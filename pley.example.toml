@@ -1,0 +1,29 @@
+# pley configuration. Copy to <data-dir>/pley.toml or pass --config <file>.
+# Every key is optional; command-line flags and PLEY_* environment variables
+# take precedence. Settings that admins change at runtime (TMDB key, hardware
+# acceleration, tone mapping, transcode limits, ...) live in the web UI under
+# Settings → Server instead.
+
+# Address to listen on. Use 127.0.0.1:7539 to stay local-only.
+# bind = "0.0.0.0:7539"
+
+# Database, caches and artwork (default: %LOCALAPPDATA%\pley, ~/.local/share/pley).
+# data_dir = "D:/Pley"
+
+# Where the transcoder writes HLS segments. Put it on a fast local disk.
+# transcode_dir = "D:/Pley/transcode"
+
+# FFmpeg binaries handed to the managed transcoder (default: from PATH).
+# ffmpeg = "C:/ffmpeg/bin/ffmpeg.exe"
+# ffprobe = "C:/ffmpeg/bin/ffprobe.exe"
+
+# Serve the web UI from a folder instead of the copy embedded in the binary.
+# web_dir = "web/dist"
+
+# Managed transcoder (default): the pley-transcoder binary next to pley.
+# transcoder_path = "C:/pley/pley-transcoder.exe"
+# transcoder_max_jobs = 8
+
+# External transcoder (e.g. a GPU machine). Media paths must be identical there.
+# transcoder_url = "http://gpu-box:7540"
+# transcoder_token = "change-me"

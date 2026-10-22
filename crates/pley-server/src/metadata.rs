@@ -1,0 +1,611 @@
+//! Metadata agent backed by The Movie Database (TMDB). Enabled when an API key
+//! (v3 key or v4 read access token) is configured in the settings. Local
+//! artwork always wins over downloaded artwork.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::{Context, bail};
+use futures::StreamExt;
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
+
+use crate::db::Db;
+use crate::library::{LibraryKind, LibraryRow};
+use crate::settings::SettingsStore;
+use crate::util::{normalize_key, now, path_str, sort_title};
+
+const API: &str = "https://api.themoviedb.org/3";
+const IMAGES: &str = "https://image.tmdb.org/t/p";
+
+pub struct MetadataAgent {
+    db: Db,
+    settings: Arc<SettingsStore>,
+    http: reqwest::Client,
+    metadata_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct Candidate {
+    id: i64,
+    kind: String,
+    title: String,
+    year: Option<i64>,
+    tmdb_id: Option<i64>,
+    imdb_id: Option<String>,
+    poster: Option<String>,
+    backdrop: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SearchResults {
+    #[serde(default)]
+    results: Vec<SearchResult>,
+}
+
+#[derive(Deserialize)]
+struct SearchResult {
+    id: i64,
+    #[serde(alias = "name")]
+    title: Option<String>,
+    #[serde(alias = "original_name")]
+    original_title: Option<String>,
+    #[serde(alias = "first_air_date")]
+    release_date: Option<String>,
+    #[serde(default)]
+    popularity: f64,
+}
+
+#[derive(Deserialize)]
+struct Named {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct MovieDetails {
+    title: Option<String>,
+    original_title: Option<String>,
+    overview: Option<String>,
+    tagline: Option<String>,
+    vote_average: Option<f64>,
+    release_date: Option<String>,
+    runtime: Option<i64>,
+    #[serde(default)]
+    genres: Vec<Named>,
+    #[serde(default)]
+    production_companies: Vec<Named>,
+    poster_path: Option<String>,
+    backdrop_path: Option<String>,
+    imdb_id: Option<String>,
+    release_dates: Option<ReleaseDates>,
+}
+
+#[derive(Deserialize)]
+struct ReleaseDates {
+    #[serde(default)]
+    results: Vec<CountryReleases>,
+}
+
+#[derive(Deserialize)]
+struct CountryReleases {
+    iso_3166_1: String,
+    #[serde(default)]
+    release_dates: Vec<Certification>,
+}
+
+#[derive(Deserialize)]
+struct Certification {
+    #[serde(default)]
+    certification: String,
+}
+
+#[derive(Deserialize)]
+struct TvDetails {
+    name: Option<String>,
+    original_name: Option<String>,
+    overview: Option<String>,
+    tagline: Option<String>,
+    vote_average: Option<f64>,
+    first_air_date: Option<String>,
+    #[serde(default)]
+    genres: Vec<Named>,
+    #[serde(default)]
+    networks: Vec<Named>,
+    poster_path: Option<String>,
+    backdrop_path: Option<String>,
+    external_ids: Option<ExternalIds>,
+    content_ratings: Option<ContentRatings>,
+}
+
+#[derive(Deserialize)]
+struct ExternalIds {
+    imdb_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ContentRatings {
+    #[serde(default)]
+    results: Vec<ContentRating>,
+}
+
+#[derive(Deserialize)]
+struct ContentRating {
+    iso_3166_1: String,
+    rating: String,
+}
+
+#[derive(Deserialize)]
+struct SeasonDetails {
+    name: Option<String>,
+    overview: Option<String>,
+    poster_path: Option<String>,
+    air_date: Option<String>,
+    #[serde(default)]
+    episodes: Vec<EpisodeDetails>,
+}
+
+#[derive(Deserialize)]
+struct EpisodeDetails {
+    episode_number: i64,
+    name: Option<String>,
+    overview: Option<String>,
+    air_date: Option<String>,
+    still_path: Option<String>,
+    vote_average: Option<f64>,
+}
+
+#[derive(Deserialize)]
+struct FindResults {
+    #[serde(default)]
+    movie_results: Vec<SearchResult>,
+    #[serde(default)]
+    tv_results: Vec<SearchResult>,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum TmdbError {
+    #[error("TMDB rejected the API key")]
+    Unauthorized,
+    #[error("not found")]
+    NotFound,
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+impl MetadataAgent {
+    pub fn new(db: Db, settings: Arc<SettingsStore>, metadata_dir: PathBuf) -> Arc<Self> {
+        let http = reqwest::Client::builder()
+            .user_agent(concat!("pley/", env!("CARGO_PKG_VERSION")))
+            .timeout(Duration::from_secs(20))
+            .build()
+            .expect("http client");
+        Arc::new(Self { db, settings, http, metadata_dir })
+    }
+
+    pub fn enabled(&self) -> bool {
+        !self.settings.get().tmdb_api_key.is_empty()
+    }
+
+    /// Fetch metadata for items that never had any (or all, when `force`).
+    pub async fn refresh_library(
+        &self,
+        lib: &LibraryRow,
+        force: bool,
+        progress: &(dyn Fn(u64, u64) + Sync),
+    ) -> anyhow::Result<()> {
+        let kind = match lib.kind() {
+            LibraryKind::Movies => "movie",
+            LibraryKind::Shows => "show",
+            LibraryKind::Music => return Ok(()),
+        };
+        let items: Vec<Candidate> = sqlx::query_as(
+            "SELECT id, kind, title, year, tmdb_id, imdb_id, poster, backdrop FROM items
+             WHERE library_id = ? AND kind = ? AND metadata_locked = 0 AND (? OR metadata_at IS NULL)
+             ORDER BY added_at DESC",
+        )
+        .bind(lib.id)
+        .bind(kind)
+        .bind(force)
+        .fetch_all(&self.db.read)
+        .await?;
+        let total = items.len() as u64;
+        if total == 0 {
+            return Ok(());
+        }
+        tracing::info!("fetching metadata for {total} {kind}s in library {}", lib.name);
+        let mut done = 0u64;
+        let mut stream = futures::stream::iter(items.into_iter().map(|item| async move {
+            let id = item.id;
+            (id, self.refresh_candidate(item).await)
+        }))
+        .buffer_unordered(4);
+        while let Some((id, result)) = stream.next().await {
+            done += 1;
+            match result {
+                Ok(()) => {}
+                Err(TmdbError::Unauthorized) => {
+                    tracing::error!("TMDB rejected the API key; check Settings → Server");
+                    bail!("invalid TMDB API key");
+                }
+                Err(TmdbError::NotFound) => {
+                    tracing::debug!("no TMDB match for item {id}");
+                    let _ = sqlx::query("UPDATE items SET metadata_at = ? WHERE id = ?")
+                        .bind(-now())
+                        .bind(id)
+                        .execute(&self.db.write)
+                        .await;
+                }
+                Err(TmdbError::Other(err)) => tracing::warn!("metadata for item {id} failed: {err:#}"),
+            }
+            if done % 5 == 0 || done == total {
+                progress(done, total);
+            }
+        }
+        Ok(())
+    }
+
+    /// Refresh one item (movie, show, season or episode → its show).
+    pub async fn refresh_item(&self, item_id: i64) -> anyhow::Result<()> {
+        let row: Option<(String, Option<i64>, Option<i64>)> =
+            sqlx::query_as("SELECT kind, parent_id, grandparent_id FROM items WHERE id = ?")
+                .bind(item_id)
+                .fetch_optional(&self.db.read)
+                .await?;
+        let Some((kind, parent, grandparent)) = row else { bail!("item not found") };
+        let target = match kind.as_str() {
+            "movie" | "show" => item_id,
+            "season" => parent.context("season without show")?,
+            "episode" => grandparent.context("episode without show")?,
+            _ => return Ok(()),
+        };
+        let item: Candidate =
+            sqlx::query_as("SELECT id, kind, title, year, tmdb_id, imdb_id, poster, backdrop FROM items WHERE id = ?")
+                .bind(target)
+                .fetch_one(&self.db.read)
+                .await?;
+        self.refresh_candidate(item).await.map_err(|e| anyhow::anyhow!(e.to_string()))
+    }
+
+    async fn refresh_candidate(&self, item: Candidate) -> Result<(), TmdbError> {
+        match item.kind.as_str() {
+            "movie" => self.refresh_movie(&item).await,
+            "show" => self.refresh_show(&item).await,
+            _ => Ok(()),
+        }
+    }
+
+    async fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T, TmdbError> {
+        let settings = self.settings.get();
+        let key = settings.tmdb_api_key.trim();
+        if key.is_empty() {
+            return Err(TmdbError::Unauthorized);
+        }
+        let mut req = self
+            .http
+            .get(format!("{API}{path}"))
+            .query(query)
+            .query(&[("language", settings.metadata_language.as_str())]);
+        req = if key.starts_with("eyJ") { req.bearer_auth(key) } else { req.query(&[("api_key", key)]) };
+        for attempt in 0..3 {
+            let resp =
+                req.try_clone().context("request clone")?.send().await.map_err(|e| TmdbError::Other(e.into()))?;
+            match resp.status().as_u16() {
+                200 => return resp.json::<T>().await.map_err(|e| TmdbError::Other(e.into())),
+                401 => return Err(TmdbError::Unauthorized),
+                404 => return Err(TmdbError::NotFound),
+                429 => tokio::time::sleep(Duration::from_millis(1000 * (attempt + 1))).await,
+                status => return Err(TmdbError::Other(anyhow::anyhow!("TMDB returned HTTP {status}"))),
+            }
+        }
+        Err(TmdbError::Other(anyhow::anyhow!("TMDB rate limit")))
+    }
+
+    fn region(&self) -> String {
+        let lang = self.settings.get().metadata_language.clone();
+        lang.split(['-', '_']).nth(1).unwrap_or("US").to_ascii_uppercase()
+    }
+
+    async fn find_by_imdb(&self, imdb: &str, tv: bool) -> Result<Option<i64>, TmdbError> {
+        let found: FindResults = self.get(&format!("/find/{imdb}"), &[("external_source", "imdb_id".into())]).await?;
+        Ok(if tv { found.tv_results.first() } else { found.movie_results.first() }.map(|r| r.id))
+    }
+
+    async fn search(&self, tv: bool, title: &str, year: Option<i64>) -> Result<Option<i64>, TmdbError> {
+        let (path, year_param) = if tv { ("/search/tv", "first_air_date_year") } else { ("/search/movie", "year") };
+        let mut query = vec![("query", title.to_owned()), ("include_adult", "false".to_owned())];
+        if let Some(y) = year {
+            query.push((year_param, y.to_string()));
+        }
+        let mut results: SearchResults = self.get(path, &query).await?;
+        if results.results.is_empty() && year.is_some() {
+            results = self.get(path, &query[..2]).await?;
+        }
+        Ok(best_match(&results.results, title, year))
+    }
+
+    async fn refresh_movie(&self, item: &Candidate) -> Result<(), TmdbError> {
+        let tmdb_id = match item.tmdb_id {
+            Some(id) => id,
+            None => {
+                let by_imdb = match &item.imdb_id {
+                    Some(imdb) => self.find_by_imdb(imdb, false).await?,
+                    None => None,
+                };
+                match by_imdb {
+                    Some(id) => id,
+                    None => self.search(false, &item.title, item.year).await?.ok_or(TmdbError::NotFound)?,
+                }
+            }
+        };
+        let details: MovieDetails =
+            self.get(&format!("/movie/{tmdb_id}"), &[("append_to_response", "release_dates".into())]).await?;
+        let region = self.region();
+        let certification = details.release_dates.as_ref().and_then(|rd| {
+            rd.results
+                .iter()
+                .find(|c| c.iso_3166_1 == region)
+                .or_else(|| rd.results.iter().find(|c| c.iso_3166_1 == "US"))
+                .and_then(|c| c.release_dates.iter().map(|r| r.certification.trim()).find(|c| !c.is_empty()))
+                .map(str::to_owned)
+        });
+        let poster =
+            self.artwork(item.id, "poster", item.poster.as_deref(), details.poster_path.as_deref(), "w780").await;
+        let backdrop = self
+            .artwork(item.id, "backdrop", item.backdrop.as_deref(), details.backdrop_path.as_deref(), "w1280")
+            .await;
+        let title = details.title.clone().unwrap_or_else(|| item.title.clone());
+        let genres: Vec<String> = details.genres.iter().map(|g| g.name.clone()).collect();
+        sqlx::query(
+            "UPDATE items SET title = ?, sort_title = ?, original_title = ?, year = COALESCE(?, year), summary = ?, tagline = ?,
+                rating = ?, content_rating = ?, genres = ?, studio = ?, release_date = ?, duration_ms = COALESCE(duration_ms, ?),
+                tmdb_id = ?, imdb_id = COALESCE(?, imdb_id), poster = COALESCE(?, poster), backdrop = COALESCE(?, backdrop),
+                metadata_at = ?, updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(&title)
+        .bind(sort_title(&title))
+        .bind(details.original_title.filter(|o| *o != title))
+        .bind(details.release_date.as_deref().and_then(year_of))
+        .bind(details.overview.filter(|s| !s.is_empty()))
+        .bind(details.tagline.filter(|s| !s.is_empty()))
+        .bind(details.vote_average.filter(|v| *v > 0.0))
+        .bind(certification)
+        .bind(serde_json::to_string(&genres).ok())
+        .bind(details.production_companies.first().map(|c| c.name.clone()))
+        .bind(details.release_date.filter(|d| !d.is_empty()))
+        .bind(details.runtime.filter(|r| *r > 0).map(|r| r * 60_000))
+        .bind(tmdb_id)
+        .bind(details.imdb_id)
+        .bind(poster)
+        .bind(backdrop)
+        .bind(now())
+        .bind(now())
+        .bind(item.id)
+        .execute(&self.db.write)
+        .await
+        .map_err(|e| TmdbError::Other(e.into()))?;
+        Ok(())
+    }
+
+    async fn refresh_show(&self, item: &Candidate) -> Result<(), TmdbError> {
+        let tmdb_id = match item.tmdb_id {
+            Some(id) => id,
+            None => self.search(true, &item.title, item.year).await?.ok_or(TmdbError::NotFound)?,
+        };
+        let details: TvDetails = self
+            .get(&format!("/tv/{tmdb_id}"), &[("append_to_response", "external_ids,content_ratings".into())])
+            .await?;
+        let region = self.region();
+        let rating = details.content_ratings.as_ref().and_then(|r| {
+            r.results
+                .iter()
+                .find(|c| c.iso_3166_1 == region)
+                .or_else(|| r.results.iter().find(|c| c.iso_3166_1 == "US"))
+                .map(|c| c.rating.clone())
+                .filter(|r| !r.is_empty())
+        });
+        let poster =
+            self.artwork(item.id, "poster", item.poster.as_deref(), details.poster_path.as_deref(), "w780").await;
+        let backdrop = self
+            .artwork(item.id, "backdrop", item.backdrop.as_deref(), details.backdrop_path.as_deref(), "w1280")
+            .await;
+        let title = details.name.clone().unwrap_or_else(|| item.title.clone());
+        let genres: Vec<String> = details.genres.iter().map(|g| g.name.clone()).collect();
+        sqlx::query(
+            "UPDATE items SET title = ?, sort_title = ?, original_title = ?, year = COALESCE(?, year), summary = ?, tagline = ?,
+                rating = ?, content_rating = ?, genres = ?, studio = ?, release_date = ?, tmdb_id = ?, imdb_id = COALESCE(?, imdb_id),
+                poster = COALESCE(?, poster), backdrop = COALESCE(?, backdrop), metadata_at = ?, updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(&title)
+        .bind(sort_title(&title))
+        .bind(details.original_name.filter(|o| *o != title))
+        .bind(details.first_air_date.as_deref().and_then(year_of))
+        .bind(details.overview.filter(|s| !s.is_empty()))
+        .bind(details.tagline.filter(|s| !s.is_empty()))
+        .bind(details.vote_average.filter(|v| *v > 0.0))
+        .bind(rating)
+        .bind(serde_json::to_string(&genres).ok())
+        .bind(details.networks.first().map(|n| n.name.clone()))
+        .bind(details.first_air_date.filter(|d| !d.is_empty()))
+        .bind(tmdb_id)
+        .bind(details.external_ids.and_then(|e| e.imdb_id).filter(|i| !i.is_empty()))
+        .bind(poster)
+        .bind(backdrop)
+        .bind(now())
+        .bind(now())
+        .bind(item.id)
+        .execute(&self.db.write)
+        .await
+        .map_err(|e| TmdbError::Other(e.into()))?;
+
+        // Seasons and their episodes.
+        let seasons: Vec<(i64, i64, Option<String>)> = sqlx::query_as(
+            "SELECT id, idx, poster FROM items WHERE parent_id = ? AND kind = 'season' AND metadata_locked = 0",
+        )
+        .bind(item.id)
+        .fetch_all(&self.db.read)
+        .await
+        .map_err(|e| TmdbError::Other(e.into()))?;
+        for (season_id, number, season_poster) in seasons {
+            let season: SeasonDetails = match self.get(&format!("/tv/{tmdb_id}/season/{number}"), &[]).await {
+                Ok(s) => s,
+                Err(TmdbError::NotFound) => continue,
+                Err(e) => return Err(e),
+            };
+            let poster = self
+                .artwork(season_id, "poster", season_poster.as_deref(), season.poster_path.as_deref(), "w780")
+                .await;
+            let name = season
+                .name
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| if number == 0 { "Specials".into() } else { format!("Season {number}") });
+            sqlx::query(
+                "UPDATE items SET title = ?, sort_title = ?, summary = ?, release_date = ?, year = ?, poster = COALESCE(?, poster),
+                    metadata_at = ?, updated_at = ? WHERE id = ?",
+            )
+            .bind(&name)
+            .bind(format!("{number:04}"))
+            .bind(season.overview.filter(|s| !s.is_empty()))
+            .bind(season.air_date.clone().filter(|d| !d.is_empty()))
+            .bind(season.air_date.as_deref().and_then(year_of))
+            .bind(poster)
+            .bind(now())
+            .bind(now())
+            .bind(season_id)
+            .execute(&self.db.write)
+            .await
+            .map_err(|e| TmdbError::Other(e.into()))?;
+
+            let episodes: Vec<(i64, i64, Option<String>)> = sqlx::query_as(
+                "SELECT id, idx, thumb FROM items WHERE parent_id = ? AND kind = 'episode' AND metadata_locked = 0",
+            )
+            .bind(season_id)
+            .fetch_all(&self.db.read)
+            .await
+            .map_err(|e| TmdbError::Other(e.into()))?;
+            for (episode_id, ep_number, thumb) in episodes {
+                let Some(ep) = season.episodes.iter().find(|e| e.episode_number == ep_number) else { continue };
+                let still = self.artwork(episode_id, "thumb", thumb.as_deref(), ep.still_path.as_deref(), "w780").await;
+                let title = ep.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Episode {ep_number}"));
+                sqlx::query(
+                    "UPDATE items SET title = ?, sort_title = ?, summary = ?, release_date = ?, year = ?, rating = ?,
+                        thumb = COALESCE(?, thumb), metadata_at = ?, updated_at = ? WHERE id = ?",
+                )
+                .bind(&title)
+                .bind(sort_title(&title))
+                .bind(ep.overview.clone().filter(|s| !s.is_empty()))
+                .bind(ep.air_date.clone().filter(|d| !d.is_empty()))
+                .bind(ep.air_date.as_deref().and_then(year_of))
+                .bind(ep.vote_average.filter(|v| *v > 0.0))
+                .bind(still)
+                .bind(now())
+                .bind(now())
+                .bind(episode_id)
+                .execute(&self.db.write)
+                .await
+                .map_err(|e| TmdbError::Other(e.into()))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Download `remote` into the metadata folder unless the item already has
+    /// local (sidecar) artwork. Returns the new path to store, if any.
+    async fn artwork(
+        &self,
+        item_id: i64,
+        name: &str,
+        current: Option<&str>,
+        remote: Option<&str>,
+        size: &str,
+    ) -> Option<String> {
+        let remote = remote?;
+        if let Some(cur) = current {
+            if !Path::new(cur).starts_with(&self.metadata_dir) && Path::new(cur).exists() {
+                return None;
+            }
+        }
+        let ext =
+            Path::new(remote).extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "jpg".into());
+        let dir = self.metadata_dir.join("items").join(item_id.to_string());
+        let target = dir.join(format!("{name}.{ext}"));
+        let url = format!("{IMAGES}/{size}{remote}");
+        let bytes = match self.http.get(&url).send().await.and_then(|r| r.error_for_status()) {
+            Ok(resp) => resp.bytes().await.ok()?,
+            Err(err) => {
+                tracing::debug!("artwork download failed for {url}: {err}");
+                return None;
+            }
+        };
+        tokio::fs::create_dir_all(&dir).await.ok()?;
+        tokio::fs::write(&target, &bytes).await.ok()?;
+        Some(path_str(&target))
+    }
+}
+
+fn year_of(date: &str) -> Option<i64> {
+    date.get(..4).and_then(|y| y.parse().ok())
+}
+
+/// Pick the result whose title and year match best (popularity breaks ties).
+fn best_match(results: &[SearchResult], title: &str, year: Option<i64>) -> Option<i64> {
+    let wanted = normalize_key(title);
+    results
+        .iter()
+        .take(10)
+        .map(|r| {
+            let titles = [r.title.as_deref(), r.original_title.as_deref()];
+            let title_score = titles
+                .iter()
+                .flatten()
+                .map(|t| {
+                    let t = normalize_key(t);
+                    if t == wanted {
+                        3.0
+                    } else if t.contains(&wanted) || wanted.contains(&t) {
+                        1.5
+                    } else {
+                        0.0
+                    }
+                })
+                .fold(0.0, f64::max);
+            let year_score = match (year, r.release_date.as_deref().and_then(year_of)) {
+                (Some(want), Some(got)) if want == got => 2.0,
+                (Some(want), Some(got)) if (want - got).abs() == 1 => 1.0,
+                (Some(_), Some(_)) => -1.0,
+                _ => 0.0,
+            };
+            (r.id, title_score + year_score + r.popularity.min(100.0) / 1000.0)
+        })
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(id, _)| id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn result(id: i64, title: &str, date: &str, popularity: f64) -> SearchResult {
+        SearchResult {
+            id,
+            title: Some(title.into()),
+            original_title: None,
+            release_date: Some(date.into()),
+            popularity,
+        }
+    }
+
+    #[test]
+    fn picks_title_and_year_match() {
+        let results = vec![
+            result(1, "The Thing", "2011-10-12", 50.0),
+            result(2, "The Thing", "1982-06-25", 40.0),
+            result(3, "The Thing from Another World", "1951-04-06", 10.0),
+        ];
+        assert_eq!(best_match(&results, "The Thing", Some(1982)), Some(2));
+        assert_eq!(best_match(&results, "The Thing", None), Some(1));
+        assert_eq!(best_match(&[], "x", None), None);
+    }
+}

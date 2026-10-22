@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/pley-server",
+    "crates/pley-transcoder",
+    "crates/pley-transcoder-api",
+]
+default-members = ["crates/pley-server", "crates/pley-transcoder"]
+
+# NOTE: licensing boundary.
+# - pley-server            must never depend on pley-transcoder or any GPL crate
+# - pley-transcoder        a separate program, spoken to only over HTTP
+# - pley-transcoder-api    wire types shared by both
+# See LICENSING.md and scripts/check-licenses.ps1.
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

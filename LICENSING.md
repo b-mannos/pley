@@ -1,0 +1,122 @@
+# Licensing
+
+Pley is under one licence, [LICENSE](LICENSE): **Restricted**, its terms to
+be determined. Until they are published, no right to copy, modify or
+distribute Pley is granted except by a separate written agreement; if it was
+shared with you, you may view and run it for the purpose it was shared with
+you. The Kodi add-on is the one exception, and third-party code keeps its
+own licences.
+
+| Component | Path | License | Contents |
+|---|---|---|---|
+| **Pley server** | `apps/server`, `apps/web` | Restricted (`LicenseRef-Restricted`) | Libraries, scanner, metadata, users, sessions, HTTP API, web UI |
+| **Pley transcoder** | `apps/transcoder` | Restricted (`LicenseRef-Restricted`) | Everything that runs FFmpeg: probing, HLS transcoding/remuxing, HDR/Dolby Vision tone mapping, subtitles, thumbnails, metrics |
+| **protocol types** | `packages/transcoder-api` | Restricted (`LicenseRef-Restricted`) | Plain serde structs shared by the server and the transcoder |
+| **Pley for desktop** | `apps/desktop` | Restricted (`LicenseRef-Restricted`) | A window on a server's web app (Tauri, MIT OR Apache-2.0) |
+| **Pley for Android** | `apps/android` | Restricted | A native app for phones, tablets and TVs (Kotlin and Compose): AndroidX, Media3, OkHttp, Coil and kotlinx under Apache-2.0, Lucide's icons under ISC, Nayuki's QR code generator under MIT |
+| **Pley for Roku** | `apps/roku` | Restricted | A native SceneGraph app in BrightScript, built with BrighterScript (MIT), which adds its runtime helpers, bslib (MIT), to the package |
+| **Pley for Samsung TV and LG TV** | `apps/tizen`, `apps/webos`, `packages/tv` | Restricted | Web apps for the TVs' own engines in TypeScript: Preact and its signals (MIT), Lucide's icons (ISC, and MIT for those from Feather), a QR code generator (MIT) and the Roboto font (OFL-1.1) |
+| **Pley for Kodi** | `apps/kodi` | **GPL-2.0-or-later** (`plugin.video.pley/LICENSE.txt`) | A Kodi add-on in Python, on Python's standard library alone, with pictures drawn from Lucide's icons under ISC |
+
+## The Kodi add-on
+
+The add-on is the only part of Pley under the GPL, because it has to be: it
+runs inside Kodi (GPL-2.0-or-later) and calls Kodi's own modules (`xbmc`,
+`xbmcgui`, `xbmcplugin` and the rest), which makes it part of a work under
+Kodi's licence. Like the other apps, it talks to the server over HTTP, as a
+browser does, which leaves the rest of Pley's licence unaffected. Its code is
+never copied into the server or another app, and it ships with its
+`LICENSE.txt` and `NOTICES.txt` (the zip of `apps/kodi/package.py` holds its
+whole folder, source included).
+
+## FFmpeg
+
+Pley contains no FFmpeg. The transcoder runs `ffmpeg` and `ffprobe` as
+separate programs and links none of FFmpeg's libraries: linking them would
+put it under FFmpeg's licence (the GPL, for the builds Pley uses). Where a
+build of Pley ships FFmpeg beside it, FFmpeg keeps its own licence:
+
+- **The Docker image** installs Debian's `ffmpeg` package, unmodified. Its
+  licence is in the image (`/usr/share/doc/ffmpeg/copyright`, as for every
+  Debian package), and its source is Debian's, for the version the image
+  lists (`dpkg -l ffmpeg`): `apt-get source ffmpeg=<version>`, or
+  <https://sources.debian.org/src/ffmpeg/>. On amd64 the image also has
+  Intel's VAAPI driver from Debian's non-free section
+  (`intel-media-va-driver-non-free`, redistributable, with GPU shaders that
+  come without source), its licence in
+  `/usr/share/doc/intel-media-va-driver-non-free/copyright`.
+- **The Windows installer** carries an FFmpeg build (gyan.dev's "full",
+  `--enable-gpl --enable-version3`, so GPLv3) with its `LICENSE` and
+  `README.txt`, and, for a patched build, its patch and build script
+  ([deploy/windows/README.md](deploy/windows/README.md)). Whoever
+  distributes the installer must also offer that build's source and build
+  configuration (GPLv3 §6; <https://ffmpeg.org/legal.html>). Alternatively,
+  ship without FFmpeg and let users install it: the transcoder finds it on
+  `PATH` or via `--ffmpeg`/`--ffprobe`.
+- **The other server archives** don't contain FFmpeg.
+
+## What keeps it this way
+
+- **No copyleft code in Pley's own programs.** `scripts/check-licenses.ps1`
+  walks the real dependency graphs of the server and the transcoder and fails
+  on any crate that is only available under a copyleft licence (GPL, LGPL,
+  AGPL and the like), and on the server depending on the transcoder crate
+  (they are separate programs that talk over HTTP, `docs/TRANSCODER.md`).
+  `cargo deny check licenses` allows only permissive licences for
+  third-party crates (`deny.toml`). CI runs both.
+- **No FFmpeg and no GPL code in the Android app.** It plays with Media3 and
+  the device's own decoders; the server's transcoder converts what the
+  device can't play. `scripts/check-android.ps1`, run by CI after the release
+  build, enforces this:
+  - every library in the store release (`:app`'s
+    `storeReleaseRuntimeClasspath`) comes from an allowed group: AndroidX
+    (Compose and Media3 included), the annotations and Guava pieces AndroidX
+    brings (`com.google.guava`, `com.google.errorprone`, `com.google.j2objc`,
+    `com.google.code.findbugs`, `org.checkerframework`, `org.jspecify`),
+    Kotlin and JetBrains' (`org.jetbrains*`), OkHttp and Okio, Coil and the
+    Accompanist drawable painter it uses, and the QR code generator
+    (`io.nayuki`). A new group is a decision, made in the script.
+  - the release APK has no native code (`lib/**.so`) except two small
+    AndroidX libraries: Compose's path iterator
+    (`libandroidx.graphics.path.so`) and DataStore's counter
+    (`libdatastore_shared_counter.so`). FFmpeg's Media3 extension or mpv
+    would bring native code, so neither can slip in under an allowed group.
+- **The TV apps name every package they bundle.** Their build fails on a
+  package that `packages/tv/src/licenses.ts` doesn't name.
+- **Rules to keep:**
+  - Never link FFmpeg's libraries into the transcoder, or any GPL library
+    into the server, the transcoder or an app; Pley runs FFmpeg as a program.
+  - Never add `pley-transcoder` as a dependency of `pley-server`.
+  - Never add FFmpeg, mpv or a GPL library to the Android app.
+  - Never copy the Kodi add-on's code into the server or another app.
+
+## Third-party notices
+
+What each build contains of others' work, and where its notices are:
+
+- The server's and the transcoder's Rust dependencies are permissive (MIT,
+  Apache-2.0, BSD, ISC, Zlib, Unicode-3.0, MPL-2.0 unmodified).
+  `scripts/check-licenses.ps1` prints the full list.
+- The web UI uses React, React Router, TanStack Query and Virtual, and
+  Tailwind (all MIT), hls.js and mpegts.js (Apache-2.0) and lucide (ISC).
+- The Android app uses AndroidX, Media3, Kotlin and kotlinx, OkHttp and
+  Okio, Coil, Accompanist and the Guava and annotation pieces AndroidX
+  brings (Apache-2.0), Lucide's icons (ISC; the notice ships in the app's
+  `assets/licenses/lucide.txt`) and Nayuki's QR code generator (MIT).
+- The Roku app ships bslib (MIT), BrighterScript's runtime helpers; its
+  notice is in the package (`licenses/bslib.txt`).
+- The Kodi add-on uses Python's standard library alone, and pictures drawn
+  from Lucide's icons (ISC, and MIT for those Lucide took from Feather); the
+  notice ships in the add-on's `NOTICES.txt`, and its `addon.xml` gives the
+  licence as `GPL-2.0-or-later AND ISC AND MIT`.
+- The Samsung and LG TV apps use Preact and `@preact/signals` (MIT),
+  Lucide's icons (ISC, and MIT for those Lucide took from Feather),
+  `qrcode-generator` (MIT) and Roboto (OFL-1.1, from
+  `@fontsource/roboto`). The build writes the full licences of the packages
+  in the bundle into `NOTICES.txt` in `dist/` (so into the .wgt and the
+  .ipk). Settings → About lists them.
+- The tools that build the JavaScript apps (Bun, Vite, TypeScript and the
+  rest) aren't shipped.
+- Builds of Pley carry `LICENSE` (as `LICENSE.txt`) and this file.
+
+> This document describes the technical setup. It is not legal advice.

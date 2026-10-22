@@ -1,0 +1,210 @@
+//! Static configuration: command line > environment > config file > defaults.
+//!
+//! Settings that admins change at runtime (TMDB key, hardware acceleration, …)
+//! live in the database instead, see [`crate::settings`].
+
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::{Path, PathBuf};
+
+use anyhow::Context;
+use clap::{Parser, Subcommand};
+use serde::Deserialize;
+
+/// Default HTTP port ("PLEY" on a phone keypad).
+pub const DEFAULT_PORT: u16 = 7539;
+
+#[derive(Debug, Parser)]
+#[command(name = "pley", version, about = "pley — a fast, self-hosted media server")]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Option<Command>,
+
+    /// Path to a TOML config file (default: <data-dir>/pley.toml when it exists)
+    #[arg(long, short, env = "PLEY_CONFIG", global = true)]
+    pub config: Option<PathBuf>,
+
+    /// Directory holding the database, caches, artwork and transcodes
+    #[arg(long, env = "PLEY_DATA_DIR", global = true)]
+    pub data_dir: Option<PathBuf>,
+
+    /// Address to listen on, e.g. `0.0.0.0:7539` or just a port
+    #[arg(long, env = "PLEY_BIND", global = true)]
+    pub bind: Option<String>,
+
+    /// Path to the ffmpeg binary
+    #[arg(long, env = "PLEY_FFMPEG", global = true)]
+    pub ffmpeg: Option<PathBuf>,
+
+    /// Path to the ffprobe binary
+    #[arg(long, env = "PLEY_FFPROBE", global = true)]
+    pub ffprobe: Option<PathBuf>,
+
+    /// Serve the web UI from this directory instead of the copy embedded in the binary
+    #[arg(long, env = "PLEY_WEB_DIR", global = true)]
+    pub web_dir: Option<PathBuf>,
+
+    /// pley-transcoder executable to spawn (default: next to the pley binary)
+    #[arg(long, env = "PLEY_TRANSCODER_PATH", global = true)]
+    pub transcoder_path: Option<PathBuf>,
+
+    /// Use an already running transcoder at this URL instead of spawning one
+    #[arg(long, env = "PLEY_TRANSCODER_URL", global = true)]
+    pub transcoder_url: Option<String>,
+
+    /// Shared secret for an external transcoder (`--transcoder-url`)
+    #[arg(long, env = "PLEY_TRANSCODER_TOKEN", global = true, hide_env_values = true)]
+    pub transcoder_token: Option<String>,
+
+    /// Log filter, e.g. `info` or `debug,sqlx=warn`
+    #[arg(long, env = "PLEY_LOG", default_value = "info", global = true)]
+    pub log: String,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Command {
+    /// Run the media server (default)
+    Serve,
+    /// Set a user's password, creating the user if it does not exist
+    ResetPassword {
+        username: String,
+        password: String,
+        /// Grant administrator rights
+        #[arg(long)]
+        admin: bool,
+    },
+}
+
+/// Shape of `pley.toml`. Every key is optional.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct FileConfig {
+    bind: Option<String>,
+    data_dir: Option<PathBuf>,
+    transcode_dir: Option<PathBuf>,
+    ffmpeg: Option<PathBuf>,
+    ffprobe: Option<PathBuf>,
+    web_dir: Option<PathBuf>,
+    transcoder_path: Option<PathBuf>,
+    transcoder_url: Option<String>,
+    transcoder_token: Option<String>,
+    transcoder_max_jobs: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub bind: SocketAddr,
+    pub data_dir: PathBuf,
+    /// Work directory handed to the managed transcoder (segments, caches).
+    pub transcode_dir: PathBuf,
+    /// ffmpeg/ffprobe are only passed through to the managed transcoder.
+    pub ffmpeg: PathBuf,
+    pub ffprobe: PathBuf,
+    pub web_dir: Option<PathBuf>,
+    pub transcoder_path: Option<PathBuf>,
+    pub transcoder_url: Option<String>,
+    pub transcoder_token: Option<String>,
+    pub transcoder_max_jobs: u32,
+}
+
+impl Config {
+    pub fn load(cli: &Cli) -> anyhow::Result<Self> {
+        let default_data_dir = cli.data_dir.clone().unwrap_or_else(default_data_dir);
+        let config_path = match &cli.config {
+            Some(p) => Some(p.clone()),
+            None => {
+                let candidate = default_data_dir.join("pley.toml");
+                candidate.exists().then_some(candidate)
+            }
+        };
+        let file: FileConfig = match &config_path {
+            Some(path) => {
+                let text =
+                    std::fs::read_to_string(path).with_context(|| format!("reading config file {}", path.display()))?;
+                toml::from_str(&text).with_context(|| format!("parsing config file {}", path.display()))?
+            }
+            None => FileConfig::default(),
+        };
+
+        let data_dir = cli.data_dir.clone().or(file.data_dir).unwrap_or(default_data_dir);
+        let data_dir = absolutize(&data_dir);
+        let bind = cli.bind.clone().or(file.bind).map(|s| parse_bind(&s)).transpose()?;
+        let transcode_dir = file.transcode_dir.map(|p| absolutize(&p)).unwrap_or_else(|| data_dir.join("transcode"));
+
+        Ok(Self {
+            bind: bind.unwrap_or(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_PORT)),
+            ffmpeg: cli.ffmpeg.clone().or(file.ffmpeg).unwrap_or_else(|| PathBuf::from("ffmpeg")),
+            ffprobe: cli.ffprobe.clone().or(file.ffprobe).unwrap_or_else(|| PathBuf::from("ffprobe")),
+            web_dir: cli.web_dir.clone().or(file.web_dir),
+            transcoder_path: cli.transcoder_path.clone().or(file.transcoder_path),
+            transcoder_url: cli.transcoder_url.clone().or(file.transcoder_url).filter(|u| !u.trim().is_empty()),
+            transcoder_token: cli.transcoder_token.clone().or(file.transcoder_token),
+            transcoder_max_jobs: file.transcoder_max_jobs.unwrap_or(8).max(1),
+            data_dir,
+            transcode_dir,
+        })
+    }
+
+    /// Configuration rooted in `data_dir`, used by tests.
+    pub fn for_data_dir(data_dir: &Path) -> Self {
+        Self {
+            bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            data_dir: data_dir.to_path_buf(),
+            transcode_dir: data_dir.join("transcode"),
+            ffmpeg: PathBuf::from("ffmpeg"),
+            ffprobe: PathBuf::from("ffprobe"),
+            web_dir: None,
+            transcoder_path: None,
+            transcoder_url: None,
+            transcoder_token: None,
+            transcoder_max_jobs: 8,
+        }
+    }
+
+    pub fn db_path(&self) -> PathBuf {
+        self.data_dir.join("pley.db")
+    }
+
+    /// Resized images, extracted subtitles, …: safe to delete at any time.
+    pub fn cache_dir(&self) -> PathBuf {
+        self.data_dir.join("cache")
+    }
+
+    /// Downloaded / generated artwork referenced from the database.
+    pub fn metadata_dir(&self) -> PathBuf {
+        self.data_dir.join("metadata")
+    }
+}
+
+fn default_data_dir() -> PathBuf {
+    dirs::data_local_dir().map(|d| d.join("pley")).unwrap_or_else(|| PathBuf::from("pley-data"))
+}
+
+fn absolutize(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().map(|cwd| cwd.join(path)).unwrap_or_else(|_| path.to_path_buf())
+    }
+}
+
+/// Accepts `host:port`, `:port` or a bare `port`.
+fn parse_bind(value: &str) -> anyhow::Result<SocketAddr> {
+    let value = value.trim();
+    if let Ok(port) = value.trim_start_matches(':').parse::<u16>() {
+        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
+    }
+    value.parse().with_context(|| format!("invalid bind address '{value}'"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bind_forms() {
+        assert_eq!(parse_bind("8080").unwrap().port(), 8080);
+        assert_eq!(parse_bind(":9000").unwrap().port(), 9000);
+        assert_eq!(parse_bind("127.0.0.1:1234").unwrap(), "127.0.0.1:1234".parse().unwrap());
+        assert!(parse_bind("nope").is_err());
+    }
+}

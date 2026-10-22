@@ -1,0 +1,59 @@
+[package]
+name = "pley-server"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "pley media server: libraries, metadata, users, playback sessions and the web UI"
+license = "LicenseRef-Restricted"
+publish = false
+
+[lib]
+name = "pley"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pley"
+path = "src/main.rs"
+
+[dependencies]
+# Shared wire types. The server must NOT depend on the
+# transcoder crate itself; it talks to the transcoder process over HTTP.
+pley-transcoder-api = { path = "../pley-transcoder-api" }
+
+anyhow = "1"
+argon2 = "0.5"
+axum = { version = "0.8", features = ["macros"] }
+base64 = "0.22"
+bytes = "1"
+clap = { version = "4", features = ["derive", "env"] }
+dashmap = "6"
+dirs = "6"
+futures = "0.3"
+hex = "0.4"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
+mime_guess = "2"
+mimalloc = { version = "0.1", default-features = false }
+notify = "8"
+parking_lot = "0.12"
+rand_core = { version = "0.6", features = ["getrandom"] }
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "stream"] }
+rust-embed = "8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate", "derive"] }
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["io"] }
+toml = "0.8"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs", "compression-br", "compression-gzip", "trace", "set-header", "timeout"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"

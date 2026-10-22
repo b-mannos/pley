@@ -1,0 +1,145 @@
+import { useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { X } from "lucide-react";
+import { cn } from "@/lib/cn";
+import { Button, IconButton } from "./ui";
+
+export interface ModalProps {
+  open: boolean;
+  onClose: () => void;
+  title: ReactNode;
+  children: ReactNode;
+  footer?: ReactNode;
+  size?: "sm" | "md" | "lg" | "xl";
+  /** Prevent closing via backdrop / Escape (e.g. while saving). */
+  locked?: boolean;
+}
+
+export function Modal({ open, onClose, title, children, footer, size = "md", locked }: ModalProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const lockedRef = useRef(locked);
+  lockedRef.current = locked;
+
+  useEffect(() => {
+    if (!open) return;
+    const prevFocus = document.activeElement as HTMLElement | null;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !lockedRef.current) {
+        e.stopPropagation();
+        closeRef.current();
+      }
+      if (e.key === "Tab" && panelRef.current) {
+        // Minimal focus trap.
+        const focusables = panelRef.current.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    // Focus the first input (or the panel) on open.
+    window.setTimeout(() => {
+      const target =
+        panelRef.current?.querySelector<HTMLElement>("[data-autofocus]") ??
+        panelRef.current?.querySelector<HTMLElement>("input, select, textarea") ??
+        panelRef.current;
+      target?.focus();
+    }, 0);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      document.body.style.overflow = prevOverflow;
+      prevFocus?.focus?.();
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6">
+      <div
+        className="absolute inset-0 animate-fade-in bg-black/70 backdrop-blur-sm"
+        onClick={() => {
+          if (!locked) onClose();
+        }}
+      />
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
+        className={cn(
+          "relative flex max-h-[92vh] w-full animate-pop-in flex-col overflow-hidden rounded-t-xl border border-border bg-surface shadow-2xl shadow-black/60 outline-none sm:rounded-xl",
+          size === "sm" && "sm:max-w-sm",
+          size === "md" && "sm:max-w-lg",
+          size === "lg" && "sm:max-w-2xl",
+          size === "xl" && "sm:max-w-4xl",
+        )}
+      >
+        <div className="flex items-center justify-between gap-4 border-b border-border px-5 py-3.5">
+          <h2 className="truncate text-base font-semibold">{title}</h2>
+          <IconButton label="Close" size="sm" onClick={onClose} disabled={locked}>
+            <X className="size-4" />
+          </IconButton>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        {footer ? <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">{footer}</div> : null}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+export function ConfirmModal({
+  open,
+  onClose,
+  onConfirm,
+  title,
+  message,
+  confirmLabel = "Confirm",
+  danger,
+  loading,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title: string;
+  message: ReactNode;
+  confirmLabel?: string;
+  danger?: boolean;
+  loading?: boolean;
+}) {
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={title}
+      size="sm"
+      locked={loading}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={loading}>
+            Cancel
+          </Button>
+          <Button variant={danger ? "danger" : "primary"} onClick={onConfirm} loading={loading} data-autofocus>
+            {confirmLabel}
+          </Button>
+        </>
+      }
+    >
+      <div className="text-sm text-muted">{message}</div>
+    </Modal>
+  );
+}

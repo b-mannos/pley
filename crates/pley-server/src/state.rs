@@ -1,0 +1,101 @@
+use std::ops::Deref;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use crate::auth::AuthService;
+use crate::config::Config;
+use crate::db::Db;
+use crate::events::EventBus;
+use crate::images::Images;
+use crate::library::scanner::Scanner;
+use crate::library::watcher::LibraryWatcher;
+use crate::metadata::MetadataAgent;
+use crate::playback::Sessions;
+use crate::settings::SettingsStore;
+use crate::transcoder::Transcoder;
+
+/// Shared application state handed to every request handler.
+#[derive(Clone)]
+pub struct AppState {
+    inner: Arc<Inner>,
+}
+
+pub struct Inner {
+    pub config: Config,
+    pub db: Db,
+    pub auth: AuthService,
+    pub settings: Arc<SettingsStore>,
+    pub events: EventBus,
+    pub transcoder: Arc<Transcoder>,
+    pub metadata: Arc<MetadataAgent>,
+    pub scanner: Arc<Scanner>,
+    pub watcher: Arc<LibraryWatcher>,
+    pub images: Images,
+    pub sessions: Arc<Sessions>,
+    pub started_at: Instant,
+}
+
+impl Deref for AppState {
+    type Target = Inner;
+
+    fn deref(&self) -> &Inner {
+        &self.inner
+    }
+}
+
+impl AppState {
+    pub async fn init(config: Config) -> anyhow::Result<Self> {
+        for dir in [config.data_dir.clone(), config.cache_dir(), config.metadata_dir(), config.transcode_dir.clone()] {
+            std::fs::create_dir_all(&dir).map_err(|e| anyhow::anyhow!("cannot create {}: {e}", dir.display()))?;
+        }
+        let db = Db::open(&config.db_path()).await?;
+        let settings = Arc::new(SettingsStore::load(&db).await?);
+        let events = EventBus::new();
+        let transcoder = Transcoder::new(&config);
+        let metadata = MetadataAgent::new(db.clone(), settings.clone(), config.metadata_dir());
+        let scanner = Scanner::new(db.clone(), transcoder.clone(), events.clone(), metadata.clone(), &config);
+        let watcher = LibraryWatcher::new(db.clone(), scanner.clone(), settings.clone());
+        let images = Images::new(config.cache_dir().join("images"));
+        Ok(Self {
+            inner: Arc::new(Inner {
+                auth: AuthService::new(db.clone()),
+                sessions: Arc::new(Sessions::default()),
+                started_at: Instant::now(),
+                config,
+                db,
+                settings,
+                events,
+                transcoder,
+                metadata,
+                scanner,
+                watcher,
+                images,
+            }),
+        })
+    }
+
+    pub fn start_background_tasks(&self) {
+        self.transcoder.start();
+        self.sessions.spawn_reaper(self.transcoder.clone(), self.events.clone());
+        let watcher = self.watcher.clone();
+        tokio::spawn(async move { watcher.reload().await });
+        let state = self.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(3600));
+            loop {
+                tick.tick().await;
+                state.auth.purge_expired().await;
+            }
+        });
+    }
+
+    pub async fn shutdown(&self) {
+        for session in self.sessions.list() {
+            if let Some(job) = session.job_id() {
+                let _ = self.transcoder.delete_job(&job).await;
+            }
+        }
+        self.transcoder.shutdown().await;
+        self.db.close().await;
+    }
+}

@@ -1,0 +1,228 @@
+import { useMemo } from "react";
+import { Link } from "react-router";
+import { AudioLines, Play, Shuffle } from "lucide-react";
+import { useChildren, type ChildItem } from "@/api/hooks";
+import type { ItemDetail } from "@/api/types";
+import { useAudioPlayer } from "@/audio/AudioPlayer";
+import { CardSkeleton, MediaCard } from "@/components/cards";
+import { Button, SectionTitle, Skeleton } from "@/components/ui";
+import { cn } from "@/lib/cn";
+import { formatClock, formatDuration, pluralize } from "@/lib/format";
+import { useElementWidth } from "@/lib/hooks";
+import { usePlayItem } from "@/lib/usePlayItem";
+import { Genres, ItemArt, MetaLine, RefreshButton, Summary } from "./shared";
+
+function MusicHeader({ item, kindLabel, meta, actions }: { item: ItemDetail; kindLabel: string; meta: React.ReactNode; actions: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:gap-8">
+      <div className="w-44 shrink-0 sm:w-52 lg:w-60">
+        <ItemArt item={item} aspect="square" width={240} />
+      </div>
+      <div className="min-w-0 flex-1 space-y-3">
+        <div className="text-xs font-semibold uppercase tracking-wider text-subtle">{kindLabel}</div>
+        <h1 className="text-3xl font-bold leading-tight tracking-tight text-balance sm:text-5xl">{item.title}</h1>
+        {meta}
+        <Genres genres={item.genres} />
+        <div className="flex flex-wrap items-center gap-2.5 pt-1">{actions}</div>
+      </div>
+    </div>
+  );
+}
+
+export function ArtistView({ item }: { item: ItemDetail }) {
+  const play = usePlayItem();
+  const albums = useChildren(item.id);
+  const [gridRef, gridWidth] = useElementWidth<HTMLDivElement>();
+  const cols = gridWidth > 0 ? Math.max(2, Math.floor((gridWidth + 18) / (170 + 18))) : 6;
+  const colWidth = gridWidth > 0 ? (gridWidth - 18 * (cols - 1)) / cols : 170;
+  const sorted = useMemo(
+    () =>
+      [...(albums.data ?? [])].sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || a.sort_title.localeCompare(b.sort_title)),
+    [albums.data],
+  );
+
+  return (
+    <div className="animate-fade-in px-4 pb-16 pt-8 sm:px-8">
+      <MusicHeader
+        item={item}
+        kindLabel="Artist"
+        meta={<MetaLine parts={[item.child_count != null ? pluralize(item.child_count, "album") : null, item.leaf_count != null ? pluralize(item.leaf_count, "track") : null]} />}
+        actions={
+          <>
+            <Button variant="primary" size="lg" icon={<Play className="size-5 fill-current" />} onClick={() => void play(item)}>
+              Play
+            </Button>
+            <Button size="lg" icon={<Shuffle className="size-4" />} onClick={() => void play(item, { shuffle: true })}>
+              Shuffle
+            </Button>
+            <RefreshButton item={item} />
+          </>
+        }
+      />
+      <Summary text={item.summary} className="mt-6" />
+      <section className="mt-10">
+        <SectionTitle>Albums</SectionTitle>
+        <div ref={gridRef} className="grid gap-x-[18px] gap-y-6" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+          {albums.isPending
+            ? Array.from({ length: Math.min(cols, 6) }, (_, i) => <CardSkeleton key={i} aspect="square" />)
+            : sorted.map((a) => (
+                <MediaCard key={a.id} item={a} aspect="square" width={colWidth} subtitle={a.year ? String(a.year) : ""} />
+              ))}
+        </div>
+        {albums.data && albums.data.length === 0 ? <p className="text-sm text-muted">No albums found.</p> : null}
+      </section>
+    </div>
+  );
+}
+
+export function AlbumView({ item, highlightId }: { item: ItemDetail; highlightId?: number }) {
+  const play = usePlayItem();
+  const audio = useAudioPlayer();
+  const tracks = useChildren(item.id);
+  const list = tracks.data ?? [];
+  const totalMs = list.reduce((sum, t) => sum + (t.duration_ms ?? 0), 0);
+  const discs = new Set(list.map((t) => t.parent_index ?? 1));
+  const multiDisc = discs.size > 1;
+
+  const playFrom = (i: number) => audio.playQueue(list, i);
+
+  return (
+    <div className="animate-fade-in px-4 pb-16 pt-8 sm:px-8">
+      <MusicHeader
+        item={item}
+        kindLabel="Album"
+        meta={
+          <MetaLine
+            parts={[
+              item.parent_id ? (
+                <Link key="artist" to={`/item/${item.parent_id}`} className="font-semibold text-fg hover:text-accent">
+                  {item.parent_title ?? "Artist"}
+                </Link>
+              ) : (
+                item.parent_title
+              ),
+              item.year,
+              list.length ? pluralize(list.length, "track") : null,
+              totalMs ? formatDuration(totalMs) : null,
+            ]}
+          />
+        }
+        actions={
+          <>
+            <Button
+              variant="primary"
+              size="lg"
+              icon={<Play className="size-5 fill-current" />}
+              onClick={() => (list.length ? playFrom(0) : void play(item))}
+              disabled={tracks.isSuccess && list.length === 0}
+            >
+              Play
+            </Button>
+            <Button
+              size="lg"
+              icon={<Shuffle className="size-4" />}
+              onClick={() => (list.length ? audio.playQueue(list, 0, { shuffle: true }) : void play(item, { shuffle: true }))}
+              disabled={tracks.isSuccess && list.length === 0}
+            >
+              Shuffle
+            </Button>
+            <RefreshButton item={item} />
+          </>
+        }
+      />
+      <Summary text={item.summary} className="mt-6" />
+
+      <section className="mt-8 max-w-4xl">
+        {tracks.isPending ? (
+          <div className="space-y-2">
+            {Array.from({ length: 8 }, (_, i) => (
+              <Skeleton key={i} className="h-10" />
+            ))}
+          </div>
+        ) : (
+          <div role="table" aria-label="Tracks" className="text-sm">
+            <div role="row" className="grid grid-cols-[2.5rem_1fr_4rem] gap-3 border-b border-border px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-subtle">
+              <span role="columnheader" className="text-right">#</span>
+              <span role="columnheader">Title</span>
+              <span role="columnheader" className="text-right">Time</span>
+            </div>
+            {list.map((t, i) => {
+              const showDisc = multiDisc && (i === 0 || (list[i - 1].parent_index ?? 1) !== (t.parent_index ?? 1));
+              return (
+                <TrackRow
+                  key={t.id}
+                  track={t}
+                  disc={showDisc ? (t.parent_index ?? 1) : null}
+                  current={audio.current?.id === t.id}
+                  playing={audio.current?.id === t.id && audio.playing}
+                  highlighted={highlightId === t.id}
+                  albumArtist={item.parent_title}
+                  onPlay={() => (audio.current?.id === t.id ? audio.toggle() : playFrom(i))}
+                />
+              );
+            })}
+            {list.length === 0 ? <SectionTitle className="mt-6">No tracks found</SectionTitle> : null}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function TrackRow({
+  track,
+  disc,
+  current,
+  playing,
+  highlighted,
+  albumArtist,
+  onPlay,
+}: {
+  track: ChildItem;
+  disc: number | null;
+  current: boolean;
+  playing: boolean;
+  highlighted: boolean;
+  albumArtist: string | null;
+  onPlay: () => void;
+}) {
+  const artist = track.grandparent_title && track.grandparent_title !== albumArtist ? track.grandparent_title : null;
+  return (
+    <>
+      {disc != null ? (
+        <div className="px-3 pb-1 pt-4 text-xs font-semibold uppercase tracking-wider text-subtle">Disc {disc}</div>
+      ) : null}
+      <div
+        role="row"
+        onDoubleClick={onPlay}
+        className={cn(
+          "group grid grid-cols-[2.5rem_1fr_4rem] items-center gap-3 rounded-md px-3 py-2 transition-colors hover:bg-white/[0.05]",
+          current && "bg-white/[0.04]",
+          highlighted && !current && "bg-accent/10",
+        )}
+      >
+        <span role="cell" className="relative flex justify-end">
+          <span className={cn("tabular-nums text-subtle group-hover:invisible", current && "invisible")}>{track.index ?? ""}</span>
+          <button
+            type="button"
+            aria-label={playing ? `Pause ${track.title}` : `Play ${track.title}`}
+            onClick={onPlay}
+            className={cn(
+              "absolute inset-y-0 right-0 flex items-center text-fg",
+              current ? "visible text-accent" : "invisible group-hover:visible",
+            )}
+          >
+            {playing ? <AudioLines className="size-4 animate-pulse" /> : <Play className="size-4 fill-current" />}
+          </button>
+        </span>
+        <span role="cell" className="min-w-0">
+          <span className={cn("block truncate font-medium", current ? "text-accent" : "text-fg")}>{track.title}</span>
+          {artist ? <span className="block truncate text-xs text-muted">{artist}</span> : null}
+        </span>
+        <span role="cell" className="text-right tabular-nums text-muted">
+          {track.duration_ms ? formatClock(track.duration_ms / 1000) : ""}
+        </span>
+      </div>
+    </>
+  );
+}

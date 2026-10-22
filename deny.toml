@@ -1,0 +1,33 @@
+# cargo-deny configuration (https://github.com/EmbarkStudios/cargo-deny).
+#   cargo install cargo-deny && cargo deny check licenses
+# Third-party crates must be permissively licensed. Our own crates are
+# unpublished (`publish = false`) and skipped here; the server ↔ transcoder
+# boundary is enforced by scripts/check-licenses.ps1 (see LICENSING.md).
+
+[graph]
+all-features = false
+exclude-dev = true
+
+[licenses]
+confidence-threshold = 0.9
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unlicense",
+    "CC0-1.0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+    "OpenSSL",
+]
+
+[licenses.private]
+ignore = true

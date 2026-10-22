@@ -1,0 +1,85 @@
+import { Play } from "lucide-react";
+import { useChildren, useOnDeck } from "@/api/hooks";
+import type { ItemDetail } from "@/api/types";
+import { CardSkeleton, MediaCard } from "@/components/cards";
+import { Button, SectionTitle } from "@/components/ui";
+import { episodeLabel, pluralize } from "@/lib/format";
+import { useElementWidth } from "@/lib/hooks";
+import { usePlayItem } from "@/lib/usePlayItem";
+import {
+  ContentRating,
+  Genres,
+  ItemArt,
+  ItemPageShell,
+  MetaLine,
+  RatingBadge,
+  RefreshButton,
+  Summary,
+  WatchedButton,
+} from "./shared";
+
+export function ShowView({ item }: { item: ItemDetail }) {
+  const play = usePlayItem();
+  const seasons = useChildren(item.id);
+  const onDeck = useOnDeck(item.id);
+  const [gridRef, gridWidth] = useElementWidth<HTMLDivElement>();
+  const cols = gridWidth > 0 ? Math.max(2, Math.floor((gridWidth + 18) / (150 + 18))) : 6;
+  const colWidth = gridWidth > 0 ? (gridWidth - 18 * (cols - 1)) / cols : 150;
+
+  const ep = onDeck.data;
+  const resuming = ep && ep.user_state.position_ms > 0 && !ep.user_state.watched;
+  const playLabel = ep ? `${resuming ? "Resume" : "Play"} ${episodeLabel(ep)}` : "Play";
+
+  return (
+    <ItemPageShell item={item}>
+      <div className="flex flex-col gap-6 sm:flex-row sm:gap-10">
+        <div className="hidden w-52 shrink-0 sm:block md:w-60 lg:w-64">
+          <ItemArt item={item} aspect="poster" width={256} />
+        </div>
+        <div className="min-w-0 flex-1 space-y-4">
+          <h1 className="text-3xl font-bold leading-tight tracking-tight text-balance sm:text-4xl">{item.title}</h1>
+          <MetaLine
+            parts={[
+              item.year,
+              item.child_count ? pluralize(item.child_count, "season") : null,
+              item.leaf_count ? pluralize(item.leaf_count, "episode") : null,
+              item.content_rating ? <ContentRating key="cr" value={item.content_rating} /> : null,
+              item.rating != null && item.rating > 0 ? <RatingBadge key="r" rating={item.rating} /> : null,
+              item.studio,
+            ]}
+          />
+          <Genres genres={item.genres} />
+          <div className="flex flex-wrap items-center gap-2.5 pt-1">
+            <Button
+              variant="primary"
+              size="lg"
+              icon={<Play className="size-5 fill-current" />}
+              onClick={() => void play(item)}
+              disabled={!item.leaf_count && !ep}
+            >
+              {playLabel}
+            </Button>
+            <WatchedButton item={item} />
+            <RefreshButton item={item} />
+          </div>
+          {item.tagline ? <p className="text-base italic text-fg/75">{item.tagline}</p> : null}
+          <Summary text={item.summary} />
+        </div>
+      </div>
+
+      <section className="mt-12">
+        <SectionTitle>Seasons</SectionTitle>
+        <div
+          ref={gridRef}
+          className="grid gap-x-[18px] gap-y-6"
+          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+        >
+          {seasons.isPending
+            ? Array.from({ length: Math.min(cols, 6) }, (_, i) => <CardSkeleton key={i} aspect="poster" />)
+            : seasons.data?.map((s) => <MediaCard key={s.id} item={s} aspect="poster" width={colWidth} />)}
+        </div>
+        {seasons.data && seasons.data.length === 0 ? <p className="text-sm text-muted">No seasons found.</p> : null}
+      </section>
+    </ItemPageShell>
+  );
+}

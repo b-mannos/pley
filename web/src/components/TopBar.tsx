@@ -1,0 +1,217 @@
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
+import { LogOut, Menu as MenuIcon, RefreshCw, Search, Settings, UserRound, X } from "lucide-react";
+import { useActivity, useLibraries, useLogout } from "@/api/hooks";
+import type { ScanPhase } from "@/api/types";
+import { useAudioPlayer } from "@/audio/AudioPlayer";
+import { useAuth } from "@/auth";
+import { cn } from "@/lib/cn";
+import { useDebouncedValue } from "@/lib/hooks";
+import { Menu, MenuItem, MenuSeparator } from "./Menu";
+import { IconButton } from "./ui";
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  return el.isContentEditable || el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT";
+}
+
+function SearchBox({ className }: { className?: string }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [params] = useSearchParams();
+  const onSearchPage = location.pathname === "/search";
+  const urlQuery = onSearchPage ? (params.get("q") ?? "") : "";
+  const [value, setValue] = useState(urlQuery);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const debounced = useDebouncedValue(value, 250);
+
+  // Leaving the search page clears the box; arriving syncs it with the URL.
+  useEffect(() => {
+    setValue(urlQuery);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onSearchPage]);
+
+  useEffect(() => {
+    const q = debounced.trim();
+    if (q === urlQuery.trim()) return;
+    if (!q && !onSearchPage) return;
+    navigate(q ? `/search?q=${encodeURIComponent(q)}` : "/search", { replace: onSearchPage });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debounced]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "/" && !isTypingTarget(e.target) && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
+  return (
+    <div className={cn("relative", className)}>
+      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-subtle" />
+      <input
+        ref={inputRef}
+        type="search"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            const q = value.trim();
+            if (q) navigate(`/search?q=${encodeURIComponent(q)}`, { replace: onSearchPage });
+          }
+          if (e.key === "Escape") {
+            setValue("");
+            inputRef.current?.blur();
+          }
+        }}
+        placeholder="Search"
+        aria-label="Search your libraries"
+        className="h-10 w-full rounded-full border border-transparent bg-surface-2 pl-9 pr-9 text-sm text-fg placeholder:text-subtle transition-colors focus:border-accent/70 focus:bg-surface-3 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+      />
+      {value ? (
+        <button
+          type="button"
+          aria-label="Clear search"
+          onClick={() => {
+            setValue("");
+            inputRef.current?.focus();
+          }}
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-subtle hover:text-fg"
+        >
+          <X className="size-3.5" />
+        </button>
+      ) : (
+        <kbd className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded border border-border px-1.5 text-[10px] font-medium text-subtle md:block">
+          /
+        </kbd>
+      )}
+    </div>
+  );
+}
+
+const PHASES: Record<ScanPhase, string> = {
+  queued: "Queued",
+  walking: "Finding files",
+  probing: "Analyzing",
+  metadata: "Fetching metadata",
+  done: "Done",
+};
+
+function ScanIndicator() {
+  const user = useAuth();
+  const activity = useActivity();
+  const libs = useLibraries();
+  const scans = (activity.data?.scans ?? []).filter((s) => s.phase !== "done");
+  const scanningLibs = (libs.data ?? []).filter((l) => l.scanning);
+  const count = Math.max(scans.length, scanningLibs.length);
+  if (count === 0) return null;
+
+  const title = scans.length
+    ? scans
+        .map((s) => `${s.library_name}: ${PHASES[s.phase]}${s.total ? ` ${Math.round((s.processed / s.total) * 100)}%` : ""}`)
+        .join("\n")
+    : scanningLibs.map((l) => `${l.name}: scanning`).join("\n");
+  const first = scans[0]?.library_name ?? scanningLibs[0]?.name ?? "";
+  const label = count === 1 ? `Scanning ${first}` : `Scanning ${count} libraries`;
+  const content = (
+    <>
+      <RefreshCw className="size-4 animate-spin text-accent" />
+      <span className="hidden max-w-48 truncate text-xs font-medium md:inline">{label}</span>
+    </>
+  );
+  const cls = "flex h-9 items-center gap-2 rounded-full px-3 text-muted transition-colors hover:bg-white/5 hover:text-fg";
+  return user.is_admin ? (
+    <Link to="/settings/dashboard" title={title} className={cls} aria-label={label}>
+      {content}
+    </Link>
+  ) : (
+    <div title={title} className={cls} aria-label={label}>
+      {content}
+    </div>
+  );
+}
+
+function UserMenu() {
+  const user = useAuth();
+  const navigate = useNavigate();
+  const logout = useLogout();
+  const audio = useAudioPlayer();
+
+  return (
+    <Menu
+      trigger={({ toggle, open }) => (
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label="Account menu"
+          aria-expanded={open}
+          className="flex size-9 items-center justify-center rounded-full bg-surface-3 text-sm font-bold uppercase text-fg ring-accent transition hover:ring-2"
+        >
+          {user.username.slice(0, 1)}
+        </button>
+      )}
+    >
+      {(close) => (
+        <>
+          <div className="px-3.5 pb-2 pt-1.5">
+            <div className="truncate text-sm font-semibold">{user.username}</div>
+            <div className="text-xs text-subtle">{user.is_admin ? "Administrator" : "User"}</div>
+          </div>
+          <MenuSeparator />
+          <MenuItem
+            icon={<UserRound />}
+            onClick={() => {
+              close();
+              navigate("/account");
+            }}
+          >
+            Account
+          </MenuItem>
+          {user.is_admin ? (
+            <MenuItem
+              icon={<Settings />}
+              onClick={() => {
+                close();
+                navigate("/settings");
+              }}
+            >
+              Settings
+            </MenuItem>
+          ) : null}
+          <MenuSeparator />
+          <MenuItem
+            icon={<LogOut />}
+            onClick={() => {
+              close();
+              audio.close();
+              logout.mutate(undefined, { onSettled: () => navigate("/login", { replace: true }) });
+            }}
+          >
+            Sign out
+          </MenuItem>
+        </>
+      )}
+    </Menu>
+  );
+}
+
+export function TopBar({ onMenu }: { onMenu: () => void }) {
+  return (
+    <header className="sticky top-0 z-20 flex h-16 items-center gap-2 border-b border-white/[0.04] bg-bg/85 px-3 backdrop-blur-md sm:gap-3 sm:px-6 lg:px-8">
+      <IconButton className="lg:hidden" label="Open menu" onClick={onMenu}>
+        <MenuIcon className="size-5" />
+      </IconButton>
+      <SearchBox className="min-w-0 max-w-xl flex-1" />
+      <div className="ml-auto flex items-center gap-1.5">
+        <ScanIndicator />
+        <UserMenu />
+      </div>
+    </header>
+  );
+}

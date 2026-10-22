@@ -1,0 +1,187 @@
+# pley-transcoder
+
+`pley-transcoder` is the component of pley that does **everything involving
+FFmpeg**:
+
+- probing media files
+- HLS transcoding and remuxing
+- HDR10, HLG and Dolby Vision tone mapping
+- subtitle burn-in and extraction
+- thumbnails and embedded cover art
+- keyframe indexing
+
+It is a separate program. The pley media server
+runs it as a child process, or connects to one running elsewhere, and talks to
+it only through the HTTP API described here. The request and response types
+live in the `pley-transcoder-api` crate.
+
+## Running
+
+```
+pley-transcoder [OPTIONS]
+  --listen <ADDR>          default 127.0.0.1:7540 (port 0 = pick a free port)
+  --token <TOKEN>          shared secret; env PLEY_TRANSCODER_TOKEN
+  --work-dir <DIR>         segments, caches (default: <tmp>/pley-transcoder)
+  --ffmpeg / --ffprobe     binaries (default: from PATH)
+  --max-jobs <N>           concurrent ffmpeg transcodes (default 8)
+  --max-hw-jobs <N>        concurrent hardware encoder sessions (default 8);
+                           extra jobs fall back to software encoding
+  --probe-concurrency <N>  concurrent probes/extractions (default 8)
+  --announce               print {"event":"listening","addr":"…"} once ready
+  --exit-with-parent       exit when stdin closes (used by the managed mode)
+  --redetect               ignore the cached capability detection
+  --license                print the licence notice
+```
+
+**Managed mode (default).** The server starts
+`pley-transcoder --listen 127.0.0.1:0 --announce --exit-with-parent` from the
+folder that holds the server binary. It passes a random token through the
+environment, reads the announced address, and restarts the transcoder with
+backoff if it dies. The transcoder exits as soon as the server does.
+
+**External mode.** Start the transcoder yourself, for example on a machine with
+a GPU, then point the server at it with `--transcoder-url http://host:7540
+--transcoder-token <secret>`. Media paths must be identical on both machines,
+for example through the same network mount.
+
+All endpoints except `GET /health` require `Authorization: Bearer <token>` when
+a token is configured. Errors are `{"code": "...", "message": "..."}` with the
+following status codes:
+
+| Status | Code | Meaning |
+|---|---|---|
+| 400 | `bad_request` | invalid request |
+| 401 | `unauthorized` | missing or wrong token |
+| 404 | `not_found` | unknown job or file |
+| 500 | `ffmpeg_failed` | ffmpeg returned an error |
+| 503 | `busy` | every transcode slot is in use |
+| 504 | `timeout` | the operation took too long |
+
+## Endpoints
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/health` | – | `ok` |
+| GET | `/v1/info` | – | `TranscoderInfo`: version, license, source, capabilities, limits |
+| GET | `/v1/status` | – | `TranscoderStatus`: counters, running processes, disk use, every job with live metrics |
+| GET | `/metrics` | – | Prometheus text format |
+| POST | `/v1/probe` | `ProbeRequest {path}` | `MediaInfo` (cached per file version) |
+| POST | `/v1/thumbnail` | `ThumbnailRequest {path, time_ms?, width?, duration_ms?, hdr}` | `image/jpeg` |
+| POST | `/v1/cover` | `CoverRequest {path}` | embedded cover art (`image/jpeg` or `image/png`) |
+| POST | `/v1/subtitles` | `SubtitleRequest {path, stream_index?}` | `text/vtt` |
+| POST | `/v1/keyframes` | `KeyframesRequest {path}` | `200` if indexed, `202` if queued |
+| POST | `/v1/jobs` | `JobRequest` | `201 JobCreated` |
+| GET | `/v1/jobs` | – | `JobStatus[]` |
+| GET | `/v1/jobs/{id}` | – | `JobStatus` |
+| DELETE | `/v1/jobs/{id}` | – | `204` (kills ffmpeg, deletes segments) |
+| POST | `/v1/jobs/{id}/touch` | – | `204` (keeps a paused session alive) |
+| GET | `/v1/jobs/{id}/index.m3u8` | – | HLS VOD playlist |
+| GET | `/v1/jobs/{id}/{n}.ts` | – | MPEG-TS segment `n` (waits for it, or starts ffmpeg) |
+
+## How HLS jobs work
+
+1. **Layout first.** When a job is created, its segment layout is fixed and the
+   whole VOD playlist is known up front, so players can seek anywhere.
+   - When transcoding, segments are every 4 s and keyframes are forced on that
+     grid.
+   - When remuxing (`video.mode = copy`), segments start on the source's
+     keyframes, taken from the keyframe index.
+
+   The layout is deterministic. If the transcoder restarts, the server
+   recreates the job and the same segment numbers still line up.
+2. **Segments on demand.** A segment request is answered from disk if that
+   segment already exists. If it doesn't:
+   - When a running ffmpeg process is at most three segments behind it, the
+     request waits for that process.
+   - Otherwise a new process starts exactly at that segment, using `-ss`,
+     `-output_ts_offset`, `-segment_times` and `-segment_start_number`, so
+     timestamps stay on the absolute timeline. `avoid_negative_ts` is disabled
+     so B-frame delay can't shift one process's segments relative to another.
+3. **Completion tracking.** ffmpeg's segment muxer writes a line to stdout as
+   each segment finishes, which marks it ready and wakes waiting requests at
+   once, with no polling. ffmpeg's `-progress` output on stderr supplies the
+   live metrics: fps, speed, bitrate and position.
+4. **Throttling.** Once a 60 s buffer exists, ffmpeg reads at most 2× realtime
+   (`-readrate`), which saves CPU, GPU and disk. This applies when supported
+   and enabled.
+5. **Housekeeping.**
+   - A process idle for 60 s (paused player) is stopped.
+   - A job idle for 20 minutes expires.
+   - Segments more than 90 behind the playhead are deleted.
+   - On startup, segments left over from an earlier run are removed.
+6. **Failure handling.** If ffmpeg fails twice at the same segment, the error is
+   returned instead of retrying forever. The job's `last_error` holds ffmpeg's
+   last log lines.
+
+## Transcoding features
+
+- **Encoders.** At startup each candidate encoder is test-encoded rather than
+  just listed:
+  - NVENC, QSV and AMF on Windows and Linux
+  - VAAPI on Linux
+  - VideoToolbox on macOS
+  - libx264 and libx265 as software fallbacks
+
+  `hwaccel = auto` picks the first hardware encoder that works. Forced
+  keyframes are IDR frames (`-forced-idr`), so every segment can be decoded on
+  its own. The results are cached in `capabilities.json`, keyed by the ffmpeg
+  binary's size and modification time.
+- **Hardware decoding.** The decoder is paired with the encoder: `cuda` with
+  NVENC, `d3d11va` with QSV/AMF on Windows, `vaapi`, or `videotoolbox`. Frames
+  come back to system memory, and ffmpeg falls back to software decoding by
+  itself if the codec isn't supported.
+- **Tone mapping** of HDR10, HLG and Dolby Vision to SDR BT.709, best available
+  first:
+  - `libplacebo` on the GPU through Vulkan. It also applies Dolby Vision RPU
+    reshaping, so **profile 5** (IPTPQc2) renders with correct colors.
+  - `tonemap_opencl` on the GPU.
+  - `zscale` plus `tonemap` on the CPU.
+
+  Profiles 7 and 8 have an HDR10- or HLG-compatible base layer and work with any
+  of these. Profile 5 without libplacebo produces a warning.
+- **Subtitle burn-in.**
+  - Bitmap subtitles (PGS, VobSub, DVB, `.sup` files) are overlaid at source
+    resolution, after tone mapping and before scaling.
+  - Text subtitles (SRT, ASS) are rendered by libass from an `.ass` file
+    extracted into the job folder.
+- **Audio.** Copied when the client supports the codec. Otherwise it's
+  transcoded to AAC, downmixed to stereo by default, and resampled to 48 kHz
+  when needed.
+- **Remux.** H.264 video is copied into HLS, with segments cut exactly on the
+  source's keyframes.
+  - Matroska and WebM: the keyframe index is read instantly from the file's
+    Cues element, so remuxing works on the first play.
+  - Other containers: the index is built in the background (one file at a
+    time, by reading packet headers) after `POST /v1/keyframes`, which the
+    server sends when an item page is opened. Until it exists, jobs transcode.
+- **Subtitle extraction.** Every text track of a file is converted to WebVTT in
+  a single pass over the file and cached. External files are converted with
+  charset detection (UTF-8, UTF-16 BOM, or Windows-1252 as a fallback).
+
+## Metrics
+
+`GET /v1/status` returns:
+
+- totals: jobs created and failed, processes started and failed, segments
+  produced and served, bytes served, probes (with total probe time),
+  thumbnails, subtitle extractions, keyframe scans
+- running and hardware processes against their limits
+- work-dir disk usage
+- per job: state, video and audio plans (input → output, encoder, decoder,
+  tone mapper), ffmpeg progress (fps, speed, bitrate, position, dropped and
+  duplicated frames), restarts, bytes served, warnings and the last error
+
+`GET /metrics` exposes the same data for Prometheus (`pley_transcoder_*`). The
+pley web UI shows it under *Settings → Dashboard*.
+
+## License
+
+```
+pley-transcoder  Copyright (c) 2026 the Pley authors. All rights reserved.
+Restricted: its licence terms are to be determined, and no licence to copy,
+modify or distribute it is granted until then. It comes with ABSOLUTELY NO
+WARRANTY. See the LICENSE file.
+```
+
+FFmpeg is invoked as a separate program and has its own license. The FFmpeg
+build used during development (`--enable-gpl --enable-version3`) is GPLv3.
