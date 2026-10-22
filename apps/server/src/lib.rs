@@ -8,6 +8,7 @@ pub mod auth;
 pub mod catalog;
 pub mod config;
 pub mod db;
+pub mod desktop;
 pub mod error;
 pub mod events;
 pub mod images;
@@ -26,9 +27,37 @@ use std::time::Duration;
 pub use config::Config;
 pub use state::AppState;
 
+/// Woken by [`request_shutdown`] (the tray's "Quit").
+static SHUTDOWN: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Ask the running server to shut down gracefully.
+pub fn request_shutdown() {
+    SHUTDOWN.notify_one();
+}
+
+/// `pley serve`: run the server on a new runtime, with a tray icon when `tray`
+/// is set and this is an interactive desktop session.
+pub fn serve(config: Config, tray: bool) -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().thread_name("pley-worker").build()?;
+    let tray = tray && desktop::interactive_session();
+    #[cfg(all(feature = "tray", target_os = "macos"))]
+    if tray {
+        // AppKit owns the main thread; the server runs on a helper thread.
+        return desktop::macos::serve(runtime, config);
+    }
+    let launcher = tray.then(|| Box::new(desktop::start_tray) as desktop::TrayLauncher);
+    runtime.block_on(run_with_tray(config, launcher))
+}
+
 /// Build the application state, start background services and serve HTTP until
 /// Ctrl+C / SIGTERM.
 pub async fn run(config: Config) -> anyhow::Result<()> {
+    run_with_tray(config, None).await
+}
+
+/// Like [`run`]; once the server listens, `tray` gets the context for the tray
+/// icon (if any), which is removed again after shutdown.
+pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) -> anyhow::Result<()> {
     let bind = config.bind;
     let state = AppState::init(config).await?;
     state.start_background_tasks();
@@ -37,6 +66,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     let listener =
         tokio::net::TcpListener::bind(bind).await.map_err(|e| anyhow::anyhow!("cannot listen on {bind}: {e}"))?;
     tracing::info!("pley {} listening on http://{}", env!("CARGO_PKG_VERSION"), display_addr(bind));
+    let tray = tray.and_then(|launch| launch(desktop::TrayContext::new(&state, bind)));
 
     axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
         .with_graceful_shutdown(shutdown_signal())
@@ -46,6 +76,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     if tokio::time::timeout(Duration::from_secs(25), state.shutdown()).await.is_err() {
         tracing::warn!("shutdown did not finish in time");
     }
+    drop(tray);
     Ok(())
 }
 
@@ -118,5 +149,6 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => {},
         _ = terminate => {},
+        _ = SHUTDOWN.notified() => {},
     }
 }

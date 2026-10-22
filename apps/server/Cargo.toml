@@ -55,5 +55,38 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2"
 
+# Desktop integration: system tray icon (see src/desktop).
+open = { version = "5", optional = true }
+
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+tray-icon = { version = "0.24", default-features = false, optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", optional = true }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSRunningApplication"], optional = true }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSThread"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# StatusNotifierItem over D-Bus in pure Rust: no GTK, so headless builds stay lean.
+ksni = { version = "0.3", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_System_Registry",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+embed-resource = "3"
+
+[features]
+default = ["tray"]
+# Tray icon while running in an interactive desktop session.
+tray = ["dep:open", "dep:tray-icon", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation", "dep:ksni"]
+
 [dev-dependencies]
 tempfile = "3"

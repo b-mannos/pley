@@ -153,7 +153,8 @@ or `pley.toml` in the data directory; see
 | `--ffmpeg`, `--ffprobe` | from `PATH` | passed to the transcoder |
 | `--transcoder-url` | (managed) | use an external transcoder instead of spawning one |
 | `--web-dir` | (embedded) | serve the UI from a folder |
-| `--log` | `info` | e.g. `debug`, `info,pley=debug` |
+| `--log` | `info` | e.g. `debug`, `info,pley=debug`; also written to `logs/pley.log` in the data directory |
+| `--no-tray` | off | never show the tray icon (it only appears in interactive desktop sessions) |
 
 Runtime settings are edited in the UI under **Settings → Server**:
 

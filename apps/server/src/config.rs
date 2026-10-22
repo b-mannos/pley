@@ -58,6 +58,10 @@ pub struct Cli {
     /// Log filter, e.g. `info` or `debug,sqlx=warn`
     #[arg(long, env = "PLEY_LOG", default_value = "info", global = true)]
     pub log: String,
+
+    /// Never show the tray icon (it only appears in interactive desktop sessions anyway)
+    #[arg(long, env = "PLEY_NO_TRAY", global = true)]
+    pub no_tray: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -164,6 +168,11 @@ impl Config {
 
     pub fn db_path(&self) -> PathBuf {
         self.data_dir.join("pley.db")
+    }
+
+    /// Server log (rotated at start-up when large).
+    pub fn log_file(&self) -> PathBuf {
+        self.data_dir.join("logs").join("pley.log")
     }
 
     /// Resized images, extracted subtitles, …: safe to delete at any time.

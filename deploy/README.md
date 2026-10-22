@@ -65,9 +65,19 @@ automatically. Downloaded binaries may need
 ## Windows
 
 Install FFmpeg (for example `winget install Gyan.FFmpeg`), extract the archive
-and run `pley.exe`. To start pley at sign-in, create a shortcut to `pley.exe`
-in `shell:startup`, or a Task Scheduler task "At log on" that runs it. NVENC,
-QSV, AMF and Vulkan tone mapping work with the gyan.dev "full" FFmpeg build.
+and run `pley.exe`. NVENC, QSV, AMF and Vulkan tone mapping work with the
+gyan.dev "full" FFmpeg build.
+
+## The tray icon
+
+On a desktop (Windows, macOS, Linux with a StatusNotifier host such as KDE or
+GNOME with the AppIndicator extension), pley shows an icon in the
+notification area or menu bar while it runs: click it to open the web UI;
+its menu scans the libraries, shows the logs, turns **Start pley at login** on
+or off and quits pley. Started by double-click on Windows, pley closes its
+console window once the icon is up; logs are in `logs/pley.log` in the data
+folder. Services, containers and SSH sessions never show the icon, and
+`--no-tray` (or `PLEY_NO_TRAY=1`) turns it off.
 
 ## Firewall and remote access
 
