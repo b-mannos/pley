@@ -100,6 +100,8 @@ parameters; containers report `size`, `totalSize` and `offset`.
 | Sections | `/library`, `/library/sections`, `/library/sections/{id}`, `…/all`, `…/albums`, `…/recentlyAdded`, `…/onDeck`, `…/search`, `…/firstCharacter`, `…/collections`, `…/{genre,year,decade,contentRating,studio}`, `…/refresh`, `/library/sections/all/refresh` |
 | Items | `/library/metadata/{id}` (comma-separated ids allowed), `…/children`, `…/allLeaves`, `…/grandchildren`, `…/thumb`, `…/art`, `…/refresh` |
 | Lists | `/library/all`, `/library/onDeck`, `/library/recentlyAdded`, `/hubs`, `/hubs/sections/{id}`, `/hubs/continueWatching/items`, `/hubs/home/recentlyAdded`, `/hubs/search`, `/search` |
+| Collections | `/library/sections/{id}/collections` (also `…/all?type=18`), `/library/collections/{id}`, `…/children`, `…/{thumb,art,composite}[/{version}]` |
+| Playlists | `GET`/`POST /playlists` (`?type=&title=&uri=…/library/metadata/1,2`), `GET`/`PUT` (`?title=`)/`DELETE /playlists/{id}`, `GET`/`PUT /playlists/{id}/items` (`?uri=`), `DELETE /playlists/{id}/items/{playlistItemID}`, `PUT …/{playlistItemID}/move?after=`, `/playlists/{id}/composite/{version}` |
 | Playback | `/library/parts/…`, `/library/streams/{id}` (subtitles), `/:/timeline`, `/:/progress`, `/:/scrobble`, `/:/unscrobble`, `/status/sessions`, `/transcode/sessions`, `/{video,audio}/:/transcode/universal/{start.m3u8,decision,stop,ping,session/…}` |
 | Images | `/photo/:/transcode` |
 
@@ -149,9 +151,11 @@ With python-plexapi 4.18 the following work against the test media:
 
 - plex.tv: sign-in, server claiming, sharing, remote access and the official
   Plex apps.
-- Collections, playlists and play queues: empty lists.
-- Editing metadata, labels, ratings, collections and posters through the Plex
-  API: `/:/rate` is accepted and ignored, edit requests fail. Edit in pley.
+- Smart collections and smart playlists, play queues, and creating or editing
+  collections through the Plex API (they are read-only here; manage them in
+  pley). Playlists can be created and edited.
+- Editing metadata, labels, ratings and posters through the Plex API:
+  `/:/rate` is accepted and ignored, edit requests fail. Edit in pley.
 - Filters on descendants (`episode.title` on shows) and on `resolution`, `hdr`,
   audio or subtitle language: ignored, so they don't narrow results.
 - Play history (`/status/sessions/history/all` is empty), the

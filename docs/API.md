@@ -335,6 +335,89 @@ are credited in.
 | GET | `/api/people/{id}` | – | `PersonDetail`; `404` when the person has no credits this user can see |
 | GET | `/api/people/{id}/photo` | `w=<px>`, `v=` | image bytes; downloaded from TMDB the first time. `404` without a photo |
 
+## Collections
+
+Groups of movies or shows of one library, shared by every user. *Automatic*
+collections mirror TMDB's movie collections: the metadata agent files each
+matched movie under its `belongs_to_collection` (with that collection's
+poster and backdrop) and drops collections left empty; one is listed once two
+of its movies are visible to the user. Administrators make their own and can
+edit either kind; an edited title is kept over TMDB's. The [access
+rules](#access-rules) apply: hidden items are left out, and a collection with
+nothing left to show answers `404` (empty manual collections are shown to
+administrators only).
+
+```ts
+interface Collection {
+  id: Id;
+  library_id: Id;
+  title: string;
+  summary: string | null;
+  automatic: boolean;               // from TMDB
+  sort: "release" | "title" | "custom";
+  item_count: number;               // items this user can see
+  poster_url: string;               // own artwork, else the first item's that has some
+  backdrop_url: string;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+```
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/api/libraries/{id}/collections` | – | `{ collections: Collection[] }` by title |
+| POST | `/api/libraries/{id}/collections` *(admin)* | `{ title, summary?, item_ids?: Id[] }` | `201` `Collection & { items: ItemSummary[] }`; `400` for music libraries |
+| GET | `/api/collections/{id}` | – | `Collection & { items: ItemSummary[] }` in the collection's order |
+| PATCH | `/api/collections/{id}` *(admin)* | `{ title?, summary? (null clears), sort? }` | `Collection & { items }` |
+| DELETE | `/api/collections/{id}` *(admin)* | – | `204` (an automatic one comes back when its movies are refreshed) |
+| POST | `/api/collections/{id}/items` *(admin)* | `{ item_ids: Id[] }` | `{ added: number }`; only movies and shows of the same library, `400` if none could be added |
+| DELETE | `/api/collections/{id}/items/{item_id}` *(admin)* | – | `204` |
+| PUT | `/api/collections/{id}/order` *(admin)* | `{ item_ids: Id[] }` | `204`; these first in this order, the rest after; switches `sort` to `custom` |
+| GET | `/api/collections/{id}/images/{poster\|backdrop}` | `w`, `v` as for items | image bytes, or a `307` to the item artwork it falls back to |
+| GET | `/api/items/{id}/collections` | – | `{ collections: { id, title }[] }` the movie or show is in ("Part of …") |
+
+## Playlists
+
+Ordered lists of a user's own, private to them (administrators included).
+A playlist is for `video` (movies and episodes) or `audio` (tracks); adding a
+show, season, album or artist adds its episodes or tracks in playing order,
+and the same item can be in a playlist more than once. Entries the user can
+no longer see are skipped in every response but kept, so they come back if
+access is restored. At most 5 000 entries.
+
+```ts
+interface Playlist {
+  id: Id;
+  title: string;
+  kind: "video" | "audio";
+  item_count: number;               // visible entries
+  duration_ms: number;
+  artwork: string[];                // artwork urls of the first entries (≤ 4), for a mosaic
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+interface PlaylistEntry {
+  entry_id: Id;                     // identifies this entry (an item may appear twice)
+  item: ItemSummary;
+}
+```
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/api/playlists` | – | `{ playlists: Playlist[] }` by title |
+| POST | `/api/playlists` | `{ title, kind?, item_ids?: Id[] }` | `201` `Playlist & { entries: PlaylistEntry[] }`; without `kind`, the first visible item decides |
+| GET | `/api/playlists/{id}` | – | `Playlist & { entries }` |
+| PATCH | `/api/playlists/{id}` | `{ title }` | `Playlist & { entries }` |
+| DELETE | `/api/playlists/{id}` | – | `204` |
+| POST | `/api/playlists/{id}/items` | `{ item_ids: Id[] }` | `{ added: number }`; `400` when an item doesn't fit the playlist's kind |
+| DELETE | `/api/playlists/{id}/items/{entry_id}` | – | `204` |
+| PUT | `/api/playlists/{id}/order` | `{ entry_ids: Id[] }` | `Playlist & { entries }`; these first in this order, the rest after |
+
+Another user's playlist answers `404`. The web player plays a video playlist
+in order (its *Next* is the next entry); music playlists go to the audio
+queue.
+
 ## Playback
 
 | Method | Path | Body | Response |

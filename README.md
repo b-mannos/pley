@@ -58,6 +58,12 @@ HLG and Dolby Vision.
   - Continue Watching and Next Up, plus Recently Added, Recently Released and
     Top Rated hubs.
   - Full-text search.
+- **Collections and playlists.**
+  - Movie collections from TMDB (Harry Potter, Alien…), made automatically,
+    plus collections that administrators curate, with their own order.
+  - Private playlists for video and music: add a film, an episode or a whole
+    show, album or artist, reorder by dragging, play in order or shuffled.
+  - Both respect library access and age limits.
 - **Admin.**
   - Metadata editing with locked fields, Fix Match against TMDB, and
     choosing or uploading posters, backgrounds and thumbnails.
@@ -68,8 +74,8 @@ HLG and Dolby Vision.
     (fps, speed, hardware sessions, segments, disk), scans and system info.
   - Prometheus `/metrics` on the transcoder.
 - **Plex-compatible API** on port 32400 for Plex tools such as python-plexapi
-  and Tautulli: libraries, metadata, watch state, sessions, direct play and HLS
-  streams. See [docs/PLEX.md](docs/PLEX.md).
+  and Tautulli: libraries, metadata, collections, playlists, watch state,
+  sessions, direct play and HLS streams. See [docs/PLEX.md](docs/PLEX.md).
 - **Performance.**
   - Single binaries.
   - SQLite in WAL mode with a dedicated writer connection, and a mimalloc
