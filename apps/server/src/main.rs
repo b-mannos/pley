@@ -17,6 +17,7 @@ fn main() -> anyhow::Result<()> {
             Some(pley::config::Command::ResetPassword { username, password, admin }) => {
                 pley::reset_password(config, &username, &password, admin).await
             }
+            Some(pley::config::Command::Health) => pley::health(&config).await,
         }
     })
 }

@@ -1,0 +1,37 @@
+# docker compose -f deploy/docker/compose.yaml up -d
+# Then open http://localhost:7539 and create the admin account.
+services:
+  pley:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: pley:latest
+    container_name: pley
+    restart: unless-stopped
+    ports:
+      - "7539:7539"
+    volumes:
+      # Database, artwork, caches and transcode segments. Must be writable by
+      # uid 1000 (or set `user:` to the owner of this folder).
+      - ./config:/config
+      # Your media, read-only. Add one line per folder.
+      - /srv/media:/media:ro
+    # Optional: a RAM disk for transcode segments (needs ~2 GB per stream).
+    # tmpfs:
+    #   - /config/transcode:size=4g,uid=1000,gid=1000
+
+    # Intel / AMD hardware transcoding (VAAPI, QSV): pass the GPU and add the
+    # host's `render` group id (`getent group render | cut -d: -f3`).
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - "993"
+
+    # NVIDIA (NVENC/NVDEC/Vulkan): install the NVIDIA Container Toolkit, then:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu, video, compute, utility, graphics]

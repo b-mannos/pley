@@ -1,0 +1,10 @@
+# Keep the Docker build context small: sources only.
+target
+dist
+data
+.local
+.git
+.github
+**/node_modules
+apps/web/dist
+*.log

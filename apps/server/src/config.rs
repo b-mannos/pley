@@ -72,6 +72,8 @@ pub enum Command {
         #[arg(long)]
         admin: bool,
     },
+    /// Exit with status 0 when the server on this machine answers (for container health checks)
+    Health,
 }
 
 /// Shape of `pley.toml`. Every key is optional.

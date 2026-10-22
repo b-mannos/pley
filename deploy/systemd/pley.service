@@ -1,0 +1,44 @@
+# systemd unit for pley on Linux.
+#   sudo useradd --system --home-dir /var/lib/pley --shell /usr/sbin/nologin pley
+#   sudo install -m755 pley pley-transcoder /usr/local/bin/
+#   sudo cp pley.service /etc/systemd/system/ && sudo systemctl enable --now pley
+[Unit]
+Description=pley media server
+After=network-online.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pley
+Group=pley
+# Hardware transcoding through /dev/dri needs the render (and on some
+# distributions video) group:
+# SupplementaryGroups=render video
+Environment=PLEY_DATA_DIR=/var/lib/pley
+ExecStart=/usr/local/bin/pley
+Restart=on-failure
+RestartSec=5
+# pley stops its transcoder (which stops ffmpeg) before exiting.
+TimeoutStopSec=45
+StateDirectory=pley
+StateDirectoryMode=0750
+
+# Hardening. Media folders stay readable; only the state directory is writable.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

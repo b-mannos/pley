@@ -82,6 +82,23 @@ pub async fn reset_password(config: Config, username: &str, password: &str, admi
     Ok(())
 }
 
+/// `pley health`: ask the local server for `/api/health`.
+pub async fn health(config: &Config) -> anyhow::Result<()> {
+    let mut addr = config.bind;
+    if addr.ip().is_unspecified() {
+        addr.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
+    }
+    let response = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()?
+        .get(format!("http://{addr}/api/health"))
+        .send()
+        .await?;
+    anyhow::ensure!(response.status().is_success(), "server answered {}", response.status());
+    Ok(())
+}
+
 fn display_addr(addr: std::net::SocketAddr) -> String {
     if addr.ip().is_unspecified() { format!("localhost:{}", addr.port()) } else { addr.to_string() }
 }

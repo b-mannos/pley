@@ -1,4 +1,4 @@
-//! Serves the web UI. Release builds embed `web/dist`; debug builds read it
+//! Serves the web UI. Release builds embed `apps/web/dist`; debug builds read it
 //! from disk so a rebuilt UI shows up without recompiling. Precompressed
 //! `.br`/`.gz` variants written by the Vite build are served when accepted.
 

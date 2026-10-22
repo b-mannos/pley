@@ -89,8 +89,10 @@ npm workspace for the web UI, both rooted at the top level.
 | `apps/transcoder` | The FFmpeg engine (crate and binary `pley-transcoder`) |
 | `apps/web` | React + TypeScript + Vite + Tailwind web UI, embedded into the server |
 | `packages/transcoder-api` | Protocol types shared by server and transcoder |
+| `deploy/` | Docker image and compose file, systemd unit, launchd agent ([guide](deploy/README.md)) |
 | `docs/` | HTTP API, transcoder protocol |
 | `scripts/` | Release build, license check |
+| `.github/workflows/` | CI on Linux, macOS and Windows; release builds for x86_64 and arm64 |
 
 ## Requirements
 
