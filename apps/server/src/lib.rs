@@ -14,6 +14,7 @@ pub mod events;
 pub mod images;
 pub mod library;
 pub mod logging;
+pub mod markers;
 pub mod metadata;
 pub mod playback;
 pub mod plex;

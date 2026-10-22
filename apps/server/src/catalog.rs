@@ -148,6 +148,8 @@ pub struct ItemDetail {
     pub tmdb_id: Option<i64>,
     pub imdb_id: Option<String>,
     pub files: Vec<MediaFileDto>,
+    /// Intro and credits of the files (Skip Intro / Skip Credits).
+    pub markers: Vec<crate::markers::Marker>,
 }
 
 pub fn image_url(id: i64, kind: &str, version: i64) -> String {
@@ -439,6 +441,7 @@ pub async fn item_detail(db: &Db, row: ItemRow) -> sqlx::Result<ItemDetail> {
     .fetch_one(&db.read)
     .await?;
     let files = files_for_item(db, row.id).await?;
+    let markers = crate::markers::for_item(db, row.id).await?;
     Ok(ItemDetail {
         summary: row.to_summary(),
         original_title: detail.original_title,
@@ -449,6 +452,7 @@ pub async fn item_detail(db: &Db, row: ItemRow) -> sqlx::Result<ItemDetail> {
         tmdb_id: detail.tmdb_id,
         imdb_id: detail.imdb_id,
         files: files.iter().map(FileRow::to_dto).collect(),
+        markers,
     })
 }
 

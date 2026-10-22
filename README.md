@@ -43,6 +43,9 @@ HLG and Dolby Vision.
   - Subtitles: text tracks (embedded and sidecar `.srt`, `.ass`, `.vtt`) are
     served as WebVTT; image subtitles (PGS, VobSub) are burned in.
   - Audio-track selection, quality presets, resume, and next-episode autoplay.
+  - Skip Intro and Skip Credits: intros and credits are found from chapter
+    names and by comparing the audio of episodes (Chromaprint), with Up Next
+    when an episode's credits start and optional automatic intro skipping.
 - **Watch state.**
   - Per-user progress, watched flags and play counts.
   - Continue Watching and Next Up, plus Recently Added, Recently Released and

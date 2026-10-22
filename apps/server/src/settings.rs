@@ -26,6 +26,8 @@ pub struct Settings {
     pub throttle_transcodes: bool,
     pub scan_interval_minutes: u32,
     pub watch_libraries: bool,
+    /// Find intros and credits (Skip Intro / Skip Credits) in the background.
+    pub detect_markers: bool,
 }
 
 impl Default for Settings {
@@ -43,6 +45,7 @@ impl Default for Settings {
             throttle_transcodes: true,
             scan_interval_minutes: 360,
             watch_libraries: true,
+            detect_markers: true,
         }
     }
 }
@@ -72,6 +75,7 @@ pub struct SettingsPatch {
     pub throttle_transcodes: Option<bool>,
     pub scan_interval_minutes: Option<u32>,
     pub watch_libraries: Option<bool>,
+    pub detect_markers: Option<bool>,
 }
 
 pub struct SettingsStore {
@@ -138,6 +142,9 @@ impl SettingsStore {
         }
         if let Some(v) = patch.watch_libraries {
             next.watch_libraries = v;
+        }
+        if let Some(v) = patch.detect_markers {
+            next.detect_markers = v;
         }
         let json = serde_json::to_string(&next).map_err(|e| AppError::Internal(e.into()))?;
         sqlx::query(

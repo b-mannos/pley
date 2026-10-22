@@ -15,6 +15,7 @@ use crate::auth::AuthUser;
 use crate::catalog::{self, ItemSummary};
 use crate::error::ApiResult;
 use crate::library::scanner::ScanStatus;
+use crate::markers::AnalysisStatus;
 use crate::playback::{Method, TranscodeInfo, transcode_info};
 use crate::state::AppState;
 
@@ -36,6 +37,8 @@ pub struct SessionInfo {
 pub struct Activity {
     scans: Vec<ScanStatus>,
     sessions: Vec<SessionInfo>,
+    /// Intro/credits detection in progress.
+    analysis: Option<AnalysisStatus>,
 }
 
 pub async fn activity(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Activity>> {
@@ -66,7 +69,8 @@ pub async fn activity(State(state): State<AppState>, user: AuthUser) -> ApiResul
             transcode: session.job_id().and_then(|id| jobs.get(&id)).map(transcode_info),
         });
     }
-    Ok(Json(Activity { scans: state.scanner.statuses(), sessions: out }))
+    let analysis = if user.is_admin { state.markers.status() } else { None };
+    Ok(Json(Activity { scans: state.scanner.statuses(), sessions: out, analysis }))
 }
 
 pub async fn events(

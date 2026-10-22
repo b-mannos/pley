@@ -100,6 +100,15 @@ interface ItemDetail extends ItemSummary {
   tmdb_id: number | null;
   imdb_id: string | null;
   files: MediaFile[];               // empty for containers (show/season/artist/album)
+  markers: Marker[];                // intro and credits of the files (Skip Intro / Skip Credits)
+}
+
+interface Marker {
+  file_id: Id;                      // markers belong to a file: versions can be different cuts
+  kind: "intro" | "credits";
+  start_ms: number;
+  end_ms: number;                   // credits that run to the end of the file end at its duration
+  source: "chapter" | "fingerprint";
 }
 
 interface MediaFile {
@@ -227,6 +236,7 @@ interface PlaybackInfo {
 | PUT | `/api/items/{id}/streams` | `{ file_id?, audio_index, subtitle_index }` (`subtitle_index: null` = off) | `204`. Remembers the choice for the whole show (episodes) or the movie, as language/title/forced, so every episode starts with its own matching tracks. |
 | POST | `/api/items/{id}/unwatched` | – | `204` |
 | POST | `/api/items/{id}/refresh` *(admin)* | – | `202` re-fetch metadata |
+| POST | `/api/items/{id}/analyze` *(admin)* | – | `202` find the intro and credits again: a movie's chapters, or every episode of an episode's season, a season or a show. `400` for other kinds. |
 | GET | `/api/items/{id}/images/{poster\|backdrop\|thumb}` | query: `w=<px>` (optional resize, bucketed), `v=` (cache buster, ignored) | image bytes (`image/jpeg`), long-lived cache headers. Falls back to parent artwork (season → show). `404` if none. |
 
 ## Home & search
@@ -298,14 +308,43 @@ The player should send `POST /api/items/{id}/progress` every ~10 s while
 playing (with `session_id`), on pause, and with `state: "stopped"` when closing,
 then `DELETE /api/playback/{session_id}`.
 
+## Intro and credits detection
+
+Markers come from two sources, best first:
+
+1. **Chapters** titled like an intro or credits (*Intro*, *Opening*, *OP*,
+   *Opening Credits*, *Ending*, *ED*, *Credits*, *End Credits*, …), for movies
+   and episodes.
+2. **Audio fingerprints** of episodes. The transcoder computes Chromaprint
+   fingerprints of the first half (at most 10 minutes) and the last 35 % (at
+   most 8 minutes) of every episode. An intro is audio of 12 s to 3 minutes
+   near the start that the nearest episodes of the season (or of the show, for
+   a season with one episode) share; credits are shared audio near the end.
+   Each episode is compared with up to four others and the boundaries agreed
+   on by most comparisons win. Fingerprints are cached per file version in the
+   cache folder, so a new episode only needs its own.
+
+A background worker analyses one season at a time after library scans (and
+30 s after start-up), pauses while two or more transcodes run, and records the
+algorithm version so improvements re-run automatically. It is skipped when
+`detect_markers` is off or the transcoder's FFmpeg lacks Chromaprint (chapters
+are still used).
+
 ## Activity & events
 
 | Method | Path | Response |
 |---|---|---|
-| GET | `/api/activity` | `{ scans: ScanStatus[], sessions: SessionInfo[] }` (non-admins only see their own sessions) |
+| GET | `/api/activity` | `{ scans: ScanStatus[], sessions: SessionInfo[], analysis: AnalysisStatus \| null }` (non-admins only see their own sessions and no analysis) |
 | GET | `/api/events` | Server-Sent Events, `data:` is JSON `ServerEvent` |
 
 ```ts
+interface AnalysisStatus {          // intro/credits detection of one season
+  item_id: Id;                      // the season
+  title: string;                    // "Show — Season 1"
+  done: number;                     // audio fingerprints computed
+  total: number;
+}
+
 interface ScanStatus {
   library_id: Id;
   library_name: string;
@@ -391,6 +430,7 @@ interface Settings {
   throttle_transcodes: boolean;     // limit ffmpeg to ~2× realtime once a buffer is built
   scan_interval_minutes: number;    // 0 disables periodic scans
   watch_libraries: boolean;         // pick up file changes automatically
+  detect_markers: boolean;          // find intros and credits in the background (default true)
 }
 
 interface SystemInfo {

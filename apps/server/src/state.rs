@@ -9,6 +9,7 @@ use crate::events::EventBus;
 use crate::images::Images;
 use crate::library::scanner::Scanner;
 use crate::library::watcher::LibraryWatcher;
+use crate::markers::MarkerService;
 use crate::metadata::MetadataAgent;
 use crate::playback::Sessions;
 use crate::settings::SettingsStore;
@@ -32,6 +33,7 @@ pub struct Inner {
     pub watcher: Arc<LibraryWatcher>,
     pub images: Images,
     pub sessions: Arc<Sessions>,
+    pub markers: Arc<MarkerService>,
     pub started_at: Instant,
 }
 
@@ -56,10 +58,20 @@ impl AppState {
         let scanner = Scanner::new(db.clone(), transcoder.clone(), events.clone(), metadata.clone(), &config);
         let watcher = LibraryWatcher::new(db.clone(), scanner.clone(), settings.clone());
         let images = Images::new(config.cache_dir().join("images"));
+        let sessions = Arc::new(Sessions::default());
+        let markers = MarkerService::new(
+            db.clone(),
+            transcoder.clone(),
+            settings.clone(),
+            sessions.clone(),
+            events.clone(),
+            config.cache_dir().join("fingerprints"),
+        );
         Ok(Self {
             inner: Arc::new(Inner {
                 auth: AuthService::new(db.clone()),
-                sessions: Arc::new(Sessions::default()),
+                sessions,
+                markers,
                 started_at: Instant::now(),
                 config,
                 db,
@@ -77,6 +89,7 @@ impl AppState {
     pub fn start_background_tasks(&self) {
         self.transcoder.start();
         self.sessions.spawn_reaper(self.transcoder.clone(), self.events.clone());
+        self.markers.start();
         let watcher = self.watcher.clone();
         tokio::spawn(async move { watcher.reload().await });
         let state = self.clone();

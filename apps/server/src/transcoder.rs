@@ -16,8 +16,9 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
 use pley_transcoder_api::{
-    Announce, CoverRequest, ErrorBody, JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo, ProbeRequest,
-    SubtitleRequest, TOKEN_ENV, ThumbnailRequest, TranscoderInfo, TranscoderStatus,
+    Announce, CoverRequest, ErrorBody, Fingerprint, FingerprintRequest, JobCreated, JobRequest, JobStatus,
+    KeyframesRequest, MediaInfo, ProbeRequest, SubtitleRequest, TOKEN_ENV, ThumbnailRequest, TranscoderInfo,
+    TranscoderStatus,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -225,6 +226,11 @@ impl Transcoder {
     pub async fn request_keyframes(&self, path: &str) -> TranscoderResult<()> {
         self.post("/v1/keyframes", &KeyframesRequest { path: path.to_owned() }, Duration::from_secs(30)).await?;
         Ok(())
+    }
+
+    /// Chromaprint fingerprint of part of a file (intro/credits detection).
+    pub async fn fingerprint(&self, req: &FingerprintRequest) -> TranscoderResult<Fingerprint> {
+        self.post_json("/v1/fingerprint", req, Duration::from_secs(15 * 60)).await
     }
 
     pub async fn create_job(&self, req: &JobRequest) -> TranscoderResult<JobCreated> {

@@ -196,6 +196,20 @@ pub async fn refresh(
     Ok(StatusCode::ACCEPTED)
 }
 
+/// Find intros and credits again: a movie, or the seasons of an episode,
+/// season or show.
+pub async fn analyze(
+    State(state): State<AppState>,
+    AdminUser(user): AdminUser,
+    Path(id): Path<i64>,
+) -> ApiResult<StatusCode> {
+    let row = item_or_404(&state, user.id, id).await?;
+    if !state.markers.analyze_item(id, &row.kind).await? {
+        return Err(AppError::bad_request("only movies, shows, seasons and episodes have intros and credits"));
+    }
+    Ok(StatusCode::ACCEPTED)
+}
+
 #[derive(sqlx::FromRow)]
 struct ArtworkPaths {
     kind: String,
