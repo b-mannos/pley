@@ -280,7 +280,14 @@ impl Plan {
 
         // ---- segment layout ----
         let (boundaries, split_at) = match (&video, keyframes) {
-            (Some(v), Some(kf)) if v.copy => keyframe_layout(kf, duration_ms, target_ms),
+            (Some(v), Some(kf)) if v.copy => {
+                // Keyframe times are packet timestamps; `-ss` and the output
+                // timeline count from the container's start time (often far
+                // from zero in MPEG-TS).
+                let offset = media.start_ms.unwrap_or(0);
+                let relative: Vec<i64> = kf.iter().map(|t| t - offset).collect();
+                keyframe_layout(&relative, duration_ms, target_ms)
+            }
             _ => uniform_layout(duration_ms, target_ms),
         };
 
@@ -325,7 +332,8 @@ impl Plan {
                 if v.copy {
                     "copy"
                 } else {
-                    let pipeline = if encoder_override.is_some() { v.pipeline.for_software_encoder() } else { v.pipeline };
+                    let pipeline =
+                        if encoder_override.is_some() { v.pipeline.for_software_encoder() } else { v.pipeline };
                     match pipeline {
                         Pipeline::Gpu(_) | Pipeline::Vulkan { encode_on_gpu: true } => "gpu",
                         Pipeline::Vulkan { encode_on_gpu: false } => "hybrid",
@@ -1089,7 +1097,11 @@ mod tests {
         assert!(args.contains("-c:v h264_nvenc"));
 
         // Hardware sessions exhausted → software encoder → no GPU frames.
-        let ctx = ArgsContext { input: Path::new("/media/movie.mkv"), encoder: Some(&ff.caps.encoders[1]), relative_split_times: true };
+        let ctx = ArgsContext {
+            input: Path::new("/media/movie.mkv"),
+            encoder: Some(&ff.caps.encoders[1]),
+            relative_split_times: true,
+        };
         let args: Vec<String> = plan.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect();
         let args = args.join(" ");
         assert!(!args.contains("hwaccel_output_format"), "{args}");
@@ -1137,6 +1149,15 @@ mod tests {
         assert!(args.contains("-ss 8.001"), "{args}");
         assert!(args.contains("-c:v copy"));
         assert!(!args.contains("-force_key_frames"));
+
+        // MPEG-TS style start time: keyframe timestamps are absolute, the layout is not.
+        let mut ts = media(DynamicRange::Sdr, None);
+        ts.start_ms = Some(600_000);
+        let kf: Vec<i64> = (0..30).map(|i| 600_000 + i * 2_000).collect();
+        let plan = Plan::build(&req, &ts, &ff, Some(&kf)).unwrap();
+        assert!(plan.video.as_ref().unwrap().copy);
+        assert_eq!(&plan.boundaries[..3], &[0, 4_000, 8_000]);
+        assert_eq!(plan.segment_count(), 15);
     }
 
     #[test]

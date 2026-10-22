@@ -12,7 +12,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering::Relaxed};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -44,6 +44,12 @@ const JOB_EXPIRE_MS: i64 = 20 * 60_000;
 const KEEP_BEHIND: u32 = 90;
 /// Give up on a segment after this many failed process starts at it.
 const MAX_FAILURES: u32 = 2;
+/// A process younger than this is not killed for a far-away request while
+/// another request is waiting for it (prevents two requests from restarting
+/// each other forever).
+const PREEMPT_GRACE: Duration = Duration::from_secs(3);
+/// Segments deleted per lock acquisition when pruning.
+const PRUNE_BATCH: usize = 32;
 
 /// Concurrency budget shared by all jobs.
 pub struct Slots {
@@ -95,6 +101,8 @@ pub struct JobManager {
     pub limits: Limits,
     pub slots: Arc<Slots>,
     jobs: Mutex<HashMap<String, Arc<Job>>>,
+    /// Set on shutdown: no new jobs are accepted.
+    closed: AtomicBool,
 }
 
 pub struct Job {
@@ -109,6 +117,10 @@ pub struct Job {
     last_requested: AtomicU32,
     ready: Mutex<Vec<bool>>,
     ready_count: AtomicU32,
+    /// Segments that requests are currently waiting for (one entry per request).
+    waiting: Mutex<Vec<u32>>,
+    /// Set when the job is removed; no process may be started afterwards.
+    closed: AtomicBool,
     notify: Notify,
     process: tokio::sync::Mutex<Option<Proc>>,
     runtime: Mutex<Runtime>,
@@ -129,8 +141,8 @@ struct Runtime {
 }
 
 struct Proc {
-    start: u32,
     end: u32,
+    started: Instant,
     next: Arc<AtomicU32>,
     exited: watch::Receiver<bool>,
     kill: Option<oneshot::Sender<()>>,
@@ -139,6 +151,14 @@ struct Proc {
 impl Proc {
     fn running(&self) -> bool {
         !*self.exited.borrow()
+    }
+
+    /// Whether this process will produce segment `n` soon, so a request for it
+    /// should wait rather than restart ffmpeg. Segments the process already
+    /// passed (pruned or skipped) are not coming back.
+    fn will_produce(&self, n: u32) -> bool {
+        let next = self.next.load(Relaxed);
+        n >= next && n < self.end && n <= next + LOOKAHEAD
     }
 
     async fn stop(mut self) {
@@ -169,6 +189,7 @@ impl JobManager {
             jobs_dir,
             limits,
             jobs: Mutex::default(),
+            closed: AtomicBool::new(false),
         })
     }
 
@@ -183,6 +204,9 @@ impl JobManager {
     }
 
     pub async fn create(self: &Arc<Self>, req: JobRequest) -> ApiResult<JobCreated> {
+        if self.closed.load(Relaxed) {
+            return Err(ApiError::Busy("the transcoder is shutting down".into()));
+        }
         if !self.ff.caps.ffmpeg_available {
             return Err(ApiError::Failed("ffmpeg is not available on the transcoder host".into()));
         }
@@ -192,11 +216,19 @@ impl JobManager {
             Ok(_) => return Err(ApiError::BadRequest(format!("{} is not a file", req.input))),
             Err(_) => return Err(ApiError::NotFound(format!("input not found: {}", req.input))),
         }
-        let media = match req.media.clone().filter(|m| m.duration_ms.is_some_and(|d| d > 0) && !m.streams.is_empty()) {
+        let wants_copy = req.video.as_ref().is_some_and(|v| v.mode == VideoMode::Copy);
+        // Remuxing needs the container start time (keyframe times are absolute,
+        // seeking is relative to it); media info from older servers lacks it.
+        let media = match req
+            .media
+            .clone()
+            .filter(|m| m.duration_ms.is_some_and(|d| d > 0) && !m.streams.is_empty())
+            .filter(|m| !wants_copy || m.start_ms.is_some())
+        {
             Some(media) => Arc::new(media),
             None => self.prober.probe(&input).await.map_err(|e| ApiError::Failed(format!("probe failed: {e:#}")))?,
         };
-        let keyframes = if req.video.as_ref().is_some_and(|v| v.mode == VideoMode::Copy) {
+        let keyframes = if wants_copy {
             let index = self.keyframes.get_or_cues(&input).await;
             if index.is_none() {
                 self.keyframes.request(&input);
@@ -238,6 +270,8 @@ impl JobManager {
             last_requested: AtomicU32::new(start_segment),
             ready: Mutex::new(vec![false; count]),
             ready_count: AtomicU32::new(0),
+            waiting: Mutex::default(),
+            closed: AtomicBool::new(false),
             notify: Notify::new(),
             process: tokio::sync::Mutex::new(None),
             runtime: Mutex::new(Runtime::default()),
@@ -275,6 +309,7 @@ impl JobManager {
         }
         job.touch();
         job.last_requested.store(n, Relaxed);
+        let _waiting = Waiting::register(job, n);
         let deadline = Instant::now() + SEGMENT_WAIT;
         loop {
             let notified = job.notify.notified();
@@ -301,11 +336,21 @@ impl JobManager {
 
     async fn ensure_producing(self: &Arc<Self>, job: &Arc<Job>, n: u32) -> ApiResult<()> {
         let mut guard = job.process.lock().await;
+        // Checked under the process lock: `remove` sets the flag before taking
+        // the lock, so no process can be started for a removed job.
+        if job.closed.load(Relaxed) {
+            return Err(ApiError::JobNotFound(format!("job {} was removed", job.id)));
+        }
         if job.is_ready(n) {
             return Ok(());
         }
-        if let Some(p) = guard.as_ref() {
-            if p.running() && n >= p.start && n < p.end && n <= p.next.load(Relaxed) + LOOKAHEAD {
+        if let Some(p) = guard.as_ref().filter(|p| p.running()) {
+            if p.will_produce(n) {
+                return Ok(());
+            }
+            // Another request is waiting for this young process: let it be
+            // served first. This request retries after the next segment or second.
+            if p.started.elapsed() < PREEMPT_GRACE && job.is_awaited(|m| m != n && p.will_produce(m)) {
                 return Ok(());
             }
         }
@@ -324,17 +369,29 @@ impl JobManager {
 
     fn spawn(self: &Arc<Self>, job: &Arc<Job>, start: u32) -> ApiResult<Proc> {
         let plan = &job.plan;
-        let end = (start + PROCESS_WINDOW).min(plan.segment_count());
+        // Stop before the first segment that is already on disk: ffmpeg would
+        // truncate and rewrite it while it may be being served.
+        let limit = (start + PROCESS_WINDOW).min(plan.segment_count());
+        let end = job.first_ready(start + 1, limit).unwrap_or(limit);
         let planned = plan.video.as_ref().filter(|v| !v.copy).and_then(|v| v.encoder.as_ref());
         let want_hw = planned.is_some_and(|e| e.hardware);
         let hw = self
             .slots
             .acquire(want_hw)
             .ok_or_else(|| ApiError::Busy(format!("all {} transcode slots are in use", self.limits.max_jobs)))?;
-        let fallback = (want_hw && !hw).then(|| planned.and_then(|e| self.ff.software_encoder(e.codec))).flatten();
-        if want_hw && !hw {
+        let fallback = if want_hw && !hw {
+            let Some(software) = planned.and_then(|e| self.ff.software_encoder(e.codec)) else {
+                self.slots.release(false);
+                return Err(ApiError::Busy(format!(
+                    "all {} hardware encoder sessions are in use and no software encoder is available",
+                    self.limits.max_hw_jobs
+                )));
+            };
             job.warn("hardware encoder sessions exhausted, using software encoding");
-        }
+            Some(software)
+        } else {
+            None
+        };
 
         let ctx =
             ArgsContext { input: &job.input, encoder: fallback, relative_split_times: self.ff.segment_times_relative };
@@ -403,14 +460,17 @@ impl JobManager {
             job_ref.notify.notify_waiters();
         });
 
-        Ok(Proc { start, end, next, exited: exit_rx, kill: Some(kill_tx) })
+        Ok(Proc { end, started: Instant::now(), next, exited: exit_rx, kill: Some(kill_tx) })
     }
 
     pub async fn remove(&self, id: &str) -> bool {
         let Some(job) = self.jobs.lock().remove(id) else { return false };
+        job.closed.store(true, Relaxed);
         if let Some(p) = job.process.lock().await.take() {
             p.stop().await;
         }
+        // Wake waiting requests so they fail now instead of at their timeout.
+        job.notify.notify_waiters();
         remove_dir_with_retry(&job.dir).await;
         tracing::info!(job = %id, "job removed");
         true
@@ -447,14 +507,37 @@ impl JobManager {
                     }
                 }
             }
-            job.prune();
+            let pruned = job.clone();
+            let _ = tokio::task::spawn_blocking(move || pruned.prune()).await;
         }
     }
 
+    /// Stop every job (concurrently) and refuse new ones.
     pub async fn shutdown(&self) {
+        self.closed.store(true, Relaxed);
         let ids: Vec<String> = self.jobs.lock().keys().cloned().collect();
-        for id in ids {
-            self.remove(&id).await;
+        futures::future::join_all(ids.iter().map(|id| self.remove(id))).await;
+    }
+}
+
+/// Registers a request as waiting for a segment for as long as it lives.
+struct Waiting<'a> {
+    job: &'a Job,
+    n: u32,
+}
+
+impl<'a> Waiting<'a> {
+    fn register(job: &'a Job, n: u32) -> Self {
+        job.waiting.lock().push(n);
+        Self { job, n }
+    }
+}
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        let mut waiting = self.job.waiting.lock();
+        if let Some(i) = waiting.iter().position(|&m| m == self.n) {
+            waiting.swap_remove(i);
         }
     }
 }
@@ -470,6 +553,17 @@ impl Job {
 
     fn is_ready(&self, n: u32) -> bool {
         self.ready.lock().get(n as usize).copied().unwrap_or(false)
+    }
+
+    /// First ready segment in `[from, to)`.
+    fn first_ready(&self, from: u32, to: u32) -> Option<u32> {
+        let ready = self.ready.lock();
+        (from..to).find(|&n| ready.get(n as usize).copied().unwrap_or(false))
+    }
+
+    /// Whether any request is waiting for a segment matching `pred`.
+    fn is_awaited(&self, pred: impl Fn(u32) -> bool) -> bool {
+        self.waiting.lock().iter().any(|&m| pred(m))
     }
 
     fn mark_ready(&self, n: u32) {
@@ -506,6 +600,7 @@ impl Job {
         metrics: &Metrics,
     ) {
         let success = status.as_ref().is_ok_and(ExitStatus::success);
+        tracing::debug!(job = %self.id, "ffmpeg exited at segment {next} (killed: {killed}, success: {success})");
         let mut rt = self.runtime.lock();
         rt.process = None;
         if killed {
@@ -533,18 +628,30 @@ impl Job {
         }
     }
 
-    /// Delete segments far behind the playhead.
+    /// Delete segments far behind the playhead. Blocking: run it on the
+    /// blocking pool. The lock is held per batch so segment lookups never wait
+    /// long, and a segment is only marked missing once its file is gone.
     fn prune(&self) {
         let last = self.last_requested.load(Relaxed);
         if last <= KEEP_BEHIND {
             return;
         }
         let cutoff = (last - KEEP_BEHIND) as usize;
-        let mut ready = self.ready.lock();
-        for n in 0..cutoff.min(ready.len()) {
-            if ready[n] && std::fs::remove_file(self.segment_path(n as u32)).is_ok() {
-                ready[n] = false;
-                self.ready_count.fetch_sub(1, Relaxed);
+        let mut n = 0;
+        loop {
+            let mut ready = self.ready.lock();
+            let end = cutoff.min(ready.len());
+            if n >= end {
+                return;
+            }
+            let mut deleted = 0;
+            while n < end && deleted < PRUNE_BATCH {
+                if ready[n] && std::fs::remove_file(self.segment_path(n as u32)).is_ok() {
+                    ready[n] = false;
+                    self.ready_count.fetch_sub(1, Relaxed);
+                    deleted += 1;
+                }
+                n += 1;
             }
         }
     }
@@ -616,6 +723,7 @@ async fn read_segment_list(job: Arc<Job>, stdout: ChildStdout, next: Arc<AtomicU
     let mut lines = BufReader::new(stdout).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         if let Some(n) = parse_list_line(&line) {
+            tracing::trace!(job = %job.id, "segment {n} ready");
             job.mark_ready(n);
             next.store(n + 1, Relaxed);
             Metrics::inc(&metrics.segments_produced);
@@ -721,6 +829,19 @@ mod tests {
         assert_eq!(parse_list_line("12.ts,48.000000,52.000000"), Some(12));
         assert_eq!(parse_list_line("C:\\tmp\\job\\3.ts,1,2"), Some(3));
         assert_eq!(parse_list_line("index.m3u8"), None);
+    }
+
+    #[test]
+    fn waits_only_for_segments_ahead_of_the_process() {
+        let (_exit_tx, exited) = watch::channel(false);
+        let p = Proc { end: 20, started: Instant::now(), next: Arc::new(AtomicU32::new(10)), exited, kill: None };
+        assert!(!p.will_produce(9), "already passed (pruned or skipped): must restart");
+        assert!(p.will_produce(10));
+        assert!(p.will_produce(13));
+        assert!(!p.will_produce(14), "too far ahead: restart there");
+        p.next.store(18, Relaxed);
+        assert!(p.will_produce(19));
+        assert!(!p.will_produce(20), "outside the process window");
     }
 
     #[test]

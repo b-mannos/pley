@@ -494,7 +494,10 @@ fn test_clip_specs(encoders: &HashSet<String>) -> Vec<(&'static str, Vec<&'stati
         specs.push(("av1", vec!["-c:v", "libaom-av1", "-cpu-used", "8", "-pix_fmt", "yuv420p"]));
     }
     if encoders.contains("libvpx-vp9") {
-        specs.push(("vp9", vec!["-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-pix_fmt", "yuv420p"]));
+        specs.push((
+            "vp9",
+            vec!["-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-pix_fmt", "yuv420p"],
+        ));
     }
     specs.push(("mpeg2video", vec!["-c:v", "mpeg2video", "-pix_fmt", "yuv420p"]));
     specs
@@ -538,7 +541,10 @@ async fn detect_gpu_pipelines(
             vec!["-c:v", "h264_qsv"],
         ));
     }
-    if cfg!(target_os = "macos") && working("h264_videotoolbox") && hwaccel("videotoolbox") && filters.contains("scale_vt")
+    if cfg!(target_os = "macos")
+        && working("h264_videotoolbox")
+        && hwaccel("videotoolbox")
+        && filters.contains("scale_vt")
     {
         candidates.push((
             HwAccel::Videotoolbox,
@@ -557,27 +563,35 @@ async fn detect_gpu_pipelines(
         return GpuDetection::default();
     }
     let limiter = Arc::new(Semaphore::new(6));
-    let clips: Vec<(&str, PathBuf)> = futures::future::join_all(test_clip_specs(encoders).into_iter().map(|(key, args)| {
-        let dir = dir.clone();
-        let limiter = limiter.clone();
-        async move {
-            let _permit = limiter.acquire().await.ok();
-            let out = dir.join(format!("{key}.mkv"));
-            let out_arg = out.to_string_lossy().into_owned();
-            let mut cmd = vec![
-                "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
-                "testsrc2=size=320x240:rate=25:duration=0.4",
-            ];
-            cmd.extend(args);
-            cmd.push(&out_arg);
-            let ok = matches!(run(ffmpeg, &cmd, Duration::from_secs(60)).await, Some(Output { success: true, .. }));
-            ok.then_some((key, out))
-        }
-    }))
-    .await
-    .into_iter()
-    .flatten()
-    .collect();
+    let clips: Vec<(&str, PathBuf)> =
+        futures::future::join_all(test_clip_specs(encoders).into_iter().map(|(key, args)| {
+            let dir = dir.clone();
+            let limiter = limiter.clone();
+            async move {
+                let _permit = limiter.acquire().await.ok();
+                let out = dir.join(format!("{key}.mkv"));
+                let out_arg = out.to_string_lossy().into_owned();
+                let mut cmd = vec![
+                    "-hide_banner",
+                    "-nostdin",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=size=320x240:rate=25:duration=0.4",
+                ];
+                cmd.extend(args);
+                cmd.push(&out_arg);
+                let ok = matches!(run(ffmpeg, &cmd, Duration::from_secs(60)).await, Some(Output { success: true, .. }));
+                ok.then_some((key, out))
+            }
+        }))
+        .await
+        .into_iter()
+        .flatten()
+        .collect();
 
     let run_test = |args: Vec<String>| {
         let limiter = limiter.clone();
@@ -588,7 +602,8 @@ async fn detect_gpu_pipelines(
         }
     };
     let base = |pre: &[&str], clip: &Path| -> Vec<String> {
-        let mut v: Vec<String> = ["-hide_banner", "-nostdin", "-loglevel", "error"].iter().map(|s| s.to_string()).collect();
+        let mut v: Vec<String> =
+            ["-hide_banner", "-nostdin", "-loglevel", "error"].iter().map(|s| s.to_string()).collect();
         v.extend(pre.iter().map(|s| s.to_string()));
         v.push("-i".into());
         v.push(clip.to_string_lossy().into_owned());
@@ -597,12 +612,22 @@ async fn detect_gpu_pipelines(
 
     // Vulkan decode → libplacebo (HDR/Dolby Vision tone mapping path).
     const VK: [&str; 10] = [
-        "-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk", "-hwaccel", "vulkan", "-hwaccel_device", "vk",
-        "-hwaccel_output_format", "vulkan",
+        "-init_hw_device",
+        "vulkan=vk",
+        "-filter_hw_device",
+        "vk",
+        "-hwaccel",
+        "vulkan",
+        "-hwaccel_device",
+        "vk",
+        "-hwaccel_output_format",
+        "vulkan",
     ];
     let vulkan_tests = futures::future::join_all(clips.iter().filter(|_| vulkan).map(|(key, clip)| {
         let mut args = base(&VK, clip);
-        args.extend(["-vf", "libplacebo=w=160:h=120:format=nv12,hwdownload,format=nv12", "-f", "null", "-"].map(String::from));
+        args.extend(
+            ["-vf", "libplacebo=w=160:h=120:format=nv12,hwdownload,format=nv12", "-f", "null", "-"].map(String::from),
+        );
         let test = run_test(args);
         async move { (key.to_string(), test.await) }
     }));
@@ -614,8 +639,19 @@ async fn detect_gpu_pipelines(
         let mut args = base(&VK, clip);
         args.extend(
             [
-                "-vf", "libplacebo=w=160:h=120:format=nv12", "-c:v", "h264_vulkan", "-rc_mode", "vbr", "-b:v", "1M",
-                "-force_key_frames", "expr:gte(t,n_forced*0.2)", "-f", "null", "-",
+                "-vf",
+                "libplacebo=w=160:h=120:format=nv12",
+                "-c:v",
+                "h264_vulkan",
+                "-rc_mode",
+                "vbr",
+                "-b:v",
+                "1M",
+                "-force_key_frames",
+                "expr:gte(t,n_forced*0.2)",
+                "-f",
+                "null",
+                "-",
             ]
             .map(String::from),
         );
@@ -632,10 +668,12 @@ async fn detect_gpu_pipelines(
         }));
         async move { (*accel, tests.await) }
     }));
-    let (vulkan_results, vulkan_encode, pipeline_results) = tokio::join!(vulkan_tests, vulkan_encode_test, pipeline_tests);
+    let (vulkan_results, vulkan_encode, pipeline_results) =
+        tokio::join!(vulkan_tests, vulkan_encode_test, pipeline_tests);
     let _ = std::fs::remove_dir_all(&dir);
 
-    let ok_keys = |results: Vec<(String, bool)>| results.into_iter().filter(|(_, ok)| *ok).map(|(k, _)| k).collect::<Vec<_>>();
+    let ok_keys =
+        |results: Vec<(String, bool)>| results.into_iter().filter(|(_, ok)| *ok).map(|(k, _)| k).collect::<Vec<_>>();
     GpuDetection {
         vulkan_decode: ok_keys(vulkan_results),
         vulkan_encode,

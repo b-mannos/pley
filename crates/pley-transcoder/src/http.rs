@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use axum::body::Body;
@@ -12,7 +13,6 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use parking_lot::Mutex;
 use pley_transcoder_api::{
     CoverRequest, JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo, ProbeRequest, SubtitleRequest,
     ThumbnailRequest, TranscoderInfo, TranscoderStatus,
@@ -24,7 +24,7 @@ use crate::extract::Extractor;
 use crate::job::JobManager;
 use crate::keyframes::KeyframeStore;
 use crate::metrics::{Metrics, render_prometheus};
-use crate::probe::Prober;
+use crate::probe::{Prober, Rejected};
 use crate::util::dir_size;
 
 pub struct AppState {
@@ -37,7 +37,8 @@ pub struct AppState {
     pub token: Option<String>,
     pub started: Instant,
     pub work_dir: PathBuf,
-    disk_usage: Mutex<(Option<Instant>, u64)>,
+    /// Size of the work directory, refreshed in the background.
+    work_dir_bytes: AtomicU64,
 }
 
 impl AppState {
@@ -62,19 +63,29 @@ impl AppState {
             token,
             started: Instant::now(),
             work_dir,
-            disk_usage: Mutex::new((None, 0)),
+            work_dir_bytes: AtomicU64::new(0),
         }
+    }
+
+    /// Walk the work directory every few seconds on the blocking pool.
+    pub fn spawn_disk_usage(self: &Arc<Self>) {
+        let weak = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                tick.tick().await;
+                let Some(state) = weak.upgrade() else { break };
+                let dir = state.work_dir.clone();
+                if let Ok(bytes) = tokio::task::spawn_blocking(move || dir_size(&dir)).await {
+                    state.work_dir_bytes.store(bytes, Ordering::Relaxed);
+                }
+            }
+        });
     }
 
     fn status(&self) -> TranscoderStatus {
         let (running, hw) = self.jobs.slots.counts();
-        let work_dir_bytes = {
-            let mut cached = self.disk_usage.lock();
-            if cached.0.is_none_or(|at| at.elapsed().as_secs() >= 5) {
-                *cached = (Some(Instant::now()), dir_size(&self.work_dir));
-            }
-            cached.1
-        };
+        let work_dir_bytes = self.work_dir_bytes.load(Ordering::Relaxed);
         TranscoderStatus {
             version: self.info.version.clone(),
             uptime_secs: self.started.elapsed().as_secs(),
@@ -155,7 +166,17 @@ async fn probe(State(state): Shared, Json(req): Json<ProbeRequest>) -> ApiResult
     if !path.is_file() {
         return Err(ApiError::NotFound(format!("file not found: {}", req.path)));
     }
-    let info = state.prober.probe(path).await.map_err(|e| ApiError::Failed(format!("{e:#}")))?;
+    let info = state.prober.probe(path).await.map_err(|e| {
+        // Only a file ffprobe could not read is a definitive failure; timeouts
+        // (sleeping NAS) and start-up problems are worth retrying later.
+        if e.downcast_ref::<Rejected>().is_some() {
+            ApiError::Failed(format!("{e:#}"))
+        } else if e.downcast_ref::<tokio::time::error::Elapsed>().is_some() {
+            ApiError::Timeout(format!("{e:#}"))
+        } else {
+            ApiError::Internal(e)
+        }
+    })?;
     Ok(Json((*info).clone()))
 }
 
@@ -196,22 +217,26 @@ async fn create_job(State(state): Shared, Json(req): Json<JobRequest>) -> ApiRes
 }
 
 async fn get_job(State(state): Shared, Path(id): Path<String>) -> ApiResult<Json<JobStatus>> {
-    let job = state.jobs.get(&id).ok_or_else(|| ApiError::NotFound(format!("job {id} not found")))?;
+    let job = state.jobs.get(&id).ok_or_else(|| ApiError::JobNotFound(format!("job {id} not found")))?;
     Ok(Json(job.status()))
 }
 
-async fn delete_job(State(state): Shared, Path(id): Path<String>) -> StatusCode {
-    if state.jobs.remove(&id).await { StatusCode::NO_CONTENT } else { StatusCode::NOT_FOUND }
+async fn delete_job(State(state): Shared, Path(id): Path<String>) -> ApiResult<StatusCode> {
+    if state.jobs.remove(&id).await {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::JobNotFound(format!("job {id} not found")))
+    }
 }
 
 async fn touch_job(State(state): Shared, Path(id): Path<String>) -> ApiResult<StatusCode> {
-    let job = state.jobs.get(&id).ok_or_else(|| ApiError::NotFound(format!("job {id} not found")))?;
+    let job = state.jobs.get(&id).ok_or_else(|| ApiError::JobNotFound(format!("job {id} not found")))?;
     job.touch();
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn job_file(State(state): Shared, Path((id, file)): Path<(String, String)>) -> ApiResult<Response> {
-    let job = state.jobs.get(&id).ok_or_else(|| ApiError::NotFound(format!("job {id} not found")))?;
+    let job = state.jobs.get(&id).ok_or_else(|| ApiError::JobNotFound(format!("job {id} not found")))?;
     if file == "index.m3u8" {
         job.touch();
         let mut headers = HeaderMap::new();
@@ -228,7 +253,7 @@ async fn job_file(State(state): Shared, Path((id, file)): Path<(String, String)>
     let len = handle.metadata().await?.len();
     job.record_served(len);
     Metrics::inc(&state.metrics.segments_served);
-    state.metrics.bytes_served.fetch_add(len, std::sync::atomic::Ordering::Relaxed);
+    state.metrics.bytes_served.fetch_add(len, Ordering::Relaxed);
     let body = Body::from_stream(ReaderStream::with_capacity(handle, 256 * 1024));
     Response::builder()
         .header(header::CONTENT_TYPE, "video/mp2t")

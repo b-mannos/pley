@@ -18,9 +18,11 @@ mod plan;
 mod probe;
 mod util;
 
+use std::future::IntoFuture;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clap::Parser;
 use pley_transcoder_api::{API_VERSION, Announce, Limits, TOKEN_ENV, TranscoderInfo};
@@ -109,6 +111,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn run(args: Args) -> anyhow::Result<()> {
+    util::kill_children_on_exit();
     let work_dir = args.work_dir.clone().unwrap_or_else(|| std::env::temp_dir().join("pley-transcoder"));
     std::fs::create_dir_all(&work_dir)?;
     let jobs_dir = work_dir.join("jobs");
@@ -164,6 +167,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         args.token.clone(),
         work_dir.clone(),
     ));
+    state.spawn_disk_usage();
 
     let listener = tokio::net::TcpListener::bind(args.listen).await?;
     let addr = listener.local_addr()?;
@@ -175,7 +179,31 @@ async fn run(args: Args) -> anyhow::Result<()> {
     }
     tracing::info!("pley-transcoder {} listening on http://{addr}", env!("CARGO_PKG_VERSION"));
 
-    axum::serve(listener, http::router(state)).with_graceful_shutdown(shutdown_signal(args.exit_with_parent)).await?;
+    let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+    let exit_with_parent = args.exit_with_parent;
+    tokio::spawn(async move {
+        shutdown_signal(exit_with_parent).await;
+        let _ = stop_tx.send(true);
+    });
+    let mut drain = stop_rx.clone();
+    let server = axum::serve(listener, http::router(state))
+        .with_graceful_shutdown(async move {
+            let _ = drain.wait_for(|stop| *stop).await;
+        })
+        .into_future();
+    tokio::pin!(server);
+    let mut stop = stop_rx;
+    tokio::select! {
+        result = &mut server => result?,
+        _ = stop.wait_for(|stop| *stop) => {
+            // Stop ffmpeg first: requests waiting for segments then fail right
+            // away instead of keeping the graceful drain open.
+            jobs.shutdown().await;
+            if tokio::time::timeout(Duration::from_secs(5), &mut server).await.is_err() {
+                tracing::warn!("some requests were still running at shutdown");
+            }
+        }
+    }
 
     jobs.shutdown().await;
     let _ = std::fs::remove_dir_all(&jobs_dir);

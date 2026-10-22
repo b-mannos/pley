@@ -26,7 +26,7 @@ pub struct Extractor {
     metrics: Arc<Metrics>,
     subs_dir: PathBuf,
     limiter: Semaphore,
-    file_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    file_locks: FileLocks,
 }
 
 pub struct Image {
@@ -167,8 +167,8 @@ impl Extractor {
         if let Ok(text) = tokio::fs::read_to_string(&target).await {
             return Ok(text);
         }
-        let lock = self.file_locks.lock().entry(key.clone()).or_default().clone();
-        let _guard = lock.lock().await;
+        let entry = FileLock::acquire(&self.file_locks, &key);
+        let _guard = entry.lock.lock().await;
         if let Ok(text) = tokio::fs::read_to_string(&target).await {
             return Ok(text);
         }
@@ -186,7 +186,6 @@ impl Extractor {
         } else {
             all?;
         }
-        self.file_locks.lock().remove(&key);
         Ok(tokio::fs::read_to_string(&target).await?)
     }
 
@@ -274,6 +273,33 @@ fn guess_charset(raw: &[u8]) -> Option<&'static str> {
         None
     } else {
         Some("CP1252")
+    }
+}
+
+type FileLocks = Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>;
+
+/// Per-file extraction lock, forgotten again once no request uses it (on
+/// every path, including errors and cancelled requests).
+struct FileLock<'a> {
+    locks: &'a FileLocks,
+    key: String,
+    lock: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl<'a> FileLock<'a> {
+    fn acquire(locks: &'a FileLocks, key: &str) -> Self {
+        let lock = locks.lock().entry(key.to_owned()).or_default().clone();
+        Self { locks, key: key.to_owned(), lock }
+    }
+}
+
+impl Drop for FileLock<'_> {
+    fn drop(&mut self) {
+        let mut locks = self.locks.lock();
+        // Only the map and this guard hold it: nobody else is waiting.
+        if Arc::strong_count(&self.lock) <= 2 {
+            locks.remove(&self.key);
+        }
     }
 }
 

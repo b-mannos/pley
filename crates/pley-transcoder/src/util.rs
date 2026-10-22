@@ -67,13 +67,76 @@ pub fn resolve_executable(program: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Apply platform tweaks to child processes: no console window on Windows.
+/// Apply platform tweaks to child processes: no console window on Windows; on
+/// Linux the child is killed when the transcoder dies without cleaning up.
 pub fn configure_child(cmd: &mut tokio::process::Command) {
     cmd.kill_on_drop(true);
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let parent = std::process::id() as libc::pid_t;
+        // SAFETY: the closure only makes async-signal-safe calls (prctl,
+        // getppid, _exit) between fork and exec.
+        unsafe {
+            cmd.pre_exec(move || {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                // The transcoder may have exited before the signal was armed.
+                if libc::getppid() != parent {
+                    libc::_exit(1);
+                }
+                Ok(())
+            });
+        }
+    }
+}
+
+/// Make every child process die with the transcoder, whatever ends it.
+///
+/// Windows: the transcoder joins a job object that kills all of its members
+/// when its last handle closes, which happens when this process exits for any
+/// reason (including a crash or a forced kill). ffmpeg and ffprobe inherit the
+/// job. Linux uses a parent-death signal per child instead (see
+/// [`configure_child`]).
+pub fn kill_children_on_exit() {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        };
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+        // SAFETY: plain Win32 calls on a handle owned here. The job handle is
+        // deliberately never closed: it must live as long as the process.
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job.is_null() {
+                tracing::warn!("could not create a job object: {}", std::io::Error::last_os_error());
+                return;
+            }
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let configured = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&raw const info).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            ) != 0;
+            if !configured || AssignProcessToJobObject(job, GetCurrentProcess()) == 0 {
+                tracing::warn!(
+                    "could not tie ffmpeg processes to the transcoder's lifetime: {}",
+                    std::io::Error::last_os_error()
+                );
+                CloseHandle(job);
+            }
+        }
     }
 }
 

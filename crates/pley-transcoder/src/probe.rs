@@ -87,11 +87,24 @@ impl Prober {
             .context("ffprobe timed out")??;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("ffprobe failed: {}", stderr.trim());
+            return Err(Rejected(format!("ffprobe failed: {}", stderr.trim())).into());
         }
-        parse_ffprobe_json(&output.stdout, path)
+        parse_ffprobe_json(&output.stdout, path).map_err(|e| Rejected(format!("{e:#}")).into())
     }
 }
+
+/// ffprobe ran and could not read the file, as opposed to a timeout or a
+/// problem starting it. Only this kind of failure is worth remembering.
+#[derive(Debug)]
+pub struct Rejected(pub String);
+
+impl std::fmt::Display for Rejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Rejected {}
 
 #[derive(Deserialize)]
 struct RawOutput {
@@ -106,6 +119,7 @@ struct RawOutput {
 struct RawFormat {
     format_name: Option<String>,
     duration: Option<String>,
+    start_time: Option<String>,
     bit_rate: Option<String>,
     #[serde(default)]
     tags: HashMap<String, String>,
@@ -266,10 +280,17 @@ pub fn parse_ffprobe_json(json: &[u8], path: &Path) -> anyhow::Result<MediaInfo>
         })
         .collect();
 
+    let start_ms = format
+        .and_then(|f| f.start_time.as_deref())
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite())
+        .map(|v| (v * 1000.0).round() as i64);
+
     Ok(MediaInfo {
         container: normalize_container(format_name.as_deref(), path, &streams),
         format_name,
         duration_ms,
+        start_ms,
         bitrate,
         streams,
         tags,
@@ -391,7 +412,7 @@ mod tests {
         {"index":3,"codec_name":"hdmv_pgs_subtitle","codec_type":"subtitle","disposition":{"default":0},"tags":{"language":"fre"}},
         {"index":4,"codec_name":"mjpeg","codec_type":"video","disposition":{"attached_pic":1}}
       ],
-      "format": {"format_name":"matroska,webm","duration":"7265.123000","bit_rate":"25000000","tags":{"TITLE":"Movie"}},
+      "format": {"format_name":"matroska,webm","start_time":"1.400000","duration":"7265.123000","bit_rate":"25000000","tags":{"TITLE":"Movie"}},
       "chapters": [{"start_time":"0.000000","end_time":"300.500000","tags":{"title":"Opening"}}]
     }"#;
 
@@ -400,6 +421,7 @@ mod tests {
         let info = parse_ffprobe_json(SAMPLE.as_bytes(), Path::new("/m/Movie.mkv")).unwrap();
         assert_eq!(info.container.as_deref(), Some("mkv"));
         assert_eq!(info.duration_ms, Some(7_265_123));
+        assert_eq!(info.start_ms, Some(1_400));
         assert_eq!(info.bitrate, Some(25_000_000));
         assert!(info.has_cover_art);
         assert_eq!(info.streams.len(), 4);

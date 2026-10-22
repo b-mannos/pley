@@ -52,8 +52,10 @@ following status codes:
 |---|---|---|
 | 400 | `bad_request` | invalid request |
 | 401 | `unauthorized` | missing or wrong token |
-| 404 | `not_found` | unknown job or file |
-| 500 | `ffmpeg_failed` | ffmpeg returned an error |
+| 404 | `job_not_found` | unknown job (expired, deleted, or the transcoder restarted) |
+| 404 | `not_found` | unknown file, or segment out of range |
+| 500 | `ffmpeg_failed` | ffmpeg or ffprobe could not process the file |
+| 500 | `internal` | anything else (e.g. ffprobe could not be started) |
 | 503 | `busy` | every transcode slot is in use |
 | 504 | `timeout` | the operation took too long |
 
@@ -85,18 +87,26 @@ following status codes:
    - When transcoding, segments are every 4 s and keyframes are forced on that
      grid.
    - When remuxing (`video.mode = copy`), segments start on the source's
-     keyframes, taken from the keyframe index.
+     keyframes, taken from the keyframe index. Keyframe timestamps are made
+     relative to the container start time (`MediaInfo.start_ms`, often far from
+     zero in MPEG-TS), because that is what `-ss` and the output timeline use.
 
    The layout is deterministic. If the transcoder restarts, the server
    recreates the job and the same segment numbers still line up.
 2. **Segments on demand.** A segment request is answered from disk if that
    segment already exists. If it doesn't:
-   - When a running ffmpeg process is at most three segments behind it, the
-     request waits for that process.
+   - When a running ffmpeg process is about to produce it (at most three
+     segments ahead of the process, never behind it), the request waits for
+     that process.
    - Otherwise a new process starts exactly at that segment, using `-ss`,
      `-output_ts_offset`, `-segment_times` and `-segment_start_number`, so
      timestamps stay on the absolute timeline. `avoid_negative_ts` is disabled
      so B-frame delay can't shift one process's segments relative to another.
+   - A new process stops right before the next segment that already exists,
+     so segments being served are never rewritten.
+   - A process started less than 3 s ago is not replaced while another request
+     is waiting for it, so two requests far apart cannot keep restarting each
+     other.
 3. **Completion tracking.** ffmpeg's segment muxer writes a line to stdout as
    each segment finishes, which marks it ready and wakes waiting requests at
    once, with no polling. ffmpeg's `-progress` output on stderr supplies the
@@ -107,8 +117,13 @@ following status codes:
 5. **Housekeeping.**
    - A process idle for 60 s (paused player) is stopped.
    - A job idle for 20 minutes expires.
-   - Segments more than 90 behind the playhead are deleted.
+   - Segments more than 90 behind the playhead are deleted (in small batches,
+     off the async runtime).
    - On startup, segments left over from an earlier run are removed.
+   - ffmpeg never outlives the transcoder: on Windows the transcoder runs in a
+     kill-on-close job object, on Linux every child gets a parent-death signal.
+     On shutdown (signal, or stdin closed with `--exit-with-parent`) all jobs
+     are stopped first, then open requests get 5 s to finish.
 6. **Failure handling.** If ffmpeg fails twice at the same segment, the error is
    returned instead of retrying forever. The job's `last_error` holds ffmpeg's
    last log lines.

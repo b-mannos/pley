@@ -37,6 +37,10 @@ pub struct MediaInfo {
     /// Raw FFmpeg demuxer name(s), e.g. `matroska,webm`.
     pub format_name: Option<String>,
     pub duration_ms: Option<i64>,
+    /// Container start time (ms, may be negative). FFmpeg's `-ss` and the
+    /// output timeline are relative to it, packet timestamps are not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_ms: Option<i64>,
     /// Overall bitrate in bits per second.
     pub bitrate: Option<i64>,
     pub streams: Vec<MediaStream>,
@@ -198,7 +202,8 @@ impl MediaStream {
     /// Dolby Vision without a backward-compatible base layer (profile 5, or
     /// 7/8 with compatibility id 0): only DV-capable decoders show it correctly.
     pub fn is_dolby_vision_only(&self) -> bool {
-        self.dynamic_range() == DynamicRange::DolbyVision && (self.dv_profile == Some(5) || self.dv_bl_compat == Some(0))
+        self.dynamic_range() == DynamicRange::DolbyVision
+            && (self.dv_profile == Some(5) || self.dv_bl_compat == Some(0))
     }
 
     pub fn is_text_subtitle(&self) -> bool {
@@ -723,7 +728,8 @@ mod tests {
         assert_eq!(dynamic_range_label(DynamicRange::DolbyVision, Some(8), Some(4)), "Dolby Vision P8.4");
         assert_eq!(dynamic_range_label(DynamicRange::DolbyVision, Some(5), Some(0)), "Dolby Vision P5");
         assert_eq!(dynamic_range_label(DynamicRange::Hdr10, None, None), "HDR10");
-        let p5 = MediaStream { dynamic_range: Some(DynamicRange::DolbyVision), dv_profile: Some(5), ..Default::default() };
+        let p5 =
+            MediaStream { dynamic_range: Some(DynamicRange::DolbyVision), dv_profile: Some(5), ..Default::default() };
         assert!(p5.is_dolby_vision_only());
         let p81 = MediaStream {
             dynamic_range: Some(DynamicRange::DolbyVision),
