@@ -175,9 +175,30 @@ pub struct MediaStream {
     pub external: bool,
 }
 
+/// "Dolby Vision P8.1", "HDR10", … for display.
+pub fn dynamic_range_label(range: DynamicRange, dv_profile: Option<i64>, dv_bl_compat: Option<i64>) -> String {
+    match (range, dv_profile) {
+        (DynamicRange::DolbyVision, Some(p)) => match dv_bl_compat {
+            Some(c @ (1 | 2 | 4)) if p >= 8 => format!("Dolby Vision P{p}.{c}"),
+            _ => format!("Dolby Vision P{p}"),
+        },
+        _ => range.label().to_owned(),
+    }
+}
+
 impl MediaStream {
     pub fn dynamic_range(&self) -> DynamicRange {
         self.dynamic_range.unwrap_or_default()
+    }
+
+    pub fn dynamic_range_label(&self) -> String {
+        dynamic_range_label(self.dynamic_range(), self.dv_profile, self.dv_bl_compat)
+    }
+
+    /// Dolby Vision without a backward-compatible base layer (profile 5, or
+    /// 7/8 with compatibility id 0): only DV-capable decoders show it correctly.
+    pub fn is_dolby_vision_only(&self) -> bool {
+        self.dynamic_range() == DynamicRange::DolbyVision && (self.dv_profile == Some(5) || self.dv_bl_compat == Some(0))
     }
 
     pub fn is_text_subtitle(&self) -> bool {
@@ -224,6 +245,8 @@ pub enum HwAccel {
     Amf,
     Vaapi,
     Videotoolbox,
+    /// Vulkan Video (`h264_vulkan`), used for fully-GPU tone mapping pipelines.
+    Vulkan,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -275,6 +298,24 @@ pub struct EncoderInfo {
     pub accel: HwAccel,
 }
 
+/// A hardware pipeline that keeps frames in GPU memory from decode to encode.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GpuPipeline {
+    pub accel: HwAccel,
+    /// Input codec keys: `h264`, `hevc`, `hevc10`, `av1`, `vp9`, `mpeg2video`.
+    pub codecs: Vec<String>,
+}
+
+/// Codec key used for hardware decode capability checks (`hevc10` for 10-bit HEVC).
+pub fn decode_key(codec: &str, bit_depth: Option<i64>) -> String {
+    match (codec, bit_depth.unwrap_or(8)) {
+        ("hevc", d) if d > 8 => "hevc10".into(),
+        ("h264", d) if d > 8 => "h264-10".into(),
+        ("vp9", d) if d > 8 => "vp9-10".into(),
+        (c, _) => c.to_owned(),
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Capabilities {
     pub ffmpeg_available: bool,
@@ -290,6 +331,17 @@ pub struct Capabilities {
     pub tonemappers: Vec<Tonemapper>,
     /// Dolby Vision profile 5 can be rendered correctly (requires libplacebo).
     pub dolby_vision: bool,
+    /// Codecs the GPU decodes straight into Vulkan memory, enabling a
+    /// zero-copy decode → libplacebo tone mapping pipeline.
+    #[serde(default)]
+    pub vulkan_decode: Vec<String>,
+    /// `h264_vulkan` encodes libplacebo output without leaving the GPU.
+    #[serde(default)]
+    pub vulkan_encode: bool,
+    /// Zero-copy decode → scale → encode pipelines that passed a self-test,
+    /// with the input codecs each one handles.
+    #[serde(default)]
+    pub gpu_pipelines: Vec<GpuPipeline>,
     pub subtitle_burn_image: bool,
     pub subtitle_burn_text: bool,
     /// `-readrate`/`-readrate_initial_burst` are supported (transcode throttling).
@@ -487,10 +539,17 @@ pub struct VideoPlan {
     pub height_out: Option<i64>,
     pub dynamic_range_in: DynamicRange,
     pub dv_profile: Option<i64>,
+    /// Dolby Vision base-layer compatibility id (1 HDR10, 2 SDR, 4 HLG; 0 none).
+    #[serde(default)]
+    pub dv_bl_compat: Option<i64>,
     pub tonemap: Option<Tonemapper>,
     pub encoder: Option<String>,
-    /// `cpu`, `cuda`, `qsv`, `vaapi`, `videotoolbox`, `d3d11va`, …
+    /// `cpu`, `cuda`, `qsv`, `vaapi`, `videotoolbox`, `d3d11va`, `vulkan`, …
     pub decoder: Option<String>,
+    /// `gpu` (frames never leave the GPU), `hybrid` (GPU decode/filter with a
+    /// copy to system memory), `cpu`, or `copy`.
+    #[serde(default)]
+    pub pipeline: Option<String>,
     pub bitrate_kbps: Option<u32>,
     pub subtitle_burn: Option<String>,
 }
@@ -656,6 +715,23 @@ mod tests {
         assert!(!json.contains("external"));
         let back: MediaStream = serde_json::from_str(&json).unwrap();
         assert_eq!(back, s);
+    }
+
+    #[test]
+    fn dolby_vision_labels() {
+        assert_eq!(dynamic_range_label(DynamicRange::DolbyVision, Some(8), Some(1)), "Dolby Vision P8.1");
+        assert_eq!(dynamic_range_label(DynamicRange::DolbyVision, Some(8), Some(4)), "Dolby Vision P8.4");
+        assert_eq!(dynamic_range_label(DynamicRange::DolbyVision, Some(5), Some(0)), "Dolby Vision P5");
+        assert_eq!(dynamic_range_label(DynamicRange::Hdr10, None, None), "HDR10");
+        let p5 = MediaStream { dynamic_range: Some(DynamicRange::DolbyVision), dv_profile: Some(5), ..Default::default() };
+        assert!(p5.is_dolby_vision_only());
+        let p81 = MediaStream {
+            dynamic_range: Some(DynamicRange::DolbyVision),
+            dv_profile: Some(8),
+            dv_bl_compat: Some(1),
+            ..Default::default()
+        };
+        assert!(!p81.is_dolby_vision_only());
     }
 
     #[test]

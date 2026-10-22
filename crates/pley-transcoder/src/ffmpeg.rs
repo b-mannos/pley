@@ -11,7 +11,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use pley_transcoder_api::{Capabilities, EncoderInfo, HwAccel, TonemapMode, Tonemapper, VideoCodec};
+use pley_transcoder_api::{Capabilities, EncoderInfo, GpuPipeline, HwAccel, TonemapMode, Tonemapper, VideoCodec};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
@@ -19,7 +19,7 @@ use tokio::sync::Semaphore;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 3;
+const DETECTION_REVISION: u32 = 4;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -461,7 +461,190 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
     caps.subtitle_burn_image = has("overlay");
     caps.subtitle_burn_text = has("subtitles");
     caps.readrate = readrate;
+
+    let gpu = detect_gpu_pipelines(ffmpeg, &encoder_names, &filter_names, &caps, libplacebo).await;
+    caps.vulkan_decode = gpu.vulkan_decode;
+    caps.vulkan_encode = gpu.vulkan_encode;
+    caps.gpu_pipelines = gpu.pipelines;
     (caps, relative)
+}
+
+#[derive(Default)]
+struct GpuDetection {
+    vulkan_decode: Vec<String>,
+    vulkan_encode: bool,
+    pipelines: Vec<GpuPipeline>,
+}
+
+/// Encoder arguments for the tiny clips used to probe hardware decoding,
+/// keyed like [`pley_transcoder_api::decode_key`].
+fn test_clip_specs(encoders: &HashSet<String>) -> Vec<(&'static str, Vec<&'static str>)> {
+    let mut specs = Vec::new();
+    if encoders.contains("libx264") {
+        specs.push(("h264", vec!["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p"]));
+    }
+    if encoders.contains("libx265") {
+        let x265 = ["-c:v", "libx265", "-preset", "ultrafast", "-x265-params", "log-level=error"];
+        specs.push(("hevc", [x265.as_slice(), &["-pix_fmt", "yuv420p"]].concat()));
+        specs.push(("hevc10", [x265.as_slice(), &["-pix_fmt", "yuv420p10le"]].concat()));
+    }
+    if encoders.contains("libsvtav1") {
+        specs.push(("av1", vec!["-c:v", "libsvtav1", "-preset", "12", "-pix_fmt", "yuv420p10le"]));
+    } else if encoders.contains("libaom-av1") {
+        specs.push(("av1", vec!["-c:v", "libaom-av1", "-cpu-used", "8", "-pix_fmt", "yuv420p"]));
+    }
+    if encoders.contains("libvpx-vp9") {
+        specs.push(("vp9", vec!["-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-pix_fmt", "yuv420p"]));
+    }
+    specs.push(("mpeg2video", vec!["-c:v", "mpeg2video", "-pix_fmt", "yuv420p"]));
+    specs
+}
+
+/// Self-test zero-copy GPU pipelines per input codec. A pipeline only counts
+/// for a codec if decoding, filtering and encoding all stay on the GPU; when
+/// the decoder cannot handle a codec, ffmpeg falls back to system-memory
+/// frames and the GPU-only filter fails, so the test is conservative.
+async fn detect_gpu_pipelines(
+    ffmpeg: &Path,
+    encoders: &HashSet<String>,
+    filters: &HashSet<String>,
+    caps: &Capabilities,
+    libplacebo: bool,
+) -> GpuDetection {
+    let working = |name: &str| caps.encoders.iter().any(|e| e.name == name);
+    let hwaccel = |name: &str| caps.hwaccels.iter().any(|h| h == name);
+    let mut candidates: Vec<(HwAccel, Vec<&str>, &str, Vec<&str>)> = Vec::new();
+    if working("h264_nvenc") && hwaccel("cuda") && filters.contains("scale_cuda") {
+        candidates.push((
+            HwAccel::Nvenc,
+            vec!["-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-extra_hw_frames", "4"],
+            "scale_cuda=160:120:format=nv12",
+            vec!["-c:v", "h264_nvenc"],
+        ));
+    }
+    if cfg!(target_os = "linux") && working("h264_vaapi") && hwaccel("vaapi") && filters.contains("scale_vaapi") {
+        candidates.push((
+            HwAccel::Vaapi,
+            vec!["-hwaccel", "vaapi", "-hwaccel_device", VAAPI_DEVICE, "-hwaccel_output_format", "vaapi"],
+            "scale_vaapi=w=160:h=120:format=nv12",
+            vec!["-c:v", "h264_vaapi"],
+        ));
+    }
+    if working("h264_qsv") && hwaccel("qsv") && filters.contains("vpp_qsv") {
+        candidates.push((
+            HwAccel::Qsv,
+            vec!["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"],
+            "vpp_qsv=w=160:h=120:format=nv12",
+            vec!["-c:v", "h264_qsv"],
+        ));
+    }
+    if cfg!(target_os = "macos") && working("h264_videotoolbox") && hwaccel("videotoolbox") && filters.contains("scale_vt")
+    {
+        candidates.push((
+            HwAccel::Videotoolbox,
+            vec!["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"],
+            "scale_vt=w=160:h=120",
+            vec!["-c:v", "h264_videotoolbox"],
+        ));
+    }
+    let vulkan = libplacebo && hwaccel("vulkan");
+    if candidates.is_empty() && !vulkan {
+        return GpuDetection::default();
+    }
+
+    let dir = std::env::temp_dir().join(format!("pley-gpu-selftest-{}", uuid::Uuid::new_v4().simple()));
+    if std::fs::create_dir_all(&dir).is_err() {
+        return GpuDetection::default();
+    }
+    let limiter = Arc::new(Semaphore::new(6));
+    let clips: Vec<(&str, PathBuf)> = futures::future::join_all(test_clip_specs(encoders).into_iter().map(|(key, args)| {
+        let dir = dir.clone();
+        let limiter = limiter.clone();
+        async move {
+            let _permit = limiter.acquire().await.ok();
+            let out = dir.join(format!("{key}.mkv"));
+            let out_arg = out.to_string_lossy().into_owned();
+            let mut cmd = vec![
+                "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                "testsrc2=size=320x240:rate=25:duration=0.4",
+            ];
+            cmd.extend(args);
+            cmd.push(&out_arg);
+            let ok = matches!(run(ffmpeg, &cmd, Duration::from_secs(60)).await, Some(Output { success: true, .. }));
+            ok.then_some((key, out))
+        }
+    }))
+    .await
+    .into_iter()
+    .flatten()
+    .collect();
+
+    let run_test = |args: Vec<String>| {
+        let limiter = limiter.clone();
+        async move {
+            let _permit = limiter.acquire().await.ok();
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            matches!(run(ffmpeg, &refs, Duration::from_secs(30)).await, Some(Output { success: true, .. }))
+        }
+    };
+    let base = |pre: &[&str], clip: &Path| -> Vec<String> {
+        let mut v: Vec<String> = ["-hide_banner", "-nostdin", "-loglevel", "error"].iter().map(|s| s.to_string()).collect();
+        v.extend(pre.iter().map(|s| s.to_string()));
+        v.push("-i".into());
+        v.push(clip.to_string_lossy().into_owned());
+        v
+    };
+
+    // Vulkan decode → libplacebo (HDR/Dolby Vision tone mapping path).
+    const VK: [&str; 10] = [
+        "-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk", "-hwaccel", "vulkan", "-hwaccel_device", "vk",
+        "-hwaccel_output_format", "vulkan",
+    ];
+    let vulkan_tests = futures::future::join_all(clips.iter().filter(|_| vulkan).map(|(key, clip)| {
+        let mut args = base(&VK, clip);
+        args.extend(["-vf", "libplacebo=w=160:h=120:format=nv12,hwdownload,format=nv12", "-f", "null", "-"].map(String::from));
+        let test = run_test(args);
+        async move { (key.to_string(), test.await) }
+    }));
+    let vulkan_encode_test = async {
+        let Some((_, clip)) = clips.iter().find(|(k, _)| *k == "hevc10").or(clips.first()) else { return false };
+        if !(vulkan && encoders.contains("h264_vulkan")) {
+            return false;
+        }
+        let mut args = base(&VK, clip);
+        args.extend(
+            [
+                "-vf", "libplacebo=w=160:h=120:format=nv12", "-c:v", "h264_vulkan", "-rc_mode", "vbr", "-b:v", "1M",
+                "-force_key_frames", "expr:gte(t,n_forced*0.2)", "-f", "null", "-",
+            ]
+            .map(String::from),
+        );
+        run_test(args).await
+    };
+    let pipeline_tests = futures::future::join_all(candidates.iter().map(|(accel, pre, vf, enc)| {
+        let tests = futures::future::join_all(clips.iter().map(|(key, clip)| {
+            let mut args = base(pre, clip);
+            args.extend(["-vf".to_string(), vf.to_string()]);
+            args.extend(enc.iter().map(|s| s.to_string()));
+            args.extend(["-f", "null", "-"].map(String::from));
+            let test = run_test(args);
+            async move { (key.to_string(), test.await) }
+        }));
+        async move { (*accel, tests.await) }
+    }));
+    let (vulkan_results, vulkan_encode, pipeline_results) = tokio::join!(vulkan_tests, vulkan_encode_test, pipeline_tests);
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let ok_keys = |results: Vec<(String, bool)>| results.into_iter().filter(|(_, ok)| *ok).map(|(k, _)| k).collect::<Vec<_>>();
+    GpuDetection {
+        vulkan_decode: ok_keys(vulkan_results),
+        vulkan_encode,
+        pipelines: pipeline_results
+            .into_iter()
+            .map(|(accel, results)| GpuPipeline { accel, codecs: ok_keys(results) })
+            .filter(|p| !p.codecs.is_empty())
+            .collect(),
+    }
 }
 
 /// Names in the second whitespace-separated column of `ffmpeg -encoders` /

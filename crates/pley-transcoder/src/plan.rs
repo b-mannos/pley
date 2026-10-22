@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use pley_transcoder_api::{
     AudioMode, AudioPlan, DynamicRange, EncoderInfo, HwAccel, JobRequest, MediaInfo, MediaStream, StreamKind,
-    Tonemapper, VideoCodec, VideoMode, VideoPlan, is_text_subtitle_codec,
+    Tonemapper, VideoCodec, VideoMode, VideoPlan, decode_key, is_text_subtitle_codec,
 };
 
 use crate::ffmpeg::{Ffmpeg, VAAPI_DEVICE};
@@ -31,6 +31,29 @@ const READRATE_BURST: &str = "60";
 pub const ZSCALE_TONEMAP: &str = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
 const OPENCL_TONEMAP: &str = "format=p010,hwupload,tonemap_opencl=tonemap=hable:desat=0:t=bt709:m=bt709:p=bt709:format=nv12,hwdownload,format=nv12";
 
+/// Where frames live between decode and encode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pipeline {
+    /// CPU filters. Decoding may use `-hwaccel` with frames copied to system memory.
+    Software,
+    /// Vulkan decode → libplacebo tone mapping → `h264_vulkan` (`encode_on_gpu`)
+    /// or a single download into the selected encoder.
+    Vulkan { encode_on_gpu: bool },
+    /// Decode, scale and encode on one GPU API without any copies.
+    Gpu(HwAccel),
+}
+
+impl Pipeline {
+    /// The pipeline to use when the planned (hardware) encoder is replaced by a
+    /// software one because hardware sessions ran out.
+    fn for_software_encoder(self) -> Pipeline {
+        match self {
+            Pipeline::Vulkan { .. } => Pipeline::Vulkan { encode_on_gpu: false },
+            _ => Pipeline::Software,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VideoOut {
     pub stream_index: i64,
@@ -46,6 +69,12 @@ pub struct VideoOut {
     pub hw_decode: Option<String>,
     pub deinterlace: bool,
     pub preset: String,
+    pub pipeline: Pipeline,
+}
+
+/// The encoder used by fully-GPU Vulkan pipelines.
+pub fn vulkan_encoder() -> EncoderInfo {
+    EncoderInfo { name: "h264_vulkan".into(), codec: VideoCodec::H264, hardware: true, accel: HwAccel::Vulkan }
 }
 
 #[derive(Debug, Clone)]
@@ -144,6 +173,7 @@ impl Plan {
                         hw_decode: None,
                         deinterlace: false,
                         preset: String::new(),
+                        pipeline: Pipeline::Software,
                     })
                 } else {
                     let (width, height) = fit(src_width, src_height, vreq.max_width, vreq.max_height);
@@ -164,7 +194,35 @@ impl Plan {
                     } else {
                         None
                     };
-                    let hw_decode = if req.options.hardware_decoding { pick_hw_decoder(ff, &encoder) } else { None };
+                    let deinterlace = src.interlaced == Some(true);
+                    let key = decode_key(&src.codec, src.bit_depth);
+                    let pipeline = if !req.options.hardware_decoding || deinterlace {
+                        Pipeline::Software
+                    } else if tonemap == Some(Tonemapper::Libplacebo) && ff.caps.vulkan_decode.contains(&key) {
+                        let encode_on_gpu = ff.caps.vulkan_encode
+                            && burn.is_none()
+                            && vreq.codec == VideoCodec::H264
+                            && req.options.hwaccel == HwAccel::Auto;
+                        Pipeline::Vulkan { encode_on_gpu }
+                    } else if tonemap.is_none() && burn.is_none() {
+                        ff.caps
+                            .gpu_pipelines
+                            .iter()
+                            .find(|p| p.accel == encoder.accel && p.codecs.contains(&key))
+                            .map_or(Pipeline::Software, |p| Pipeline::Gpu(p.accel))
+                    } else {
+                        Pipeline::Software
+                    };
+                    let hw_decode = match pipeline {
+                        Pipeline::Vulkan { .. } => Some("vulkan".to_owned()),
+                        Pipeline::Gpu(accel) => Some(gpu_decoder_name(accel).to_owned()),
+                        Pipeline::Software if req.options.hardware_decoding => pick_hw_decoder(ff, &encoder),
+                        Pipeline::Software => None,
+                    };
+                    let encoder = match pipeline {
+                        Pipeline::Vulkan { encode_on_gpu: true } => vulkan_encoder(),
+                        _ => encoder,
+                    };
                     Some(VideoOut {
                         stream_index: src.index,
                         copy: false,
@@ -176,7 +234,8 @@ impl Plan {
                         bitrate_kbps: bitrate,
                         tonemap,
                         hw_decode,
-                        deinterlace: src.interlaced == Some(true),
+                        deinterlace,
+                        pipeline,
                         preset: req
                             .options
                             .preset
@@ -258,9 +317,24 @@ impl Plan {
             height_out: Some(v.height),
             dynamic_range_in: src.map(|s| s.dynamic_range()).unwrap_or_default(),
             dv_profile: src.and_then(|s| s.dv_profile),
+            dv_bl_compat: src.and_then(|s| s.dv_bl_compat),
             tonemap: v.tonemap,
             encoder: if v.copy { None } else { encoder_override.or(v.encoder.as_ref()).map(|e| e.name.clone()) },
             decoder: Some(if v.copy { "copy".into() } else { v.hw_decode.clone().unwrap_or_else(|| "cpu".into()) }),
+            pipeline: Some(
+                if v.copy {
+                    "copy"
+                } else {
+                    let pipeline = if encoder_override.is_some() { v.pipeline.for_software_encoder() } else { v.pipeline };
+                    match pipeline {
+                        Pipeline::Gpu(_) | Pipeline::Vulkan { encode_on_gpu: true } => "gpu",
+                        Pipeline::Vulkan { encode_on_gpu: false } => "hybrid",
+                        Pipeline::Software if v.hw_decode.is_some() => "hybrid",
+                        Pipeline::Software => "cpu",
+                    }
+                }
+                .to_owned(),
+            ),
             bitrate_kbps: (!v.copy).then_some(v.bitrate_kbps),
             subtitle_burn: self.burn.as_ref().map(|b| b.label().to_owned()),
         })
@@ -288,22 +362,60 @@ impl Plan {
         // past the boundary so rounding never selects the previous keyframe.
         let seek_ms = if copy && start_ms > 0 { start_ms + 1 } else { start_ms };
         let encoder = ctx.encoder.or_else(|| self.video.as_ref().and_then(|v| v.encoder.as_ref()));
+        let pipeline = self.video.as_ref().map_or(Pipeline::Software, |v| {
+            if ctx.encoder.is_some() { v.pipeline.for_software_encoder() } else { v.pipeline }
+        });
 
         let mut a = Args::default();
         a.push_all(["-loglevel", "error", "-nostats", "-progress", "pipe:2", "-y"]);
 
-        // Global hardware devices.
+        // Global hardware devices and decoding.
         if let Some(v) = self.video.as_ref().filter(|v| !v.copy) {
-            match v.tonemap {
-                Some(Tonemapper::Libplacebo) => a.push_all(["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"]),
-                Some(Tonemapper::Opencl) => a.push_all(["-init_hw_device", "opencl=ocl", "-filter_hw_device", "ocl"]),
-                _ => {}
-            }
-            if encoder.is_some_and(|e| e.accel == HwAccel::Vaapi) {
-                a.push_all(["-vaapi_device", VAAPI_DEVICE]);
-            }
-            if let Some(dec) = &v.hw_decode {
-                a.push_all(["-hwaccel", dec.as_str()]);
+            match pipeline {
+                Pipeline::Vulkan { .. } => a.push_all([
+                    "-init_hw_device",
+                    "vulkan=vk",
+                    "-filter_hw_device",
+                    "vk",
+                    "-hwaccel",
+                    "vulkan",
+                    "-hwaccel_device",
+                    "vk",
+                    "-hwaccel_output_format",
+                    "vulkan",
+                ]),
+                Pipeline::Gpu(HwAccel::Vaapi) => a.push_all([
+                    "-hwaccel",
+                    "vaapi",
+                    "-hwaccel_device",
+                    VAAPI_DEVICE,
+                    "-hwaccel_output_format",
+                    "vaapi",
+                ]),
+                Pipeline::Gpu(HwAccel::Qsv) => a.push_all(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"]),
+                Pipeline::Gpu(HwAccel::Videotoolbox) => {
+                    a.push_all(["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"])
+                }
+                Pipeline::Gpu(_) => {
+                    a.push_all(["-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-extra_hw_frames", "8"])
+                }
+                Pipeline::Software => {
+                    match v.tonemap {
+                        Some(Tonemapper::Libplacebo) => {
+                            a.push_all(["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"])
+                        }
+                        Some(Tonemapper::Opencl) => {
+                            a.push_all(["-init_hw_device", "opencl=ocl", "-filter_hw_device", "ocl"])
+                        }
+                        _ => {}
+                    }
+                    if encoder.is_some_and(|e| e.accel == HwAccel::Vaapi) {
+                        a.push_all(["-vaapi_device", VAAPI_DEVICE]);
+                    }
+                    if let Some(dec) = &v.hw_decode {
+                        a.push_all(["-hwaccel", dec.as_str()]);
+                    }
+                }
             }
         }
 
@@ -336,7 +448,7 @@ impl Plan {
                 a.push_all(["-map", &format!("0:{}", v.stream_index), "-c:v", "copy"]);
             }
             Some(v) => {
-                let graph = self.filter_graph(v, encoder, start_ms);
+                let graph = self.filter_graph(v, encoder, pipeline, start_ms);
                 a.push_all(["-filter_complex", &graph, "-map", "[vout]"]);
                 if let Some(enc) = encoder {
                     a.extend(encoder_args(enc, v));
@@ -411,7 +523,20 @@ impl Plan {
         a.0
     }
 
-    fn filter_graph(&self, v: &VideoOut, encoder: Option<&EncoderInfo>, start_ms: i64) -> String {
+    fn filter_graph(&self, v: &VideoOut, encoder: Option<&EncoderInfo>, pipeline: Pipeline, start_ms: i64) -> String {
+        let input = format!("[0:{}]", v.stream_index);
+        let (w, h) = (v.width, v.height);
+        // Zero-copy: one GPU scaler converts to 8-bit NV12 for the encoder.
+        if let Pipeline::Gpu(accel) = pipeline {
+            let scaler = match accel {
+                HwAccel::Vaapi => format!("scale_vaapi=w={w}:h={h}:format=nv12"),
+                HwAccel::Qsv => format!("vpp_qsv=w={w}:h={h}:format=nv12"),
+                HwAccel::Videotoolbox => format!("scale_vt=w={w}:h={h}"),
+                _ => format!("scale_cuda=w={w}:h={h}:format=nv12"),
+            };
+            return format!("{input}{scaler}[vout]");
+        }
+
         let scale_needed = v.width != v.src_width || v.height != v.src_height;
         let mut pre = Vec::<String>::new(); // at source resolution
         let mut post = Vec::<String>::new(); // after (optional) overlay
@@ -424,9 +549,17 @@ impl Plan {
             Some(Tonemapper::Libplacebo) => {
                 // libplacebo scales too, unless a bitmap overlay needs source size first.
                 let (w, h) = if overlay_needed { (v.src_width, v.src_height) } else { (v.width, v.height) };
+                let format = if matches!(pipeline, Pipeline::Vulkan { .. }) { "nv12" } else { "yuv420p" };
                 pre.push(format!(
-                    "libplacebo=w={w}:h={h}:format=yuv420p:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=auto"
+                    "libplacebo=w={w}:h={h}:format={format}:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=auto"
                 ));
+                match pipeline {
+                    // Frames stay in Vulkan memory all the way into h264_vulkan.
+                    Pipeline::Vulkan { encode_on_gpu: true } => return format!("{input}{}[vout]", pre.join(",")),
+                    // One download of the (already scaled) 8-bit frame.
+                    Pipeline::Vulkan { encode_on_gpu: false } => pre.push("hwdownload,format=nv12".into()),
+                    _ => {}
+                }
                 if overlay_needed && scale_needed {
                     post.push(format!("scale={}:{}:flags=bicubic", v.width, v.height));
                 }
@@ -460,12 +593,12 @@ impl Plan {
         }
         if encoder.is_some_and(|e| e.accel == HwAccel::Vaapi) {
             post.push("format=nv12,hwupload".into());
-        } else {
+        } else if !matches!(pipeline, Pipeline::Vulkan { .. }) {
+            // (The Vulkan path already delivers NV12, which every encoder accepts.)
             post.push("format=yuv420p".into());
         }
 
         let join = |parts: &[String]| if parts.is_empty() { "null".to_owned() } else { parts.join(",") };
-        let input = format!("[0:{}]", v.stream_index);
         match &self.burn {
             Some(Burn::Image { stream_index, .. }) => format!(
                 "{input}{}[base];[base][0:{stream_index}]overlay=x=(W-w)/2:y=H-h:eof_action=pass:repeatlast=0[ov];[ov]{}[vout]",
@@ -555,6 +688,11 @@ fn encoder_args(enc: &EncoderInfo, v: &VideoOut) -> Vec<String> {
             rate(&mut s);
             s.extend(["-allow_sw", "1", "-realtime", "1", "-g", "9999"].map(String::from));
         }
+        HwAccel::Vulkan => {
+            s.extend(["-rc_mode", "vbr", "-tune", "hq", "-usage", "transcode"].map(String::from));
+            rate(&mut s);
+            s.extend(["-profile:v", "high", "-g", "9999"].map(String::from));
+        }
         HwAccel::None | HwAccel::Auto => {
             if h264 {
                 s.extend(["-preset".into(), v.preset.clone(), "-crf".into(), "21".into()]);
@@ -570,6 +708,16 @@ fn encoder_args(enc: &EncoderInfo, v: &VideoOut) -> Vec<String> {
         }
     }
     s
+}
+
+fn gpu_decoder_name(accel: HwAccel) -> &'static str {
+    match accel {
+        HwAccel::Vaapi => "vaapi",
+        HwAccel::Qsv => "qsv",
+        HwAccel::Videotoolbox => "videotoolbox",
+        HwAccel::Vulkan => "vulkan",
+        _ => "cuda",
+    }
 }
 
 /// Decoder hwaccel paired with an encoder, only when FFmpeg reports it.
@@ -888,6 +1036,71 @@ mod tests {
         assert!(args.contains("-segment_start_number 3"));
         assert!(args.contains("-t 20.000"));
         assert!(args.contains("-readrate 2 -readrate_initial_burst 60"));
+    }
+
+    fn ten_bit(mut m: MediaInfo) -> MediaInfo {
+        m.streams[0].bit_depth = Some(10);
+        m
+    }
+
+    #[test]
+    fn hdr_uses_zero_copy_vulkan_pipeline_when_available() {
+        let mut ff = ffmpeg_with(vec![nvenc(), x264()], vec![Tonemapper::Libplacebo]);
+        ff.caps.vulkan_decode = vec!["hevc10".into()];
+        ff.caps.vulkan_encode = true;
+        let m = ten_bit(media(DynamicRange::DolbyVision, Some(5)));
+
+        let plan = Plan::build(&request(), &m, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!(v.pipeline, Pipeline::Vulkan { encode_on_gpu: true });
+        assert_eq!(v.encoder.as_ref().unwrap().name, "h264_vulkan");
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains("-hwaccel vulkan -hwaccel_device vk -hwaccel_output_format vulkan"), "{args}");
+        assert!(args.contains("libplacebo=w=1920:h=1080:format=nv12"));
+        assert!(!args.contains("hwdownload"));
+        assert!(args.contains("-c:v h264_vulkan -rc_mode vbr"));
+        assert_eq!(plan.video_plan(&m, None).unwrap().pipeline.as_deref(), Some("gpu"));
+
+        // An explicit NVENC preference keeps NVENC: one download after tone mapping.
+        let mut req = request();
+        req.options.hwaccel = HwAccel::Nvenc;
+        let plan = Plan::build(&req, &m, &ff, None).unwrap();
+        assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::Vulkan { encode_on_gpu: false });
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains("tonemapping=auto,hwdownload,format=nv12[vout]"), "{args}");
+        assert!(args.contains("-c:v h264_nvenc"));
+        assert_eq!(plan.video_plan(&m, None).unwrap().pipeline.as_deref(), Some("hybrid"));
+
+        // Codecs that failed the self-test stay on the copy-through path.
+        let plan = Plan::build(&request(), &media(DynamicRange::Hdr10, None), &ff, None).unwrap();
+        assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::Software);
+    }
+
+    #[test]
+    fn sdr_uses_cuda_zero_copy_and_falls_back_with_software_encoder() {
+        let mut ff = ffmpeg_with(vec![nvenc(), x264()], vec![]);
+        ff.caps.gpu_pipelines =
+            vec![pley_transcoder_api::GpuPipeline { accel: HwAccel::Nvenc, codecs: vec!["hevc".into()] }];
+        let plan = Plan::build(&request(), &media(DynamicRange::Sdr, None), &ff, None).unwrap();
+        assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::Gpu(HwAccel::Nvenc));
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains("-hwaccel cuda -hwaccel_output_format cuda"), "{args}");
+        assert!(args.contains("[0:0]scale_cuda=w=1920:h=1080:format=nv12[vout]"));
+        assert!(args.contains("-c:v h264_nvenc"));
+
+        // Hardware sessions exhausted → software encoder → no GPU frames.
+        let ctx = ArgsContext { input: Path::new("/media/movie.mkv"), encoder: Some(&ff.caps.encoders[1]), relative_split_times: true };
+        let args: Vec<String> = plan.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        let args = args.join(" ");
+        assert!(!args.contains("hwaccel_output_format"), "{args}");
+        assert!(args.contains("scale=1920:1080:flags=bicubic,format=yuv420p"));
+        assert!(args.contains("-c:v libx264"));
+
+        // Burn-in needs CPU frames.
+        let mut req = request();
+        req.subtitle = Some(SubtitleBurnRequest { stream_index: Some(2), external_path: None });
+        let plan = Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, None).unwrap();
+        assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::Software);
     }
 
     #[test]
