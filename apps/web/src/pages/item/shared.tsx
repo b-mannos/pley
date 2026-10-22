@@ -11,6 +11,7 @@ import { Badge, Button, IconButton, ProgressBar } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { dynamicRangeBadge, formatRemaining, progressFraction } from "@/lib/format";
 import { backdropCandidates, posterCandidates, thumbCandidates } from "@/lib/images";
+import { AnalyzeMarkersButton } from "./AnalyzeMarkersButton";
 
 /** Full-bleed backdrop behind the item header. */
 export function Backdrop({ item }: { item: ItemSummary }) {
@@ -183,20 +184,23 @@ export function RefreshButton({ item }: { item: ItemDetail | ItemSummary }) {
   const toast = useToast();
   if (!user.is_admin) return null;
   return (
-    <IconButton
-      label="Refresh metadata"
-      size="lg"
-      className="bg-surface-3/80 hover:bg-border"
-      disabled={refresh.isPending}
-      onClick={() =>
-        refresh.mutate(item.id, {
-          onSuccess: () => toast.success("Refreshing metadata…"),
-          onError: (e) => toast.error(errorMessage(e)),
-        })
-      }
-    >
-      <RefreshCw className={cn("size-5", refresh.isPending && "animate-spin")} />
-    </IconButton>
+    <>
+      <IconButton
+        label="Refresh metadata"
+        size="lg"
+        className="bg-surface-3/80 hover:bg-border"
+        disabled={refresh.isPending}
+        onClick={() =>
+          refresh.mutate(item.id, {
+            onSuccess: () => toast.success("Refreshing metadata…"),
+            onError: (e) => toast.error(errorMessage(e)),
+          })
+        }
+      >
+        <RefreshCw className={cn("size-5", refresh.isPending && "animate-spin")} />
+      </IconButton>
+      <AnalyzeMarkersButton item={item} />
+    </>
   );
 }
 

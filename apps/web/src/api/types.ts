@@ -80,6 +80,18 @@ export interface ItemDetail extends ItemSummary {
   tmdb_id: number | null;
   imdb_id: string | null;
   files: MediaFile[];
+  /** Intro and credits of the files (absent on servers without detection). */
+  markers?: Marker[];
+}
+
+export type MarkerKind = "intro" | "credits";
+
+export interface Marker {
+  file_id: Id;
+  kind: MarkerKind;
+  start_ms: number;
+  end_ms: number;
+  source: "chapter" | "fingerprint";
 }
 
 export interface MediaFile {
@@ -258,6 +270,15 @@ export interface SessionInfo {
 export interface Activity {
   scans: ScanStatus[];
   sessions: SessionInfo[];
+  /** Intro/credits detection in progress (admins only). */
+  analysis?: AnalysisStatus | null;
+}
+
+export interface AnalysisStatus {
+  item_id: Id;
+  title: string;
+  done: number;
+  total: number;
 }
 
 export type ServerEvent =
@@ -284,6 +305,7 @@ export interface Settings {
   throttle_transcodes: boolean;
   scan_interval_minutes: number;
   watch_libraries: boolean;
+  detect_markers: boolean;
 }
 
 export interface TranscoderInfo {

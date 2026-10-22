@@ -255,6 +255,16 @@ export function ServerSettings() {
         <Row label="Watch folders for changes" hint="Pick up new, changed and deleted files automatically.">
           <Toggle checked={form.watch_libraries} onChange={(v) => set("watch_libraries", v)} label="Watch folders" />
         </Row>
+        <Row
+          label="Detect intros and credits"
+          hint="Compare the audio of episodes in the background to offer Skip Intro and Skip Credits. Chapters named Intro or Credits are always used."
+        >
+          <Toggle
+            checked={form.detect_markers}
+            onChange={(v) => set("detect_markers", v)}
+            label="Detect intros and credits"
+          />
+        </Row>
         <Row label="Periodic scan interval" htmlFor="scan-interval" hint="Minutes between full scans. 0 disables periodic scans.">
           <div className="flex items-center gap-2">
             <TextInput

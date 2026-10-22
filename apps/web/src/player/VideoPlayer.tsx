@@ -35,6 +35,7 @@ import { playUrl } from "@/lib/usePlayItem";
 import { modeById, qualityById } from "./quality";
 import { SeekBar } from "./SeekBar";
 import { METHOD_LABEL, SettingsPopover } from "./SettingsPopover";
+import { fileMarkers, SkipButton, useSkipMarkers } from "./SkipButton";
 import { UpNext } from "./UpNext";
 
 const PROGRESS_INTERVAL = 10_000;
@@ -110,6 +111,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const [hoveringControls, setHoveringControls] = useState(false);
   const [ended, setEnded] = useState(false);
   const [upNext, setUpNext] = useState<ItemSummary | null>(null);
+  const [autoSkip, setAutoSkip] = useLocalStorage<boolean>("pley.autoSkipIntro", false);
 
   const duration = (info?.duration_ms ?? item.duration_ms ?? 0) / 1000 || mediaDuration;
   const isEpisode = item.kind === "episode";
@@ -628,6 +630,30 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     }
   };
 
+  // Skip Intro / Skip Credits; an episode's credits bring up Up Next.
+  const markers = useMemo(() => fileMarkers(item, info?.file_id ?? file?.id), [item, info?.file_id, file?.id]);
+  const marker = useSkipMarkers({
+    markers,
+    seconds: current,
+    enabled: !!info && !loading && !error && !ended,
+    autoSkip,
+    onAutoSkip: (m) => {
+      seekTo(m.end_ms / 1000);
+      toast.info("Skipped intro");
+    },
+    onCredits: () => {
+      if (!isEpisode || upNext) return;
+      fetchNext(qc, item.id)
+        .then((next) => {
+          if (next) setUpNext(next);
+        })
+        .catch(() => undefined);
+    },
+  });
+  const skipMarker = () => {
+    if (marker) seekTo(Math.min(marker.end_ms / 1000, duration));
+  };
+
   const retry = () => {
     setError(null);
     recoveries.current.recreate = 0;
@@ -683,6 +709,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         case "c":
         case "C":
           cycleSubtitles();
+          break;
+        case "s":
+        case "S":
+          if (!marker) return;
+          skipMarker();
           break;
         case "Escape":
           if (settingsOpen) return;
@@ -928,6 +959,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             subtitleStreams={subStreams}
             subtitleIndex={subIndex}
             onSubtitle={changeSubtitle}
+            autoSkip={autoSkip}
+            onAutoSkip={setAutoSkip}
           />
           <button
             type="button"
@@ -940,6 +973,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           </button>
         </div>
       </div>
+
+      {marker && !upNext && !ended ? <SkipButton marker={marker} onSkip={skipMarker} lifted={active || !playing} /> : null}
 
       {upNext ? (
         <UpNext

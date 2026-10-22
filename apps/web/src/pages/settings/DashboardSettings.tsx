@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
-import { Activity as ActivityIcon, Cpu, MonitorPlay, Pause, Play, RefreshCw, Square } from "lucide-react";
+import { Activity as ActivityIcon, Cpu, FastForward, MonitorPlay, Pause, Play, RefreshCw, Square } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useActivity, useSystemInfo, useTranscoderStatus } from "@/api/hooks";
 import type {
@@ -314,6 +314,7 @@ export function DashboardSettings() {
 
   const sessions = activity.data?.sessions ?? [];
   const scans = (activity.data?.scans ?? []).filter((s) => s.phase !== "done");
+  const analysis = activity.data?.analysis ?? null;
 
   return (
     <div className="space-y-10">
@@ -374,6 +375,25 @@ export function DashboardSettings() {
                 <ProgressBar value={s.total > 0 ? s.processed / s.total : 0} className="h-1.5" />
               </div>
             ))}
+          </div>
+        </section>
+      ) : null}
+
+      {analysis ? (
+        <section>
+          <SectionTitle>
+            <span className="flex items-center gap-2">
+              <FastForward className="size-5 text-accent" /> Finding intros and credits
+            </span>
+          </SectionTitle>
+          <div className="rounded-lg border border-border bg-surface px-4 py-3">
+            <div className="mb-1.5 flex items-center justify-between text-sm">
+              <span className="font-medium">{analysis.title}</span>
+              <span className="text-xs text-muted">
+                {analysis.done} / {analysis.total} audio fingerprints
+              </span>
+            </div>
+            <ProgressBar value={analysis.total > 0 ? analysis.done / analysis.total : 0} className="h-1.5" />
           </div>
         </section>
       ) : null}

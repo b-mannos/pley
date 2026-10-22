@@ -4,6 +4,7 @@ import type { MediaStream, PlaybackInfo, PlaybackMode } from "@/api/types";
 import { cn } from "@/lib/cn";
 import { streamLabel } from "@/lib/format";
 import { useDismiss } from "@/lib/hooks";
+import { Toggle } from "@/components/ui";
 import { modeById, PLAYBACK_MODES, QUALITIES } from "./quality";
 
 type Panel = "root" | "quality" | "mode" | "audio" | "subtitles";
@@ -79,11 +80,14 @@ export interface SettingsPopoverProps {
   subtitleStreams: MediaStream[];
   subtitleIndex: number | null;
   onSubtitle: (index: number | null) => void;
+  /** Skip intros without waiting for a click. */
+  autoSkip: boolean;
+  onAutoSkip: (on: boolean) => void;
 }
 
 export function SettingsPopover(props: SettingsPopoverProps) {
   const { open, setOpen, info, reason, quality, onQuality, mode, onMode } = props;
-  const { audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle } = props;
+  const { audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle, autoSkip, onAutoSkip } = props;
   const [panel, setPanel] = useState<Panel>("root");
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(ref, open, () => {
@@ -141,6 +145,11 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                 value={currentSub ? streamLabel(currentSub) : subtitleStreams.length ? "Off" : "None"}
                 onClick={() => setPanel("subtitles")}
               />
+              <div className="my-1 h-px bg-white/10" />
+              <div className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                <span className="flex-1">Skip intros automatically</span>
+                <Toggle checked={autoSkip} onChange={onAutoSkip} label="Skip intros automatically" />
+              </div>
             </>
           ) : (
             <>
