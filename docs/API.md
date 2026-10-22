@@ -498,6 +498,7 @@ interface Settings {
   scan_interval_minutes: number;    // 0 disables periodic scans
   watch_libraries: boolean;         // pick up file changes automatically
   detect_markers: boolean;          // find intros and credits in the background (default true)
+  seek_previews: boolean;           // make seek-bar thumbnails when an item is first opened (default true)
 }
 
 interface SystemInfo {

@@ -373,6 +373,7 @@ export interface Settings {
   scan_interval_minutes: number;
   watch_libraries: boolean;
   detect_markers: boolean;
+  seek_previews: boolean;
 }
 
 export interface TranscoderInfo {

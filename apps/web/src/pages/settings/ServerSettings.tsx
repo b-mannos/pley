@@ -265,6 +265,12 @@ export function ServerSettings() {
             label="Detect intros and credits"
           />
         </Row>
+        <Row
+          label="Seek previews"
+          hint="Make the thumbnails shown above the seek bar, in the background, the first time a movie or episode is opened."
+        >
+          <Toggle checked={form.seek_previews} onChange={(v) => set("seek_previews", v)} label="Seek previews" />
+        </Row>
         <Row label="Periodic scan interval" htmlFor="scan-interval" hint="Minutes between full scans. 0 disables periodic scans.">
           <div className="flex items-center gap-2">
             <TextInput
