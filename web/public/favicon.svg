@@ -1,4 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#14171c"/>
-  <path d="M24 17.5v29a2.5 2.5 0 0 0 3.8 2.1l23.2-14.5a2.5 2.5 0 0 0 0-4.2L27.8 15.4a2.5 2.5 0 0 0-3.8 2.1z" fill="#e5a00d"/>
+  <defs>
+    <linearGradient id="pley-glyph" x1="16" y1="12" x2="48" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#bae6fd"/>
+      <stop offset="0.5" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#0284c7"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="#0a1622"/>
+  <path fill="url(#pley-glyph)" fill-rule="evenodd" d="M17 19a5 5 0 0 1 5-5h13a14 14 0 0 1 0 28h-8v8a5 5 0 0 1-10 0zM30 21v14l12-7z"/>
 </svg>

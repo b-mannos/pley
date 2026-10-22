@@ -5,9 +5,15 @@
  * (e.g. `:root { --color-accent: #7c5cff; }`).
  */
 @theme {
-  --color-accent: #e5a00d;
-  --color-accent-hover: #f2b632;
-  --color-accent-fg: #1b1300;
+  /* Light blue brand accent. */
+  --color-accent: #38bdf8;
+  --color-accent-hover: #7dd3fc;
+  --color-accent-fg: #03131f;
+
+  /* Logo gradient and tile. */
+  --color-brand-light: #bae6fd;
+  --color-brand-deep: #0284c7;
+  --color-brand-tile: #0a1622;
 
   --color-bg: #0b0d10;
   --color-surface: #12151a;
