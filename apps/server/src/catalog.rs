@@ -98,11 +98,14 @@ pub struct ItemRow {
     pub viewed_leaf_count: Option<i64>,
 }
 
+/// Null fields are left out of the JSON: lists of thousands of items are
+/// much smaller that way, and clients treat a missing field like `null`.
 #[derive(Debug, Clone, Serialize)]
 pub struct UserState {
     pub position_ms: i64,
     pub watched: bool,
     pub play_count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_played_at: Option<i64>,
 }
 
@@ -113,22 +116,37 @@ pub struct ItemSummary {
     pub kind: String,
     pub title: String,
     pub sort_title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub year: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub index: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_index: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub grandparent_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub grandparent_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rating: Option<f64>,
     pub added_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub poster_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub backdrop_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub thumb_url: Option<String>,
     pub user_state: UserState,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub leaf_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub viewed_leaf_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub child_count: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
@@ -242,7 +260,9 @@ impl ItemRow {
             leaf_count: self.leaf_count,
             viewed_leaf_count: self.viewed_leaf_count,
             child_count: self.child_count,
-            summary: self.summary.clone(),
+            // Lists only show the synopsis of episodes; it would make a
+            // movie library's listing several times larger.
+            summary: if self.kind == "episode" { self.summary.clone() } else { None },
             release_date: self.release_date.clone(),
         }
     }
@@ -383,20 +403,37 @@ impl SortKey {
         })
     }
 
-    fn column(self) -> &'static str {
+    /// The sort expression for items of `kind`, and whether it can be NULL.
+    fn column(self, kind: &str) -> (&'static str, bool) {
+        let show = kind == "show";
         match self {
-            SortKey::Title => "i.sort_title",
-            SortKey::Year => "i.year",
+            SortKey::Title => ("i.sort_title", false),
+            SortKey::Year => ("i.year", true),
             // Shows are "added" when their newest episode was.
-            SortKey::Added => {
-                "COALESCE((SELECT MAX(e.added_at) FROM items e WHERE e.grandparent_id = i.id), i.added_at)"
+            SortKey::Added if show => {
+                ("COALESCE((SELECT MAX(e.added_at) FROM items e WHERE e.grandparent_id = i.id), i.added_at)", false)
             }
-            SortKey::Rating => "i.rating",
-            SortKey::Release => "i.release_date",
-            SortKey::Duration => "i.duration_ms",
-            SortKey::LastPlayed => {
-                "COALESCE(s.last_played_at, (SELECT MAX(us.last_played_at) FROM items e JOIN user_item_state us ON us.item_id = e.id AND us.user_id = (SELECT uid FROM me) WHERE e.grandparent_id = i.id))"
-            }
+            SortKey::Added => ("i.added_at", false),
+            SortKey::Rating => ("i.rating", true),
+            SortKey::Release => ("i.release_date", true),
+            SortKey::Duration => ("i.duration_ms", true),
+            SortKey::LastPlayed if show => (
+                "COALESCE(s.last_played_at, (SELECT MAX(us.last_played_at) FROM items e JOIN user_item_state us ON us.item_id = e.id AND us.user_id = (SELECT uid FROM me) WHERE e.grandparent_id = i.id))",
+                true,
+            ),
+            SortKey::LastPlayed => ("s.last_played_at", true),
+        }
+    }
+
+    /// `ORDER BY` clause: NULLs last in both directions, title as tiebreaker.
+    /// Plain non-null columns stay bare so SQLite can walk an index instead of
+    /// sorting the whole library.
+    fn order_by(self, kind: &str, descending: bool) -> String {
+        let dir = if descending { "DESC" } else { "ASC" };
+        match self.column(kind) {
+            ("i.sort_title", _) => format!("i.sort_title {dir}"),
+            (col, false) => format!("{col} {dir}, i.sort_title ASC"),
+            (col, true) => format!("({col}) IS NULL, {col} {dir}, i.sort_title ASC"),
         }
     }
 }
@@ -408,27 +445,84 @@ pub struct LibraryQuery<'a> {
     pub descending: bool,
     pub genre: Option<&'a str>,
     pub year: Option<i64>,
+    /// Movies and episodes: watched flag; shows: every episode watched.
+    pub watched: Option<bool>,
+    pub offset: i64,
+    pub limit: Option<i64>,
 }
 
-pub async fn library_items(db: &Db, user_id: i64, q: &LibraryQuery<'_>) -> sqlx::Result<Vec<ItemRow>> {
-    let mut sql = format!("{SUMMARY_SELECT} WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ?");
+impl<'a> LibraryQuery<'a> {
+    /// Every item of `kind` in the library, by title.
+    pub fn all(library_id: i64, kind: &'a str) -> Self {
+        LibraryQuery {
+            library_id,
+            kind,
+            sort: SortKey::Title,
+            descending: false,
+            genre: None,
+            year: None,
+            watched: None,
+            offset: 0,
+            limit: None,
+        }
+    }
+}
+
+/// One page of a library (`limit` items from `offset`) and the total count.
+/// Filtering, sorting and paging all happen in SQL.
+pub async fn library_items(db: &Db, user_id: i64, q: &LibraryQuery<'_>) -> sqlx::Result<(Vec<ItemRow>, i64)> {
+    let mut filter = String::from(" AND i.library_id = ? AND i.kind = ?");
     if q.genre.is_some() {
-        sql.push_str(" AND EXISTS (SELECT 1 FROM json_each(i.genres) g WHERE g.value = ?)");
+        filter.push_str(" AND EXISTS (SELECT 1 FROM json_each(i.genres) g WHERE g.value = ?)");
     }
     if q.year.is_some() {
-        sql.push_str(" AND i.year = ?");
+        filter.push_str(" AND i.year = ?");
     }
-    let dir = if q.descending { "DESC" } else { "ASC" };
-    // NULLs last regardless of direction, then title as a tiebreaker.
-    sql.push_str(&format!(" ORDER BY ({col}) IS NULL, {col} {dir}, i.sort_title ASC", col = q.sort.column()));
-    let mut query = sqlx::query_as::<_, ItemRow>(&sql).bind(user_id).bind(q.library_id).bind(q.kind);
-    if let Some(genre) = q.genre {
-        query = query.bind(genre);
+    if q.watched.is_some() {
+        filter.push_str(
+            " AND (CASE WHEN i.kind = 'show' THEN COALESCE(i.leaf_count, 0) > 0 AND
+                     (SELECT COUNT(*) FROM items e JOIN user_item_state us ON us.item_id = e.id
+                      WHERE e.grandparent_id = i.id AND e.kind = 'episode' AND us.user_id = (SELECT uid FROM me)
+                        AND us.watched = 1) >= i.leaf_count
+                   ELSE COALESCE(s.watched, 0) = 1 END) = ?",
+        );
     }
-    if let Some(year) = q.year {
-        query = query.bind(year);
+    let limit = q.limit.unwrap_or(i64::MAX).max(0);
+    let sql = format!(
+        "{SUMMARY_SELECT} WHERE {VISIBLE}{filter} ORDER BY {} LIMIT ? OFFSET ?",
+        q.sort.order_by(q.kind, q.descending)
+    );
+    macro_rules! bind_filter {
+        ($query:expr) => {{
+            let mut query = $query.bind(user_id).bind(q.library_id).bind(q.kind);
+            if let Some(genre) = q.genre {
+                query = query.bind(genre);
+            }
+            if let Some(year) = q.year {
+                query = query.bind(year);
+            }
+            if let Some(watched) = q.watched {
+                query = query.bind(watched);
+            }
+            query
+        }};
     }
-    query.fetch_all(&db.read).await
+    let rows: Vec<ItemRow> =
+        bind_filter!(sqlx::query_as::<_, ItemRow>(&sql)).bind(limit).bind(q.offset.max(0)).fetch_all(&db.read).await?;
+    // Counting is only needed when the page may not hold everything.
+    let total = if q.offset == 0 && (rows.len() as i64) < limit {
+        rows.len() as i64
+    } else {
+        let count = format!(
+            "{} SELECT COUNT(*) FROM items i LEFT JOIN items p ON p.id = i.parent_id
+                 LEFT JOIN items gp ON gp.id = i.grandparent_id
+                 LEFT JOIN user_item_state s ON s.item_id = i.id AND s.user_id = (SELECT uid FROM me)
+             WHERE {VISIBLE}{filter}",
+            me_cte!()
+        );
+        bind_filter!(sqlx::query_scalar::<_, i64>(&count)).fetch_one(&db.read).await?
+    };
+    Ok((rows, total))
 }
 
 pub async fn library_filters(db: &Db, library_id: i64, kind: &str) -> sqlx::Result<(Vec<String>, Vec<i64>)> {
@@ -481,8 +575,10 @@ pub async fn item_detail(db: &Db, row: ItemRow) -> sqlx::Result<ItemDetail> {
     .await?;
     let files = files_for_item(db, row.id).await?;
     let markers = crate::markers::for_item(db, row.id).await?;
+    let mut summary = row.to_summary();
+    summary.summary = row.summary;
     Ok(ItemDetail {
-        summary: row.to_summary(),
+        summary,
         original_title: detail.original_title,
         tagline: detail.tagline,
         genres: detail.genres.and_then(|g| serde_json::from_str(&g).ok()).unwrap_or_default(),

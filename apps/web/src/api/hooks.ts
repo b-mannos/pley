@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, qs, request } from "./client";
 import type {
@@ -236,10 +237,13 @@ export function useLibrary(id: Id) {
 
 export const DEFAULT_ITEMS_LIMIT = 100_000;
 
-export function useLibraryItems(id: Id, q: LibraryItemsQuery, enabled = true) {
-  return useQuery({
+/** Items fetched on their own first, so large libraries paint right away. */
+export const FIRST_PAGE = 300;
+
+function libraryItemsQuery(id: Id, q: LibraryItemsQuery, enabled: boolean) {
+  return {
     queryKey: keys.libraryItems(id, q),
-    queryFn: ({ signal }) =>
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
       api.get<LibraryItemsResponse>(
         `/api/libraries/${id}/items${qs({
           sort: q.sort,
@@ -254,8 +258,42 @@ export function useLibraryItems(id: Id, q: LibraryItemsQuery, enabled = true) {
       ),
     enabled,
     // Keep showing the list while sorting/filtering, but never another library's items.
-    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === id ? prev : undefined),
-  });
+    placeholderData: (prev: LibraryItemsResponse | undefined, prevQuery?: { queryKey: readonly unknown[] }) =>
+      prevQuery?.queryKey[1] === id ? prev : undefined,
+  };
+}
+
+export interface LibraryItemsState {
+  /** `items` may be shorter than `total` while the rest is loading. */
+  data: LibraryItemsResponse | undefined;
+  isPending: boolean;
+  isError: boolean;
+  error: unknown;
+  refetch: () => Promise<unknown>;
+}
+
+/** A whole library listing: the first {@link FIRST_PAGE} items, then the rest. */
+export function useLibraryItems(id: Id, q: LibraryItemsQuery, enabled = true): LibraryItemsState {
+  const first = useQuery(libraryItemsQuery(id, { ...q, offset: undefined, limit: FIRST_PAGE }, enabled));
+  const fresh = first.data !== undefined && !first.isPlaceholderData;
+  const more = fresh && first.data.total > FIRST_PAGE;
+  const rest = useQuery(libraryItemsQuery(id, { ...q, offset: FIRST_PAGE, limit: undefined }, enabled && more));
+
+  const data = useMemo(() => {
+    if (!first.data) return undefined;
+    // While a new sort/filter loads both halves are the old list's; once the
+    // new first page is in, never append the old rest to it.
+    const tail = !fresh ? rest.data : more && !rest.isPlaceholderData ? rest.data : undefined;
+    return tail ? { total: first.data.total, items: first.data.items.concat(tail.items) } : first.data;
+  }, [first.data, fresh, more, rest.data, rest.isPlaceholderData]);
+
+  return {
+    data,
+    isPending: first.isPending,
+    isError: first.isError || rest.isError,
+    error: first.error ?? rest.error,
+    refetch: () => Promise.all([first.refetch(), more ? rest.refetch() : null]),
+  };
 }
 
 export function useLibraryFilters(id: Id, enabled = true) {

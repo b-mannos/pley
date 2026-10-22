@@ -183,7 +183,7 @@ function TrackRow({
   current: boolean;
   playing: boolean;
   highlighted: boolean;
-  albumArtist: string | null;
+  albumArtist?: string | null;
   onPlay: () => void;
 }) {
   const artist = track.grandparent_title && track.grandparent_title !== albumArtist ? track.grandparent_title : null;

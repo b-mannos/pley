@@ -72,42 +72,44 @@ interface UserState {
   position_ms: number;          // resume position, 0 if none
   watched: boolean;             // containers: true when every leaf is watched
   play_count: number;
-  last_played_at: Timestamp | null;
+  last_played_at?: Timestamp;
 }
 
+// Optional fields are left out when they have no value, which keeps big
+// listings small; treat a missing field like null.
 interface ItemSummary {
   id: Id;
   library_id: Id;
   kind: ItemKind;
   title: string;
   sort_title: string;
-  year: number | null;
-  index: number | null;             // season number / episode number / track number
-  parent_id: Id | null;             // season for episodes, show for seasons, album for tracks, artist for albums
-  parent_title: string | null;
-  parent_index: number | null;      // season number for episodes, disc number for tracks
-  grandparent_id: Id | null;        // show for episodes, artist for tracks
-  grandparent_title: string | null;
-  duration_ms: number | null;
-  rating: number | null;            // 0..10
+  year?: number;
+  index?: number;                   // season number / episode number / track number
+  parent_id?: Id;                   // season for episodes, show for seasons, album for tracks, artist for albums
+  parent_title?: string;
+  parent_index?: number;            // season number for episodes, disc number for tracks
+  grandparent_id?: Id;              // show for episodes, artist for tracks
+  grandparent_title?: string;
+  duration_ms?: number;
+  rating?: number;                  // 0..10
   added_at: Timestamp;
-  poster_url: string | null;        // e.g. "/api/items/12/images/poster?v=1729600000" (append &w=<px>)
-  backdrop_url: string | null;
-  thumb_url: string | null;         // episode stills / video frame grabs (16:9)
+  poster_url?: string;              // e.g. "/api/items/12/images/poster?v=1729600000" (append &w=<px>)
+  backdrop_url?: string;
+  thumb_url?: string;               // episode stills / video frame grabs (16:9)
   user_state: UserState;
-  leaf_count: number | null;        // show/season: #episodes, artist/album: #tracks
-  viewed_leaf_count: number | null; // show/season: #watched episodes
-  child_count: number | null;       // show: #seasons, artist: #albums
+  leaf_count?: number;              // show/season: #episodes, artist/album: #tracks
+  viewed_leaf_count?: number;       // show/season: #watched episodes
+  child_count?: number;             // show: #seasons, artist: #albums
+  summary?: string;                 // in lists only for episodes; always in ItemDetail
+  release_date?: string;            // "YYYY-MM-DD"
 }
 
 interface ItemDetail extends ItemSummary {
   original_title: string | null;
-  summary: string | null;
   tagline: string | null;
   genres: string[];
   studio: string | null;
   content_rating: string | null;    // e.g. "PG-13"
-  release_date: string | null;      // "YYYY-MM-DD"
   tmdb_id: number | null;
   imdb_id: string | null;
   files: MediaFile[];               // empty for containers (show/season/artist/album)
@@ -263,7 +265,7 @@ hubs, search, artwork, streams and the Plex-compatible API.
 | DELETE | `/api/libraries/{id}` *(admin)* | – | `204` |
 | POST | `/api/libraries/{id}/scan` *(admin)* | `{ force?: boolean }` (force = re-probe files and refresh metadata) | `202` |
 | POST | `/api/libraries/scan` *(admin)* | – | `202` (scan all) |
-| GET | `/api/libraries/{id}/items` | query: `sort=title\|year\|added\|rating\|release\|duration\|last_played` (default `title`), `order=asc\|desc`, `watched=true\|false`, `genre=<name>`, `year=<yyyy>`, `offset`, `limit` | `{ total: number, items: ItemSummary[] }` — top-level items only |
+| GET | `/api/libraries/{id}/items` | query: `sort=title\|year\|added\|rating\|release\|duration\|last_played` (default `title`), `order=asc\|desc`, `watched=true\|false`, `genre=<name>`, `year=<yyyy>`, `offset`, `limit` | `{ total: number, items: ItemSummary[] }` — top-level items only; `total` counts every match, not just the page; `watched=true` matches shows whose every episode is watched |
 | GET | `/api/libraries/{id}/filters` | – | `{ genres: string[], years: number[] }` |
 | GET | `/api/libraries/{id}/hubs` | – | `{ hubs: Hub[] }` (continue watching, recently added, recently released, top rated – empty hubs omitted) |
 

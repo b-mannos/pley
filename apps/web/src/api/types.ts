@@ -86,42 +86,43 @@ export interface UserState {
   position_ms: number;
   watched: boolean;
   play_count: number;
-  last_played_at: Timestamp | null;
+  last_played_at?: Timestamp | null;
 }
 
+/** Fields without a value are left out of the JSON (smaller lists). */
 export interface ItemSummary {
   id: Id;
   library_id: Id;
   kind: ItemKind;
   title: string;
   sort_title: string;
-  year: number | null;
-  index: number | null;
-  parent_id: Id | null;
-  parent_title: string | null;
-  parent_index: number | null;
-  grandparent_id: Id | null;
-  grandparent_title: string | null;
-  duration_ms: number | null;
-  rating: number | null;
+  year?: number | null;
+  index?: number | null;
+  parent_id?: Id | null;
+  parent_title?: string | null;
+  parent_index?: number | null;
+  grandparent_id?: Id | null;
+  grandparent_title?: string | null;
+  duration_ms?: number | null;
+  rating?: number | null;
   added_at: Timestamp;
-  poster_url: string | null;
-  backdrop_url: string | null;
-  thumb_url: string | null;
+  poster_url?: string | null;
+  backdrop_url?: string | null;
+  thumb_url?: string | null;
   user_state: UserState;
-  leaf_count: number | null;
-  viewed_leaf_count: number | null;
-  child_count: number | null;
+  leaf_count?: number | null;
+  viewed_leaf_count?: number | null;
+  child_count?: number | null;
+  summary?: string | null;
+  release_date?: string | null;
 }
 
 export interface ItemDetail extends ItemSummary {
   original_title: string | null;
-  summary: string | null;
   tagline: string | null;
   genres: string[];
   studio: string | null;
   content_rating: string | null;
-  release_date: string | null;
   tmdb_id: number | null;
   imdb_id: string | null;
   files: MediaFile[];

@@ -200,7 +200,7 @@ pub async fn scan_all(State(state): State<AppState>, _admin: AdminUser) -> ApiRe
 
 #[derive(Serialize)]
 pub struct ItemsPage {
-    total: usize,
+    total: i64,
     items: Vec<ItemSummary>,
 }
 
@@ -229,17 +229,12 @@ pub async fn items(
         descending,
         genre: query.get("genre").map(String::as_str).filter(|g| !g.is_empty()),
         year,
+        watched: query.get("watched").map(|w| truthy(w)),
+        offset: query.get("offset").and_then(|o| o.parse().ok()).unwrap_or(0),
+        limit: query.get("limit").and_then(|l| l.parse().ok()),
     };
-    let rows = catalog::library_items(&state.db, user.id, &q).await?;
-    let mut items: Vec<ItemSummary> = rows.iter().map(|r| r.to_summary()).collect();
-    if let Some(watched) = query.get("watched") {
-        let want = truthy(watched);
-        items.retain(|i| i.user_state.watched == want);
-    }
-    let total = items.len();
-    let offset = query.get("offset").and_then(|o| o.parse::<usize>().ok()).unwrap_or(0);
-    let limit = query.get("limit").and_then(|l| l.parse::<usize>().ok()).unwrap_or(usize::MAX);
-    let items = items.into_iter().skip(offset).take(limit).collect();
+    let (rows, total) = catalog::library_items(&state.db, user.id, &q).await?;
+    let items = rows.iter().map(|r| r.to_summary()).collect();
     Ok(Json(ItemsPage { total, items }))
 }
 

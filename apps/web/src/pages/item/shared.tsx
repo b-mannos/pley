@@ -116,7 +116,7 @@ export function Genres({ genres }: { genres: string[] }) {
   );
 }
 
-export function Summary({ text, className }: { text: string | null; className?: string }) {
+export function Summary({ text, className }: { text?: string | null; className?: string }) {
   const [expanded, setExpanded] = useState(false);
   if (!text) return null;
   const long = text.length > 360;

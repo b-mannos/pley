@@ -13,7 +13,7 @@ use axum::response::Response;
 use super::meta::{self, Detail, Extras, Sections, kind_for_number, kinds_of, plex_type, section_type, type_number};
 use super::{Node, Page, Params, PlexAdmin, PlexError, PlexInfo, PlexResult, PlexUser};
 use crate::auth::AuthUser;
-use crate::catalog::{self, ItemRow, LibraryQuery, SortKey};
+use crate::catalog::{self, ItemRow, LibraryQuery};
 use crate::events::ServerEvent;
 use crate::library::LibraryRow;
 use crate::state::AppState;
@@ -603,9 +603,7 @@ async fn query_items(
     kind: &str,
     params: &Params,
 ) -> PlexResult<(Vec<ItemRow>, HashMap<i64, Extras>)> {
-    let query =
-        LibraryQuery { library_id: lib.id, kind, sort: SortKey::Title, descending: false, genre: None, year: None };
-    let mut rows = catalog::library_items(&state.db, user.id, &query).await?;
+    let (mut rows, _) = catalog::library_items(&state.db, user.id, &LibraryQuery::all(lib.id, kind)).await?;
     let filters = Filter::parse(params, kind);
     let mut extras = HashMap::new();
     if filters.iter().any(Filter::needs_extras) {
@@ -877,9 +875,7 @@ pub async fn first_character(
 ) -> PlexResult<Node> {
     let (lib, _) = library_for(&state, &user, &id).await?;
     let kind = params.get("type").and_then(kind_for_number).unwrap_or(lib.kind().top_level_kind());
-    let query =
-        LibraryQuery { library_id: lib.id, kind, sort: SortKey::Title, descending: false, genre: None, year: None };
-    let rows = catalog::library_items(&state.db, user.id, &query).await?;
+    let (rows, _) = catalog::library_items(&state.db, user.id, &LibraryQuery::all(lib.id, kind)).await?;
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for row in &rows {
         let first = row.sort_title.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();

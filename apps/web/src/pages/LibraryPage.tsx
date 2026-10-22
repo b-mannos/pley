@@ -252,7 +252,7 @@ function LibraryTab({
       <div className="px-4 pt-5 sm:px-8">
         {items.isPending || !ready ? (
           <ItemGridSkeleton aspect={aspect} cardWidth={cardWidth} />
-        ) : items.isError ? (
+        ) : items.isError || !items.data ? (
           <EmptyState title="Couldn't load this library" description={errorMessage(items.error)} action={<Button onClick={() => void items.refetch()}>Retry</Button>} />
         ) : items.data.items.length === 0 ? (
           filtered ? (
@@ -289,7 +289,7 @@ function LibraryTab({
             />
           )
         ) : (
-          <ItemGrid items={items.data.items} aspect={aspect} cardWidth={cardWidth} jumpBar={sort === "title"} />
+          <ItemGrid items={items.data.items} total={items.data.total} aspect={aspect} cardWidth={cardWidth} jumpBar={sort === "title"} />
         )}
       </div>
     </>

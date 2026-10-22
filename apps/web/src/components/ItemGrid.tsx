@@ -16,6 +16,8 @@ function letterOf(item: ItemSummary): string {
 
 export interface ItemGridProps {
   items: ItemSummary[];
+  /** Number of cards, when more than `items` (the rest show as placeholders). */
+  total?: number;
   aspect: CardAspect;
   /** Target card width in CSS px; the grid fits as many columns as possible. */
   cardWidth: number;
@@ -26,7 +28,7 @@ export interface ItemGridProps {
 }
 
 /** Window-scrolled, row-virtualized responsive grid of media cards. */
-export function ItemGrid({ items, aspect, cardWidth, jumpBar, stickyOffset = 136 }: ItemGridProps) {
+export function ItemGrid({ items, total = items.length, aspect, cardWidth, jumpBar, stickyOffset = 136 }: ItemGridProps) {
   const [ref, width] = useElementWidth<HTMLDivElement>();
   const [scrollMargin, setScrollMargin] = useState(0);
   const gap = width < 640 ? 12 : 18;
@@ -34,7 +36,8 @@ export function ItemGrid({ items, aspect, cardWidth, jumpBar, stickyOffset = 136
   const cols = width > 0 ? Math.max(2, Math.floor((width + gap) / (cardWidth + gap))) : 0;
   const colWidth = cols > 0 ? (width - gap * (cols - 1)) / cols : cardWidth;
   const rowHeight = Math.round(aspectHeight(aspect, colWidth) + TEXT_HEIGHT + rowGap);
-  const rowCount = cols > 0 ? Math.ceil(items.length / cols) : 0;
+  const count = Math.max(total, items.length);
+  const rowCount = cols > 0 ? Math.ceil(count / cols) : 0;
 
   // Distance between the top of the document and the grid.
   useLayoutEffect(() => {
@@ -59,14 +62,15 @@ export function ItemGrid({ items, aspect, cardWidth, jumpBar, stickyOffset = 136
   }, [rowHeight, cols]);
 
   const letterIndex = useMemo(() => {
-    if (!jumpBar) return null;
+    // Letter positions are only known once every item is in.
+    if (!jumpBar || items.length < total) return null;
     const map = new Map<string, number>();
     items.forEach((item, i) => {
       const l = letterOf(item);
       if (!map.has(l)) map.set(l, i);
     });
     return map;
-  }, [items, jumpBar]);
+  }, [items, total, jumpBar]);
 
   const jump = (letter: string) => {
     const idx = letterIndex?.get(letter);
@@ -81,6 +85,7 @@ export function ItemGrid({ items, aspect, cardWidth, jumpBar, stickyOffset = 136
           ? virtualizer.getVirtualItems().map((row) => {
               const start = row.index * cols;
               const rowItems = items.slice(start, start + cols);
+              const placeholders = Math.min(cols, count - start) - rowItems.length;
               return (
                 <div
                   key={row.key}
@@ -95,12 +100,15 @@ export function ItemGrid({ items, aspect, cardWidth, jumpBar, stickyOffset = 136
                   {rowItems.map((item) => (
                     <MediaCard key={item.id} item={item} aspect={aspect} width={colWidth} />
                   ))}
+                  {Array.from({ length: placeholders }, (_, i) => (
+                    <CardSkeleton key={`p${i}`} aspect={aspect} />
+                  ))}
                 </div>
               );
             })
           : null}
       </div>
-      {jumpBar && letterIndex && items.length > 30 ? (
+      {jumpBar && letterIndex && count > 30 ? (
         <div className="fixed right-1.5 top-1/2 z-10 hidden -translate-y-1/2 flex-col items-center md:flex">
           {LETTERS.map((l) => {
             const enabled = letterIndex.has(l);

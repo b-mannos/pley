@@ -203,8 +203,17 @@ async fn movies_are_scanned_listed_and_searchable() {
     assert_eq!(by_year.body["total"], json!(3));
     assert_eq!(titles(&by_year.body["items"]), vec!["Blade Runner 2049"]);
 
+    // `total` counts every match, whatever the page.
+    let second = app.get(&format!("/api/libraries/{lib}/items?offset=1&limit=1"), &token).await;
+    assert_eq!(second.body["total"], json!(3));
+    assert_eq!(titles(&second.body["items"]), vec!["Blade Runner 2049"]);
+    let past_end = app.get(&format!("/api/libraries/{lib}/items?offset=5"), &token).await;
+    assert_eq!(past_end.body["total"], json!(3));
+    assert_eq!(past_end.body["items"], json!([]));
+
     let matrix = page.body["items"].as_array().unwrap().iter().find(|i| i["title"] == "The Matrix").unwrap().clone();
     assert_eq!(matrix["year"], json!(1999));
+    assert!(matrix.get("parent_id").is_none(), "fields without a value are left out");
     assert!(matrix["poster_url"].as_str().unwrap().contains("/images/poster"));
     let id = matrix["id"].as_i64().unwrap();
     let detail = app.get(&format!("/api/items/{id}"), &token).await;
@@ -311,6 +320,8 @@ async fn shows_progress_and_hubs() {
     assert_eq!(show.body["user_state"]["watched"], json!(true));
     let unwatched = app.get(&format!("/api/libraries/{lib}/items?watched=false"), &token).await;
     assert_eq!(unwatched.body["total"], json!(0));
+    let watched = app.get(&format!("/api/libraries/{lib}/items?watched=true"), &token).await;
+    assert_eq!(watched.body["total"], json!(1));
     assert_eq!(
         app.post(&format!("/api/items/{show_id}/unwatched"), &token, json!({})).await.status,
         StatusCode::NO_CONTENT
