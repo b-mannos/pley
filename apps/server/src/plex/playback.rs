@@ -245,6 +245,21 @@ pub async fn progress(
     Ok(Node::container().attr("size", 0))
 }
 
+/// `/:/rate?key=…&rating=0-10` (a negative rating clears it).
+pub async fn rate(State(state): State<AppState>, PlexUser(user): PlexUser, params: Params) -> PlexResult<Node> {
+    let id = rating_key(&params)?;
+    let row = catalog::item(&state.db, user.id, id).await?.ok_or(PlexError::NotFound)?;
+    let value = params.parse::<f64>("rating").ok_or_else(|| PlexError::BadRequest("rating is required".into()))?;
+    let rating = if value < 0.0 {
+        None
+    } else {
+        Some(catalog::valid_rating(value).ok_or_else(|| PlexError::BadRequest("rating must be 0-10".into()))?)
+    };
+    catalog::set_rating(&state.db, user.id, row.id, rating).await?;
+    state.events.send(ServerEvent::LibraryChanged { library_id: row.library_id });
+    Ok(Node::container())
+}
+
 async fn set_watched(state: &AppState, user: &AuthUser, params: &Params, watched: bool) -> PlexResult<Node> {
     let id = rating_key(params)?;
     let row = catalog::item(&state.db, user.id, id).await?.ok_or(PlexError::NotFound)?;

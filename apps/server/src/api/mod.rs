@@ -82,6 +82,7 @@ pub fn router(state: AppState) -> Router {
         .route("/items/{id}/progress", post(items::progress))
         .route("/items/{id}/watched", post(items::watched))
         .route("/items/{id}/streams", put(items::set_streams))
+        .route("/items/{id}/rating", put(items::set_rating))
         .route("/items/{id}/unwatched", post(items::unwatched))
         .route("/items/{id}/refresh", post(items::refresh))
         .route("/items/{id}/analyze", post(items::analyze))

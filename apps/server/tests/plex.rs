@@ -388,3 +388,35 @@ async fn play_history() {
     assert_eq!(delete, StatusCode::OK);
     assert!(metadata(&app.plex_json("/status/sessions/history/all", &token).await).is_empty());
 }
+
+#[tokio::test]
+async fn user_ratings_through_rate() {
+    let app = TestApp::new().await;
+    let token = app.setup().await;
+    app.media_file("movies/Alpha (2001).mp4");
+    app.media_file("movies/Beta (2002).mp4");
+    let lib = app.library(&token, "Movies", "movies", "movies").await;
+    let all = app.plex_json(&format!("/library/sections/{lib}/all"), &token).await;
+    let beta = metadata(&all).iter().find(|m| m["title"] == "Beta").unwrap()["ratingKey"].as_str().unwrap().to_owned();
+    let rated = app
+        .plex(
+            &format!("/:/rate?key={beta}&identifier=com.plexapp.plugins.library&rating=8"),
+            &[("x-plex-token", &token)],
+        )
+        .await;
+    assert_eq!(rated.status, StatusCode::OK, "{}", rated.text);
+    let details = app.plex_json(&format!("/library/metadata/{beta}"), &token).await;
+    assert_eq!(metadata(&details)[0]["userRating"], 8.0);
+    let sorted = app.plex_json(&format!("/library/sections/{lib}/all?sort=userRating:desc"), &token).await;
+    assert_eq!(titles(&sorted), vec!["Beta", "Alpha"]);
+    let rated = app.plex_json(&format!("/library/sections/{lib}/all?userRating%3E%3E=5"), &token).await;
+    assert_eq!(titles(&rated), vec!["Beta"]);
+
+    app.plex(
+        &format!("/:/rate?key={beta}&identifier=com.plexapp.plugins.library&rating=-1"),
+        &[("x-plex-token", &token)],
+    )
+    .await;
+    let details = app.plex_json(&format!("/library/metadata/{beta}"), &token).await;
+    assert!(metadata(&details)[0].get("userRating").is_none());
+}

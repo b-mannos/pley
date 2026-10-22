@@ -205,7 +205,7 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/_/progress", any(playback::progress))
         .route("/_/scrobble", any(playback::scrobble))
         .route("/_/unscrobble", any(playback::unscrobble))
-        .route("/_/rate", any(server::accepted))
+        .route("/_/rate", any(playback::rate))
         .route("/status/sessions", get(playback::sessions))
         .route("/status/sessions/history/all", get(server::history))
         .route("/status/sessions/history/{id}", delete(server::delete_history))

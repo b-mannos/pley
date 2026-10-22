@@ -219,7 +219,10 @@ pub async fn items(
     let descending = match query.get("order").map(String::as_str) {
         Some("desc") => true,
         Some("asc") => false,
-        _ => matches!(sort, SortKey::Added | SortKey::Rating | SortKey::Release | SortKey::LastPlayed),
+        _ => matches!(
+            sort,
+            SortKey::Added | SortKey::Rating | SortKey::Release | SortKey::LastPlayed | SortKey::UserRating
+        ),
     };
     let year = query.get("year").and_then(|y| y.parse().ok());
     let q = LibraryQuery {

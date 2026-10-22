@@ -174,6 +174,31 @@ pub async fn progress(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+pub struct Rating {
+    rating: Option<f64>,
+}
+
+/// `PUT /api/items/{id}/rating`: the user's own rating, 0-10 (two points
+/// per star), or `null` to clear it.
+pub async fn set_rating(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<i64>,
+    Json(body): Json<Rating>,
+) -> ApiResult<StatusCode> {
+    let row = item_or_404(&state, user.id, id).await?;
+    let rating = match body.rating {
+        Some(value) => {
+            Some(catalog::valid_rating(value).ok_or_else(|| AppError::bad_request("rating must be between 0 and 10"))?)
+        }
+        None => None,
+    };
+    catalog::set_rating(&state.db, user.id, id, rating).await?;
+    state.events.send(ServerEvent::LibraryChanged { library_id: row.library_id });
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn watched(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<StatusCode> {
     let row = item_or_404(&state, user.id, id).await?;
     catalog::set_watched(&state.db, user.id, id, &row.kind, true).await?;

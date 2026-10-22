@@ -270,6 +270,7 @@ pub fn item_node(
             .attr("audienceRating", rating)
             .attr("audienceRatingImage", "themoviedb://image.rating");
     }
+    node = node.opt("userRating", row.user_rating);
     node = node
         .opt("originallyAvailableAt", row.release_date.as_deref())
         .opt("duration", row.duration_ms.filter(|d| *d > 0))

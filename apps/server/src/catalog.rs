@@ -48,7 +48,7 @@ SELECT i.id, i.library_id, i.kind, i.title, i.sort_title, i.year, i.idx, i.disc,
        COALESCE(gp.poster IS NOT NULL, 0) AS grandparent_has_poster, COALESCE(gp.backdrop IS NOT NULL, 0) AS grandparent_has_backdrop,
        gp.updated_at AS grandparent_updated_at,
        COALESCE(s.position_ms, 0) AS position_ms, COALESCE(s.watched, 0) AS watched,
-       COALESCE(s.play_count, 0) AS play_count, s.last_played_at,
+       COALESCE(s.play_count, 0) AS play_count, s.last_played_at, s.rating AS user_rating,
        i.leaf_count, i.child_count,
        CASE i.kind
          WHEN 'show' THEN (SELECT COUNT(*) FROM items e JOIN user_item_state us ON us.item_id = e.id
@@ -97,6 +97,7 @@ pub struct ItemRow {
     pub watched: bool,
     pub play_count: i64,
     pub last_played_at: Option<i64>,
+    pub user_rating: Option<f64>,
     pub leaf_count: Option<i64>,
     pub child_count: Option<i64>,
     pub viewed_leaf_count: Option<i64>,
@@ -111,6 +112,9 @@ pub struct UserState {
     pub play_count: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_played_at: Option<i64>,
+    /// The user's star rating, 0-10 (two points per star).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rating: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -264,6 +268,7 @@ impl ItemRow {
                 watched,
                 play_count: self.play_count,
                 last_played_at: self.last_played_at,
+                rating: self.user_rating,
             },
             leaf_count: self.leaf_count,
             viewed_leaf_count: self.viewed_leaf_count,
@@ -395,6 +400,7 @@ pub enum SortKey {
     Release,
     Duration,
     LastPlayed,
+    UserRating,
 }
 
 impl SortKey {
@@ -407,6 +413,7 @@ impl SortKey {
             "release" => SortKey::Release,
             "duration" => SortKey::Duration,
             "last_played" => SortKey::LastPlayed,
+            "user_rating" => SortKey::UserRating,
             _ => return None,
         })
     }
@@ -430,6 +437,7 @@ impl SortKey {
                 true,
             ),
             SortKey::LastPlayed => ("s.last_played_at", true),
+            SortKey::UserRating => ("s.rating", true),
         }
     }
 
@@ -677,6 +685,29 @@ pub async fn record_progress(
     .execute(&db.write)
     .await?;
     Ok(false)
+}
+
+/// Set (0-10) or clear the user's star rating of an item.
+pub async fn set_rating(db: &Db, user_id: i64, item_id: i64, rating: Option<f64>) -> sqlx::Result<()> {
+    let now = now();
+    sqlx::query(
+        "INSERT INTO user_item_state (user_id, item_id, rating, rated_at, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, item_id) DO UPDATE SET
+            rating = excluded.rating, rated_at = excluded.rated_at, updated_at = excluded.updated_at",
+    )
+    .bind(user_id)
+    .bind(item_id)
+    .bind(rating)
+    .bind(rating.map(|_| now))
+    .bind(now)
+    .execute(&db.write)
+    .await?;
+    Ok(())
+}
+
+/// A rating in Plex's 0-10 range, rounded to half stars; `None` for anything else.
+pub fn valid_rating(value: f64) -> Option<f64> {
+    (value.is_finite() && (0.0..=10.0).contains(&value)).then(|| value.round())
 }
 
 /// Leaf items covered by `item` (itself for movies/episodes/tracks).

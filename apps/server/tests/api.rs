@@ -1034,3 +1034,43 @@ async fn watch_history() {
     assert_eq!(reply.status, StatusCode::NO_CONTENT);
     assert_eq!(app.get("/api/history", &admin).await.body["total"], json!(1));
 }
+
+#[tokio::test]
+async fn user_ratings() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    for name in ["Alien (1979)", "Brazil (1985)", "Casablanca (1942)"] {
+        app.media_file(&format!("movies/{name}.mkv"), 1024);
+    }
+    let lib = app.library(&admin, "Movies", "movies", "movies").await;
+    let page = app.get(&format!("/api/libraries/{lib}/items"), &admin).await;
+    let id_of = |title: &str| {
+        page.body["items"].as_array().unwrap().iter().find(|i| i["title"] == title).unwrap()["id"].as_i64().unwrap()
+    };
+    let rate = |id: i64, rating: Value| {
+        let app = &app;
+        let admin = admin.clone();
+        async move {
+            app.call(
+                Method::PUT,
+                &format!("/api/items/{id}/rating"),
+                Some(&admin),
+                Some(json!({"rating": rating})),
+                &[],
+            )
+            .await
+        }
+    };
+    assert_eq!(rate(id_of("Brazil"), json!(9)).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(rate(id_of("Alien"), json!(6.6)).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(rate(id_of("Alien"), json!(11)).await.status, StatusCode::BAD_REQUEST);
+
+    let alien = app.get(&format!("/api/items/{}", id_of("Alien")), &admin).await;
+    assert_eq!(alien.body["user_state"]["rating"], json!(7.0), "rounded to a half star");
+    let sorted = app.get(&format!("/api/libraries/{lib}/items?sort=user_rating"), &admin).await;
+    assert_eq!(titles(&sorted.body["items"]), vec!["Brazil", "Alien", "Casablanca"], "unrated last");
+
+    assert_eq!(rate(id_of("Brazil"), Value::Null).await.status, StatusCode::NO_CONTENT);
+    let brazil = app.get(&format!("/api/items/{}", id_of("Brazil")), &admin).await;
+    assert!(brazil.body["user_state"].get("rating").is_none());
+}
