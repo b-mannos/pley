@@ -169,7 +169,14 @@ export interface ClientCaps {
   containers: string[];
   video_codecs: string[];
   audio_codecs: string[];
+  /** Shows HDR10 / HLG without tone mapping. */
+  hdr?: boolean;
+  /** Decodes Dolby Vision (needed for profile 5). */
+  dolby_vision?: boolean;
 }
+
+/** `auto` lets the server pick the cheapest method the client supports. */
+export type PlaybackMode = "auto" | "direct" | "remux" | "transcode";
 
 export interface PlaybackRequest {
   item_id: Id;
@@ -179,6 +186,9 @@ export interface PlaybackRequest {
   max_bitrate?: number | null;
   max_height?: number | null;
   start_ms?: number;
+  mode?: PlaybackMode;
+  /** Identifies the player; its previous sessions end when it starts a new one. */
+  client_id?: string;
   caps: ClientCaps;
 }
 
@@ -204,6 +214,8 @@ export interface ScanStatus {
 
 export type TranscodeJobState = "starting" | "running" | "idle" | "finished" | "failed";
 
+export type TranscodePipeline = "gpu" | "hybrid" | "cpu" | "copy";
+
 export interface TranscodeInfo {
   job_id: string;
   state: TranscodeJobState;
@@ -215,6 +227,8 @@ export interface TranscodeInfo {
   audio_out: string | null;
   encoder: string | null;
   decoder: string | null;
+  /** Where frames are processed: zero-copy on one GPU, mixed, CPU only, or stream copy. */
+  pipeline?: TranscodePipeline | null;
   tonemap: string | null;
   subtitle_burn: boolean;
   speed: number | null;

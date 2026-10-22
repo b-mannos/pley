@@ -11,6 +11,30 @@ function probe(el: HTMLMediaElement, type: string): boolean {
   }
 }
 
+type MseCtor = { isTypeSupported(type: string): boolean };
+
+/** Media Source Extensions support (`ManagedMediaSource` on iOS Safari). */
+function mse(type: string): boolean {
+  const w = window as unknown as { MediaSource?: MseCtor; ManagedMediaSource?: MseCtor };
+  try {
+    return !!(w.MediaSource?.isTypeSupported(type) || w.ManagedMediaSource?.isTypeSupported(type));
+  } catch {
+    return false;
+  }
+}
+
+/** Decodable either by the element itself or through MSE. */
+function decodes(el: HTMLMediaElement, ...types: string[]): boolean {
+  return types.some((t) => probe(el, t) || mse(t));
+}
+
+/** Chrome, Edge, Opera, … play Matroska through `<video src>` even though they don't advertise it. */
+function isChromium(): boolean {
+  const uaData = (navigator as Navigator & { userAgentData?: { brands?: { brand: string }[] } }).userAgentData;
+  if (uaData?.brands?.length) return uaData.brands.some((b) => b.brand === "Chromium");
+  return /\b(Chrome|Chromium)\//.test(navigator.userAgent) && !/\bEdge\//.test(navigator.userAgent);
+}
+
 function audioCodecs(el: HTMLMediaElement): string[] {
   const codecs: string[] = [];
   if (probe(el, 'audio/mp4; codecs="mp4a.40.2"')) codecs.push("aac");
@@ -34,16 +58,32 @@ export function videoCaps(): ClientCaps {
   const containers: string[] = [];
   if (probe(v, "video/mp4")) containers.push("mp4", "m4v", "mov");
   if (probe(v, "video/webm")) containers.push("webm");
+  if (probe(v, "video/x-matroska") || probe(v, "video/matroska") || isChromium()) containers.push("mkv");
 
   const video: string[] = [];
-  if (probe(v, 'video/mp4; codecs="avc1.640028"') || probe(v, 'video/mp4; codecs="avc1.42E01E"')) video.push("h264");
-  if (probe(v, 'video/mp4; codecs="hvc1.1.6.L120.90"') || probe(v, 'video/mp4; codecs="hev1.1.6.L120.90"'))
-    video.push("hevc");
-  if (probe(v, 'video/webm; codecs="vp9"') || probe(v, 'video/mp4; codecs="vp09.00.10.08"')) video.push("vp9");
-  if (probe(v, 'video/mp4; codecs="av01.0.08M.08"') || probe(v, 'video/webm; codecs="av01.0.08M.08"')) video.push("av1");
+  if (decodes(v, 'video/mp4; codecs="avc1.640028"', 'video/mp4; codecs="avc1.42E01E"')) video.push("h264");
+  if (decodes(v, 'video/mp4; codecs="hvc1.1.6.L120.90"', 'video/mp4; codecs="hev1.1.6.L120.90"')) video.push("hevc");
+  if (decodes(v, 'video/webm; codecs="vp9"', 'video/mp4; codecs="vp09.00.10.08"')) video.push("vp9");
+  if (decodes(v, 'video/mp4; codecs="av01.0.08M.08"', 'video/webm; codecs="av01.0.08M.08"')) video.push("av1");
   if (probe(v, 'video/webm; codecs="vp8"')) video.push("vp8");
 
-  videoCache = { containers, video_codecs: video, audio_codecs: audioCodecs(v) };
+  // HDR needs an HDR display and a 10-bit decoder for an HDR-capable codec.
+  const tenBit = decodes(
+    v,
+    'video/mp4; codecs="hvc1.2.4.L153.B0"', // HEVC Main 10
+    'video/mp4; codecs="vp09.02.51.10.01.09.16.09.00"', // VP9 profile 2, BT.2020 PQ
+    'video/mp4; codecs="av01.0.13M.10"', // AV1 Main 10-bit
+  );
+  const hdrDisplay = typeof window.matchMedia === "function" && window.matchMedia("(dynamic-range: high)").matches;
+  const dolbyVision = decodes(v, 'video/mp4; codecs="dvh1.05.06"', 'video/mp4; codecs="dvhe.05.06"');
+
+  videoCache = {
+    containers,
+    video_codecs: video,
+    audio_codecs: audioCodecs(v),
+    hdr: hdrDisplay && tenBit,
+    dolby_vision: dolbyVision,
+  };
   return videoCache;
 }
 
@@ -61,9 +101,6 @@ export function audioCaps(): ClientCaps {
   audioCache = { containers, video_codecs: [], audio_codecs: audioCodecs(a) };
   return audioCache;
 }
-
-/** Caps that force the server to transcode everything. */
-export const NO_CAPS: ClientCaps = { containers: [], video_codecs: [], audio_codecs: [] };
 
 export function canPlayNativeHls(el: HTMLMediaElement): boolean {
   return probe(el, "application/vnd.apple.mpegurl");

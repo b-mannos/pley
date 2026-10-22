@@ -18,7 +18,20 @@ export function useServerEvents(enabled: boolean) {
     let flushTimer: number | undefined;
     let closed = false;
     let failures = 0;
+    let connectedBefore = false;
     const pendingLibraries = new Set<Id>();
+
+    // The server neither replays events nor queues them for slow clients:
+    // after a reconnect anything may have changed (e.g. a scan finished while
+    // the server restarted), so refetch what events would have updated.
+    const resync = () => {
+      qc.invalidateQueries({ queryKey: keys.libraries });
+      qc.invalidateQueries({ queryKey: keys.activity });
+      qc.invalidateQueries({ queryKey: ["hubs"] });
+      qc.invalidateQueries({ queryKey: ["library"] });
+      qc.invalidateQueries({ queryKey: ["item"] });
+      qc.invalidateQueries({ queryKey: ["search"] });
+    };
 
     // Metadata refreshes can emit many `library_changed` events in a burst;
     // batch them so we refetch at most every ~1.5 s.
@@ -104,6 +117,9 @@ export function useServerEvents(enabled: boolean) {
       es = new EventSource("/api/events");
       es.onopen = () => {
         failures = 0;
+        // Also fires when the browser reconnects on its own.
+        if (connectedBefore) resync();
+        connectedBefore = true;
       };
       es.onmessage = (msg) => {
         try {

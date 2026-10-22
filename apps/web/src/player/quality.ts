@@ -1,3 +1,5 @@
+import type { PlaybackMode } from "@/api/types";
+
 export interface QualityOption {
   id: string;
   label: string;
@@ -17,4 +19,21 @@ export const QUALITIES: QualityOption[] = [
 
 export function qualityById(id: string | null | undefined): QualityOption {
   return QUALITIES.find((q) => q.id === id) ?? QUALITIES[0];
+}
+
+export interface ModeOption {
+  id: PlaybackMode;
+  label: string;
+  hint: string;
+}
+
+export const PLAYBACK_MODES: ModeOption[] = [
+  { id: "auto", label: "Auto", hint: "Best method for this browser" },
+  { id: "direct", label: "Direct Play", hint: "The original file, unchanged" },
+  { id: "remux", label: "Remux", hint: "Repackaged, original video" },
+  { id: "transcode", label: "Transcode", hint: "Converted video, most compatible" },
+];
+
+export function modeById(id: string | null | undefined): ModeOption {
+  return PLAYBACK_MODES.find((m) => m.id === id) ?? PLAYBACK_MODES[0];
 }

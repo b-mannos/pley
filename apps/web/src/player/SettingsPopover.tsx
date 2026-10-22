@@ -1,20 +1,37 @@
 import { useRef, useState, type ReactNode } from "react";
 import { Check, ChevronLeft, ChevronRight, Settings2 } from "lucide-react";
-import type { MediaStream, PlaybackInfo } from "@/api/types";
+import type { MediaStream, PlaybackInfo, PlaybackMode } from "@/api/types";
 import { cn } from "@/lib/cn";
 import { streamLabel } from "@/lib/format";
 import { useDismiss } from "@/lib/hooks";
-import { QUALITIES } from "./quality";
+import { modeById, PLAYBACK_MODES, QUALITIES } from "./quality";
 
-type Panel = "root" | "quality" | "audio" | "subtitles";
+type Panel = "root" | "quality" | "mode" | "audio" | "subtitles";
+
+const PANEL_TITLE: Record<Exclude<Panel, "root">, string> = {
+  quality: "Quality",
+  mode: "Playback",
+  audio: "Audio",
+  subtitles: "Subtitles",
+};
 
 export const METHOD_LABEL: Record<PlaybackInfo["method"], string> = {
   direct: "Direct Play",
-  remux: "Direct Stream",
+  remux: "Remux",
   transcode: "Transcode",
 };
 
-function Option({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: ReactNode }) {
+function Option({
+  selected,
+  onClick,
+  hint,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  hint?: string;
+  children: ReactNode;
+}) {
   return (
     <button
       type="button"
@@ -24,7 +41,10 @@ function Option({ selected, onClick, children }: { selected: boolean; onClick: (
       className="flex w-full items-center gap-2.5 px-4 py-2 text-left text-sm transition-colors hover:bg-white/10"
     >
       <Check className={cn("size-4 shrink-0 text-accent", !selected && "invisible")} />
-      <span className="min-w-0 flex-1 truncate">{children}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{children}</span>
+        {hint ? <span className="block truncate text-xs text-white/50">{hint}</span> : null}
+      </span>
     </button>
   );
 }
@@ -47,8 +67,12 @@ export interface SettingsPopoverProps {
   open: boolean;
   setOpen: (open: boolean) => void;
   info: PlaybackInfo | null;
+  /** Why the current method was chosen (server reason or a client-side note). */
+  reason: string | null;
   quality: string;
   onQuality: (id: string) => void;
+  mode: PlaybackMode;
+  onMode: (mode: PlaybackMode) => void;
   audioStreams: MediaStream[];
   audioIndex: number | null;
   onAudio: (index: number) => void;
@@ -58,7 +82,8 @@ export interface SettingsPopoverProps {
 }
 
 export function SettingsPopover(props: SettingsPopoverProps) {
-  const { open, setOpen, info, quality, onQuality, audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle } = props;
+  const { open, setOpen, info, reason, quality, onQuality, mode, onMode } = props;
+  const { audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle } = props;
   const [panel, setPanel] = useState<Panel>("root");
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(ref, open, () => {
@@ -102,11 +127,12 @@ export function SettingsPopover(props: SettingsPopoverProps) {
               {info ? (
                 <div className="px-4 pb-2 pt-1">
                   <div className="text-xs font-semibold uppercase tracking-wider text-accent">{METHOD_LABEL[info.method]}</div>
-                  {info.reason ? <div className="mt-0.5 text-xs text-white/60">{info.reason}</div> : null}
+                  {reason ? <div className="mt-0.5 line-clamp-3 text-xs text-white/60" title={reason}>{reason}</div> : null}
                 </div>
               ) : null}
               <div className="my-1 h-px bg-white/10" />
               <Nav label="Quality" value={qualityLabel} onClick={() => setPanel("quality")} />
+              <Nav label="Playback" value={modeById(mode).label} onClick={() => setPanel("mode")} />
               {audioStreams.length > 1 ? (
                 <Nav label="Audio" value={currentAudio ? streamLabel(currentAudio) : "Default"} onClick={() => setPanel("audio")} />
               ) : null}
@@ -124,7 +150,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                 className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold transition-colors hover:bg-white/10"
               >
                 <ChevronLeft className="size-4" />
-                {panel === "quality" ? "Quality" : panel === "audio" ? "Audio" : "Subtitles"}
+                {PANEL_TITLE[panel]}
               </button>
               <div className="my-1 h-px bg-white/10" />
               {panel === "quality"
@@ -138,6 +164,21 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                       }}
                     >
                       {q.label}
+                    </Option>
+                  ))
+                : null}
+              {panel === "mode"
+                ? PLAYBACK_MODES.map((m) => (
+                    <Option
+                      key={m.id}
+                      selected={m.id === mode}
+                      hint={m.hint}
+                      onClick={() => {
+                        onMode(m.id);
+                        close();
+                      }}
+                    >
+                      {m.label}
                     </Option>
                   ))
                 : null}

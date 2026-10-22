@@ -3,7 +3,16 @@ import { Link } from "react-router";
 import { Activity as ActivityIcon, Cpu, MonitorPlay, Pause, Play, RefreshCw, Square } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useActivity, useSystemInfo, useTranscoderStatus } from "@/api/hooks";
-import type { PlaybackMethod, ScanStatus, SessionInfo, TranscodeJobState, TranscoderInfo, TranscoderJob, TranscoderStatus } from "@/api/types";
+import type {
+  PlaybackMethod,
+  ScanStatus,
+  SessionInfo,
+  TranscodeJobState,
+  TranscodePipeline,
+  TranscoderInfo,
+  TranscoderJob,
+  TranscoderStatus,
+} from "@/api/types";
 import { Artwork } from "@/components/Artwork";
 import { Badge, Card, EmptyState, ProgressBar, SectionTitle, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -13,9 +22,26 @@ import { useDocumentTitle } from "@/lib/hooks";
 
 const METHOD: Record<PlaybackMethod, { label: string; tone: "success" | "info" | "accent" }> = {
   direct: { label: "Direct Play", tone: "success" },
-  remux: { label: "Direct Stream", tone: "info" },
+  remux: { label: "Remux", tone: "info" },
   transcode: { label: "Transcode", tone: "accent" },
 };
+
+const PIPELINE: Record<TranscodePipeline, { label: string; tone: "success" | "info" | "neutral"; title: string }> = {
+  gpu: { label: "GPU", tone: "success", title: "Decoded, filtered and encoded on the GPU without copies" },
+  hybrid: { label: "Hybrid", tone: "info", title: "Part GPU, part CPU" },
+  cpu: { label: "CPU", tone: "neutral", title: "Software decoding and encoding" },
+  copy: { label: "Copy", tone: "neutral", title: "Video stream copied, not re-encoded" },
+};
+
+function PipelineBadge({ pipeline, className }: { pipeline: TranscodePipeline | null | undefined; className?: string }) {
+  const p = pipeline ? PIPELINE[pipeline] : undefined;
+  if (!p) return null;
+  return (
+    <Badge tone={p.tone} className={className}>
+      <span title={p.title}>{p.label}</span>
+    </Badge>
+  );
+}
 
 const JOB_TONE: Record<TranscodeJobState, "success" | "info" | "accent" | "danger" | "neutral"> = {
   starting: "info",
@@ -75,8 +101,11 @@ function SessionCard({ s }: { s: SessionInfo }) {
         {duration ? <ProgressBar value={s.position_ms / duration} className="h-1" /> : null}
         {t ? (
           <div className="space-y-1 pt-0.5">
-            <div className="text-xs leading-snug text-fg/75" title={transcodeSummary(t)}>
-              {transcodeSummary(t) || "Preparing…"}
+            <div className="flex items-start gap-1.5">
+              <PipelineBadge pipeline={t.pipeline} className="mt-px shrink-0" />
+              <div className="text-xs leading-snug text-fg/75" title={transcodeSummary(t)}>
+                {transcodeSummary(t) || "Preparing…"}
+              </div>
             </div>
             {t.segments_total > 0 ? (
               <div className="flex items-center gap-2 text-[11px] text-subtle">
@@ -225,7 +254,10 @@ function JobsTable({ jobs }: { jobs: TranscoderJob[] }) {
                   {i.audio === "none" ? "—" : i.audio === "copy" ? `${i.audio_in ?? ""} (copy)` : `${i.audio_in ?? "?"} → ${i.audio_out ?? "?"}`}
                 </td>
                 <td className="px-3 py-2 font-mono text-fg/80">
-                  {i.encoder ?? "—"}
+                  <div className="flex items-center gap-1.5">
+                    {i.encoder ?? (i.video === "copy" ? "copy" : "—")}
+                    <PipelineBadge pipeline={i.pipeline} className="font-sans" />
+                  </div>
                   <div className="text-subtle">{i.decoder ?? ""}</div>
                 </td>
                 <td className="px-3 py-2 font-mono text-fg/80">{i.tonemap ?? "—"}</td>

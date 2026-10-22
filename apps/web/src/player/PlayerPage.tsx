@@ -40,11 +40,12 @@ export function PlayerPage() {
       </div>
     );
   }
-  if (item.isError) {
+  // A failed background refetch (e.g. after watch state changed) keeps the
+  // previous data: don't tear down a playing video because of it.
+  const data = item.data;
+  if (!data) {
     return <PlayerMessage title="Can't play this item" message={errorMessage(item.error)} onBack={() => navigate(-1)} />;
   }
-
-  const data = item.data;
   if (data.kind !== "movie" && data.kind !== "episode") return <Navigate to={`/item/${data.id}`} replace />;
   if (!data.files.length) {
     return <PlayerMessage title="Nothing to play" message="This item has no media files." onBack={() => navigate(-1)} />;

@@ -21,18 +21,18 @@ import {
 } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { fetchNext, invalidateWatchState } from "@/api/hooks";
-import type { ItemDetail, ItemSummary, PlaybackInfo, PlaybackState } from "@/api/types";
+import type { ItemDetail, ItemSummary, PlaybackInfo, PlaybackMode, PlaybackState } from "@/api/types";
 import { useOptionalAudioPlayer } from "@/audio/AudioPlayer";
 import { Slider } from "@/components/Slider";
 import { useToast } from "@/components/Toast";
-import { canPlayNativeHls, NO_CAPS, videoCaps } from "@/lib/caps";
+import { canPlayNativeHls, videoCaps } from "@/lib/caps";
 import { cn } from "@/lib/cn";
 import { episodeLabel, formatClock, streamLabel } from "@/lib/format";
 import { loadHls } from "@/lib/hls";
 import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
-import { reportProgress, startPlayback, stopSession } from "@/lib/progress";
+import { endSession, reportProgress, startPlayback, stopSession } from "@/lib/progress";
 import { playUrl } from "@/lib/usePlayItem";
-import { qualityById } from "./quality";
+import { modeById, qualityById } from "./quality";
 import { SeekBar } from "./SeekBar";
 import { METHOD_LABEL, SettingsPopover } from "./SettingsPopover";
 import { UpNext } from "./UpNext";
@@ -67,9 +67,14 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const hlsRef = useRef<HlsType | null>(null);
   const sessionRef = useRef<PlaybackInfo | null>(null);
   const startMsRef = useRef(startMs);
+  /** Last known playhead (s). Kept while a session (re)starts and the element sits at 0. */
   const positionRef = useRef(startMs / 1000);
-  const forceTranscodeRef = useRef(false);
+  /** Mode used instead of the preference after direct play failed to decode (this player only). */
+  const fallbackModeRef = useRef<PlaybackMode | null>(null);
+  /** `network`/`media` count per session; `recreate` (new sessions) is reset once media loads again. */
   const recoveries = useRef({ network: 0, media: 0, recreate: 0 });
+  /** POST /api/playback of the previous run, which ends its own session if that run was cancelled. */
+  const pendingStartRef = useRef<Promise<void>>(Promise.resolve());
 
   const file = item.files.find((f) => f.id === fileId) ?? item.files[0] ?? null;
   const audioStreams = useMemo(() => file?.streams.filter((s) => s.kind === "audio") ?? [], [file]);
@@ -78,6 +83,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const [audioIndex, setAudioIndex] = useState<number | null>(initialAudio);
   const [subIndex, setSubIndex] = useState<number | null>(initialSub);
   const [quality, setQuality] = useLocalStorage<string>("pley.quality", "original");
+  const [storedMode, setStoredMode] = useLocalStorage<PlaybackMode>("pley.playbackMode", "auto");
+  const mode = modeById(storedMode).id;
   const [loadToken, setLoadToken] = useState(0);
 
   const selectedSub = subStreams.find((s) => s.index === subIndex) ?? null;
@@ -85,6 +92,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const shownTextIndex = selectedSub && selectedSub.text_based !== false ? selectedSub.index : null;
 
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
+  const [fellBack, setFellBack] = useState(false);
   const [loading, setLoading] = useState(true);
   const [buffering, setBuffering] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -113,7 +121,12 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     hlsRef.current = null;
   };
 
-  const currentMs = () => Math.round((videoRef.current?.currentTime || positionRef.current) * 1000);
+  /** The playhead in seconds: the element's time once it shows the session's media, else the last known one. */
+  const livePosition = () => {
+    const v = videoRef.current;
+    return v && sessionRef.current && v.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA ? v.currentTime : positionRef.current;
+  };
+  const currentMs = () => Math.round(livePosition() * 1000);
 
   const restartAt = useCallback((seconds: number) => {
     startMsRef.current = Math.max(0, Math.round(seconds * 1000));
@@ -157,8 +170,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const video = videoRef.current;
     if (!video || !file) return;
     let cancelled = false;
-    const ctrl = new AbortController();
     const q = qualityById(quality);
+    const startSec = startMsRef.current / 1000;
+    const requestMode = fallbackModeRef.current ?? mode;
     recoveries.current.network = 0;
     recoveries.current.media = 0;
     setLoading(true);
@@ -167,53 +181,63 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     setEnded(false);
     setBuffering(false);
 
+    // Release the previous session before asking for the next one, so a
+    // quality or track switch never trips the server's transcode limit.
+    // Started right away (not in the async part) so it also happens when this
+    // run is cancelled; it reports the last real position, not the reset element's 0.
     const prev = sessionRef.current;
-    if (prev) {
-      sessionRef.current = null;
-      void reportProgress(item.id, {
-        position_ms: Math.round(video.currentTime * 1000),
-        duration_ms: prev.duration_ms || undefined,
-        state: "paused",
-        session_id: prev.session_id,
-      }).then(() => stopSession(prev.session_id));
-    }
+    sessionRef.current = null;
+    const released = prev ? endSession(item.id, prev, positionRef.current * 1000) : Promise.resolve();
+    const previousStart = pendingStartRef.current;
     destroyHls();
     video.pause();
     video.removeAttribute("src");
     video.load();
+    positionRef.current = startSec;
+    setCurrent(startSec);
 
-    const seekOnLoad = (startSec: number) => {
-      if (startSec <= 0) return;
+    const seekOnLoad = (seconds: number) => {
+      if (seconds <= 0) return;
       const onMeta = () => {
-        video.currentTime = startSec;
+        video.currentTime = seconds;
       };
       video.addEventListener("loadedmetadata", onMeta, { once: true });
     };
 
+    // The new session is recorded as soon as it exists, so the next run (or
+    // unmount) ends it; a run cancelled before that ends it here instead.
+    const acquired = (async (): Promise<PlaybackInfo | null> => {
+      await Promise.all([released, previousStart]);
+      if (cancelled) return null;
+      const pinfo = await startPlayback({
+        item_id: item.id,
+        file_id: file.id,
+        audio_index: audioIndex,
+        subtitle_index: burnIndex,
+        max_bitrate: q.maxBitrate,
+        max_height: q.maxHeight,
+        start_ms: Math.round(startSec * 1000),
+        mode: requestMode,
+        caps: videoCaps(),
+      });
+      if (cancelled) {
+        await stopSession(pinfo.session_id);
+        return null;
+      }
+      sessionRef.current = pinfo;
+      return pinfo;
+    })();
+    pendingStartRef.current = acquired.then(
+      () => undefined,
+      () => undefined,
+    );
+
     (async () => {
       try {
-        const startSec = startMsRef.current / 1000;
-        const pinfo = await startPlayback(
-          {
-            item_id: item.id,
-            file_id: file.id,
-            audio_index: audioIndex,
-            subtitle_index: burnIndex,
-            max_bitrate: q.maxBitrate,
-            max_height: q.maxHeight,
-            start_ms: startMsRef.current,
-            caps: forceTranscodeRef.current ? NO_CAPS : videoCaps(),
-          },
-          ctrl.signal,
-        );
-        if (cancelled) {
-          void stopSession(pinfo.session_id);
-          return;
-        }
-        sessionRef.current = pinfo;
+        const pinfo = await acquired;
+        if (!pinfo || cancelled) return;
         setInfo(pinfo);
-        setCurrent(startSec);
-        positionRef.current = startSec;
+        setFellBack(requestMode !== mode);
 
         if (pinfo.hls) {
           const hasMse = typeof window.MediaSource !== "undefined" || "ManagedMediaSource" in window;
@@ -241,28 +265,42 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
               });
               hlsRef.current = hls;
               hls.on(Hls.Events.ERROR, (_evt, data: ErrorData) => {
-                if (!data.fatal) return;
+                if (!data.fatal || cancelled) return;
+                const r = recoveries.current;
                 if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
                   const code = data.response?.code;
-                  if ((code === 404 || code === 410) && recoveries.current.recreate < 3) {
-                    // The server forgot the session (idle timeout/restart): recreate it here.
-                    recoveries.current.recreate += 1;
-                    restartAt(video.currentTime || startSec);
-                    return;
-                  }
-                  if (recoveries.current.network < 4) {
-                    recoveries.current.network += 1;
-                    hls.startLoad();
+                  const playlist =
+                    data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+                    data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT ||
+                    data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR;
+                  if (code === 404 || code === 410 || playlist) {
+                    // The session expired (idle timeout, server restart) or its
+                    // playlist can't be loaded: only a new session helps.
+                    if (r.recreate < 3) {
+                      r.recreate += 1;
+                      restartAt(livePosition());
+                      return;
+                    }
+                  } else if (r.network < 4) {
+                    r.network += 1;
+                    // Without a position hls.js would restart from the beginning.
+                    hls.startLoad(livePosition());
                     return;
                   }
                 } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                  if (recoveries.current.media < 2) {
-                    recoveries.current.media += 1;
+                  if (r.media < 2) {
+                    r.media += 1;
                     hls.recoverMediaError();
                     return;
                   }
                 }
                 setError(`Playback failed (${data.details}).`);
+              });
+              hls.on(Hls.Events.FRAG_LOADED, () => {
+                // Media flows again: the next incident (e.g. the session expiring
+                // during a long pause) gets a fresh retry budget.
+                recoveries.current.recreate = 0;
+                recoveries.current.network = 0;
               });
               hls.loadSource(pinfo.url);
               hls.attachMedia(video);
@@ -279,7 +317,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           if (!cancelled && err instanceof DOMException && err.name === "NotAllowedError") setNeedsGesture(true);
         }
       } catch (err) {
-        if (cancelled || (err instanceof DOMException && err.name === "AbortError")) return;
+        if (cancelled) return;
         setError(errorMessage(err));
       } finally {
         if (!cancelled) setLoading(false);
@@ -288,10 +326,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
     return () => {
       cancelled = true;
-      ctrl.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item.id, file?.id, audioIndex, burnIndex, quality, loadToken]);
+  }, [item.id, file?.id, audioIndex, burnIndex, quality, mode, loadToken]);
 
   // Final teardown on unmount: report "stopped" and release the transcode.
   useEffect(() => {
@@ -300,47 +337,32 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       sessionRef.current = null;
       hlsRef.current?.destroy();
       hlsRef.current = null;
-      if (s) {
-        void reportProgress(
-          item.id,
-          {
-            position_ms: Math.round(positionRef.current * 1000),
-            duration_ms: s.duration_ms || undefined,
-            state: "stopped",
-            session_id: s.session_id,
-          },
-          true,
-        )
-          .then(() => stopSession(s.session_id, true))
-          .then(() => invalidateWatchState(qc));
-      } else {
-        invalidateWatchState(qc);
-      }
+      const done = s ? endSession(item.id, s, positionRef.current * 1000, true) : Promise.resolve();
+      void done.then(() => invalidateWatchState(qc));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Tab closed / navigated away: best-effort stop with keepalive requests.
+  // Tab closed / navigated away: best-effort stop with keepalive requests (in
+  // parallel: nothing can wait for a response while the page unloads).
+  // Restored from the back/forward cache: start again where we were.
   useEffect(() => {
     const onHide = () => {
       const s = sessionRef.current;
       if (!s) return;
       sessionRef.current = null;
-      void reportProgress(
-        item.id,
-        {
-          position_ms: Math.round(positionRef.current * 1000),
-          duration_ms: s.duration_ms || undefined,
-          state: "stopped",
-          session_id: s.session_id,
-        },
-        true,
-      );
-      void stopSession(s.session_id, true);
+      void endSession(item.id, s, positionRef.current * 1000, true);
+    };
+    const onShow = (e: PageTransitionEvent) => {
+      if (e.persisted && !sessionRef.current) restartAt(positionRef.current);
     };
     window.addEventListener("pagehide", onHide);
-    return () => window.removeEventListener("pagehide", onHide);
-  }, [item.id]);
+    window.addEventListener("pageshow", onShow);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("pageshow", onShow);
+    };
+  }, [item.id, restartAt]);
 
   // ---------------------------------------------------------------------
   // Media element events.
@@ -376,10 +398,19 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const v = videoRef.current;
     if (!v || !v.error || hlsRef.current) return; // hls.js reports its own errors
     const s = sessionRef.current;
-    if (s && s.method === "direct" && !forceTranscodeRef.current) {
-      // The browser claimed support but can't decode this file: fall back to a transcode.
-      forceTranscodeRef.current = true;
-      restartAt(positionRef.current);
+    if (!s) return; // the element was reset for the next session
+    const code = v.error.code;
+    const undecodable = code === MediaError.MEDIA_ERR_DECODE || code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
+    if (s.method === "direct" && undecodable && !fallbackModeRef.current) {
+      // The browser claimed support but can't decode this file: transcode it instead.
+      fallbackModeRef.current = "transcode";
+      restartAt(livePosition());
+      return;
+    }
+    if (code === MediaError.MEDIA_ERR_NETWORK && recoveries.current.recreate < 3) {
+      // Server restart or connection drop: the same method will most likely work again.
+      recoveries.current.recreate += 1;
+      restartAt(livePosition());
       return;
     }
     setError(v.error.message || "This video can't be played in your browser.");
@@ -397,16 +428,26 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       setPlaying(false);
       if (!v.ended) report("paused");
     };
+    // While a session (re)starts the element is reset to 0 before it seeks to
+    // the start position: only trust its time once it shows the session's media.
+    const showsMedia = () => !!sessionRef.current && v.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
     const onTime = () => {
+      if (!showsMedia()) return;
       positionRef.current = v.currentTime;
       setCurrent(v.currentTime);
     };
     const onProgress = () => setBuffered(rangesOf(v.buffered));
     const onDuration = () => setMediaDuration(Number.isFinite(v.duration) ? v.duration : 0);
     const onWaiting = () => setBuffering(true);
-    const onPlaying = () => setBuffering(false);
+    const onPlaying = () => {
+      setBuffering(false);
+      // hls.js resets the budget per loaded fragment; direct play once it plays again.
+      if (!hlsRef.current) recoveries.current.recreate = 0;
+    };
+    const onCanPlay = () => setBuffering(false);
     const onSeeked = () => {
       setBuffering(false);
+      if (!sessionRef.current) return;
       positionRef.current = v.currentTime;
       report(v.paused ? "paused" : "playing");
     };
@@ -420,7 +461,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     v.addEventListener("durationchange", onDuration);
     v.addEventListener("waiting", onWaiting);
     v.addEventListener("playing", onPlaying);
-    v.addEventListener("canplay", onPlaying);
+    v.addEventListener("canplay", onCanPlay);
     v.addEventListener("seeked", onSeeked);
     v.addEventListener("ended", onEnded);
     v.addEventListener("error", onError);
@@ -432,7 +473,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       v.removeEventListener("durationchange", onDuration);
       v.removeEventListener("waiting", onWaiting);
       v.removeEventListener("playing", onPlaying);
-      v.removeEventListener("canplay", onPlaying);
+      v.removeEventListener("canplay", onCanPlay);
       v.removeEventListener("seeked", onSeeked);
       v.removeEventListener("ended", onEnded);
       v.removeEventListener("error", onError);
@@ -541,8 +582,14 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const changeQuality = (id: string) => {
     if (id === quality) return;
     startMsRef.current = currentMs();
-    forceTranscodeRef.current = false;
+    fallbackModeRef.current = null;
     setQuality(id);
+  };
+  const changeMode = (next: PlaybackMode) => {
+    if (next === mode) return;
+    startMsRef.current = currentMs();
+    fallbackModeRef.current = null;
+    setStoredMode(next);
   };
   const changeSubtitle = (index: number | null) => {
     const s = subStreams.find((x) => x.index === index);
@@ -575,7 +622,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const retry = () => {
     setError(null);
     recoveries.current.recreate = 0;
-    restartAt(positionRef.current);
+    // Without a session (its start failed) the element knows nothing: use the intended start.
+    restartAt(sessionRef.current ? livePosition() : startMsRef.current / 1000);
   };
 
   // Keyboard shortcuts.
@@ -659,6 +707,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   };
 
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
+  // After a failed direct play the server only knows that a transcode was requested.
+  const methodReason = fellBack ? "This browser couldn't play the original file" : (info?.reason ?? null);
   const subtitleLabel = (s: PlaybackInfo["subtitles"][number]) =>
     streamLabel({ index: s.index, kind: "subtitle", codec: s.codec, language: s.language, title: s.title, default: s.default, forced: s.forced, external: s.external, text_based: s.text_based });
 
@@ -820,7 +870,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
           {info ? (
             <span
-              title={info.reason ?? undefined}
+              title={methodReason ?? undefined}
               className={cn(
                 "mr-1 hidden rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide md:inline",
                 info.method === "direct" ? "bg-success/20 text-success" : info.method === "remux" ? "bg-info/20 text-info" : "bg-accent/20 text-accent",
@@ -858,8 +908,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             open={settingsOpen}
             setOpen={setSettingsOpen}
             info={info}
+            reason={methodReason}
             quality={quality}
             onQuality={changeQuality}
+            mode={mode}
+            onMode={changeMode}
             audioStreams={audioStreams}
             audioIndex={audioIndex ?? info?.audio_index ?? null}
             onAudio={changeAudio}

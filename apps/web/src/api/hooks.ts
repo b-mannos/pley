@@ -148,7 +148,8 @@ export function useLibraryItems(id: Id, q: LibraryItemsQuery, enabled = true) {
         { signal },
       ),
     enabled,
-    placeholderData: (prev) => prev,
+    // Keep showing the list while sorting/filtering, but never another library's items.
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === id ? prev : undefined),
   });
 }
 

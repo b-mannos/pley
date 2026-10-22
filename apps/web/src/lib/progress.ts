@@ -14,6 +14,81 @@ export function stopSession(sessionId: string, keepalive = false): Promise<void>
     .catch(() => undefined);
 }
 
-export function startPlayback(req: PlaybackRequest, signal?: AbortSignal): Promise<PlaybackInfo> {
-  return api.post<PlaybackInfo>("/api/playback", req, { signal });
+/**
+ * Report the final position of a session and release it (its transcode slot)
+ * in parallel. Resolves once both requests are done; never rejects.
+ */
+export function endSession(
+  itemId: Id,
+  session: { session_id: string; duration_ms: number },
+  positionMs: number,
+  keepalive = false,
+): Promise<void> {
+  return Promise.all([
+    reportProgress(
+      itemId,
+      {
+        position_ms: Math.max(0, Math.round(positionMs)),
+        duration_ms: session.duration_ms || undefined,
+        state: "stopped",
+        session_id: session.session_id,
+      },
+      keepalive,
+    ),
+    stopSession(session.session_id, keepalive),
+  ]).then(() => undefined);
+}
+
+/**
+ * Not abortable on purpose: the server may already have created the session
+ * (and its transcode) when the request is cancelled. Callers that no longer
+ * need the result must `stopSession` it.
+ */
+export function startPlayback(req: Omit<PlaybackRequest, "client_id">): Promise<PlaybackInfo> {
+  return api.post<PlaybackInfo>("/api/playback", { ...req, client_id: clientId() });
+}
+
+const CLIENT_KEY = "pley.clientId";
+let currentClientId: string | null = null;
+
+function randomId(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes); // works outside secure contexts, unlike randomUUID
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Identifies this browser tab to the server, which ends a client's previous
+ * playback session whenever it starts a new one. The id survives reloads but
+ * is not inherited by duplicated tabs: it only sits in sessionStorage while
+ * the page is being unloaded.
+ */
+export function clientId(): string {
+  if (currentClientId) return currentClientId;
+  let stored: string | null = null;
+  try {
+    stored = window.sessionStorage.getItem(CLIENT_KEY);
+    window.sessionStorage.removeItem(CLIENT_KEY);
+  } catch {
+    // storage unavailable
+  }
+  const id = stored || randomId();
+  currentClientId = id;
+  window.addEventListener("pagehide", () => {
+    try {
+      window.sessionStorage.setItem(CLIENT_KEY, id);
+    } catch {
+      // storage unavailable
+    }
+  });
+  window.addEventListener("pageshow", (e) => {
+    // Back from the bfcache: take the id out of storage again.
+    if (!e.persisted) return;
+    try {
+      window.sessionStorage.removeItem(CLIENT_KEY);
+    } catch {
+      // storage unavailable
+    }
+  });
+  return id;
 }
