@@ -12,6 +12,8 @@ use serde::Deserialize;
 
 /// Default HTTP port ("PLEY" on a phone keypad).
 pub const DEFAULT_PORT: u16 = 7539;
+/// Default port of the Plex-compatible API (Plex Media Server's).
+pub const PLEX_PORT: u16 = 32400;
 
 #[derive(Debug, Parser)]
 #[command(name = "pley", version, about = "pley — a fast, self-hosted media server")]
@@ -30,6 +32,10 @@ pub struct Cli {
     /// Address to listen on, e.g. `0.0.0.0:7539` or just a port
     #[arg(long, env = "PLEY_BIND", global = true)]
     pub bind: Option<String>,
+
+    /// Address of the Plex-compatible API (default `0.0.0.0:32400`, `off` to disable)
+    #[arg(long, env = "PLEY_PLEX_BIND", global = true)]
+    pub plex_bind: Option<String>,
 
     /// Path to the ffmpeg binary
     #[arg(long, env = "PLEY_FFMPEG", global = true)]
@@ -85,6 +91,7 @@ pub enum Command {
 #[serde(default, deny_unknown_fields)]
 struct FileConfig {
     bind: Option<String>,
+    plex_bind: Option<String>,
     data_dir: Option<PathBuf>,
     transcode_dir: Option<PathBuf>,
     ffmpeg: Option<PathBuf>,
@@ -99,6 +106,8 @@ struct FileConfig {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub bind: SocketAddr,
+    /// Plex-compatible API listener (`None`: disabled).
+    pub plex_bind: Option<SocketAddr>,
     pub data_dir: PathBuf,
     /// Work directory handed to the managed transcoder (segments, caches).
     pub transcode_dir: PathBuf,
@@ -134,10 +143,16 @@ impl Config {
         let data_dir = cli.data_dir.clone().or(file.data_dir).unwrap_or(default_data_dir);
         let data_dir = absolutize(&data_dir);
         let bind = cli.bind.clone().or(file.bind).map(|s| parse_bind(&s)).transpose()?;
+        let plex_bind = match cli.plex_bind.clone().or(file.plex_bind) {
+            None => Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), PLEX_PORT)),
+            Some(value) if matches!(value.trim(), "" | "off" | "none" | "false" | "0") => None,
+            Some(value) => Some(parse_bind(&value)?),
+        };
         let transcode_dir = file.transcode_dir.map(|p| absolutize(&p)).unwrap_or_else(|| data_dir.join("transcode"));
 
         Ok(Self {
             bind: bind.unwrap_or(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_PORT)),
+            plex_bind,
             ffmpeg: cli.ffmpeg.clone().or(file.ffmpeg).unwrap_or_else(|| PathBuf::from("ffmpeg")),
             ffprobe: cli.ffprobe.clone().or(file.ffprobe).unwrap_or_else(|| PathBuf::from("ffprobe")),
             web_dir: cli.web_dir.clone().or(file.web_dir),
@@ -154,6 +169,7 @@ impl Config {
     pub fn for_data_dir(data_dir: &Path) -> Self {
         Self {
             bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            plex_bind: None,
             data_dir: data_dir.to_path_buf(),
             transcode_dir: data_dir.join("transcode"),
             ffmpeg: PathBuf::from("ffmpeg"),

@@ -16,6 +16,7 @@ pub mod library;
 pub mod logging;
 pub mod metadata;
 pub mod playback;
+pub mod plex;
 pub mod settings;
 pub mod state;
 pub mod streams;
@@ -67,6 +68,7 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     let listener =
         tokio::net::TcpListener::bind(bind).await.map_err(|e| anyhow::anyhow!("cannot listen on {bind}: {e}"))?;
     tracing::info!("pley {} listening on http://{}", env!("CARGO_PKG_VERSION"), display_addr(bind));
+    let plex = plex::start(&state).await;
     let tray = tray.and_then(|launch| launch(desktop::TrayContext::new(&state, bind)));
 
     axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
@@ -74,6 +76,9 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
         .await?;
 
     tracing::info!("shutting down");
+    if let Some(plex) = plex {
+        plex.stop().await;
+    }
     if tokio::time::timeout(Duration::from_secs(25), state.shutdown()).await.is_err() {
         tracing::warn!("shutdown did not finish in time");
     }

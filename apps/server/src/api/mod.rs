@@ -4,9 +4,9 @@ mod activity;
 mod admin;
 mod auth;
 mod browse;
-mod items;
+pub(crate) mod items;
 mod libraries;
-mod playback;
+pub(crate) mod playback;
 
 use std::time::Duration;
 
