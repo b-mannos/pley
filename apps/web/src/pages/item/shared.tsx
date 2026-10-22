@@ -12,6 +12,7 @@ import { cn } from "@/lib/cn";
 import { dynamicRangeBadge, formatRemaining, progressFraction } from "@/lib/format";
 import { backdropCandidates, posterCandidates, thumbCandidates } from "@/lib/images";
 import { AnalyzeMarkersButton } from "./AnalyzeMarkersButton";
+import { EditMenu } from "./EditMenu";
 
 /** Full-bleed backdrop behind the item header. */
 export function Backdrop({ item }: { item: ItemSummary }) {
@@ -200,6 +201,7 @@ export function RefreshButton({ item }: { item: ItemDetail | ItemSummary }) {
         <RefreshCw className={cn("size-5", refresh.isPending && "animate-spin")} />
       </IconButton>
       <AnalyzeMarkersButton item={item} />
+      <EditMenu item={item} />
     </>
   );
 }

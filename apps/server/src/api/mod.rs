@@ -5,6 +5,7 @@ mod activity;
 mod admin;
 mod auth;
 mod browse;
+mod editing;
 pub(crate) mod items;
 mod libraries;
 pub(crate) mod playback;
@@ -49,7 +50,17 @@ pub fn router(state: AppState) -> Router {
         .route("/libraries/{id}/items", get(libraries::items))
         .route("/libraries/{id}/filters", get(libraries::filters))
         .route("/libraries/{id}/hubs", get(libraries::hubs))
-        .route("/items/{id}", get(items::get))
+        .route("/items/{id}", get(items::get).patch(editing::edit))
+        .route("/items/{id}/matches", get(editing::matches))
+        .route("/items/{id}/match", post(editing::rematch))
+        .route(
+            "/items/{id}/artwork/{kind}",
+            get(editing::artwork_options).put(editing::choose_artwork).delete(editing::reset_artwork),
+        )
+        .route(
+            "/items/{id}/artwork/{kind}/upload",
+            post(editing::upload_artwork).layer(DefaultBodyLimit::max(25 * 1024 * 1024)),
+        )
         .route("/items/{id}/children", get(items::children))
         .route("/items/{id}/on-deck", get(items::on_deck))
         .route("/items/{id}/next", get(items::next))

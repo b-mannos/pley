@@ -18,6 +18,7 @@ pub mod library;
 pub mod logging;
 pub mod markers;
 pub mod metadata;
+pub mod overrides;
 pub mod playback;
 pub mod plex;
 pub mod ratings;

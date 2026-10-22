@@ -80,6 +80,8 @@ export interface ItemDetail extends ItemSummary {
   tmdb_id: number | null;
   imdb_id: string | null;
   files: MediaFile[];
+  /** Fields edited by hand; metadata refreshes keep them. */
+  locked_fields?: string[];
   /** Intro and credits of the files (absent on servers without detection). */
   markers?: Marker[];
 }

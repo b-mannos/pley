@@ -270,6 +270,13 @@ hubs, search, artwork, streams and the Plex-compatible API.
 | GET | `/api/items/{id}/next` | – | `{ item: ItemSummary \| null }` – episode/track following this one (for autoplay) |
 | POST | `/api/items/{id}/progress` | `{ position_ms, duration_ms?, state: "playing"\|"paused"\|"stopped", session_id? }` | `204`. ≥ 90 % marks the item watched and clears the resume point. |
 | POST | `/api/items/{id}/watched` | – | `204` (containers: all leaves) |
+| PATCH | `/api/items/{id}` *(admin)* | `{ title?, sort_title?, original_title?, year?, summary?, tagline?, studio?, content_rating?, release_date?, genres? }` | `ItemDetail`. A value edits and locks the field (refreshes and scans keep it); `null` unlocks it. `locked_fields` in `ItemDetail` lists locked fields. |
+| GET | `/api/items/{id}/matches?title=&year=` *(admin)* | – | TMDB candidates `{ tmdb_id, title, original_title, year, overview, poster_url }[]` for movies and shows |
+| POST | `/api/items/{id}/match` *(admin)* | `{ tmdb_id }` | `ItemDetail` after re-matching and refreshing |
+| GET | `/api/items/{id}/artwork/{poster\|backdrop\|thumb}` *(admin)* | – | TMDB images `{ url, preview_url, width, height, language, votes }[]` |
+| PUT | `/api/items/{id}/artwork/{kind}` *(admin)* | `{ url }` (a TMDB image) | `ItemDetail`; the picture is downloaded and locked |
+| POST | `/api/items/{id}/artwork/{kind}/upload` *(admin)* | raw image bytes (≤ 25 MB) | `ItemDetail`; stored as JPEG and locked |
+| DELETE | `/api/items/{id}/artwork/{kind}` *(admin)* | – | `204`; back to local or downloaded artwork |
 | PUT | `/api/items/{id}/streams` | `{ file_id?, audio_index, subtitle_index }` (`subtitle_index: null` = off) | `204`. Remembers the choice for the whole show (episodes) or the movie, as language/title/forced, so every episode starts with its own matching tracks. |
 | POST | `/api/items/{id}/unwatched` | – | `204` |
 | POST | `/api/items/{id}/refresh` *(admin)* | – | `202` re-fetch metadata |

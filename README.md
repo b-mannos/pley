@@ -56,6 +56,8 @@ HLG and Dolby Vision.
     Top Rated hubs.
   - Full-text search.
 - **Admin.**
+  - Metadata editing with locked fields, Fix Match against TMDB, and
+    choosing or uploading posters, backgrounds and thumbnails.
   - Users and roles.
   - Library management with a folder browser.
   - Runtime settings.

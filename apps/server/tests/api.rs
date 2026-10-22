@@ -755,3 +755,79 @@ async fn avatars_upload_and_serve() {
     let bad = app.call(Method::PATCH, "/api/me", Some(&admin), Some(json!({"avatar_color": "blue"})), &[]).await;
     assert_eq!(bad.status, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn metadata_edits_survive_rescans() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Alein (1979).mkv", 1024);
+    let lib = app.library(&admin, "Movies", "movies", "movies").await;
+    let items = app.get(&format!("/api/libraries/{lib}/items"), &admin).await;
+    let id = items.body["items"][0]["id"].as_i64().unwrap();
+
+    let edited = app
+        .call(
+            Method::PATCH,
+            &format!("/api/items/{id}"),
+            Some(&admin),
+            Some(json!({"title": "Alien", "summary": "In space no one can hear you scream.", "genres": ["Horror", "Sci-Fi"], "content_rating": "R"})),
+            &[],
+        )
+        .await;
+    assert_eq!(edited.status, StatusCode::OK, "{:?}", edited.body);
+    assert_eq!(edited.body["title"], json!("Alien"));
+    assert_eq!(edited.body["genres"], json!(["Horror", "Sci-Fi"]));
+    assert_eq!(edited.body["locked_fields"], json!(["content_rating", "genres", "summary", "title"]));
+    let bad = app.call(Method::PATCH, &format!("/api/items/{id}"), Some(&admin), Some(json!({"year": "soon"})), &[]).await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    let path = app.call(Method::PATCH, &format!("/api/items/{id}"), Some(&admin), Some(json!({"path": "/x"})), &[]).await;
+    assert_eq!(path.status, StatusCode::BAD_REQUEST);
+
+    // The file changes, so the scan rewrites the item from the file name; the edit wins.
+    app.media_file("movies/Alein (1979).mkv", 2048);
+    app.post(&format!("/api/libraries/{lib}/scan"), &admin, json!({"force": true})).await;
+    app.wait_for_scans().await;
+    let after = app.get(&format!("/api/items/{id}"), &admin).await;
+    assert_eq!(after.body["title"], json!("Alien"));
+    assert_eq!(after.body["content_rating"], json!("R"));
+
+    // Unlocking hands the field back to the scanner / metadata agent.
+    app.call(Method::PATCH, &format!("/api/items/{id}"), Some(&admin), Some(json!({"title": null})), &[]).await;
+    app.media_file("movies/Alein (1979).mkv", 4096);
+    app.post(&format!("/api/libraries/{lib}/scan"), &admin, json!({"force": true})).await;
+    app.wait_for_scans().await;
+    let unlocked = app.get(&format!("/api/items/{id}"), &admin).await;
+    assert_eq!(unlocked.body["title"], json!("Alein"));
+    assert_eq!(unlocked.body["locked_fields"], json!(["content_rating", "genres", "summary"]));
+
+    // Non-admins can't edit.
+    app.post("/api/users", &admin, json!({"username": "viewer", "password": "viewer1"})).await;
+    let viewer = login_as(&app, "viewer", "viewer1", "test").await;
+    let denied = app.call(Method::PATCH, &format!("/api/items/{id}"), Some(&viewer), Some(json!({"title": "x"})), &[]).await;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+
+    // Uploaded artwork replaces the poster and is served.
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(200, 300, image::Rgb([10, 120, 200])))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri(format!("/api/items/{id}/artwork/poster/upload"))
+        .header(header::AUTHORIZATION, format!("Bearer {admin}"))
+        .header(header::CONTENT_TYPE, "image/png")
+        .body(Body::from(png))
+        .unwrap();
+    let resp = app.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap()).unwrap();
+    let poster = body["poster_url"].as_str().unwrap().to_owned();
+    let image = app.get(&poster, &admin).await;
+    assert_eq!(image.status, StatusCode::OK);
+    assert_eq!(image.headers[header::CONTENT_TYPE], "image/jpeg");
+
+    // Without a TMDB key, matching explains what is missing.
+    let matches = app.get(&format!("/api/items/{id}/matches"), &admin).await;
+    assert_eq!(matches.status, StatusCode::BAD_REQUEST);
+    assert!(matches.body["message"].as_str().unwrap().contains("TMDB"));
+}

@@ -169,6 +169,8 @@ pub struct ItemDetail {
     pub files: Vec<MediaFileDto>,
     /// Intro and credits of the files (Skip Intro / Skip Credits).
     pub markers: Vec<crate::markers::Marker>,
+    /// Fields edited by hand (kept on refresh), see [`crate::overrides`].
+    pub locked_fields: Vec<String>,
 }
 
 pub fn image_url(id: i64, kind: &str, version: i64) -> String {
@@ -483,6 +485,7 @@ pub async fn item_detail(db: &Db, row: ItemRow) -> sqlx::Result<ItemDetail> {
         imdb_id: detail.imdb_id,
         files: files.iter().map(FileRow::to_dto).collect(),
         markers,
+        locked_fields: Vec::new(),
     })
 }
 

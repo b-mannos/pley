@@ -55,6 +55,55 @@ struct SearchResult {
     release_date: Option<String>,
     #[serde(default)]
     popularity: f64,
+    #[serde(default)]
+    overview: Option<String>,
+    #[serde(default)]
+    poster_path: Option<String>,
+}
+
+/// A possible TMDB match, for "Fix match".
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MatchCandidate {
+    pub tmdb_id: i64,
+    pub title: String,
+    pub original_title: Option<String>,
+    pub year: Option<i64>,
+    pub overview: Option<String>,
+    pub poster_url: Option<String>,
+}
+
+/// Artwork TMDB has for an item.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ArtworkCandidate {
+    /// Full-size image (what gets downloaded when chosen).
+    pub url: String,
+    pub preview_url: String,
+    pub width: i64,
+    pub height: i64,
+    pub language: Option<String>,
+    pub votes: f64,
+}
+
+#[derive(Deserialize)]
+struct Images {
+    #[serde(default)]
+    posters: Vec<ImageInfo>,
+    #[serde(default)]
+    backdrops: Vec<ImageInfo>,
+    #[serde(default)]
+    stills: Vec<ImageInfo>,
+}
+
+#[derive(Deserialize)]
+struct ImageInfo {
+    file_path: String,
+    #[serde(default)]
+    width: i64,
+    #[serde(default)]
+    height: i64,
+    iso_639_1: Option<String>,
+    #[serde(default)]
+    vote_average: f64,
 }
 
 #[derive(Deserialize)]
@@ -268,11 +317,142 @@ impl MetadataAgent {
     }
 
     async fn refresh_candidate(&self, item: Candidate) -> Result<(), TmdbError> {
+        let id = item.id;
         match item.kind.as_str() {
-            "movie" => self.refresh_movie(&item).await,
-            "show" => self.refresh_show(&item).await,
-            _ => Ok(()),
+            "movie" => self.refresh_movie(&item).await?,
+            "show" => self.refresh_show(&item).await?,
+            _ => return Ok(()),
         }
+        // Hand edits win over whatever was just fetched.
+        crate::overrides::apply_tree(&self.db, id).await.map_err(|e| TmdbError::Other(e.into()))
+    }
+
+    /// TMDB results for a title, best first ("Fix match").
+    pub async fn search_matches(&self, tv: bool, title: &str, year: Option<i64>) -> anyhow::Result<Vec<MatchCandidate>> {
+        let (path, year_param) = if tv { ("/search/tv", "first_air_date_year") } else { ("/search/movie", "year") };
+        let mut query = vec![("query", title.to_owned()), ("include_adult", "false".to_owned())];
+        if let Some(y) = year {
+            query.push((year_param, y.to_string()));
+        }
+        let results: SearchResults = self.get(path, &query).await.map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let best = best_match(&results.results, title, year);
+        let mut out: Vec<MatchCandidate> = results
+            .results
+            .into_iter()
+            .take(12)
+            .map(|r| MatchCandidate {
+                tmdb_id: r.id,
+                title: r.title.clone().or(r.original_title.clone()).unwrap_or_default(),
+                original_title: r.original_title.filter(|o| Some(o) != r.title.as_ref()),
+                year: r.release_date.as_deref().and_then(year_of),
+                overview: r.overview.filter(|o| !o.is_empty()),
+                poster_url: r.poster_path.map(|p| format!("{IMAGES}/w185{p}")),
+            })
+            .collect();
+        if let Some(best) = best {
+            out.sort_by_key(|c| c.tmdb_id != best);
+        }
+        Ok(out)
+    }
+
+    /// Match a movie or show to another TMDB entry and refresh it.
+    pub async fn rematch(&self, item_id: i64, tmdb_id: i64) -> anyhow::Result<()> {
+        sqlx::query("UPDATE items SET tmdb_id = ?, imdb_id = NULL, metadata_at = NULL WHERE id = ? AND kind IN ('movie', 'show')")
+            .bind(tmdb_id)
+            .bind(item_id)
+            .execute(&self.db.write)
+            .await?;
+        self.refresh_item(item_id).await
+    }
+
+    /// Posters, backdrops or episode stills TMDB has for an item.
+    pub async fn artwork_candidates(&self, item_id: i64, kind: &str) -> anyhow::Result<Vec<ArtworkCandidate>> {
+        #[allow(clippy::type_complexity)]
+        let row: Option<(String, Option<i64>, Option<i64>, Option<i64>, Option<i64>)> = sqlx::query_as(
+            "SELECT i.kind, i.tmdb_id, i.idx, p.tmdb_id, gp.tmdb_id FROM items i
+             LEFT JOIN items p ON p.id = i.parent_id LEFT JOIN items gp ON gp.id = i.grandparent_id WHERE i.id = ?",
+        )
+        .bind(item_id)
+        .fetch_optional(&self.db.read)
+        .await?;
+        let Some((item_kind, tmdb, idx, parent_tmdb, show_tmdb)) = row else { bail!("item not found") };
+        let season_number = || {
+            sqlx::query_scalar::<_, Option<i64>>("SELECT p.idx FROM items i JOIN items p ON p.id = i.parent_id WHERE i.id = ?")
+                .bind(item_id)
+                .fetch_one(&self.db.read)
+        };
+        let path = match item_kind.as_str() {
+            "movie" => format!("/movie/{}/images", tmdb.context("not matched to TMDB yet")?),
+            "show" => format!("/tv/{}/images", tmdb.context("not matched to TMDB yet")?),
+            "season" => format!("/tv/{}/season/{}/images", parent_tmdb.context("the show is not matched yet")?, idx.unwrap_or(1)),
+            "episode" => {
+                let season = season_number().await?.unwrap_or(1);
+                format!(
+                    "/tv/{}/season/{season}/episode/{}/images",
+                    show_tmdb.context("the show is not matched yet")?,
+                    idx.unwrap_or(1)
+                )
+            }
+            _ => bail!("{item_kind} items have no TMDB artwork"),
+        };
+        let lang = self.settings.get().metadata_language.split(['-', '_']).next().unwrap_or("en").to_owned();
+        // Without a language filter TMDB only returns images in the request language.
+        let images: Images = self
+            .get(&path, &[("include_image_language", format!("{lang},en,null"))])
+            .await
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let list = match kind {
+            "poster" => images.posters,
+            "backdrop" => images.backdrops,
+            "thumb" => images.stills,
+            _ => bail!("unknown artwork kind"),
+        };
+        let preview = if kind == "poster" { "w342" } else { "w780" };
+        let mut out: Vec<ArtworkCandidate> = list
+            .into_iter()
+            .map(|i| ArtworkCandidate {
+                url: format!("{IMAGES}/original{}", i.file_path),
+                preview_url: format!("{IMAGES}/{preview}{}", i.file_path),
+                width: i.width,
+                height: i.height,
+                language: i.iso_639_1,
+                votes: i.vote_average,
+            })
+            .collect();
+        // Images in the metadata language first, then the best rated.
+        out.sort_by(|a, b| {
+            let rank = |c: &ArtworkCandidate| match c.language.as_deref() {
+                Some(l) if l == lang => 0,
+                None => 1,
+                _ => 2,
+            };
+            rank(a).cmp(&rank(b)).then(b.votes.total_cmp(&a.votes))
+        });
+        out.truncate(60);
+        Ok(out)
+    }
+
+    /// Download a chosen TMDB image into the metadata folder. Only TMDB's
+    /// image host is fetched, so the server can't be pointed at other URLs.
+    pub async fn download_artwork(&self, item_id: i64, kind: &str, url: &str) -> anyhow::Result<String> {
+        let Some(rest) = url.strip_prefix(&format!("{IMAGES}/")) else { bail!("only TMDB images can be chosen") };
+        let file = rest.rsplit('/').next().unwrap_or_default();
+        if file.is_empty() || !file.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')) {
+            bail!("unexpected image URL");
+        }
+        let bytes = self.http.get(url).send().await?.error_for_status()?.bytes().await?;
+        anyhow::ensure!(image::guess_format(&bytes).is_ok(), "that is not an image");
+        let dir = self.metadata_dir.join("items").join(item_id.to_string());
+        tokio::fs::create_dir_all(&dir).await?;
+        let ext = Path::new(file).extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "jpg".into());
+        let target = dir.join(format!("{kind}-chosen-{}.{ext}", now()));
+        tokio::fs::write(&target, &bytes).await?;
+        Ok(path_str(&target))
+    }
+
+    /// Where uploaded or chosen artwork of an item is kept.
+    pub fn item_dir(&self, item_id: i64) -> PathBuf {
+        self.metadata_dir.join("items").join(item_id.to_string())
     }
 
     async fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T, TmdbError> {
@@ -598,6 +778,8 @@ mod tests {
             original_title: None,
             release_date: Some(date.into()),
             popularity,
+            overview: None,
+            poster_path: None,
         }
     }
 

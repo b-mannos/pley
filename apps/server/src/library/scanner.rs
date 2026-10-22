@@ -303,6 +303,9 @@ impl Scanner {
             .execute(&mut *conn)
             .await?;
         drop(conn);
+        // Scanning rewrites titles of unmatched items and local artwork;
+        // hand edits win.
+        crate::overrides::apply_library(&self.db, library_id).await?;
         self.events.send(ServerEvent::LibraryChanged { library_id });
 
         if kind != LibraryKind::Music && self.metadata.enabled() {

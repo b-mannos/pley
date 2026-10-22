@@ -25,6 +25,7 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i
     let row = item_or_404(&state, user.id, id).await?;
     let scope = streams::scope(&row);
     let mut detail = catalog::item_detail(&state.db, row).await?;
+    detail.locked_fields = crate::overrides::locked_fields(&state.db, id).await?;
     if !detail.files.is_empty() {
         let pref = streams::load(&state.db, user.id, scope).await?;
         for file in &mut detail.files {
