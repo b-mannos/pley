@@ -33,6 +33,9 @@ const ServerSettings = lazy(() => import("@/pages/settings/ServerSettings").then
 const DashboardSettings = lazy(() =>
   import("@/pages/settings/DashboardSettings").then((m) => ({ default: m.DashboardSettings })),
 );
+const CollectionPage = lazy(() => import("@/pages/collections/CollectionPage").then((m) => ({ default: m.CollectionPage })));
+const PlaylistsPage = lazy(() => import("@/pages/playlists/PlaylistsPage").then((m) => ({ default: m.PlaylistsPage })));
+const PlaylistPage = lazy(() => import("@/pages/playlists/PlaylistPage").then((m) => ({ default: m.PlaylistPage })));
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -81,6 +84,9 @@ const router = createBrowserRouter([
           { path: "library/:id", element: <LibraryPage /> },
           { path: "item/:id", element: <ItemPage /> },
           { path: "person/:id", element: <PersonPage /> },
+          { path: "collection/:id", element: <CollectionPage /> },
+          { path: "playlists", element: <PlaylistsPage /> },
+          { path: "playlists/:id", element: <PlaylistPage /> },
           { path: "search", element: <SearchPage /> },
           { path: "account", element: <AccountPage /> },
           {

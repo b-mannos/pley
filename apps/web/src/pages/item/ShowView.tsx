@@ -2,6 +2,7 @@ import { Play } from "lucide-react";
 import { useChildren, useOnDeck } from "@/api/hooks";
 import type { ItemDetail } from "@/api/types";
 import { CardSkeleton, MediaCard } from "@/components/cards";
+import { ListButtons, PartOfCollections } from "@/components/lists/ListButtons";
 import { Button, SectionTitle } from "@/components/ui";
 import { episodeLabel, pluralize } from "@/lib/format";
 import { useElementWidth } from "@/lib/hooks";
@@ -50,6 +51,7 @@ export function ShowView({ item }: { item: ItemDetail }) {
             ]}
           />
           <Genres genres={item.genres} />
+          <PartOfCollections item={item} />
           <div className="flex flex-wrap items-center gap-2.5 pt-1">
             <Button
               variant="primary"
@@ -61,6 +63,7 @@ export function ShowView({ item }: { item: ItemDetail }) {
               {playLabel}
             </Button>
             <WatchedButton item={item} />
+            <ListButtons item={item} />
             <RefreshButton item={item} />
           </div>
           {item.tagline ? <p className="text-base italic text-fg/75">{item.tagline}</p> : null}

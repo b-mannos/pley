@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Play, RotateCcw } from "lucide-react";
 import type { ItemDetail, MediaFile } from "@/api/types";
+import { ListButtons, PartOfCollections } from "@/components/lists/ListButtons";
 import { Button, Select } from "@/components/ui";
 import { codecLabel, formatBytes, formatDate, formatDuration, resolutionLabel, seasonTitle, streamLabel } from "@/lib/format";
 import { saveStreamChoice } from "@/lib/progress";
@@ -127,6 +128,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
           />
 
           <Genres genres={item.genres} />
+          <PartOfCollections item={item} />
 
           <div className="flex flex-wrap items-center gap-2.5 pt-1">
             {item.files.length ? (
@@ -144,6 +146,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
               </Button>
             ) : null}
             <WatchedButton item={item} />
+            <ListButtons item={item} />
             <RefreshButton item={item} />
           </div>
 

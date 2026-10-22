@@ -1,7 +1,9 @@
+import { useMemo } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import { LoaderCircle, TriangleAlert } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useItem } from "@/api/hooks";
+import { loadQueue } from "@/lib/videoQueue";
 import { VideoPlayer } from "./VideoPlayer";
 
 function num(v: string | null): number | null {
@@ -31,6 +33,13 @@ export function PlayerPage() {
   const navigate = useNavigate();
   const itemId = Number(id);
   const item = useItem(Number.isFinite(itemId) ? itemId : null);
+  // Playing through a playlist or collection (`?queue=&qi=`).
+  const queueKey = params.get("queue");
+  const queueIndex = num(params.get("qi"));
+  const queue = useMemo(() => {
+    const q = loadQueue(queueKey);
+    return q && queueIndex != null && q.ids[queueIndex] === itemId ? { queue: q, index: queueIndex } : null;
+  }, [queueKey, queueIndex, itemId]);
 
   if (!Number.isFinite(itemId) || itemId <= 0) return <Navigate to="/" replace />;
   if (item.isPending) {
@@ -53,12 +62,13 @@ export function PlayerPage() {
 
   return (
     <VideoPlayer
-      key={data.id}
+      key={`${data.id}:${queue?.index ?? ""}`}
       item={data}
       startMs={num(params.get("t")) ?? 0}
       fileId={num(params.get("file"))}
       audio={num(params.get("audio"))}
       sub={num(params.get("sub"))}
+      queue={queue}
     />
   );
 }

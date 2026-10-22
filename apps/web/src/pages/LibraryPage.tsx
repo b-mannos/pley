@@ -7,10 +7,12 @@ import type { LibraryKind, LibrarySort, SortOrder } from "@/api/types";
 import { useAuth } from "@/auth";
 import { HubRow, HubRowSkeleton } from "@/components/HubRow";
 import { ItemGrid, ItemGridSkeleton } from "@/components/ItemGrid";
+import { CollectionsRow } from "@/components/lists/CollectionCard";
 import { LibraryIcon } from "@/components/Sidebar";
 import { useToast } from "@/components/Toast";
 import { Button, EmptyState, IconButton, Select } from "@/components/ui";
 import { NotFoundPage } from "./NotFoundPage";
+import { CollectionsTab } from "./collections/CollectionsTab";
 import type { CardAspect } from "@/components/cards";
 import { cn } from "@/lib/cn";
 import { pluralize } from "@/lib/format";
@@ -47,7 +49,8 @@ export function LibraryPage() {
   const libId = Number(id);
   const lib = useLibrary(libId);
   const [params, setParams] = useSearchParams();
-  const tab = params.get("tab") === "recommended" ? "recommended" : "library";
+  const rawTab = params.get("tab");
+  const tab = rawTab === "recommended" || rawTab === "collections" ? rawTab : "library";
   useDocumentTitle(lib.data?.name);
 
   const setParam = (updates: Record<string, string | null>) => {
@@ -76,7 +79,7 @@ export function LibraryPage() {
           </div>
         </div>
         <div className="flex rounded-lg bg-surface-2 p-1" role="tablist">
-          {(["recommended", "library"] as const).map((t) => (
+          {(kind === "music" ? (["recommended", "library"] as const) : (["recommended", "library", "collections"] as const)).map((t) => (
             <button
               key={t}
               type="button"
@@ -95,7 +98,9 @@ export function LibraryPage() {
       </div>
 
       {tab === "recommended" ? (
-        <RecommendedTab libraryId={libId} />
+        <RecommendedTab libraryId={libId} kind={kind} />
+      ) : tab === "collections" && kind !== "music" ? (
+        <CollectionsTab libraryId={libId} kind={kind} />
       ) : (
         <LibraryTab libraryId={libId} kind={kind} params={params} setParam={setParam} ready={lib.isSuccess} />
       )}
@@ -103,7 +108,7 @@ export function LibraryPage() {
   );
 }
 
-function RecommendedTab({ libraryId }: { libraryId: number }) {
+function RecommendedTab({ libraryId, kind }: { libraryId: number; kind: LibraryKind }) {
   const hubs = useLibraryHubs(libraryId);
   if (hubs.isPending) {
     return (
@@ -125,6 +130,7 @@ function RecommendedTab({ libraryId }: { libraryId: number }) {
       {visible.map((hub) => (
         <HubRow key={hub.key} hub={hub} />
       ))}
+      <CollectionsRow libraryId={libraryId} kind={kind} />
     </div>
   );
 }

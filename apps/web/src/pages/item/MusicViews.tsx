@@ -5,6 +5,7 @@ import { useChildren, type ChildItem } from "@/api/hooks";
 import type { ItemDetail } from "@/api/types";
 import { useAudioPlayer } from "@/audio/AudioPlayer";
 import { CardSkeleton, MediaCard } from "@/components/cards";
+import { ListButtons } from "@/components/lists/ListButtons";
 import { Button, SectionTitle, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatClock, formatDuration, pluralize } from "@/lib/format";
@@ -55,6 +56,7 @@ export function ArtistView({ item }: { item: ItemDetail }) {
             <Button size="lg" icon={<Shuffle className="size-4" />} onClick={() => void play(item, { shuffle: true })}>
               Shuffle
             </Button>
+            <ListButtons item={item} />
             <RefreshButton item={item} />
           </>
         }
@@ -126,6 +128,7 @@ export function AlbumView({ item, highlightId }: { item: ItemDetail; highlightId
             >
               Shuffle
             </Button>
+            <ListButtons item={item} />
             <RefreshButton item={item} />
           </>
         }

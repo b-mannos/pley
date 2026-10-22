@@ -1,7 +1,8 @@
 import { useEffect, type ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router";
-import { Film, House, LoaderCircle, Music, Plus, Settings, Tv, X } from "lucide-react";
+import { Film, House, List, ListMusic, ListVideo, LoaderCircle, Music, Plus, Settings, Tv, X } from "lucide-react";
 import { useLibraries } from "@/api/hooks";
+import { usePlaylists } from "@/api/lists";
 import type { LibraryKind } from "@/api/types";
 import { useAuth } from "@/auth";
 import { cn } from "@/lib/cn";
@@ -95,6 +96,8 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
         ) : null}
       </div>
 
+      <PlaylistsSection />
+
       <div className="flex-1" />
 
       {user.is_admin ? (
@@ -105,6 +108,31 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
         </div>
       ) : null}
     </nav>
+  );
+}
+
+/** The user's playlists (the first few) and a link to all of them. */
+function PlaylistsSection() {
+  const playlists = usePlaylists();
+  const shown = playlists.data?.slice(0, 8) ?? [];
+  return (
+    <>
+      <div className="mb-1.5 mt-6 px-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Playlists</div>
+      <div className="space-y-0.5">
+        {shown.map((p) => (
+          <NavItem
+            key={p.id}
+            to={`/playlists/${p.id}`}
+            icon={p.kind === "audio" ? <ListMusic className="size-[18px]" /> : <ListVideo className="size-[18px]" />}
+          >
+            {p.title}
+          </NavItem>
+        ))}
+        <NavItem to="/playlists" end icon={<List className="size-[18px]" />}>
+          {shown.length ? "All playlists" : "Your playlists"}
+        </NavItem>
+      </div>
+    </>
   );
 }
 

@@ -28,7 +28,9 @@ export function UpNext({ next, onPlay, onCancel }: { next: ItemSummary; onPlay: 
         <Artwork candidates={thumbCandidates(next)} width={352} alt="" title={next.title} className="aspect-video w-full" />
         <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/20 to-transparent" />
         <div className="absolute bottom-3 left-4 right-4">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-accent">Up next · {episodeLabel(next)}</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-accent">
+            {next.kind === "episode" ? `Up next · ${episodeLabel(next)}` : "Up next"}
+          </div>
           <div className="truncate text-base font-semibold">{next.title}</div>
         </div>
       </div>

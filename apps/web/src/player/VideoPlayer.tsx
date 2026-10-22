@@ -32,6 +32,7 @@ import { loadHls } from "@/lib/hls";
 import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
 import { endSession, reportProgress, saveStreamChoice, startPlayback, stopSession } from "@/lib/progress";
 import { playUrl } from "@/lib/usePlayItem";
+import { nextInQueue, queuePlayUrl, type QueuePosition } from "@/lib/videoQueue";
 import { modeById, qualityById } from "./quality";
 import { ChaptersMenu } from "./ChaptersMenu";
 import { SeekBar } from "./SeekBar";
@@ -56,9 +57,11 @@ export interface VideoPlayerProps {
   fileId: number | null;
   audio: number | null;
   sub: number | null;
+  /** Playing through a playlist or collection: "next" is its next entry. */
+  queue?: QueuePosition | null;
 }
 
-export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: initialSub }: VideoPlayerProps) {
+export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: initialSub, queue }: VideoPlayerProps) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const toast = useToast();
@@ -118,6 +121,14 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
   const duration = (info?.duration_ms ?? item.duration_ms ?? 0) / 1000 || mediaDuration;
   const isEpisode = item.kind === "episode";
+  // The next episode, or the queue's next entry.
+  const hasNext = isEpisode || !!queue;
+  const findNext = () => (queue ? nextInQueue(qc, queue) : fetchNext(qc, item.id));
+  const nextUrl = (next: ItemSummary) => {
+    const at = next.user_state.watched ? 0 : next.user_state.position_ms;
+    return queue ? queuePlayUrl(queue.queue, queue.index + 1, at) : playUrl(next.id, { startMs: at });
+  };
+  const endUrl = queue?.queue.returnTo ?? `/item/${item.id}`;
   const title = isEpisode ? (item.grandparent_title ?? item.title) : item.year ? `${item.title} (${item.year})` : item.title;
   const subtitle = isEpisode ? [episodeLabel(item), item.title].filter(Boolean).join(" — ") : null;
   useDocumentTitle(isEpisode ? `${title} ${episodeLabel(item)}` : item.title);
@@ -388,16 +399,16 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       ? reportProgress(item.id, { position_ms: durMs, duration_ms: durMs || undefined, state: "stopped", session_id: s.session_id })
       : Promise.resolve();
     void done.then(() => invalidateWatchState(qc));
-    if (!isEpisode) {
-      void done.then(() => navigate(`/item/${item.id}`, { replace: true }));
+    if (!hasNext) {
+      void done.then(() => navigate(endUrl, { replace: true }));
       return;
     }
-    fetchNext(qc, item.id)
+    findNext()
       .then((next) => {
         if (next) setUpNext(next);
-        else navigate(`/item/${item.id}`, { replace: true });
+        else navigate(endUrl, { replace: true });
       })
-      .catch(() => navigate(`/item/${item.id}`, { replace: true }));
+      .catch(() => navigate(endUrl, { replace: true }));
   };
 
   handlers.current.onMediaError = () => {
@@ -623,12 +634,12 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
   const playNext = async () => {
     try {
-      const next = upNext ?? (await fetchNext(qc, item.id));
+      const next = upNext ?? (await findNext());
       if (!next) {
-        toast.info("This is the last episode");
+        toast.info(queue ? "This is the last one" : "This is the last episode");
         return;
       }
-      navigate(playUrl(next.id, { startMs: next.user_state.watched ? 0 : next.user_state.position_ms }), { replace: true });
+      navigate(nextUrl(next), { replace: true });
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -646,8 +657,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       toast.info("Skipped intro");
     },
     onCredits: () => {
-      if (!isEpisode || upNext) return;
-      fetchNext(qc, item.id)
+      if (!hasNext || upNext) return;
+      findNext()
         .then((next) => {
           if (next) setUpNext(next);
         })
@@ -930,11 +941,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
               {METHOD_LABEL[info.method]}
             </span>
           ) : null}
-          {isEpisode ? (
+          {hasNext ? (
             <button
               type="button"
-              aria-label="Next episode"
-              title="Next episode"
+              aria-label={queue ? "Next" : "Next episode"}
+              title={queue ? "Next" : "Next episode"}
               onClick={() => void playNext()}
               className="flex size-10 items-center justify-center rounded-full transition hover:bg-white/15"
             >

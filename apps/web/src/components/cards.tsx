@@ -7,6 +7,7 @@ import { cardSubtitle, episodeLabel, formatRemaining, progressFraction, seasonTi
 import { posterCandidates, thumbCandidates } from "@/lib/images";
 import { usePlayItem } from "@/lib/usePlayItem";
 import { Artwork } from "./Artwork";
+import { useListMenu } from "./lists/ListMenu";
 import { Skeleton } from "./ui";
 
 export type CardAspect = "poster" | "square" | "thumb";
@@ -91,6 +92,7 @@ export const MediaCard = memo(function MediaCard({
   className,
 }: MediaCardProps) {
   const play = usePlayItem();
+  const lists = useListMenu();
   const defaults = defaultCardTitles(item, continueStyle);
   const t = title ?? defaults.title;
   const st = subtitle ?? defaults.subtitle;
@@ -104,7 +106,18 @@ export const MediaCard = memo(function MediaCard({
   const round = item.kind === "artist";
 
   return (
-    <div className={cn("group/card min-w-0", className)} style={fixed ? { width } : undefined}>
+    <div
+      className={cn("group/card min-w-0", className)}
+      style={fixed ? { width } : undefined}
+      onContextMenu={
+        lists
+          ? (e) => {
+              e.preventDefault();
+              lists.openMenu(item, e.clientX, e.clientY);
+            }
+          : undefined
+      }
+    >
       <div className="relative">
         <Link
           to={to}
