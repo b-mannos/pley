@@ -57,7 +57,8 @@ impl Trickplay {
         }
         let media = self.prober.probe(path).await.map_err(|e| ApiError::Failed(format!("probe failed: {e:#}")))?;
         let video = media.video().ok_or_else(|| ApiError::BadRequest("the file has no video".into()))?;
-        let duration = media.duration_ms.filter(|d| *d > 0).ok_or_else(|| ApiError::BadRequest("unknown duration".into()))?;
+        let duration =
+            media.duration_ms.filter(|d| *d > 0).ok_or_else(|| ApiError::BadRequest("unknown duration".into()))?;
         let interval = req.interval_ms.unwrap_or_else(|| default_interval_ms(duration)).clamp(1_000, 60_000);
         let width = req.width.unwrap_or(320).clamp(96, 640);
         let (src_w, src_h) = (video.width.unwrap_or(1920).max(2), video.height.unwrap_or(1080).max(2));

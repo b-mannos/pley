@@ -300,17 +300,12 @@ pub async fn trickplay_sheet(
     user: AuthUser,
     Path((id, sheet)): Path<(i64, String)>,
 ) -> ApiResult<Response> {
-    let n: u32 = sheet
-        .strip_suffix(".jpg")
-        .and_then(|n| n.parse().ok())
-        .ok_or_else(|| AppError::not_found("unknown sheet"))?;
+    let n: u32 =
+        sheet.strip_suffix(".jpg").and_then(|n| n.parse().ok()).ok_or_else(|| AppError::not_found("unknown sheet"))?;
     let file = visible_file(&state, &user, id).await?;
     let path = state.trickplay.sheet(&file, n).ok_or_else(|| AppError::not_found("unknown sheet"))?;
     let bytes = tokio::fs::read(path).await.map_err(|e| AppError::Internal(e.into()))?;
-    Ok((
-        [(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "private, max-age=31536000, immutable")],
-        bytes,
-    )
+    Ok(([(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "private, max-age=31536000, immutable")], bytes)
         .into_response())
 }
 

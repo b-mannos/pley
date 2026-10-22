@@ -22,11 +22,11 @@ use tokio_util::io::ReaderStream;
 use crate::error::{ApiError, ApiResult};
 use crate::extract::Extractor;
 use crate::fingerprint::Fingerprinter;
-use crate::trickplay::Trickplay;
 use crate::job::JobManager;
 use crate::keyframes::KeyframeStore;
 use crate::metrics::{Metrics, render_prometheus};
 use crate::probe::{Prober, Rejected};
+use crate::trickplay::Trickplay;
 use crate::util::dir_size;
 
 pub struct AppState {

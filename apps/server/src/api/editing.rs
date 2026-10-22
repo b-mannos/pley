@@ -44,8 +44,12 @@ pub async fn edit(
             Value::String(s) => Some(s.trim().to_owned()),
             Value::Number(n) => Some(n.to_string()),
             Value::Array(list) => {
-                let names: Vec<String> =
-                    list.iter().filter_map(|v| v.as_str()).map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect();
+                let names: Vec<String> = list
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty())
+                    .collect();
                 Some(serde_json::to_string(&names).map_err(|e| AppError::Internal(e.into()))?)
             }
             _ => return Err(AppError::bad_request(format!("unsupported value for '{field}'"))),
@@ -158,7 +162,8 @@ pub async fn choose_artwork(
 ) -> ApiResult<Json<ItemDetail>> {
     let row = item_or_404(&state, user.id, id).await?;
     let kind = artwork_kind(&kind)?;
-    let path = state.metadata.download_artwork(id, kind, &body.url).await.map_err(|e| AppError::bad_request(e.to_string()))?;
+    let path =
+        state.metadata.download_artwork(id, kind, &body.url).await.map_err(|e| AppError::bad_request(e.to_string()))?;
     overrides::set(&state.db, id, &[(kind.to_owned(), Some(path))]).await?;
     state.events.send(ServerEvent::LibraryChanged { library_id: row.library_id });
     Ok(Json(detail(&state, user.id, id).await?))
@@ -180,7 +185,8 @@ pub async fn upload_artwork(
     }
     // Re-encode: only real pictures get stored, and huge ones are scaled down.
     let jpeg = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, AppError> {
-        let img = image::load_from_memory(&body).map_err(|_| AppError::bad_request("that file is not a supported picture"))?;
+        let img = image::load_from_memory(&body)
+            .map_err(|_| AppError::bad_request("that file is not a supported picture"))?;
         let img = if img.width() > 3840 || img.height() > 3840 {
             img.resize(3840, 3840, image::imageops::FilterType::Lanczos3)
         } else {
