@@ -268,14 +268,23 @@ pub async fn hls_file(
     response.body(Body::from_stream(upstream.bytes_stream())).map_err(|e| AppError::Internal(e.into()))
 }
 
+/// A media file of an item the user may see.
+pub(crate) async fn visible_file(state: &AppState, user: &AuthUser, id: i64) -> ApiResult<catalog::FileRow> {
+    let file = catalog::file(&state.db, id).await?.ok_or_else(|| AppError::not_found("file not found"))?;
+    if !catalog::is_visible(&state.db, user.id, file.item_id).await? {
+        return Err(AppError::not_found("file not found"));
+    }
+    Ok(file)
+}
+
 /// Direct play: the raw file with HTTP range support.
 pub async fn stream_file(
     State(state): State<AppState>,
-    _user: AuthUser,
+    user: AuthUser,
     Path(id): Path<i64>,
     request: Request,
 ) -> ApiResult<Response> {
-    let file = catalog::file(&state.db, id).await?.ok_or_else(|| AppError::not_found("file not found"))?;
+    let file = visible_file(&state, &user, id).await?;
     let response =
         ServeFile::new(&file.path).oneshot(request).await.map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))?;
     let mut response = response.map(Body::new);
@@ -285,14 +294,14 @@ pub async fn stream_file(
 
 pub async fn subtitles(
     State(state): State<AppState>,
-    _user: AuthUser,
+    user: AuthUser,
     Path((id, name)): Path<(i64, String)>,
 ) -> ApiResult<Response> {
     let index: i64 = name
         .strip_suffix(".vtt")
         .and_then(|n| n.parse().ok())
         .ok_or_else(|| AppError::not_found("unknown subtitle file"))?;
-    let file = catalog::file(&state.db, id).await?.ok_or_else(|| AppError::not_found("file not found"))?;
+    let file = visible_file(&state, &user, id).await?;
     let cache = state.config.cache_dir().join("subtitles").join(format!("{}_{}_{}.vtt", file.id, index, file.mtime));
     let text = match tokio::fs::read_to_string(&cache).await {
         Ok(text) => text,

@@ -221,13 +221,16 @@ struct ArtworkPaths {
 
 pub async fn image(
     State(state): State<AppState>,
-    _user: AuthUser,
+    user: AuthUser,
     Path((id, kind)): Path<(i64, String)>,
     Query(query): Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     if !matches!(kind.as_str(), "poster" | "backdrop" | "thumb") {
         return Err(AppError::not_found("unknown image kind"));
+    }
+    if !catalog::is_visible(&state.db, user.id, id).await? {
+        return Err(AppError::not_found(format!("item {id} not found")));
     }
     let width = query.get("w").and_then(|w| w.parse::<u32>().ok()).filter(|w| *w > 0);
     let path = resolve_artwork(&state, id, &kind).await?;

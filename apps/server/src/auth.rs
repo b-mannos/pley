@@ -29,6 +29,28 @@ pub struct AuthUser {
     pub id: i64,
     pub username: String,
     pub is_admin: bool,
+    /// Every library, or only the ones in `user_libraries` (see [`crate::access`]).
+    pub all_libraries: bool,
+    /// Age limit for movies and shows; `None` = unrestricted.
+    pub max_age: Option<i64>,
+}
+
+impl AuthUser {
+    /// A user acting with all rights the account has, for server-side work.
+    pub async fn load(db: &Db, id: i64) -> sqlx::Result<Option<AuthUser>> {
+        let row: Option<(i64, String, bool, bool, Option<i64>)> =
+            sqlx::query_as("SELECT id, username, is_admin, all_libraries, max_age FROM users WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&db.read)
+                .await?;
+        Ok(row.map(|(id, username, is_admin, all_libraries, max_age)| AuthUser {
+            id,
+            username,
+            is_admin,
+            all_libraries,
+            max_age: if is_admin { None } else { max_age },
+        }))
+    }
 }
 
 /// Extractor that additionally requires administrator rights.
@@ -96,18 +118,26 @@ struct CachedSession {
 pub struct AuthService {
     db: Db,
     cache: DashMap<String, CachedSession>,
+    /// Failed password and PIN attempts.
+    pub throttle: crate::accounts::Throttle,
 }
 
 impl AuthService {
     pub fn new(db: Db) -> Self {
-        Self { db, cache: DashMap::new() }
+        Self { db, cache: DashMap::new(), throttle: Default::default() }
     }
 
-    pub async fn create_session(&self, user_id: i64, user_agent: Option<&str>) -> Result<String, AppError> {
+    pub async fn create_session(
+        &self,
+        user_id: i64,
+        user_agent: Option<&str>,
+        ip: Option<&str>,
+    ) -> Result<String, AppError> {
         let token = new_token();
         let now = now();
         sqlx::query(
-            "INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at, user_agent) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at, user_agent, last_ip)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(hash_token(&token))
         .bind(user_id)
@@ -115,6 +145,7 @@ impl AuthService {
         .bind(now)
         .bind(now + SESSION_TTL_SECS)
         .bind(user_agent.map(|ua| ua.chars().take(200).collect::<String>()))
+        .bind(ip)
         .execute(&self.db.write)
         .await?;
         Ok(token)
@@ -128,23 +159,24 @@ impl AuthService {
                 return Some(entry.user.clone());
             }
         }
-        let row: Option<(i64, String, bool, i64, i64)> = sqlx::query_as(
-            "SELECT u.id, u.username, u.is_admin, s.expires_at, s.last_seen_at
+        #[allow(clippy::type_complexity)]
+        let row: Option<(i64, String, bool, bool, Option<i64>, bool, i64, i64)> = sqlx::query_as(
+            "SELECT u.id, u.username, u.is_admin, u.all_libraries, u.max_age, u.disabled, s.expires_at, s.last_seen_at
              FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?",
         )
         .bind(&key)
         .fetch_optional(&self.db.read)
         .await
         .ok()?;
-        let Some((id, username, is_admin, expires_at, last_seen_at)) = row else {
+        let Some((id, username, is_admin, all_libraries, max_age, disabled, expires_at, last_seen_at)) = row else {
             self.cache.remove(&key);
             return None;
         };
-        if expires_at <= now {
+        if expires_at <= now || disabled {
             self.cache.remove(&key);
             return None;
         }
-        let user = AuthUser { id, username, is_admin };
+        let user = AuthUser { id, username, is_admin, all_libraries, max_age: if is_admin { None } else { max_age } };
         let mut touched_at = last_seen_at;
         if now - last_seen_at > TOUCH_INTERVAL_SECS {
             // Sliding expiration, written at most every few minutes.
@@ -202,6 +234,39 @@ pub fn token_from_parts(parts: &Parts) -> Option<String> {
     parts.uri.query().and_then(|q| {
         q.split('&').find_map(|kv| kv.strip_prefix("token=").map(|t| t.to_owned())).filter(|t| !t.is_empty())
     })
+}
+
+/// The session token of the request, if any (to mark "this device").
+pub struct CurrentToken(pub Option<String>);
+
+impl<S: Send + Sync> FromRequestParts<S> for CurrentToken {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        Ok(CurrentToken(token_from_parts(parts)))
+    }
+}
+
+/// The client's address as seen by the server (for the devices list).
+pub struct ClientIp(pub Option<String>);
+
+impl<S: Send + Sync> FromRequestParts<S> for ClientIp {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let forwarded = parts
+            .headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.split(',').next())
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty());
+        let peer = parts
+            .extensions
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|info| info.0.ip().to_string());
+        Ok(ClientIp(forwarded.or(peer)))
+    }
 }
 
 impl FromRequestParts<AppState> for AuthUser {

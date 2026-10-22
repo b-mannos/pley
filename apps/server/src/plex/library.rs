@@ -15,13 +15,13 @@ use super::{Node, Page, Params, PlexAdmin, PlexError, PlexInfo, PlexResult, Plex
 use crate::auth::AuthUser;
 use crate::catalog::{self, ItemRow, LibraryQuery, SortKey};
 use crate::events::ServerEvent;
-use crate::library::{LibraryRow, list_libraries};
+use crate::library::LibraryRow;
 use crate::state::AppState;
 use crate::util::now;
 
-/// Libraries the user can see. Per-user library access belongs here.
-async fn visible_libraries(state: &AppState, _user: &AuthUser) -> PlexResult<Vec<LibraryRow>> {
-    Ok(list_libraries(&state.db).await?)
+/// Libraries the user can see (per-user library access).
+async fn visible_libraries(state: &AppState, user: &AuthUser) -> PlexResult<Vec<LibraryRow>> {
+    Ok(crate::access::visible_libraries(&state.db, user).await?)
 }
 
 async fn library_for(state: &AppState, user: &AuthUser, id: &str) -> PlexResult<(LibraryRow, Vec<LibraryRow>)> {

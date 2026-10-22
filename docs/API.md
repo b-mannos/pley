@@ -38,7 +38,18 @@ type Timestamp = number; // unix seconds
 interface User {
   id: Id;
   username: string;
+  name: string;                    // display name, or the username
+  display_name: string | null;
   is_admin: boolean;
+  managed: boolean;                // profile without a password, reached by switching
+  home: boolean;                   // listed in the household's profile switcher
+  has_pin: boolean;
+  avatar_url: string | null;
+  avatar_color: string | null;     // "#38bdf8"
+  all_libraries: boolean;          // false: only `library_ids`
+  library_ids: Id[];
+  max_age: number | null;          // age limit for movies and shows; null = none
+  disabled: boolean;
   created_at: Timestamp;
 }
 
@@ -207,6 +218,32 @@ interface PlaybackInfo {
 | POST | `/api/auth/logout` | – | `204`, cookie cleared |
 | GET | `/api/auth/me` | – | `User` |
 | PUT | `/api/auth/password` | `{ current_password, new_password }` | `204` |
+| GET | `/api/auth/profiles` | – | `User[]`: home profiles this user can switch to (empty for non-home users) |
+| POST | `/api/auth/switch` | `{ user_id, pin?, password? }` | `{ user, token }`: this device becomes that profile (old session ends). A profile with a PIN needs it; an administrator without a PIN needs its password unless you are an administrator. `429` after 5 wrong tries in 15 min. |
+
+Login attempts are throttled the same way (5 failures per username per 15 min).
+Disabled accounts get `403` at login and their sessions stop working.
+
+## Your account
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| PATCH | `/api/me` | `{ display_name?, avatar_color? }` (`null` clears) | `User` |
+| PUT | `/api/me/pin` | `{ pin: string \| null, password }` | `204`; 4–8 digits, `null` removes it |
+| PUT | `/api/me/avatar` | raw image bytes (JPEG, PNG, WebP, GIF, BMP; ≤ 10 MB) | `User`; stored as a 256 px square JPEG |
+| DELETE | `/api/me/avatar` | – | `204` |
+| GET | `/api/users/{id}/avatar` | – | `image/jpeg` (any signed-in user, for the profile switcher) |
+| GET | `/api/me/devices` | – | `Device[]`: `{ id, name, user_agent, ip, created_at, last_seen_at, current }` |
+| DELETE | `/api/me/devices/{id}` | – | `204`, signs that device out |
+
+## Access rules
+
+Administrators see everything. Other users see every library or only the
+ones in `library_ids`, and with `max_age` only movies and shows whose content
+rating allows that age (US, UK, DE, FR, AU, CA and numeric certifications are
+understood; seasons and episodes go by their show; unrated titles are hidden;
+music is exempt). Hidden libraries and items answer `404` everywhere: lists,
+hubs, search, artwork, streams and the Plex-compatible API.
 
 ## Libraries
 
@@ -403,9 +440,21 @@ type ServerEvent =
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/api/users` | – | `User[]` |
-| POST | `/api/users` | `{ username, password, is_admin }` | `User` |
-| PATCH | `/api/users/{id}` | `{ password?, is_admin? }` | `User` |
+| POST | `/api/users` | `{ username, password?, display_name?, is_admin?, managed?, home? (true), all_libraries? (true), library_ids?, max_age?, pin? }` | `User`; managed profiles need no password |
+| PATCH | `/api/users/{id}` | `{ password?, display_name?, is_admin?, home?, disabled?, all_libraries?, library_ids?, max_age?, pin? }` (`null` clears nullable fields) | `User`. pley always keeps one enabled administrator. |
 | DELETE | `/api/users/{id}` | – | `204` (cannot delete yourself) |
+| GET | `/api/users/{id}/devices` | – | `Device[]` |
+| DELETE | `/api/users/{id}/devices` | – | `204`, signs the user out everywhere |
+
+## Invitations
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/api/invites` *(admin)* | – | `Invite[]`: `{ code, created_at, expires_at, uses_left, all_libraries, library_ids, max_age, note }` |
+| POST | `/api/invites` *(admin)* | `{ expires_in_days? (7, 0 = never), uses? (1), all_libraries?, library_ids?, max_age?, note? }` | `Invite`; share `/invite/{code}` |
+| DELETE | `/api/invites/{code}` *(admin)* | – | `204` |
+| GET | `/api/invites/{code}` | – | `{ server_name, expires_at }`, `404` when invalid, used up or expired |
+| POST | `/api/invites/{code}/accept` | `{ username, password, display_name? }` | `{ user, token }`: a new (non-home) account with the invitation's access, signed in |
 
 ## System *(admin)*
 

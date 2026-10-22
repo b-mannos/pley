@@ -516,7 +516,7 @@ pub async fn universal_file(
     Path((session_id, file)): Path<(String, String)>,
 ) -> PlexResult<Response> {
     let session = state.sessions.get(&session_id).ok_or(PlexError::NotFound)?;
-    let user = AuthUser { id: session.user_id, username: session.username.clone(), is_admin: false };
+    let user = AuthUser::load(&state.db, session.user_id).await?.ok_or(PlexError::NotFound)?;
     crate::api::playback::hls_file(State(state), user, Path((session_id, file))).await.map_err(PlexError::from)
 }
 

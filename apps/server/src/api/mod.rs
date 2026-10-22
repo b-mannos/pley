@@ -1,5 +1,6 @@
 //! HTTP API (`/api/*`, see docs/API.md) plus the web UI fallback.
 
+mod accounts;
 mod activity;
 mod admin;
 mod auth;
@@ -11,6 +12,7 @@ pub(crate) mod playback;
 use std::time::Duration;
 
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderValue, header};
 use axum::routing::{delete, get, patch, post, put};
 use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
@@ -30,6 +32,16 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))
         .route("/auth/password", put(auth::change_password))
+        .route("/auth/profiles", get(auth::profiles))
+        .route("/auth/switch", post(auth::switch))
+        .route("/me", patch(accounts::update_me))
+        .route("/me/pin", put(accounts::set_my_pin))
+        .route(
+            "/me/avatar",
+            put(accounts::upload_avatar).delete(accounts::delete_avatar).layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
+        )
+        .route("/me/devices", get(accounts::my_devices))
+        .route("/me/devices/{id}", delete(accounts::sign_out_device))
         .route("/libraries", get(libraries::list).post(libraries::create))
         .route("/libraries/scan", post(libraries::scan_all))
         .route("/libraries/{id}", get(libraries::get).patch(libraries::update).delete(libraries::remove))
@@ -57,8 +69,13 @@ pub fn router(state: AppState) -> Router {
         .route("/files/{id}/subtitles/{file}", get(playback::subtitles))
         .route("/activity", get(activity::activity))
         .route("/events", get(activity::events))
-        .route("/users", get(admin::list_users).post(admin::create_user))
-        .route("/users/{id}", patch(admin::update_user).delete(admin::delete_user))
+        .route("/users", get(accounts::list_users).post(accounts::create_user))
+        .route("/users/{id}", patch(accounts::update_user).delete(accounts::delete_user))
+        .route("/users/{id}/avatar", get(accounts::avatar))
+        .route("/users/{id}/devices", get(accounts::user_devices).delete(accounts::sign_out_everywhere))
+        .route("/invites", get(accounts::list_invites).post(accounts::create_invite))
+        .route("/invites/{code}", get(accounts::check_invite).delete(accounts::delete_invite))
+        .route("/invites/{code}/accept", post(accounts::accept_invite))
         .route("/system", get(admin::system))
         .route("/transcoder", get(admin::transcoder_status))
         .route("/settings", get(admin::get_settings).put(admin::put_settings))

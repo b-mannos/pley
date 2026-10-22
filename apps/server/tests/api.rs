@@ -501,3 +501,257 @@ async fn subtitle_choice_carries_over_to_the_next_episode() {
     let pilot_again = app.get(&format!("/api/items/{pilot}"), &token).await.body;
     assert_eq!(pilot_again["files"][0]["selected_subtitle"], Value::Null);
 }
+
+async fn set_rating(app: &TestApp, title: &str, rating: Option<&str>) {
+    let age = rating.and_then(pley::ratings::rating_age);
+    sqlx::query("UPDATE items SET content_rating = ?, rating_age = ? WHERE title = ?")
+        .bind(rating)
+        .bind(age)
+        .bind(title)
+        .execute(&app.state.db.write)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn library_access_and_age_limits() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Adult Film (2020).mkv", 1024);
+    app.media_file("movies/Family Film (2019).mkv", 1024);
+    app.media_file("movies/Home Video (2015).mkv", 1024);
+    app.media_file("kids/Cartoon (2018).mkv", 1024);
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let kids = app.library(&admin, "Kids", "movies", "kids").await;
+    set_rating(&app, "Adult Film", Some("R")).await;
+    set_rating(&app, "Family Film", Some("PG")).await;
+    set_rating(&app, "Cartoon", Some("G")).await;
+
+    let created = app
+        .post(
+            "/api/users",
+            &admin,
+            json!({"username": "kid", "managed": true, "all_libraries": false, "library_ids": [movies, kids], "max_age": 12}),
+        )
+        .await;
+    assert_eq!(created.status, StatusCode::CREATED, "{:?}", created.body);
+    assert_eq!(created.body["library_ids"], json!([movies, kids]));
+    let kid_id = created.body["id"].as_i64().unwrap();
+    let switched = app.post("/api/auth/switch", &admin, json!({"user_id": kid_id})).await;
+    assert_eq!(switched.status, StatusCode::OK, "{:?}", switched.body);
+    let kid = switched.body["token"].as_str().unwrap().to_owned();
+    // Switching signed the admin out on this "device".
+    let admin = app
+        .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "admin", "password": "secret1"})), &[])
+        .await
+        .body["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // R-rated and unrated titles are hidden; the libraries are visible.
+    let libs = app.get("/api/libraries", &kid).await;
+    assert_eq!(libs.body.as_array().unwrap().len(), 2);
+    let items = app.get(&format!("/api/libraries/{movies}/items"), &kid).await;
+    assert_eq!(titles(&items.body["items"]), vec!["Family Film"]);
+    let all = app.get(&format!("/api/libraries/{movies}/items"), &admin).await;
+    let id_of = |title: &str| {
+        all.body["items"].as_array().unwrap().iter().find(|i| i["title"] == title).unwrap()["id"].as_i64().unwrap()
+    };
+    let adult = id_of("Adult Film");
+    assert_eq!(app.get(&format!("/api/items/{adult}"), &kid).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.get(&format!("/api/items/{adult}/images/poster"), &kid).await.status, StatusCode::NOT_FOUND);
+    let found = app.get("/api/search?q=film", &kid).await;
+    assert_eq!(found.status, StatusCode::OK);
+    assert!(!found.bytes.windows(10).any(|w| w == b"Adult Film"), "search leaks hidden titles");
+
+    // Taking a library away hides it completely.
+    let patched = app
+        .call(Method::PATCH, &format!("/api/users/{kid_id}"), Some(&admin), Some(json!({"library_ids": [kids]})), &[])
+        .await;
+    assert_eq!(patched.status, StatusCode::OK, "{:?}", patched.body);
+    assert_eq!(app.get(&format!("/api/libraries/{movies}/items"), &kid).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.get("/api/libraries", &kid).await.body.as_array().unwrap().len(), 1);
+
+    // Lifting the restrictions shows everything.
+    app.call(
+        Method::PATCH,
+        &format!("/api/users/{kid_id}"),
+        Some(&admin),
+        Some(json!({"max_age": null, "all_libraries": true})),
+        &[],
+    )
+    .await;
+    let items = app.get(&format!("/api/libraries/{movies}/items"), &kid).await;
+    assert_eq!(titles(&items.body["items"]), vec!["Adult Film", "Family Film", "Home Video"]);
+}
+
+#[tokio::test]
+async fn profiles_switch_with_pins() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let created = app
+        .post("/api/users", &admin, json!({"username": "kid", "display_name": "Kiddo", "managed": true, "pin": "1234"}))
+        .await;
+    assert_eq!(created.status, StatusCode::CREATED, "{:?}", created.body);
+    assert_eq!(created.body["name"], json!("Kiddo"));
+    assert_eq!(created.body["has_pin"], json!(true));
+    let kid_id = created.body["id"].as_i64().unwrap();
+
+    let profiles = app.get("/api/auth/profiles", &admin).await;
+    assert_eq!(profiles.body.as_array().unwrap().len(), 2);
+    let admin_id = profiles.body.as_array().unwrap().iter().find(|u| u["is_admin"] == json!(true)).unwrap()["id"]
+        .as_i64()
+        .unwrap();
+
+    let no_pin = app.post("/api/auth/switch", &admin, json!({"user_id": kid_id})).await;
+    assert_eq!(no_pin.status, StatusCode::FORBIDDEN);
+    let wrong = app.post("/api/auth/switch", &admin, json!({"user_id": kid_id, "pin": "9999"})).await;
+    assert_eq!(wrong.status, StatusCode::FORBIDDEN);
+    let ok = app.post("/api/auth/switch", &admin, json!({"user_id": kid_id, "pin": "1234"})).await;
+    assert_eq!(ok.status, StatusCode::OK, "{:?}", ok.body);
+    let kid = ok.body["token"].as_str().unwrap().to_owned();
+    // The device's previous profile session is gone.
+    assert_eq!(app.get("/api/auth/me", &admin).await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(app.get("/api/auth/me", &kid).await.body["id"], json!(kid_id));
+
+    // Back to the administrator: its password is needed (it has no PIN).
+    let denied = app.post("/api/auth/switch", &kid, json!({"user_id": admin_id})).await;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+    let back = app.post("/api/auth/switch", &kid, json!({"user_id": admin_id, "password": "secret1"})).await;
+    assert_eq!(back.status, StatusCode::OK, "{:?}", back.body);
+    let admin = back.body["token"].as_str().unwrap().to_owned();
+
+    // Guessing a PIN gets throttled.
+    let mut statuses = Vec::new();
+    for _ in 0..7 {
+        statuses.push(app.post("/api/auth/switch", &admin, json!({"user_id": kid_id, "pin": "0000"})).await.status);
+    }
+    assert_eq!(statuses.last(), Some(&StatusCode::TOO_MANY_REQUESTS), "{statuses:?}");
+
+    // Managed profiles can't sign in with a password.
+    let login = app
+        .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "kid", "password": "!managed"})), &[])
+        .await;
+    assert_eq!(login.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn invitations_create_friend_accounts() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Shared (2020).mkv", 1024);
+    app.media_file("private/Secret (2021).mkv", 1024);
+    let shared = app.library(&admin, "Shared", "movies", "movies").await;
+    app.library(&admin, "Private", "movies", "private").await;
+
+    let invite = app.post("/api/invites", &admin, json!({"all_libraries": false, "library_ids": [shared]})).await;
+    assert_eq!(invite.status, StatusCode::CREATED, "{:?}", invite.body);
+    let code = invite.body["code"].as_str().unwrap().to_owned();
+
+    let check = app.call(Method::GET, &format!("/api/invites/{code}"), None, None, &[]).await;
+    assert_eq!(check.status, StatusCode::OK);
+    let accept = app
+        .call(
+            Method::POST,
+            &format!("/api/invites/{code}/accept"),
+            None,
+            Some(json!({"username": "friend", "password": "pass1234"})),
+            &[],
+        )
+        .await;
+    assert_eq!(accept.status, StatusCode::OK, "{:?}", accept.body);
+    assert_eq!(accept.body["user"]["home"], json!(false));
+    let friend = accept.body["token"].as_str().unwrap().to_owned();
+    let libs = app.get("/api/libraries", &friend).await;
+    assert_eq!(libs.body.as_array().unwrap().len(), 1);
+    assert_eq!(app.get("/api/auth/profiles", &friend).await.body, json!([]));
+
+    // Single use.
+    let again = app
+        .call(
+            Method::POST,
+            &format!("/api/invites/{code}/accept"),
+            None,
+            Some(json!({"username": "friend2", "password": "pass1234"})),
+            &[],
+        )
+        .await;
+    assert_eq!(again.status, StatusCode::NOT_FOUND);
+}
+
+async fn login_as(app: &TestApp, username: &str, password: &str, agent: &str) -> String {
+    let r = app
+        .call(
+            Method::POST,
+            "/api/auth/login",
+            None,
+            Some(json!({"username": username, "password": password})),
+            &[("user-agent", agent)],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    r.body["token"].as_str().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn devices_can_be_signed_out_and_accounts_disabled() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.post("/api/users", &admin, json!({"username": "bob", "password": "bobpass1", "home": false})).await;
+    let laptop = login_as(&app, "bob", "bobpass1", "Mozilla/5.0 (Windows NT 10.0) Chrome/140.0 Safari/537.36").await;
+    let phone = login_as(
+        &app,
+        "bob",
+        "bobpass1",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Version/18.0 Safari/604.1",
+    )
+    .await;
+
+    let devices = app.get("/api/me/devices", &laptop).await;
+    let list = devices.body.as_array().unwrap();
+    assert_eq!(list.len(), 2);
+    let current = list.iter().find(|d| d["current"] == json!(true)).unwrap();
+    assert_eq!(current["name"], json!("Chrome on Windows"));
+    let other = list.iter().find(|d| d["current"] == json!(false)).unwrap()["id"].as_str().unwrap().to_owned();
+    let out = app.call(Method::DELETE, &format!("/api/me/devices/{other}"), Some(&laptop), None, &[]).await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT);
+    assert_eq!(app.get("/api/auth/me", &phone).await.status, StatusCode::UNAUTHORIZED);
+
+    let bob_id = app.get("/api/auth/me", &laptop).await.body["id"].as_i64().unwrap();
+    app.call(Method::PATCH, &format!("/api/users/{bob_id}"), Some(&admin), Some(json!({"disabled": true})), &[]).await;
+    assert_eq!(app.get("/api/auth/me", &laptop).await.status, StatusCode::UNAUTHORIZED);
+    let login = app
+        .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "bob", "password": "bobpass1"})), &[])
+        .await;
+    assert_eq!(login.status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn avatars_upload_and_serve() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(300, 200, image::Rgb([200, 30, 90])))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    let req = Request::builder()
+        .method(Method::PUT)
+        .uri("/api/me/avatar")
+        .header(header::AUTHORIZATION, format!("Bearer {admin}"))
+        .header(header::CONTENT_TYPE, "image/png")
+        .body(Body::from(png))
+        .unwrap();
+    let resp = app.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap()).unwrap();
+    let url = body["avatar_url"].as_str().unwrap().to_owned();
+    let image = app.get(&url, &admin).await;
+    assert_eq!(image.status, StatusCode::OK);
+    assert_eq!(image.headers[header::CONTENT_TYPE], "image/jpeg");
+
+    let patched = app.call(Method::PATCH, "/api/me", Some(&admin), Some(json!({"avatar_color": "#38bdf8"})), &[]).await;
+    assert_eq!(patched.body["avatar_color"], json!("#38bdf8"));
+    let bad = app.call(Method::PATCH, "/api/me", Some(&admin), Some(json!({"avatar_color": "blue"})), &[]).await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+}

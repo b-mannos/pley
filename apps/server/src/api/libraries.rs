@@ -7,11 +7,12 @@ use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 
 use super::truthy;
+use crate::access;
 use crate::auth::{AdminUser, AuthUser};
 use crate::catalog::{self, ItemSummary, LibraryQuery, SortKey};
 use crate::error::{ApiResult, AppError};
 use crate::events::ServerEvent;
-use crate::library::{LibraryKind, LibraryRow, get_library, list_libraries};
+use crate::library::{LibraryKind, LibraryRow, get_library};
 use crate::state::AppState;
 use crate::util::now;
 
@@ -49,16 +50,24 @@ async fn library_or_404(state: &AppState, id: i64) -> ApiResult<LibraryRow> {
     get_library(&state.db, id).await?.ok_or_else(|| AppError::not_found(format!("library {id} not found")))
 }
 
-pub async fn list(State(state): State<AppState>, _user: AuthUser) -> ApiResult<Json<Vec<LibraryDto>>> {
+/// The library, if this user may open it (others look like they don't exist).
+pub(crate) async fn visible_library(state: &AppState, user: &AuthUser, id: i64) -> ApiResult<LibraryRow> {
+    if !access::can_open_library(&state.db, user, id).await? {
+        return Err(AppError::not_found(format!("library {id} not found")));
+    }
+    library_or_404(state, id).await
+}
+
+pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<LibraryDto>>> {
     let mut out = Vec::new();
-    for lib in list_libraries(&state.db).await? {
+    for lib in access::visible_libraries(&state.db, &user).await? {
         out.push(to_dto(&state, &lib).await?);
     }
     Ok(Json(out))
 }
 
-pub async fn get(State(state): State<AppState>, _user: AuthUser, Path(id): Path<i64>) -> ApiResult<Json<LibraryDto>> {
-    let lib = library_or_404(&state, id).await?;
+pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<Json<LibraryDto>> {
+    let lib = visible_library(&state, &user, id).await?;
     Ok(Json(to_dto(&state, &lib).await?))
 }
 
@@ -201,7 +210,7 @@ pub async fn items(
     Path(id): Path<i64>,
     Query(query): Query<HashMap<String, String>>,
 ) -> ApiResult<Json<ItemsPage>> {
-    let lib = library_or_404(&state, id).await?;
+    let lib = visible_library(&state, &user, id).await?;
     let sort = query
         .get("sort")
         .map(|s| SortKey::parse(s).ok_or_else(|| AppError::bad_request(format!("unknown sort '{s}'"))))
@@ -236,10 +245,10 @@ pub async fn items(
 
 pub async fn filters(
     State(state): State<AppState>,
-    _user: AuthUser,
+    user: AuthUser,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let lib = library_or_404(&state, id).await?;
+    let lib = visible_library(&state, &user, id).await?;
     let (genres, years) = catalog::library_filters(&state.db, lib.id, lib.kind().top_level_kind()).await?;
     Ok(Json(serde_json::json!({ "genres": genres, "years": years })))
 }
@@ -258,7 +267,7 @@ pub struct Hubs {
 }
 
 pub async fn hubs(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<Json<Hubs>> {
-    let lib = library_or_404(&state, id).await?;
+    let lib = visible_library(&state, &user, id).await?;
     let kind = lib.kind();
     let mut hubs = Vec::new();
     let summarize = |rows: Vec<catalog::ItemRow>| rows.iter().map(|r| r.to_summary()).collect::<Vec<_>>();

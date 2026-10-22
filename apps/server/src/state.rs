@@ -51,6 +51,7 @@ impl AppState {
             std::fs::create_dir_all(&dir).map_err(|e| anyhow::anyhow!("cannot create {}: {e}", dir.display()))?;
         }
         let db = Db::open(&config.db_path()).await?;
+        crate::ratings::backfill(&db).await?;
         let settings = Arc::new(SettingsStore::load(&db).await?);
         let events = EventBus::new();
         let transcoder = Transcoder::new(&config);

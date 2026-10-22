@@ -356,9 +356,10 @@ impl MetadataAgent {
             .await;
         let title = details.title.clone().unwrap_or_else(|| item.title.clone());
         let genres: Vec<String> = details.genres.iter().map(|g| g.name.clone()).collect();
+        let age = certification.as_deref().and_then(crate::ratings::rating_age);
         sqlx::query(
             "UPDATE items SET title = ?, sort_title = ?, original_title = ?, year = COALESCE(?, year), summary = ?, tagline = ?,
-                rating = ?, content_rating = ?, genres = ?, studio = ?, release_date = ?, duration_ms = COALESCE(duration_ms, ?),
+                rating = ?, content_rating = ?, rating_age = ?, genres = ?, studio = ?, release_date = ?, duration_ms = COALESCE(duration_ms, ?),
                 tmdb_id = ?, imdb_id = COALESCE(?, imdb_id), poster = COALESCE(?, poster), backdrop = COALESCE(?, backdrop),
                 metadata_at = ?, updated_at = ?
              WHERE id = ?",
@@ -371,6 +372,7 @@ impl MetadataAgent {
         .bind(details.tagline.filter(|s| !s.is_empty()))
         .bind(details.vote_average.filter(|v| *v > 0.0))
         .bind(certification)
+        .bind(age)
         .bind(serde_json::to_string(&genres).ok())
         .bind(details.production_companies.first().map(|c| c.name.clone()))
         .bind(details.release_date.filter(|d| !d.is_empty()))
@@ -412,9 +414,10 @@ impl MetadataAgent {
             .await;
         let title = details.name.clone().unwrap_or_else(|| item.title.clone());
         let genres: Vec<String> = details.genres.iter().map(|g| g.name.clone()).collect();
+        let age = rating.as_deref().and_then(crate::ratings::rating_age);
         sqlx::query(
             "UPDATE items SET title = ?, sort_title = ?, original_title = ?, year = COALESCE(?, year), summary = ?, tagline = ?,
-                rating = ?, content_rating = ?, genres = ?, studio = ?, release_date = ?, tmdb_id = ?, imdb_id = COALESCE(?, imdb_id),
+                rating = ?, content_rating = ?, rating_age = ?, genres = ?, studio = ?, release_date = ?, tmdb_id = ?, imdb_id = COALESCE(?, imdb_id),
                 poster = COALESCE(?, poster), backdrop = COALESCE(?, backdrop), metadata_at = ?, updated_at = ?
              WHERE id = ?",
         )
@@ -426,6 +429,7 @@ impl MetadataAgent {
         .bind(details.tagline.filter(|s| !s.is_empty()))
         .bind(details.vote_average.filter(|v| *v > 0.0))
         .bind(rating)
+        .bind(age)
         .bind(serde_json::to_string(&genres).ok())
         .bind(details.networks.first().map(|n| n.name.clone()))
         .bind(details.first_air_date.filter(|d| !d.is_empty()))

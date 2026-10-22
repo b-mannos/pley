@@ -11,11 +11,29 @@ use crate::db::Db;
 use crate::library::sidecar::ExternalSub;
 use crate::util::now;
 
-/// Columns of [`ItemRow`]. The first bound parameter is the user id, exposed
-/// through the `me` CTE so every placeholder can stay a plain `?` (sqlx numbers
-/// unnamed placeholders itself, so they must not be mixed with `?NNN`).
-const SUMMARY_SELECT: &str = "
-WITH me(uid) AS (SELECT ?)
+/// The requesting user and their restrictions. Item queries bind the user id
+/// first and refer to it through `me`, so every placeholder can stay a plain
+/// `?` (sqlx numbers unnamed placeholders itself, so they must not be mixed
+/// with `?NNN`). Administrators have no restrictions.
+macro_rules! me_cte {
+    () => {
+        "WITH me(uid, all_libs, max_age) AS (
+            SELECT id, all_libraries OR is_admin, CASE WHEN is_admin THEN NULL ELSE max_age END FROM users WHERE id = ?)"
+    };
+}
+
+/// Whether item `i` (with parent `p` and grandparent `gp`) is visible to the
+/// user in `me`: library access and age limit, see [`crate::access`].
+const VISIBLE: &str = "((SELECT all_libs FROM me)
+       OR i.library_id IN (SELECT library_id FROM user_libraries WHERE user_id = (SELECT uid FROM me)))
+  AND ((SELECT max_age FROM me) IS NULL
+       OR i.kind IN ('artist', 'album', 'track')
+       OR COALESCE(i.rating_age, p.rating_age, gp.rating_age) <= (SELECT max_age FROM me))";
+
+/// Columns of [`ItemRow`]; callers add `WHERE {VISIBLE} AND …`.
+const SUMMARY_SELECT: &str = concat!(
+    me_cte!(),
+    "
 SELECT i.id, i.library_id, i.kind, i.title, i.sort_title, i.year, i.idx, i.disc,
        i.parent_id, p.title AS parent_title, p.idx AS parent_idx,
        i.grandparent_id, gp.title AS grandparent_title,
@@ -38,7 +56,8 @@ FROM items i
 LEFT JOIN items p ON p.id = i.parent_id
 LEFT JOIN items gp ON gp.id = i.grandparent_id
 LEFT JOIN user_item_state s ON s.item_id = i.id AND s.user_id = (SELECT uid FROM me)
-";
+"
+);
 
 #[derive(Debug, Clone, FromRow)]
 pub struct ItemRow {
@@ -284,8 +303,19 @@ impl FileRow {
     }
 }
 
+/// Whether the user may see the item (library access, age limit), without
+/// loading it.
+pub async fn is_visible(db: &Db, user_id: i64, item_id: i64) -> sqlx::Result<bool> {
+    let sql = format!(
+        "{} SELECT EXISTS (SELECT 1 FROM items i LEFT JOIN items p ON p.id = i.parent_id
+                           LEFT JOIN items gp ON gp.id = i.grandparent_id WHERE i.id = ? AND {VISIBLE})",
+        me_cte!()
+    );
+    sqlx::query_scalar(&sql).bind(user_id).bind(item_id).fetch_one(&db.read).await
+}
+
 pub async fn item(db: &Db, user_id: i64, item_id: i64) -> sqlx::Result<Option<ItemRow>> {
-    sqlx::query_as(&format!("{SUMMARY_SELECT} WHERE i.id = ?"))
+    sqlx::query_as(&format!("{SUMMARY_SELECT} WHERE {VISIBLE} AND i.id = ?"))
         .bind(user_id)
         .bind(item_id)
         .fetch_optional(&db.read)
@@ -298,7 +328,7 @@ pub async fn items_by_ids(db: &Db, user_id: i64, ids: &[i64]) -> sqlx::Result<Ve
         return Ok(Vec::new());
     }
     let placeholders = vec!["?"; ids.len()].join(",");
-    let sql = format!("{SUMMARY_SELECT} WHERE i.id IN ({placeholders})");
+    let sql = format!("{SUMMARY_SELECT} WHERE {VISIBLE} AND i.id IN ({placeholders})");
     let mut query = sqlx::query_as::<_, ItemRow>(&sql).bind(user_id);
     for id in ids {
         query = query.bind(id);
@@ -310,7 +340,7 @@ pub async fn items_by_ids(db: &Db, user_id: i64, ids: &[i64]) -> sqlx::Result<Ve
 
 pub async fn children(db: &Db, user_id: i64, parent_id: i64) -> sqlx::Result<Vec<ItemRow>> {
     sqlx::query_as(&format!(
-        "{SUMMARY_SELECT} WHERE i.parent_id = ?
+        "{SUMMARY_SELECT} WHERE {VISIBLE} AND i.parent_id = ?
          ORDER BY CASE WHEN i.kind = 'season' AND i.idx = 0 THEN 1 ELSE 0 END, i.disc, i.idx, i.sort_title"
     ))
     .bind(user_id)
@@ -372,7 +402,7 @@ pub struct LibraryQuery<'a> {
 }
 
 pub async fn library_items(db: &Db, user_id: i64, q: &LibraryQuery<'_>) -> sqlx::Result<Vec<ItemRow>> {
-    let mut sql = format!("{SUMMARY_SELECT} WHERE i.library_id = ? AND i.kind = ?");
+    let mut sql = format!("{SUMMARY_SELECT} WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ?");
     if q.genre.is_some() {
         sql.push_str(" AND EXISTS (SELECT 1 FROM json_each(i.genres) g WHERE g.value = ?)");
     }
@@ -550,7 +580,7 @@ pub async fn set_watched(db: &Db, user_id: i64, item_id: i64, kind: &str, watche
 pub async fn in_progress(db: &Db, user_id: i64, library_id: Option<i64>, limit: i64) -> sqlx::Result<Vec<ItemRow>> {
     let scope = if library_id.is_some() { "AND i.library_id = ?" } else { "" };
     let sql = format!(
-        "{SUMMARY_SELECT} WHERE s.position_ms > 0 AND i.kind IN ('movie', 'episode') {scope}
+        "{SUMMARY_SELECT} WHERE {VISIBLE} AND s.position_ms > 0 AND i.kind IN ('movie', 'episode') {scope}
          ORDER BY s.last_played_at DESC LIMIT ?"
     );
     let mut q = sqlx::query_as::<_, ItemRow>(&sql).bind(user_id);
@@ -711,7 +741,7 @@ pub async fn recently_added(
         kind => {
             let item_kind = if kind == "music" { "album" } else { "movie" };
             sqlx::query_as(&format!(
-                "{SUMMARY_SELECT} WHERE i.library_id = ? AND i.kind = ? ORDER BY i.added_at DESC, i.id DESC LIMIT ?"
+                "{SUMMARY_SELECT} WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? ORDER BY i.added_at DESC, i.id DESC LIMIT ?"
             ))
             .bind(user_id)
             .bind(library_id)
@@ -731,7 +761,7 @@ pub async fn recently_released(
     limit: i64,
 ) -> sqlx::Result<Vec<ItemRow>> {
     sqlx::query_as(&format!(
-        "{SUMMARY_SELECT} WHERE i.library_id = ? AND i.kind = ? AND i.release_date IS NOT NULL
+        "{SUMMARY_SELECT} WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? AND i.release_date IS NOT NULL
          ORDER BY i.release_date DESC LIMIT ?"
     ))
     .bind(user_id)
@@ -744,7 +774,7 @@ pub async fn recently_released(
 
 pub async fn top_rated(db: &Db, user_id: i64, library_id: i64, kind: &str, limit: i64) -> sqlx::Result<Vec<ItemRow>> {
     sqlx::query_as(&format!(
-        "{SUMMARY_SELECT} WHERE i.library_id = ? AND i.kind = ? AND i.rating IS NOT NULL ORDER BY i.rating DESC, i.sort_title LIMIT ?"
+        "{SUMMARY_SELECT} WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? AND i.rating IS NOT NULL ORDER BY i.rating DESC, i.sort_title LIMIT ?"
     ))
     .bind(user_id)
     .bind(library_id)

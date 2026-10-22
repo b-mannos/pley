@@ -3,6 +3,8 @@
 //! The crate is organised as a library so integration tests can build the full
 //! application in-process; `main.rs` only parses the command line.
 
+pub mod access;
+pub mod accounts;
 pub mod api;
 pub mod auth;
 pub mod catalog;
@@ -18,6 +20,7 @@ pub mod markers;
 pub mod metadata;
 pub mod playback;
 pub mod plex;
+pub mod ratings;
 pub mod settings;
 pub mod state;
 pub mod streams;

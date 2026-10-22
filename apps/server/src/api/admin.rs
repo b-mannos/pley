@@ -2,124 +2,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use axum::Json;
-use axum::extract::{Path as UrlPath, Query, State};
-use axum::http::StatusCode;
+use axum::extract::{Query, State};
 use pley_transcoder_api::Counters;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-use super::auth::UserDto;
-use crate::auth::{AdminUser, hash_password, validate_password, validate_username};
+use crate::auth::AdminUser;
 use crate::error::{ApiResult, AppError};
 use crate::playback::{TranscodeInfo, transcode_info};
 use crate::settings::{Settings, SettingsPatch};
 use crate::state::AppState;
-use crate::util::now;
-
-// ------------------------------------------------------------------ users
-
-pub async fn list_users(State(state): State<AppState>, _admin: AdminUser) -> ApiResult<Json<Vec<UserDto>>> {
-    let users = sqlx::query_as("SELECT id, username, is_admin, created_at FROM users ORDER BY username COLLATE NOCASE")
-        .fetch_all(&state.db.read)
-        .await?;
-    Ok(Json(users))
-}
-
-#[derive(Deserialize)]
-pub struct NewUser {
-    username: String,
-    password: String,
-    #[serde(default)]
-    is_admin: bool,
-}
-
-pub async fn create_user(
-    State(state): State<AppState>,
-    _admin: AdminUser,
-    Json(body): Json<NewUser>,
-) -> ApiResult<(StatusCode, Json<UserDto>)> {
-    let username = body.username.trim().to_owned();
-    validate_username(&username)?;
-    validate_password(&body.password)?;
-    let exists: Option<i64> = sqlx::query_scalar("SELECT id FROM users WHERE username = ?")
-        .bind(&username)
-        .fetch_optional(&state.db.read)
-        .await?;
-    if exists.is_some() {
-        return Err(AppError::conflict(format!("user '{username}' already exists")));
-    }
-    let hash = hash_password(body.password).await?;
-    let user: UserDto = sqlx::query_as(
-        "INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?)
-         RETURNING id, username, is_admin, created_at",
-    )
-    .bind(&username)
-    .bind(hash)
-    .bind(body.is_admin)
-    .bind(now())
-    .fetch_one(&state.db.write)
-    .await?;
-    Ok((StatusCode::CREATED, Json(user)))
-}
-
-#[derive(Deserialize)]
-pub struct UserPatch {
-    password: Option<String>,
-    is_admin: Option<bool>,
-}
-
-pub async fn update_user(
-    State(state): State<AppState>,
-    AdminUser(admin): AdminUser,
-    UrlPath(id): UrlPath<i64>,
-    Json(body): Json<UserPatch>,
-) -> ApiResult<Json<UserDto>> {
-    if let Some(password) = body.password {
-        validate_password(&password)?;
-        let hash = hash_password(password).await?;
-        sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
-            .bind(hash)
-            .bind(id)
-            .execute(&state.db.write)
-            .await?;
-        // Sign the user out everywhere else.
-        if id != admin.id {
-            sqlx::query("DELETE FROM sessions WHERE user_id = ?").bind(id).execute(&state.db.write).await?;
-        }
-    }
-    if let Some(is_admin) = body.is_admin {
-        if id == admin.id && !is_admin {
-            return Err(AppError::bad_request("you cannot remove your own administrator rights"));
-        }
-        sqlx::query("UPDATE users SET is_admin = ? WHERE id = ?")
-            .bind(is_admin)
-            .bind(id)
-            .execute(&state.db.write)
-            .await?;
-    }
-    state.auth.forget_user(id);
-    let user = sqlx::query_as("SELECT id, username, is_admin, created_at FROM users WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&state.db.read)
-        .await?
-        .ok_or_else(|| AppError::not_found("user not found"))?;
-    Ok(Json(user))
-}
-
-pub async fn delete_user(
-    State(state): State<AppState>,
-    AdminUser(admin): AdminUser,
-    UrlPath(id): UrlPath<i64>,
-) -> ApiResult<StatusCode> {
-    if id == admin.id {
-        return Err(AppError::bad_request("you cannot delete your own account"));
-    }
-    let result = sqlx::query("DELETE FROM users WHERE id = ?").bind(id).execute(&state.db.write).await?;
-    if result.rows_affected() == 0 {
-        return Err(AppError::not_found("user not found"));
-    }
-    state.auth.forget_user(id);
-    Ok(StatusCode::NO_CONTENT)
-}
 
 // ------------------------------------------------------------------ settings
 
