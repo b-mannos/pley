@@ -33,6 +33,7 @@ import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
 import { endSession, reportProgress, saveStreamChoice, startPlayback, stopSession } from "@/lib/progress";
 import { playUrl } from "@/lib/usePlayItem";
 import { modeById, qualityById } from "./quality";
+import { ChaptersMenu } from "./ChaptersMenu";
 import { SeekBar } from "./SeekBar";
 import { METHOD_LABEL, SettingsPopover } from "./SettingsPopover";
 import { fileMarkers, SkipButton, useSkipMarkers } from "./SkipButton";
@@ -108,6 +109,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const [muted, setMuted] = useLocalStorage<boolean>("pley.muted", false);
   const [fullscreen, setFullscreen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [chaptersOpen, setChaptersOpen] = useState(false);
   const [active, setActive] = useState(true);
   const [hoveringControls, setHoveringControls] = useState(false);
   const [ended, setEnded] = useState(false);
@@ -538,7 +540,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     return () => window.clearTimeout(hideTimer.current);
   }, [poke]);
 
-  const showControls = active || hoveringControls || !playing || settingsOpen || loading || !!error || needsGesture || ended;
+  const showControls =
+    active || hoveringControls || !playing || settingsOpen || chaptersOpen || loading || !!error || needsGesture || ended;
 
   const togglePlay = () => {
     const v = videoRef.current;
@@ -859,6 +862,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           buffered={buffered}
           onSeek={seekTo}
           previews={file && trickplay.data ? { fileId: file.id, trickplay: trickplay.data } : null}
+          chapters={file?.chapters ?? []}
         />
         <div className="mt-1 flex items-center gap-0.5 sm:gap-1.5">
           <button
@@ -950,6 +954,15 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             >
               <Captions className="size-5" />
             </button>
+          ) : null}
+          {file && (file.chapters?.length ?? 0) > 1 ? (
+            <ChaptersMenu
+              chapters={file.chapters}
+              current={current}
+              open={chaptersOpen}
+              setOpen={setChaptersOpen}
+              onSeek={seekTo}
+            />
           ) : null}
           <SettingsPopover
             open={settingsOpen}

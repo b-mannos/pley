@@ -156,6 +156,13 @@ export interface MediaFile {
   /** Tracks to start with: the user's remembered choice for this show or movie. */
   selected_audio: number | null;
   selected_subtitle: number | null;
+  chapters: Chapter[];
+}
+
+export interface Chapter {
+  start_ms: number;
+  end_ms: number;
+  title: string | null;
 }
 
 /** Seek-bar preview sprite sheets of a file (`GET /api/files/{id}/trickplay`). */

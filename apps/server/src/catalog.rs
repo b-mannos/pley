@@ -153,6 +153,7 @@ pub struct MediaFileDto {
     /// see [`crate::streams`]); `None` = the file's default audio / no subtitles.
     pub selected_audio: Option<i64>,
     pub selected_subtitle: Option<i64>,
+    pub chapters: Vec<pley_transcoder_api::Chapter>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -281,12 +282,17 @@ impl FileRow {
 
     /// Embedded streams followed by sidecar subtitles.
     pub fn streams(&self) -> Vec<MediaStream> {
-        let mut streams = self.media_info().map(|m| m.streams).unwrap_or_default();
+        self.streams_of(self.media_info().map(|m| m.streams).unwrap_or_default())
+    }
+
+    fn streams_of(&self, mut streams: Vec<MediaStream>) -> Vec<MediaStream> {
         streams.extend(self.external_subs().iter().map(ExternalSub::to_stream));
         streams
     }
 
     pub fn to_dto(&self) -> MediaFileDto {
+        // Parse the stored media info once.
+        let (streams, chapters) = self.media_info().map(|m| (m.streams, m.chapters)).unwrap_or_default();
         MediaFileDto {
             id: self.id,
             path: self.path.clone(),
@@ -298,9 +304,10 @@ impl FileRow {
             height: self.height,
             video_codec: self.video_codec.clone(),
             audio_codec: self.audio_codec.clone(),
-            streams: self.streams(),
+            streams: self.streams_of(streams),
             selected_audio: None,
             selected_subtitle: None,
+            chapters,
         }
     }
 }

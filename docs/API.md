@@ -136,6 +136,13 @@ interface MediaFile {
   streams: MediaStream[];
   selected_audio: number | null;    // tracks to start with for this user (remembered
   selected_subtitle: number | null; // choice for the show or movie); null = default / off
+  chapters: Chapter[];              // from the container, by start time (empty if none)
+}
+
+interface Chapter {
+  start_ms: number;
+  end_ms: number;
+  title: string | null;
 }
 
 interface MediaStream {

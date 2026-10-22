@@ -1,7 +1,8 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import type { Trickplay } from "@/api/types";
+import type { Chapter, Trickplay } from "@/api/types";
 import { cn } from "@/lib/cn";
 import { formatClock } from "@/lib/format";
+import { chapterIndexAt, chapterTitle } from "./ChaptersMenu";
 
 /** Width of the preview thumbnail on screen. */
 const PREVIEW_WIDTH = 224;
@@ -16,6 +17,15 @@ export interface SeekBarProps {
   onScrub?: (seconds: number | null) => void;
   /** Preview thumbnails, shown above the pointer when available. */
   previews?: { fileId: number; trickplay: Trickplay } | null;
+  /** Chapter starts are marked on the bar and named in the preview. */
+  chapters?: Chapter[];
+}
+
+/** "Chapter name · " for the chapter containing `seconds`, if the file has chapters. */
+function chapterAt(chapters: Chapter[], seconds: number): string {
+  if (chapters.length < 2) return "";
+  const i = chapterIndexAt(chapters, seconds * 1000);
+  return i < 0 ? "" : `${chapterTitle(chapters[i], i)} · `;
 }
 
 /** Sprite-sheet tile showing the video at `seconds`. */
@@ -40,7 +50,7 @@ function Preview({ fileId, trickplay: tp, seconds }: { fileId: number; trickplay
   );
 }
 
-export function SeekBar({ current, duration, buffered, onSeek, onScrub, previews }: SeekBarProps) {
+export function SeekBar({ current, duration, buffered, onSeek, onScrub, previews, chapters = [] }: SeekBarProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ x: number; t: number } | null>(null);
   const [drag, setDrag] = useState<number | null>(null);
@@ -136,6 +146,17 @@ export function SeekBar({ current, duration, buffered, onSeek, onScrub, previews
           <div className="absolute inset-y-0 left-0 bg-white/20" style={{ width: `${hover.x}px` }} />
         ) : null}
         <div className="absolute inset-y-0 left-0 bg-accent" style={{ width: `${pct}%` }} />
+        {duration > 0
+          ? chapters
+              .filter((c) => c.start_ms > 1000 && c.start_ms / 1000 < duration - 1)
+              .map((c) => (
+                <div
+                  key={c.start_ms}
+                  className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-black/70"
+                  style={{ left: `${(c.start_ms / 1000 / duration) * 100}%` }}
+                />
+              ))
+          : null}
       </div>
       <div
         className={cn(
@@ -152,7 +173,8 @@ export function SeekBar({ current, duration, buffered, onSeek, onScrub, previews
           {previews && previews.trickplay.count > 0 ? (
             <Preview fileId={previews.fileId} trickplay={previews.trickplay} seconds={drag ?? hover?.t ?? 0} />
           ) : null}
-          <div className="rounded bg-black/85 px-2 py-1 text-xs font-medium tabular-nums text-white shadow">
+          <div className="max-w-56 truncate rounded bg-black/85 px-2 py-1 text-xs font-medium tabular-nums text-white shadow">
+            {chapterAt(chapters, drag ?? hover?.t ?? 0)}
             {formatClock(drag ?? hover?.t ?? 0)}
           </div>
         </div>
