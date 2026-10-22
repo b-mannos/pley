@@ -139,7 +139,8 @@ async fn report(
     client: &ClientInfo,
 ) -> PlexResult<()> {
     let duration = duration_ms.filter(|d| *d > 0).or(row.duration_ms).unwrap_or(0);
-    let became_watched = catalog::record_progress(&state.db, user.id, row.id, time_ms, duration).await?;
+    let device = client.device_name.as_deref().or(client.product.as_deref());
+    let became_watched = catalog::record_progress(&state.db, user.id, row.id, time_ms, duration, device).await?;
 
     let existing = state.sessions.list().into_iter().find(|s| {
         s.user_id == user.id && s.item_id == row.id && (client.identifier.is_none() || s.client_id == client.identifier)

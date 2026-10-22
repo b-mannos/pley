@@ -63,6 +63,11 @@ impl TestApp {
         Reply { status, text, json }
     }
 
+    async fn plex_delete(&self, uri: &str, token: &str) -> StatusCode {
+        let req = Request::builder().method(Method::DELETE).uri(uri).header("x-plex-token", token);
+        self.plex.clone().oneshot(req.body(Body::empty()).unwrap()).await.unwrap().status()
+    }
+
     /// JSON response with the token as Plex clients send it.
     async fn plex_json(&self, uri: &str, token: &str) -> Value {
         let reply = self.plex(uri, &[("x-plex-token", token), ("accept", "application/json")]).await;
@@ -349,4 +354,37 @@ async fn cast_and_crew_tags_and_filters() {
     assert_eq!(titles(&by_name), vec!["Alpha"]);
     let without = app.plex_json(&format!("/library/sections/{lib}/all?actor!=Ann%20Actor"), &token).await;
     assert_eq!(titles(&without), vec!["Beta"]);
+}
+
+#[tokio::test]
+async fn play_history() {
+    let app = TestApp::new().await;
+    let token = app.setup().await;
+    app.media_file("movies/Alpha (2001).mp4");
+    let lib = app.library(&token, "Movies", "movies", "movies").await;
+    let all = app.plex_json(&format!("/library/sections/{lib}/all"), &token).await;
+    let id = metadata(&all)[0]["ratingKey"].as_str().unwrap().to_owned();
+    let client = [
+        ("x-plex-token", token.as_str()),
+        ("x-plex-client-identifier", "history-client"),
+        ("x-plex-device-name", "Living Room TV"),
+    ];
+    for time in [30_000, 590_000, 595_000] {
+        let reply =
+            app.plex(&format!("/:/timeline?ratingKey={id}&state=playing&time={time}&duration=600000"), &client).await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.text);
+    }
+    let history = app.plex_json("/status/sessions/history/all?sort=viewedAt:desc", &token).await;
+    let entries = metadata(&history);
+    assert_eq!(entries.len(), 1, "{history}");
+    assert_eq!(entries[0]["ratingKey"], id);
+    assert_eq!(entries[0]["type"], "movie");
+    assert!(entries[0]["viewedAt"].as_i64().unwrap() > 0);
+    let key = entries[0]["historyKey"].as_str().unwrap().to_owned();
+    let since = app.plex_json("/status/sessions/history/all?viewedAt%3E=4102444800", &token).await;
+    assert!(metadata(&since).is_empty(), "nothing after 2100");
+
+    let delete = app.plex_delete(&key, &token).await;
+    assert_eq!(delete, StatusCode::OK);
+    assert!(metadata(&app.plex_json("/status/sessions/history/all", &token).await).is_empty());
 }

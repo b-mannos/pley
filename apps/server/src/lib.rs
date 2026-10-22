@@ -14,6 +14,7 @@ pub mod db;
 pub mod desktop;
 pub mod error;
 pub mod events;
+pub mod history;
 pub mod images;
 pub mod library;
 pub mod logging;

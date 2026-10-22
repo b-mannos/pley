@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router";
-import { Camera, Check, KeyRound, Laptop, Lock, LogOut, ShieldCheck, Smartphone, Trash2, UserRound } from "lucide-react";
+import { Camera, Check, History, KeyRound, Laptop, Lock, LogOut, ShieldCheck, Smartphone, Trash2, UserRound } from "lucide-react";
 import { errorMessage, isApiError } from "@/api/client";
 import {
   useChangePassword,
@@ -17,6 +17,7 @@ import { useAudioPlayer } from "@/audio/AudioPlayer";
 import { useAuth } from "@/auth";
 import { Avatar, AVATAR_COLORS, avatarColor } from "@/components/Avatar";
 import { useToast } from "@/components/Toast";
+import { HistoryList } from "@/components/HistoryList";
 import { Badge, Button, Card, Field, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatRelative, formatTimestamp } from "@/lib/format";
@@ -347,6 +348,15 @@ function deviceIcon(d: Device) {
   return /iPhone|iPad|Android/.test(d.name) ? Smartphone : Laptop;
 }
 
+function HistoryCard() {
+  return (
+    <Card>
+      <CardTitle icon={<History />}>Watch history</CardTitle>
+      <HistoryList scope={{}} pageSize={15} empty="Movies, episodes and songs you finish show up here." />
+    </Card>
+  );
+}
+
 function DevicesCard() {
   const toast = useToast();
   const devices = useDevices();
@@ -452,6 +462,7 @@ export function AccountPage() {
       <ProfileCard key={user.id} />
       <PinCard />
       {user.managed ? null : <PasswordCard />}
+      <HistoryCard />
       <DevicesCard />
     </div>
   );

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
-import { Activity as ActivityIcon, Cpu, FastForward, MonitorPlay, Pause, Play, RefreshCw, Square } from "lucide-react";
+import { Activity as ActivityIcon, Cpu, FastForward, History, MonitorPlay, Pause, Play, RefreshCw, Square } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useActivity, useSystemInfo, useTranscoderStatus } from "@/api/hooks";
 import type {
@@ -14,6 +14,7 @@ import type {
   TranscoderStatus,
 } from "@/api/types";
 import { Artwork } from "@/components/Artwork";
+import { HistoryList } from "@/components/HistoryList";
 import { Badge, Card, EmptyState, ProgressBar, SectionTitle, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatBytes, formatClock, formatUptime, fullTitle, transcodeSummary } from "@/lib/format";
@@ -336,6 +337,15 @@ export function DashboardSettings() {
             ))}
           </div>
         )}
+      </section>
+
+      <section>
+        <SectionTitle>
+          <span className="flex items-center gap-2">
+            <History className="size-5 text-accent" /> Recently played
+          </span>
+        </SectionTitle>
+        <HistoryList scope={{ all: true }} showUser pageSize={10} empty="Nothing has been played to the end yet." />
       </section>
 
       <section>

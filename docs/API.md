@@ -504,6 +504,27 @@ algorithm version so improvements re-run automatically. It is skipped when
 `detect_markers` is off or the transcoder's FFmpeg lacks Chromaprint (chapters
 are still used).
 
+## Watch history
+
+A play is recorded once it reaches the point where the item counts as watched
+(90 %), with the device it played on. Marking something watched by hand is not
+a play.
+
+| Method | Path | Query | Response |
+|---|---|---|---|
+| GET | `/api/history` | `offset`, `limit` (default 50, max 200), `item_id` (the item, or the episodes or tracks under it), `library_id`, `since` (unix seconds); administrators: `user_id=<id>` or `all=1` | `{ total: number, entries: HistoryEntry[] }`, newest first. Your own plays unless asked otherwise; entries of items you can't see are left out. |
+| DELETE | `/api/history/{id}` | – | `204`; your own entries, or any for administrators |
+
+```ts
+interface HistoryEntry {
+  id: Id;
+  viewed_at: Timestamp;
+  device?: string;                  // "Chrome on Windows", a Plex client's name
+  user: { id: Id; name: string; avatar_url?: string; avatar_color?: string };
+  item: ItemSummary;
+}
+```
+
 ## Activity & events
 
 | Method | Path | Response |

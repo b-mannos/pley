@@ -4,11 +4,13 @@
 use std::sync::Arc;
 
 use axum::Extension;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 
-use super::meta::section_type;
-use super::{Node, PLEX_VERSION, PlexInfo, PlexResult, PlexUser};
+use super::library::{item_nodes, list_container, visible_libraries};
+use super::meta::{Detail, Sections, section_type};
+use super::{Node, PLEX_VERSION, Page, Params, PlexError, PlexInfo, PlexResult, PlexUser};
+use crate::history;
 use crate::library::list_libraries;
 use crate::state::AppState;
 
@@ -265,4 +267,53 @@ pub async fn media_providers(State(state): State<AppState>, PlexUser(_user): Ple
         .child(Node::new("Feature").attr("type", "timeline").attr("key", "/:/timeline"))
         .child(Node::new("Feature").attr("type", "universal").attr("key", "/video/:/transcode/universal"));
     Ok(Node::container().attr("size", 1).child(provider))
+}
+
+/// `/status/sessions/history/all`: plays, newest first. Administrators see
+/// everyone's (or one account's with `accountID`), others their own.
+pub async fn history(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Extension(info): Extension<Arc<PlexInfo>>,
+    params: Params,
+    page: Page,
+) -> PlexResult<Node> {
+    let account = params.parse::<i64>("accountID");
+    let filter = history::Filter {
+        user_id: if user.is_admin { account } else { Some(user.id) },
+        item_id: params.parse::<i64>("metadataItemID"),
+        library_id: params.parse::<i64>("librarySectionID"),
+        // `viewedAt>=…` arrives as the key `viewedAt>`.
+        since: params.parse::<i64>("viewedAt>").or_else(|| params.parse::<i64>("viewedAt")),
+        offset: page.start as i64,
+        limit: page.size.map(|s| s as i64).unwrap_or(1_000).clamp(0, 10_000),
+    };
+    let (records, total) = history::list(&state.db, user.id, &filter).await?;
+    let libraries = visible_libraries(&state, &user).await?;
+    let rows: Vec<_> = records.iter().map(|r| r.item.clone()).collect();
+    let detail = Detail { guids: false, full: false, media: false };
+    let nodes = item_nodes(&state, &rows, &Sections::new(&libraries), detail).await?;
+    let nodes = nodes
+        .into_iter()
+        .zip(&records)
+        .map(|(node, record)| {
+            node.attr("historyKey", format!("/status/sessions/history/{}", record.id))
+                .attr("viewedAt", record.viewed_at)
+                .attr("accountID", record.user.id)
+                .attr("deviceID", 0)
+        })
+        .collect();
+    Ok(list_container(None, &info, nodes, total as usize, &page))
+}
+
+pub async fn delete_history(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Path(id): Path<i64>,
+) -> PlexResult<StatusCode> {
+    if history::delete(&state.db, user.id, user.is_admin, id).await? {
+        Ok(StatusCode::OK)
+    } else {
+        Err(PlexError::NotFound)
+    }
 }

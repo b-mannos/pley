@@ -952,3 +952,85 @@ async fn cast_and_crew() {
     assert_eq!(app.get(&format!("/api/people/{moss}"), &admin).await.status, StatusCode::NOT_FOUND);
     assert_eq!(app.get(&format!("/api/people/{person}"), &admin).await.status, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn watch_history() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Alien (1979).mkv", 1024);
+    app.media_file("movies/Brazil (1985).mkv", 1024);
+    let lib = app.library(&admin, "Movies", "movies", "movies").await;
+    let page = app.get(&format!("/api/libraries/{lib}/items"), &admin).await;
+    let id_of = |title: &str| {
+        page.body["items"].as_array().unwrap().iter().find(|i| i["title"] == title).unwrap()["id"].as_i64().unwrap()
+    };
+    let (alien, brazil) = (id_of("Alien"), id_of("Brazil"));
+    let progress = |id: i64, position_ms: i64, token: String| {
+        let app = &app;
+        async move {
+            let body = json!({"position_ms": position_ms, "duration_ms": 100_000, "state": "playing"});
+            let reply = app
+                .call(
+                    Method::POST,
+                    &format!("/api/items/{id}/progress"),
+                    Some(&token),
+                    Some(body),
+                    &[("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0 Safari/537.36")],
+                )
+                .await;
+            assert_eq!(reply.status, StatusCode::NO_CONTENT, "{:?}", reply.body);
+        }
+    };
+
+    // Reports keep coming after the end is reached: one play.
+    progress(alien, 40_000, admin.clone()).await;
+    progress(alien, 95_000, admin.clone()).await;
+    progress(alien, 99_000, admin.clone()).await;
+    // Watching again counts again; marking watched by hand doesn't.
+    progress(alien, 30_000, admin.clone()).await;
+    progress(alien, 92_000, admin.clone()).await;
+    app.post(&format!("/api/items/{brazil}/watched"), &admin, json!({})).await;
+
+    let history = app.get("/api/history", &admin).await;
+    assert_eq!(history.status, StatusCode::OK, "{:?}", history.body);
+    assert_eq!(history.body["total"], json!(2));
+    let entry = &history.body["entries"][0];
+    assert_eq!(entry["item"]["title"], json!("Alien"));
+    assert_eq!(entry["device"], json!("Chrome on Windows"));
+    assert_eq!(entry["user"]["name"], json!("admin"));
+    let alien_detail = app.get(&format!("/api/items/{alien}"), &admin).await;
+    assert_eq!(alien_detail.body["user_state"]["play_count"], json!(2));
+    let paged = app.get("/api/history?limit=1&offset=1", &admin).await;
+    assert_eq!(paged.body["total"], json!(2));
+    assert_eq!(paged.body["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(app.get(&format!("/api/history?item_id={brazil}"), &admin).await.body["total"], json!(0));
+
+    // Others see their own plays; administrators can see everyone's.
+    let created =
+        app.post("/api/users", &admin, json!({"username": "bob", "password": "bobpass1", "all_libraries": true})).await;
+    assert_eq!(created.status, StatusCode::CREATED, "{:?}", created.body);
+    let bob = app
+        .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "bob", "password": "bobpass1"})), &[])
+        .await
+        .body["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    progress(brazil, 97_000, bob.clone()).await;
+    let own = app.get("/api/history?all=1", &bob).await;
+    assert_eq!(
+        titles(&json!(own.body["entries"].as_array().unwrap().iter().map(|e| &e["item"]).collect::<Vec<_>>())),
+        vec!["Brazil"]
+    );
+    assert_eq!(app.get("/api/history?all=1", &admin).await.body["total"], json!(3));
+    let bobs_id = created.body["id"].as_i64().unwrap();
+    assert_eq!(app.get(&format!("/api/history?user_id={bobs_id}"), &admin).await.body["total"], json!(1));
+
+    // Entries can be removed by their user or an administrator.
+    let admins_entry = history.body["entries"][0]["id"].as_i64().unwrap();
+    let reply = app.call(Method::DELETE, &format!("/api/history/{admins_entry}"), Some(&bob), None, &[]).await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    let reply = app.call(Method::DELETE, &format!("/api/history/{admins_entry}"), Some(&admin), None, &[]).await;
+    assert_eq!(reply.status, StatusCode::NO_CONTENT);
+    assert_eq!(app.get("/api/history", &admin).await.body["total"], json!(1));
+}

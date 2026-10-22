@@ -611,17 +611,31 @@ pub async fn item_detail(db: &Db, row: ItemRow) -> sqlx::Result<ItemDetail> {
 pub const WATCHED_THRESHOLD: f64 = 0.9;
 const MIN_RESUME_MS: i64 = 15_000;
 
-/// Record playback progress; crossing 90 % marks the item watched.
+/// Record playback progress. Crossing 90 % marks the item watched and, the
+/// first time for this play, counts it and adds it to the watch history from
+/// `device`; returns whether that happened.
 pub async fn record_progress(
     db: &Db,
     user_id: i64,
     item_id: i64,
     position_ms: i64,
     duration_ms: i64,
+    device: Option<&str>,
 ) -> sqlx::Result<bool> {
     let now = now();
     let position_ms = position_ms.max(0);
     if duration_ms > 0 && position_ms as f64 >= duration_ms as f64 * WATCHED_THRESHOLD {
+        let mut tx = db.write.begin().await?;
+        // Reports keep coming after the threshold: a play counts once, until
+        // the item is resumed or played again (which sets a position).
+        let counted: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM user_item_state
+                            WHERE user_id = ? AND item_id = ? AND watched = 1 AND position_ms = 0)",
+        )
+        .bind(user_id)
+        .bind(item_id)
+        .fetch_one(&mut *tx)
+        .await?;
         sqlx::query(
             "INSERT INTO user_item_state (user_id, item_id, position_ms, watched, play_count, last_played_at, updated_at)
              VALUES (?, ?, 0, 1, 1, ?, ?)
@@ -634,9 +648,19 @@ pub async fn record_progress(
         .bind(item_id)
         .bind(now)
         .bind(now)
-        .execute(&db.write)
+        .execute(&mut *tx)
         .await?;
-        return Ok(true);
+        if !counted {
+            sqlx::query("INSERT INTO play_history (user_id, item_id, viewed_at, device) VALUES (?, ?, ?, ?)")
+                .bind(user_id)
+                .bind(item_id)
+                .bind(now)
+                .bind(device)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        return Ok(!counted);
     }
     let stored = if position_ms >= MIN_RESUME_MS { position_ms } else { 0 };
     sqlx::query(

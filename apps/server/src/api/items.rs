@@ -138,6 +138,7 @@ pub async fn progress(
     State(state): State<AppState>,
     user: AuthUser,
     Path(id): Path<i64>,
+    headers: HeaderMap,
     Json(body): Json<Progress>,
 ) -> ApiResult<StatusCode> {
     let row = item_or_404(&state, user.id, id).await?;
@@ -148,7 +149,9 @@ pub async fn progress(
         return Err(AppError::bad_request("state must be playing, paused or stopped"));
     }
     let duration = body.duration_ms.filter(|d| *d > 0).or(row.duration_ms).unwrap_or(0);
-    let became_watched = catalog::record_progress(&state.db, user.id, id, body.position_ms, duration).await?;
+    let device = crate::accounts::device_name(headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()));
+    let became_watched =
+        catalog::record_progress(&state.db, user.id, id, body.position_ms, duration, Some(&device)).await?;
     if let Some(session) = body.session_id.as_deref().and_then(|sid| state.sessions.get(sid)) {
         if session.user_id == user.id {
             session.update(body.position_ms, &body.state);

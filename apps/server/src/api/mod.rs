@@ -7,6 +7,7 @@ mod auth;
 mod browse;
 pub(crate) mod collections;
 mod editing;
+mod history;
 pub(crate) mod items;
 mod libraries;
 mod people;
@@ -88,6 +89,8 @@ pub fn router(state: AppState) -> Router {
         .route("/items/{id}/collections", get(collections::for_item))
         .route("/people/{id}", get(people::get))
         .route("/people/{id}/photo", get(people::photo))
+        .route("/history", get(history::list))
+        .route("/history/{id}", delete(history::delete))
         .route("/hubs/home", get(browse::home))
         .route("/search", get(browse::search))
         .route("/playback", post(playback::start))

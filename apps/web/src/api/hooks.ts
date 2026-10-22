@@ -1,10 +1,11 @@
 import { useMemo } from "react";
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, qs, request } from "./client";
 import type {
   Activity,
   Device,
   FsListing,
+  HistoryPage,
   Hub,
   Id,
   Invite,
@@ -42,6 +43,7 @@ export const keys = {
   next: (id: Id) => ["item", id, "next"] as const,
   search: (q: string, limit: number) => ["search", q, limit] as const,
   person: (id: Id) => ["person", id] as const,
+  history: (scope: HistoryScope, pageSize: number) => ["history", scope, pageSize] as const,
   activity: ["activity"] as const,
   users: ["users"] as const,
   userDevices: (id: Id) => ["users", id, "devices"] as const,
@@ -495,6 +497,36 @@ export function useSearch(q: string, limit = 60) {
     queryFn: ({ signal }) => api.get<SearchResults>(`/api/search${qs({ q: trimmed, limit })}`, { signal }),
     enabled: trimmed.length > 0,
     placeholderData: (prev) => prev,
+  });
+}
+
+/** Whose plays: your own (default), one user's or everyone's (administrators). */
+export interface HistoryScope {
+  all?: boolean;
+  userId?: Id;
+}
+
+export function useHistory(scope: HistoryScope, pageSize = 20) {
+  return useInfiniteQuery({
+    queryKey: keys.history(scope, pageSize),
+    queryFn: ({ pageParam, signal }) =>
+      api.get<HistoryPage>(
+        `/api/history${qs({ all: scope.all ? 1 : undefined, user_id: scope.userId, offset: pageParam, limit: pageSize })}`,
+        { signal },
+      ),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => {
+      const loaded = pages.reduce((n, p) => n + p.entries.length, 0);
+      return loaded < last.total ? loaded : undefined;
+    },
+  });
+}
+
+export function useDeleteHistory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: Id) => api.del<void>(`/api/history/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["history"] }),
   });
 }
 

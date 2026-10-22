@@ -55,6 +55,8 @@ HLG and Dolby Vision.
     starts with the same language.
 - **Watch state.**
   - Per-user progress, watched flags and play counts.
+  - Watch history per user (with the device), and everyone's recent plays on
+    the dashboard.
   - Continue Watching and Next Up, plus Recently Added, Recently Released and
     Top Rated hubs.
   - Full-text search.

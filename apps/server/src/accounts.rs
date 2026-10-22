@@ -64,7 +64,7 @@ impl UserRow {
     fn into_dto(self, library_ids: Vec<i64>) -> UserDto {
         UserDto {
             name: self.display_name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| self.username.clone()),
-            avatar_url: self.avatar.as_ref().map(|a| format!("/api/users/{}/avatar?v={}", self.id, version_of(a))),
+            avatar_url: avatar_url(self.id, self.avatar.as_deref()),
             id: self.id,
             username: self.username,
             display_name: self.display_name,
@@ -85,6 +85,11 @@ impl UserRow {
 /// `"7-1734567890.jpg"` → `"1734567890"`, for cache-busting avatar URLs.
 fn version_of(file: &str) -> &str {
     file.rsplit_once('-').map(|(_, v)| v.trim_end_matches(".jpg")).unwrap_or(file)
+}
+
+/// `/api/users/{id}/avatar?v=…` for a user with an avatar file.
+pub fn avatar_url(user_id: i64, avatar: Option<&str>) -> Option<String> {
+    avatar.map(|a| format!("/api/users/{user_id}/avatar?v={}", version_of(a)))
 }
 
 pub async fn user(db: &Db, id: i64) -> sqlx::Result<Option<UserDto>> {

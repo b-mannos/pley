@@ -31,6 +31,7 @@ export function useServerEvents(enabled: boolean) {
       qc.invalidateQueries({ queryKey: ["library"] });
       qc.invalidateQueries({ queryKey: ["item"] });
       qc.invalidateQueries({ queryKey: ["search"] });
+      qc.invalidateQueries({ queryKey: ["history"] });
     };
 
     // Metadata refreshes can emit many `library_changed` events in a burst;
@@ -43,6 +44,8 @@ export function useServerEvents(enabled: boolean) {
       qc.invalidateQueries({ queryKey: ["hubs"] });
       qc.invalidateQueries({ queryKey: ["item"] });
       qc.invalidateQueries({ queryKey: ["search"] });
+      // Finishing something is a library change too.
+      qc.invalidateQueries({ queryKey: ["history"] });
     };
     const scheduleLibrary = (id: Id) => {
       pendingLibraries.add(id);

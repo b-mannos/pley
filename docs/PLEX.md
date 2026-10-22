@@ -103,6 +103,7 @@ parameters; containers report `size`, `totalSize` and `offset`.
 | Collections | `/library/sections/{id}/collections` (also `…/all?type=18`), `/library/collections/{id}`, `…/children`, `…/{thumb,art,composite}[/{version}]` |
 | Playlists | `GET`/`POST /playlists` (`?type=&title=&uri=…/library/metadata/1,2`), `GET`/`PUT` (`?title=`)/`DELETE /playlists/{id}`, `GET`/`PUT /playlists/{id}/items` (`?uri=`), `DELETE /playlists/{id}/items/{playlistItemID}`, `PUT …/{playlistItemID}/move?after=`, `/playlists/{id}/composite/{version}` |
 | Playback | `/library/parts/…`, `/library/streams/{id}` (subtitles), `/:/timeline`, `/:/progress`, `/:/scrobble`, `/:/unscrobble`, `/status/sessions`, `/transcode/sessions`, `/{video,audio}/:/transcode/universal/{start.m3u8,decision,stop,ping,session/…}` |
+| History | `/status/sessions/history/all` (`accountID`, `librarySectionID`, `metadataItemID`, `viewedAt>=`; administrators see every account, others their own), `DELETE /status/sessions/history/{id}` |
 | Images | `/photo/:/transcode` |
 
 ## Searching and filtering
@@ -158,8 +159,7 @@ With python-plexapi 4.18 the following work against the test media:
   `/:/rate` is accepted and ignored, edit requests fail. Edit in pley.
 - Filters on descendants (`episode.title` on shows) and on `resolution`, `hdr`,
   audio or subtitle language: ignored, so they don't narrow results.
-- Play history (`/status/sessions/history/all` is empty), the
-  `/:/websockets/notifications` event stream, player remote control, markers,
+- The `/:/websockets/notifications` event stream, player remote control, markers,
   related and similar items, photos and live TV.
 - Per-client capability profiles: universal transcode streams are H.264/AAC
   HLS.

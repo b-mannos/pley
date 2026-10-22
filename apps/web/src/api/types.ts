@@ -172,6 +172,28 @@ export interface PersonDetail extends PersonSummary {
   credits: PersonCredit[];
 }
 
+export interface HistoryUser {
+  id: Id;
+  name: string;
+  avatar_url?: string | null;
+  avatar_color?: string | null;
+}
+
+/** A play that reached the end (`GET /api/history`). */
+export interface HistoryEntry {
+  id: Id;
+  viewed_at: Timestamp;
+  /** "Chrome on Windows", a Plex client's name. */
+  device?: string;
+  user: HistoryUser;
+  item: ItemSummary;
+}
+
+export interface HistoryPage {
+  total: number;
+  entries: HistoryEntry[];
+}
+
 export interface SearchResults {
   items: ItemSummary[];
   people?: PersonSummary[];
