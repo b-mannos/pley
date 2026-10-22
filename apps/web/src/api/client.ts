@@ -4,6 +4,7 @@ export type ApiErrorCode =
   | "forbidden"
   | "not_found"
   | "conflict"
+  | "too_many_requests"
   | "unavailable"
   | "internal"
   | "network";
@@ -25,9 +26,9 @@ export function isApiError(err: unknown, status?: number): err is ApiError {
 }
 
 export function errorMessage(err: unknown): string {
-  if (err instanceof ApiError) return err.message || err.code;
-  if (err instanceof Error) return err.message;
-  return String(err);
+  const message = err instanceof ApiError ? err.message || err.code : err instanceof Error ? err.message : String(err);
+  // Server messages are lowercase phrases ("this account is disabled").
+  return message ? message.charAt(0).toUpperCase() + message.slice(1) : message;
 }
 
 let unauthorizedHandler: (() => void) | null = null;
@@ -40,6 +41,8 @@ export function setUnauthorizedHandler(handler: (() => void) | null) {
 export interface RequestOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
+  /** Sent as is (file uploads) instead of JSON-encoding `body`. */
+  rawBody?: Blob;
   signal?: AbortSignal;
   keepalive?: boolean;
   /** Don't trigger the global 401 redirect (used by auth probes). */
@@ -47,14 +50,17 @@ export interface RequestOptions {
 }
 
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const { method = "GET", body, signal, keepalive, noAuthRedirect } = opts;
+  const { method = "GET", body, rawBody, signal, keepalive, noAuthRedirect } = opts;
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (rawBody) headers["Content-Type"] = rawBody.type || "application/octet-stream";
+  else if (body !== undefined) headers["Content-Type"] = "application/json";
   let res: Response;
   try {
     res = await fetch(path, {
       method,
       credentials: "same-origin",
-      headers: body !== undefined ? { "Content-Type": "application/json", Accept: "application/json" } : { Accept: "application/json" },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      headers,
+      body: rawBody ?? (body !== undefined ? JSON.stringify(body) : undefined),
       signal,
       keepalive,
     });
@@ -110,6 +116,8 @@ function statusCode(status: number): ApiErrorCode {
       return "not_found";
     case 409:
       return "conflict";
+    case 429:
+      return "too_many_requests";
     case 503:
       return "unavailable";
     default:

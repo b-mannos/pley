@@ -1,10 +1,13 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { api, qs } from "./client";
+import { api, qs, request } from "./client";
 import type {
   Activity,
+  Device,
   FsListing,
   Hub,
   Id,
+  Invite,
+  InviteCheck,
   ItemDetail,
   ItemSummary,
   Library,
@@ -37,6 +40,11 @@ export const keys = {
   search: (q: string, limit: number) => ["search", q, limit] as const,
   activity: ["activity"] as const,
   users: ["users"] as const,
+  userDevices: (id: Id) => ["users", id, "devices"] as const,
+  profiles: ["profiles"] as const,
+  devices: ["devices"] as const,
+  invites: ["invites"] as const,
+  invite: (code: string) => ["invite", code] as const,
   settings: ["settings"] as const,
   system: ["system"] as const,
   transcoder: ["transcoder"] as const,
@@ -110,6 +118,102 @@ export function useChangePassword() {
     // A wrong current password must not trigger the global "session expired" redirect.
     mutationFn: (body: { current_password: string; new_password: string }) =>
       api.put<void>("/api/auth/password", body, { noAuthRedirect: true }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Profiles and your account
+// ---------------------------------------------------------------------------
+
+/** Home profiles this user can switch to (empty for people outside the home). */
+export function useProfiles(enabled = true) {
+  return useQuery({
+    queryKey: keys.profiles,
+    queryFn: () => api.get<User[]>("/api/auth/profiles"),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+export function fetchProfiles(qc: QueryClient) {
+  return qc.fetchQuery({ queryKey: keys.profiles, queryFn: () => api.get<User[]>("/api/auth/profiles"), staleTime: 0 });
+}
+
+/**
+ * Switch this device to another home profile. Everything cached belongs to
+ * the previous profile, so the cache starts over with the new user.
+ */
+export function useSwitchProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { user_id: Id; pin?: string; password?: string }) =>
+      api.post<LoginResponse>("/api/auth/switch", body, { noAuthRedirect: true }),
+    onSuccess: (res) => {
+      const server = qc.getQueryData<ServerStatus>(keys.server);
+      qc.clear();
+      if (server) qc.setQueryData(keys.server, server);
+      qc.setQueryData(keys.me, res.user);
+    },
+  });
+}
+
+function rememberMe(qc: QueryClient, user: User) {
+  qc.setQueryData(keys.me, user);
+  qc.invalidateQueries({ queryKey: keys.users });
+  qc.invalidateQueries({ queryKey: keys.profiles });
+}
+
+export function useUpdateProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { display_name?: string | null; avatar_color?: string | null }) => api.patch<User>("/api/me", body),
+    onSuccess: (user) => rememberMe(qc, user),
+  });
+}
+
+export function useUploadAvatar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: Blob) => request<User>("/api/me/avatar", { method: "PUT", rawBody: file }),
+    onSuccess: (user) => rememberMe(qc, user),
+  });
+}
+
+export function useDeleteAvatar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.del<void>("/api/me/avatar"),
+    onSuccess: () => {
+      qc.setQueryData<User | undefined>(keys.me, (u) => (u ? { ...u, avatar_url: null } : u));
+      qc.invalidateQueries({ queryKey: keys.users });
+      qc.invalidateQueries({ queryKey: keys.profiles });
+    },
+  });
+}
+
+export function useSetPin() {
+  const qc = useQueryClient();
+  return useMutation({
+    // A wrong password must not look like an expired session.
+    mutationFn: (body: { pin: string | null; password: string }) =>
+      api.put<void>("/api/me/pin", body, { noAuthRedirect: true }),
+    onSuccess: (_data, body) => {
+      qc.setQueryData<User | undefined>(keys.me, (u) => (u ? { ...u, has_pin: !!body.pin } : u));
+      qc.invalidateQueries({ queryKey: keys.profiles });
+      qc.invalidateQueries({ queryKey: keys.users });
+    },
+  });
+}
+
+export function useDevices() {
+  return useQuery({ queryKey: keys.devices, queryFn: () => api.get<Device[]>("/api/me/devices") });
+}
+
+export function useSignOutDevice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<void>(`/api/me/devices/${encodeURIComponent(id)}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.devices }),
   });
 }
 
@@ -380,20 +484,52 @@ export function useUsers() {
   return useQuery({ queryKey: keys.users, queryFn: () => api.get<User[]>("/api/users") });
 }
 
+export interface NewUserInput {
+  username: string;
+  password?: string;
+  display_name?: string;
+  is_admin?: boolean;
+  managed?: boolean;
+  home?: boolean;
+  all_libraries?: boolean;
+  library_ids?: Id[];
+  max_age?: number | null;
+  pin?: string;
+}
+
 export function useCreateUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { username: string; password: string; is_admin: boolean }) => api.post<User>("/api/users", body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.users }),
+    mutationFn: (body: NewUserInput) => api.post<User>("/api/users", body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.users });
+      qc.invalidateQueries({ queryKey: keys.profiles });
+    },
   });
+}
+
+/** Only the fields present are changed; `null` clears nullable ones. */
+export interface UserPatch {
+  password?: string;
+  display_name?: string | null;
+  is_admin?: boolean;
+  home?: boolean;
+  disabled?: boolean;
+  all_libraries?: boolean;
+  library_ids?: Id[];
+  max_age?: number | null;
+  pin?: string | null;
 }
 
 export function useUpdateUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: Id; password?: string; is_admin?: boolean }) =>
-      api.patch<User>(`/api/users/${id}`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.users }),
+    mutationFn: ({ id, ...body }: UserPatch & { id: Id }) => api.patch<User>(`/api/users/${id}`, body),
+    onSuccess: (user) => {
+      qc.invalidateQueries({ queryKey: keys.users });
+      qc.invalidateQueries({ queryKey: keys.profiles });
+      qc.setQueryData<User | undefined>(keys.me, (me) => (me && me.id === user.id ? user : me));
+    },
   });
 }
 
@@ -401,7 +537,82 @@ export function useDeleteUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: Id) => api.del<void>(`/api/users/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.users }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.users });
+      qc.invalidateQueries({ queryKey: keys.profiles });
+    },
+  });
+}
+
+export function useUserDevices(id: Id | null) {
+  return useQuery({
+    queryKey: keys.userDevices(id ?? 0),
+    queryFn: () => api.get<Device[]>(`/api/users/${id}/devices`),
+    enabled: id != null,
+  });
+}
+
+export function useSignOutEverywhere() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: Id) => api.del<void>(`/api/users/${id}/devices`),
+    onSuccess: (_data, id) => qc.invalidateQueries({ queryKey: keys.userDevices(id) }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Invitations
+// ---------------------------------------------------------------------------
+
+export function useInvites() {
+  return useQuery({ queryKey: keys.invites, queryFn: () => api.get<Invite[]>("/api/invites") });
+}
+
+export interface NewInviteInput {
+  expires_in_days?: number;
+  uses?: number;
+  all_libraries?: boolean;
+  library_ids?: Id[];
+  max_age?: number | null;
+  note?: string;
+}
+
+export function useCreateInvite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: NewInviteInput) => api.post<Invite>("/api/invites", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.invites }),
+  });
+}
+
+export function useDeleteInvite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => api.del<void>(`/api/invites/${encodeURIComponent(code)}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.invites }),
+  });
+}
+
+/** Public: is this invitation still valid? */
+export function useInviteCheck(code: string) {
+  return useQuery({
+    queryKey: keys.invite(code),
+    queryFn: () => api.get<InviteCheck>(`/api/invites/${encodeURIComponent(code)}`, { noAuthRedirect: true }),
+    retry: false,
+  });
+}
+
+export function useAcceptInvite(code: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { username: string; password: string; display_name?: string }) =>
+      api.post<LoginResponse>(`/api/invites/${encodeURIComponent(code)}/accept`, body, { noAuthRedirect: true }),
+    onSuccess: (res) => {
+      const server = qc.getQueryData<ServerStatus>(keys.server);
+      qc.clear();
+      if (server) qc.setQueryData(keys.server, server);
+      qc.setQueryData(keys.me, res.user);
+    },
   });
 }
 

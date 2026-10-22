@@ -7,8 +7,53 @@ export type Timestamp = number;
 export interface User {
   id: Id;
   username: string;
+  /** Display name, or the username when there is none. */
+  name: string;
+  display_name: string | null;
   is_admin: boolean;
+  /** A profile without a password, reached by switching from a home member. */
+  managed: boolean;
+  /** Listed in the household's profile switcher. */
+  home: boolean;
+  has_pin: boolean;
+  avatar_url: string | null;
+  /** "#38bdf8" */
+  avatar_color: string | null;
+  /** `false`: only the libraries in `library_ids`. */
+  all_libraries: boolean;
+  library_ids: Id[];
+  /** Age limit for movies and shows; `null` = none. */
+  max_age: number | null;
+  disabled: boolean;
   created_at: Timestamp;
+}
+
+/** A signed-in session (browser, app). */
+export interface Device {
+  id: string;
+  name: string;
+  user_agent: string | null;
+  ip: string | null;
+  created_at: Timestamp;
+  last_seen_at: Timestamp;
+  /** The session making this request. */
+  current: boolean;
+}
+
+export interface Invite {
+  code: string;
+  created_at: Timestamp;
+  expires_at: Timestamp | null;
+  uses_left: number;
+  all_libraries: boolean;
+  library_ids: Id[];
+  max_age: number | null;
+  note: string | null;
+}
+
+export interface InviteCheck {
+  server_name: string;
+  expires_at: Timestamp | null;
 }
 
 export interface ServerStatus {
