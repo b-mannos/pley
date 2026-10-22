@@ -8,6 +8,14 @@ export function reportProgress(itemId: Id, body: ProgressRequest, keepalive = fa
     .catch(() => undefined);
 }
 
+/** Remember the chosen tracks for this show (or movie); `subtitle_index: null` = off. */
+export function saveStreamChoice(
+  itemId: Id,
+  body: { file_id: Id | null; audio_index: number | null; subtitle_index: number | null },
+): Promise<void> {
+  return api.put<void>(`/api/items/${itemId}/streams`, body).catch(() => undefined);
+}
+
 export function stopSession(sessionId: string, keepalive = false): Promise<void> {
   return api
     .del<void>(`/api/playback/${encodeURIComponent(sessionId)}`, { keepalive, noAuthRedirect: keepalive })

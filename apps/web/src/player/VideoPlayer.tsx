@@ -30,7 +30,7 @@ import { cn } from "@/lib/cn";
 import { episodeLabel, formatClock, streamLabel } from "@/lib/format";
 import { loadHls } from "@/lib/hls";
 import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
-import { endSession, reportProgress, startPlayback, stopSession } from "@/lib/progress";
+import { endSession, reportProgress, saveStreamChoice, startPlayback, stopSession } from "@/lib/progress";
 import { playUrl } from "@/lib/usePlayItem";
 import { modeById, qualityById } from "./quality";
 import { SeekBar } from "./SeekBar";
@@ -80,8 +80,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const audioStreams = useMemo(() => file?.streams.filter((s) => s.kind === "audio") ?? [], [file]);
   const subStreams = useMemo(() => file?.streams.filter((s) => s.kind === "subtitle") ?? [], [file]);
 
-  const [audioIndex, setAudioIndex] = useState<number | null>(initialAudio);
-  const [subIndex, setSubIndex] = useState<number | null>(initialSub);
+  // Explicit tracks from the URL win; otherwise the remembered choice for the show / movie.
+  const [audioIndex, setAudioIndex] = useState<number | null>(initialAudio ?? file?.selected_audio ?? null);
+  const [subIndex, setSubIndex] = useState<number | null>(initialSub ?? file?.selected_subtitle ?? null);
   const [quality, setQuality] = useLocalStorage<string>("pley.quality", "original");
   const [storedMode, setStoredMode] = useLocalStorage<PlaybackMode>("pley.playbackMode", "auto");
   const mode = modeById(storedMode).id;
@@ -574,10 +575,17 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     else (videoRef.current as WebkitVideo | null)?.webkitEnterFullscreen?.();
   };
 
+  /** Store the choice so the next episode (or the next viewing) starts with the same tracks. */
+  const rememberTracks = (audio: number | null, sub: number | null) => {
+    void saveStreamChoice(item.id, { file_id: file?.id ?? null, audio_index: audio, subtitle_index: sub }).then(() =>
+      qc.invalidateQueries({ queryKey: ["item"], predicate: (q) => q.queryKey[1] !== item.id }),
+    );
+  };
   const changeAudio = (index: number) => {
     if (index === (audioIndex ?? audioStreams.find((s) => s.default)?.index ?? audioStreams[0]?.index)) return;
     startMsRef.current = currentMs();
     setAudioIndex(index);
+    rememberTracks(index, subIndex);
   };
   const changeQuality = (id: string) => {
     if (id === quality) return;
@@ -596,6 +604,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const nextBurn = s && s.text_based === false ? s.index : null;
     if (nextBurn !== burnIndex) startMsRef.current = currentMs();
     setSubIndex(index);
+    rememberTracks(audioIndex, index);
   };
   const cycleSubtitles = () => {
     const texts = subStreams.filter((s) => s.text_based !== false);

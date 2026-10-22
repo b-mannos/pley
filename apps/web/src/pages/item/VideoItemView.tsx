@@ -1,9 +1,11 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { Play, RotateCcw } from "lucide-react";
 import type { ItemDetail, MediaFile } from "@/api/types";
 import { Button, Select } from "@/components/ui";
 import { codecLabel, formatBytes, formatDate, formatDuration, resolutionLabel, seasonTitle, streamLabel } from "@/lib/format";
+import { saveStreamChoice } from "@/lib/progress";
 import { usePlayItem } from "@/lib/usePlayItem";
 import { MediaInfo } from "./MediaInfo";
 import {
@@ -47,13 +49,23 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
   const subStreams = useMemo(() => file?.streams.filter((s) => s.kind === "subtitle") ?? [], [file]);
   const defaultAudio = audioStreams.find((s) => s.default) ?? audioStreams[0];
 
-  // `null` → server default; per-file selections reset when the version changes.
-  const [audio, setAudio] = useState<{ file: number | null; index: number | null }>({ file: null, index: null });
+  // "auto" → the server's pick for this user (remembered choice for the show or movie);
+  // per-file selections reset when the version changes.
+  const qc = useQueryClient();
+  const [audio, setAudio] = useState<{ file: number | null; index: number | null | "auto" }>({ file: null, index: "auto" });
   const [sub, setSub] = useState<{ file: number | null; index: number | null | "auto" }>({ file: null, index: "auto" });
-  const audioIndex = audio.file === (file?.id ?? null) ? audio.index : null;
-  const autoSub = subStreams.find((s) => s.forced && s.default)?.index ?? null;
+  const audioChoice = audio.file === (file?.id ?? null) ? audio.index : "auto";
+  const audioIndex = audioChoice === "auto" ? (file?.selected_audio ?? null) : audioChoice;
   const subChoice = sub.file === (file?.id ?? null) ? sub.index : "auto";
-  const subIndex = subChoice === "auto" ? autoSub : subChoice;
+  const subIndex = subChoice === "auto" ? (file?.selected_subtitle ?? null) : subChoice;
+
+  /** Remember a choice made here for the whole show (or this movie). */
+  const remember = (nextAudio: number | null, nextSub: number | null) => {
+    if (!file) return;
+    void saveStreamChoice(item.id, { file_id: file.id, audio_index: nextAudio, subtitle_index: nextSub }).then(() =>
+      qc.invalidateQueries({ queryKey: ["item"], predicate: (q) => q.queryKey[1] !== item.id }),
+    );
+  };
 
   const resumable = !item.user_state.watched && item.user_state.position_ms > 0;
 
@@ -154,7 +166,10 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
                 <LabeledSelect
                   label="Audio"
                   value={String(audioIndex ?? defaultAudio?.index ?? "")}
-                  onChange={(v) => setAudio({ file: file.id, index: Number(v) })}
+                  onChange={(v) => {
+                    setAudio({ file: file.id, index: Number(v) });
+                    remember(Number(v), subIndex);
+                  }}
                 >
                   {audioStreams.map((s) => (
                     <option key={s.index} value={s.index}>
@@ -167,7 +182,11 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
                 <LabeledSelect
                   label="Subtitles"
                   value={subIndex == null ? "off" : String(subIndex)}
-                  onChange={(v) => setSub({ file: file.id, index: v === "off" ? null : Number(v) })}
+                  onChange={(v) => {
+                    const index = v === "off" ? null : Number(v);
+                    setSub({ file: file.id, index });
+                    remember(audioIndex, index);
+                  }}
                 >
                   <option value="off">Off</option>
                   {subStreams.map((s) => (

@@ -94,6 +94,9 @@ export interface MediaFile {
   video_codec: string | null;
   audio_codec: string | null;
   streams: MediaStream[];
+  /** Tracks to start with: the user's remembered choice for this show or movie. */
+  selected_audio: number | null;
+  selected_subtitle: number | null;
 }
 
 export type StreamKind = "video" | "audio" | "subtitle";

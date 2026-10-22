@@ -14,6 +14,7 @@ use crate::error::{ApiResult, AppError};
 use crate::events::ServerEvent;
 use crate::library::scanner::remux_candidate;
 use crate::state::AppState;
+use crate::streams;
 use crate::util::{now, path_str};
 
 pub(crate) async fn item_or_404(state: &AppState, user_id: i64, id: i64) -> ApiResult<ItemRow> {
@@ -22,7 +23,16 @@ pub(crate) async fn item_or_404(state: &AppState, user_id: i64, id: i64) -> ApiR
 
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<Json<ItemDetail>> {
     let row = item_or_404(&state, user.id, id).await?;
-    let detail = catalog::item_detail(&state.db, row).await?;
+    let scope = streams::scope(&row);
+    let mut detail = catalog::item_detail(&state.db, row).await?;
+    if !detail.files.is_empty() {
+        let pref = streams::load(&state.db, user.id, scope).await?;
+        for file in &mut detail.files {
+            let selection = streams::resolve(pref.as_ref(), &file.streams);
+            file.selected_audio = selection.audio;
+            file.selected_subtitle = selection.subtitle;
+        }
+    }
     // Opening an item is a good moment to index keyframes so playback can remux.
     if state.transcoder.is_available() {
         for file in &detail.files {
@@ -36,6 +46,35 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i
         }
     }
     Ok(Json(detail))
+}
+
+#[derive(Deserialize)]
+pub struct StreamChoice {
+    /// File the indexes refer to (default: the item's first file).
+    file_id: Option<i64>,
+    audio_index: Option<i64>,
+    /// `None` = subtitles off.
+    subtitle_index: Option<i64>,
+}
+
+/// Remember the audio / subtitle tracks the user picked, for the whole show
+/// when this is an episode.
+pub async fn set_streams(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<i64>,
+    Json(choice): Json<StreamChoice>,
+) -> ApiResult<StatusCode> {
+    let row = item_or_404(&state, user.id, id).await?;
+    let files = catalog::files_for_item(&state.db, row.id).await?;
+    let file = match choice.file_id {
+        Some(file_id) => files.iter().find(|f| f.id == file_id),
+        None => files.first(),
+    }
+    .ok_or_else(|| AppError::not_found("file not found"))?;
+    let pref = streams::from_selection(&file.streams(), choice.audio_index, choice.subtitle_index);
+    streams::save(&state.db, user.id, streams::scope(&row), &pref).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Serialize)]

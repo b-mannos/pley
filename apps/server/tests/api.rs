@@ -442,3 +442,62 @@ fn urlencode(path: &Path) -> String {
         })
         .collect()
 }
+
+#[tokio::test]
+async fn subtitle_choice_carries_over_to_the_next_episode() {
+    let app = TestApp::new().await;
+    let token = app.setup_admin().await;
+    for (e, title) in [(1, "Pilot"), (2, "Second")] {
+        let base = format!("tv/Subbed (2020)/Season 01/Subbed - S01E{e:02} - {title}");
+        app.media_file(&format!("{base}.mkv"), 1024);
+        app.media_file(&format!("{base}.en.srt"), 64);
+        app.media_file(&format!("{base}.fr.srt"), 64);
+    }
+    let lib = app.library(&token, "TV", "shows", "tv").await;
+    let show = app.get(&format!("/api/libraries/{lib}/items"), &token).await.body["items"][0]["id"].as_i64().unwrap();
+    let season = app.get(&format!("/api/items/{show}/children"), &token).await.body["items"][0]["id"].as_i64().unwrap();
+    let episodes = app.get(&format!("/api/items/{season}/children"), &token).await;
+    let (pilot, second) =
+        (episodes.body["items"][0]["id"].as_i64().unwrap(), episodes.body["items"][1]["id"].as_i64().unwrap());
+
+    let subtitle = |detail: &Value, language: &str| -> i64 {
+        detail["files"][0]["streams"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["kind"] == "subtitle" && s["language"] == language)
+            .unwrap()["index"]
+            .as_i64()
+            .unwrap()
+    };
+    let detail = app.get(&format!("/api/items/{pilot}"), &token).await.body;
+    assert_eq!(detail["files"][0]["selected_subtitle"], Value::Null, "nothing chosen yet");
+    let english = subtitle(&detail, "eng");
+
+    let chose = app
+        .call(
+            Method::PUT,
+            &format!("/api/items/{pilot}/streams"),
+            Some(&token),
+            Some(json!({"subtitle_index": english})),
+            &[],
+        )
+        .await;
+    assert_eq!(chose.status, StatusCode::NO_CONTENT, "{:?}", chose.body);
+
+    // The next episode starts with its own English track.
+    let next = app.get(&format!("/api/items/{second}"), &token).await.body;
+    assert_eq!(next["files"][0]["selected_subtitle"], json!(subtitle(&next, "eng")));
+
+    // Turning subtitles off is remembered too.
+    app.call(
+        Method::PUT,
+        &format!("/api/items/{second}/streams"),
+        Some(&token),
+        Some(json!({"subtitle_index": null})),
+        &[],
+    )
+    .await;
+    let pilot_again = app.get(&format!("/api/items/{pilot}"), &token).await.body;
+    assert_eq!(pilot_again["files"][0]["selected_subtitle"], Value::Null);
+}
