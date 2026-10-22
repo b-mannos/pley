@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use pley_transcoder_api::{
-    AudioMode, AudioRequest, JobRequest, JobStatus, MediaInfo, MediaStream, StreamKind, SubtitleBurnRequest,
-    VideoCodec, VideoMode, VideoRequest,
+    AudioMode, AudioRequest, DynamicRange, JobRequest, JobStatus, MediaInfo, MediaStream, StreamKind,
+    SubtitleBurnRequest, VideoCodec, VideoMode, VideoRequest, dynamic_range_label,
 };
 use serde::{Deserialize, Serialize};
 
@@ -30,9 +30,13 @@ pub struct Caps {
     pub video_codecs: Vec<String>,
     #[serde(default)]
     pub audio_codecs: Vec<String>,
-    /// Client can display HDR10 without tone mapping.
+    /// Client can display HDR10 / HLG without tone mapping.
     #[serde(default)]
     pub hdr: bool,
+    /// Client decodes Dolby Vision (including profile 5, which has no HDR10
+    /// or SDR base layer).
+    #[serde(default)]
+    pub dolby_vision: bool,
 }
 
 impl Caps {
@@ -45,6 +49,21 @@ impl Caps {
     fn audio(&self, c: &str) -> bool {
         self.audio_codecs.iter().any(|x| x.eq_ignore_ascii_case(c))
     }
+}
+
+/// How the client wants the media delivered.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PlaybackMode {
+    /// The cheapest method the client supports: direct play, then remux, then transcode.
+    #[default]
+    Auto,
+    /// The original file, even when the client did not claim support for it.
+    Direct,
+    /// HLS, copying the video stream when possible.
+    Remux,
+    /// HLS with the video always re-encoded.
+    Transcode,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -64,6 +83,12 @@ pub struct PlaybackRequest {
     pub start_ms: Option<i64>,
     #[serde(default)]
     pub caps: Caps,
+    #[serde(default)]
+    pub mode: PlaybackMode,
+    /// Identifies the player (a browser tab, a device). A client plays one
+    /// thing at a time, so its previous sessions end when it starts a new one.
+    #[serde(default)]
+    pub client_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -113,12 +138,30 @@ pub struct Decision {
     pub reasons: Vec<String>,
 }
 
-fn range_label(stream: &MediaStream) -> String {
-    let range = stream.dynamic_range();
-    match (range, stream.dv_profile) {
-        (pley_transcoder_api::DynamicRange::DolbyVision, Some(p)) => format!("Dolby Vision P{p}"),
-        _ => range.label().to_owned(),
+/// Why the client cannot show this video's dynamic range as is (the video is
+/// then tone-mapped to SDR), or `None` when it can.
+fn range_problem(v: &MediaStream, caps: &Caps) -> Option<String> {
+    let range = v.dynamic_range();
+    if !range.is_hdr() {
+        return None;
     }
+    let label = v.dynamic_range_label();
+    if range == DynamicRange::DolbyVision {
+        if caps.dolby_vision {
+            return None;
+        }
+        if v.is_dolby_vision_only() {
+            // No HDR10/SDR base layer: colours are wrong without DV processing.
+            return Some(format!("{label} needs a Dolby Vision decoder and is tone-mapped to SDR"));
+        }
+        // Profile 7/8: an HDR10 or HLG base layer plays as plain HDR.
+        if caps.hdr {
+            return None;
+        }
+    } else if caps.hdr {
+        return None;
+    }
+    Some(format!("{label} video is tone-mapped to SDR"))
 }
 
 /// Containers the browser can play natively (used when a file was never probed).
@@ -133,7 +176,11 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
 
     let Some(info) = info else {
         // Never probed (transcoder was unavailable during the scan).
-        let direct = caps.container(container) || web_container(container);
+        let direct = match req.mode {
+            PlaybackMode::Direct => true,
+            PlaybackMode::Auto => caps.container(container) || web_container(container),
+            PlaybackMode::Remux | PlaybackMode::Transcode => false,
+        };
         return Decision {
             method: if direct { Method::Direct } else { Method::Transcode },
             video: (!direct).then(VideoRequest::default),
@@ -168,8 +215,8 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
                 reasons.push(format!("{} video is not supported by this player", v.codec));
                 ok = false;
             }
-            if v.dynamic_range().is_hdr() && !caps.hdr {
-                reasons.push(format!("{} video is tone-mapped to SDR", range_label(v)));
+            if let Some(problem) = range_problem(v, caps) {
+                reasons.push(problem);
                 ok = false;
             }
             if v.codec == "h264" && v.bit_depth.unwrap_or(8) > 8 {
@@ -204,7 +251,15 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     }
 
     let audio_index = audio.map(|a| a.index);
-    if container_ok && video_ok && audio_ok && audio_is_default && bitrate_ok && size_ok && burn.is_none() {
+    let direct_ok = container_ok && video_ok && audio_ok && audio_is_default && bitrate_ok && size_ok && burn.is_none();
+    let direct = match req.mode {
+        PlaybackMode::Auto => direct_ok,
+        // The user knows better (e.g. a browser that plays more than it
+        // admits); image subtitles and alternate audio are lost.
+        PlaybackMode::Direct => true,
+        PlaybackMode::Remux | PlaybackMode::Transcode => false,
+    };
+    if direct {
         return Decision {
             method: Method::Direct,
             video: None,
@@ -216,8 +271,14 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         };
     }
 
+    match req.mode {
+        PlaybackMode::Remux if direct_ok => reasons.push("remuxing was requested".into()),
+        PlaybackMode::Transcode => reasons.push("transcoding was requested".into()),
+        _ => {}
+    }
     let video_req = video.map(|v| {
-        let copy = v.codec == "h264"
+        let copy = req.mode != PlaybackMode::Transcode
+            && v.codec == "h264"
             && caps.video("h264")
             && v.bit_depth.unwrap_or(8) <= 8
             && !v.dynamic_range().is_hdr()
@@ -296,15 +357,27 @@ pub struct PlayState {
     pub updated_at: i64,
 }
 
+/// What a transcode session asked the transcoder for, kept to re-create the
+/// job with the exact same segment layout if the transcoder loses it.
+#[derive(Debug, Clone)]
+pub struct TranscodeSpec {
+    /// The request with the *effective* video mode (a remux request the
+    /// transcoder answered with a transcode stays a transcode).
+    pub request: JobRequest,
+    pub segment_count: u32,
+    pub duration_ms: i64,
+}
+
 pub struct Session {
     pub id: String,
     pub user_id: i64,
     pub username: String,
+    pub client_id: Option<String>,
     pub item_id: i64,
     pub file_id: i64,
     pub method: Method,
     pub duration_ms: i64,
-    pub job_request: Option<JobRequest>,
+    pub transcode: Option<TranscodeSpec>,
     pub job_id: Mutex<Option<String>>,
     pub started_at: i64,
     pub play: Mutex<PlayState>,
@@ -318,11 +391,12 @@ impl Session {
     pub fn new(
         user_id: i64,
         username: String,
+        client_id: Option<String>,
         item_id: i64,
         file_id: i64,
         method: Method,
         duration_ms: i64,
-        job_request: Option<JobRequest>,
+        transcode: Option<TranscodeSpec>,
         job_id: Option<String>,
         start_ms: i64,
     ) -> Self {
@@ -331,11 +405,12 @@ impl Session {
             id: uuid::Uuid::new_v4().simple().to_string(),
             user_id,
             username,
+            client_id,
             item_id,
             file_id,
             method,
             duration_ms,
-            job_request,
+            transcode,
             job_id: Mutex::new(job_id),
             started_at: now,
             play: Mutex::new(PlayState { position_ms: start_ms, state: "playing".into(), updated_at: now }),
@@ -346,6 +421,10 @@ impl Session {
 
     pub fn job_id(&self) -> Option<String> {
         self.job_id.lock().clone()
+    }
+
+    pub fn position_ms(&self) -> i64 {
+        self.play.lock().position_ms
     }
 
     pub fn touch(&self) {
@@ -396,6 +475,18 @@ impl Sessions {
         self.map.lock().remove(id)
     }
 
+    /// Remove the sessions of `user_id` playing on `client_id` (the client
+    /// moved on to something else, or switched quality / audio track).
+    pub fn take_client_sessions(&self, user_id: i64, client_id: &str) -> Vec<Arc<Session>> {
+        let mut map = self.map.lock();
+        let ids: Vec<String> = map
+            .values()
+            .filter(|s| s.user_id == user_id && s.client_id.as_deref() == Some(client_id))
+            .map(|s| s.id.clone())
+            .collect();
+        ids.iter().filter_map(|id| map.remove(id)).collect()
+    }
+
     pub fn list(&self) -> Vec<Arc<Session>> {
         let mut list: Vec<_> = self.map.lock().values().cloned().collect();
         list.sort_by_key(|s| s.started_at);
@@ -412,7 +503,7 @@ impl Sessions {
             .values()
             .filter(|s| {
                 let play = s.play.lock();
-                s.job_request.is_some() && play.state != "stopped" && play.updated_at >= cutoff
+                s.transcode.is_some() && play.state != "stopped" && play.updated_at >= cutoff
             })
             .count()
     }
@@ -462,6 +553,8 @@ pub struct TranscodeInfo {
     pub audio_out: Option<String>,
     pub encoder: Option<String>,
     pub decoder: Option<String>,
+    /// `gpu` (decode → filters → encode on one GPU), `hybrid`, `cpu` or `copy`.
+    pub pipeline: Option<String>,
     pub tonemap: Option<String>,
     pub subtitle_burn: bool,
     pub speed: Option<f64>,
@@ -503,10 +596,7 @@ pub fn transcode_info(job: &JobStatus) -> TranscodeInfo {
         let mut s = format!("{} {}×{}", codec_label(&v.codec_in), v.width_in.unwrap_or(0), v.height_in.unwrap_or(0));
         if v.dynamic_range_in.is_hdr() {
             s.push(' ');
-            s.push_str(&match v.dv_profile {
-                Some(p) => format!("Dolby Vision P{p}"),
-                None => v.dynamic_range_in.label().to_owned(),
-            });
+            s.push_str(&dynamic_range_label(v.dynamic_range_in, v.dv_profile, v.dv_bl_compat));
         }
         s
     });
@@ -545,6 +635,7 @@ pub fn transcode_info(job: &JobStatus) -> TranscodeInfo {
         audio_out,
         encoder: video.and_then(|v| v.encoder.clone()),
         decoder: video.and_then(|v| v.decoder.clone()),
+        pipeline: video.and_then(|v| v.pipeline.clone()),
         tonemap: video.and_then(|v| v.tonemap).map(|t| t.as_str().to_owned()),
         subtitle_burn: video.is_some_and(|v| v.subtitle_burn.is_some()),
         speed: process.and_then(|p| p.speed),
@@ -618,6 +709,7 @@ mod tests {
             video_codecs: vec!["h264".into(), "vp9".into()],
             audio_codecs: vec!["aac".into(), "mp3".into(), "opus".into()],
             hdr: false,
+            dolby_vision: false,
         }
     }
 
@@ -631,6 +723,8 @@ mod tests {
             max_height: None,
             start_ms: None,
             caps: browser(),
+            mode: PlaybackMode::Auto,
+            client_id: None,
         }
     }
 
@@ -684,6 +778,60 @@ mod tests {
         let d = decide(&file("mp4", 5_000_000), Some(&i), &i.streams, &req);
         assert_eq!(d.method, Method::Remux);
         assert_eq!(d.audio.unwrap().stream_index, Some(2));
+    }
+
+    fn dolby_vision(profile: i64, compat: i64) -> MediaInfo {
+        let mut i = info("hevc", &["aac"], DynamicRange::DolbyVision);
+        i.streams[0].dv_profile = Some(profile);
+        i.streams[0].dv_bl_compat = Some(compat);
+        i.streams[0].bit_depth = Some(10);
+        i
+    }
+
+    #[test]
+    fn dolby_vision_needs_matching_client() {
+        let mut req = request();
+        req.caps.containers.push("mkv".into());
+        req.caps.video_codecs.push("hevc".into());
+        req.caps.hdr = true;
+
+        // Profile 8.1 has an HDR10 base layer: an HDR client plays it directly.
+        let p81 = dolby_vision(8, 1);
+        assert_eq!(decide(&file("mkv", 20_000_000), Some(&p81), &p81.streams, &req).method, Method::Direct);
+
+        // Profile 5 needs Dolby Vision decoding, otherwise it is tone-mapped.
+        let p5 = dolby_vision(5, 0);
+        let d = decide(&file("mkv", 20_000_000), Some(&p5), &p5.streams, &req);
+        assert_eq!(d.method, Method::Transcode);
+        assert!(d.reasons.iter().any(|r| r.contains("Dolby Vision P5")), "{:?}", d.reasons);
+        req.caps.dolby_vision = true;
+        assert_eq!(decide(&file("mkv", 20_000_000), Some(&p5), &p5.streams, &req).method, Method::Direct);
+
+        // Without HDR support, 8.1 is tone-mapped too.
+        req.caps.dolby_vision = false;
+        req.caps.hdr = false;
+        let d = decide(&file("mkv", 20_000_000), Some(&p81), &p81.streams, &req);
+        assert_eq!(d.method, Method::Transcode);
+        assert!(d.reasons.iter().any(|r| r.contains("Dolby Vision P8.1")), "{:?}", d.reasons);
+    }
+
+    #[test]
+    fn playback_modes_override_the_decision() {
+        let i = info("h264", &["aac"], DynamicRange::Sdr);
+        let mut req = request();
+        req.mode = PlaybackMode::Transcode;
+        let d = decide(&file("mp4", 5_000_000), Some(&i), &i.streams, &req);
+        assert_eq!(d.method, Method::Transcode);
+        assert_eq!(d.video.unwrap().mode, VideoMode::Transcode);
+
+        req.mode = PlaybackMode::Remux;
+        let d = decide(&file("mp4", 5_000_000), Some(&i), &i.streams, &req);
+        assert_eq!(d.method, Method::Remux);
+
+        let hevc = info("hevc", &["eac3"], DynamicRange::Sdr);
+        req.mode = PlaybackMode::Direct;
+        let d = decide(&file("mkv", 5_000_000), Some(&hevc), &hevc.streams, &req);
+        assert_eq!(d.method, Method::Direct);
     }
 
     #[test]

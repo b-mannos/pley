@@ -254,18 +254,39 @@ interface PlaybackInfo {
   subtitle_index?: number | null; // only needed for image-based subs (forces burn-in transcode)
   max_bitrate?: number | null;    // kbps, null/absent = original quality
   max_height?: number | null;     // e.g. 1080, 720, 480
-  start_ms?: number;              // informational
+  start_ms?: number;              // resume position; transcodes start producing there
+  mode?: "auto" | "direct" | "remux" | "transcode"; // default "auto"
+  client_id?: string;             // identifies the player (browser tab, device)
   caps: {                         // what the client can decode natively
     containers: string[];         // e.g. ["mp4","m4v","mov","webm","mp3","m4a","flac","ogg","wav"]
     video_codecs: string[];       // e.g. ["h264","hevc","vp9","av1"]
     audio_codecs: string[];       // e.g. ["aac","mp3","opus","flac","vorbis"]
+    hdr?: boolean;                // shows HDR10 / HLG without tone mapping
+    dolby_vision?: boolean;       // decodes Dolby Vision (needed for profile 5)
   };
 }
 ```
 
-Decision: **direct** when container + codecs are all supported, the requested audio
-track is the default one, nothing must be burned in and the bitrate fits;
-otherwise **remux** (HLS, video stream copied) or **transcode** (HLS, H.264/AAC).
+Decision (`mode: "auto"`): **direct** when container + codecs are all supported,
+the dynamic range can be shown, the requested audio track is the default one,
+nothing must be burned in and the bitrate fits; otherwise **remux** (HLS, video
+stream copied) or **transcode** (HLS, H.264/AAC).
+
+- HDR10 and HLG need `caps.hdr`. Dolby Vision profile 5 needs
+  `caps.dolby_vision`; profiles 7 and 8 play directly with either, because their
+  base layer is HDR10 (8.1) or HLG (8.4). Otherwise the video is tone-mapped to
+  SDR.
+- `mode: "direct"` always returns the original file (useful when a browser plays
+  more than it reports; image subtitles and alternate audio tracks are then
+  unavailable). `"remux"` and `"transcode"` force HLS; `"transcode"` always
+  re-encodes the video.
+- Starting a session with a `client_id` ends that user's previous sessions on
+  the same client (quality or audio switch, next episode) before the transcode
+  limit is checked.
+- If the transcoder loses a job (restart, expiry), the server recreates it with
+  the same segment layout. When that is impossible, segment requests answer
+  `404 not_found` ("playback session expired") and the player should start a
+  new session at its current position.
 The HLS playlist covers the whole file (VOD) so seeking works natively; the
 server restarts ffmpeg at the right segment on seeks. Audio-only items (tracks)
 use the same endpoint and get either a direct URL or an audio-only HLS stream.
@@ -314,7 +335,8 @@ interface TranscodeInfo {
   audio_in: string | null;      // e.g. "EAC3 5.1"
   audio_out: string | null;     // e.g. "AAC 2.0"
   encoder: string | null;       // e.g. "h264_nvenc", "libx264"
-  decoder: string | null;       // "cuda", "cpu", …
+  decoder: string | null;       // "cuda", "vulkan", "cpu", …
+  pipeline: string | null;      // "gpu" (zero-copy), "hybrid", "cpu" or "copy"
   tonemap: string | null;       // "libplacebo" | "opencl" | "zscale" when HDR/DV is tone-mapped to SDR
   subtitle_burn: boolean;
   speed: number | null;         // ffmpeg speed multiplier (2.5 = 2.5× realtime)

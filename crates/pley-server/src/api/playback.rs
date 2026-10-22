@@ -15,7 +15,7 @@ use crate::catalog::{self, ItemRow};
 use crate::error::{ApiResult, AppError};
 use crate::events::ServerEvent;
 use crate::library::sidecar::EXTERNAL_INDEX_BASE;
-use crate::playback::{Method, PlaybackInfo, PlaybackRequest, Session, decide, subtitle_tracks};
+use crate::playback::{Method, PlaybackInfo, PlaybackRequest, Session, TranscodeSpec, decide, subtitle_tracks};
 use crate::state::AppState;
 
 fn label(row: &ItemRow) -> String {
@@ -55,12 +55,24 @@ pub async fn start(
     let mut reasons = decision.reasons.clone();
     let subtitles = subtitle_tracks(file.id, &streams);
     let start_ms = req.start_ms.unwrap_or(0).max(0);
+    let client_id = req.client_id.clone().filter(|c| !c.is_empty() && c.len() <= 128);
+
+    // A client plays one thing at a time: end what it played before (a
+    // quality or audio switch, the next episode) so its transcode slot is
+    // free before the limit is checked.
+    if let Some(client) = &client_id {
+        let previous = state.sessions.take_client_sessions(user.id, client);
+        if !previous.is_empty() {
+            end_sessions(&state, previous);
+        }
+    }
 
     if decision.method == Method::Direct {
         let duration = file.duration_ms.or(row.duration_ms).unwrap_or(0);
         let session = state.sessions.insert(Session::new(
             user.id,
             user.username.clone(),
+            client_id,
             row.id,
             file.id,
             Method::Direct,
@@ -113,14 +125,21 @@ pub async fn start(
     };
     reasons.extend(created.warnings.iter().cloned());
     let burn = decision.burn_index;
+    // Pin the effective video mode: the segment layout depends on it.
+    let mut request = job_request;
+    if let (Some(video), Some(plan)) = (request.video.as_mut(), created.video.as_ref()) {
+        video.mode = plan.mode;
+    }
+    let spec = TranscodeSpec { request, segment_count: created.segment_count, duration_ms: created.duration_ms };
     let session = state.sessions.insert(Session::new(
         user.id,
         user.username.clone(),
+        client_id,
         row.id,
         file.id,
         method,
         created.duration_ms,
-        Some(job_request),
+        Some(spec),
         Some(created.id.clone()),
         start_ms,
     ));
@@ -150,19 +169,32 @@ fn owned_session(state: &AppState, user: &AuthUser, id: &str) -> ApiResult<Arc<S
 
 pub async fn stop(State(state): State<AppState>, user: AuthUser, Path(id): Path<String>) -> ApiResult<StatusCode> {
     let session = owned_session(&state, &user, &id)?;
-    state.sessions.remove(&session.id);
-    if let Some(job) = session.job_id() {
-        let transcoder = state.transcoder.clone();
-        tokio::spawn(async move {
-            let _ = transcoder.delete_job(&job).await;
-        });
+    if let Some(session) = state.sessions.remove(&session.id) {
+        end_sessions(&state, vec![session]);
     }
-    state.events.send(ServerEvent::SessionsChanged);
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// The transcoder forgot the job (restart, expiry): create it again. The
-/// segment layout is deterministic, so the client's playlist stays valid.
+/// Forget sessions that were already removed from the registry and delete
+/// their transcoder jobs in the background.
+fn end_sessions(state: &AppState, sessions: Vec<Arc<Session>>) {
+    let jobs: Vec<String> = sessions.iter().filter_map(|s| s.job_id()).collect();
+    if !jobs.is_empty() {
+        let transcoder = state.transcoder.clone();
+        tokio::spawn(async move {
+            for job in jobs {
+                let _ = transcoder.delete_job(&job).await;
+            }
+        });
+    }
+    state.events.send(ServerEvent::SessionsChanged);
+}
+
+/// The transcoder forgot the job (restart, expiry): create it again with the
+/// same effective request. The client never reloads its VOD playlist, so the
+/// new job must have the very same segment layout; when it does not (the
+/// keyframe cache was cleared), the session is over and the client starts a
+/// new one.
 async fn replacement_job(state: &AppState, session: &Session, failed: &str) -> ApiResult<String> {
     let _guard = session.recreate.lock().await;
     if let Some(current) = session.job_id() {
@@ -170,8 +202,21 @@ async fn replacement_job(state: &AppState, session: &Session, failed: &str) -> A
             return Ok(current);
         }
     }
-    let request = session.job_request.clone().ok_or_else(|| AppError::not_found("not a transcode session"))?;
-    let created = state.transcoder.create_job(&JobRequest { start_ms: None, ..request }).await?;
+    let spec = session.transcode.as_ref().ok_or_else(|| AppError::not_found("not a transcode session"))?;
+    // Pre-start near the playhead instead of at the beginning.
+    let request = JobRequest { start_ms: Some(session.position_ms()), ..spec.request.clone() };
+    let created = state.transcoder.create_job(&request).await?;
+    let same_mode = match (&spec.request.video, &created.video) {
+        (Some(wanted), Some(got)) => wanted.mode == got.mode,
+        (None, None) => true,
+        _ => false,
+    };
+    if !same_mode || created.segment_count != spec.segment_count || created.duration_ms != spec.duration_ms {
+        let _ = state.transcoder.delete_job(&created.id).await;
+        *session.job_id.lock() = None;
+        tracing::info!("transcode job for session {} cannot be recreated with the same layout", session.id);
+        return Err(AppError::not_found("playback session expired"));
+    }
     tracing::info!("recreated transcode job for session {}", session.id);
     *session.job_id.lock() = Some(created.id.clone());
     Ok(created.id)
@@ -184,11 +229,14 @@ pub async fn hls_file(
 ) -> ApiResult<Response> {
     let session = owned_session(&state, &user, &id)?;
     session.touch();
-    let job = session.job_id().ok_or_else(|| AppError::not_found("not a transcode session"))?;
+    if session.transcode.is_none() {
+        return Err(AppError::not_found("not a transcode session"));
+    }
+    let job = session.job_id().ok_or_else(|| AppError::not_found("playback session expired"))?;
 
     if file == "index.m3u8" {
         let playlist = match state.transcoder.playlist(&job).await {
-            Err(err) if err.is_not_found() => {
+            Err(err) if err.is_job_gone() => {
                 let job = replacement_job(&state, &session, &job).await?;
                 state.transcoder.playlist(&job).await?
             }
@@ -206,7 +254,7 @@ pub async fn hls_file(
         .and_then(|n| n.parse().ok())
         .ok_or_else(|| AppError::not_found("unknown playlist file"))?;
     let upstream = match state.transcoder.segment(&job, n).await {
-        Err(err) if err.is_not_found() => {
+        Err(err) if err.is_job_gone() => {
             let job = replacement_job(&state, &session, &job).await?;
             state.transcoder.segment(&job, n).await?
         }

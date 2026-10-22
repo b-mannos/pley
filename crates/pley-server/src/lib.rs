@@ -43,7 +43,9 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .await?;
 
     tracing::info!("shutting down");
-    tokio::time::timeout(Duration::from_secs(5), state.shutdown()).await.ok();
+    if tokio::time::timeout(Duration::from_secs(25), state.shutdown()).await.is_err() {
+        tracing::warn!("shutdown did not finish in time");
+    }
     Ok(())
 }
 

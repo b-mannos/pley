@@ -214,11 +214,23 @@ impl Scanner {
             }
             seen.insert(key);
         }
+        // A root that suddenly holds no media at all is far more likely an
+        // unmounted drive (the mount point exists but is empty) than a library
+        // whose every file was deleted: keep its items.
+        let mut walked = walked;
+        for root in &roots {
+            let empty = !walked.media.iter().any(|f| &f.root == root);
+            if empty
+                && !walked.offline_roots.contains(root)
+                && existing.iter().any(|(_, path, ..)| Path::new(path).starts_with(root))
+            {
+                tracing::warn!("library folder {} is empty; assuming its drive is not mounted", root.display());
+                walked.offline_roots.push(root.clone());
+            }
+        }
         let removed: Vec<i64> = existing
             .iter()
-            .filter(|(_, path, ..)| {
-                !seen.contains(path) && !walked.offline_roots.iter().any(|r| Path::new(path).starts_with(r))
-            })
+            .filter(|(_, path, ..)| !seen.contains(path) && !walked.maybe_unavailable(Path::new(path)))
             .map(|(id, ..)| *id)
             .collect();
 
@@ -240,11 +252,15 @@ impl Scanner {
             async move {
                 let outcome = match transcoder.probe(&path_str(&file.path)).await {
                     Ok(info) => ProbeOutcome::Ok(Box::new(info)),
-                    Err(TranscoderError::Unavailable(_)) => ProbeOutcome::Unavailable,
-                    Err(TranscoderError::Http(e)) if e.is_connect() || e.is_timeout() => ProbeOutcome::Unavailable,
-                    Err(err) => {
-                        tracing::warn!("could not probe {}: {err}", file.path.display());
+                    // ffprobe ran and cannot read the file: don't retry every scan.
+                    Err(TranscoderError::Api { code, message, .. }) if code == "ffmpeg_failed" => {
+                        tracing::warn!("could not probe {}: {message}", file.path.display());
                         ProbeOutcome::Failed
+                    }
+                    // Unreachable transcoder, timeout (sleeping NAS), …: try again next scan.
+                    Err(err) => {
+                        tracing::debug!("probe of {} postponed: {err}", file.path.display());
+                        ProbeOutcome::Unavailable
                     }
                 };
                 (file, outcome)
@@ -321,7 +337,15 @@ impl Scanner {
         }
         let mut tx = self.db.write.begin().await?;
         for (file, outcome) in batch.drain(..) {
-            let is_new = !existing.contains_key(path_str(&file.path).as_str());
+            let known = existing.get(path_str(&file.path).as_str());
+            // A forced rescan while the transcoder is down must not replace
+            // good probe data (and music tags) with nothing.
+            if matches!(outcome, ProbeOutcome::Unavailable)
+                && known.is_some_and(|&(_, size, mtime, _)| size == file.size && mtime == file.mtime)
+            {
+                continue;
+            }
+            let is_new = known.is_none();
             match writer.write(&mut tx, &file, outcome).await {
                 Ok(()) if is_new => totals.added += 1,
                 Ok(()) => totals.updated += 1,
@@ -335,7 +359,8 @@ impl Scanner {
 
 enum ProbeOutcome {
     Ok(Box<MediaInfo>),
-    /// The transcoder could not be reached: store the file unprobed, retry next scan.
+    /// The transcoder could not be reached or timed out: store the file
+    /// unprobed (unless it is already known), retry next scan.
     Unavailable,
     /// ffprobe rejected the file: store it as probed so we don't retry every scan.
     Failed,

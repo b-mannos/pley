@@ -61,6 +61,18 @@ pub struct Walked {
     /// Library roots that could not be read (unmounted drive?): files below
     /// them must not be treated as deleted.
     pub offline_roots: Vec<PathBuf>,
+    /// Folders, links and files inside the roots that failed to read (an
+    /// offline network share behind a symlink, a permission problem, an I/O
+    /// error): files below them must not be treated as deleted either.
+    pub unreadable: Vec<PathBuf>,
+}
+
+impl Walked {
+    /// Whether a known file at `path` may be missing only because it could
+    /// not be read this time.
+    pub fn maybe_unavailable(&self, path: &Path) -> bool {
+        self.offline_roots.iter().chain(&self.unreadable).any(|p| path.starts_with(p))
+    }
 }
 
 fn extension(path: &Path) -> String {
@@ -118,7 +130,8 @@ pub fn walk(roots: &[PathBuf], kind: LibraryKind) -> Walked {
             let entry = match entry {
                 Ok(e) => e,
                 Err(err) => {
-                    tracing::debug!("walk error: {err}");
+                    tracing::warn!("cannot read {}: {err}", err.path().unwrap_or(root).display());
+                    out.unreadable.push(err.path().unwrap_or(root).to_path_buf());
                     continue;
                 }
             };
@@ -139,7 +152,10 @@ pub fn walk(roots: &[PathBuf], kind: LibraryKind) -> Walked {
             if !is_media_file(path, kind) {
                 continue;
             }
-            let Ok(meta) = entry.metadata() else { continue };
+            let Ok(meta) = entry.metadata() else {
+                out.unreadable.push(path.to_path_buf());
+                continue;
+            };
             if kind != LibraryKind::Music && is_sample(path, meta.len()) {
                 continue;
             }
@@ -213,5 +229,15 @@ mod tests {
         let sidecars = &walked.sidecars[&root.join("Movie (2020)")];
         assert_eq!(sidecars.len(), 2);
         assert_eq!(walked.offline_roots, vec![root.join("missing")]);
+        assert!(walked.maybe_unavailable(&root.join("missing/Film (1999)/Film.mkv")));
+        assert!(!walked.maybe_unavailable(&root.join("Gone (2001)/Gone.mkv")));
+    }
+
+    #[test]
+    fn unreadable_folders_protect_their_files() {
+        let walked = Walked { unreadable: vec![PathBuf::from("/m/nas-link")], ..Default::default() };
+        assert!(walked.maybe_unavailable(Path::new("/m/nas-link/Movie (2020)/Movie.mkv")));
+        assert!(walked.maybe_unavailable(Path::new("/m/nas-link")));
+        assert!(!walked.maybe_unavailable(Path::new("/m/other/Movie.mkv")));
     }
 }

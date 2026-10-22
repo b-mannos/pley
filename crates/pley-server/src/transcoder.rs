@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use pley_transcoder_api::{
     Announce, CoverRequest, ErrorBody, JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo, ProbeRequest,
     SubtitleRequest, TOKEN_ENV, ThumbnailRequest, TranscoderInfo, TranscoderStatus,
@@ -38,8 +38,10 @@ pub enum TranscoderError {
 }
 
 impl TranscoderError {
-    pub fn is_not_found(&self) -> bool {
-        matches!(self, TranscoderError::Api { status: 404, .. })
+    /// The transcoder no longer knows the job (it restarted or expired the
+    /// job). Other 404s (segment out of range, missing input) are not this.
+    pub fn is_job_gone(&self) -> bool {
+        matches!(self, TranscoderError::Api { status: 404, code, .. } if code == "job_not_found")
     }
 }
 
@@ -72,6 +74,7 @@ pub struct Transcoder {
     started: AtomicBool,
     stopping: AtomicBool,
     stop: Notify,
+    supervisor: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 #[derive(Clone)]
@@ -123,6 +126,7 @@ impl Transcoder {
             started: AtomicBool::new(false),
             stopping: AtomicBool::new(false),
             stop: Notify::new(),
+            supervisor: Mutex::new(None),
         })
     }
 
@@ -133,16 +137,25 @@ impl Transcoder {
     pub fn start(self: &Arc<Self>) {
         self.started.store(true, Ordering::SeqCst);
         let this = self.clone();
-        if let Some(spec) = self.managed.clone() {
-            tokio::spawn(async move { this.supervise(spec).await });
+        let task = if let Some(spec) = self.managed.clone() {
+            tokio::spawn(async move { this.supervise(spec).await })
         } else {
-            tokio::spawn(async move { this.watch_external().await });
-        }
+            tokio::spawn(async move { this.watch_external().await })
+        };
+        *self.supervisor.lock() = Some(task);
     }
 
+    /// Stop supervising; a managed transcoder is asked to exit (it stops its
+    /// ffmpeg processes first) and killed only if it does not.
     pub async fn shutdown(&self) {
         self.stopping.store(true, Ordering::SeqCst);
         self.stop.notify_waiters();
+        let task = self.supervisor.lock().take();
+        if let Some(task) = task {
+            if tokio::time::timeout(Duration::from_secs(15), task).await.is_err() {
+                tracing::warn!("the transcoder supervisor did not stop in time");
+            }
+        }
     }
 
     pub fn info(&self) -> Option<TranscoderInfo> {
@@ -352,9 +365,8 @@ impl Transcoder {
                     self.set_unavailable(err.to_string());
                 }
             }
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(15)) => {}
-                _ = self.stop.notified() => return,
+            if !self.sleep_unless_stopped(Duration::from_secs(15)).await {
+                return;
             }
         }
     }
@@ -368,10 +380,10 @@ impl Transcoder {
                     tracing::error!("{message}; transcoding, probing and thumbnails are unavailable");
                 }
                 self.set_unavailable(message);
-                tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(30)) => continue,
-                    _ = self.stop.notified() => return,
+                if !self.sleep_unless_stopped(Duration::from_secs(30)).await {
+                    return;
                 }
+                continue;
             }
             let started = Instant::now();
             match self.run_once(&spec).await {
@@ -388,11 +400,24 @@ impl Transcoder {
                 backoff = Duration::from_secs(1);
             }
             tracing::info!("restarting transcoder in {}s", backoff.as_secs());
-            tokio::select! {
-                _ = tokio::time::sleep(backoff) => {}
-                _ = self.stop.notified() => return,
+            if !self.sleep_unless_stopped(backoff).await {
+                return;
             }
             backoff = (backoff * 2).min(Duration::from_secs(30));
+        }
+    }
+
+    /// Sleep for `duration`; `false` when shutdown started (before or during).
+    async fn sleep_unless_stopped(&self, duration: Duration) -> bool {
+        let stop = self.stop.notified();
+        tokio::pin!(stop);
+        stop.as_mut().enable();
+        if self.stopping.load(Ordering::SeqCst) {
+            return false;
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(duration) => true,
+            _ = stop => false,
         }
     }
 
@@ -408,8 +433,9 @@ impl Transcoder {
         #[cfg(windows)]
         cmd.creation_flags(0x0800_0000);
         let mut child = cmd.spawn().map_err(|e| format!("failed to start {}: {e}", spec.binary.display()))?;
-        // Keep stdin open: the transcoder exits when it closes (we died).
-        let _stdin = child.stdin.take();
+        // Keep stdin open: the transcoder shuts down cleanly when it closes
+        // (we stopped it, or died).
+        let mut stdin = child.stdin.take();
         let stdout = child.stdout.take().ok_or("no stdout")?;
         let stderr = child.stderr.take().ok_or("no stderr")?;
 
@@ -456,14 +482,32 @@ impl Transcoder {
         }
         tokio::spawn(async move { while let Ok(Some(_)) = stdout_lines.next_line().await {} });
 
+        let stop = self.stop.notified();
+        tokio::pin!(stop);
+        stop.as_mut().enable();
+        if self.stopping.load(Ordering::SeqCst) {
+            return self.stop_child(&mut child, &mut stdin).await;
+        }
         tokio::select! {
             status = child.wait() => Err(format!("transcoder exited ({})", status.map(|s| s.to_string()).unwrap_or_default())),
-            _ = self.stop.notified() => {
-                let _ = child.start_kill();
-                let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
-                Ok(())
-            }
+            _ = stop => self.stop_child(&mut child, &mut stdin).await,
         }
+    }
+
+    /// Close the transcoder's stdin so it stops its jobs and exits; kill it if
+    /// it is still running after a grace period.
+    async fn stop_child(
+        &self,
+        child: &mut tokio::process::Child,
+        stdin: &mut Option<tokio::process::ChildStdin>,
+    ) -> Result<(), String> {
+        drop(stdin.take());
+        if tokio::time::timeout(Duration::from_secs(10), child.wait()).await.is_err() {
+            tracing::warn!("transcoder did not exit within 10s; killing it");
+            let _ = child.start_kill();
+            let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+        }
+        Ok(())
     }
 }
 

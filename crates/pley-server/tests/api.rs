@@ -372,6 +372,26 @@ async fn direct_play_supports_ranges_and_transcode_needs_the_transcoder() {
     let play = app.post("/api/playback", &token, json!({"item_id": id_of("Other"), "caps": caps})).await;
     assert_eq!(play.status, StatusCode::SERVICE_UNAVAILABLE, "{:?}", play.body);
 
+    // ...unless the player asks for the original file anyway.
+    let body = json!({"item_id": id_of("Other"), "caps": caps, "mode": "direct", "client_id": "tab-1"});
+    let play = app.post("/api/playback", &token, body).await;
+    assert_eq!(play.status, StatusCode::OK, "{:?}", play.body);
+    assert_eq!(play.body["method"], json!("direct"));
+
+    // A client plays one thing at a time: its next session replaces the previous one.
+    let first = play.body["session_id"].as_str().unwrap().to_owned();
+    let body = json!({"item_id": id_of("Clip"), "caps": caps, "client_id": "tab-1"});
+    let play = app.post("/api/playback", &token, body).await;
+    assert_eq!(play.status, StatusCode::OK, "{:?}", play.body);
+    let activity = app.get("/api/activity", &token).await;
+    let sessions = activity.body["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1, "{sessions:?}");
+    assert_ne!(play.body["session_id"].as_str().unwrap(), first);
+    let other_client = json!({"item_id": id_of("Clip"), "caps": caps, "client_id": "tv"});
+    app.post("/api/playback", &token, other_client).await;
+    let activity = app.get("/api/activity", &token).await;
+    assert_eq!(activity.body["sessions"].as_array().unwrap().len(), 2);
+
     let system = app.get("/api/system", &token).await;
     assert_eq!(system.body["transcoder"]["available"], json!(false));
     assert_eq!(system.body["counts"]["movies"], json!(2));

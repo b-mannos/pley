@@ -90,10 +90,12 @@ impl AppState {
     }
 
     pub async fn shutdown(&self) {
-        for session in self.sessions.list() {
-            if let Some(job) = session.job_id() {
-                let _ = self.transcoder.delete_job(&job).await;
-            }
+        // External transcoders keep running: delete our jobs there. A managed
+        // one stops all of its jobs itself when it shuts down.
+        if !self.transcoder.is_managed() {
+            let jobs: Vec<String> = self.sessions.list().iter().filter_map(|s| s.job_id()).collect();
+            let deletes = futures::future::join_all(jobs.iter().map(|job| self.transcoder.delete_job(job)));
+            let _ = tokio::time::timeout(Duration::from_secs(5), deletes).await;
         }
         self.transcoder.shutdown().await;
         self.db.close().await;
