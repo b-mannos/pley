@@ -1,0 +1,287 @@
+import { useState } from "react";
+import { Check, Copy, Link2, MailPlus, Plus, Trash2 } from "lucide-react";
+import { errorMessage } from "@/api/client";
+import { useCreateInvite, useDeleteInvite, useInvites, useLibraries } from "@/api/hooks";
+import type { Invite } from "@/api/types";
+import { AccessFields, type AccessValue } from "@/components/AccessFields";
+import { ConfirmModal, Modal } from "@/components/Modal";
+import { useToast } from "@/components/Toast";
+import { Badge, Button, EmptyState, Field, IconButton, PageSpinner, Select, TextInput } from "@/components/ui";
+import { ageBadge, librariesLabel } from "@/lib/access";
+import { formatRelative, pluralize } from "@/lib/format";
+import { useDocumentTitle } from "@/lib/hooks";
+
+export function inviteUrl(code: string): string {
+  return `${window.location.origin}/invite/${code}`;
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Clipboard API needs a secure context; fall back to a hidden textarea.
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    return ok;
+  }
+}
+
+function CopyButton({ text, label = "Copy link" }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <IconButton
+      label={copied ? "Copied" : label}
+      size="sm"
+      onClick={() =>
+        void copyText(text).then((ok) => {
+          if (!ok) return;
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        })
+      }
+    >
+      {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
+    </IconButton>
+  );
+}
+
+function status(invite: Invite): { label: string; tone: "success" | "neutral" | "danger" } {
+  if (invite.uses_left <= 0) return { label: "Used", tone: "neutral" };
+  if (invite.expires_at != null && invite.expires_at * 1000 <= Date.now()) return { label: "Expired", tone: "danger" };
+  return { label: "Active", tone: "success" };
+}
+
+const EXPIRY_OPTIONS = [
+  { days: 1, label: "1 day" },
+  { days: 7, label: "7 days" },
+  { days: 30, label: "30 days" },
+  { days: 0, label: "Never" },
+];
+
+function CreateInviteModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (i: Invite) => void }) {
+  const create = useCreateInvite();
+  const [days, setDays] = useState(7);
+  const [uses, setUses] = useState(1);
+  const [note, setNote] = useState("");
+  const [access, setAccess] = useState<AccessValue>({ all_libraries: true, library_ids: [], max_age: null });
+  const [error, setError] = useState<string | null>(null);
+
+  const close = () => {
+    setDays(7);
+    setUses(1);
+    setNote("");
+    setAccess({ all_libraries: true, library_ids: [], max_age: null });
+    setError(null);
+    onClose();
+  };
+
+  const submit = () => {
+    if (!access.all_libraries && access.library_ids.length === 0) return setError("Pick at least one library, or share all of them.");
+    if (!Number.isFinite(uses) || uses < 1) return setError("The link must allow at least one sign-up.");
+    setError(null);
+    create.mutate(
+      { expires_in_days: days, uses, note: note.trim() || undefined, ...access },
+      {
+        onSuccess: (invite) => {
+          onCreated(invite);
+          close();
+        },
+        onError: (e) => setError(errorMessage(e)),
+      },
+    );
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={close}
+      locked={create.isPending}
+      title="New invitation"
+      footer={
+        <>
+          <Button variant="ghost" onClick={close} disabled={create.isPending}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={submit} loading={create.isPending}>
+            Create link
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+      >
+        <p className="text-sm text-muted">
+          Anyone with the link can create their own account. They join as friends of this server (not home members) with the
+          access you choose here.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Link expires" htmlFor="invite-days">
+            <Select id="invite-days" className="h-10 w-full" value={String(days)} onChange={(e) => setDays(Number(e.target.value))}>
+              {EXPIRY_OPTIONS.map((o) => (
+                <option key={o.days} value={o.days}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Number of sign-ups" htmlFor="invite-uses">
+            <TextInput
+              id="invite-uses"
+              type="number"
+              min={1}
+              max={1000}
+              value={uses}
+              onChange={(e) => setUses(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+            />
+          </Field>
+        </div>
+        <Field label="Note" htmlFor="invite-note" hint="Only you see it, e.g. who the link is for.">
+          <TextInput id="invite-note" maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} />
+        </Field>
+        <AccessFields value={access} onChange={setAccess} idPrefix="invite" />
+        {error ? <p className="text-sm text-danger">{error}</p> : null}
+        <button type="submit" className="hidden" />
+      </form>
+    </Modal>
+  );
+}
+
+function CreatedModal({ invite, onClose }: { invite: Invite | null; onClose: () => void }) {
+  const url = invite ? inviteUrl(invite.code) : "";
+  return (
+    <Modal
+      open={!!invite}
+      onClose={onClose}
+      size="md"
+      title="Invitation ready"
+      footer={
+        <Button variant="primary" onClick={onClose}>
+          Done
+        </Button>
+      }
+    >
+      <div className="space-y-3">
+        <p className="text-sm text-muted">Send this link to the person you're inviting:</p>
+        <div className="flex items-center gap-2 rounded-md border border-border bg-surface-2 py-1 pl-3 pr-1">
+          <Link2 className="size-4 shrink-0 text-accent" />
+          <input
+            readOnly
+            value={url}
+            onFocus={(e) => e.target.select()}
+            className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none"
+            aria-label="Invitation link"
+          />
+          <CopyButton text={url} />
+        </div>
+        {invite?.expires_at ? <p className="text-xs text-subtle">Expires {formatRelative(invite.expires_at)}.</p> : null}
+      </div>
+    </Modal>
+  );
+}
+
+export function InvitesSettings() {
+  useDocumentTitle("Invitations");
+  const invites = useInvites();
+  const libs = useLibraries();
+  const del = useDeleteInvite();
+  const toast = useToast();
+  const [creating, setCreating] = useState(false);
+  const [created, setCreated] = useState<Invite | null>(null);
+  const [deleting, setDeleting] = useState<Invite | null>(null);
+
+  if (invites.isPending) return <PageSpinner />;
+  if (invites.isError) return <EmptyState title="Couldn't load invitations" description={errorMessage(invites.error)} />;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Invitations</h2>
+          <p className="text-sm text-muted">Share your libraries with friends: each link lets people create their own account.</p>
+        </div>
+        <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>
+          New invitation
+        </Button>
+      </div>
+
+      {invites.data.length === 0 ? (
+        <EmptyState
+          icon={<MailPlus />}
+          title="No invitations yet"
+          description="Create a link and send it to someone. You choose which libraries they can see and an optional age limit."
+        />
+      ) : (
+        <ul className="divide-y divide-white/[0.05] overflow-hidden rounded-lg border border-border bg-surface">
+          {invites.data.map((invite) => {
+            const st = status(invite);
+            const age = ageBadge(invite.max_age);
+            return (
+              <li key={invite.code} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-sm">{invite.code}</span>
+                    <Badge tone={st.tone}>{st.label}</Badge>
+                    <Badge>{librariesLabel(invite, libs.data)}</Badge>
+                    {age ? <Badge>{age}</Badge> : null}
+                  </div>
+                  <div className="mt-1 truncate text-xs text-subtle">
+                    {[
+                      invite.note,
+                      st.label === "Active" ? `${pluralize(invite.uses_left, "sign-up")} left` : null,
+                      invite.expires_at
+                        ? `${invite.expires_at * 1000 > Date.now() ? "expires" : "expired"} ${formatRelative(invite.expires_at)}`
+                        : "never expires",
+                      `created ${formatRelative(invite.created_at)}`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  {st.label === "Active" ? <CopyButton text={inviteUrl(invite.code)} /> : null}
+                  <IconButton label="Delete invitation" size="sm" onClick={() => setDeleting(invite)}>
+                    <Trash2 className="size-4" />
+                  </IconButton>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <CreateInviteModal open={creating} onClose={() => setCreating(false)} onCreated={setCreated} />
+      <CreatedModal invite={created} onClose={() => setCreated(null)} />
+      <ConfirmModal
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        title="Delete invitation?"
+        danger
+        confirmLabel="Delete"
+        loading={del.isPending}
+        message="The link stops working. Accounts already created with it are kept."
+        onConfirm={() => {
+          if (!deleting) return;
+          del.mutate(deleting.code, {
+            onSuccess: () => {
+              toast.success("Invitation deleted");
+              setDeleting(null);
+            },
+            onError: (e) => toast.error(errorMessage(e)),
+          });
+        }}
+      />
+    </div>
+  );
+}

@@ -1,111 +1,216 @@
-import { useState } from "react";
-import { EllipsisVertical, KeyRound, Plus, ShieldCheck, ShieldOff, Trash2, UserPlus } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronRight, Laptop, Lock, LogOut, Plus, Smartphone, Trash2, UserPlus } from "lucide-react";
 import { errorMessage } from "@/api/client";
-import { useCreateUser, useDeleteUser, useUpdateUser, useUsers } from "@/api/hooks";
-import type { User } from "@/api/types";
+import {
+  useCreateUser,
+  useDeleteUser,
+  useLibraries,
+  useSignOutEverywhere,
+  useUpdateUser,
+  useUserDevices,
+  useUsers,
+  type UserPatch,
+} from "@/api/hooks";
+import type { Device, User } from "@/api/types";
 import { useAuth } from "@/auth";
-import { Menu, MenuItem, MenuSeparator } from "@/components/Menu";
+import { AccessFields, type AccessValue } from "@/components/AccessFields";
+import { Avatar } from "@/components/Avatar";
 import { ConfirmModal, Modal } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
-import { Badge, Button, EmptyState, Field, IconButton, PageSpinner, TextInput, Toggle } from "@/components/ui";
-import { formatTimestamp } from "@/lib/format";
+import { Badge, Button, EmptyState, Field, PageSpinner, TextInput, Toggle } from "@/components/ui";
+import { ageBadge, librariesLabel } from "@/lib/access";
+import { cn } from "@/lib/cn";
+import { formatRelative } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
 
-function AddUserModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const create = useCreateUser();
-  const toast = useToast();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+const PIN_RE = /^\d{4,8}$/;
 
-  const reset = () => {
-    setUsername("");
-    setPassword("");
-    setIsAdmin(false);
-    setError(null);
-  };
-  const close = () => {
-    reset();
-    onClose();
-  };
-
-  const submit = () => {
-    setError(null);
-    if (!username.trim()) return setError("Enter a username.");
-    if (password.length < 4) return setError("Use at least 4 characters for the password.");
-    create.mutate(
-      { username: username.trim(), password, is_admin: isAdmin },
-      {
-        onSuccess: (u) => {
-          toast.success(`Created ${u.username}`);
-          close();
-        },
-        onError: (e) => setError(errorMessage(e)),
-      },
-    );
-  };
-
+function SwitchRow({
+  label,
+  description,
+  checked,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
   return (
-    <Modal
-      open={open}
-      onClose={close}
-      locked={create.isPending}
-      title="Add user"
-      footer={
-        <>
-          <Button variant="ghost" onClick={close} disabled={create.isPending}>
-            Cancel
-          </Button>
-          <Button variant="primary" onClick={submit} loading={create.isPending}>
-            Create user
-          </Button>
-        </>
-      }
-    >
-      <form
-        className="space-y-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
-        }}
-      >
-        <Field label="Username" htmlFor="new-username">
-          <TextInput id="new-username" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} />
-        </Field>
-        <Field label="Password" htmlFor="new-password">
-          <TextInput id="new-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        </Field>
-        <div className="flex items-center justify-between rounded-md border border-border bg-surface-2 px-3 py-2.5">
-          <div>
-            <div className="text-sm font-medium">Administrator</div>
-            <div className="text-xs text-subtle">Can manage libraries, users and server settings.</div>
-          </div>
-          <Toggle checked={isAdmin} onChange={setIsAdmin} label="Administrator" />
-        </div>
-        {error ? <p className="text-sm text-danger">{error}</p> : null}
-        <button type="submit" className="hidden" />
-      </form>
-    </Modal>
+    <div className={cn("flex items-center justify-between gap-4 rounded-md border border-border bg-surface-2 px-3 py-2.5", disabled && "opacity-60")}>
+      <div className="min-w-0">
+        <div className="text-sm font-medium">{label}</div>
+        <div className="text-xs text-subtle">{description}</div>
+      </div>
+      <Toggle checked={checked} onChange={onChange} label={label} disabled={disabled} />
+    </div>
   );
 }
 
-function ResetPasswordModal({ user, onClose }: { user: User | null; onClose: () => void }) {
+function isPhone(d: Device) {
+  return /iPhone|iPad|Android/.test(d.name);
+}
+
+function UserDevices({ user, self }: { user: User; self: boolean }) {
+  const devices = useUserDevices(user.id);
+  const signOut = useSignOutEverywhere();
+  const toast = useToast();
+  const list = devices.data ?? [];
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-medium">Signed-in devices</h3>
+        {!self && list.length > 0 ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<LogOut className="size-4" />}
+            loading={signOut.isPending}
+            onClick={() =>
+              signOut.mutate(user.id, {
+                onSuccess: () => toast.success(`${user.name} was signed out everywhere`),
+                onError: (e) => toast.error(errorMessage(e)),
+              })
+            }
+          >
+            Sign out everywhere
+          </Button>
+        ) : null}
+      </div>
+      {devices.isPending ? (
+        <p className="text-sm text-subtle">Loading…</p>
+      ) : list.length === 0 ? (
+        <p className="text-sm text-subtle">Not signed in anywhere.</p>
+      ) : (
+        <ul className="divide-y divide-white/[0.05] rounded-md border border-border">
+          {list.map((d) => {
+            const Icon = isPhone(d) ? Smartphone : Laptop;
+            return (
+              <li key={d.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+                <Icon className="size-4 shrink-0 text-subtle" />
+                <span className="min-w-0 flex-1 truncate" title={d.user_agent ?? undefined}>
+                  {d.name}
+                </span>
+                <span className="shrink-0 text-xs text-subtle">
+                  {[d.ip, formatRelative(d.last_seen_at)].filter(Boolean).join(" · ")}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+type Kind = "regular" | "managed";
+
+function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open: boolean; onClose: () => void; onDelete: (u: User) => void }) {
+  const me = useAuth();
+  const users = useUsers();
+  const create = useCreateUser();
   const update = useUpdateUser();
   const toast = useToast();
+  const isNew = user == null;
+  const self = user?.id === me.id;
+
+  const [kind, setKind] = useState<Kind>("regular");
+  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [home, setHome] = useState(true);
+  const [disabled, setDisabled] = useState(false);
+  const [access, setAccess] = useState<AccessValue>({ all_libraries: true, library_ids: [], max_age: null });
+  const [pin, setPin] = useState("");
+  const [clearPin, setClearPin] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = () => {
-    if (!user) return;
+  // Reset the form whenever the dialog opens for someone else.
+  useEffect(() => {
+    if (!open) return;
+    setKind(user?.managed ? "managed" : "regular");
+    setUsername(user?.username ?? "");
+    setDisplayName(user?.display_name ?? "");
+    setPassword("");
+    setIsAdmin(user?.is_admin ?? false);
+    setHome(user?.home ?? true);
+    setDisabled(user?.disabled ?? false);
+    setAccess({
+      all_libraries: user?.all_libraries ?? true,
+      library_ids: user?.library_ids ?? [],
+      max_age: user?.max_age ?? null,
+    });
+    setPin("");
+    setClearPin(false);
     setError(null);
-    if (password.length < 4) return setError("Use at least 4 characters.");
+    // Only when the dialog opens (or switches user), not on background refetches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, user?.id]);
+
+  const managed = isNew ? kind === "managed" : (user?.managed ?? false) && !password;
+  const otherAdmins = (users.data ?? []).filter((u) => u.is_admin && !u.disabled && u.id !== user?.id).length;
+  const lastAdmin = !!user?.is_admin && otherAdmins === 0;
+  const busy = create.isPending || update.isPending;
+
+  const validate = (): string | null => {
+    if (isNew && !username.trim()) return "Enter a username.";
+    if (isNew && kind === "regular" && password.length < 4) return "Use at least 4 characters for the password.";
+    if (!isNew && password && password.length < 4) return "Use at least 4 characters for the new password.";
+    if (pin && !PIN_RE.test(pin)) return "The PIN must be 4 to 8 digits.";
+    if (!access.all_libraries && access.library_ids.length === 0) return "Pick at least one library, or allow all of them.";
+    return null;
+  };
+
+  const save = () => {
+    const problem = validate();
+    if (problem) return setError(problem);
+    setError(null);
+    const name = displayName.trim();
+    if (isNew) {
+      create.mutate(
+        {
+          username: username.trim(),
+          password: kind === "regular" ? password : undefined,
+          display_name: name || undefined,
+          is_admin: kind === "regular" && isAdmin,
+          managed: kind === "managed",
+          home,
+          ...access,
+          pin: pin || undefined,
+        },
+        {
+          onSuccess: (u) => {
+            toast.success(`Added ${u.name}`);
+            onClose();
+          },
+          onError: (e) => setError(errorMessage(e)),
+        },
+      );
+      return;
+    }
+    if (!user) return;
+    const patch: UserPatch = {};
+    if (name !== (user.display_name ?? "")) patch.display_name = name || null;
+    if (password) patch.password = password;
+    if (isAdmin !== user.is_admin) patch.is_admin = isAdmin;
+    if (home !== user.home) patch.home = home;
+    if (disabled !== user.disabled) patch.disabled = disabled;
+    if (access.all_libraries !== user.all_libraries) patch.all_libraries = access.all_libraries;
+    const sameLibraries =
+      access.library_ids.length === user.library_ids.length && access.library_ids.every((id) => user.library_ids.includes(id));
+    if (!access.all_libraries && !sameLibraries) patch.library_ids = access.library_ids;
+    if (access.max_age !== user.max_age) patch.max_age = access.max_age;
+    if (pin) patch.pin = pin;
+    else if (clearPin) patch.pin = null;
+    if (Object.keys(patch).length === 0) return onClose();
     update.mutate(
-      { id: user.id, password },
+      { id: user.id, ...patch },
       {
-        onSuccess: () => {
-          toast.success(`Password reset for ${user.username}`);
-          setPassword("");
+        onSuccess: (u) => {
+          toast.success(`Saved ${u.name}`);
           onClose();
         },
         onError: (e) => setError(errorMessage(e)),
@@ -115,39 +220,206 @@ function ResetPasswordModal({ user, onClose }: { user: User | null; onClose: () 
 
   return (
     <Modal
-      open={!!user}
-      onClose={() => {
-        setPassword("");
-        setError(null);
-        onClose();
-      }}
-      locked={update.isPending}
-      size="sm"
-      title={`Reset password for ${user?.username ?? ""}`}
+      open={open}
+      onClose={onClose}
+      locked={busy}
+      size="lg"
+      title={isNew ? "Add user" : `Edit ${user?.name ?? ""}`}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={update.isPending}>
+          {!isNew && user && !self ? (
+            <Button variant="ghost" className="mr-auto" icon={<Trash2 className="size-4 text-danger" />} onClick={() => onDelete(user)}>
+              <span className="text-danger">Delete</span>
+            </Button>
+          ) : null}
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={submit} loading={update.isPending}>
-            Reset password
+          <Button variant="primary" onClick={save} loading={busy}>
+            {isNew ? "Add user" : "Save"}
           </Button>
         </>
       }
     >
       <form
+        className="space-y-5"
         onSubmit={(e) => {
           e.preventDefault();
-          submit();
+          save();
         }}
-        className="space-y-3"
       >
-        <Field label="New password" htmlFor="reset-password">
-          <TextInput id="reset-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        {isNew ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {(
+              [
+                { id: "regular", title: "Regular account", text: "Signs in with a username and password." },
+                { id: "managed", title: "Managed profile", text: "No password: a child or guest you switch to from your profile." },
+              ] as const
+            ).map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                aria-pressed={kind === o.id}
+                onClick={() => setKind(o.id)}
+                className={cn(
+                  "rounded-lg border p-3 text-left transition-colors",
+                  kind === o.id ? "border-accent bg-accent/10" : "border-border hover:border-border-strong",
+                )}
+              >
+                <div className="text-sm font-semibold">{o.title}</div>
+                <div className="mt-0.5 text-xs text-muted">{o.text}</div>
+              </button>
+            ))}
+          </div>
+        ) : user ? (
+          <div className="flex items-center gap-3">
+            <Avatar user={user} size="lg" />
+            <div className="min-w-0">
+              <div className="truncate font-semibold">{user.name}</div>
+              <div className="text-sm text-muted">
+                @{user.username} · {user.managed ? "Managed profile" : user.is_admin ? "Administrator" : "Regular account"}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          {isNew ? (
+            <Field label="Username" htmlFor="user-username" hint={kind === "managed" ? "Only used internally for managed profiles." : undefined}>
+              <TextInput id="user-username" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} />
+            </Field>
+          ) : null}
+          <Field label="Display name" htmlFor="user-display" hint="Shown in the profile switcher and menus.">
+            <TextInput
+              id="user-display"
+              autoComplete="off"
+              placeholder={username || user?.username}
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+            />
+          </Field>
+          {isNew && kind === "regular" ? (
+            <Field label="Password" htmlFor="user-password">
+              <TextInput id="user-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            </Field>
+          ) : null}
+          {!isNew ? (
+            <Field
+              label={user?.managed ? "Password" : "New password"}
+              htmlFor="user-password"
+              hint={user?.managed ? "Setting one turns this profile into a regular account." : "Leave empty to keep the current one."}
+            >
+              <TextInput id="user-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            </Field>
+          ) : null}
+        </div>
+
+        <div className="space-y-2">
+          <SwitchRow
+            label="Administrator"
+            description={managed ? "Managed profiles can't be administrators." : "Can manage libraries, users and server settings."}
+            checked={isAdmin && !managed}
+            onChange={setIsAdmin}
+            disabled={managed || (self && isAdmin) || (lastAdmin && isAdmin)}
+          />
+          <SwitchRow
+            label="Member of this home"
+            description="Shown in the profile switcher, so household members can switch to each other."
+            checked={home}
+            onChange={setHome}
+          />
+          {!isNew ? (
+            <SwitchRow
+              label="Disabled"
+              description="Can't sign in or play anything until enabled again."
+              checked={disabled}
+              onChange={setDisabled}
+              disabled={self || (lastAdmin && !disabled)}
+            />
+          ) : null}
+        </div>
+
+        <AccessFields value={access} onChange={setAccess} idPrefix="user" />
+
+        <Field
+          label="Profile PIN"
+          htmlFor="user-pin"
+          hint={
+            user?.has_pin && !clearPin
+              ? "This profile has a PIN. Enter a new one to change it."
+              : "Optional, 4 to 8 digits. Needed to switch to this profile."
+          }
+        >
+          <div className="flex gap-2">
+            <TextInput
+              id="user-pin"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={8}
+              placeholder={user?.has_pin && !clearPin ? "••••" : ""}
+              value={pin}
+              onChange={(e) => {
+                setPin(e.target.value.replace(/\D/g, ""));
+                setClearPin(false);
+              }}
+            />
+            {user?.has_pin ? (
+              <Button
+                variant="outline"
+                icon={<Lock className="size-4" />}
+                onClick={() => {
+                  setPin("");
+                  setClearPin(!clearPin);
+                }}
+              >
+                {clearPin ? "Keep PIN" : "Remove PIN"}
+              </Button>
+            ) : null}
+          </div>
         </Field>
+
+        {!isNew && user ? <UserDevices user={user} self={self} /> : null}
+
         {error ? <p className="text-sm text-danger">{error}</p> : null}
+        <button type="submit" className="hidden" />
       </form>
     </Modal>
+  );
+}
+
+function UserRow({ user, self, libraries, onOpen }: { user: User; self: boolean; libraries: ReturnType<typeof useLibraries>["data"]; onOpen: () => void }) {
+  const age = ageBadge(user.max_age);
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.03] focus-visible:bg-white/[0.04] focus-visible:outline-none"
+      >
+        <Avatar user={user} size="md" className={cn(user.disabled && "opacity-40 grayscale")} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className={cn("truncate font-medium", user.disabled && "text-muted")}>{user.name}</span>
+            {user.name !== user.username ? <span className="truncate text-xs text-subtle">@{user.username}</span> : null}
+            {self ? <span className="text-xs text-subtle">(you)</span> : null}
+          </div>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {user.is_admin ? <Badge tone="accent">Admin</Badge> : null}
+            {user.managed ? <Badge tone="info">Managed</Badge> : null}
+            {user.home ? <Badge>Home</Badge> : null}
+            {user.disabled ? <Badge tone="danger">Disabled</Badge> : null}
+            {!user.is_admin && !user.all_libraries ? <Badge>{librariesLabel(user, libraries)}</Badge> : null}
+            {age && !user.is_admin ? <Badge>{age}</Badge> : null}
+            {user.has_pin ? (
+              <Badge>
+                <Lock className="size-3" /> PIN
+              </Badge>
+            ) : null}
+          </div>
+        </div>
+        <ChevronRight className="size-4 shrink-0 text-subtle" />
+      </button>
+    </li>
   );
 }
 
@@ -155,26 +427,26 @@ export function UsersSettings() {
   useDocumentTitle("Users");
   const me = useAuth();
   const users = useUsers();
-  const update = useUpdateUser();
+  const libs = useLibraries();
   const del = useDeleteUser();
   const toast = useToast();
-  const [adding, setAdding] = useState(false);
-  const [resetting, setResetting] = useState<User | null>(null);
+  const [dialog, setDialog] = useState<{ user: User | null } | null>(null);
   const [deleting, setDeleting] = useState<User | null>(null);
 
   if (users.isPending) return <PageSpinner />;
   if (users.isError) return <EmptyState title="Couldn't load users" description={errorMessage(users.error)} />;
 
-  const adminCount = users.data.filter((u) => u.is_admin).length;
+  // Keep the dialog's user in sync with refetched data.
+  const dialogUser = dialog?.user ? (users.data.find((u) => u.id === dialog.user?.id) ?? dialog.user) : null;
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">Users</h2>
-          <p className="text-sm text-muted">Everyone with an account can browse and play all libraries.</p>
+          <p className="text-sm text-muted">Who can sign in, what each person can see, and the profiles of your home.</p>
         </div>
-        <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setAdding(true)}>
+        <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setDialog({ user: null })}>
           Add user
         </Button>
       </div>
@@ -182,94 +454,22 @@ export function UsersSettings() {
       {users.data.length === 0 ? (
         <EmptyState icon={<UserPlus />} title="No users" />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-surface-2 text-xs uppercase tracking-wider text-subtle">
-              <tr>
-                <th className="px-4 py-2.5 font-semibold">User</th>
-                <th className="px-4 py-2.5 font-semibold">Role</th>
-                <th className="hidden px-4 py-2.5 font-semibold sm:table-cell">Created</th>
-                <th className="w-12 px-2 py-2.5" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/[0.05] bg-surface">
-              {users.data.map((u) => {
-                const self = u.id === me.id;
-                const lastAdmin = u.is_admin && adminCount <= 1;
-                return (
-                  <tr key={u.id}>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <span className="flex size-8 items-center justify-center rounded-full bg-surface-3 text-xs font-bold uppercase">
-                          {u.username.slice(0, 1)}
-                        </span>
-                        <span className="font-medium">{u.username}</span>
-                        {self ? <span className="text-xs text-subtle">(you)</span> : null}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">{u.is_admin ? <Badge tone="accent">Admin</Badge> : <Badge>User</Badge>}</td>
-                    <td className="hidden px-4 py-3 text-muted sm:table-cell">{formatTimestamp(u.created_at)}</td>
-                    <td className="px-2 py-3 text-right">
-                      <Menu
-                        trigger={({ toggle }) => (
-                          <IconButton label={`Actions for ${u.username}`} size="sm" onClick={toggle}>
-                            <EllipsisVertical className="size-4" />
-                          </IconButton>
-                        )}
-                      >
-                        {(close) => (
-                          <>
-                            <MenuItem
-                              icon={u.is_admin ? <ShieldOff /> : <ShieldCheck />}
-                              disabled={self || lastAdmin}
-                              onClick={() => {
-                                close();
-                                update.mutate(
-                                  { id: u.id, is_admin: !u.is_admin },
-                                  {
-                                    onSuccess: () => toast.success(u.is_admin ? `${u.username} is no longer an admin` : `${u.username} is now an admin`),
-                                    onError: (e) => toast.error(errorMessage(e)),
-                                  },
-                                );
-                              }}
-                            >
-                              {u.is_admin ? "Remove admin" : "Make admin"}
-                            </MenuItem>
-                            <MenuItem
-                              icon={<KeyRound />}
-                              onClick={() => {
-                                close();
-                                setResetting(u);
-                              }}
-                            >
-                              Reset password
-                            </MenuItem>
-                            <MenuSeparator />
-                            <MenuItem
-                              icon={<Trash2 />}
-                              danger
-                              disabled={self}
-                              onClick={() => {
-                                close();
-                                setDeleting(u);
-                              }}
-                            >
-                              Delete user
-                            </MenuItem>
-                          </>
-                        )}
-                      </Menu>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <ul className="divide-y divide-white/[0.05] overflow-hidden rounded-lg border border-border bg-surface">
+          {users.data.map((u) => (
+            <UserRow key={u.id} user={u} self={u.id === me.id} libraries={libs.data} onOpen={() => setDialog({ user: u })} />
+          ))}
+        </ul>
       )}
 
-      <AddUserModal open={adding} onClose={() => setAdding(false)} />
-      <ResetPasswordModal user={resetting} onClose={() => setResetting(null)} />
+      <UserDialog
+        open={!!dialog}
+        user={dialogUser}
+        onClose={() => setDialog(null)}
+        onDelete={(u) => {
+          setDialog(null);
+          setDeleting(u);
+        }}
+      />
       <ConfirmModal
         open={!!deleting}
         onClose={() => setDeleting(null)}
@@ -279,14 +479,15 @@ export function UsersSettings() {
         loading={del.isPending}
         message={
           <>
-            <strong className="text-fg">{deleting?.username}</strong> will lose access and their watch history will be deleted.
+            <strong className="text-fg">{deleting?.name}</strong> will lose access, and their watch history and settings will be
+            deleted.
           </>
         }
         onConfirm={() => {
           if (!deleting) return;
           del.mutate(deleting.id, {
             onSuccess: () => {
-              toast.success(`Deleted ${deleting.username}`);
+              toast.success(`Deleted ${deleting.name}`);
               setDeleting(null);
             },
             onError: (e) => toast.error(errorMessage(e)),

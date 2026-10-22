@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { NavLink, Outlet } from "react-router";
-import { LayoutDashboard, LibraryBig, Server, Users } from "lucide-react";
+import { LayoutDashboard, LibraryBig, MailPlus, Server, Users } from "lucide-react";
 import { RequireAdmin } from "@/auth";
 import { PageSpinner } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -9,6 +9,7 @@ import { useDocumentTitle } from "@/lib/hooks";
 const NAV = [
   { to: "/settings/libraries", label: "Libraries", icon: LibraryBig },
   { to: "/settings/users", label: "Users", icon: Users },
+  { to: "/settings/invitations", label: "Invitations", icon: MailPlus },
   { to: "/settings/server", label: "Server", icon: Server },
   { to: "/settings/dashboard", label: "Dashboard", icon: LayoutDashboard },
 ];
