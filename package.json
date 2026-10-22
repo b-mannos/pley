@@ -1,0 +1,16 @@
+{
+  "name": "pley",
+  "private": true,
+  "description": "pley media server monorepo (Rust apps are built with cargo, see Cargo.toml)",
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w apps/web",
+    "build": "npm run build -w apps/web",
+    "typecheck": "npm run typecheck -w apps/web"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

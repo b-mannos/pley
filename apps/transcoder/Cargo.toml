@@ -15,7 +15,7 @@ name = "pley-transcoder"
 path = "src/main.rs"
 
 [dependencies]
-pley-transcoder-api = { path = "../pley-transcoder-api", version = "0.1" }
+pley-transcoder-api = { path = "../../packages/transcoder-api", version = "0.1" }
 
 anyhow = "1"
 axum = "0.8"

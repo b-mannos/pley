@@ -1,16 +1,16 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/pley-server",
-    "crates/pley-transcoder",
-    "crates/pley-transcoder-api",
+    "apps/server",
+    "apps/transcoder",
+    "packages/transcoder-api",
 ]
-default-members = ["crates/pley-server", "crates/pley-transcoder"]
+default-members = ["apps/server", "apps/transcoder"]
 
 # NOTE: licensing boundary.
-# - pley-server            must never depend on pley-transcoder or any GPL crate
-# - pley-transcoder        a separate program, spoken to only over HTTP
-# - pley-transcoder-api    wire types shared by both
+# - apps/server               pley-server; must never depend on pley-transcoder or any GPL crate
+# - apps/transcoder           pley-transcoder; a separate program, spoken to only over HTTP
+# - packages/transcoder-api   pley-transcoder-api; wire types shared by both
 # See LICENSING.md and scripts/check-licenses.ps1.
 
 [profile.dev]

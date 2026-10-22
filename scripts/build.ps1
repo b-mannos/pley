@@ -5,20 +5,20 @@ param([switch]$SkipWeb)
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
-$version = (Select-String -Path "$root/crates/pley-server/Cargo.toml" -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+$version = (Select-String -Path "$root/apps/server/Cargo.toml" -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
 
 if (-not $SkipWeb) {
-    Push-Location "$root/web"
+    Push-Location $root
     try {
         if (-not (Test-Path node_modules)) { npm ci --no-fund --no-audit; if ($LASTEXITCODE) { throw "npm ci failed" } }
-        npm run build
+        npm run build -w apps/web
         if ($LASTEXITCODE) { throw "web build failed" }
     } finally {
         Pop-Location
     }
 }
 # The UI is embedded at compile time; make sure cargo re-embeds the fresh build.
-(Get-Item "$root/crates/pley-server/src/web.rs").LastWriteTime = Get-Date
+(Get-Item "$root/apps/server/src/web.rs").LastWriteTime = Get-Date
 
 Push-Location $root
 try {
@@ -32,7 +32,7 @@ $out = "$root/dist/pley-$version-windows-x86_64"
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 New-Item -ItemType Directory -Force $out | Out-Null
 Copy-Item "$root/target/release/pley.exe", "$root/target/release/pley-transcoder.exe" $out
-Copy-Item "$root/crates/pley-server/LICENSE" "$out/LICENSE.txt"
+Copy-Item "$root/apps/server/LICENSE" "$out/LICENSE.txt"
 Copy-Item "$root/LICENSING.md", "$root/README.md", "$root/pley.example.toml" $out
 
 

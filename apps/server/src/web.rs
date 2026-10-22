@@ -14,7 +14,7 @@ use crate::error::AppError;
 use crate::state::AppState;
 
 #[derive(RustEmbed)]
-#[folder = "../../web/dist/"]
+#[folder = "../web/dist/"]
 #[allow_missing = true]
 struct Assets;
 

@@ -80,12 +80,15 @@ HTTP. That keeps the server's source closed while the transcoder can be
 published. See [LICENSING.md](LICENSING.md),
 [docs/TRANSCODER.md](docs/TRANSCODER.md) and [docs/API.md](docs/API.md).
 
+The repository is a monorepo: a Cargo workspace for the Rust programs and an
+npm workspace for the web UI, both rooted at the top level.
+
 | Path | What |
 |---|---|
-| `crates/pley-server` | The media server (binary `pley`) |
-| `crates/pley-transcoder` | The FFmpeg engine (binary `pley-transcoder`) |
-| `crates/pley-transcoder-api` | Protocol types shared by both |
-| `web/` | React + TypeScript + Vite + Tailwind web UI |
+| `apps/server` | The media server (crate `pley-server`, binary `pley`) |
+| `apps/transcoder` | The FFmpeg engine (crate and binary `pley-transcoder`) |
+| `apps/web` | React + TypeScript + Vite + Tailwind web UI, embedded into the server |
+| `packages/transcoder-api` | Protocol types shared by server and transcoder |
 | `docs/` | HTTP API, transcoder protocol |
 | `scripts/` | Release build, license check |
 
@@ -101,7 +104,7 @@ published. See [LICENSING.md](LICENSING.md),
 ## Quick start
 
 ```powershell
-cd web; npm install; npm run build; cd ..        # build the UI (embedded into the server)
+npm install; npm run build                       # build the UI (embedded into the server)
 cargo build                                      # builds pley + pley-transcoder
 .\target\debug\pley.exe --data-dir .\data        # http://localhost:7539
 ```
@@ -114,10 +117,10 @@ To recover a lost password, use
 
 ### Development
 
-- `npm run dev` in `web/` runs the UI with hot reload on
-  `http://localhost:5173`, proxying `/api` to the server on port 7539.
-- Debug builds of the server read `web/dist` from disk, so `npm run build`
-  shows up without recompiling Rust.
+- `npm run dev` runs the UI with hot reload on `http://localhost:5173`,
+  proxying `/api` to the server on port 7539.
+- Debug builds of the server read `apps/web/dist` from disk, so
+  `npm run build` shows up without recompiling Rust.
 - Tests: `cargo test --workspace`. They cover parsers, decision logic, ffmpeg
   argument building, plus HTTP API end-to-end tests.
 - Lint: `cargo clippy --workspace --all-targets`, `cargo fmt --all` and
