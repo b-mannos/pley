@@ -21,6 +21,7 @@ macro_rules! me_cte {
             SELECT id, all_libraries OR is_admin, CASE WHEN is_admin THEN NULL ELSE max_age END FROM users WHERE id = ?)"
     };
 }
+pub(crate) use me_cte;
 
 /// Whether item `i` (with parent `p` and grandparent `gp`) is visible to the
 /// user in `me`: library access and age limit, see [`crate::access`].

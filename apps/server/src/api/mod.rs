@@ -5,11 +5,13 @@ mod activity;
 mod admin;
 mod auth;
 mod browse;
+pub(crate) mod collections;
 mod editing;
 pub(crate) mod items;
 mod libraries;
 mod people;
 pub(crate) mod playback;
+mod playlists;
 
 use std::time::Duration;
 
@@ -51,6 +53,17 @@ pub fn router(state: AppState) -> Router {
         .route("/libraries/{id}/items", get(libraries::items))
         .route("/libraries/{id}/filters", get(libraries::filters))
         .route("/libraries/{id}/hubs", get(libraries::hubs))
+        .route("/libraries/{id}/collections", get(collections::list).post(collections::create))
+        .route("/collections/{id}", get(collections::get).patch(collections::update).delete(collections::delete))
+        .route("/collections/{id}/items", post(collections::add_items))
+        .route("/collections/{id}/items/{item_id}", delete(collections::remove_item))
+        .route("/collections/{id}/order", put(collections::reorder))
+        .route("/collections/{id}/images/{kind}", get(collections::image))
+        .route("/playlists", get(playlists::list).post(playlists::create))
+        .route("/playlists/{id}", get(playlists::get).patch(playlists::rename).delete(playlists::delete))
+        .route("/playlists/{id}/items", post(playlists::add))
+        .route("/playlists/{id}/items/{entry_id}", delete(playlists::remove))
+        .route("/playlists/{id}/order", put(playlists::reorder))
         .route("/items/{id}", get(items::get).patch(editing::edit))
         .route("/items/{id}/matches", get(editing::matches))
         .route("/items/{id}/match", post(editing::rematch))
@@ -72,6 +85,7 @@ pub fn router(state: AppState) -> Router {
         .route("/items/{id}/refresh", post(items::refresh))
         .route("/items/{id}/analyze", post(items::analyze))
         .route("/items/{id}/images/{kind}", get(items::image))
+        .route("/items/{id}/collections", get(collections::for_item))
         .route("/people/{id}", get(people::get))
         .route("/people/{id}/photo", get(people::photo))
         .route("/hubs/home", get(browse::home))

@@ -1,0 +1,406 @@
+//! Collections (`/library/sections/{id}/collections`, `/library/collections/…`)
+//! and playlists (`/playlists/…`). Read through [`crate::collections`] and
+//! [`crate::playlists`], so the same library access and age limits apply.
+
+use std::sync::Arc;
+
+use axum::Extension;
+use axum::extract::{Path, State};
+use axum::http::HeaderMap;
+use axum::response::Response;
+
+use super::library::{
+    base_container, item_nodes, library_for, list_container, listing_detail, serve_image, visible_libraries,
+};
+use super::meta::Sections;
+use super::{Node, Page, Params, PlexError, PlexInfo, PlexResult, PlexUser};
+use crate::auth::AuthUser;
+use crate::catalog::ItemRow;
+use crate::collections::{self, CollectionDto};
+use crate::library::{LibraryKind, LibraryRow};
+use crate::playlists::{self, Kind, PlaylistDto};
+use crate::state::AppState;
+
+/// Plex's type number of collections (`/library/sections/{id}/all?type=18`).
+pub const COLLECTION_TYPE: &str = "18";
+
+// ------------------------------------------------------------------ collections
+
+fn collection_node(c: &CollectionDto, lib: &LibraryRow) -> Node {
+    let subtype = if lib.kind() == LibraryKind::Shows { "show" } else { "movie" };
+    let sort = match c.sort.as_str() {
+        "title" => 1,
+        "custom" => 2,
+        _ => 0,
+    };
+    Node::item("Directory")
+        .attr("ratingKey", c.id.to_string())
+        .attr("key", format!("/library/collections/{}/children", c.id))
+        .attr("guid", format!("collection://{:024x}", c.id))
+        .attr("type", "collection")
+        .attr("title", &c.title)
+        .attr("subtype", subtype)
+        .opt("summary", c.summary.as_deref())
+        .attr("index", c.id)
+        .attr("librarySectionID", lib.id)
+        .attr("librarySectionTitle", &lib.name)
+        .attr("librarySectionKey", format!("/library/sections/{}", lib.id))
+        .attr("thumb", format!("/library/collections/{}/thumb/{}", c.id, c.updated_at))
+        .attr("art", format!("/library/collections/{}/art/{}", c.id, c.updated_at))
+        .attr("childCount", c.item_count)
+        .attr("collectionSort", sort)
+        .attr("smart", false)
+        .attr("addedAt", c.created_at)
+        .attr("updatedAt", c.updated_at)
+}
+
+/// `/library/sections/{id}/collections`, also `/all?type=18`.
+pub async fn section_collections(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Extension(info): Extension<Arc<PlexInfo>>,
+    Path(id): Path<String>,
+    page: Page,
+) -> PlexResult<Node> {
+    let (lib, _) = library_for(&state, &user, &id).await?;
+    let (rows, total) = page.apply(collections::list(&state.db, &user, lib.id).await?);
+    let nodes = rows.iter().map(|c| collection_node(c, &lib)).collect();
+    Ok(list_container(Some(&lib), &info, nodes, total, &page)
+        .attr("title2", "All Collections")
+        .attr("viewGroup", "secondary"))
+}
+
+async fn collection_for(
+    state: &AppState,
+    user: &AuthUser,
+    id: i64,
+) -> PlexResult<(CollectionDto, Vec<ItemRow>, LibraryRow, Vec<LibraryRow>)> {
+    let (collection, items) = collections::get(&state.db, user, id).await?.ok_or(PlexError::NotFound)?;
+    let libraries = visible_libraries(state, user).await?;
+    let lib = libraries.iter().find(|l| l.id == collection.library_id).cloned().ok_or(PlexError::NotFound)?;
+    Ok((collection, items, lib, libraries))
+}
+
+/// `/library/collections/{id}`
+pub async fn collection(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Extension(info): Extension<Arc<PlexInfo>>,
+    Path(id): Path<i64>,
+) -> PlexResult<Node> {
+    let (collection, _, lib, _) = collection_for(&state, &user, id).await?;
+    Ok(list_container(Some(&lib), &info, vec![collection_node(&collection, &lib)], 1, &Page::default()))
+}
+
+/// `/library/collections/{id}/children`
+pub async fn collection_children(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Extension(info): Extension<Arc<PlexInfo>>,
+    Path(id): Path<i64>,
+    params: Params,
+    page: Page,
+) -> PlexResult<Node> {
+    let (collection, items, lib, libraries) = collection_for(&state, &user, id).await?;
+    let (rows, total) = page.apply(items);
+    let view_group = if lib.kind() == LibraryKind::Shows { "show" } else { "movie" };
+    let nodes = item_nodes(&state, &rows, &Sections::new(&libraries), listing_detail(&params)).await?;
+    Ok(list_container(Some(&lib), &info, nodes, total, &page)
+        .attr("key", collection.id.to_string())
+        .attr("ratingKey", collection.id.to_string())
+        .attr("title2", &collection.title)
+        .opt("summary", collection.summary.as_deref())
+        .attr("thumb", format!("/library/collections/{}/thumb/{}", collection.id, collection.updated_at))
+        .attr("art", format!("/library/collections/{}/art/{}", collection.id, collection.updated_at))
+        .attr("viewGroup", view_group))
+}
+
+/// Collection artwork, or its first visible item's.
+async fn collection_artwork(
+    state: AppState,
+    user: AuthUser,
+    id: i64,
+    image: &str,
+    version: Option<String>,
+    width: Option<u32>,
+    headers: HeaderMap,
+) -> PlexResult<Response> {
+    let (kind, item_image) = match image {
+        "thumb" | "composite" => ("poster", "thumb"),
+        "art" => ("backdrop", "art"),
+        _ => return Err(PlexError::NotFound),
+    };
+    match collections::artwork(&state.db, &user, id, kind).await? {
+        Some(Ok(path)) => {
+            Ok(crate::api::collections::serve_file(&state, &path, width, version.is_some(), &headers).await?)
+        }
+        // Not versioned: the first item may change without the collection.
+        Some(Err(item)) => serve_image(state, user, item, item_image, None, width, headers).await,
+        None => Err(PlexError::NotFound),
+    }
+}
+
+/// `/library/collections/{id}/{thumb|art|composite}`
+pub async fn collection_image(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Path((id, image)): Path<(i64, String)>,
+    params: Params,
+    headers: HeaderMap,
+) -> PlexResult<Response> {
+    collection_artwork(state, user, id, &image, None, params.parse("width"), headers).await
+}
+
+/// `/library/collections/{id}/{thumb|art|composite}/{version}`
+pub async fn collection_image_version(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Path((id, image, version)): Path<(i64, String, String)>,
+    params: Params,
+    headers: HeaderMap,
+) -> PlexResult<Response> {
+    collection_artwork(state, user, id, &image, Some(version), params.parse("width"), headers).await
+}
+
+// ------------------------------------------------------------------ playlists
+
+fn playlist_node(p: &PlaylistDto) -> Node {
+    Node::item("Playlist")
+        .attr("ratingKey", p.id.to_string())
+        .attr("key", format!("/playlists/{}/items", p.id))
+        .attr("guid", format!("com.plexapp.agents.none://pley-playlist-{}", p.id))
+        .attr("type", "playlist")
+        .attr("title", &p.title)
+        .attr("smart", false)
+        .attr("playlistType", &p.kind)
+        .attr("composite", format!("/playlists/{}/composite/{}", p.id, p.updated_at))
+        .attr("leafCount", p.item_count)
+        .opt("duration", (p.duration_ms > 0).then_some(p.duration_ms))
+        .attr("addedAt", p.created_at)
+        .attr("updatedAt", p.updated_at)
+}
+
+fn playlist_container(playlist: &PlaylistDto) -> Node {
+    base_container().attr("size", 1).child(playlist_node(playlist))
+}
+
+async fn playlist_container_of(state: &AppState, user: &AuthUser, id: i64) -> PlexResult<Node> {
+    let (playlist, _) = playlists::get_rows(&state.db, user, id).await?.ok_or(PlexError::NotFound)?;
+    Ok(playlist_container(&playlist))
+}
+
+/// `/playlists` (`playlistType=video|audio|photo`, `smart=0|1`)
+pub async fn list(State(state): State<AppState>, PlexUser(user): PlexUser, params: Params) -> PlexResult<Node> {
+    let mut rows = playlists::list(&state.db, &user).await?;
+    if let Some(kind) = params.get("playlistType") {
+        rows.retain(|p| p.kind == kind);
+    }
+    if params.flag("smart") {
+        rows.clear();
+    }
+    let mut mc = base_container().attr("size", rows.len());
+    mc.extend(rows.iter().map(playlist_node));
+    Ok(mc)
+}
+
+/// Item ids in a Plex `uri` (`server://…/library/metadata/1,2,3`,
+/// `library://…/item/%2Flibrary%2Fmetadata%2F1`).
+fn uri_items(uri: &str) -> Vec<i64> {
+    let Some(start) = uri.find("/library/metadata/") else { return Vec::new() };
+    let rest = &uri[start + "/library/metadata/".len()..];
+    let ids = rest.split(['/', '?', '&']).next().unwrap_or_default();
+    ids.split(',').filter_map(|id| id.trim().parse().ok()).collect()
+}
+
+/// `POST /playlists?type=video&title=…&uri=…`
+pub async fn create(State(state): State<AppState>, PlexUser(user): PlexUser, params: Params) -> PlexResult<Node> {
+    if params.flag("smart") {
+        return Err(PlexError::BadRequest("smart playlists are not supported".into()));
+    }
+    let title = params.get("title").unwrap_or_default().trim().chars().take(200).collect::<String>();
+    if title.is_empty() {
+        return Err(PlexError::BadRequest("title is required".into()));
+    }
+    let items = params.get("uri").map(uri_items).unwrap_or_default();
+    let kind = match params.get("type") {
+        Some(kind) => Kind::parse(kind),
+        None => playlists::kind_of_first(&state.db, &user, &items).await?,
+    }
+    .ok_or_else(|| PlexError::BadRequest("type must be video or audio".into()))?;
+    let id = playlists::create(&state.db, &user, &title, kind).await?;
+    if !items.is_empty() {
+        if let Err(err) = playlists::add(&state.db, &user, id, &items).await {
+            playlists::delete(&state.db, &user, id).await?;
+            return Err(err.into());
+        }
+    }
+    playlist_container_of(&state, &user, id).await
+}
+
+/// `/playlists/{id}`
+pub async fn get(State(state): State<AppState>, PlexUser(user): PlexUser, Path(id): Path<i64>) -> PlexResult<Node> {
+    playlist_container_of(&state, &user, id).await
+}
+
+/// `PUT /playlists/{id}?title=…`
+pub async fn edit(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Path(id): Path<i64>,
+    params: Params,
+) -> PlexResult<Node> {
+    if let Some(title) = params.get("title").map(|t| t.trim().chars().take(200).collect::<String>()) {
+        if title.is_empty() {
+            return Err(PlexError::BadRequest("title is required".into()));
+        }
+        if !playlists::rename(&state.db, &user, id, &title).await? {
+            return Err(PlexError::NotFound);
+        }
+    }
+    playlist_container_of(&state, &user, id).await
+}
+
+/// `DELETE /playlists/{id}`
+pub async fn delete(State(state): State<AppState>, PlexUser(user): PlexUser, Path(id): Path<i64>) -> PlexResult<Node> {
+    if !playlists::delete(&state.db, &user, id).await? {
+        return Err(PlexError::NotFound);
+    }
+    Ok(Node::container().attr("size", 0))
+}
+
+/// `/playlists/{id}/items`: entries carry `playlistItemID`.
+pub async fn items(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Path(id): Path<i64>,
+    params: Params,
+    page: Page,
+) -> PlexResult<Node> {
+    let (playlist, entries) = playlists::get_rows(&state.db, &user, id).await?.ok_or(PlexError::NotFound)?;
+    let (entries, total) = page.apply(entries);
+    let (entry_ids, rows): (Vec<i64>, Vec<ItemRow>) = entries.into_iter().unzip();
+    let libraries = visible_libraries(&state, &user).await?;
+    let mut nodes = item_nodes(&state, &rows, &Sections::new(&libraries), listing_detail(&params)).await?;
+    for (node, entry_id) in nodes.iter_mut().zip(entry_ids) {
+        node.set("playlistItemID", entry_id);
+    }
+    let mut mc = base_container()
+        .attr("size", nodes.len())
+        .attr("totalSize", total)
+        .attr("offset", page.start)
+        .attr("ratingKey", playlist.id.to_string())
+        .attr("key", format!("/playlists/{}/items", playlist.id))
+        .attr("title", &playlist.title)
+        .attr("playlistType", &playlist.kind)
+        .attr("smart", false)
+        .attr("composite", format!("/playlists/{}/composite/{}", playlist.id, playlist.updated_at))
+        .attr("leafCount", playlist.item_count)
+        .opt("duration", (playlist.duration_ms > 0).then_some(playlist.duration_ms));
+    mc.extend(nodes);
+    Ok(mc)
+}
+
+/// `PUT /playlists/{id}/items?uri=…`
+pub async fn add(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Path(id): Path<i64>,
+    params: Params,
+) -> PlexResult<Node> {
+    let items = params.get("uri").map(uri_items).unwrap_or_default();
+    if items.is_empty() {
+        return Err(PlexError::BadRequest("uri is required".into()));
+    }
+    let added = playlists::add(&state.db, &user, id, &items).await?;
+    let mc = playlist_container_of(&state, &user, id).await?;
+    Ok(mc.attr("leafCountAdded", added).attr("leafCountRequested", items.len()))
+}
+
+/// `DELETE /playlists/{id}/items/{playlistItemID}`
+pub async fn remove(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Path((id, entry)): Path<(i64, i64)>,
+) -> PlexResult<Node> {
+    if !playlists::remove_entry(&state.db, &user, id, entry).await? {
+        return Err(PlexError::NotFound);
+    }
+    playlist_container_of(&state, &user, id).await
+}
+
+/// `PUT /playlists/{id}/items/{playlistItemID}/move?after={playlistItemID}`
+pub async fn move_item(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Path((id, entry)): Path<(i64, i64)>,
+    params: Params,
+) -> PlexResult<Node> {
+    let after = params.parse::<i64>("after").filter(|after| *after > 0);
+    if !playlists::move_entry(&state.db, &user, id, entry, after).await? {
+        return Err(PlexError::NotFound);
+    }
+    playlist_container_of(&state, &user, id).await
+}
+
+async fn playlist_artwork(
+    state: AppState,
+    user: AuthUser,
+    id: i64,
+    width: Option<u32>,
+    headers: HeaderMap,
+) -> PlexResult<Response> {
+    let (_, entries) = playlists::get_rows(&state.db, &user, id).await?.ok_or(PlexError::NotFound)?;
+    let first = entries.first().ok_or(PlexError::NotFound)?.1.id;
+    serve_image(state, user, first, "thumb", None, width, headers).await
+}
+
+/// `/playlists/{id}/composite/{version}`: the first entry's artwork.
+pub async fn composite(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Path((id, _version)): Path<(i64, String)>,
+    params: Params,
+    headers: HeaderMap,
+) -> PlexResult<Response> {
+    playlist_artwork(state, user, id, params.parse("width"), headers).await
+}
+
+/// `/photo/:/transcode?url=…` for collection and playlist artwork; `None`
+/// for other URLs.
+pub async fn photo_transcode(
+    state: &AppState,
+    user: &AuthUser,
+    url: &str,
+    params: &Params,
+    headers: &HeaderMap,
+) -> PlexResult<Option<Response>> {
+    let path = url.split(['?', '#']).next().unwrap_or_default();
+    let width = params.parse::<u32>("width").filter(|w| *w > 0);
+    for (prefix, playlist) in [("/library/collections/", false), ("/playlists/", true)] {
+        let Some(start) = path.find(prefix) else { continue };
+        let mut segments = path[start + prefix.len()..].split('/');
+        let id: i64 = segments.next().and_then(|s| s.parse().ok()).ok_or(PlexError::NotFound)?;
+        let image = segments.next().unwrap_or("thumb").to_owned();
+        let version = segments.next().map(str::to_owned);
+        let (state, user, headers) = (state.clone(), user.clone(), headers.clone());
+        let response = if playlist {
+            playlist_artwork(state, user, id, width, headers).await?
+        } else {
+            collection_artwork(state, user, id, &image, version, width, headers).await?
+        };
+        return Ok(Some(response));
+    }
+    Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_plex_uris() {
+        assert_eq!(uri_items("server://abc/com.plexapp.plugins.library/library/metadata/12,13"), vec![12, 13]);
+        assert_eq!(uri_items("library://uuid/item//library/metadata/7"), vec![7]);
+        assert_eq!(uri_items("library://uuid/directory//library/sections/1/all"), Vec::<i64>::new());
+    }
+}

@@ -21,18 +21,22 @@ use crate::state::AppState;
 use crate::util::now;
 
 /// Libraries the user can see (per-user library access).
-async fn visible_libraries(state: &AppState, user: &AuthUser) -> PlexResult<Vec<LibraryRow>> {
+pub(super) async fn visible_libraries(state: &AppState, user: &AuthUser) -> PlexResult<Vec<LibraryRow>> {
     Ok(crate::access::visible_libraries(&state.db, user).await?)
 }
 
-async fn library_for(state: &AppState, user: &AuthUser, id: &str) -> PlexResult<(LibraryRow, Vec<LibraryRow>)> {
+pub(super) async fn library_for(
+    state: &AppState,
+    user: &AuthUser,
+    id: &str,
+) -> PlexResult<(LibraryRow, Vec<LibraryRow>)> {
     let id: i64 = id.parse().map_err(|_| PlexError::NotFound)?;
     let libraries = visible_libraries(state, user).await?;
     let lib = libraries.iter().find(|l| l.id == id).cloned().ok_or(PlexError::NotFound)?;
     Ok((lib, libraries))
 }
 
-fn base_container() -> Node {
+pub(super) fn base_container() -> Node {
     Node::container()
         .attr("allowSync", false)
         .attr("identifier", "com.plexapp.plugins.library")
@@ -41,7 +45,13 @@ fn base_container() -> Node {
 }
 
 /// A paged list of items.
-fn list_container(lib: Option<&LibraryRow>, info: &PlexInfo, nodes: Vec<Node>, total: usize, page: &Page) -> Node {
+pub(super) fn list_container(
+    lib: Option<&LibraryRow>,
+    info: &PlexInfo,
+    nodes: Vec<Node>,
+    total: usize,
+    page: &Page,
+) -> Node {
     let mut mc = base_container().attr("size", nodes.len()).attr("totalSize", total).attr("offset", page.start);
     if let Some(lib) = lib {
         mc = mc
@@ -55,7 +65,12 @@ fn list_container(lib: Option<&LibraryRow>, info: &PlexInfo, nodes: Vec<Node>, t
 }
 
 /// Item elements for rows loaded through the catalog.
-async fn item_nodes(state: &AppState, rows: &[ItemRow], sections: &Sections, detail: Detail) -> PlexResult<Vec<Node>> {
+pub(super) async fn item_nodes(
+    state: &AppState,
+    rows: &[ItemRow],
+    sections: &Sections,
+    detail: Detail,
+) -> PlexResult<Vec<Node>> {
     let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
     let mut extras = meta::load_extras(&state.db, &ids).await?;
     if detail.full {
@@ -81,7 +96,7 @@ async fn add_people(state: &AppState, ids: &[i64], extras: &mut HashMap<i64, Ext
     Ok(())
 }
 
-fn listing_detail(params: &Params) -> Detail {
+pub(super) fn listing_detail(params: &Params) -> Detail {
     Detail { guids: params.flag("includeGuids"), full: false, media: true }
 }
 
@@ -181,10 +196,6 @@ pub async fn section(
     let size = mc.children().len();
     mc.set("size", size);
     Ok(mc)
-}
-
-pub async fn collections(PlexUser(_user): PlexUser) -> Node {
-    base_container().attr("size", 0).attr("totalSize", 0).attr("offset", 0)
 }
 
 pub async fn refresh_all(
@@ -672,6 +683,9 @@ pub async fn all(
     params: Params,
     page: Page,
 ) -> PlexResult<Node> {
+    if params.get("type") == Some(super::lists::COLLECTION_TYPE) {
+        return super::lists::section_collections(State(state), PlexUser(user), Extension(info), Path(id), page).await;
+    }
     let (lib, libraries) = library_for(&state, &user, &id).await?;
     let kind = params.get("type").and_then(kind_for_number).unwrap_or(lib.kind().top_level_kind());
     let rows = if kinds_of(&lib).contains(&kind) {
@@ -1416,7 +1430,7 @@ pub async fn section_search(
 
 /// Serves Plex image URLs (`/library/metadata/{id}/thumb/{version}`) with
 /// pley's artwork handler: posters, backgrounds and episode stills.
-async fn serve_image(
+pub(super) async fn serve_image(
     state: AppState,
     user: AuthUser,
     id: i64,
@@ -1472,6 +1486,9 @@ pub async fn photo_transcode(
     headers: HeaderMap,
 ) -> PlexResult<Response> {
     let url = params.get("url").ok_or(PlexError::BadRequest("url is required".into()))?;
+    if let Some(response) = super::lists::photo_transcode(&state, &user, url, &params, &headers).await? {
+        return Ok(response);
+    }
     // Absolute URLs pointing back at this server are fine too.
     let path = match url.find("/library/metadata/") {
         Some(start) => &url[start..],

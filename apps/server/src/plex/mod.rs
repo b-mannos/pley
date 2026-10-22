@@ -8,6 +8,7 @@
 //! auth and playback code as pley's own API.
 
 mod library;
+mod lists;
 mod meta;
 mod playback;
 mod server;
@@ -26,7 +27,7 @@ use axum::http::uri::PathAndQuery;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get};
+use axum::routing::{any, delete, get, put};
 use tower::Layer;
 use tower::util::{MapRequest, MapRequestLayer};
 use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
@@ -149,7 +150,12 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/devices", get(server::empty))
         .route("/activities", get(server::empty))
         .route("/butler", get(server::empty))
-        .route("/playlists", get(server::empty))
+        .route("/playlists", get(lists::list).post(lists::create))
+        .route("/playlists/{id}", get(lists::get).put(lists::edit).delete(lists::delete))
+        .route("/playlists/{id}/items", get(lists::items).put(lists::add))
+        .route("/playlists/{id}/items/{entry}", delete(lists::remove))
+        .route("/playlists/{id}/items/{entry}/move", put(lists::move_item))
+        .route("/playlists/{id}/composite/{version}", get(lists::composite))
         .route("/updater/status", get(server::empty))
         .route("/prefs", get(server::prefs))
         .route("/_/prefs", get(server::prefs).put(server::accepted))
@@ -160,7 +166,7 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/library/sections/{id}", get(library::section))
         .route("/library/sections/{id}/all", get(library::all))
         .route("/library/sections/{id}/refresh", any(library::refresh))
-        .route("/library/sections/{id}/collections", get(library::collections))
+        .route("/library/sections/{id}/collections", get(lists::section_collections))
         .route("/library/sections/{id}/albums", get(library::section_albums))
         .route("/library/sections/{id}/recentlyAdded", get(library::section_recently_added))
         .route("/library/sections/{id}/onDeck", get(library::section_on_deck))
@@ -181,6 +187,10 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/library/metadata/{id}/refresh", any(library::refresh_item))
         .route("/library/metadata/{id}/{image}", get(library::image))
         .route("/library/metadata/{id}/{image}/{version}", get(library::image_version))
+        .route("/library/collections/{id}", get(lists::collection))
+        .route("/library/collections/{id}/children", get(lists::collection_children))
+        .route("/library/collections/{id}/{image}", get(lists::collection_image))
+        .route("/library/collections/{id}/{image}/{version}", get(lists::collection_image_version))
         .route("/library/parts/{id}/{version}/{file}", get(playback::part_file))
         .route("/library/streams/{id}", get(playback::stream_file))
         .route("/hubs", get(library::hubs))

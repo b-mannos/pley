@@ -1,0 +1,574 @@
+//! Collections and playlists through pley's API and the Plex-compatible one,
+//! in-process against a temporary data directory like tests/api.rs.
+
+use std::collections::HashMap;
+use std::time::Duration;
+
+use axum::Router;
+use axum::body::Body;
+use axum::http::{HeaderMap, Method, Request, StatusCode, header};
+use serde_json::{Value, json};
+use tower::ServiceExt;
+
+use pley::collections::TmdbCollection;
+use pley::{AppState, Config};
+
+struct TestApp {
+    api: Router,
+    plex: pley::plex::Service,
+    state: AppState,
+    media: tempfile::TempDir,
+    _data: tempfile::TempDir,
+}
+
+struct Reply {
+    status: StatusCode,
+    headers: HeaderMap,
+    body: Value,
+    text: String,
+}
+
+impl TestApp {
+    async fn new() -> Self {
+        let data = tempfile::tempdir().unwrap();
+        let mut config = Config::for_data_dir(data.path());
+        config.transcoder_path = Some(data.path().join("no-transcoder-in-tests"));
+        let state = AppState::init(config).await.unwrap();
+        let api = pley::api::router(state.clone());
+        let plex = pley::plex::service(state.clone());
+        Self { api, plex, state, media: tempfile::tempdir().unwrap(), _data: data }
+    }
+
+    fn media_file(&self, rel: &str) {
+        let path = self.media.path().join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, vec![7u8; 1024]).unwrap();
+    }
+
+    async fn reply(resp: axum::response::Response) -> Reply {
+        let status = resp.status();
+        let headers = resp.headers().clone();
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 24).await.unwrap();
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        Reply { status, headers, body, text }
+    }
+
+    async fn call(&self, method: Method, uri: &str, token: Option<&str>, body: Option<Value>) -> Reply {
+        let mut req = Request::builder().method(method).uri(uri);
+        if let Some(token) = token {
+            req = req.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
+        let req = match body {
+            Some(b) => req.header(header::CONTENT_TYPE, "application/json").body(Body::from(b.to_string())).unwrap(),
+            None => req.body(Body::empty()).unwrap(),
+        };
+        Self::reply(self.api.clone().oneshot(req).await.unwrap()).await
+    }
+
+    async fn get(&self, uri: &str, token: &str) -> Reply {
+        self.call(Method::GET, uri, Some(token), None).await
+    }
+
+    async fn post(&self, uri: &str, token: &str, body: Value) -> Reply {
+        self.call(Method::POST, uri, Some(token), Some(body)).await
+    }
+
+    async fn patch(&self, uri: &str, token: &str, body: Value) -> Reply {
+        self.call(Method::PATCH, uri, Some(token), Some(body)).await
+    }
+
+    async fn put(&self, uri: &str, token: &str, body: Value) -> Reply {
+        self.call(Method::PUT, uri, Some(token), Some(body)).await
+    }
+
+    async fn delete(&self, uri: &str, token: &str) -> Reply {
+        self.call(Method::DELETE, uri, Some(token), None).await
+    }
+
+    /// The Plex API, asking for JSON.
+    async fn plex(&self, method: Method, uri: &str, token: &str) -> Reply {
+        let req = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("x-plex-token", token)
+            .header(header::ACCEPT, "application/json")
+            .body(Body::empty())
+            .unwrap();
+        Self::reply(self.plex.clone().oneshot(req).await.unwrap()).await
+    }
+
+    async fn plex_json(&self, uri: &str, token: &str) -> Value {
+        let reply = self.plex(Method::GET, uri, token).await;
+        assert_eq!(reply.status, StatusCode::OK, "{uri}: {}", reply.text);
+        reply.body["MediaContainer"].clone()
+    }
+
+    async fn setup_admin(&self) -> String {
+        let r = self
+            .call(Method::POST, "/api/setup", None, Some(json!({"username": "admin", "password": "secret1"})))
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        r.body["token"].as_str().unwrap().to_owned()
+    }
+
+    /// A user with a password and the given restrictions: `(token, id)`.
+    async fn user(&self, admin: &str, username: &str, mut fields: Value) -> (String, i64) {
+        fields["username"] = json!(username);
+        fields["password"] = json!("password1");
+        let created = self.post("/api/users", admin, fields).await;
+        assert_eq!(created.status, StatusCode::CREATED, "{:?}", created.body);
+        let login = self
+            .call(Method::POST, "/api/auth/login", None, Some(json!({"username": username, "password": "password1"})))
+            .await;
+        assert_eq!(login.status, StatusCode::OK, "{:?}", login.body);
+        (login.body["token"].as_str().unwrap().to_owned(), created.body["id"].as_i64().unwrap())
+    }
+
+    async fn library(&self, token: &str, name: &str, kind: &str, rel: &str) -> i64 {
+        std::fs::create_dir_all(self.media.path().join(rel)).unwrap();
+        let path = self.media.path().join(rel).to_string_lossy().into_owned();
+        let r = self.post("/api/libraries", token, json!({"name": name, "kind": kind, "paths": [path]})).await;
+        assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+        for _ in 0..200 {
+            if self.state.scanner.statuses().is_empty() {
+                return r.body["id"].as_i64().unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("scan did not finish");
+    }
+
+    /// Title → id of the top-level items of a library.
+    async fn ids(&self, library: i64, token: &str) -> HashMap<String, i64> {
+        let page = self.get(&format!("/api/libraries/{library}/items"), token).await;
+        assert_eq!(page.status, StatusCode::OK, "{:?}", page.body);
+        page.body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| (i["title"].as_str().unwrap().to_owned(), i["id"].as_i64().unwrap()))
+            .collect()
+    }
+
+    /// A collection made by an administrator.
+    async fn collection(&self, admin: &str, library: i64, title: &str, items: &[i64]) -> i64 {
+        let r = self
+            .post(&format!("/api/libraries/{library}/collections"), admin, json!({"title": title, "item_ids": items}))
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+        r.body["id"].as_i64().unwrap()
+    }
+
+    async fn collections(&self, library: i64, token: &str) -> Value {
+        let r = self.get(&format!("/api/libraries/{library}/collections"), token).await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        r.body["collections"].clone()
+    }
+
+    /// What the metadata agent does after matching a movie.
+    async fn link(&self, item: i64, found: Option<&TmdbCollection>) {
+        pley::collections::link_tmdb(&self.state.db, &self.state.config.metadata_dir(), item, found).await.unwrap();
+    }
+
+    async fn set_rating(&self, title: &str, rating: &str) {
+        sqlx::query("UPDATE items SET content_rating = ?, rating_age = ? WHERE title = ?")
+            .bind(rating)
+            .bind(pley::ratings::rating_age(rating))
+            .bind(title)
+            .execute(&self.state.db.write)
+            .await
+            .unwrap();
+    }
+}
+
+fn titles(items: &Value) -> Vec<String> {
+    items.as_array().unwrap().iter().map(|i| i["title"].as_str().unwrap().to_owned()).collect()
+}
+
+fn entry_titles(entries: &Value) -> Vec<String> {
+    entries.as_array().unwrap().iter().map(|e| e["item"]["title"].as_str().unwrap().to_owned()).collect()
+}
+
+fn entry_ids(entries: &Value) -> Vec<i64> {
+    entries.as_array().unwrap().iter().map(|e| e["entry_id"].as_i64().unwrap()).collect()
+}
+
+fn plex_titles(container: &Value) -> Vec<String> {
+    container["Metadata"]
+        .as_array()
+        .map(|items| items.iter().map(|m| m["title"].as_str().unwrap().to_owned()).collect())
+        .unwrap_or_default()
+}
+
+fn encode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn collections_are_curated_by_admins() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Alpha (2001).mkv");
+    app.media_file("movies/Beta (1999).mkv");
+    app.media_file("movies/Gamma (2010).mkv");
+    app.media_file("tv/Show (2015)/Season 01/Show - S01E01 - Pilot.mkv");
+    app.media_file("music/Artist/Album (2000)/01 - Song.mp3");
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let tv = app.library(&admin, "TV", "shows", "tv").await;
+    let music = app.library(&admin, "Music", "music", "music").await;
+    let m = app.ids(movies, &admin).await;
+    let show = app.ids(tv, &admin).await["Show"];
+
+    // Release order by default.
+    let created = app
+        .post(
+            &format!("/api/libraries/{movies}/collections"),
+            &admin,
+            json!({"title": "Favourites", "summary": "The best", "item_ids": [m["Alpha"], m["Beta"]]}),
+        )
+        .await;
+    assert_eq!(created.status, StatusCode::CREATED, "{:?}", created.body);
+    assert_eq!(created.body["automatic"], json!(false));
+    assert_eq!(created.body["summary"], json!("The best"));
+    assert_eq!(titles(&created.body["items"]), vec!["Beta", "Alpha"]);
+    let id = created.body["id"].as_i64().unwrap();
+    let listed = app.get(&format!("/api/libraries/{movies}/collections"), &admin).await;
+    assert_eq!(listed.body["collections"][0]["item_count"], json!(2));
+
+    // Only movies and shows of the collection's library go in; no duplicates.
+    let other = app.post(&format!("/api/collections/{id}/items"), &admin, json!({"item_ids": [show]})).await;
+    assert_eq!(other.status, StatusCode::BAD_REQUEST);
+    let added =
+        app.post(&format!("/api/collections/{id}/items"), &admin, json!({"item_ids": [m["Gamma"], m["Alpha"]]})).await;
+    assert_eq!(added.body["added"], json!(1));
+
+    // By title, then a custom order.
+    let patched = app.patch(&format!("/api/collections/{id}"), &admin, json!({"sort": "title", "summary": null})).await;
+    assert_eq!(patched.status, StatusCode::OK, "{:?}", patched.body);
+    assert_eq!(titles(&patched.body["items"]), vec!["Alpha", "Beta", "Gamma"]);
+    assert_eq!(patched.body["summary"], Value::Null);
+    let bad = app.patch(&format!("/api/collections/{id}"), &admin, json!({"sort": "random"})).await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    let order =
+        app.put(&format!("/api/collections/{id}/order"), &admin, json!({"item_ids": [m["Gamma"], m["Alpha"]]})).await;
+    assert_eq!(order.status, StatusCode::NO_CONTENT);
+    let detail = app.get(&format!("/api/collections/{id}"), &admin).await;
+    assert_eq!(detail.body["sort"], json!("custom"));
+    assert_eq!(titles(&detail.body["items"]), vec!["Gamma", "Alpha", "Beta"]);
+
+    // Item pages know their collections.
+    let of_item = app.get(&format!("/api/items/{}/collections", m["Gamma"]), &admin).await;
+    assert_eq!(of_item.body["collections"], json!([{"id": id, "title": "Favourites"}]));
+
+    // Without artwork of its own, the first item's is used.
+    let poster = app.get(&format!("/api/collections/{id}/images/poster?w=320"), &admin).await;
+    assert_eq!(poster.status, StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(poster.headers[header::LOCATION], format!("/api/items/{}/images/poster?w=320", m["Gamma"]).as_str());
+
+    let removed = app.delete(&format!("/api/collections/{id}/items/{}", m["Gamma"]), &admin).await;
+    assert_eq!(removed.status, StatusCode::NO_CONTENT);
+    assert_eq!(app.get(&format!("/api/collections/{id}"), &admin).await.body["item_count"], json!(2));
+
+    // Regular users see collections but can't change them; music has none.
+    let (bob, _) = app.user(&admin, "bob", json!({})).await;
+    let mine = app.post(&format!("/api/libraries/{movies}/collections"), &bob, json!({"title": "Mine"})).await;
+    assert_eq!(mine.status, StatusCode::FORBIDDEN);
+    assert_eq!(app.delete(&format!("/api/collections/{id}"), &bob).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(app.get(&format!("/api/collections/{id}"), &bob).await.body["item_count"], json!(2));
+    let hits = app.post(&format!("/api/libraries/{music}/collections"), &admin, json!({"title": "Hits"})).await;
+    assert_eq!(hits.status, StatusCode::BAD_REQUEST);
+
+    // An empty collection is only shown to administrators.
+    let later = app.post(&format!("/api/libraries/{movies}/collections"), &admin, json!({"title": "Later"})).await;
+    let later = later.body["id"].as_i64().unwrap();
+    assert_eq!(app.get(&format!("/api/collections/{later}"), &bob).await.status, StatusCode::NOT_FOUND);
+    let for_bob = app.get(&format!("/api/libraries/{movies}/collections"), &bob).await;
+    assert_eq!(titles(&for_bob.body["collections"]), vec!["Favourites"]);
+    let for_admin = app.get(&format!("/api/libraries/{movies}/collections"), &admin).await;
+    assert_eq!(titles(&for_admin.body["collections"]), vec!["Favourites", "Later"]);
+
+    assert_eq!(app.delete(&format!("/api/collections/{id}"), &admin).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(app.get(&format!("/api/collections/{id}"), &admin).await.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn automatic_collections_follow_tmdb() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/First (2001).mkv");
+    app.media_file("movies/Second (2004).mkv");
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let m = app.ids(movies, &admin).await;
+    let saga = TmdbCollection { id: 10, name: "Saga Collection".into(), poster_path: None, backdrop_path: None };
+
+    // A single film is not a collection yet.
+    app.link(m["First"], Some(&saga)).await;
+    assert_eq!(app.collections(movies, &admin).await, json!([]));
+    app.link(m["Second"], Some(&saga)).await;
+    let listed = app.collections(movies, &admin).await;
+    assert_eq!(titles(&listed), vec!["Saga Collection"]);
+    assert_eq!(listed[0]["automatic"], json!(true));
+    assert_eq!(listed[0]["item_count"], json!(2));
+    let id = listed[0]["id"].as_i64().unwrap();
+    assert_eq!(
+        titles(&app.get(&format!("/api/collections/{id}"), &admin).await.body["items"]),
+        vec!["First", "Second"]
+    );
+
+    // A title edited by an administrator survives refreshes.
+    app.patch(&format!("/api/collections/{id}"), &admin, json!({"title": "The Saga"})).await;
+    app.link(m["First"], Some(&saga)).await;
+    assert_eq!(titles(&app.collections(movies, &admin).await), vec!["The Saga"]);
+
+    // Films matched elsewhere leave; an emptied collection is removed.
+    app.link(m["First"], None).await;
+    assert_eq!(app.collections(movies, &admin).await, json!([]));
+    let of_second = app.get(&format!("/api/items/{}/collections", m["Second"]), &admin).await;
+    assert_eq!(of_second.body["collections"], json!([]));
+    app.link(m["Second"], None).await;
+    assert_eq!(app.get(&format!("/api/collections/{id}"), &admin).await.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn hidden_items_stay_hidden_in_collections_and_playlists() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Adult Film (2020).mkv");
+    app.media_file("movies/Family Film (2019).mkv");
+    app.media_file("movies/Cartoon (2018).mkv");
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    app.set_rating("Adult Film", "R").await;
+    app.set_rating("Family Film", "PG").await;
+    app.set_rating("Cartoon", "G").await;
+    let m = app.ids(movies, &admin).await;
+    let (adult, family, cartoon) = (m["Adult Film"], m["Family Film"], m["Cartoon"]);
+    let (kid, kid_id) =
+        app.user(&admin, "kid", json!({"all_libraries": false, "library_ids": [movies], "max_age": 12})).await;
+
+    let mixed = app.collection(&admin, movies, "Mixed", &[adult, family]).await;
+    let grown_ups = app.collection(&admin, movies, "Grown-ups", &[adult]).await;
+    let saga = TmdbCollection { id: 7, name: "Saga".into(), poster_path: None, backdrop_path: None };
+    app.link(adult, Some(&saga)).await;
+    app.link(cartoon, Some(&saga)).await;
+    assert_eq!(titles(&app.collections(movies, &admin).await), vec!["Grown-ups", "Mixed", "Saga"]);
+
+    // Collections only show what the kid may watch; ones left with nothing
+    // (or an automatic one left with a single film) are not listed.
+    let listed = app.collections(movies, &kid).await;
+    assert_eq!(titles(&listed), vec!["Mixed"]);
+    assert_eq!(listed[0]["item_count"], json!(1));
+    let detail = app.get(&format!("/api/collections/{mixed}"), &kid).await;
+    assert_eq!(titles(&detail.body["items"]), vec!["Family Film"]);
+    assert!(!detail.text.contains("Adult Film"));
+    assert_eq!(app.get(&format!("/api/collections/{grown_ups}"), &kid).await.status, StatusCode::NOT_FOUND);
+    let image = app.get(&format!("/api/collections/{grown_ups}/images/poster"), &kid).await;
+    assert_eq!(image.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.get(&format!("/api/items/{adult}/collections"), &kid).await.status, StatusCode::NOT_FOUND);
+    let of_cartoon = app.get(&format!("/api/items/{cartoon}/collections"), &kid).await;
+    assert_eq!(of_cartoon.body["collections"], json!([]));
+    // The artwork fallback never points at the hidden film.
+    let poster = app.get(&format!("/api/collections/{mixed}/images/poster"), &kid).await;
+    assert_eq!(poster.headers[header::LOCATION], format!("/api/items/{family}/images/poster").as_str());
+    // The Plex API applies the same rules.
+    let sections = app.plex_json(&format!("/library/sections/{movies}/collections"), &kid).await;
+    assert_eq!(plex_titles(&sections), vec!["Mixed"]);
+    let children = app.plex_json(&format!("/library/collections/{mixed}/children"), &kid).await;
+    assert_eq!(plex_titles(&children), vec!["Family Film"]);
+    let hidden = app.plex(Method::GET, &format!("/library/collections/{grown_ups}/children"), &kid).await;
+    assert_eq!(hidden.status, StatusCode::NOT_FOUND);
+
+    // Hidden items can't be put in a playlist (the kind comes from the first
+    // visible one)...
+    let created =
+        app.post("/api/playlists", &kid, json!({"title": "Movie night", "item_ids": [adult, family, cartoon]})).await;
+    assert_eq!(created.status, StatusCode::CREATED, "{:?}", created.body);
+    assert_eq!(entry_titles(&created.body["entries"]), vec!["Family Film", "Cartoon"]);
+    let playlist = created.body["id"].as_i64().unwrap();
+
+    // ...and entries that become hidden are skipped, not deleted.
+    app.set_rating("Family Film", "R").await;
+    let detail = app.get(&format!("/api/playlists/{playlist}"), &kid).await;
+    assert_eq!(entry_titles(&detail.body["entries"]), vec!["Cartoon"]);
+    assert_eq!(detail.body["item_count"], json!(1));
+    assert!(!detail.text.contains("Family Film"));
+    let listed = app.get("/api/playlists", &kid).await;
+    assert_eq!(listed.body["playlists"][0]["item_count"], json!(1));
+    let items = app.plex_json(&format!("/playlists/{playlist}/items"), &kid).await;
+    assert_eq!(plex_titles(&items), vec!["Cartoon"]);
+    // The collection now has nothing the kid may see.
+    assert_eq!(app.get(&format!("/api/collections/{mixed}"), &kid).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.collections(movies, &kid).await, json!([]));
+
+    // Lifting the restrictions brings the entry back.
+    let lifted =
+        app.patch(&format!("/api/users/{kid_id}"), &admin, json!({"max_age": null, "all_libraries": true})).await;
+    assert_eq!(lifted.status, StatusCode::OK, "{:?}", lifted.body);
+    let detail = app.get(&format!("/api/playlists/{playlist}"), &kid).await;
+    assert_eq!(entry_titles(&detail.body["entries"]), vec!["Family Film", "Cartoon"]);
+
+    // Playlists are private, administrators included.
+    assert_eq!(app.get(&format!("/api/playlists/{playlist}"), &admin).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.delete(&format!("/api/playlists/{playlist}"), &admin).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.get("/api/playlists", &admin).await.body["playlists"], json!([]));
+}
+
+#[tokio::test]
+async fn playlists_expand_reorder_and_keep_to_one_kind() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    for (s, e, title) in [(2, 1, "Return"), (1, 2, "Second"), (1, 1, "Pilot")] {
+        app.media_file(&format!("tv/Show (2015)/Season {s:02}/Show - S{s:02}E{e:02} - {title}.mkv"));
+    }
+    app.media_file("movies/Film (2001).mkv");
+    app.media_file("music/Artist/Album (2000)/01 - One.mp3");
+    app.media_file("music/Artist/Album (2000)/02 - Two.mp3");
+    let tv = app.library(&admin, "TV", "shows", "tv").await;
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let music = app.library(&admin, "Music", "music", "music").await;
+    let show = app.ids(tv, &admin).await["Show"];
+    let film = app.ids(movies, &admin).await["Film"];
+    let artist = app.ids(music, &admin).await["Artist"];
+    let album =
+        app.get(&format!("/api/items/{artist}/children"), &admin).await.body["items"][0]["id"].as_i64().unwrap();
+
+    // A show adds its episodes in order; the kind comes from the items.
+    let created = app.post("/api/playlists", &admin, json!({"title": "Binge", "item_ids": [show]})).await;
+    assert_eq!(created.status, StatusCode::CREATED, "{:?}", created.body);
+    assert_eq!(created.body["kind"], json!("video"));
+    assert_eq!(entry_titles(&created.body["entries"]), vec!["Pilot", "Second", "Return"]);
+    let id = created.body["id"].as_i64().unwrap();
+
+    // Music doesn't go in a video playlist; the same film may go in twice.
+    let wrong = app.post(&format!("/api/playlists/{id}/items"), &admin, json!({"item_ids": [album]})).await;
+    assert_eq!(wrong.status, StatusCode::BAD_REQUEST);
+    for _ in 0..2 {
+        let added = app.post(&format!("/api/playlists/{id}/items"), &admin, json!({"item_ids": [film]})).await;
+        assert_eq!(added.body["added"], json!(1));
+    }
+
+    // Reorder (unlisted entries keep their order after the listed ones).
+    let entries = entry_ids(&app.get(&format!("/api/playlists/{id}"), &admin).await.body["entries"]);
+    assert_eq!(entries.len(), 5);
+    let reordered =
+        app.put(&format!("/api/playlists/{id}/order"), &admin, json!({"entry_ids": [entries[4], entries[0]]})).await;
+    assert_eq!(reordered.status, StatusCode::OK, "{:?}", reordered.body);
+    assert_eq!(entry_titles(&reordered.body["entries"]), vec!["Film", "Pilot", "Second", "Return", "Film"]);
+
+    // Remove one entry; rename.
+    let removed = app.delete(&format!("/api/playlists/{id}/items/{}", entries[3]), &admin).await;
+    assert_eq!(removed.status, StatusCode::NO_CONTENT);
+    let again = app.delete(&format!("/api/playlists/{id}/items/{}", entries[3]), &admin).await;
+    assert_eq!(again.status, StatusCode::NOT_FOUND);
+    let renamed = app.patch(&format!("/api/playlists/{id}"), &admin, json!({"title": "  Weekend  "})).await;
+    assert_eq!(renamed.body["title"], json!("Weekend"));
+    assert_eq!(entry_titles(&renamed.body["entries"]), vec!["Film", "Pilot", "Second", "Return"]);
+    let blank = app.patch(&format!("/api/playlists/{id}"), &admin, json!({"title": " "})).await;
+    assert_eq!(blank.status, StatusCode::BAD_REQUEST);
+
+    // Music playlists from an album; a kind is needed to start empty.
+    let songs = app.post("/api/playlists", &admin, json!({"title": "Songs", "item_ids": [album]})).await;
+    assert_eq!(songs.body["kind"], json!("audio"));
+    assert_eq!(entry_titles(&songs.body["entries"]), vec!["One", "Two"]);
+    let no_kind = app.post("/api/playlists", &admin, json!({"title": "Empty"})).await;
+    assert_eq!(no_kind.status, StatusCode::BAD_REQUEST);
+    let empty = app.post("/api/playlists", &admin, json!({"title": "Empty", "kind": "audio"})).await;
+    assert_eq!(empty.status, StatusCode::CREATED);
+    assert_eq!(empty.body["entries"], json!([]));
+    // A refused first batch leaves no playlist behind.
+    let mixed = app.post("/api/playlists", &admin, json!({"title": "Mixed", "item_ids": [film, album]})).await;
+    assert_eq!(mixed.status, StatusCode::BAD_REQUEST);
+
+    let listed = app.get("/api/playlists", &admin).await;
+    assert_eq!(titles(&listed.body["playlists"]), vec!["Empty", "Songs", "Weekend"]);
+    let weekend = &listed.body["playlists"][2];
+    assert_eq!((weekend["kind"].clone(), weekend["item_count"].clone()), (json!("video"), json!(4)));
+
+    assert_eq!(app.delete(&format!("/api/playlists/{id}"), &admin).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(app.get(&format!("/api/playlists/{id}"), &admin).await.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn plex_api_lists_collections_and_edits_playlists() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Alpha (2001)/Alpha (2001).mkv");
+    app.media_file("movies/Alpha (2001)/poster.jpg");
+    app.media_file("movies/Beta (2002).mkv");
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let m = app.ids(movies, &admin).await;
+    let created = app
+        .post(
+            &format!("/api/libraries/{movies}/collections"),
+            &admin,
+            json!({"title": "Pair", "item_ids": [m["Beta"], m["Alpha"]]}),
+        )
+        .await;
+    let c = created.body["id"].as_i64().unwrap();
+
+    // Collections, listed both ways Plex clients ask for them.
+    let section = app.plex_json(&format!("/library/sections/{movies}/collections"), &admin).await;
+    let node = &section["Metadata"][0];
+    assert_eq!(node["type"], json!("collection"));
+    assert_eq!(node["subtype"], json!("movie"));
+    assert_eq!(node["childCount"], json!(2));
+    assert_eq!(node["key"], json!(format!("/library/collections/{c}/children")));
+    let typed = app.plex_json(&format!("/library/sections/{movies}/all?type=18"), &admin).await;
+    assert_eq!(plex_titles(&typed), vec!["Pair"]);
+    let children = app.plex_json(&format!("/library/collections/{c}/children"), &admin).await;
+    assert_eq!(plex_titles(&children), vec!["Alpha", "Beta"]);
+    assert_eq!(
+        app.plex_json(&format!("/library/collections/{c}"), &admin).await["Metadata"][0]["title"],
+        json!("Pair")
+    );
+    // Artwork comes from the first item.
+    let thumb = app.plex(Method::GET, &format!("/library/collections/{c}/thumb/1"), &admin).await;
+    assert_eq!(thumb.status, StatusCode::OK, "{}", thumb.text);
+    let transcoded = app
+        .plex(
+            Method::GET,
+            &format!("/photo/:/transcode?url={}", encode(&format!("/library/collections/{c}/thumb/1"))),
+            &admin,
+        )
+        .await;
+    assert_eq!(transcoded.status, StatusCode::OK);
+
+    // Playlists: create from a uri, list, move, remove, rename, delete.
+    let uri = encode(&format!("server://x/com.plexapp.plugins.library/library/metadata/{},{}", m["Alpha"], m["Beta"]));
+    let created = app.plex(Method::POST, &format!("/playlists?type=video&title=Mix&smart=0&uri={uri}"), &admin).await;
+    assert_eq!(created.status, StatusCode::OK, "{}", created.text);
+    let playlist = created.body["MediaContainer"]["Metadata"][0].clone();
+    assert_eq!(playlist["type"], json!("playlist"));
+    assert_eq!(playlist["playlistType"], json!("video"));
+    assert_eq!(playlist["leafCount"], json!(2));
+    let id = playlist["ratingKey"].as_str().unwrap().to_owned();
+    assert_eq!(plex_titles(&app.plex_json("/playlists?playlistType=video", &admin).await), vec!["Mix"]);
+    assert_eq!(app.plex_json("/playlists?playlistType=audio", &admin).await["size"], json!(0));
+
+    let items = app.plex_json(&format!("/playlists/{id}/items"), &admin).await;
+    assert_eq!(plex_titles(&items), vec!["Alpha", "Beta"]);
+    let beta = items["Metadata"][1]["playlistItemID"].as_i64().unwrap();
+    let moved = app.plex(Method::PUT, &format!("/playlists/{id}/items/{beta}/move"), &admin).await;
+    assert_eq!(moved.status, StatusCode::OK, "{}", moved.text);
+    assert_eq!(plex_titles(&app.plex_json(&format!("/playlists/{id}/items"), &admin).await), vec!["Beta", "Alpha"]);
+    let api_view = app.get(&format!("/api/playlists/{id}"), &admin).await;
+    assert_eq!(entry_titles(&api_view.body["entries"]), vec!["Beta", "Alpha"]);
+
+    let removed = app.plex(Method::DELETE, &format!("/playlists/{id}/items/{beta}"), &admin).await;
+    assert_eq!(removed.body["MediaContainer"]["Metadata"][0]["leafCount"], json!(1));
+    let renamed = app.plex(Method::PUT, &format!("/playlists/{id}?title=Solo"), &admin).await;
+    assert_eq!(renamed.body["MediaContainer"]["Metadata"][0]["title"], json!("Solo"));
+    let added = app.plex(Method::PUT, &format!("/playlists/{id}/items?uri={uri}"), &admin).await;
+    assert_eq!(added.body["MediaContainer"]["leafCountAdded"], json!(2));
+    let composite = app.plex(Method::GET, &format!("/playlists/{id}/composite/1"), &admin).await;
+    assert_eq!(composite.status, StatusCode::OK);
+
+    assert_eq!(app.plex(Method::DELETE, &format!("/playlists/{id}"), &admin).await.status, StatusCode::OK);
+    assert_eq!(app.plex(Method::GET, &format!("/playlists/{id}"), &admin).await.status, StatusCode::NOT_FOUND);
+}

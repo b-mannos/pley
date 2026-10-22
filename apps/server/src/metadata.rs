@@ -132,6 +132,8 @@ struct MovieDetails {
     imdb_id: Option<String>,
     release_dates: Option<ReleaseDates>,
     credits: Option<people::Credits>,
+    #[serde(default)]
+    belongs_to_collection: Option<crate::collections::TmdbCollection>,
 }
 
 #[derive(Deserialize)]
@@ -731,6 +733,10 @@ impl MetadataAgent {
             people::replace(&self.db, item.id, &people::movie_credits(credits))
                 .await
                 .map_err(|e| TmdbError::Other(e.into()))?;
+        }
+        let collection = details.belongs_to_collection.as_ref();
+        if let Err(err) = crate::collections::link_tmdb(&self.db, &self.metadata_dir, item.id, collection).await {
+            tracing::warn!("collection of item {} not updated: {err:#}", item.id);
         }
         Ok(())
     }
