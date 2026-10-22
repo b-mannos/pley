@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { Hub } from "@/api/types";
@@ -6,12 +6,14 @@ import { cn } from "@/lib/cn";
 import { useMediaQuery } from "@/lib/hooks";
 import { aspectFor, CardSkeleton, MediaCard, type CardAspect } from "./cards";
 
-const WIDTHS: Record<CardAspect, [number, number]> = {
-  // [mobile, desktop]
+/** Smallest card width per shape: [mobile, desktop]. Cards grow from there to fill the row. */
+const MIN_WIDTHS: Record<CardAspect, [number, number]> = {
   poster: [118, 160],
   square: [132, 168],
   thumb: [236, 296],
 };
+/** Gap between cards: `gap-3.5` / `sm:gap-4`. */
+const GAPS: [number, number] = [14, 16];
 
 export function hubAspect(hub: Hub): CardAspect {
   if (hub.key.startsWith("continue")) return "thumb";
@@ -27,11 +29,44 @@ function hubLink(hub: Hub): string | null {
   return null;
 }
 
-export function HubRow({ hub }: { hub: Hub }) {
+/**
+ * Card width that fits a whole number of cards into `available` px, so no
+ * card is ever cut off at the edge. Big screens get somewhat larger cards.
+ */
+export function fitCards(available: number, minWidth: number, gap: number): { width: number; perPage: number } {
+  const scaled = minWidth * Math.min(1.35, Math.max(1, available / 1800));
+  const perPage = Math.max(1, Math.floor((available + gap) / (scaled + gap)));
+  return { width: Math.floor((available - gap * (perPage - 1)) / perPage), perPage };
+}
+
+/** Measures the content width of a padded row and fits cards into it. */
+function useFittedCards(aspect: CardAspect) {
   const desktop = useMediaQuery("(min-width: 640px)");
+  const minWidth = MIN_WIDTHS[aspect][desktop ? 1 : 0];
+  const gap = GAPS[desktop ? 1 : 0];
+  const ref = useRef<HTMLDivElement>(null);
+  const [available, setAvailable] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const style = getComputedStyle(el);
+      setAvailable(el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const fit = available > 0 ? fitCards(available, minWidth, gap) : { width: minWidth, perPage: 1 };
+  return { ref, gap, ...fit };
+}
+
+export function HubRow({ hub }: { hub: Hub }) {
   const aspect = hubAspect(hub);
-  const width = WIDTHS[aspect][desktop ? 1 : 0];
-  const scroller = useRef<HTMLDivElement>(null);
+  const { ref: scroller, width, perPage, gap } = useFittedCards(aspect);
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(false);
   const continueStyle = hub.key.startsWith("continue");
@@ -42,28 +77,22 @@ export function HubRow({ hub }: { hub: Hub }) {
     if (!el) return;
     setCanLeft(el.scrollLeft > 4);
     setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
-  }, []);
+  }, [scroller]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     update();
-    const el = scroller.current;
-    if (!el) return;
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [update, hub.items.length]);
+  }, [update, hub.items.length, width]);
 
-  const scrollBy = (dir: 1 | -1) => {
-    const el = scroller.current;
-    if (!el) return;
-    el.scrollBy({ left: dir * Math.max(el.clientWidth * 0.85, width), behavior: "smooth" });
+  const scrollPage = (dir: 1 | -1) => {
+    scroller.current?.scrollBy({ left: dir * perPage * (width + gap), behavior: "smooth" });
   };
 
   if (!hub.items.length) return null;
+  const scrollable = canLeft || canRight;
 
   return (
-    <section className="group/hub relative">
-      <div className="mb-3 flex items-end justify-between gap-4 px-4 sm:px-8">
+    <section>
+      <div className="mb-2 flex items-center justify-between gap-4 px-4 sm:px-8">
         <h2 className="truncate text-lg font-semibold tracking-tight">
           {link ? (
             <Link to={link} className="transition-colors hover:text-accent">
@@ -73,17 +102,28 @@ export function HubRow({ hub }: { hub: Hub }) {
             hub.title
           )}
         </h2>
-        {link ? (
-          <Link to={link} className="shrink-0 text-xs font-medium text-muted transition-colors hover:text-accent">
-            See all
-          </Link>
-        ) : null}
+        <div className="flex shrink-0 items-center gap-1">
+          {link ? (
+            <Link to={link} className="mr-2 text-xs font-medium text-muted transition-colors hover:text-accent">
+              See all
+            </Link>
+          ) : null}
+          {scrollable ? (
+            <>
+              <ArrowButton side="left" enabled={canLeft} onClick={() => scrollPage(-1)} />
+              <ArrowButton side="right" enabled={canRight} onClick={() => scrollPage(1)} />
+            </>
+          ) : null}
+        </div>
       </div>
-      <div className="relative">
+      {/* The page margin sits outside the scroll box (a scroll box shows content
+          in its own padding, which would reveal a sliver of the next card); the
+          4px inset only keeps hover outlines from being clipped. */}
+      <div className="px-4 sm:px-8">
         <div
           ref={scroller}
           onScroll={update}
-          className="scrollbar-none flex snap-x snap-mandatory scroll-px-4 gap-3.5 overflow-x-auto px-4 pb-2 sm:scroll-px-8 sm:gap-4 sm:px-8"
+          className="scrollbar-none -mx-1 flex snap-x snap-mandatory scroll-px-1 gap-3.5 overflow-x-auto px-1 pt-1 pb-2 sm:gap-4"
         >
           {hub.items.map((item) => (
             <div key={item.id} className="shrink-0 snap-start">
@@ -91,45 +131,44 @@ export function HubRow({ hub }: { hub: Hub }) {
             </div>
           ))}
         </div>
-        <ArrowButton side="left" visible={canLeft} onClick={() => scrollBy(-1)} />
-        <ArrowButton side="right" visible={canRight} onClick={() => scrollBy(1)} />
       </div>
     </section>
   );
 }
 
-function ArrowButton({ side, visible, onClick }: { side: "left" | "right"; visible: boolean; onClick: () => void }) {
+function ArrowButton({ side, enabled, onClick }: { side: "left" | "right"; enabled: boolean; onClick: () => void }) {
+  const Icon = side === "left" ? ChevronLeft : ChevronRight;
   return (
     <button
       type="button"
-      aria-label={side === "left" ? "Scroll left" : "Scroll right"}
+      aria-label={side === "left" ? "Previous" : "Next"}
       onClick={onClick}
-      tabIndex={-1}
+      disabled={!enabled}
       className={cn(
-        "absolute top-0 z-10 hidden h-[calc(100%-3.25rem)] w-10 items-center justify-center from-bg/95 to-transparent text-white opacity-0 transition-opacity duration-200 sm:flex",
-        side === "left" ? "left-0 bg-linear-to-r" : "right-0 bg-linear-to-l",
-        visible ? "group-hover/hub:opacity-100" : "pointer-events-none",
+        "flex size-8 items-center justify-center rounded-full text-fg transition-colors",
+        enabled ? "hover:bg-surface-3 hover:text-accent" : "opacity-30",
       )}
     >
-      {side === "left" ? <ChevronLeft className="size-7" /> : <ChevronRight className="size-7" />}
+      <Icon className="size-5" />
     </button>
   );
 }
 
 export function HubRowSkeleton({ aspect = "poster" }: { aspect?: CardAspect }) {
-  const desktop = useMediaQuery("(min-width: 640px)");
-  const width = WIDTHS[aspect][desktop ? 1 : 0];
+  const { ref, width, perPage } = useFittedCards(aspect);
   return (
     <section>
       <div className="mb-3 px-4 sm:px-8">
         <div className="skeleton h-5 w-48 rounded" />
       </div>
-      <div className="flex gap-4 overflow-hidden px-4 sm:px-8">
-        {Array.from({ length: 8 }, (_, i) => (
-          <div key={i} className="shrink-0">
-            <CardSkeleton aspect={aspect} width={width} fixed />
-          </div>
-        ))}
+      <div className="px-4 sm:px-8">
+        <div ref={ref} className="-mx-1 flex gap-3.5 overflow-hidden px-1 pt-1 sm:gap-4">
+          {Array.from({ length: Math.max(perPage, 4) }, (_, i) => (
+            <div key={i} className="shrink-0">
+              <CardSkeleton aspect={aspect} width={width} fixed />
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );
