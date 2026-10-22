@@ -18,6 +18,7 @@ import type {
   SystemInfo,
   TranscoderStatus,
   User,
+  Trickplay,
 } from "./types";
 
 export const keys = {
@@ -244,6 +245,18 @@ export function useItem(id: Id | null | undefined) {
     queryKey: keys.item(id ?? 0),
     queryFn: ({ signal }) => api.get<ItemDetail>(`/api/items/${id}`, { signal }),
     enabled: id != null && Number.isFinite(id) && id > 0,
+  });
+}
+
+/** Seek previews of a file. They are made in the background on first use, so keep asking until they exist. */
+export function useTrickplay(fileId: Id | null | undefined) {
+  return useQuery({
+    queryKey: ["trickplay", fileId ?? 0],
+    queryFn: ({ signal }) => api.get<Trickplay>(`/api/files/${fileId}/trickplay`, { signal }),
+    enabled: fileId != null && fileId > 0,
+    retry: false,
+    staleTime: Infinity,
+    refetchInterval: (query) => (query.state.data ? false : 20_000),
   });
 }
 

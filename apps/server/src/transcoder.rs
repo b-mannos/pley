@@ -18,7 +18,7 @@ use parking_lot::{Mutex, RwLock};
 use pley_transcoder_api::{
     Announce, CoverRequest, ErrorBody, Fingerprint, FingerprintRequest, JobCreated, JobRequest, JobStatus,
     KeyframesRequest, MediaInfo, ProbeRequest, SubtitleRequest, TOKEN_ENV, ThumbnailRequest, TranscoderInfo,
-    TranscoderStatus,
+    TranscoderStatus, TrickplayInfo, TrickplayRequest,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -231,6 +231,25 @@ impl Transcoder {
     /// Chromaprint fingerprint of part of a file (intro/credits detection).
     pub async fn fingerprint(&self, req: &FingerprintRequest) -> TranscoderResult<Fingerprint> {
         self.post_json("/v1/fingerprint", req, Duration::from_secs(15 * 60)).await
+    }
+
+    /// Make (or look up) the seek previews of a video; can take minutes.
+    pub async fn trickplay(&self, path: &str) -> TranscoderResult<TrickplayInfo> {
+        let req = TrickplayRequest { path: path.to_owned(), ..Default::default() };
+        self.post_json("/v1/trickplay", &req, Duration::from_secs(60 * 60)).await
+    }
+
+    pub async fn trickplay_sheet(&self, id: &str, n: u32) -> TranscoderResult<Bytes> {
+        let base = self.base()?;
+        let resp = self
+            .authed(self.http.get(format!("{base}/v1/trickplay/{id}/{n}.jpg")))
+            .timeout(Duration::from_secs(60))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            return Err(api_error(resp).await);
+        }
+        Ok(resp.bytes().await?)
     }
 
     pub async fn create_job(&self, req: &JobRequest) -> TranscoderResult<JobCreated> {

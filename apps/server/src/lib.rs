@@ -25,6 +25,7 @@ pub mod settings;
 pub mod state;
 pub mod streams;
 pub mod transcoder;
+pub mod trickplay;
 pub mod util;
 pub mod web;
 

@@ -20,7 +20,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import { errorMessage } from "@/api/client";
-import { fetchNext, invalidateWatchState } from "@/api/hooks";
+import { fetchNext, invalidateWatchState, useTrickplay } from "@/api/hooks";
 import type { ItemDetail, ItemSummary, PlaybackInfo, PlaybackMode, PlaybackState } from "@/api/types";
 import { useOptionalAudioPlayer } from "@/audio/AudioPlayer";
 import { Slider } from "@/components/Slider";
@@ -82,6 +82,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const subStreams = useMemo(() => file?.streams.filter((s) => s.kind === "subtitle") ?? [], [file]);
 
   // Explicit tracks from the URL win; otherwise the remembered choice for the show / movie.
+  const trickplay = useTrickplay(file?.id);
   const [audioIndex, setAudioIndex] = useState<number | null>(initialAudio ?? file?.selected_audio ?? null);
   const [subIndex, setSubIndex] = useState<number | null>(initialSub ?? file?.selected_subtitle ?? null);
   const [quality, setQuality] = useLocalStorage<string>("pley.quality", "original");
@@ -852,7 +853,13 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         onMouseEnter={() => setHoveringControls(true)}
         onMouseLeave={() => setHoveringControls(false)}
       >
-        <SeekBar current={current} duration={duration} buffered={buffered} onSeek={seekTo} />
+        <SeekBar
+          current={current}
+          duration={duration}
+          buffered={buffered}
+          onSeek={seekTo}
+          previews={file && trickplay.data ? { fileId: file.id, trickplay: trickplay.data } : null}
+        />
         <div className="mt-1 flex items-center gap-0.5 sm:gap-1.5">
           <button
             type="button"

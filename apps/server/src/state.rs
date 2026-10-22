@@ -10,6 +10,7 @@ use crate::images::Images;
 use crate::library::scanner::Scanner;
 use crate::library::watcher::LibraryWatcher;
 use crate::markers::MarkerService;
+use crate::trickplay::TrickplayService;
 use crate::metadata::MetadataAgent;
 use crate::playback::Sessions;
 use crate::settings::SettingsStore;
@@ -34,6 +35,7 @@ pub struct Inner {
     pub images: Images,
     pub sessions: Arc<Sessions>,
     pub markers: Arc<MarkerService>,
+    pub trickplay: Arc<TrickplayService>,
     pub started_at: Instant,
 }
 
@@ -68,11 +70,19 @@ impl AppState {
             events.clone(),
             config.cache_dir().join("fingerprints"),
         );
+        let trickplay = TrickplayService::new(
+            db.clone(),
+            transcoder.clone(),
+            settings.clone(),
+            sessions.clone(),
+            config.cache_dir().join("trickplay"),
+        );
         Ok(Self {
             inner: Arc::new(Inner {
                 auth: AuthService::new(db.clone()),
                 sessions,
                 markers,
+                trickplay,
                 started_at: Instant::now(),
                 config,
                 db,

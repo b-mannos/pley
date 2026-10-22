@@ -46,6 +46,10 @@ HLG and Dolby Vision.
   - Skip Intro and Skip Credits: intros and credits are found from chapter
     names and by comparing the audio of episodes (Chromaprint), with Up Next
     when an episode's credits start and optional automatic intro skipping.
+  - Seek-bar previews: thumbnails while hovering the timeline, made from
+    keyframes in the background (seconds per film, HDR tone-mapped).
+  - Subtitle and audio choices are remembered per show, so the next episode
+    starts with the same language.
 - **Watch state.**
   - Per-user progress, watched flags and play counts.
   - Continue Watching and Next Up, plus Recently Added, Recently Released and

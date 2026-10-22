@@ -28,6 +28,8 @@ pub struct Settings {
     pub watch_libraries: bool,
     /// Find intros and credits (Skip Intro / Skip Credits) in the background.
     pub detect_markers: bool,
+    /// Make seek-bar preview thumbnails in the background.
+    pub seek_previews: bool,
 }
 
 impl Default for Settings {
@@ -46,6 +48,7 @@ impl Default for Settings {
             scan_interval_minutes: 360,
             watch_libraries: true,
             detect_markers: true,
+            seek_previews: true,
         }
     }
 }
@@ -76,6 +79,7 @@ pub struct SettingsPatch {
     pub scan_interval_minutes: Option<u32>,
     pub watch_libraries: Option<bool>,
     pub detect_markers: Option<bool>,
+    pub seek_previews: Option<bool>,
 }
 
 pub struct SettingsStore {
@@ -145,6 +149,9 @@ impl SettingsStore {
         }
         if let Some(v) = patch.detect_markers {
             next.detect_markers = v;
+        }
+        if let Some(v) = patch.seek_previews {
+            next.seek_previews = v;
         }
         let json = serde_json::to_string(&next).map_err(|e| AppError::Internal(e.into()))?;
         sqlx::query(

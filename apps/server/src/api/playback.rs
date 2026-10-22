@@ -277,6 +277,43 @@ pub(crate) async fn visible_file(state: &AppState, user: &AuthUser, id: i64) -> 
     Ok(file)
 }
 
+/// Seek-bar previews of a file; `404` while they are being made (asking
+/// queues them).
+pub async fn trickplay(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<pley_transcoder_api::TrickplayInfo>> {
+    let file = visible_file(&state, &user, id).await?;
+    match state.trickplay.index(&file) {
+        Some(index) => Ok(Json(index)),
+        None => {
+            state.trickplay.request(&file);
+            Err(AppError::not_found("seek previews are not ready yet"))
+        }
+    }
+}
+
+/// One sprite sheet (`{n}.jpg`); versioned by the `?v=` the client adds.
+pub async fn trickplay_sheet(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path((id, sheet)): Path<(i64, String)>,
+) -> ApiResult<Response> {
+    let n: u32 = sheet
+        .strip_suffix(".jpg")
+        .and_then(|n| n.parse().ok())
+        .ok_or_else(|| AppError::not_found("unknown sheet"))?;
+    let file = visible_file(&state, &user, id).await?;
+    let path = state.trickplay.sheet(&file, n).ok_or_else(|| AppError::not_found("unknown sheet"))?;
+    let bytes = tokio::fs::read(path).await.map_err(|e| AppError::Internal(e.into()))?;
+    Ok((
+        [(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "private, max-age=31536000, immutable")],
+        bytes,
+    )
+        .into_response())
+}
+
 /// Direct play: the raw file with HTTP range support.
 pub async fn stream_file(
     State(state): State<AppState>,

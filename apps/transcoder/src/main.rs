@@ -17,6 +17,7 @@ mod matroska;
 mod metrics;
 mod plan;
 mod probe;
+mod trickplay;
 mod util;
 
 use std::future::IntoFuture;
@@ -137,6 +138,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         args.probe_concurrency.div_ceil(2),
     ));
     let fingerprinter = Arc::new(fingerprint::Fingerprinter::new(ff.clone(), 2));
+    let trickplay = Arc::new(trickplay::Trickplay::new(ff.clone(), prober.clone(), work_dir.join("trickplay")));
     let limits = Limits { max_jobs: args.max_jobs.max(1), max_hw_jobs: args.max_hw_jobs };
     let jobs = job::JobManager::new(
         ff.clone(),
@@ -165,6 +167,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         extractor,
         keyframes,
         fingerprinter,
+        trickplay,
         metrics,
         info,
         args.token.clone(),

@@ -1,0 +1,163 @@
+// SPDX-License-Identifier: LicenseRef-Restricted
+//! Seek-bar preview thumbnails ("trickplay"): one small frame every few
+//! seconds, tiled into JPEG sprite sheets. Only keyframes are decoded, so even
+//! a long film takes seconds to a minute; HDR and Dolby Vision are tone-mapped
+//! so previews look like the transcoded picture. Results are cached per file
+//! version.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+
+use parking_lot::Mutex;
+use pley_transcoder_api::{Tonemapper, TrickplayInfo, TrickplayRequest};
+use tokio::sync::Semaphore;
+
+use crate::error::{ApiError, ApiResult};
+use crate::extract::run_capture;
+use crate::ffmpeg::Ffmpeg;
+use crate::plan::ZSCALE_TONEMAP;
+use crate::probe::Prober;
+use crate::util::{background_priority, file_key, input_arg};
+
+const COLUMNS: u32 = 10;
+const ROWS: u32 = 10;
+const TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
+pub struct Trickplay {
+    ff: Arc<Ffmpeg>,
+    prober: Arc<Prober>,
+    dir: PathBuf,
+    /// One generation at a time: it is background work.
+    limiter: Semaphore,
+    locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+}
+
+/// Thumbnails every 2–10 s: about 360 for a film, more density for short clips.
+pub fn default_interval_ms(duration_ms: i64) -> i64 {
+    ((duration_ms / 360).clamp(2_000, 10_000) / 1_000) * 1_000
+}
+
+impl Trickplay {
+    pub fn new(ff: Arc<Ffmpeg>, prober: Arc<Prober>, dir: PathBuf) -> Self {
+        let _ = std::fs::create_dir_all(&dir);
+        Self { ff, prober, dir, limiter: Semaphore::new(1), locks: Mutex::default() }
+    }
+
+    pub fn sheet_path(&self, id: &str, n: u32) -> Option<PathBuf> {
+        let valid = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+        valid.then(|| self.dir.join(id).join(format!("{n}.jpg"))).filter(|p| p.is_file())
+    }
+
+    pub async fn generate(&self, req: &TrickplayRequest) -> ApiResult<TrickplayInfo> {
+        let path = Path::new(&req.path);
+        if !path.is_file() {
+            return Err(ApiError::NotFound(format!("file not found: {}", req.path)));
+        }
+        let media = self.prober.probe(path).await.map_err(|e| ApiError::Failed(format!("probe failed: {e:#}")))?;
+        let video = media.video().ok_or_else(|| ApiError::BadRequest("the file has no video".into()))?;
+        let duration = media.duration_ms.filter(|d| *d > 0).ok_or_else(|| ApiError::BadRequest("unknown duration".into()))?;
+        let interval = req.interval_ms.unwrap_or_else(|| default_interval_ms(duration)).clamp(1_000, 60_000);
+        let width = req.width.unwrap_or(320).clamp(96, 640);
+        let (src_w, src_h) = (video.width.unwrap_or(1920).max(2), video.height.unwrap_or(1080).max(2));
+        let height = ((width as f64 * src_h as f64 / src_w as f64 / 2.0).round() as u32 * 2).max(2);
+
+        let id = format!("{}-{interval}-{width}", file_key(path)?);
+        let dir = self.dir.join(&id);
+        if let Some(info) = read_index(&dir) {
+            return Ok(info);
+        }
+        let lock = self.locks.lock().entry(id.clone()).or_default().clone();
+        let _guard = lock.lock().await;
+        if let Some(info) = read_index(&dir) {
+            return Ok(info);
+        }
+        let _permit = self.limiter.acquire().await.map_err(|e| ApiError::Internal(e.into()))?;
+
+        let range = video.dynamic_range();
+        let caps = &self.ff.caps;
+        let placebo = range.is_hdr() && caps.tonemappers.contains(&Tonemapper::Libplacebo);
+        let picture = if placebo {
+            // Handles Dolby Vision profile 5 too (its RPU is on every keyframe).
+            format!(
+                "libplacebo=w={width}:h={height}:format=yuv420p:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=auto"
+            )
+        } else if range.is_hdr() && caps.tonemappers.contains(&Tonemapper::Zscale) {
+            format!("scale={width}:{height}:flags=bilinear,{ZSCALE_TONEMAP}")
+        } else {
+            format!("scale={width}:{height}:flags=bilinear")
+        };
+        let filter = format!("fps=1000/{interval},{picture},tile={COLUMNS}x{ROWS}");
+
+        let part = self.dir.join(format!("{id}.part"));
+        let _ = tokio::fs::remove_dir_all(&part).await;
+        tokio::fs::create_dir_all(&part).await?;
+        let mut cmd = self.ff.command();
+        cmd.args(["-loglevel", "error"]);
+        if placebo {
+            cmd.args(["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"]);
+        }
+        // Decoding keyframes only is what makes this cheap.
+        cmd.args(["-skip_frame", "nokey"]).arg("-i").arg(input_arg(path));
+        cmd.args(["-map", &format!("0:{}", video.index), "-an", "-sn", "-dn", "-vf", &filter]);
+        cmd.args(["-fps_mode", "passthrough", "-c:v", "mjpeg", "-q:v", "5", "-start_number", "0"]);
+        cmd.arg(part.join("%d.jpg"));
+        background_priority(&mut cmd);
+        let started = std::time::Instant::now();
+        let result = run_capture(cmd, TIMEOUT).await;
+        let sheets = count_sheets(&part);
+        if let Err(err) = result {
+            let _ = tokio::fs::remove_dir_all(&part).await;
+            return Err(err);
+        }
+        if sheets == 0 {
+            let _ = tokio::fs::remove_dir_all(&part).await;
+            return Err(ApiError::Failed("no thumbnails could be made".into()));
+        }
+        let per_sheet = COLUMNS * ROWS;
+        let count = ((duration + interval - 1) / interval) as u32;
+        let info = TrickplayInfo {
+            id: id.clone(),
+            interval_ms: interval,
+            width,
+            height,
+            columns: COLUMNS,
+            rows: ROWS,
+            count: count.min(sheets * per_sheet),
+            sheets,
+        };
+        tokio::fs::write(part.join("index.json"), serde_json::to_vec(&info).map_err(anyhow::Error::from)?).await?;
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        tokio::fs::rename(&part, &dir).await?;
+        self.locks.lock().remove(&id);
+        tracing::info!(
+            "seek previews for {} ({} thumbnails) made in {:.1}s",
+            path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
+            info.count,
+            started.elapsed().as_secs_f32()
+        );
+        Ok(info)
+    }
+}
+
+fn read_index(dir: &Path) -> Option<TrickplayInfo> {
+    serde_json::from_slice(&std::fs::read(dir.join("index.json")).ok()?).ok()
+}
+
+fn count_sheets(dir: &Path) -> u32 {
+    (0..).take_while(|n| dir.join(format!("{n}.jpg")).is_file()).count() as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn intervals_scale_with_length() {
+        assert_eq!(default_interval_ms(2 * 3_600_000), 10_000);
+        assert_eq!(default_interval_ms(45 * 60_000), 7_000);
+        assert_eq!(default_interval_ms(20 * 60_000), 3_000);
+        assert_eq!(default_interval_ms(60_000), 2_000);
+    }
+}

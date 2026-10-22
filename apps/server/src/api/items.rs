@@ -33,7 +33,13 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i
             file.selected_subtitle = selection.subtitle;
         }
     }
-    // Opening an item is a good moment to index keyframes so playback can remux.
+    // Opening an item is a good moment to prepare seek previews and to index
+    // keyframes so playback can remux.
+    if matches!(detail.summary.kind.as_str(), "movie" | "episode") {
+        for file in catalog::files_for_item(&state.db, detail.summary.id).await? {
+            state.trickplay.request(&file);
+        }
+    }
     if state.transcoder.is_available() {
         for file in &detail.files {
             if remux_candidate(file.container.as_deref(), &file.streams) {

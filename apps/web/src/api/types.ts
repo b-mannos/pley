@@ -111,6 +111,18 @@ export interface MediaFile {
   selected_subtitle: number | null;
 }
 
+/** Seek-bar preview sprite sheets of a file (`GET /api/files/{id}/trickplay`). */
+export interface Trickplay {
+  id: string;
+  interval_ms: number;
+  width: number;
+  height: number;
+  columns: number;
+  rows: number;
+  count: number;
+  sheets: number;
+}
+
 export type StreamKind = "video" | "audio" | "subtitle";
 
 export type DynamicRange = "sdr" | "hdr10" | "hdr10plus" | "hlg" | "dolby_vision";

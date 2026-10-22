@@ -15,13 +15,14 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use pley_transcoder_api::{
     CoverRequest, Fingerprint, FingerprintRequest, JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo,
-    ProbeRequest, SubtitleRequest, ThumbnailRequest, TranscoderInfo, TranscoderStatus,
+    ProbeRequest, SubtitleRequest, ThumbnailRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
 };
 use tokio_util::io::ReaderStream;
 
 use crate::error::{ApiError, ApiResult};
 use crate::extract::Extractor;
 use crate::fingerprint::Fingerprinter;
+use crate::trickplay::Trickplay;
 use crate::job::JobManager;
 use crate::keyframes::KeyframeStore;
 use crate::metrics::{Metrics, render_prometheus};
@@ -34,6 +35,7 @@ pub struct AppState {
     pub extractor: Arc<Extractor>,
     pub keyframes: Arc<KeyframeStore>,
     pub fingerprinter: Arc<Fingerprinter>,
+    pub trickplay: Arc<Trickplay>,
     pub metrics: Arc<Metrics>,
     pub info: TranscoderInfo,
     pub token: Option<String>,
@@ -51,6 +53,7 @@ impl AppState {
         extractor: Arc<Extractor>,
         keyframes: Arc<KeyframeStore>,
         fingerprinter: Arc<Fingerprinter>,
+        trickplay: Arc<Trickplay>,
         metrics: Arc<Metrics>,
         info: TranscoderInfo,
         token: Option<String>,
@@ -62,6 +65,7 @@ impl AppState {
             extractor,
             keyframes,
             fingerprinter,
+            trickplay,
             metrics,
             info,
             token,
@@ -117,6 +121,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/subtitles", post(subtitles))
         .route("/keyframes", post(keyframes))
         .route("/fingerprint", post(fingerprint))
+        .route("/trickplay", post(trickplay))
+        .route("/trickplay/{id}/{sheet}", get(trickplay_sheet))
         .route("/jobs", get(list_jobs).post(create_job))
         .route("/jobs/{id}", get(get_job).delete(delete_job))
         .route("/jobs/{id}/touch", post(touch_job))
@@ -210,6 +216,20 @@ async fn keyframes(State(state): Shared, Json(req): Json<KeyframesRequest>) -> A
     }
     state.keyframes.request(path);
     Ok(StatusCode::ACCEPTED)
+}
+
+async fn trickplay(State(state): Shared, Json(req): Json<TrickplayRequest>) -> ApiResult<Json<TrickplayInfo>> {
+    Ok(Json(state.trickplay.generate(&req).await?))
+}
+
+async fn trickplay_sheet(State(state): Shared, Path((id, sheet)): Path<(String, String)>) -> ApiResult<Response> {
+    let n: u32 = sheet
+        .strip_suffix(".jpg")
+        .and_then(|n| n.parse().ok())
+        .ok_or_else(|| ApiError::NotFound(format!("unknown file {sheet}")))?;
+    let path = state.trickplay.sheet_path(&id, n).ok_or_else(|| ApiError::NotFound("no such sheet".into()))?;
+    let bytes = tokio::fs::read(path).await?;
+    Ok(([(header::CONTENT_TYPE, "image/jpeg")], bytes).into_response())
 }
 
 async fn fingerprint(State(state): Shared, Json(req): Json<FingerprintRequest>) -> ApiResult<Json<Fingerprint>> {

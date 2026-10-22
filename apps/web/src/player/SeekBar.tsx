@@ -1,6 +1,10 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import type { Trickplay } from "@/api/types";
 import { cn } from "@/lib/cn";
 import { formatClock } from "@/lib/format";
+
+/** Width of the preview thumbnail on screen. */
+const PREVIEW_WIDTH = 224;
 
 export interface SeekBarProps {
   current: number;
@@ -10,9 +14,33 @@ export interface SeekBarProps {
   onSeek: (seconds: number) => void;
   /** Called while scrubbing (null when scrubbing ends). */
   onScrub?: (seconds: number | null) => void;
+  /** Preview thumbnails, shown above the pointer when available. */
+  previews?: { fileId: number; trickplay: Trickplay } | null;
 }
 
-export function SeekBar({ current, duration, buffered, onSeek, onScrub }: SeekBarProps) {
+/** Sprite-sheet tile showing the video at `seconds`. */
+function Preview({ fileId, trickplay: tp, seconds }: { fileId: number; trickplay: Trickplay; seconds: number }) {
+  const index = Math.min(tp.count - 1, Math.max(0, Math.floor((seconds * 1000) / tp.interval_ms)));
+  const perSheet = tp.columns * tp.rows;
+  const sheet = Math.floor(index / perSheet);
+  const cell = index % perSheet;
+  const scale = PREVIEW_WIDTH / tp.width;
+  const height = Math.round(tp.height * scale);
+  return (
+    <div
+      className="rounded-md bg-black bg-no-repeat shadow-lg ring-1 ring-white/20"
+      style={{
+        width: PREVIEW_WIDTH,
+        height,
+        backgroundImage: `url(/api/files/${fileId}/trickplay/${sheet}.jpg?v=${encodeURIComponent(tp.id)})`,
+        backgroundSize: `${tp.columns * PREVIEW_WIDTH}px ${tp.rows * height}px`,
+        backgroundPosition: `-${(cell % tp.columns) * PREVIEW_WIDTH}px -${Math.floor(cell / tp.columns) * height}px`,
+      }}
+    />
+  );
+}
+
+export function SeekBar({ current, duration, buffered, onSeek, onScrub, previews }: SeekBarProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ x: number; t: number } | null>(null);
   const [drag, setDrag] = useState<number | null>(null);
@@ -23,6 +51,14 @@ export function SeekBar({ current, duration, buffered, onSeek, onScrub }: SeekBa
     const rect = el.getBoundingClientRect();
     const x = Math.min(Math.max(clientX - rect.left, 0), rect.width);
     return { x, t: (x / rect.width) * duration };
+  };
+
+  const barWidth = () => ref.current?.getBoundingClientRect().width ?? 0;
+  /** Keep the preview inside the bar so it is never cut off at the edges. */
+  const previewLeft = (x: number) => {
+    const half = previews && previews.trickplay.count > 0 ? PREVIEW_WIDTH / 2 : 24;
+    const width = barWidth();
+    return `${width > half * 2 ? Math.min(Math.max(x, half), width - half) : x}px`;
   };
 
   const shown = drag ?? current;
@@ -110,10 +146,15 @@ export function SeekBar({ current, duration, buffered, onSeek, onScrub }: SeekBa
       />
       {(hover || drag != null) && duration > 0 ? (
         <div
-          className="pointer-events-none absolute bottom-full mb-2 -translate-x-1/2 rounded bg-black/85 px-2 py-1 text-xs font-medium tabular-nums text-white shadow"
-          style={{ left: drag != null ? `${pct}%` : `${hover?.x ?? 0}px` }}
+          className="pointer-events-none absolute bottom-full mb-2 flex -translate-x-1/2 flex-col items-center gap-1.5"
+          style={{ left: previewLeft(drag != null ? (pct / 100) * barWidth() : (hover?.x ?? 0)) }}
         >
-          {formatClock(drag ?? hover?.t ?? 0)}
+          {previews && previews.trickplay.count > 0 ? (
+            <Preview fileId={previews.fileId} trickplay={previews.trickplay} seconds={drag ?? hover?.t ?? 0} />
+          ) : null}
+          <div className="rounded bg-black/85 px-2 py-1 text-xs font-medium tabular-nums text-white shadow">
+            {formatClock(drag ?? hover?.t ?? 0)}
+          </div>
         </div>
       ) : null}
     </div>

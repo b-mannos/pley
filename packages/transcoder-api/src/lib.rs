@@ -714,6 +714,37 @@ pub struct Fingerprint {
     pub data: Vec<u32>,
 }
 
+/// `POST /v1/trickplay`: seek-bar preview thumbnails of a video, tiled into
+/// JPEG sprite sheets fetched with `GET /v1/trickplay/{id}/{n}`. Cached: asking
+/// again for the same file version returns at once.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct TrickplayRequest {
+    pub path: String,
+    /// Time between thumbnails (default: 2–10 s depending on the length).
+    #[serde(default)]
+    pub interval_ms: Option<i64>,
+    /// Thumbnail width in pixels (default 320).
+    #[serde(default)]
+    pub width: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct TrickplayInfo {
+    /// Identifies the sheets on the transcoder.
+    pub id: String,
+    pub interval_ms: i64,
+    /// Size of one thumbnail.
+    pub width: u32,
+    pub height: u32,
+    /// Thumbnails per sheet: `columns × rows`, left to right, top to bottom.
+    pub columns: u32,
+    pub rows: u32,
+    /// Number of thumbnails; thumbnail `k` shows the video at `k × interval_ms`.
+    pub count: u32,
+    /// Number of sheets, `0.jpg` to `{sheets - 1}.jpg`.
+    pub sheets: u32,
+}
+
 /// Error body returned by the transcoder for non-2xx responses.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ErrorBody {

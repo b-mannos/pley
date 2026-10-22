@@ -293,6 +293,8 @@ hubs, search, artwork, streams and the Plex-compatible API.
 | GET | `/api/playback/{session_id}/{n}.ts` | – | MPEG-TS segment |
 | GET | `/api/files/{id}/stream` | – | raw file, supports `Range` (direct play) |
 | GET | `/api/files/{id}/subtitles/{index}.vtt` | – | WebVTT (text subtitles; extracted/converted on demand and cached) |
+| GET | `/api/files/{id}/trickplay` | – | `{ id, interval_ms, width, height, columns, rows, count, sheets }` seek-bar previews; `404` while they are being made (asking, or opening the item, queues them) |
+| GET | `/api/files/{id}/trickplay/{n}.jpg?v={id}` | – | sprite sheet `n`: thumbnail `k` is at column `k % columns`, row `k / columns` of sheet `k / (columns × rows)` and shows the video at `k × interval_ms` |
 
 `POST /api/playback` body:
 

@@ -72,6 +72,8 @@ following status codes:
 | POST | `/v1/cover` | `CoverRequest {path}` | embedded cover art (`image/jpeg` or `image/png`) |
 | POST | `/v1/subtitles` | `SubtitleRequest {path, stream_index?}` | `text/vtt` |
 | POST | `/v1/keyframes` | `KeyframesRequest {path}` | `200` if indexed, `202` if queued |
+| POST | `/v1/trickplay` | `TrickplayRequest {path, interval_ms?, width?}` | `TrickplayInfo {id, interval_ms, width, height, columns, rows, count, sheets}`: seek-bar previews, cached per file version. Keyframes only are decoded (seconds for a film); HDR and Dolby Vision are tone-mapped with libplacebo when available. |
+| GET | `/v1/trickplay/{id}/{n}.jpg` | – | sprite sheet `n` (`columns × rows` thumbnails) |
 | POST | `/v1/fingerprint` | `FingerprintRequest {path, stream_index?, start_ms, duration_ms}` | `Fingerprint {start_ms, item_seconds, data: u32[]}`: raw Chromaprint values of the audio (`400` when FFmpeg lacks Chromaprint) |
 | POST | `/v1/jobs` | `JobRequest` | `201 JobCreated` |
 | GET | `/v1/jobs` | – | `JobStatus[]` |
