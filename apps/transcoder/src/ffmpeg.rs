@@ -19,7 +19,7 @@ use tokio::sync::Semaphore;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 4;
+const DETECTION_REVISION: u32 = 5;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -333,12 +333,13 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
         ..Default::default()
     };
     let timeout = Duration::from_secs(30);
-    let (version, probe, encoders, hwaccels, filters) = tokio::join!(
+    let (version, probe, encoders, hwaccels, filters, muxers) = tokio::join!(
         run(ffmpeg, &["-hide_banner", "-version"], timeout),
         run(ffprobe, &["-hide_banner", "-version"], timeout),
         run(ffmpeg, &["-hide_banner", "-encoders"], timeout),
         run(ffmpeg, &["-hide_banner", "-hwaccels"], timeout),
         run(ffmpeg, &["-hide_banner", "-filters"], timeout),
+        run(ffmpeg, &["-hide_banner", "-muxers"], timeout),
     );
     let Some(version) = version.filter(|o| o.success) else {
         return (caps, true);
@@ -355,6 +356,7 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
 
     let encoder_names = second_column(encoders.map(|o| o.text).unwrap_or_default());
     let filter_names = second_column(filters.map(|o| o.text).unwrap_or_default());
+    caps.chromaprint = second_column(muxers.map(|o| o.text).unwrap_or_default()).contains("chromaprint");
     caps.hwaccels = hwaccels
         .map(|o| o.text)
         .unwrap_or_default()
@@ -686,7 +688,7 @@ async fn detect_gpu_pipelines(
 }
 
 /// Names in the second whitespace-separated column of `ffmpeg -encoders` /
-/// `ffmpeg -filters` output.
+/// `-filters` / `-muxers` output.
 fn second_column(text: String) -> HashSet<String> {
     text.lines()
         .filter_map(|line| {
@@ -709,6 +711,14 @@ mod tests {
         assert!(names.contains("libx264"));
         assert!(names.contains("h264_nvenc"));
         assert!(names.contains("aac"));
+    }
+
+    #[test]
+    fn parses_muxer_list() {
+        let text = "File formats:\n D. = Demuxing supported\n .E = Muxing supported\n ---\n  E chromaprint     Chromaprint\n  E mp4             MP4 (MPEG-4 Part 14)\n".to_owned();
+        let names = second_column(text);
+        assert!(names.contains("chromaprint"));
+        assert!(names.contains("mp4"));
     }
 
     #[test]

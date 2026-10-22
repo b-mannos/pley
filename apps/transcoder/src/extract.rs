@@ -237,7 +237,7 @@ fn existing(path: &str) -> ApiResult<PathBuf> {
 }
 
 /// Run ffmpeg, returning stdout. Non-zero exit becomes `ApiError::Failed`.
-async fn run_capture(mut cmd: tokio::process::Command, timeout: Duration) -> ApiResult<(Vec<u8>, String)> {
+pub(crate) async fn run_capture(mut cmd: tokio::process::Command, timeout: Duration) -> ApiResult<(Vec<u8>, String)> {
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let child = cmd.spawn().map_err(|e| ApiError::Internal(anyhow::anyhow!("failed to start ffmpeg: {e}")))?;
     let output = tokio::time::timeout(timeout, child.wait_with_output())

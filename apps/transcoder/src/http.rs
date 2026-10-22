@@ -14,13 +14,14 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use pley_transcoder_api::{
-    CoverRequest, JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo, ProbeRequest, SubtitleRequest,
-    ThumbnailRequest, TranscoderInfo, TranscoderStatus,
+    CoverRequest, Fingerprint, FingerprintRequest, JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo,
+    ProbeRequest, SubtitleRequest, ThumbnailRequest, TranscoderInfo, TranscoderStatus,
 };
 use tokio_util::io::ReaderStream;
 
 use crate::error::{ApiError, ApiResult};
 use crate::extract::Extractor;
+use crate::fingerprint::Fingerprinter;
 use crate::job::JobManager;
 use crate::keyframes::KeyframeStore;
 use crate::metrics::{Metrics, render_prometheus};
@@ -32,6 +33,7 @@ pub struct AppState {
     pub prober: Arc<Prober>,
     pub extractor: Arc<Extractor>,
     pub keyframes: Arc<KeyframeStore>,
+    pub fingerprinter: Arc<Fingerprinter>,
     pub metrics: Arc<Metrics>,
     pub info: TranscoderInfo,
     pub token: Option<String>,
@@ -48,6 +50,7 @@ impl AppState {
         prober: Arc<Prober>,
         extractor: Arc<Extractor>,
         keyframes: Arc<KeyframeStore>,
+        fingerprinter: Arc<Fingerprinter>,
         metrics: Arc<Metrics>,
         info: TranscoderInfo,
         token: Option<String>,
@@ -58,6 +61,7 @@ impl AppState {
             prober,
             extractor,
             keyframes,
+            fingerprinter,
             metrics,
             info,
             token,
@@ -112,6 +116,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/cover", post(cover))
         .route("/subtitles", post(subtitles))
         .route("/keyframes", post(keyframes))
+        .route("/fingerprint", post(fingerprint))
         .route("/jobs", get(list_jobs).post(create_job))
         .route("/jobs/{id}", get(get_job).delete(delete_job))
         .route("/jobs/{id}/touch", post(touch_job))
@@ -205,6 +210,10 @@ async fn keyframes(State(state): Shared, Json(req): Json<KeyframesRequest>) -> A
     }
     state.keyframes.request(path);
     Ok(StatusCode::ACCEPTED)
+}
+
+async fn fingerprint(State(state): Shared, Json(req): Json<FingerprintRequest>) -> ApiResult<Json<Fingerprint>> {
+    Ok(Json(state.fingerprinter.fingerprint(&req).await?))
 }
 
 async fn list_jobs(State(state): Shared) -> Json<Vec<JobStatus>> {

@@ -9,6 +9,7 @@
 mod error;
 mod extract;
 mod ffmpeg;
+mod fingerprint;
 mod http;
 mod job;
 mod keyframes;
@@ -135,6 +136,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         work_dir.join("subtitles"),
         args.probe_concurrency.div_ceil(2),
     ));
+    let fingerprinter = Arc::new(fingerprint::Fingerprinter::new(ff.clone(), 2));
     let limits = Limits { max_jobs: args.max_jobs.max(1), max_hw_jobs: args.max_hw_jobs };
     let jobs = job::JobManager::new(
         ff.clone(),
@@ -162,6 +164,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         prober,
         extractor,
         keyframes,
+        fingerprinter,
         metrics,
         info,
         args.token.clone(),

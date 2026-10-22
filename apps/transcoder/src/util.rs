@@ -96,6 +96,29 @@ pub fn configure_child(cmd: &mut tokio::process::Command) {
     }
 }
 
+/// Run a child at reduced CPU priority (background analysis that must never
+/// slow down playback). Call after [`configure_child`].
+pub fn background_priority(cmd: &mut tokio::process::Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+        cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: setpriority is async-signal-safe.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setpriority(libc::PRIO_PROCESS, 0, 10);
+                Ok(())
+            });
+        }
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    let _ = cmd;
+}
+
 /// Make every child process die with the transcoder, whatever ends it.
 ///
 /// Windows: the transcoder joins a job object that kills all of its members

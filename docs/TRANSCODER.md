@@ -72,6 +72,7 @@ following status codes:
 | POST | `/v1/cover` | `CoverRequest {path}` | embedded cover art (`image/jpeg` or `image/png`) |
 | POST | `/v1/subtitles` | `SubtitleRequest {path, stream_index?}` | `text/vtt` |
 | POST | `/v1/keyframes` | `KeyframesRequest {path}` | `200` if indexed, `202` if queued |
+| POST | `/v1/fingerprint` | `FingerprintRequest {path, stream_index?, start_ms, duration_ms}` | `Fingerprint {start_ms, item_seconds, data: u32[]}`: raw Chromaprint values of the audio (`400` when FFmpeg lacks Chromaprint) |
 | POST | `/v1/jobs` | `JobRequest` | `201 JobCreated` |
 | GET | `/v1/jobs` | – | `JobStatus[]` |
 | GET | `/v1/jobs/{id}` | – | `JobStatus` |
@@ -172,6 +173,16 @@ following status codes:
 - **Subtitle extraction.** Every text track of a file is converted to WebVTT in
   a single pass over the file and cached. External files are converted with
   charset detection (UTF-8, UTF-16 BOM, or Windows-1252 as a fallback).
+
+## Audio fingerprints
+
+`POST /v1/fingerprint` runs FFmpeg's `chromaprint` muxer (`-f chromaprint
+-fp_format raw`) on part of the audio, downmixed to mono 11025 Hz, which is
+what Chromaprint analyses. Each value covers 1365 samples (0.124 s) and is
+returned as a plain number. The pley server compares the fingerprints of
+episodes to find shared intros and credits. Requests run two at a time, at
+below-normal process priority, so they never slow down playback. Whether the
+FFmpeg build includes Chromaprint is reported as `capabilities.chromaprint`.
 
 ## Metrics
 

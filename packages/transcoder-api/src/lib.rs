@@ -351,6 +351,10 @@ pub struct Capabilities {
     pub subtitle_burn_text: bool,
     /// `-readrate`/`-readrate_initial_burst` are supported (transcode throttling).
     pub readrate: bool,
+    /// FFmpeg's `chromaprint` muxer is available: audio fingerprints for
+    /// intro and credits detection (`POST /v1/fingerprint`).
+    #[serde(default)]
+    pub chromaprint: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -682,6 +686,32 @@ pub struct SubtitleRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct KeyframesRequest {
     pub path: String,
+}
+
+/// `POST /v1/fingerprint` → [`Fingerprint`]: a Chromaprint fingerprint of the
+/// audio in part of a file. The server compares the fingerprints of episodes
+/// to find the intro and credits they share.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct FingerprintRequest {
+    pub path: String,
+    /// Audio stream to analyse (default: the first audio stream).
+    #[serde(default)]
+    pub stream_index: Option<i64>,
+    /// Where to start, ms from the beginning of the file.
+    #[serde(default)]
+    pub start_ms: i64,
+    /// How much audio to analyse; the end of the file may stop it earlier.
+    pub duration_ms: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Fingerprint {
+    /// Position of the first value, ms from the beginning of the file.
+    pub start_ms: i64,
+    /// Seconds between consecutive values (1365 samples at 11025 Hz).
+    pub item_seconds: f64,
+    /// Raw Chromaprint values of the default algorithm, one per `item_seconds`.
+    pub data: Vec<u32>,
 }
 
 /// Error body returned by the transcoder for non-2xx responses.
