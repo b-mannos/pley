@@ -1,0 +1,614 @@
+//! Cast and crew. Credits come from TMDB along with the rest of the metadata;
+//! people are shared between items, and a person's photo is downloaded the
+//! first time someone looks at it.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+use crate::catalog::{self, ItemSummary};
+use crate::db::Db;
+use crate::util::now;
+
+/// Billed cast kept for a movie or a show.
+const MAX_CAST: usize = 40;
+/// Guest stars kept for an episode.
+const MAX_GUESTS: usize = 15;
+/// Producers kept for a movie (big productions list dozens).
+const MAX_PRODUCERS: usize = 6;
+
+// ------------------------------------------------------------------ TMDB
+
+/// `credits` of a movie (`append_to_response=credits`).
+#[derive(Debug, Default, Deserialize)]
+pub struct Credits {
+    #[serde(default)]
+    pub cast: Vec<CastCredit>,
+    #[serde(default)]
+    pub crew: Vec<CrewCredit>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CastCredit {
+    pub id: i64,
+    pub name: String,
+    pub character: Option<String>,
+    pub profile_path: Option<String>,
+    #[serde(default)]
+    pub order: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CrewCredit {
+    pub id: i64,
+    pub name: String,
+    #[serde(default)]
+    pub job: String,
+    #[serde(default)]
+    pub department: String,
+    pub profile_path: Option<String>,
+}
+
+/// `aggregate_credits` of a show: everyone in any episode, with every part
+/// they played.
+#[derive(Debug, Default, Deserialize)]
+pub struct AggregateCredits {
+    #[serde(default)]
+    pub cast: Vec<AggregateCast>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AggregateCast {
+    pub id: i64,
+    pub name: String,
+    pub profile_path: Option<String>,
+    #[serde(default)]
+    pub roles: Vec<AggregateRole>,
+    #[serde(default)]
+    pub order: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AggregateRole {
+    pub character: Option<String>,
+    #[serde(default)]
+    pub episode_count: i64,
+}
+
+/// `created_by` of a show.
+#[derive(Debug, Deserialize)]
+pub struct Creator {
+    pub id: i64,
+    pub name: String,
+    pub profile_path: Option<String>,
+}
+
+// ------------------------------------------------------------------ credits
+
+/// Ordered as shown: cast, then crew.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    Actor,
+    Creator,
+    Director,
+    Writer,
+    Producer,
+}
+
+impl Role {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Role::Actor => "actor",
+            Role::Creator => "creator",
+            Role::Director => "director",
+            Role::Writer => "writer",
+            Role::Producer => "producer",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "actor" => Role::Actor,
+            "creator" => Role::Creator,
+            "director" => Role::Director,
+            "writer" => Role::Writer,
+            "producer" => Role::Producer,
+            _ => return None,
+        })
+    }
+}
+
+/// A credit to store for an item.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewCredit {
+    pub tmdb_id: i64,
+    pub name: String,
+    pub photo: Option<String>,
+    pub role: Role,
+    pub character: Option<String>,
+}
+
+fn clean(value: Option<&str>) -> Option<String> {
+    value.map(str::trim).filter(|v| !v.is_empty()).map(str::to_owned)
+}
+
+fn actor(c: &CastCredit) -> NewCredit {
+    NewCredit {
+        tmdb_id: c.id,
+        name: c.name.clone(),
+        photo: clean(c.profile_path.as_deref()),
+        role: Role::Actor,
+        character: clean(c.character.as_deref()),
+    }
+}
+
+/// Directors, writers and the first producers, in that order.
+fn crew(crew: &[CrewCredit], producers: bool) -> Vec<NewCredit> {
+    let mut out: Vec<NewCredit> = crew
+        .iter()
+        .filter_map(|c| {
+            let role = match (c.department.as_str(), c.job.as_str()) {
+                (_, "Director") => Role::Director,
+                ("Writing", _) => Role::Writer,
+                (_, "Producer") if producers => Role::Producer,
+                _ => return None,
+            };
+            Some(NewCredit {
+                tmdb_id: c.id,
+                name: c.name.clone(),
+                photo: clean(c.profile_path.as_deref()),
+                role,
+                character: None,
+            })
+        })
+        .collect();
+    // Stable: TMDB's order within each role is kept.
+    out.sort_by_key(|c| c.role);
+    let mut seen_producers = 0;
+    out.retain(|c| {
+        if c.role != Role::Producer {
+            return true;
+        }
+        seen_producers += 1;
+        seen_producers <= MAX_PRODUCERS
+    });
+    out
+}
+
+/// One credit per person and role; an actor playing several parts keeps them
+/// all ("Alice / Bob").
+fn dedupe(credits: Vec<NewCredit>) -> Vec<NewCredit> {
+    let mut out: Vec<NewCredit> = Vec::with_capacity(credits.len());
+    let mut index: HashMap<(i64, Role), usize> = HashMap::new();
+    for credit in credits {
+        match index.get(&(credit.tmdb_id, credit.role)) {
+            Some(&i) => {
+                if let Some(part) = credit.character {
+                    let existing = &mut out[i].character;
+                    match existing {
+                        Some(parts) if !parts.split(" / ").any(|p| p == part) => {
+                            parts.push_str(" / ");
+                            parts.push_str(&part);
+                        }
+                        Some(_) => {}
+                        None => *existing = Some(part),
+                    }
+                }
+            }
+            None => {
+                index.insert((credit.tmdb_id, credit.role), out.len());
+                out.push(credit);
+            }
+        }
+    }
+    out
+}
+
+pub fn movie_credits(credits: &Credits) -> Vec<NewCredit> {
+    let mut cast: Vec<&CastCredit> = credits.cast.iter().collect();
+    cast.sort_by_key(|c| c.order);
+    let mut out: Vec<NewCredit> = cast.into_iter().map(actor).collect();
+    out = dedupe(out);
+    out.truncate(MAX_CAST);
+    out.extend(crew(&credits.crew, true));
+    dedupe(out)
+}
+
+pub fn show_credits(credits: &AggregateCredits, creators: &[Creator]) -> Vec<NewCredit> {
+    let mut cast: Vec<&AggregateCast> = credits.cast.iter().collect();
+    cast.sort_by_key(|c| c.order);
+    let mut out: Vec<NewCredit> = cast
+        .into_iter()
+        .take(MAX_CAST)
+        .map(|c| NewCredit {
+            tmdb_id: c.id,
+            name: c.name.clone(),
+            photo: clean(c.profile_path.as_deref()),
+            role: Role::Actor,
+            // The part played in the most episodes.
+            character: c.roles.iter().max_by_key(|r| r.episode_count).and_then(|r| clean(r.character.as_deref())),
+        })
+        .collect();
+    out.extend(creators.iter().map(|c| NewCredit {
+        tmdb_id: c.id,
+        name: c.name.clone(),
+        photo: clean(c.profile_path.as_deref()),
+        role: Role::Creator,
+        character: None,
+    }));
+    dedupe(out)
+}
+
+/// Guest stars, directors and writers of an episode (the regular cast is the
+/// show's).
+pub fn episode_credits(guests: &[CastCredit], crew_credits: &[CrewCredit]) -> Vec<NewCredit> {
+    let mut cast: Vec<&CastCredit> = guests.iter().collect();
+    cast.sort_by_key(|c| c.order);
+    let mut out = dedupe(cast.into_iter().map(actor).collect());
+    out.truncate(MAX_GUESTS);
+    out.extend(crew(crew_credits, false));
+    dedupe(out)
+}
+
+/// Replace the credits of an item.
+pub async fn replace(db: &Db, item_id: i64, credits: &[NewCredit]) -> sqlx::Result<()> {
+    let now = now();
+    let mut tx = db.write.begin().await?;
+    sqlx::query("DELETE FROM item_people WHERE item_id = ?").bind(item_id).execute(&mut *tx).await?;
+    for (position, credit) in credits.iter().enumerate() {
+        let person: i64 = sqlx::query_scalar(
+            "INSERT INTO people (tmdb_id, name, photo_path, updated_at) VALUES (?, ?, ?, ?)
+             ON CONFLICT (tmdb_id) DO UPDATE SET name = excluded.name,
+                 photo_path = COALESCE(excluded.photo_path, photo_path), updated_at = excluded.updated_at
+             RETURNING id",
+        )
+        .bind(credit.tmdb_id)
+        .bind(&credit.name)
+        .bind(&credit.photo)
+        .bind(now)
+        .fetch_one(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT OR IGNORE INTO item_people (item_id, person_id, role, character, position) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(item_id)
+        .bind(person)
+        .bind(credit.role.as_str())
+        .bind(&credit.character)
+        .bind(position as i64)
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query("UPDATE items SET credits_at = ? WHERE id = ?").bind(now).bind(item_id).execute(&mut *tx).await?;
+    tx.commit().await
+}
+
+// ------------------------------------------------------------------ reading
+
+/// A credit of an item, as clients see it.
+#[derive(Debug, Clone, Serialize)]
+pub struct Credit {
+    /// The person's id.
+    pub id: i64,
+    pub name: String,
+    pub role: Role,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub character: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
+    /// TMDB profile image (for Plex clients, which load role thumbs directly).
+    #[serde(skip)]
+    pub photo_path: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct CreditRow {
+    item_id: i64,
+    person_id: i64,
+    name: String,
+    role: String,
+    character: Option<String>,
+    photo_path: Option<String>,
+}
+
+/// A TMDB profile path pley is willing to turn into a file name.
+fn valid_photo(path: &str) -> bool {
+    let Some(name) = path.strip_prefix('/') else { return false };
+    let Some((stem, ext)) = name.rsplit_once('.') else { return false };
+    !stem.is_empty()
+        && stem.len() <= 64
+        && stem.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        && matches!(ext, "jpg" | "jpeg" | "png" | "webp")
+}
+
+/// `/api/people/{id}/photo?v=…`; the version changes with the photo.
+pub fn photo_url(person_id: i64, photo_path: Option<&str>) -> Option<String> {
+    let path = photo_path.filter(|p| valid_photo(p))?;
+    let stem = path[1..].rsplit_once('.').map(|(s, _)| s).unwrap_or_default();
+    Some(format!("/api/people/{person_id}/photo?v={stem}"))
+}
+
+/// Full-size TMDB URL of a profile image.
+pub fn tmdb_photo(photo_path: &str) -> Option<String> {
+    valid_photo(photo_path).then(|| format!("https://image.tmdb.org/t/p/h632{photo_path}"))
+}
+
+/// Where a downloaded profile image is kept.
+pub fn photo_file(dir: &Path, photo_path: &str) -> Option<PathBuf> {
+    valid_photo(photo_path).then(|| dir.join(&photo_path[1..]))
+}
+
+/// Credits of each item, in billing order. The caller checks access.
+pub async fn for_items(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Vec<Credit>>> {
+    let mut out: HashMap<i64, Vec<Credit>> = HashMap::new();
+    for chunk in ids.chunks(500) {
+        let sql = format!(
+            "SELECT ip.item_id, ip.person_id, pe.name, ip.role, ip.character, pe.photo_path
+             FROM item_people ip JOIN people pe ON pe.id = ip.person_id
+             WHERE ip.item_id IN ({}) ORDER BY ip.item_id, ip.position",
+            vec!["?"; chunk.len()].join(",")
+        );
+        let mut query = sqlx::query_as::<_, CreditRow>(&sql);
+        for id in chunk {
+            query = query.bind(id);
+        }
+        for row in query.fetch_all(&db.read).await? {
+            let Some(role) = Role::parse(&row.role) else { continue };
+            out.entry(row.item_id).or_default().push(Credit {
+                id: row.person_id,
+                photo_url: photo_url(row.person_id, row.photo_path.as_deref()),
+                name: row.name,
+                role,
+                character: row.character,
+                photo_path: row.photo_path,
+            });
+        }
+    }
+    Ok(out)
+}
+
+pub async fn for_item(db: &Db, id: i64) -> sqlx::Result<Vec<Credit>> {
+    Ok(for_items(db, &[id]).await?.remove(&id).unwrap_or_default())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PersonSummary {
+    pub id: i64,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PersonDetail {
+    pub id: i64,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
+    /// Newest first.
+    pub credits: Vec<PersonCredit>,
+}
+
+/// A movie or show the person is credited in. Episode credits count towards
+/// their show.
+#[derive(Debug, Serialize)]
+pub struct PersonCredit {
+    pub item: ItemSummary,
+    pub roles: Vec<PersonRole>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PersonRole {
+    pub role: Role,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub character: Option<String>,
+    /// Credits from single episodes (guest parts, episode directors): how many.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub episodes: Option<i64>,
+}
+
+#[derive(sqlx::FromRow)]
+struct RoleRow {
+    target: i64,
+    role: String,
+    character: Option<String>,
+    episodes: i64,
+}
+
+/// A person and what they are credited in among the items `user_id` may see;
+/// `None` when that is nothing (people only credited in hidden items don't
+/// exist for this user).
+pub async fn person(db: &Db, user_id: i64, person_id: i64) -> sqlx::Result<Option<PersonDetail>> {
+    let found: Option<(String, Option<String>)> = sqlx::query_as("SELECT name, photo_path FROM people WHERE id = ?")
+        .bind(person_id)
+        .fetch_optional(&db.read)
+        .await?;
+    let Some((name, photo)) = found else { return Ok(None) };
+    let rows: Vec<RoleRow> = sqlx::query_as(
+        "SELECT CASE WHEN i.kind = 'episode' THEN i.grandparent_id ELSE i.id END AS target, ip.role, ip.character,
+                SUM(i.kind = 'episode') AS episodes
+         FROM item_people ip JOIN items i ON i.id = ip.item_id
+         WHERE ip.person_id = ? AND i.kind IN ('movie', 'show', 'episode')
+         GROUP BY target, ip.role, ip.character
+         ORDER BY MIN(ip.position)",
+    )
+    .bind(person_id)
+    .fetch_all(&db.read)
+    .await?;
+    let mut ids: Vec<i64> = Vec::new();
+    let mut roles: HashMap<i64, Vec<PersonRole>> = HashMap::new();
+    for row in rows {
+        let Some(role) = Role::parse(&row.role) else { continue };
+        if !roles.contains_key(&row.target) {
+            ids.push(row.target);
+        }
+        roles.entry(row.target).or_default().push(PersonRole {
+            role,
+            character: row.character,
+            episodes: (row.episodes > 0).then_some(row.episodes),
+        });
+    }
+    // Access rules apply here.
+    let items = catalog::items_by_ids(db, user_id, &ids).await?;
+    if items.is_empty() {
+        return Ok(None);
+    }
+    let mut credits: Vec<PersonCredit> = items
+        .iter()
+        .map(|row| {
+            let mut roles = roles.remove(&row.id).unwrap_or_default();
+            roles.sort_by_key(|r| (r.role, r.episodes.is_some()));
+            PersonCredit { item: row.to_summary(), roles }
+        })
+        .collect();
+    credits.sort_by(|a, b| {
+        let date = |c: &PersonCredit| (c.item.release_date.clone(), c.item.year);
+        date(b).cmp(&date(a)).then_with(|| a.item.sort_title.cmp(&b.item.sort_title))
+    });
+    Ok(Some(PersonDetail { id: person_id, name, photo_url: photo_url(person_id, photo.as_deref()), credits }))
+}
+
+/// People whose name has words starting with each word of `input`, most
+/// credited first, among those credited in items `user_id` may see.
+pub async fn search(db: &Db, user_id: i64, input: &str, limit: i64) -> sqlx::Result<Vec<PersonSummary>> {
+    let words: Vec<String> = input
+        .split_whitespace()
+        .take(6)
+        .map(|w| format!("% {}%", w.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")))
+        .collect();
+    if words.is_empty() {
+        return Ok(Vec::new());
+    }
+    let name_matches = vec!["(' ' || pe.name) LIKE ? ESCAPE '\\'"; words.len()].join(" AND ");
+    let sql = format!(
+        "{} SELECT pe.id, pe.name, pe.photo_path FROM people pe
+         JOIN item_people ip ON ip.person_id = pe.id
+         JOIN items i ON i.id = ip.item_id
+         LEFT JOIN items p ON p.id = i.parent_id
+         LEFT JOIN items gp ON gp.id = i.grandparent_id
+         WHERE {name_matches} AND {}
+         GROUP BY pe.id ORDER BY COUNT(*) DESC, pe.name LIMIT ?",
+        catalog::ME_CTE,
+        catalog::VISIBLE,
+    );
+    let mut query = sqlx::query_as::<_, (i64, String, Option<String>)>(&sql).bind(user_id);
+    for word in &words {
+        query = query.bind(word);
+    }
+    let rows = query.bind(limit).fetch_all(&db.read).await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, name, photo)| PersonSummary { id, photo_url: photo_url(id, photo.as_deref()), name })
+        .collect())
+}
+
+/// Forget people no item credits any more, with their downloaded photos.
+pub async fn prune(db: &Db, photo_dir: &Path) -> sqlx::Result<u64> {
+    let photos: Vec<Option<String>> = sqlx::query_scalar(
+        "DELETE FROM people WHERE NOT EXISTS (SELECT 1 FROM item_people WHERE person_id = people.id)
+         RETURNING photo_path",
+    )
+    .fetch_all(&db.write)
+    .await?;
+    let removed = photos.len() as u64;
+    for photo in photos.into_iter().flatten() {
+        if let Some(file) = photo_file(photo_dir, &photo) {
+            let _ = std::fs::remove_file(file);
+        }
+    }
+    if removed > 0 {
+        tracing::debug!("forgot {removed} people without credits");
+    }
+    Ok(removed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cast(id: i64, name: &str, character: &str, order: i64) -> CastCredit {
+        CastCredit { id, name: name.into(), character: Some(character.into()), profile_path: None, order }
+    }
+
+    fn crew_member(id: i64, name: &str, department: &str, job: &str) -> CrewCredit {
+        CrewCredit { id, name: name.into(), job: job.into(), department: department.into(), profile_path: None }
+    }
+
+    #[test]
+    fn movie_credits_keep_billing_and_merge_duplicates() {
+        let credits = Credits {
+            cast: vec![
+                cast(2, "Carrie-Anne Moss", "Trinity", 2),
+                cast(1, "Keanu Reeves", "Neo", 0),
+                cast(3, "Hugo Weaving", "Agent Smith", 1),
+                cast(3, "Hugo Weaving", "Agent Smith (voice)", 5),
+            ],
+            crew: vec![
+                crew_member(10, "Lilly Wachowski", "Writing", "Screenplay"),
+                crew_member(11, "Lana Wachowski", "Directing", "Director"),
+                crew_member(10, "Lilly Wachowski", "Directing", "Director"),
+                crew_member(10, "Lilly Wachowski", "Writing", "Story"),
+                crew_member(12, "Joel Silver", "Production", "Producer"),
+                crew_member(13, "Don Davis", "Sound", "Original Music Composer"),
+            ],
+        };
+        let out = movie_credits(&credits);
+        let summary: Vec<(i64, Role, Option<&str>)> =
+            out.iter().map(|c| (c.tmdb_id, c.role, c.character.as_deref())).collect();
+        assert_eq!(
+            summary,
+            vec![
+                (1, Role::Actor, Some("Neo")),
+                (3, Role::Actor, Some("Agent Smith / Agent Smith (voice)")),
+                (2, Role::Actor, Some("Trinity")),
+                (11, Role::Director, None),
+                (10, Role::Director, None),
+                (10, Role::Writer, None),
+                (12, Role::Producer, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn show_credits_use_the_main_part_and_creators() {
+        let credits = AggregateCredits {
+            cast: vec![AggregateCast {
+                id: 1,
+                name: "Bryan Cranston".into(),
+                profile_path: Some("/abc.jpg".into()),
+                roles: vec![
+                    AggregateRole { character: Some("Walter White".into()), episode_count: 62 },
+                    AggregateRole { character: Some("Heisenberg".into()), episode_count: 3 },
+                ],
+                order: 0,
+            }],
+        };
+        let creators = [Creator { id: 9, name: "Vince Gilligan".into(), profile_path: None }];
+        let out = show_credits(&credits, &creators);
+        assert_eq!(out[0].character.as_deref(), Some("Walter White"));
+        assert_eq!(out[0].photo.as_deref(), Some("/abc.jpg"));
+        assert_eq!((out[1].tmdb_id, out[1].role), (9, Role::Creator));
+    }
+
+    #[test]
+    fn episodes_skip_producers() {
+        let out = episode_credits(
+            &[cast(5, "Guest", "Clerk", 0)],
+            &[crew_member(6, "Producer", "Production", "Producer"), crew_member(7, "Dir", "Directing", "Director")],
+        );
+        let roles: Vec<Role> = out.iter().map(|c| c.role).collect();
+        assert_eq!(roles, vec![Role::Actor, Role::Director]);
+    }
+
+    #[test]
+    fn only_plain_tmdb_paths_become_files() {
+        assert!(valid_photo("/kU3B75TyRiCgE270EyZnHjfivoq.jpg"));
+        assert!(!valid_photo("/../secret.jpg"));
+        assert!(!valid_photo("abc.jpg"));
+        assert!(!valid_photo("/abc.exe"));
+        assert_eq!(photo_url(4, Some("/abc_1.jpg")).as_deref(), Some("/api/people/4/photo?v=abc_1"));
+        assert_eq!(photo_url(4, Some("/../x.jpg")), None);
+    }
+}

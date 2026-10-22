@@ -13,6 +13,7 @@ use serde::de::DeserializeOwned;
 
 use crate::db::Db;
 use crate::library::{LibraryKind, LibraryRow};
+use crate::people;
 use crate::settings::SettingsStore;
 use crate::util::{normalize_key, now, path_str, sort_title};
 
@@ -24,6 +25,8 @@ pub struct MetadataAgent {
     settings: Arc<SettingsStore>,
     http: reqwest::Client,
     metadata_dir: PathBuf,
+    /// One credits backfill at a time (startup and scans can both start one).
+    backfill: tokio::sync::Mutex<()>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -128,6 +131,7 @@ struct MovieDetails {
     backdrop_path: Option<String>,
     imdb_id: Option<String>,
     release_dates: Option<ReleaseDates>,
+    credits: Option<people::Credits>,
 }
 
 #[derive(Deserialize)]
@@ -165,6 +169,17 @@ struct TvDetails {
     backdrop_path: Option<String>,
     external_ids: Option<ExternalIds>,
     content_ratings: Option<ContentRatings>,
+    aggregate_credits: Option<people::AggregateCredits>,
+    #[serde(default)]
+    created_by: Vec<people::Creator>,
+}
+
+/// Just the credits of a show (backfill).
+#[derive(Deserialize)]
+struct ShowCredits {
+    #[serde(default)]
+    created_by: Vec<people::Creator>,
+    aggregate_credits: Option<people::AggregateCredits>,
 }
 
 #[derive(Deserialize)]
@@ -202,6 +217,10 @@ struct EpisodeDetails {
     air_date: Option<String>,
     still_path: Option<String>,
     vote_average: Option<f64>,
+    #[serde(default)]
+    crew: Vec<people::CrewCredit>,
+    #[serde(default)]
+    guest_stars: Vec<people::CastCredit>,
 }
 
 #[derive(Deserialize)]
@@ -229,7 +248,7 @@ impl MetadataAgent {
             .timeout(Duration::from_secs(20))
             .build()
             .expect("http client");
-        Arc::new(Self { db, settings, http, metadata_dir })
+        Arc::new(Self { db, settings, http, metadata_dir, backfill: tokio::sync::Mutex::new(()) })
     }
 
     pub fn enabled(&self) -> bool {
@@ -291,7 +310,137 @@ impl MetadataAgent {
                 progress(done, total);
             }
         }
+        self.backfill_credits(Some(lib.id)).await;
         Ok(())
+    }
+
+    /// Cast and crew of movies and shows matched before credits were stored:
+    /// one request per movie, and one per show and season.
+    pub async fn backfill_credits(&self, library_id: Option<i64>) {
+        if !self.enabled() {
+            return;
+        }
+        let _running = self.backfill.lock().await;
+        let items: Vec<(i64, String, i64)> = match sqlx::query_as(
+            "SELECT id, kind, tmdb_id FROM items
+             WHERE kind IN ('movie', 'show') AND tmdb_id IS NOT NULL AND credits_at IS NULL AND metadata_locked = 0
+               AND (?1 IS NULL OR library_id = ?1)",
+        )
+        .bind(library_id)
+        .fetch_all(&self.db.read)
+        .await
+        {
+            Ok(items) => items,
+            Err(err) => {
+                tracing::warn!("credits backfill: {err}");
+                return;
+            }
+        };
+        if items.is_empty() {
+            return;
+        }
+        tracing::info!("fetching cast and crew for {} items", items.len());
+        let mut stream = futures::stream::iter(items.into_iter().map(|(id, kind, tmdb_id)| async move {
+            let result = if kind == "movie" {
+                self.movie_credits(id, tmdb_id).await
+            } else {
+                self.show_credits(id, tmdb_id).await
+            };
+            (id, result)
+        }))
+        .buffer_unordered(4);
+        while let Some((id, result)) = stream.next().await {
+            match result {
+                Ok(()) => {}
+                Err(TmdbError::Unauthorized) => return,
+                // Nothing to fetch: don't ask again.
+                Err(TmdbError::NotFound) => {
+                    let _ = people::replace(&self.db, id, &[]).await;
+                }
+                Err(TmdbError::Other(err)) => tracing::debug!("cast and crew of item {id} failed: {err:#}"),
+            }
+        }
+    }
+
+    async fn movie_credits(&self, item_id: i64, tmdb_id: i64) -> Result<(), TmdbError> {
+        let credits: people::Credits = self.get(&format!("/movie/{tmdb_id}/credits"), &[]).await?;
+        people::replace(&self.db, item_id, &people::movie_credits(&credits))
+            .await
+            .map_err(|e| TmdbError::Other(e.into()))
+    }
+
+    async fn show_credits(&self, show_id: i64, tmdb_id: i64) -> Result<(), TmdbError> {
+        let show: ShowCredits =
+            self.get(&format!("/tv/{tmdb_id}"), &[("append_to_response", "aggregate_credits".into())]).await?;
+        let seasons: Vec<(i64, i64)> = sqlx::query_as(
+            "SELECT id, idx FROM items WHERE parent_id = ? AND kind = 'season' AND idx IS NOT NULL AND metadata_locked = 0",
+        )
+        .bind(show_id)
+        .fetch_all(&self.db.read)
+        .await
+        .map_err(|e| TmdbError::Other(e.into()))?;
+        for (season_id, number) in seasons {
+            let season: SeasonDetails = match self.get(&format!("/tv/{tmdb_id}/season/{number}"), &[]).await {
+                Ok(s) => s,
+                Err(TmdbError::NotFound) => continue,
+                Err(e) => return Err(e),
+            };
+            self.store_episode_credits(season_id, &season).await?;
+        }
+        // The show last: its `credits_at` marks the whole show as done.
+        let credits = people::show_credits(&show.aggregate_credits.unwrap_or_default(), &show.created_by);
+        people::replace(&self.db, show_id, &credits).await.map_err(|e| TmdbError::Other(e.into()))
+    }
+
+    async fn store_episode_credits(&self, season_id: i64, season: &SeasonDetails) -> Result<(), TmdbError> {
+        let episodes: Vec<(i64, i64)> = sqlx::query_as(
+            "SELECT id, idx FROM items WHERE parent_id = ? AND kind = 'episode' AND idx IS NOT NULL AND metadata_locked = 0",
+        )
+        .bind(season_id)
+        .fetch_all(&self.db.read)
+        .await
+        .map_err(|e| TmdbError::Other(e.into()))?;
+        for (episode_id, number) in episodes {
+            let Some(ep) = season.episodes.iter().find(|e| e.episode_number == number) else { continue };
+            people::replace(&self.db, episode_id, &people::episode_credits(&ep.guest_stars, &ep.crew))
+                .await
+                .map_err(|e| TmdbError::Other(e.into()))?;
+        }
+        Ok(())
+    }
+
+    fn people_dir(&self) -> PathBuf {
+        self.metadata_dir.join("people")
+    }
+
+    /// Forget people no longer credited anywhere (after scans removed items).
+    pub async fn prune_people(&self) {
+        if let Err(err) = people::prune(&self.db, &self.people_dir()).await {
+            tracing::warn!("pruning people failed: {err}");
+        }
+    }
+
+    /// A person's photo on disk, downloaded from TMDB the first time.
+    pub async fn person_photo(&self, photo_path: &str) -> anyhow::Result<PathBuf> {
+        let dir = self.people_dir();
+        let file = people::photo_file(&dir, photo_path).context("invalid photo path")?;
+        if file.is_file() {
+            return Ok(file);
+        }
+        let url = people::tmdb_photo(photo_path).context("invalid photo path")?;
+        let bytes = self.http.get(&url).send().await?.error_for_status()?.bytes().await?;
+        tokio::fs::create_dir_all(&dir).await?;
+        // Two requests for the same photo may download it at once: each writes
+        // its own file and the last rename wins.
+        let tmp = dir.join(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
+        tokio::fs::write(&tmp, &bytes).await?;
+        if let Err(err) = tokio::fs::rename(&tmp, &file).await {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            if !file.is_file() {
+                return Err(err.into());
+            }
+        }
+        Ok(file)
     }
 
     /// Refresh one item (movie, show, season or episode → its show).
@@ -328,7 +477,12 @@ impl MetadataAgent {
     }
 
     /// TMDB results for a title, best first ("Fix match").
-    pub async fn search_matches(&self, tv: bool, title: &str, year: Option<i64>) -> anyhow::Result<Vec<MatchCandidate>> {
+    pub async fn search_matches(
+        &self,
+        tv: bool,
+        title: &str,
+        year: Option<i64>,
+    ) -> anyhow::Result<Vec<MatchCandidate>> {
         let (path, year_param) = if tv { ("/search/tv", "first_air_date_year") } else { ("/search/movie", "year") };
         let mut query = vec![("query", title.to_owned()), ("include_adult", "false".to_owned())];
         if let Some(y) = year {
@@ -377,14 +531,20 @@ impl MetadataAgent {
         .await?;
         let Some((item_kind, tmdb, idx, parent_tmdb, show_tmdb)) = row else { bail!("item not found") };
         let season_number = || {
-            sqlx::query_scalar::<_, Option<i64>>("SELECT p.idx FROM items i JOIN items p ON p.id = i.parent_id WHERE i.id = ?")
-                .bind(item_id)
-                .fetch_one(&self.db.read)
+            sqlx::query_scalar::<_, Option<i64>>(
+                "SELECT p.idx FROM items i JOIN items p ON p.id = i.parent_id WHERE i.id = ?",
+            )
+            .bind(item_id)
+            .fetch_one(&self.db.read)
         };
         let path = match item_kind.as_str() {
             "movie" => format!("/movie/{}/images", tmdb.context("not matched to TMDB yet")?),
             "show" => format!("/tv/{}/images", tmdb.context("not matched to TMDB yet")?),
-            "season" => format!("/tv/{}/season/{}/images", parent_tmdb.context("the show is not matched yet")?, idx.unwrap_or(1)),
+            "season" => format!(
+                "/tv/{}/season/{}/images",
+                parent_tmdb.context("the show is not matched yet")?,
+                idx.unwrap_or(1)
+            ),
             "episode" => {
                 let season = season_number().await?.unwrap_or(1);
                 format!(
@@ -519,7 +679,7 @@ impl MetadataAgent {
             }
         };
         let details: MovieDetails =
-            self.get(&format!("/movie/{tmdb_id}"), &[("append_to_response", "release_dates".into())]).await?;
+            self.get(&format!("/movie/{tmdb_id}"), &[("append_to_response", "release_dates,credits".into())]).await?;
         let region = self.region();
         let certification = details.release_dates.as_ref().and_then(|rd| {
             rd.results
@@ -567,6 +727,11 @@ impl MetadataAgent {
         .execute(&self.db.write)
         .await
         .map_err(|e| TmdbError::Other(e.into()))?;
+        if let Some(credits) = &details.credits {
+            people::replace(&self.db, item.id, &people::movie_credits(credits))
+                .await
+                .map_err(|e| TmdbError::Other(e.into()))?;
+        }
         Ok(())
     }
 
@@ -576,7 +741,10 @@ impl MetadataAgent {
             None => self.search(true, &item.title, item.year).await?.ok_or(TmdbError::NotFound)?,
         };
         let details: TvDetails = self
-            .get(&format!("/tv/{tmdb_id}"), &[("append_to_response", "external_ids,content_ratings".into())])
+            .get(
+                &format!("/tv/{tmdb_id}"),
+                &[("append_to_response", "external_ids,content_ratings,aggregate_credits".into())],
+            )
             .await?;
         let region = self.region();
         let rating = details.content_ratings.as_ref().and_then(|r| {
@@ -623,6 +791,11 @@ impl MetadataAgent {
         .execute(&self.db.write)
         .await
         .map_err(|e| TmdbError::Other(e.into()))?;
+        if let Some(credits) = &details.aggregate_credits {
+            people::replace(&self.db, item.id, &people::show_credits(credits, &details.created_by))
+                .await
+                .map_err(|e| TmdbError::Other(e.into()))?;
+        }
 
         // Seasons and their episodes.
         let seasons: Vec<(i64, i64, Option<String>)> = sqlx::query_as(
@@ -690,6 +863,9 @@ impl MetadataAgent {
                 .execute(&self.db.write)
                 .await
                 .map_err(|e| TmdbError::Other(e.into()))?;
+                people::replace(&self.db, episode_id, &people::episode_credits(&ep.guest_stars, &ep.crew))
+                    .await
+                    .map_err(|e| TmdbError::Other(e.into()))?;
             }
         }
         Ok(())

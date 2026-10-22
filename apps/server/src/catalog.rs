@@ -24,13 +24,16 @@ macro_rules! me_cte {
 
 /// Whether item `i` (with parent `p` and grandparent `gp`) is visible to the
 /// user in `me`: library access and age limit, see [`crate::access`].
-const VISIBLE: &str = "((SELECT all_libs FROM me)
+pub(crate) const VISIBLE: &str = "((SELECT all_libs FROM me)
        OR i.library_id IN (SELECT library_id FROM user_libraries WHERE user_id = (SELECT uid FROM me)))
   AND ((SELECT max_age FROM me) IS NULL
        OR i.kind IN ('artist', 'album', 'track')
        OR COALESCE(i.rating_age, p.rating_age, gp.rating_age) <= (SELECT max_age FROM me))";
 
 /// Columns of [`ItemRow`]; callers add `WHERE {VISIBLE} AND …`.
+/// The `me` CTE that [`VISIBLE`] reads (binds the user id).
+pub(crate) const ME_CTE: &str = me_cte!();
+
 const SUMMARY_SELECT: &str = concat!(
     me_cte!(),
     "
@@ -190,6 +193,10 @@ pub struct ItemDetail {
     pub markers: Vec<crate::markers::Marker>,
     /// Fields edited by hand (kept on refresh), see [`crate::overrides`].
     pub locked_fields: Vec<String>,
+    /// Actors in billing order; for episodes, the guest stars.
+    pub cast: Vec<crate::people::Credit>,
+    /// Creators, directors, writers and producers.
+    pub crew: Vec<crate::people::Credit>,
 }
 
 pub fn image_url(id: i64, kind: &str, version: i64) -> String {
@@ -575,6 +582,10 @@ pub async fn item_detail(db: &Db, row: ItemRow) -> sqlx::Result<ItemDetail> {
     .await?;
     let files = files_for_item(db, row.id).await?;
     let markers = crate::markers::for_item(db, row.id).await?;
+    // Seasons have the cast and crew of their show.
+    let credits_of = if row.kind == "season" { row.parent_id.unwrap_or(row.id) } else { row.id };
+    let (cast, crew) =
+        crate::people::for_item(db, credits_of).await?.into_iter().partition(|c| c.role == crate::people::Role::Actor);
     let mut summary = row.to_summary();
     summary.summary = row.summary;
     Ok(ItemDetail {
@@ -589,6 +600,8 @@ pub async fn item_detail(db: &Db, row: ItemRow) -> sqlx::Result<ItemDetail> {
         files: files.iter().map(FileRow::to_dto).collect(),
         markers,
         locked_fields: Vec::new(),
+        cast,
+        crew,
     })
 }
 

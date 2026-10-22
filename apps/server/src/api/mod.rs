@@ -8,6 +8,7 @@ mod browse;
 mod editing;
 pub(crate) mod items;
 mod libraries;
+mod people;
 pub(crate) mod playback;
 
 use std::time::Duration;
@@ -71,6 +72,8 @@ pub fn router(state: AppState) -> Router {
         .route("/items/{id}/refresh", post(items::refresh))
         .route("/items/{id}/analyze", post(items::analyze))
         .route("/items/{id}/images/{kind}", get(items::image))
+        .route("/people/{id}", get(people::get))
+        .route("/people/{id}/photo", get(people::photo))
         .route("/hubs/home", get(browse::home))
         .route("/search", get(browse::search))
         .route("/playback", post(playback::start))

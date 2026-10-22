@@ -298,3 +298,55 @@ async fn shows_hierarchy_search_and_hubs() {
         hubs["Hub"].as_array().unwrap().iter().filter_map(|h| h["hubIdentifier"].as_str()).collect();
     assert!(identifiers.contains(&"home.television.recent"), "{identifiers:?}");
 }
+
+#[tokio::test]
+async fn cast_and_crew_tags_and_filters() {
+    use pley::people::{self, NewCredit, Role};
+
+    let app = TestApp::new().await;
+    let token = app.setup().await;
+    app.media_file("movies/Alpha (2001).mp4");
+    app.media_file("movies/Beta (2002).mp4");
+    let lib = app.library(&token, "Movies", "movies", "movies").await;
+    let all = app.plex_json(&format!("/library/sections/{lib}/all"), &token).await;
+    let id_of = |title: &str| {
+        metadata(&all).iter().find(|m| m["title"] == title).unwrap()["ratingKey"]
+            .as_str()
+            .unwrap()
+            .parse::<i64>()
+            .unwrap()
+    };
+    let (alpha, beta) = (id_of("Alpha"), id_of("Beta"));
+    let credit = |tmdb_id: i64, name: &str, role: Role, character: Option<&str>| NewCredit {
+        tmdb_id,
+        name: name.into(),
+        photo: Some("/face.jpg".into()),
+        role,
+        character: character.map(str::to_owned),
+    };
+    people::replace(
+        &app.state.db,
+        alpha,
+        &[credit(1, "Ann Actor", Role::Actor, Some("Hero")), credit(2, "Dan Director", Role::Director, None)],
+    )
+    .await
+    .unwrap();
+    people::replace(&app.state.db, beta, &[credit(2, "Dan Director", Role::Director, None)]).await.unwrap();
+
+    let details = app.plex_json(&format!("/library/metadata/{alpha}"), &token).await;
+    let movie = &metadata(&details)[0];
+    assert_eq!(movie["Role"][0]["tag"], "Ann Actor");
+    assert_eq!(movie["Role"][0]["role"], "Hero");
+    assert_eq!(movie["Role"][0]["thumb"], "https://image.tmdb.org/t/p/h632/face.jpg");
+    let director = movie["Director"][0]["id"].as_i64().unwrap();
+    assert_eq!(movie["Director"][0]["filter"], format!("director={director}"));
+
+    let directors = app.plex_json(&format!("/library/sections/{lib}/director"), &token).await;
+    assert_eq!(directors["Directory"][0]["title"], "Dan Director");
+    let by_id = app.plex_json(&format!("/library/sections/{lib}/all?director={director}"), &token).await;
+    assert_eq!(titles(&by_id), vec!["Alpha", "Beta"]);
+    let by_name = app.plex_json(&format!("/library/sections/{lib}/all?actor=ann%20actor"), &token).await;
+    assert_eq!(titles(&by_name), vec!["Alpha"]);
+    let without = app.plex_json(&format!("/library/sections/{lib}/all?actor!=Ann%20Actor"), &token).await;
+    assert_eq!(titles(&without), vec!["Beta"]);
+}

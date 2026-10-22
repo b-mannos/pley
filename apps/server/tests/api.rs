@@ -11,6 +11,7 @@ use axum::http::{Method, Request, StatusCode, header};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
+use pley::people::{self, NewCredit, Role};
 use pley::{AppState, Config};
 
 struct TestApp {
@@ -789,9 +790,11 @@ async fn metadata_edits_survive_rescans() {
     assert_eq!(edited.body["title"], json!("Alien"));
     assert_eq!(edited.body["genres"], json!(["Horror", "Sci-Fi"]));
     assert_eq!(edited.body["locked_fields"], json!(["content_rating", "genres", "summary", "title"]));
-    let bad = app.call(Method::PATCH, &format!("/api/items/{id}"), Some(&admin), Some(json!({"year": "soon"})), &[]).await;
+    let bad =
+        app.call(Method::PATCH, &format!("/api/items/{id}"), Some(&admin), Some(json!({"year": "soon"})), &[]).await;
     assert_eq!(bad.status, StatusCode::BAD_REQUEST);
-    let path = app.call(Method::PATCH, &format!("/api/items/{id}"), Some(&admin), Some(json!({"path": "/x"})), &[]).await;
+    let path =
+        app.call(Method::PATCH, &format!("/api/items/{id}"), Some(&admin), Some(json!({"path": "/x"})), &[]).await;
     assert_eq!(path.status, StatusCode::BAD_REQUEST);
 
     // The file changes, so the scan rewrites the item from the file name; the edit wins.
@@ -814,7 +817,8 @@ async fn metadata_edits_survive_rescans() {
     // Non-admins can't edit.
     app.post("/api/users", &admin, json!({"username": "viewer", "password": "viewer1"})).await;
     let viewer = login_as(&app, "viewer", "viewer1", "test").await;
-    let denied = app.call(Method::PATCH, &format!("/api/items/{id}"), Some(&viewer), Some(json!({"title": "x"})), &[]).await;
+    let denied =
+        app.call(Method::PATCH, &format!("/api/items/{id}"), Some(&viewer), Some(json!({"title": "x"})), &[]).await;
     assert_eq!(denied.status, StatusCode::FORBIDDEN);
 
     // Uploaded artwork replaces the poster and is served.
@@ -841,4 +845,110 @@ async fn metadata_edits_survive_rescans() {
     let matches = app.get(&format!("/api/items/{id}/matches"), &admin).await;
     assert_eq!(matches.status, StatusCode::BAD_REQUEST);
     assert!(matches.body["message"].as_str().unwrap().contains("TMDB"));
+}
+
+fn credit(tmdb_id: i64, name: &str, role: Role, character: Option<&str>, photo: Option<&str>) -> NewCredit {
+    NewCredit {
+        tmdb_id,
+        name: name.into(),
+        photo: photo.map(str::to_owned),
+        role,
+        character: character.map(str::to_owned),
+    }
+}
+
+#[tokio::test]
+async fn cast_and_crew() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/The Matrix (1999).mkv", 1024);
+    // A root left empty looks offline and is not purged.
+    app.media_file("movies/Speed (1994).mkv", 1024);
+    app.media_file("hidden/John Wick (2014).mkv", 1024);
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let hidden = app.library(&admin, "Hidden", "movies", "hidden").await;
+    let id_in = |page: &Reply, title: &str| {
+        page.body["items"].as_array().unwrap().iter().find(|i| i["title"] == title).unwrap()["id"].as_i64().unwrap()
+    };
+    let matrix = id_in(&app.get(&format!("/api/libraries/{movies}/items"), &admin).await, "The Matrix");
+    let wick = id_in(&app.get(&format!("/api/libraries/{hidden}/items"), &admin).await, "John Wick");
+
+    // Credits come from TMDB in real use.
+    let keanu = credit(6384, "Keanu Reeves", Role::Actor, Some("Neo"), Some("/keanu.jpg"));
+    people::replace(
+        &app.state.db,
+        matrix,
+        &[
+            keanu.clone(),
+            credit(530, "Carrie-Anne Moss", Role::Actor, Some("Trinity"), None),
+            credit(9339, "Lana Wachowski", Role::Director, None, None),
+        ],
+    )
+    .await
+    .unwrap();
+    people::replace(&app.state.db, wick, &[credit(6384, "Keanu Reeves", Role::Actor, Some("John Wick"), None)])
+        .await
+        .unwrap();
+
+    let detail = app.get(&format!("/api/items/{matrix}"), &admin).await;
+    let cast = detail.body["cast"].as_array().unwrap();
+    assert_eq!(cast.len(), 2);
+    assert_eq!(cast[0]["name"], json!("Keanu Reeves"));
+    assert_eq!(cast[0]["character"], json!("Neo"));
+    assert!(cast[0]["photo_url"].as_str().unwrap().ends_with("/photo?v=keanu"));
+    assert!(cast[1].get("photo_url").is_none());
+    assert_eq!(detail.body["crew"][0]["role"], json!("director"));
+
+    let person = cast[0]["id"].as_i64().unwrap();
+    let page = app.get(&format!("/api/people/{person}"), &admin).await;
+    assert_eq!(page.status, StatusCode::OK, "{:?}", page.body);
+    assert_eq!(page.body["name"], json!("Keanu Reeves"));
+    let credits = page.body["credits"].as_array().unwrap();
+    assert_eq!(credits.len(), 2);
+    assert_eq!(credits[0]["item"]["title"], json!("John Wick"), "newest first");
+    assert_eq!(credits[1]["roles"], json!([{"role": "actor", "character": "Neo"}]));
+
+    let search = app.get("/api/search?q=keanu%20ree", &admin).await;
+    assert_eq!(search.body["people"][0]["id"], json!(person));
+    assert_eq!(app.get("/api/search?q=eanu", &admin).await.body["people"], json!([]), "word prefixes only");
+
+    // Photos are downloaded on first use; this one is already there.
+    let photos = app.state.config.metadata_dir().join("people");
+    std::fs::create_dir_all(&photos).unwrap();
+    std::fs::write(photos.join("keanu.jpg"), [0xFF, 0xD8, 0xFF, 0xE0, 0, 0]).unwrap();
+    let photo = app.get(&format!("/api/people/{person}/photo?v=keanu"), &admin).await;
+    assert_eq!(photo.status, StatusCode::OK);
+    assert_eq!(photo.headers[header::CONTENT_TYPE], "image/jpeg");
+    let moss = cast[1]["id"].as_i64().unwrap();
+    assert_eq!(app.get(&format!("/api/people/{moss}/photo"), &admin).await.status, StatusCode::NOT_FOUND);
+
+    // Someone who can't see the Matrix library sees Keanu in John Wick only,
+    // and nothing of people only credited there.
+    let created = app
+        .post(
+            "/api/users",
+            &admin,
+            json!({"username": "guest", "password": "guestpass", "all_libraries": false, "library_ids": [hidden]}),
+        )
+        .await;
+    assert_eq!(created.status, StatusCode::CREATED, "{:?}", created.body);
+    let guest = app
+        .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "guest", "password": "guestpass"})), &[])
+        .await
+        .body["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let page = app.get(&format!("/api/people/{person}"), &guest).await;
+    let items: Vec<&Value> = page.body["credits"].as_array().unwrap().iter().map(|c| &c["item"]).collect();
+    assert_eq!(titles(&json!(items)), vec!["John Wick"]);
+    assert_eq!(app.get(&format!("/api/people/{moss}"), &guest).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.get("/api/search?q=carrie", &guest).await.body["people"], json!([]));
+
+    // Removing the movie forgets people credited nowhere else.
+    std::fs::remove_file(app.media.path().join("movies/The Matrix (1999).mkv")).unwrap();
+    app.post(&format!("/api/libraries/{movies}/scan"), &admin, json!({"force": false})).await;
+    app.wait_for_scans().await;
+    assert_eq!(app.get(&format!("/api/people/{moss}"), &admin).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.get(&format!("/api/people/{person}"), &admin).await.status, StatusCode::OK);
 }

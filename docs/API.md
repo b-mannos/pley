@@ -114,6 +114,29 @@ interface ItemDetail extends ItemSummary {
   imdb_id: string | null;
   files: MediaFile[];               // empty for containers (show/season/artist/album)
   markers: Marker[];                // intro and credits of the files (Skip Intro / Skip Credits)
+  cast: Credit[];                   // actors in billing order; episodes: guest stars; seasons: the show's
+  crew: Credit[];                   // creators, directors, writers, producers
+}
+
+interface Credit {
+  id: Id;                           // the person: GET /api/people/{id}
+  name: string;
+  role: "actor" | "creator" | "director" | "writer" | "producer";
+  character?: string;               // actors: the part played
+  photo_url?: string;               // "/api/people/7/photo?v=…" (append &w=<px>)
+}
+
+interface PersonSummary {
+  id: Id;
+  name: string;
+  photo_url?: string;
+}
+
+interface PersonDetail extends PersonSummary {
+  credits: {                        // newest first; episode credits count towards their show
+    item: ItemSummary;              // a movie or show
+    roles: { role: Credit["role"]; character?: string; episodes?: number }[];
+  }[];
 }
 
 interface Marker {
@@ -297,7 +320,20 @@ hubs, search, artwork, streams and the Plex-compatible API.
 | Method | Path | Query | Response |
 |---|---|---|---|
 | GET | `/api/hubs/home` | – | `{ hubs: Hub[] }` – `continue_watching` (in-progress + next up), then `recently_added:<library_id>` per library |
-| GET | `/api/search` | `q`, `limit` (default 40) | `{ items: ItemSummary[] }` ranked by relevance |
+| GET | `/api/search` | `q`, `limit` (default 40) | `{ items: ItemSummary[], people: PersonSummary[] }`: items ranked by relevance; people whose name has words starting with each word of `q`, most credited first |
+
+## Cast and crew
+
+Credits come from TMDB with the rest of the metadata (movies: cast and crew;
+shows: everyone in any episode and the creators; episodes: guest stars,
+directors and writers). Items matched before an upgrade get theirs fetched in
+the background once. People only appear where the user can see an item they
+are credited in.
+
+| Method | Path | Query | Response |
+|---|---|---|---|
+| GET | `/api/people/{id}` | – | `PersonDetail`; `404` when the person has no credits this user can see |
+| GET | `/api/people/{id}/photo` | `w=<px>`, `v=` | image bytes; downloaded from TMDB the first time. `404` without a photo |
 
 ## Playback
 

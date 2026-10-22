@@ -130,6 +130,51 @@ export interface ItemDetail extends ItemSummary {
   locked_fields?: string[];
   /** Intro and credits of the files (absent on servers without detection). */
   markers?: Marker[];
+  /** Actors in billing order; for episodes, the guest stars. */
+  cast?: Credit[];
+  /** Creators, directors, writers and producers. */
+  crew?: Credit[];
+}
+
+export type CreditRole = "actor" | "creator" | "director" | "writer" | "producer";
+
+/** A person credited in an item. */
+export interface Credit {
+  /** The person (`/person/{id}`). */
+  id: Id;
+  name: string;
+  role: CreditRole;
+  character?: string;
+  photo_url?: string;
+}
+
+export interface PersonSummary {
+  id: Id;
+  name: string;
+  photo_url?: string;
+}
+
+export interface PersonRole {
+  role: CreditRole;
+  character?: string;
+  /** Credits from single episodes (guest parts): how many. */
+  episodes?: number;
+}
+
+/** A movie or show a person is credited in (episode credits count towards the show). */
+export interface PersonCredit {
+  item: ItemSummary;
+  roles: PersonRole[];
+}
+
+export interface PersonDetail extends PersonSummary {
+  /** Newest first. */
+  credits: PersonCredit[];
+}
+
+export interface SearchResults {
+  items: ItemSummary[];
+  people?: PersonSummary[];
 }
 
 export type MarkerKind = "intro" | "credits";

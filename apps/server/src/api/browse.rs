@@ -9,6 +9,7 @@ use crate::auth::AuthUser;
 use crate::catalog::{self, ItemSummary};
 use crate::error::ApiResult;
 use crate::library::{LibraryKind, list_libraries};
+use crate::people::{self, PersonSummary};
 use crate::state::AppState;
 
 pub async fn home(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Hubs>> {
@@ -40,6 +41,7 @@ pub async fn home(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
 #[derive(Serialize)]
 pub struct SearchResults {
     items: Vec<ItemSummary>,
+    people: Vec<PersonSummary>,
 }
 
 pub async fn search(
@@ -50,5 +52,6 @@ pub async fn search(
     let q = query.get("q").map(|s| s.trim()).unwrap_or_default();
     let limit = query.get("limit").and_then(|l| l.parse::<i64>().ok()).unwrap_or(40).clamp(1, 200);
     let rows = catalog::search(&state.db, user.id, q, limit).await?;
-    Ok(Json(SearchResults { items: rows.iter().map(|r| r.to_summary()).collect() }))
+    let people = people::search(&state.db, user.id, q, 12).await?;
+    Ok(Json(SearchResults { items: rows.iter().map(|r| r.to_summary()).collect(), people }))
 }

@@ -10,11 +10,11 @@ use crate::images::Images;
 use crate::library::scanner::Scanner;
 use crate::library::watcher::LibraryWatcher;
 use crate::markers::MarkerService;
-use crate::trickplay::TrickplayService;
 use crate::metadata::MetadataAgent;
 use crate::playback::Sessions;
 use crate::settings::SettingsStore;
 use crate::transcoder::Transcoder;
+use crate::trickplay::TrickplayService;
 
 /// Shared application state handed to every request handler.
 #[derive(Clone)]
@@ -101,6 +101,11 @@ impl AppState {
         self.transcoder.start();
         self.sessions.spawn_reaper(self.transcoder.clone(), self.events.clone());
         self.markers.start();
+        let metadata = self.metadata.clone();
+        tokio::spawn(async move {
+            metadata.prune_people().await;
+            metadata.backfill_credits(None).await;
+        });
         let watcher = self.watcher.clone();
         tokio::spawn(async move { watcher.reload().await });
         let state = self.clone();

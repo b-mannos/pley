@@ -6,6 +6,7 @@ import { Button, SectionTitle } from "@/components/ui";
 import { episodeLabel, pluralize } from "@/lib/format";
 import { useElementWidth } from "@/lib/hooks";
 import { usePlayItem } from "@/lib/usePlayItem";
+import { CastRow, CrewRows, hasCrew } from "./Credits";
 import {
   ContentRating,
   Genres,
@@ -64,6 +65,11 @@ export function ShowView({ item }: { item: ItemDetail }) {
           </div>
           {item.tagline ? <p className="text-base italic text-fg/75">{item.tagline}</p> : null}
           <Summary text={item.summary} />
+          {hasCrew(item.crew) ? (
+            <dl className="grid max-w-3xl grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 pt-2 text-sm">
+              <CrewRows crew={item.crew} />
+            </dl>
+          ) : null}
         </div>
       </div>
 
@@ -80,6 +86,7 @@ export function ShowView({ item }: { item: ItemDetail }) {
         </div>
         {seasons.data && seasons.data.length === 0 ? <p className="text-sm text-muted">No seasons found.</p> : null}
       </section>
+      <CastRow title="Cast" credits={item.cast} />
     </ItemPageShell>
   );
 }

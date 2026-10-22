@@ -16,6 +16,7 @@ use crate::auth::AuthUser;
 use crate::catalog::{self, ItemRow, LibraryQuery};
 use crate::events::ServerEvent;
 use crate::library::LibraryRow;
+use crate::people;
 use crate::state::AppState;
 use crate::util::now;
 
@@ -56,7 +57,10 @@ fn list_container(lib: Option<&LibraryRow>, info: &PlexInfo, nodes: Vec<Node>, t
 /// Item elements for rows loaded through the catalog.
 async fn item_nodes(state: &AppState, rows: &[ItemRow], sections: &Sections, detail: Detail) -> PlexResult<Vec<Node>> {
     let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
-    let extras = meta::load_extras(&state.db, &ids).await?;
+    let mut extras = meta::load_extras(&state.db, &ids).await?;
+    if detail.full {
+        add_people(state, &ids, &mut extras).await?;
+    }
     let leaves: Vec<i64> = rows.iter().filter(|r| meta::is_leaf(&r.kind)).map(|r| r.id).collect();
     let files =
         if detail.media && !leaves.is_empty() { meta::load_files(&state.db, &leaves).await? } else { HashMap::new() };
@@ -67,6 +71,14 @@ async fn item_nodes(state: &AppState, rows: &[ItemRow], sections: &Sections, det
             meta::item_node(r, extras.get(&r.id), files, sections, detail)
         })
         .collect())
+}
+
+/// Cast and crew of `ids` into their extras (seasons get their show's).
+async fn add_people(state: &AppState, ids: &[i64], extras: &mut HashMap<i64, Extras>) -> PlexResult<()> {
+    for (id, credits) in people::for_items(&state.db, ids).await? {
+        extras.entry(id).or_default().people = credits;
+    }
+    Ok(())
 }
 
 fn listing_detail(params: &Params) -> Detail {
@@ -274,6 +286,17 @@ struct Filter {
     values: Vec<String>,
 }
 
+/// The credit role a Plex tag filter (`actor=`, `director=`, …) selects.
+fn people_role(field: &str) -> Option<people::Role> {
+    Some(match field {
+        "actor" => people::Role::Actor,
+        "director" => people::Role::Director,
+        "writer" => people::Role::Writer,
+        "producer" => people::Role::Producer,
+        _ => return None,
+    })
+}
+
 /// Query parameters that are not filters.
 const NOT_FILTERS: &[&str] = &[
     "type",
@@ -351,7 +374,11 @@ impl Filter {
     }
 
     fn needs_extras(&self) -> bool {
-        matches!(self.field.as_str(), "genre" | "contentRating" | "studio" | "guid")
+        matches!(self.field.as_str(), "genre" | "contentRating" | "studio" | "guid") || self.needs_people()
+    }
+
+    fn needs_people(&self) -> bool {
+        people_role(&self.field).is_some()
     }
 
     /// Unknown fields don't filter anything out.
@@ -396,6 +423,18 @@ impl Filter {
             "contentRating" => {
                 let rating: Vec<String> = extras.and_then(|e| e.content_rating.clone()).into_iter().collect();
                 Some(self.tags(&rating))
+            }
+            field if people_role(field).is_some() => {
+                let role = people_role(field);
+                let credits = extras.map(|e| e.people.as_slice()).unwrap_or(&[]);
+                // Values are person ids (the tag ids of `/library/sections/{id}/actor`) or names.
+                let credited = |v: &str| {
+                    credits.iter().any(|c| {
+                        Some(c.role) == role && (v.parse::<i64>().ok() == Some(c.id) || c.name.eq_ignore_ascii_case(v))
+                    })
+                };
+                let any = self.values.iter().any(|v| credited(v));
+                Some(if matches!(self.op, Op::Not | Op::NotExactly) { !any } else { any })
             }
             "unwatched" | "unwatchedLeaves" => Some(self.boolean(!watched)),
             "watched" => Some(self.boolean(watched)),
@@ -609,6 +648,9 @@ async fn query_items(
     if filters.iter().any(Filter::needs_extras) {
         let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
         extras = meta::load_extras(&state.db, &ids).await?;
+        if filters.iter().any(Filter::needs_people) {
+            add_people(state, &ids, &mut extras).await?;
+        }
     }
     if !filters.is_empty() {
         let now = now();
@@ -716,6 +758,10 @@ fn filter_meta(lib: &LibraryRow) -> Node {
         if matches!(*kind, "movie" | "show") {
             filters.push(("contentRating", "Content Rating"));
             filters.push(("studio", "Studio"));
+            filters.push(("actor", "Actor"));
+        }
+        if *kind == "movie" {
+            filters.extend([("director", "Director"), ("writer", "Writer"), ("producer", "Producer")]);
         }
         for (filter, title) in filters {
             t.push(
@@ -822,6 +868,39 @@ pub async fn filter_choices(
             let mut decades: Vec<i64> = years.iter().map(|y| y / 10 * 10).collect();
             decades.dedup();
             decades.iter().map(i64::to_string).collect()
+        }
+        field if people_role(field).is_some() => {
+            // Keyed by person id, so the filter is exact.
+            let role = people_role(field).map(people::Role::as_str).unwrap_or_default();
+            let credited: Vec<(i64, String)> = sqlx::query_as(
+                "SELECT DISTINCT pe.id, pe.name FROM item_people ip
+                 JOIN people pe ON pe.id = ip.person_id
+                 JOIN items i ON i.id = ip.item_id
+                 WHERE i.library_id = ? AND i.kind = ? AND ip.role = ?
+                 ORDER BY pe.name COLLATE NOCASE",
+            )
+            .bind(lib.id)
+            .bind(kind)
+            .bind(role)
+            .fetch_all(&state.db.read)
+            .await?;
+            let mut mc = base_container()
+                .attr("size", credited.len())
+                .attr("librarySectionID", lib.id)
+                .attr("librarySectionUUID", info.section_uuid(lib.id))
+                .attr("title1", &lib.name)
+                .attr("viewGroup", "secondary");
+            let n = type_number(kind);
+            for (id, name) in credited {
+                mc.push(
+                    Node::new("Directory")
+                        .attr("fastKey", format!("/library/sections/{}/all?type={n}&{filter}={id}", lib.id))
+                        .attr("key", id)
+                        .attr("title", name)
+                        .attr("type", filter.clone()),
+                );
+            }
+            return Ok(mc);
         }
         "contentRating" | "studio" => {
             let column = if filter == "studio" { "studio" } else { "content_rating" };

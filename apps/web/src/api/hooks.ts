@@ -17,12 +17,14 @@ import type {
   LibraryItemsResponse,
   LibraryKind,
   LoginResponse,
+  PersonDetail,
+  SearchResults,
   ServerStatus,
   Settings,
   SystemInfo,
   TranscoderStatus,
-  User,
   Trickplay,
+  User,
 } from "./types";
 
 export const keys = {
@@ -39,6 +41,7 @@ export const keys = {
   onDeck: (id: Id) => ["item", id, "on-deck"] as const,
   next: (id: Id) => ["item", id, "next"] as const,
   search: (q: string, limit: number) => ["search", q, limit] as const,
+  person: (id: Id) => ["person", id] as const,
   activity: ["activity"] as const,
   users: ["users"] as const,
   userDevices: (id: Id) => ["users", id, "devices"] as const,
@@ -489,10 +492,17 @@ export function useSearch(q: string, limit = 60) {
   const trimmed = q.trim();
   return useQuery({
     queryKey: keys.search(trimmed, limit),
-    queryFn: ({ signal }) => api.get<{ items: ItemSummary[] }>(`/api/search${qs({ q: trimmed, limit })}`, { signal }),
+    queryFn: ({ signal }) => api.get<SearchResults>(`/api/search${qs({ q: trimmed, limit })}`, { signal }),
     enabled: trimmed.length > 0,
-    select: (d) => d.items,
     placeholderData: (prev) => prev,
+  });
+}
+
+export function usePerson(id: Id) {
+  return useQuery({
+    queryKey: keys.person(id),
+    queryFn: ({ signal }) => api.get<PersonDetail>(`/api/people/${id}`, { signal }),
+    enabled: Number.isFinite(id) && id > 0,
   });
 }
 

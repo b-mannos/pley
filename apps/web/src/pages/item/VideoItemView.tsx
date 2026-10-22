@@ -7,6 +7,7 @@ import { Button, Select } from "@/components/ui";
 import { codecLabel, formatBytes, formatDate, formatDuration, resolutionLabel, seasonTitle, streamLabel } from "@/lib/format";
 import { saveStreamChoice } from "@/lib/progress";
 import { usePlayItem } from "@/lib/usePlayItem";
+import { CastRow, CrewRows } from "./Credits";
 import { MediaInfo } from "./MediaInfo";
 import {
   ContentRating,
@@ -200,6 +201,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
           ) : null}
 
           <dl className="grid max-w-3xl grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 pt-2 text-sm">
+            <CrewRows crew={item.crew} />
             {item.original_title && item.original_title !== item.title ? (
               <>
                 <dt className="text-subtle">Original title</dt>
@@ -229,6 +231,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
           <MediaInfo files={item.files} />
         </div>
       </div>
+      <CastRow title={isEpisode ? "Guest Stars" : "Cast"} credits={item.cast} />
     </ItemPageShell>
   );
 }

@@ -19,6 +19,7 @@ pub mod logging;
 pub mod markers;
 pub mod metadata;
 pub mod overrides;
+pub mod people;
 pub mod playback;
 pub mod plex;
 pub mod ratings;

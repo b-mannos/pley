@@ -14,6 +14,7 @@ import { ItemPage } from "@/pages/item/ItemPage";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { NotFoundPage, RouteErrorPage } from "@/pages/NotFoundPage";
+import { PersonPage } from "@/pages/PersonPage";
 import { ProfilesPage } from "@/pages/ProfilesPage";
 import { SearchPage } from "@/pages/SearchPage";
 import { SetupPage } from "@/pages/SetupPage";
@@ -79,6 +80,7 @@ const router = createBrowserRouter([
           { index: true, element: <HomePage /> },
           { path: "library/:id", element: <LibraryPage /> },
           { path: "item/:id", element: <ItemPage /> },
+          { path: "person/:id", element: <PersonPage /> },
           { path: "search", element: <SearchPage /> },
           { path: "account", element: <AccountPage /> },
           {

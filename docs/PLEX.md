@@ -85,6 +85,9 @@ parameters; containers report `size`, `totalSize` and `offset`.
   `subtitleStreamID`. The master playlist points at
   `session/<id>/base/index.m3u8`. Session URLs need no token: the 128-bit
   session id is the credential, as with Plex.
+- **Cast and crew.** Details carry `Role` (with the part as `role`),
+  `Director`, `Writer` and `Producer` tags. Their `id` is the pley person id and
+  `thumb` the TMDB photo.
 - **Artwork.** `thumb` and `art` attributes point at
   `/library/metadata/{id}/thumb/{version}` and `/art/{version}`.
   `/photo/:/transcode?url=…&width=…` resizes them through pley's image cache.
@@ -114,7 +117,10 @@ comma-separated), `limit` and Plex filters with their operators:
   is, `!=`, `>>=`, `<<=`;
 - tags (`genre`, `contentRating`), booleans (`unwatched`, `inProgress`), dates
   (`addedAt`, `lastViewedAt`, `originallyAvailableAt`, as unix time or relative
-  like `-30d`) and `guid`.
+  like `-30d`) and `guid`;
+- people (`actor`, `director`, `writer`, `producer`): a person id (the tag `id`,
+  also listed by `/library/sections/{id}/actor` and friends) or a name, `!=`
+  excludes.
 
 Filters on ancestors work (`artist.id=5` on albums, `show.title=…` on
 episodes). With `includeMeta=1` the response describes these filters, sorts

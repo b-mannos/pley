@@ -2,6 +2,7 @@
 //! `Directory` (shows, seasons, artists, albums) and `Track`, with their
 //! `Media`/`Part`/`Stream`, `Genre` and `Guid` children.
 
+use crate::people::{Credit, Role};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -98,6 +99,8 @@ pub struct Extras {
     pub tmdb_id: Option<i64>,
     pub imdb_id: Option<String>,
     pub path: Option<String>,
+    /// Cast and crew, loaded only for full details and people filters.
+    pub people: Vec<Credit>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -139,6 +142,7 @@ pub async fn load_extras(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Extr
                     tmdb_id: row.tmdb_id,
                     imdb_id: row.imdb_id,
                     path: row.path,
+                    people: Vec::new(),
                 },
             );
         }
@@ -409,8 +413,33 @@ pub fn item_node(
                 node.push(Node::new("Location").attr("path", path));
             }
         }
+        if detail.full {
+            for credit in &extras.people {
+                node.push(credit_node(credit));
+            }
+        }
     }
     node
+}
+
+/// Plex's tag element for a credit (`Role`, `Director`, …); the tag id is the
+/// person id, which the `actor=`/`director=`… filters accept.
+fn credit_node(credit: &Credit) -> Node {
+    let (tag, filter) = match credit.role {
+        Role::Actor => ("Role", "actor"),
+        Role::Director => ("Director", "director"),
+        Role::Writer => ("Writer", "writer"),
+        Role::Producer => ("Producer", "producer"),
+        // Plex has no tag for show creators.
+        Role::Creator => ("Producer", "producer"),
+    };
+    Node::new(tag)
+        .attr("id", credit.id)
+        .attr("filter", format!("{filter}={}", credit.id))
+        .attr("tag", &credit.name)
+        .attr("tagKey", credit.id.to_string())
+        .opt("role", credit.character.as_deref())
+        .opt("thumb", credit.photo_path.as_deref().and_then(crate::people::tmdb_photo))
 }
 
 // ------------------------------------------------------------------ media

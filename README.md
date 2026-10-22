@@ -27,6 +27,8 @@ HLG and Dolby Vision.
   - Local artwork (`poster.jpg`, `fanart.jpg`, `season01-poster.jpg`,
     `cover.jpg`…) always wins over downloaded artwork.
   - Video frame grabs and embedded album art are extracted on demand.
+  - Cast and crew: actors with their parts, directors, writers and creators,
+    and a page for each person listing what they're in across your libraries.
 - **Playback.**
   - The server picks direct play, remux or transcode for each client and
     explains why.
@@ -48,6 +50,7 @@ HLG and Dolby Vision.
     when an episode's credits start and optional automatic intro skipping.
   - Seek-bar previews: thumbnails while hovering the timeline, made from
     keyframes in the background (seconds per film, HDR tone-mapped).
+  - Chapters are marked on the seek bar and listed in a Chapters menu.
   - Subtitle and audio choices are remembered per show, so the next episode
     starts with the same language.
 - **Watch state.**
@@ -72,6 +75,9 @@ HLG and Dolby Vision.
   - SQLite in WAL mode with a dedicated writer connection, and a mimalloc
     allocator.
   - Session cache in memory.
+  - Library listings are filtered, sorted and paged in SQL, and the library
+    page loads its first screenful on its own. API responses are compressed
+    with zstd (or Brotli/gzip for clients without it).
   - Images resized once per size bucket and cached with immutable cache
     headers.
   - Precompressed (Brotli and gzip) UI assets embedded in the server.

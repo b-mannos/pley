@@ -8,6 +8,7 @@ import { episodeLabel, formatDate, formatDuration, pluralize, progressFraction, 
 import { thumbCandidates } from "@/lib/images";
 import { usePlayItem } from "@/lib/usePlayItem";
 import { ItemArt, ItemPageShell, MetaLine, RefreshButton, Summary, WatchedButton } from "./shared";
+import { CastRow } from "./Credits";
 
 function EpisodeRow({ ep }: { ep: ChildItem }) {
   const play = usePlayItem();
@@ -117,6 +118,7 @@ export function SeasonView({ item }: { item: ItemDetail }) {
           {episodes.data && episodes.data.length === 0 ? <p className="px-2 text-sm text-muted">No episodes found.</p> : null}
         </div>
       </section>
+      <CastRow title="Cast" credits={item.cast} />
     </ItemPageShell>
   );
 }

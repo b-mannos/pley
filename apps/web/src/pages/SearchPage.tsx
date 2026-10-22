@@ -4,6 +4,7 @@ import { errorMessage } from "@/api/client";
 import { useSearch } from "@/api/hooks";
 import type { ItemKind, ItemSummary } from "@/api/types";
 import { aspectFor, CardSkeleton, MediaCard } from "@/components/cards";
+import { PersonCard } from "@/components/PersonCard";
 import { EmptyState, SectionTitle, Spinner } from "@/components/ui";
 import { useDocumentTitle, useElementWidth } from "@/lib/hooks";
 
@@ -50,7 +51,7 @@ export function SearchPage() {
         className="min-h-[60vh]"
         icon={<Search />}
         title="Search your libraries"
-        description="Find movies, shows, episodes, artists, albums and tracks. Press / anywhere to jump to the search box."
+        description="Find movies, shows, episodes, people, artists, albums and tracks. Press / anywhere to jump to the search box."
       />
     );
   }
@@ -71,8 +72,9 @@ export function SearchPage() {
     return <EmptyState className="min-h-[60vh]" title="Search failed" description={errorMessage(search.error)} />;
   }
 
-  const results = search.data ?? [];
-  if (!results.length) {
+  const results = search.data?.items ?? [];
+  const people = search.data?.people ?? [];
+  if (!results.length && !people.length) {
     return (
       <EmptyState
         className="min-h-[60vh]"
@@ -91,6 +93,18 @@ export function SearchPage() {
         </h1>
         {search.isFetching ? <Spinner className="size-4" /> : null}
       </div>
+      {people.length ? (
+        <section>
+          <SectionTitle>
+            People <span className="ml-1 text-sm font-normal text-subtle">{people.length}</span>
+          </SectionTitle>
+          <div className="flex flex-wrap gap-x-4 gap-y-5">
+            {people.map((p) => (
+              <PersonCard key={p.id} person={p} width={112} />
+            ))}
+          </div>
+        </section>
+      ) : null}
       {GROUPS.map(({ kind, title }) => {
         const items = results.filter((r) => r.kind === kind);
         return items.length ? <ResultGroup key={kind} title={title} items={items} /> : null;

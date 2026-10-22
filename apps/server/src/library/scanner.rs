@@ -316,6 +316,9 @@ impl Scanner {
             }
             self.events.send(ServerEvent::LibraryChanged { library_id });
         }
+        if totals.removed > 0 {
+            self.metadata.prune_people().await;
+        }
 
         self.set_status(&lib, ScanPhase::Done, processed, total);
         self.events.send(ServerEvent::ScanFinished {

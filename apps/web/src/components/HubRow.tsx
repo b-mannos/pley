@@ -39,10 +39,13 @@ export function fitCards(available: number, minWidth: number, gap: number): { wi
   return { width: Math.floor((available - gap * (perPage - 1)) / perPage), perPage };
 }
 
-/** Measures the content width of a padded row and fits cards into it. */
-function useFittedCards(aspect: CardAspect) {
+/**
+ * Measures the content width of a padded row and fits cards of at least
+ * `minWidths` ([mobile, desktop]) into it.
+ */
+export function useFittedRow(minWidths: [number, number]) {
   const desktop = useMediaQuery("(min-width: 640px)");
-  const minWidth = MIN_WIDTHS[aspect][desktop ? 1 : 0];
+  const minWidth = minWidths[desktop ? 1 : 0];
   const gap = GAPS[desktop ? 1 : 0];
   const ref = useRef<HTMLDivElement>(null);
   const [available, setAvailable] = useState(0);
@@ -62,6 +65,10 @@ function useFittedCards(aspect: CardAspect) {
 
   const fit = available > 0 ? fitCards(available, minWidth, gap) : { width: minWidth, perPage: 1 };
   return { ref, gap, ...fit };
+}
+
+function useFittedCards(aspect: CardAspect) {
+  return useFittedRow(MIN_WIDTHS[aspect]);
 }
 
 export function HubRow({ hub }: { hub: Hub }) {
@@ -136,7 +143,7 @@ export function HubRow({ hub }: { hub: Hub }) {
   );
 }
 
-function ArrowButton({ side, enabled, onClick }: { side: "left" | "right"; enabled: boolean; onClick: () => void }) {
+export function ArrowButton({ side, enabled, onClick }: { side: "left" | "right"; enabled: boolean; onClick: () => void }) {
   const Icon = side === "left" ? ChevronLeft : ChevronRight;
   return (
     <button
