@@ -248,6 +248,8 @@ async fn collections_are_curated_by_admins() {
     let added =
         app.post(&format!("/api/collections/{id}/items"), &admin, json!({"item_ids": [m["Gamma"], m["Alpha"]]})).await;
     assert_eq!(added.body["added"], json!(1));
+    let again = app.post(&format!("/api/collections/{id}/items"), &admin, json!({"item_ids": [m["Alpha"]]})).await;
+    assert_eq!((again.status, again.body["added"].clone()), (StatusCode::OK, json!(0)));
 
     // By title, then a custom order.
     let patched = app.patch(&format!("/api/collections/{id}"), &admin, json!({"sort": "title", "summary": null})).await;
@@ -322,7 +324,15 @@ async fn automatic_collections_follow_tmdb() {
         vec!["First", "Second"]
     );
 
-    // A title edited by an administrator survives refreshes.
+    // TMDB renames apply until an administrator changes the title (saving
+    // it unchanged doesn't count); then refreshes keep the edited one.
+    let same = app
+        .patch(&format!("/api/collections/{id}"), &admin, json!({"title": "Saga Collection", "sort": "title"}))
+        .await;
+    assert_eq!(same.status, StatusCode::OK, "{:?}", same.body);
+    let renamed = TmdbCollection { name: "The Saga Collection".into(), ..saga.clone() };
+    app.link(m["First"], Some(&renamed)).await;
+    assert_eq!(titles(&app.collections(movies, &admin).await), vec!["The Saga Collection"]);
     app.patch(&format!("/api/collections/{id}"), &admin, json!({"title": "The Saga"})).await;
     app.link(m["First"], Some(&saga)).await;
     assert_eq!(titles(&app.collections(movies, &admin).await), vec!["The Saga"]);

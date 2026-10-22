@@ -221,16 +221,19 @@ pub async fn update(
     sort: Option<&str>,
 ) -> sqlx::Result<()> {
     let mut tx = db.write.begin().await?;
+    // `edited` (SET reads the old row) only when a value really changes.
     if let Some(title) = title {
-        sqlx::query("UPDATE collections SET title = ?, sort_title = ?, edited = 1 WHERE id = ?")
+        sqlx::query("UPDATE collections SET title = ?, sort_title = ?, edited = edited OR title IS NOT ? WHERE id = ?")
             .bind(title)
             .bind(sort_title(title))
+            .bind(title)
             .bind(id)
             .execute(&mut *tx)
             .await?;
     }
     if let Some(summary) = summary {
-        sqlx::query("UPDATE collections SET summary = ?, edited = 1 WHERE id = ?")
+        sqlx::query("UPDATE collections SET summary = ?, edited = edited OR summary IS NOT ? WHERE id = ?")
+            .bind(summary)
             .bind(summary)
             .bind(id)
             .execute(&mut *tx)
@@ -248,6 +251,23 @@ pub async fn delete(db: &Db, metadata_dir: &Path, id: i64) -> sqlx::Result<bool>
         sqlx::query("DELETE FROM collections WHERE id = ?").bind(id).execute(&db.write).await?.rows_affected();
     let _ = tokio::fs::remove_dir_all(artwork_dir(metadata_dir, id)).await;
     Ok(deleted > 0)
+}
+
+/// How many of `item_ids` are movies or shows of the library (what a
+/// collection of it can hold).
+pub async fn eligible(db: &Db, library_id: i64, item_ids: &[i64]) -> sqlx::Result<i64> {
+    if item_ids.is_empty() {
+        return Ok(0);
+    }
+    let placeholders = vec!["?"; item_ids.len()].join(",");
+    let sql = format!(
+        "SELECT COUNT(*) FROM items WHERE library_id = ? AND kind IN ('movie', 'show') AND id IN ({placeholders})"
+    );
+    let mut query = sqlx::query_scalar(&sql).bind(library_id);
+    for id in item_ids {
+        query = query.bind(id);
+    }
+    query.fetch_one(&db.read).await
 }
 
 /// Add movies or shows of the collection's library; others are ignored.
@@ -316,15 +336,18 @@ fn artwork_dir(metadata_dir: &Path, id: i64) -> PathBuf {
     metadata_dir.join("collections").join(id.to_string())
 }
 
-/// Own artwork of the collection, or `Err(first visible item)` to fall back to.
+/// Own artwork of the collection, or `Err(item)` to fall back to: the first
+/// visible item that has such artwork (else the first one).
 pub async fn artwork(db: &Db, user: &AuthUser, id: i64, kind: &str) -> sqlx::Result<Option<Result<PathBuf, i64>>> {
     let Some(row) = row(db, id).await? else { return Ok(None) };
     let Some((_, items)) = get(db, user, id).await? else { return Ok(None) };
-    let own = if kind == "poster" { row.poster } else { row.backdrop };
+    let poster = kind == "poster";
+    let own = if poster { row.poster } else { row.backdrop };
     if let Some(path) = own.map(PathBuf::from).filter(|p| p.is_file()) {
         return Ok(Some(Ok(path)));
     }
-    Ok(items.first().map(|i| Err(i.id)))
+    let with_art = items.iter().find(|i| if poster { i.has_poster } else { i.has_backdrop });
+    Ok(with_art.or(items.first()).map(|i| Err(i.id)))
 }
 
 fn http() -> &'static reqwest::Client {

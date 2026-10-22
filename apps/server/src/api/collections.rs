@@ -153,10 +153,10 @@ pub async fn add_items(
     Json(body): Json<ItemIds>,
 ) -> ApiResult<Json<Added>> {
     let library_id = library_of(&state, id).await?;
-    let added = collections::add_items(&state.db, id, library_id, &body.item_ids).await?;
-    if added == 0 && !body.item_ids.is_empty() {
+    if !body.item_ids.is_empty() && collections::eligible(&state.db, library_id, &body.item_ids).await? == 0 {
         return Err(AppError::bad_request("only movies and shows of the same library can be added"));
     }
+    let added = collections::add_items(&state.db, id, library_id, &body.item_ids).await?;
     state.events.send(ServerEvent::LibraryChanged { library_id });
     Ok(Json(Added { added }))
 }
