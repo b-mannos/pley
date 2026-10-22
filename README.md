@@ -55,6 +55,9 @@ HLG and Dolby Vision.
   - A live dashboard: now playing with transcode details, transcoder metrics
     (fps, speed, hardware sessions, segments, disk), scans and system info.
   - Prometheus `/metrics` on the transcoder.
+- **Plex-compatible API** on port 32400 for Plex tools such as python-plexapi
+  and Tautulli: libraries, metadata, watch state, sessions, direct play and HLS
+  streams. See [docs/PLEX.md](docs/PLEX.md).
 - **Performance.**
   - Single binaries.
   - SQLite in WAL mode with a dedicated writer connection, and a mimalloc
@@ -149,6 +152,7 @@ or `pley.toml` in the data directory; see
 | Flag | Default | |
 |---|---|---|
 | `--bind` | `0.0.0.0:7539` | listen address (port spells PLEY on a keypad) |
+| `--plex-bind` | `0.0.0.0:32400` | Plex-compatible API, `off` to disable |
 | `--data-dir` | `%LOCALAPPDATA%\pley` / `~/.local/share/pley` | database, caches, artwork |
 | `--ffmpeg`, `--ffprobe` | from `PATH` | passed to the transcoder |
 | `--transcoder-url` | (managed) | use an external transcoder instead of spawning one |
