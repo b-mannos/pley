@@ -1,40 +1,48 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { errorMessage, isApiError } from "@/api/client";
-import { useLogin, useMe, useServer } from "@/api/hooks";
+import { fetchProfiles, useLogin, useMe, useServer } from "@/api/hooks";
 import { Splash } from "@/auth";
 import { Button, Field, TextInput } from "@/components/ui";
 import { useDocumentTitle } from "@/lib/hooks";
 import { AuthLayout } from "./AuthLayout";
-
-function safeNext(next: string | null): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/login")) return "/";
-  return next;
-}
+import { safeNext } from "./ProfilesPage";
 
 export function LoginPage() {
   useDocumentTitle("Sign in");
   const [params] = useSearchParams();
   const next = safeNext(params.get("next"));
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const server = useServer();
   const me = useMe(server.isSuccess && !server.data.setup_required);
   const login = useLogin();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [signingIn, setSigningIn] = useState(false);
 
   if (server.data?.setup_required) return <Navigate to="/setup" replace />;
-  if (me.data) return <Navigate to={next} replace />;
+  if (me.data && !signingIn) return <Navigate to={next} replace />;
   if (server.isPending || (me.isPending && me.fetchStatus === "fetching")) return <Splash />;
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
+    setSigningIn(true);
     login.mutate(
       { username: username.trim(), password },
-      { onSuccess: () => navigate(next, { replace: true }) },
+      {
+        // A household with several profiles picks one first.
+        onSuccess: async () => {
+          const profiles = await fetchProfiles(qc).catch(() => []);
+          navigate(profiles.length > 1 ? `/profiles?next=${encodeURIComponent(next)}` : next, { replace: true });
+        },
+        onError: () => setSigningIn(false),
+      },
     );
   };
 
+  // 403: disabled account, 429: too many attempts; the server explains both.
   const error = login.error
     ? isApiError(login.error, 401)
       ? "Wrong username or password."
@@ -69,7 +77,7 @@ export function LoginPage() {
             {error}
           </p>
         ) : null}
-        <Button type="submit" variant="primary" size="lg" className="w-full" loading={login.isPending}>
+        <Button type="submit" variant="primary" size="lg" className="w-full" loading={login.isPending || (signingIn && !login.isError)}>
           Sign in
         </Button>
       </form>

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
-import { LogOut, Menu as MenuIcon, RefreshCw, Search, Settings, UserRound, X } from "lucide-react";
-import { useActivity, useLibraries, useLogout } from "@/api/hooks";
+import { LogOut, Menu as MenuIcon, RefreshCw, Search, Settings, UserRound, Users, X } from "lucide-react";
+import { useActivity, useLibraries, useLogout, useProfiles } from "@/api/hooks";
 import type { ScanPhase } from "@/api/types";
 import { useAudioPlayer } from "@/audio/AudioPlayer";
 import { useAuth } from "@/auth";
 import { cn } from "@/lib/cn";
 import { useDebouncedValue } from "@/lib/hooks";
+import { Avatar } from "./Avatar";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { IconButton } from "./ui";
 
@@ -140,8 +141,11 @@ function ScanIndicator() {
 function UserMenu() {
   const user = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const logout = useLogout();
   const audio = useAudioPlayer();
+  const profiles = useProfiles(user.home);
+  const canSwitch = (profiles.data?.length ?? 0) > 1;
 
   return (
     <Menu
@@ -151,19 +155,35 @@ function UserMenu() {
           onClick={toggle}
           aria-label="Account menu"
           aria-expanded={open}
-          className="flex size-9 items-center justify-center rounded-full bg-surface-3 text-sm font-bold uppercase text-fg ring-accent transition hover:ring-2"
+          className="flex size-9 items-center justify-center rounded-full ring-accent ring-offset-2 ring-offset-bg transition hover:ring-2"
         >
-          {user.username.slice(0, 1)}
+          <Avatar user={user} size="md" />
         </button>
       )}
     >
       {(close) => (
         <>
-          <div className="px-3.5 pb-2 pt-1.5">
-            <div className="truncate text-sm font-semibold">{user.username}</div>
-            <div className="text-xs text-subtle">{user.is_admin ? "Administrator" : "User"}</div>
+          <div className="flex items-center gap-3 px-3.5 pb-2 pt-1.5">
+            <Avatar user={user} size="sm" />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold">{user.name}</div>
+              <div className="text-xs text-subtle">
+                {user.is_admin ? "Administrator" : user.managed ? "Managed profile" : "User"}
+              </div>
+            </div>
           </div>
           <MenuSeparator />
+          {canSwitch ? (
+            <MenuItem
+              icon={<Users />}
+              onClick={() => {
+                close();
+                navigate(`/profiles?next=${encodeURIComponent(location.pathname + location.search)}`);
+              }}
+            >
+              Switch profile
+            </MenuItem>
+          ) : null}
           <MenuItem
             icon={<UserRound />}
             onClick={() => {

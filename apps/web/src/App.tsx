@@ -9,10 +9,12 @@ import { ToastProvider } from "@/components/Toast";
 import { PageSpinner } from "@/components/ui";
 import { AccountPage } from "@/pages/AccountPage";
 import { HomePage } from "@/pages/HomePage";
+import { InvitePage } from "@/pages/InvitePage";
 import { ItemPage } from "@/pages/item/ItemPage";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { NotFoundPage, RouteErrorPage } from "@/pages/NotFoundPage";
+import { ProfilesPage } from "@/pages/ProfilesPage";
 import { SearchPage } from "@/pages/SearchPage";
 import { SetupPage } from "@/pages/SetupPage";
 
@@ -23,6 +25,9 @@ const LibrariesSettings = lazy(() =>
   import("@/pages/settings/LibrariesSettings").then((m) => ({ default: m.LibrariesSettings })),
 );
 const UsersSettings = lazy(() => import("@/pages/settings/UsersSettings").then((m) => ({ default: m.UsersSettings })));
+const InvitesSettings = lazy(() =>
+  import("@/pages/settings/InvitesSettings").then((m) => ({ default: m.InvitesSettings })),
+);
 const ServerSettings = lazy(() => import("@/pages/settings/ServerSettings").then((m) => ({ default: m.ServerSettings })));
 const DashboardSettings = lazy(() =>
   import("@/pages/settings/DashboardSettings").then((m) => ({ default: m.DashboardSettings })),
@@ -54,10 +59,12 @@ function PlayerFallback() {
 const router = createBrowserRouter([
   { path: "/setup", element: <SetupPage />, errorElement: <RouteErrorPage /> },
   { path: "/login", element: <LoginPage />, errorElement: <RouteErrorPage /> },
+  { path: "/invite/:code", element: <InvitePage />, errorElement: <RouteErrorPage /> },
   {
     element: <RequireAuth />,
     errorElement: <RouteErrorPage />,
     children: [
+      { path: "/profiles", element: <ProfilesPage /> },
       {
         path: "/play/:id",
         element: (
@@ -85,6 +92,7 @@ const router = createBrowserRouter([
               { index: true, element: <Navigate to="libraries" replace /> },
               { path: "libraries", element: <LibrariesSettings /> },
               { path: "users", element: <UsersSettings /> },
+              { path: "invitations", element: <InvitesSettings /> },
               { path: "server", element: <ServerSettings /> },
               { path: "dashboard", element: <DashboardSettings /> },
             ],
@@ -99,7 +107,7 @@ const router = createBrowserRouter([
 // Any authenticated request that comes back 401 (expired/revoked session) sends the user to the login screen.
 setUnauthorizedHandler(() => {
   const { pathname, search } = window.location;
-  if (pathname.startsWith("/login") || pathname.startsWith("/setup")) return;
+  if (pathname.startsWith("/login") || pathname.startsWith("/setup") || pathname.startsWith("/invite/")) return;
   const next = pathname + search;
   void router
     .navigate(next && next !== "/" ? `/login?next=${encodeURIComponent(next)}` : "/login", { replace: true })
