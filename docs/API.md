@@ -114,6 +114,8 @@ interface MediaFile {
   video_codec: string | null;       // ffprobe codec name: "h264", "hevc", "av1", ...
   audio_codec: string | null;       // codec of the default audio stream
   streams: MediaStream[];
+  selected_audio: number | null;    // tracks to start with for this user (remembered
+  selected_subtitle: number | null; // choice for the show or movie); null = default / off
 }
 
 interface MediaStream {
@@ -222,6 +224,7 @@ interface PlaybackInfo {
 | GET | `/api/items/{id}/next` | – | `{ item: ItemSummary \| null }` – episode/track following this one (for autoplay) |
 | POST | `/api/items/{id}/progress` | `{ position_ms, duration_ms?, state: "playing"\|"paused"\|"stopped", session_id? }` | `204`. ≥ 90 % marks the item watched and clears the resume point. |
 | POST | `/api/items/{id}/watched` | – | `204` (containers: all leaves) |
+| PUT | `/api/items/{id}/streams` | `{ file_id?, audio_index, subtitle_index }` (`subtitle_index: null` = off) | `204`. Remembers the choice for the whole show (episodes) or the movie, as language/title/forced, so every episode starts with its own matching tracks. |
 | POST | `/api/items/{id}/unwatched` | – | `204` |
 | POST | `/api/items/{id}/refresh` *(admin)* | – | `202` re-fetch metadata |
 | GET | `/api/items/{id}/images/{poster\|backdrop\|thumb}` | query: `w=<px>` (optional resize, bucketed), `v=` (cache buster, ignored) | image bytes (`image/jpeg`), long-lived cache headers. Falls back to parent artwork (season → show). `404` if none. |
