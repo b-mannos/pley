@@ -8,7 +8,9 @@ use std::thread::JoinHandle;
 
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use windows_sys::Win32::System::Console::{FreeConsole, GetConsoleProcessList};
+use windows_sys::Win32::System::Console::{
+    FreeConsole, GetConsoleProcessList, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
+};
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, GetSystemMetrics, KillTimer, MSG, PostThreadMessageW, SM_CXSMICON, SetTimer,
@@ -274,8 +276,23 @@ fn detach_console() {
     let attached = unsafe { GetConsoleProcessList(processes.as_mut_ptr(), processes.len() as u32) };
     if attached == 1 {
         tracing::info!("running in the notification area; logs are in the data folder");
-        // SAFETY: detaching from our own console. Later writes to stdout and
-        // stderr are ignored by the standard library.
-        unsafe { FreeConsole() };
+        crate::logging::console_detached();
+        // FreeConsole closes the console's handles but leaves their values as
+        // the standard handles, and Windows gives the same values to files
+        // opened later. Anything still writing to stdout or stderr (a panic,
+        // a library) would write into one of those files: database files
+        // opened later were corrupted that way. Point them at NUL first.
+        let nul = std::fs::OpenOptions::new().read(true).write(true).open("NUL").ok();
+        // Kept open for the life of the process (null makes writes fail
+        // quietly if NUL can't be opened).
+        let handle = nul.map(std::os::windows::io::IntoRawHandle::into_raw_handle).unwrap_or(null_mut());
+        // SAFETY: replacing our own standard handles, then detaching from
+        // our own console.
+        unsafe {
+            SetStdHandle(STD_INPUT_HANDLE, handle);
+            SetStdHandle(STD_OUTPUT_HANDLE, handle);
+            SetStdHandle(STD_ERROR_HANDLE, handle);
+            FreeConsole();
+        }
     }
 }

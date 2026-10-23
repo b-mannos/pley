@@ -2,12 +2,39 @@ use std::fs::{File, OpenOptions};
 use std::io::IsTerminal;
 use std::path::Path;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use tracing_subscriber::fmt::MakeWriter;
+use tracing_subscriber::fmt::writer::EitherWriter;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, fmt};
 
 /// Start a new log file once the previous run's log is larger than this.
 const ROTATE_BYTES: u64 = 10 * 1024 * 1024;
+
+/// Cleared when the process leaves its console window (the Windows tray
+/// does); log lines then only go to the log file.
+static CONSOLE: AtomicBool = AtomicBool::new(true);
+
+/// Stop writing log lines to the console. Call before detaching from it.
+pub fn console_detached() {
+    CONSOLE.store(false, Ordering::SeqCst);
+}
+
+/// Standard error while there is a console, nothing after.
+struct Console;
+
+impl<'a> MakeWriter<'a> for Console {
+    type Writer = EitherWriter<std::io::Stderr, std::io::Sink>;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        if CONSOLE.load(Ordering::Relaxed) {
+            EitherWriter::A(std::io::stderr())
+        } else {
+            EitherWriter::B(std::io::sink())
+        }
+    }
+}
 
 /// Initialise tracing. `filter` uses `EnvFilter` syntax; a bare level such as
 /// `info` keeps noisy dependencies at `warn`. With `file`, logs also go to that
@@ -23,7 +50,7 @@ pub fn init(filter: &str, file: Option<&Path>) {
         .with_target(false)
         .with_ansi(std::io::stderr().is_terminal())
         .log_internal_errors(false)
-        .with_writer(std::io::stderr)
+        .with_writer(Console)
         .compact();
     let file = file.and_then(open_log).map(|f| {
         fmt::layer().with_target(false).with_ansi(false).log_internal_errors(false).with_writer(Mutex::new(f)).compact()
