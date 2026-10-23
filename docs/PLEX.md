@@ -78,6 +78,16 @@ parameters; containers report `size`, `totalSize` and `offset`.
   pley playback session. It is listed in `/status/sessions` (with `User`,
   `Player` and `Session`, plus `TranscodeSession` for HLS) and in pley's
   dashboard.
+- **Notifications.** `/:/websockets/notifications` (token as `X-Plex-Token`
+  query parameter or header) streams JSON `NotificationContainer`s:
+  `playing` when a session starts, pauses, resumes or stops, and every 10 s
+  while its position moves (`PlaySessionStateNotification` with the
+  `sessionKey` of `/status/sessions`); `timeline` for items added, first
+  `state` 0 with `metadataState` `created`, then 5 (what Tautulli's recently
+  added notifications wait for); `activity` for library scans; `status`
+  (`LIBRARY_UPDATE`) when a scan ends. Each user hears about their own
+  sessions (administrators about all) and the libraries they may open; the
+  token is checked again every 10 s and the socket closes once it is revoked.
 - **Streaming.** `/library/parts/{id}/{version}/file.ext` serves the file with
   range requests (direct play; `?download=1` adds an attachment header).
   `/video/:/transcode/universal/start.m3u8` (and `/audio/…` for tracks) starts
@@ -105,7 +115,7 @@ parameters; containers report `size`, `totalSize` and `offset`.
 
 | Area | Endpoints |
 |---|---|
-| Server | `/`, `/identity`, `/servers`, `/accounts`, `/myplex/account`, `/system`, `/prefs`, `/:/prefs`, `/media/providers` |
+| Server | `/`, `/identity`, `/servers`, `/accounts`, `/myplex/account`, `/system`, `/prefs`, `/:/prefs`, `/media/providers`, `/:/websockets/notifications` |
 | Sections | `/library`, `/library/sections`, `/library/sections/{id}`, `…/all`, `…/albums`, `…/recentlyAdded`, `…/onDeck`, `…/search`, `…/firstCharacter`, `…/collections`, `…/{genre,year,decade,contentRating,studio,actor,director,writer,producer}`, `…/refresh`, `/library/sections/all/refresh` |
 | Items | `/library/metadata/{id}` (comma-separated ids allowed), `…/extras` (trailers and other bonus material as `clip`s with Plex's `extraType` and `subtype`), `…/children`, `…/allLeaves`, `…/grandchildren`, `…/thumb`, `…/art`, `…/refresh` |
 | Lists | `/library/all`, `/library/onDeck`, `/library/recentlyAdded`, `/hubs`, `/hubs/sections/{id}`, `/hubs/continueWatching/items`, `/hubs/home/recentlyAdded`, `/hubs/search`, `/search` |
@@ -169,7 +179,8 @@ With python-plexapi 4.18 the following work against the test media:
   fail. Edit in pley. (Ratings work: `/:/rate` sets the user's `userRating`.)
 - Filters on descendants (`episode.title` on shows) and on `resolution`, `hdr`,
   audio or subtitle language: ignored, so they don't narrow results.
-- The `/:/websockets/notifications` event stream, player remote control,
-  related and similar items, photos and live TV.
+- Player remote control, related and similar items, photos and live TV.
+- Notifications about transcodes (`transcodeSession.*`), deleted items and
+  reachability.
 - Per-client capability profiles: universal transcode streams are H.264/AAC
   HLS.

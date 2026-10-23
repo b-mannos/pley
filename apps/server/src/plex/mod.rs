@@ -10,6 +10,7 @@
 mod library;
 mod lists;
 mod meta;
+mod notifications;
 mod playback;
 mod server;
 mod xml;
@@ -201,6 +202,7 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/_/unscrobble", any(playback::unscrobble))
         .route("/_/rate", any(playback::rate))
         .route("/status/sessions", get(playback::sessions))
+        .route("/_/websockets/notifications", get(notifications::socket))
         .route("/status/sessions/history/all", get(server::history))
         .route("/status/sessions/history/{id}", delete(server::delete_history))
         .route("/transcode/sessions", get(playback::transcode_sessions))
@@ -354,7 +356,7 @@ impl FromRequestParts<AppState> for PlexUser {
         if let Some(user) = parts.extensions.get::<AuthUser>() {
             return Ok(PlexUser(user.clone()));
         }
-        let token = plex_token(parts).or_else(|| token_without_cookie(parts)).ok_or(PlexError::Unauthorized)?;
+        let token = request_token(parts).ok_or(PlexError::Unauthorized)?;
         let user = state.auth.validate(&token).await.ok_or(PlexError::Unauthorized)?;
         parts.extensions.insert(user.clone());
         Ok(PlexUser(user))
@@ -374,6 +376,13 @@ impl FromRequestParts<AppState> for PlexAdmin {
         }
         Ok(PlexAdmin(user))
     }
+}
+
+/// The token of a Plex request: `X-Plex-Token` (header or query), or a
+/// bearer token. Never the web UI's cookie: pages on other sites could make
+/// a browser send that.
+pub(super) fn request_token(parts: &Parts) -> Option<String> {
+    plex_token(parts).or_else(|| token_without_cookie(parts))
 }
 
 fn plex_token(parts: &Parts) -> Option<String> {

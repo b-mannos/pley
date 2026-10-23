@@ -180,7 +180,7 @@ pub async fn progress(
         catalog::record_progress(&state.db, user.id, id, body.position_ms, duration, Some(&device)).await?;
     if let Some(session) = body.session_id.as_deref().and_then(|sid| state.sessions.get(sid)) {
         if session.user_id == user.id {
-            session.update(body.position_ms, &body.state);
+            let changed = session.update(body.position_ms, &body.state);
             if session.should_touch_transcoder() {
                 if let Some(job) = session.job_id() {
                     let transcoder = state.transcoder.clone();
@@ -189,7 +189,7 @@ pub async fn progress(
                     });
                 }
             }
-            if body.state == "stopped" {
+            if changed {
                 state.events.send(ServerEvent::SessionsChanged);
             }
         }

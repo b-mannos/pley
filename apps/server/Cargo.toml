@@ -22,7 +22,7 @@ pley-transcoder-api = { path = "../../packages/transcoder-api" }
 
 anyhow = "1"
 argon2 = "0.5"
-axum = { version = "0.8", features = ["macros"] }
+axum = { version = "0.8", features = ["macros", "ws"] }
 base64 = "0.22"
 bytes = "1"
 clap = { version = "4", features = ["derive", "env"] }
@@ -98,3 +98,4 @@ tray = ["dep:open", "dep:tray-icon", "dep:objc2", "dep:objc2-app-kit", "dep:objc
 
 [dev-dependencies]
 tempfile = "3"
+tokio-tungstenite = "0.29"

@@ -431,11 +431,17 @@ impl Session {
         self.play.lock().updated_at = now();
     }
 
-    pub fn update(&self, position_ms: i64, state: &str) {
+    /// Records a progress report; whether the play state (playing, paused,
+    /// stopped) changed, which the dashboard and Plex tools hear about at once.
+    pub fn update(&self, position_ms: i64, state: &str) -> bool {
         let mut play = self.play.lock();
+        let changed = play.state != state;
         play.position_ms = position_ms;
-        play.state = state.to_owned();
+        if changed {
+            play.state = state.to_owned();
+        }
         play.updated_at = now();
+        changed
     }
 
     /// Keep the transcoder job alive while the player reports progress (paused players).

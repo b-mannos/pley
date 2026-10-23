@@ -43,7 +43,7 @@ fn remember(session_id: &str, client: &ClientInfo) {
     entry.client = client.clone();
 }
 
-fn session_key(session_id: &str) -> (i64, ClientInfo) {
+pub(super) fn session_key(session_id: &str) -> (i64, ClientInfo) {
     let mut tracked = TRACKED.lock();
     let entry = tracked
         .entry(session_id.to_owned())
@@ -51,7 +51,7 @@ fn session_key(session_id: &str) -> (i64, ClientInfo) {
     (entry.key, entry.client.clone())
 }
 
-fn forget_ended(live: &[Arc<Session>]) {
+pub(super) fn forget_ended(live: &[Arc<Session>]) {
     TRACKED.lock().retain(|id, _| live.iter().any(|s| &s.id == id));
 }
 
@@ -194,7 +194,7 @@ async fn report(
     });
     match existing {
         Some(session) => {
-            session.update(time_ms, play_state);
+            let changed = session.update(time_ms, play_state);
             if session.should_touch_transcoder() {
                 if let Some(job) = session.job_id() {
                     let transcoder = state.transcoder.clone();
@@ -203,7 +203,7 @@ async fn report(
                     });
                 }
             }
-            if play_state == "stopped" {
+            if changed {
                 state.events.send(ServerEvent::SessionsChanged);
             }
         }
