@@ -176,5 +176,41 @@ mod tests {
         assert_eq!(parse_packet_line("12.345000,___"), None);
         assert_eq!(parse_packet_line("N/A,K__"), None);
         assert_eq!(parse_packet_line("garbage"), None);
+        assert_eq!(parse_packet_line("-0.042000,K__"), None, "before the start");
+        assert_eq!(parse_packet_line(" 0.5 ,KD_"), Some(500));
+    }
+
+    fn store(dir: &Path) -> Arc<KeyframeStore> {
+        let ff = Arc::new(Ffmpeg {
+            ffmpeg: dir.join("no-ffmpeg"),
+            ffprobe: dir.join("no-ffprobe"),
+            caps: Default::default(),
+            segment_times_relative: true,
+        });
+        KeyframeStore::new(ff, Arc::new(Metrics::default()), dir.join("keyframes"))
+    }
+
+    #[tokio::test]
+    async fn indexes_are_kept_per_file_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let movie = dir.path().join("movie.mp4");
+        std::fs::write(&movie, b"frames").unwrap();
+        let keyframes = store(dir.path());
+        assert!(keyframes.get(&movie).is_none());
+        keyframes.save(&file_key(&movie).unwrap(), vec![0, 2_002, 4_004]);
+        assert_eq!(keyframes.get(&movie).as_deref(), Some(&vec![0, 2_002, 4_004]));
+        // On disk too: a new store (a restarted transcoder) finds it.
+        let restarted = store(dir.path());
+        assert_eq!(restarted.get(&movie).as_deref(), Some(&vec![0, 2_002, 4_004]));
+        // An index exists: no scan is queued.
+        restarted.request(&movie);
+        assert!(restarted.pending.lock().is_empty());
+        // A replaced file needs a new index; empty ones are never stored.
+        std::fs::write(&movie, b"other frames").unwrap();
+        assert!(restarted.get(&movie).is_none());
+        restarted.save(&file_key(&movie).unwrap(), vec![]);
+        assert!(restarted.get(&movie).is_none());
+        // Only Matroska files have cues to read; others wait for a scan.
+        assert!(restarted.get_or_cues(&movie).await.is_none());
     }
 }

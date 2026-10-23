@@ -484,4 +484,85 @@ mod tests {
         let info = parse_ffprobe_json(json.as_bytes(), Path::new("a.mp4")).unwrap();
         assert_eq!(info.video().unwrap().dynamic_range, Some(DynamicRange::Hlg));
     }
+
+    fn video_range(stream: &str) -> Option<DynamicRange> {
+        let json = format!(r#"{{"streams":[{stream}],"format":{{"format_name":"matroska","duration":"10"}}}}"#);
+        parse_ffprobe_json(json.as_bytes(), Path::new("a.mkv")).unwrap().video().unwrap().dynamic_range
+    }
+
+    #[test]
+    fn more_dynamic_ranges() {
+        let hdr10plus = r#"{"index":0,"codec_type":"video","codec_name":"hevc","pix_fmt":"yuv420p10le","color_transfer":"smpte2084",
+            "side_data_list":[{"side_data_type":"HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}]}"#;
+        assert_eq!(video_range(hdr10plus), Some(DynamicRange::Hdr10plus));
+        // Untagged transfer, 10-bit BT.2020: PQ in practice.
+        let untagged = r#"{"index":0,"codec_type":"video","codec_name":"hevc","pix_fmt":"yuv420p10le","color_primaries":"bt2020"}"#;
+        assert_eq!(video_range(untagged), Some(DynamicRange::Hdr10));
+        let eight_bit =
+            r#"{"index":0,"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","color_primaries":"bt2020"}"#;
+        assert_eq!(video_range(eight_bit), Some(DynamicRange::Sdr));
+        let bt709 =
+            r#"{"index":0,"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","color_transfer":"bt709"}"#;
+        assert_eq!(video_range(bt709), Some(DynamicRange::Sdr));
+    }
+
+    #[test]
+    fn odd_ffprobe_output() {
+        let json = r#"{
+          "streams": [
+            {"index":0,"codec_type":"video","codec_name":"mpeg2video","field_order":"tt","avg_frame_rate":"0/0","r_frame_rate":"30000/1001","tags":{"LANGUAGE":"und"}},
+            {"index":1,"codec_type":"audio","codec_name":"mp2","duration":"95.5","tags":{"language":""}},
+            {"index":2,"codec_type":"data","codec_name":"bin_data"},
+            {"index":3,"codec_type":"attachment","codec_name":"ttf"},
+            {"index":4,"codec_type":"audio","codec_name":"ac3","duration":"120.25","profile":"unknown"}
+          ],
+          "format": {"format_name":"mpeg","start_time":"N/A"},
+          "chapters": [{"start_time":"0.0","end_time":"60.0","tags":{"TITLE":"Part 1"}}, {"start_time":"60.0"}]
+        }"#;
+        let info = parse_ffprobe_json(json.as_bytes(), Path::new("old.vob")).unwrap();
+        assert_eq!(info.container.as_deref(), Some("mpeg"));
+        assert_eq!(
+            info.streams.iter().map(|s| s.index).collect::<Vec<_>>(),
+            [0, 1, 4],
+            "data and attachments are not streams"
+        );
+        let video = info.video().unwrap();
+        assert_eq!(video.interlaced, Some(true));
+        assert_eq!(video.frame_rate, Some(29.97), "the real frame rate when the average is unknown");
+        assert_eq!(video.language, None, "und is no language");
+        assert_eq!(info.stream(1).unwrap().language, None);
+        assert_eq!(info.stream(4).unwrap().profile, None);
+        assert_eq!(info.duration_ms, Some(120_250), "the longest stream without a format duration");
+        assert_eq!(info.start_ms, None);
+        assert_eq!(info.chapters.len(), 1, "a chapter without an end is dropped");
+        assert_eq!(info.chapters[0].title.as_deref(), Some("Part 1"));
+        assert!(parse_ffprobe_json(b"not json", Path::new("a.mkv")).is_err());
+    }
+
+    #[test]
+    fn frame_rates_and_windows_media() {
+        assert_eq!(parse_rate(Some("25")), Some(25.0));
+        assert_eq!(parse_rate(Some("24000/1001")), Some(23.976));
+        assert_eq!(parse_rate(Some("0/0")), None);
+        assert_eq!(parse_rate(Some("90000/1")), None, "a time base, not a frame rate");
+        assert_eq!(parse_rate(Some("N/A")), None);
+        assert_eq!(parse_secs_ms("-1.5"), None);
+        assert_eq!(parse_secs_ms(" 1.0006 "), Some(1_001));
+        let s = |kind| MediaStream { kind, ..Default::default() };
+        assert_eq!(
+            normalize_container(Some("asf"), Path::new("a.wmv"), &[s(StreamKind::Video)]).as_deref(),
+            Some("wmv")
+        );
+        assert_eq!(
+            normalize_container(Some("asf"), Path::new("a.wma"), &[s(StreamKind::Audio)]).as_deref(),
+            Some("wma")
+        );
+        assert_eq!(normalize_container(Some("matroska,webm"), Path::new("a.webm"), &[]).as_deref(), Some("webm"));
+        assert_eq!(
+            normalize_container(Some("dv"), Path::new("a.dv"), &[]).as_deref(),
+            Some("dv"),
+            "unknown names pass through"
+        );
+        assert_eq!(normalize_container(None, Path::new("a.mkv"), &[]), None);
+    }
 }

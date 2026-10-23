@@ -195,5 +195,44 @@ mod tests {
     #[test]
     fn input_arg_is_prefixed() {
         assert_eq!(input_arg(Path::new("/m/a.mkv")), OsString::from("file:/m/a.mkv"));
+        // A file named like an option or a protocol stays a file.
+        assert_eq!(input_arg(Path::new("-i")), OsString::from("file:-i"));
+        assert_eq!(input_arg(Path::new("http://x")), OsString::from("file:http://x"));
+    }
+
+    #[test]
+    fn file_keys_change_with_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.mkv");
+        let b = dir.path().join("b.mkv");
+        std::fs::write(&a, b"one").unwrap();
+        std::fs::write(&b, b"one").unwrap();
+        let key = file_key(&a).unwrap();
+        assert_eq!(key.len(), 32);
+        assert_eq!(file_key(&a).unwrap(), key, "stable");
+        assert_ne!(file_key(&b).unwrap(), key, "another path");
+        std::fs::write(&a, b"longer").unwrap();
+        assert_ne!(file_key(&a).unwrap(), key, "a replaced file");
+        assert!(file_key(&dir.path().join("missing.mkv")).is_err());
+    }
+
+    #[test]
+    fn dir_sizes_count_nested_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("jobs/abc")).unwrap();
+        std::fs::write(dir.path().join("a"), vec![0u8; 10]).unwrap();
+        std::fs::write(dir.path().join("jobs/abc/0.ts"), vec![0u8; 100]).unwrap();
+        assert_eq!(dir_size(dir.path()), 110);
+        assert_eq!(dir_size(&dir.path().join("missing")), 0);
+    }
+
+    #[test]
+    fn explicit_paths_are_used_as_they_are() {
+        let dir = tempfile::tempdir().unwrap();
+        let tool = dir.path().join("ffmpeg-custom");
+        std::fs::write(&tool, b"").unwrap();
+        assert_eq!(resolve_executable(&tool), Some(tool.clone()));
+        assert_eq!(resolve_executable(&dir.path().join("missing")), None);
+        assert_eq!(resolve_executable(Path::new("no-such-program-pley-test")), None);
     }
 }
