@@ -1952,6 +1952,7 @@ dependencies = [
  "hex",
  "image",
  "ksni",
+ "libc",
  "mimalloc",
  "mime_guess",
  "notify",

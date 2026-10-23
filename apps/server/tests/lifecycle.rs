@@ -1,4 +1,5 @@
-//! Starting and stopping the server: what shutdown waits for, and for how
+//! Starting and stopping the server: one server per data directory, nothing
+//! touched before the ports are bound, what shutdown waits for and for how
 //! long. Servers here are stopped through their tray context's Quit (see
 //! `tests/shutdown.rs` for `pley::request_shutdown`).
 
@@ -12,6 +13,7 @@ use futures::StreamExt;
 use pley::Config;
 use pley::desktop::{Command, TrayContext, TrayLauncher};
 use pley::events::ServerEvent;
+use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinHandle;
 
@@ -21,6 +23,19 @@ fn config(data: &std::path::Path) -> Config {
     let mut config = Config::for_data_dir(data);
     config.transcoder_path = Some(data.join("no-transcoder-in-tests"));
     config
+}
+
+/// The `pley` executable, without the `PLEY_*` settings of whoever runs the
+/// tests.
+fn pley_exe() -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_pley"));
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("PLEY_") {
+            command.env_remove(key);
+        }
+    }
+    command.kill_on_drop(true);
+    command
 }
 
 /// pley running in this process: its address (`127.0.0.1:port`), the tray
@@ -42,6 +57,64 @@ async fn start(config: Config) -> (String, TrayContext, JoinHandle<anyhow::Resul
 
 async fn stopped(server: JoinHandle<anyhow::Result<()>>, within: Duration) -> anyhow::Result<()> {
     tokio::time::timeout(within, server).await.expect("pley stopped in time").expect("pley did not panic")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn one_server_per_data_directory() {
+    let data = tempfile::tempdir().unwrap();
+    let (_, ctx, server) = start(config(data.path())).await;
+
+    // A second copy gives up at once, before it opens the database.
+    let second = tokio::time::timeout(Duration::from_secs(10), pley::run(config(data.path()))).await;
+    let message = format!("{:#}", second.expect("the second copy gives up at once").expect_err("the directory is taken"));
+    assert!(message.contains("pley is already running"), "{message}");
+    assert!(message.contains(&format!("(process {})", std::process::id())), "{message}");
+
+    ctx.send(Command::Quit);
+    stopped(server, Duration::from_secs(5)).await.unwrap();
+    // The lock went with the server that held it.
+    let (_, ctx, server) = start(config(data.path())).await;
+    ctx.send(Command::Quit);
+    stopped(server, Duration::from_secs(5)).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_taken_port_stops_the_start_before_the_database_is_opened() {
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let mut config = config(data.path());
+    config.bind = taken.local_addr().unwrap();
+    let message = format!("{:#}", pley::run(config).await.expect_err("the port is taken"));
+    assert!(message.contains(&format!("cannot listen on {}", taken.local_addr().unwrap())), "{message}");
+    for made_by_the_start in ["pley.db", "cache", "transcode"] {
+        assert!(!data.path().join(made_by_the_start).exists(), "{made_by_the_start} exists");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reset_password_works_next_to_a_running_server() {
+    let data = tempfile::tempdir().unwrap();
+    let (addr, ctx, server) = start(config(data.path())).await;
+
+    let output = pley_exe()
+        .args(["reset-password", "admin", "password1", "--admin", "--data-dir"])
+        .arg(data.path())
+        .output()
+        .await
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("created user 'admin' (admin)"));
+    let http = reqwest::Client::builder().no_proxy().build().unwrap();
+    let login = http
+        .post(format!("http://{addr}/api/auth/login"))
+        .json(&json!({"username": "admin", "password": "password1"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(login.status(), reqwest::StatusCode::OK, "the running server sees the new account");
+
+    ctx.send(Command::Quit);
+    stopped(server, Duration::from_secs(5)).await.unwrap();
 }
 
 #[tokio::test]

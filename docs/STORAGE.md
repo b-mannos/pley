@@ -7,6 +7,7 @@ artwork, which pley never moves or changes.
 ```
 <data>/
   pley.db                    the database (SQLite, WAL)
+  pley.lock                  locked while pley runs: one server per data folder
   metadata/blobs/ab/<sha256>.<ext>
                              pictures that are metadata
   media/ab/<fingerprint>/    files generated from one media file

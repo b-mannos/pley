@@ -17,6 +17,7 @@ pub mod error;
 pub mod events;
 pub mod history;
 pub mod images;
+pub mod instance;
 pub mod library;
 pub mod logging;
 pub mod markers;
@@ -97,22 +98,27 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 /// icon (if any), which is removed again after shutdown. The tray's Quit stops
 /// this server.
 ///
+/// Before the database is opened, the data directory is locked (one server
+/// per data directory, see [`instance`]) and both ports are bound: a second
+/// copy, or one whose port is taken, stops without touching anything.
+///
 /// On shutdown the listeners close, the event streams end, and requests in
 /// progress get [`Config::shutdown_grace`] to finish; connections still open
 /// after that (a film playing directly) are left to the runtime's shutdown
 /// (see [`serve`]).
 pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) -> anyhow::Result<()> {
+    let _instance = instance::InstanceLock::acquire(&config.data_dir)?;
     let bind = config.bind;
-    let grace = config.shutdown_grace;
-    let state = AppState::init(config).await?;
-    state.start_background_tasks();
-
-    let app = api::router(state.clone());
     let listener =
         tokio::net::TcpListener::bind(bind).await.map_err(|e| anyhow::anyhow!("cannot listen on {bind}: {e}"))?;
     let addr = listener.local_addr()?;
+    let plex = plex::bind(config.plex_bind).await;
+
+    let grace = config.shutdown_grace;
+    let state = AppState::init(config).await?;
+    state.start_background_tasks();
+    let app = api::router(state.clone());
     tracing::info!("pley {} listening on http://{}", env!("CARGO_PKG_VERSION"), display_addr(addr));
-    let plex = plex::bind(state.config.plex_bind).await;
     let tray = tray.and_then(|launch| launch(desktop::TrayContext::new(&state, addr)));
 
     let stopping = state.stopping.clone();
