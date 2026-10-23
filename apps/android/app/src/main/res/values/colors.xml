@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="pley_bg">#0B0D10</color>
+    <color name="pley_tile">#0A1622</color>
+    <color name="pley_accent">#38BDF8</color>
+</resources>

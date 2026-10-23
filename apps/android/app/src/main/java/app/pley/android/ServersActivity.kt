@@ -1,0 +1,304 @@
+package app.pley.android
+
+import android.content.Context
+import android.content.Intent
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+
+/**
+ * The list of servers the app opens with: the ones opened before and the
+ * ones answering on the local network. The server opened last opens by
+ * itself, unless the web app asked for this list ("Switch server").
+ */
+class ServersActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        val store = ServerStore(this)
+        val pick = intent.getBooleanExtra(EXTRA_PICK, false)
+        setContent {
+            PleyTheme {
+                ServersScreen(store, autoOpen = !pick && savedInstanceState == null) { url ->
+                    startActivity(WebActivity.intent(this, url))
+                    finish()
+                }
+            }
+        }
+    }
+
+    companion object {
+        private const val EXTRA_PICK = "pick"
+
+        /** The list, without opening the last server by itself. */
+        fun pick(context: Context): Intent = Intent(context, ServersActivity::class.java).putExtra(EXTRA_PICK, true)
+    }
+}
+
+@Composable
+private fun ServersScreen(store: ServerStore, autoOpen: Boolean, onOpen: (String) -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var saved by remember { mutableStateOf(store.all()) }
+    var found by remember { mutableStateOf(emptyList<FoundServer>()) }
+    var searching by remember { mutableStateOf(false) }
+    val reachable = remember { mutableStateMapOf<String, Boolean>() }
+    var busy by remember { mutableStateOf<String?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var address by remember { mutableStateOf("") }
+    var addressError by remember { mutableStateOf<String?>(null) }
+    var opening by remember { mutableStateOf(if (autoOpen) Servers.lastUsed(saved) else null) }
+    var openingJob by remember { mutableStateOf<Job?>(null) }
+
+    fun search() {
+        searching = true
+        scope.launch {
+            val checks = saved.map { server ->
+                launch {
+                    reachable[server.url] = runCatching { PleyApi(server.url, null).serverInfo() }.isSuccess
+                }
+            }
+            found = Discovery.search(context)
+            checks.forEach { it.join() }
+            searching = false
+        }
+    }
+
+    fun open(url: String, id: String?) {
+        busy = url
+        status = null
+        scope.launch {
+            try {
+                val info = PleyApi(url, null).serverInfo()
+                store.save(SavedServer(url, info.name, id, System.currentTimeMillis()))
+                onOpen(url)
+            } catch (e: Exception) {
+                reachable[url] = false
+                status = "Couldn't reach ${Servers.displayAddress(url)}: ${describe(e)}"
+                busy = null
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val last = opening
+        if (last == null) {
+            search()
+        } else {
+            openingJob = launch {
+                try {
+                    val info = PleyApi(last.url, null).serverInfo()
+                    store.save(last.copy(name = info.name, lastUsed = System.currentTimeMillis()))
+                    onOpen(last.url)
+                } catch (e: Exception) {
+                    reachable[last.url] = false
+                    status = "${last.name} didn't answer: ${describe(e)}"
+                    opening = null
+                    search()
+                }
+            }
+        }
+    }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(PleyColors.Bg)
+            .systemBarsPadding()
+            .imePadding(),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Column(
+            Modifier
+                .widthIn(max = 520.dp)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 40.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Image(painterResource(R.drawable.pley_mark), contentDescription = null, modifier = Modifier.size(40.dp))
+                Text("pley", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = PleyColors.Fg)
+            }
+            Spacer(Modifier.height(36.dp))
+
+            val auto = opening
+            if (auto != null) {
+                Text("Opening ${auto.name}…", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = PleyColors.Fg)
+                TextButton(onClick = {
+                    openingJob?.cancel()
+                    opening = null
+                    search()
+                }) { Text("Choose another server") }
+                return@Column
+            }
+
+            Text("Choose a server", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = PleyColors.Fg)
+            Spacer(Modifier.height(14.dp))
+            val entries = Servers.merge(saved, found)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (entry in entries) {
+                    ServerRow(
+                        entry = entry,
+                        online = reachable[entry.url],
+                        connecting = busy == entry.url,
+                        enabled = busy == null,
+                        onOpen = { open(entry.url, entry.id) },
+                        onForget = if (entry.saved) {
+                            {
+                                store.forget(entry.url)
+                                saved = store.all()
+                            }
+                        } else {
+                            null
+                        },
+                    )
+                }
+            }
+            val note = status ?: when {
+                searching -> "Looking for servers on this network…"
+                entries.isEmpty() -> "No server answered. Check that pley is running on it, or enter its address."
+                else -> null
+            }
+            if (note != null) {
+                Text(note, fontSize = 14.sp, color = PleyColors.Muted, modifier = Modifier.padding(top = 12.dp))
+            }
+            if (!searching) {
+                TextButton(onClick = { search() }, modifier = Modifier.padding(top = 4.dp)) {
+                    Text("Search the network again")
+                }
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 20.dp), color = PleyColors.Border)
+            Text("Or enter its address", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = PleyColors.Fg)
+            Spacer(Modifier.height(8.dp))
+            val connect = {
+                val url = Servers.normalizeUrl(address)
+                if (url == null) {
+                    addressError = "Enter an address such as nas, 192.168.1.20 or https://pley.example.com."
+                } else {
+                    addressError = null
+                    open(url, null)
+                }
+            }
+            OutlinedTextField(
+                value = address,
+                onValueChange = { address = it },
+                singleLine = true,
+                placeholder = { Text("nas, 192.168.1.20 or https://…") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
+                keyboardActions = KeyboardActions(onGo = { connect() }),
+                isError = addressError != null,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (addressError != null) {
+                Text(addressError ?: "", fontSize = 13.sp, color = PleyColors.Danger, modifier = Modifier.padding(top = 6.dp))
+            }
+            Button(onClick = { connect() }, enabled = busy == null, modifier = Modifier.padding(top = 12.dp)) {
+                Text("Connect", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ServerRow(
+    entry: ServerEntry,
+    online: Boolean?,
+    connecting: Boolean,
+    enabled: Boolean,
+    onOpen: () -> Unit,
+    onForget: (() -> Unit)?,
+) {
+    Surface(
+        onClick = onOpen,
+        enabled = enabled,
+        shape = RoundedCornerShape(10.dp),
+        color = PleyColors.Surface,
+        border = BorderStroke(1.dp, PleyColors.Border),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 16.dp)) {
+            val dot = when {
+                entry.found || online == true -> PleyColors.Success
+                online == false -> PleyColors.Danger
+                else -> PleyColors.Subtle
+            }
+            Box(Modifier.size(9.dp).background(dot, CircleShape))
+            Column(
+                Modifier
+                    .weight(1f)
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+            ) {
+                Text(entry.name, fontWeight = FontWeight.SemiBold, color = PleyColors.Fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    if (connecting) "Connecting…" else Servers.displayAddress(entry.url),
+                    fontSize = 13.sp,
+                    color = PleyColors.Muted,
+                )
+            }
+            val tag = when {
+                !entry.saved -> "New"
+                entry.found -> "On this network"
+                else -> null
+            }
+            if (tag != null) Text(tag, fontSize = 12.sp, color = PleyColors.Subtle, modifier = Modifier.padding(end = 8.dp))
+            if (onForget != null) {
+                TextButton(
+                    onClick = onForget,
+                    modifier = Modifier.semantics { contentDescription = "Forget ${entry.name}" },
+                ) { Text("×", fontSize = 20.sp, color = PleyColors.Subtle) }
+            }
+        }
+    }
+}
