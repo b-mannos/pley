@@ -122,6 +122,7 @@ pub async fn system(State(state): State<AppState>, _admin: AdminUser) -> ApiResu
         "arch": std::env::consts::ARCH,
         "uptime_secs": state.started_at.elapsed().as_secs(),
         "data_dir": state.config.data_dir.to_string_lossy(),
+        "database": state.backups.health(),
         "transcoder": transcoder,
         "counts": counts,
     })))
@@ -153,6 +154,38 @@ pub struct TranscoderStatusDto {
     work_dir_bytes: u64,
     counters: Counters,
     jobs: Vec<TranscoderJob>,
+}
+
+#[derive(Serialize)]
+pub struct BackupsDto {
+    health: crate::backup::Health,
+    backups: Vec<crate::backup::BackupInfo>,
+}
+
+/// The database's health and its backups, newest first.
+pub async fn backups(State(state): State<AppState>, _admin: AdminUser) -> Json<BackupsDto> {
+    Json(BackupsDto { health: state.backups.health(), backups: state.backups.list().await })
+}
+
+/// Back the database up now.
+pub async fn create_backup(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+) -> ApiResult<Json<crate::backup::BackupInfo>> {
+    Ok(Json(state.backups.create().await.map_err(AppError::Internal)?))
+}
+
+/// Space used by stored pictures, generated media files and the cache.
+pub async fn storage(State(state): State<AppState>, _admin: AdminUser) -> ApiResult<Json<crate::store::Usage>> {
+    Ok(Json(state.store.usage().await.map_err(AppError::Internal)?))
+}
+
+/// Remove pictures and generated files nothing uses any more.
+pub async fn clean_storage(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+) -> ApiResult<Json<crate::store::CleanReport>> {
+    Ok(Json(state.store.clean().await.map_err(AppError::Internal)?))
 }
 
 pub async fn transcoder_status(State(state): State<AppState>, _admin: AdminUser) -> Json<TranscoderStatusDto> {

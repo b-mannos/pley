@@ -75,6 +75,23 @@ impl TestApp {
         Reply { status, headers, body, bytes }
     }
 
+    /// A request with a raw body (uploads).
+    async fn call_raw(&self, method: Method, uri: &str, token: &str, bytes: Vec<u8>) -> Reply {
+        let req = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .body(Body::from(bytes))
+            .unwrap();
+        let resp = self.router.clone().oneshot(req).await.unwrap();
+        let status = resp.status();
+        let headers = resp.headers().clone();
+        let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024 * 1024).await.unwrap().to_vec();
+        let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        Reply { status, headers, body, bytes }
+    }
+
     async fn get(&self, uri: &str, token: &str) -> Reply {
         self.call(Method::GET, uri, Some(token), None, &[]).await
     }
@@ -874,7 +891,8 @@ async fn cast_and_crew() {
     let wick = id_in(&app.get(&format!("/api/libraries/{hidden}/items"), &admin).await, "John Wick");
 
     // Credits come from TMDB in real use.
-    let keanu = credit(6384, "Keanu Reeves", Role::Actor, Some("Neo"), Some("/keanu.jpg"));
+    let keanu_photo = "https://image.tmdb.org/t/p/h632/keanu.jpg";
+    let keanu = credit(6384, "Keanu Reeves", Role::Actor, Some("Neo"), Some(keanu_photo));
     people::replace(
         &app.state.db,
         matrix,
@@ -895,7 +913,8 @@ async fn cast_and_crew() {
     assert_eq!(cast.len(), 2);
     assert_eq!(cast[0]["name"], json!("Keanu Reeves"));
     assert_eq!(cast[0]["character"], json!("Neo"));
-    assert!(cast[0]["photo_url"].as_str().unwrap().ends_with("/photo?v=keanu"));
+    let photo_url = cast[0]["photo_url"].as_str().unwrap().to_owned();
+    assert!(photo_url.contains("/photo?v="), "{photo_url}");
     assert!(cast[1].get("photo_url").is_none());
     assert_eq!(detail.body["crew"][0]["role"], json!("director"));
 
@@ -912,11 +931,15 @@ async fn cast_and_crew() {
     assert_eq!(search.body["people"][0]["id"], json!(person));
     assert_eq!(app.get("/api/search?q=eanu", &admin).await.body["people"], json!([]), "word prefixes only");
 
-    // Photos are downloaded on first use; this one is already there.
-    let photos = app.state.config.metadata_dir().join("people");
-    std::fs::create_dir_all(&photos).unwrap();
-    std::fs::write(photos.join("keanu.jpg"), [0xFF, 0xD8, 0xFF, 0xE0, 0, 0]).unwrap();
-    let photo = app.get(&format!("/api/people/{person}/photo?v=keanu"), &admin).await;
+    // Photos are downloaded on first use; this one is already in the store.
+    let blob = app.state.store.put(&[0xFF, 0xD8, 0xFF, 0xE0, 0, 0], "jpg").await.unwrap();
+    sqlx::query("INSERT INTO remote_images (url, blob, fetched_at) VALUES (?, ?, 0)")
+        .bind(keanu_photo)
+        .bind(&blob)
+        .execute(&app.state.db.write)
+        .await
+        .unwrap();
+    let photo = app.get(&photo_url, &admin).await;
     assert_eq!(photo.status, StatusCode::OK);
     assert_eq!(photo.headers[header::CONTENT_TYPE], "image/jpeg");
     let moss = cast[1]["id"].as_i64().unwrap();
@@ -1073,4 +1096,81 @@ async fn user_ratings() {
     assert_eq!(rate(id_of("Brazil"), Value::Null).await.status, StatusCode::NO_CONTENT);
     let brazil = app.get(&format!("/api/items/{}", id_of("Brazil")), &admin).await;
     assert!(brazil.body["user_state"].get("rating").is_none());
+}
+
+fn png() -> Vec<u8> {
+    let mut out = Vec::new();
+    image::RgbImage::from_pixel(8, 8, image::Rgb([30, 140, 220]))
+        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+        .unwrap();
+    out
+}
+
+#[tokio::test]
+async fn pictures_are_stored_by_content_and_cleaned_up() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Alien (1979).mkv", 4096);
+    app.media_file("movies/Brazil (1985).mkv", 4096);
+    let lib = app.library(&admin, "Movies", "movies", "movies").await;
+    let page = app.get(&format!("/api/libraries/{lib}/items"), &admin).await;
+    let id_of = |title: &str| {
+        page.body["items"].as_array().unwrap().iter().find(|i| i["title"] == title).unwrap()["id"].as_i64().unwrap()
+    };
+    let (alien, brazil) = (id_of("Alien"), id_of("Brazil"));
+    let db = &app.state.db;
+
+    // Pictures kept the old way (absolute paths in the metadata folder) move into the store.
+    let metadata_dir = app.state.config.metadata_dir();
+    let old = metadata_dir.join("items").join(alien.to_string()).join("poster.png");
+    std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+    std::fs::write(&old, png()).unwrap();
+    sqlx::query("UPDATE items SET poster = ? WHERE id = ?")
+        .bind(old.to_string_lossy().into_owned())
+        .bind(alien)
+        .execute(&db.write)
+        .await
+        .unwrap();
+    app.state.store.migrate_legacy(&metadata_dir).await.unwrap();
+    let poster: String =
+        sqlx::query_scalar("SELECT poster FROM items WHERE id = ?").bind(alien).fetch_one(&db.read).await.unwrap();
+    assert!(poster.starts_with("blob:"), "{poster}");
+    assert!(!old.exists());
+    assert!(!metadata_dir.join("items").exists(), "old folders are removed");
+    let image = app.get(&format!("/api/items/{alien}/images/poster"), &admin).await;
+    assert_eq!(image.status, StatusCode::OK);
+    assert_eq!(image.headers[header::CONTENT_TYPE], "image/png");
+
+    // The same upload for two items is stored once.
+    for id in [alien, brazil] {
+        let reply =
+            app.call_raw(Method::POST, &format!("/api/items/{id}/artwork/backdrop/upload"), &admin, png()).await;
+        assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+    }
+    let backdrops: Vec<String> =
+        sqlx::query_scalar("SELECT DISTINCT value FROM item_overrides WHERE field = 'backdrop' AND item_id IN (?, ?)")
+            .bind(alien)
+            .bind(brazil)
+            .fetch_all(&db.read)
+            .await
+            .unwrap();
+    assert_eq!(backdrops.len(), 1);
+
+    // Resetting one keeps the picture (the other uses it); resetting both frees it.
+    let usage = app.state.store.usage().await.unwrap();
+    assert_eq!(usage.blobs, 2);
+    for id in [alien, brazil] {
+        let reply =
+            app.call(Method::DELETE, &format!("/api/items/{id}/artwork/backdrop"), Some(&admin), None, &[]).await;
+        assert_eq!(reply.status, StatusCode::NO_CONTENT, "{:?}", reply.body);
+    }
+    let report = app.state.store.clean_older_than(std::time::Duration::ZERO).await.unwrap();
+    assert_eq!(report.blobs_removed, 1);
+    assert!(app.state.store.exists(&poster), "the poster is still used");
+
+    // Scanned files get a fingerprint (the OpenSubtitles hash).
+    app.state.store.fingerprint_pending().await;
+    let fingerprints: Vec<Option<String>> =
+        sqlx::query_scalar("SELECT fingerprint FROM media_files").fetch_all(&db.read).await.unwrap();
+    assert!(fingerprints.iter().all(|f| f.as_ref().is_some_and(|f| f.len() == 16)), "{fingerprints:?}");
 }

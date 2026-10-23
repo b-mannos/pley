@@ -325,7 +325,7 @@ async fn cast_and_crew_tags_and_filters() {
     let credit = |tmdb_id: i64, name: &str, role: Role, character: Option<&str>| NewCredit {
         tmdb_id,
         name: name.into(),
-        photo: Some("/face.jpg".into()),
+        photo: Some("https://image.tmdb.org/t/p/h632/face.jpg".into()),
         role,
         character: character.map(str::to_owned),
     };

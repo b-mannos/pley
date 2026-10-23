@@ -1,11 +1,11 @@
 //! Cast and crew. Credits come from TMDB along with the rest of the metadata;
-//! people are shared between items, and a person's photo is downloaded the
-//! first time someone looks at it.
+//! people are shared between items, and a person's photo is downloaded into
+//! the blob store ([`crate::store`]) the first time someone looks at it.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::catalog::{self, ItemSummary};
 use crate::db::Db;
@@ -125,6 +125,7 @@ impl Role {
 pub struct NewCredit {
     pub tmdb_id: i64,
     pub name: String,
+    /// Full URL of the person's photo.
     pub photo: Option<String>,
     pub role: Role,
     pub character: Option<String>,
@@ -134,11 +135,23 @@ fn clean(value: Option<&str>) -> Option<String> {
     value.map(str::trim).filter(|v| !v.is_empty()).map(str::to_owned)
 }
 
+/// Full-size URL of a TMDB profile image path ("/abc.jpg").
+pub fn tmdb_photo(profile_path: Option<&str>) -> Option<String> {
+    let path = clean(profile_path)?;
+    let name = path.strip_prefix('/')?;
+    let (stem, ext) = name.rsplit_once('.')?;
+    let plain = !stem.is_empty()
+        && stem.len() <= 64
+        && stem.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        && matches!(ext, "jpg" | "jpeg" | "png" | "webp");
+    plain.then(|| format!("https://image.tmdb.org/t/p/h632{path}"))
+}
+
 fn actor(c: &CastCredit) -> NewCredit {
     NewCredit {
         tmdb_id: c.id,
         name: c.name.clone(),
-        photo: clean(c.profile_path.as_deref()),
+        photo: tmdb_photo(c.profile_path.as_deref()),
         role: Role::Actor,
         character: clean(c.character.as_deref()),
     }
@@ -158,7 +171,7 @@ fn crew(crew: &[CrewCredit], producers: bool) -> Vec<NewCredit> {
             Some(NewCredit {
                 tmdb_id: c.id,
                 name: c.name.clone(),
-                photo: clean(c.profile_path.as_deref()),
+                photo: tmdb_photo(c.profile_path.as_deref()),
                 role,
                 character: None,
             })
@@ -225,7 +238,7 @@ pub fn show_credits(credits: &AggregateCredits, creators: &[Creator]) -> Vec<New
         .map(|c| NewCredit {
             tmdb_id: c.id,
             name: c.name.clone(),
-            photo: clean(c.profile_path.as_deref()),
+            photo: tmdb_photo(c.profile_path.as_deref()),
             role: Role::Actor,
             // The part played in the most episodes.
             character: c.roles.iter().max_by_key(|r| r.episode_count).and_then(|r| clean(r.character.as_deref())),
@@ -234,7 +247,7 @@ pub fn show_credits(credits: &AggregateCredits, creators: &[Creator]) -> Vec<New
     out.extend(creators.iter().map(|c| NewCredit {
         tmdb_id: c.id,
         name: c.name.clone(),
-        photo: clean(c.profile_path.as_deref()),
+        photo: tmdb_photo(c.profile_path.as_deref()),
         role: Role::Creator,
         character: None,
     }));
@@ -259,9 +272,9 @@ pub async fn replace(db: &Db, item_id: i64, credits: &[NewCredit]) -> sqlx::Resu
     sqlx::query("DELETE FROM item_people WHERE item_id = ?").bind(item_id).execute(&mut *tx).await?;
     for (position, credit) in credits.iter().enumerate() {
         let person: i64 = sqlx::query_scalar(
-            "INSERT INTO people (tmdb_id, name, photo_path, updated_at) VALUES (?, ?, ?, ?)
+            "INSERT INTO people (tmdb_id, name, photo_url, updated_at) VALUES (?, ?, ?, ?)
              ON CONFLICT (tmdb_id) DO UPDATE SET name = excluded.name,
-                 photo_path = COALESCE(excluded.photo_path, photo_path), updated_at = excluded.updated_at
+                 photo_url = COALESCE(excluded.photo_url, photo_url), updated_at = excluded.updated_at
              RETURNING id",
         )
         .bind(credit.tmdb_id)
@@ -298,9 +311,9 @@ pub struct Credit {
     pub character: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub photo_url: Option<String>,
-    /// TMDB profile image (for Plex clients, which load role thumbs directly).
+    /// Where the photo comes from (Plex clients load role thumbs directly).
     #[serde(skip)]
-    pub photo_path: Option<String>,
+    pub photo_source: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -310,34 +323,14 @@ struct CreditRow {
     name: String,
     role: String,
     character: Option<String>,
-    photo_path: Option<String>,
-}
-
-/// A TMDB profile path pley is willing to turn into a file name.
-fn valid_photo(path: &str) -> bool {
-    let Some(name) = path.strip_prefix('/') else { return false };
-    let Some((stem, ext)) = name.rsplit_once('.') else { return false };
-    !stem.is_empty()
-        && stem.len() <= 64
-        && stem.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-        && matches!(ext, "jpg" | "jpeg" | "png" | "webp")
+    photo_url: Option<String>,
 }
 
 /// `/api/people/{id}/photo?v=…`; the version changes with the photo.
-pub fn photo_url(person_id: i64, photo_path: Option<&str>) -> Option<String> {
-    let path = photo_path.filter(|p| valid_photo(p))?;
-    let stem = path[1..].rsplit_once('.').map(|(s, _)| s).unwrap_or_default();
-    Some(format!("/api/people/{person_id}/photo?v={stem}"))
-}
-
-/// Full-size TMDB URL of a profile image.
-pub fn tmdb_photo(photo_path: &str) -> Option<String> {
-    valid_photo(photo_path).then(|| format!("https://image.tmdb.org/t/p/h632{photo_path}"))
-}
-
-/// Where a downloaded profile image is kept.
-pub fn photo_file(dir: &Path, photo_path: &str) -> Option<PathBuf> {
-    valid_photo(photo_path).then(|| dir.join(&photo_path[1..]))
+pub fn photo_url(person_id: i64, source: Option<&str>) -> Option<String> {
+    let source = source.filter(|s| crate::store::allowed_image_url(s))?;
+    let version = hex::encode(&Sha256::digest(source.as_bytes())[..5]);
+    Some(format!("/api/people/{person_id}/photo?v={version}"))
 }
 
 /// Credits of each item, in billing order. The caller checks access.
@@ -345,7 +338,7 @@ pub async fn for_items(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Vec<Cr
     let mut out: HashMap<i64, Vec<Credit>> = HashMap::new();
     for chunk in ids.chunks(500) {
         let sql = format!(
-            "SELECT ip.item_id, ip.person_id, pe.name, ip.role, ip.character, pe.photo_path
+            "SELECT ip.item_id, ip.person_id, pe.name, ip.role, ip.character, pe.photo_url
              FROM item_people ip JOIN people pe ON pe.id = ip.person_id
              WHERE ip.item_id IN ({}) ORDER BY ip.item_id, ip.position",
             vec!["?"; chunk.len()].join(",")
@@ -358,11 +351,11 @@ pub async fn for_items(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Vec<Cr
             let Some(role) = Role::parse(&row.role) else { continue };
             out.entry(row.item_id).or_default().push(Credit {
                 id: row.person_id,
-                photo_url: photo_url(row.person_id, row.photo_path.as_deref()),
+                photo_url: photo_url(row.person_id, row.photo_url.as_deref()),
                 name: row.name,
                 role,
                 character: row.character,
-                photo_path: row.photo_path,
+                photo_source: row.photo_url,
             });
         }
     }
@@ -421,7 +414,7 @@ struct RoleRow {
 /// `None` when that is nothing (people only credited in hidden items don't
 /// exist for this user).
 pub async fn person(db: &Db, user_id: i64, person_id: i64) -> sqlx::Result<Option<PersonDetail>> {
-    let found: Option<(String, Option<String>)> = sqlx::query_as("SELECT name, photo_path FROM people WHERE id = ?")
+    let found: Option<(String, Option<String>)> = sqlx::query_as("SELECT name, photo_url FROM people WHERE id = ?")
         .bind(person_id)
         .fetch_optional(&db.read)
         .await?;
@@ -483,7 +476,7 @@ pub async fn search(db: &Db, user_id: i64, input: &str, limit: i64) -> sqlx::Res
     }
     let name_matches = vec!["(' ' || pe.name) LIKE ? ESCAPE '\\'"; words.len()].join(" AND ");
     let sql = format!(
-        "{} SELECT pe.id, pe.name, pe.photo_path FROM people pe
+        "{} SELECT pe.id, pe.name, pe.photo_url FROM people pe
          JOIN item_people ip ON ip.person_id = pe.id
          JOIN items i ON i.id = ip.item_id
          LEFT JOIN items p ON p.id = i.parent_id
@@ -504,20 +497,14 @@ pub async fn search(db: &Db, user_id: i64, input: &str, limit: i64) -> sqlx::Res
         .collect())
 }
 
-/// Forget people no item credits any more, with their downloaded photos.
-pub async fn prune(db: &Db, photo_dir: &Path) -> sqlx::Result<u64> {
-    let photos: Vec<Option<String>> = sqlx::query_scalar(
-        "DELETE FROM people WHERE NOT EXISTS (SELECT 1 FROM item_people WHERE person_id = people.id)
-         RETURNING photo_path",
-    )
-    .fetch_all(&db.write)
-    .await?;
-    let removed = photos.len() as u64;
-    for photo in photos.into_iter().flatten() {
-        if let Some(file) = photo_file(photo_dir, &photo) {
-            let _ = std::fs::remove_file(file);
-        }
-    }
+/// Forget people no item credits any more (their photos go with the next
+/// storage clean-up).
+pub async fn prune(db: &Db) -> sqlx::Result<u64> {
+    let removed =
+        sqlx::query("DELETE FROM people WHERE NOT EXISTS (SELECT 1 FROM item_people WHERE person_id = people.id)")
+            .execute(&db.write)
+            .await?
+            .rows_affected();
     if removed > 0 {
         tracing::debug!("forgot {removed} people without credits");
     }
@@ -588,7 +575,7 @@ mod tests {
         let creators = [Creator { id: 9, name: "Vince Gilligan".into(), profile_path: None }];
         let out = show_credits(&credits, &creators);
         assert_eq!(out[0].character.as_deref(), Some("Walter White"));
-        assert_eq!(out[0].photo.as_deref(), Some("/abc.jpg"));
+        assert_eq!(out[0].photo.as_deref(), Some("https://image.tmdb.org/t/p/h632/abc.jpg"));
         assert_eq!((out[1].tmdb_id, out[1].role), (9, Role::Creator));
     }
 
@@ -604,11 +591,12 @@ mod tests {
 
     #[test]
     fn only_plain_tmdb_paths_become_files() {
-        assert!(valid_photo("/kU3B75TyRiCgE270EyZnHjfivoq.jpg"));
-        assert!(!valid_photo("/../secret.jpg"));
-        assert!(!valid_photo("abc.jpg"));
-        assert!(!valid_photo("/abc.exe"));
-        assert_eq!(photo_url(4, Some("/abc_1.jpg")).as_deref(), Some("/api/people/4/photo?v=abc_1"));
-        assert_eq!(photo_url(4, Some("/../x.jpg")), None);
+        assert!(tmdb_photo(Some("/kU3B75TyRiCgE270EyZnHjfivoq.jpg")).is_some());
+        assert_eq!(tmdb_photo(Some("/../secret.jpg")), None);
+        assert_eq!(tmdb_photo(Some("abc.jpg")), None);
+        assert_eq!(tmdb_photo(Some("/abc.exe")), None);
+        let url = photo_url(4, Some("https://image.tmdb.org/t/p/h632/abc_1.jpg")).unwrap();
+        assert!(url.starts_with("/api/people/4/photo?v="));
+        assert_eq!(photo_url(4, Some("https://example.com/x.jpg")), None);
     }
 }

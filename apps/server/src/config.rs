@@ -200,6 +200,11 @@ impl Config {
     pub fn metadata_dir(&self) -> PathBuf {
         self.data_dir.join("metadata")
     }
+
+    /// Files generated from media files, by fingerprint (see [`crate::store`]).
+    pub fn media_dir(&self) -> PathBuf {
+        self.data_dir.join("media")
+    }
 }
 
 fn default_data_dir() -> PathBuf {

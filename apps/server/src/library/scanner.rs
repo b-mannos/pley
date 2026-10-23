@@ -27,6 +27,7 @@ use crate::config::Config;
 use crate::db::Db;
 use crate::events::{EventBus, ScanPhase, ServerEvent};
 use crate::metadata::MetadataAgent;
+use crate::store::Store;
 use crate::transcoder::{Transcoder, TranscoderError};
 use crate::util::{normalize_key, now, path_str, sort_title};
 
@@ -54,7 +55,7 @@ pub struct Scanner {
     transcoder: Arc<Transcoder>,
     events: EventBus,
     metadata: Arc<MetadataAgent>,
-    metadata_dir: PathBuf,
+    store: Arc<Store>,
     queue: mpsc::UnboundedSender<ScanRequest>,
     status: Mutex<HashMap<i64, ScanStatus>>,
 }
@@ -72,18 +73,12 @@ impl Scanner {
         transcoder: Arc<Transcoder>,
         events: EventBus,
         metadata: Arc<MetadataAgent>,
+        store: Arc<Store>,
         config: &Config,
     ) -> Arc<Self> {
+        let _ = config;
         let (tx, rx) = mpsc::unbounded_channel();
-        let scanner = Arc::new(Self {
-            db,
-            transcoder,
-            events,
-            metadata,
-            metadata_dir: config.metadata_dir(),
-            queue: tx,
-            status: Mutex::default(),
-        });
+        let scanner = Arc::new(Self { db, transcoder, events, metadata, store, queue: tx, status: Mutex::default() });
         tokio::spawn(scanner.clone().worker(rx));
         scanner
     }
@@ -295,7 +290,7 @@ impl Scanner {
         }
         cleanup_orphans(&mut conn, library_id).await?;
         refresh_external_subs(&mut conn, &unchanged, &walked.sidecars).await?;
-        refresh_artwork(&mut conn, &lib, &walked.sidecars, &self.metadata_dir).await?;
+        refresh_artwork(&mut conn, &lib, &walked.sidecars).await?;
         update_counts(&mut conn, library_id).await?;
         sqlx::query("UPDATE libraries SET scanned_at = ? WHERE id = ?")
             .bind(now())
@@ -319,6 +314,18 @@ impl Scanner {
         if totals.removed > 0 {
             self.metadata.prune_people().await;
         }
+        // New and changed files get their fingerprint; then whatever removed
+        // items left behind goes.
+        let store = self.store.clone();
+        let removed = totals.removed > 0;
+        tokio::spawn(async move {
+            store.fingerprint_pending().await;
+            if removed {
+                if let Err(err) = store.clean().await {
+                    tracing::warn!("storage clean-up failed: {err:#}");
+                }
+            }
+        });
 
         self.set_status(&lib, ScanPhase::Done, processed, total);
         self.events.send(ServerEvent::ScanFinished {
@@ -624,7 +631,10 @@ async fn upsert_file(
             container = excluded.container, duration_ms = excluded.duration_ms, bitrate = excluded.bitrate,
             width = excluded.width, height = excluded.height, video_codec = excluded.video_codec,
             audio_codec = excluded.audio_codec, media_info = excluded.media_info, external_subs = excluded.external_subs,
-            probed = excluded.probed, updated_at = excluded.updated_at",
+            probed = excluded.probed, updated_at = excluded.updated_at,
+            -- A changed file gets fingerprinted again.
+            fingerprint = CASE WHEN media_files.size = excluded.size AND media_files.mtime = excluded.mtime
+                               THEN media_files.fingerprint END",
     )
     .bind(item_id)
     .bind(library_id)
@@ -735,7 +745,6 @@ async fn refresh_artwork(
     conn: &mut SqliteConnection,
     lib: &LibraryRow,
     sidecars: &HashMap<PathBuf, Vec<String>>,
-    metadata_dir: &Path,
 ) -> sqlx::Result<()> {
     let rows: Vec<ArtworkRow> = sqlx::query_as(
         "SELECT i.id, i.kind, i.path, i.idx, i.poster, i.backdrop, i.thumb, p.path AS parent_path,
@@ -819,10 +828,8 @@ async fn refresh_artwork(
             match (current, local) {
                 (Some(cur), Some(new)) if *cur == new => None,
                 (_, Some(new)) => Some(Some(new)),
-                // Clear local artwork that vanished (downloaded/generated art lives in metadata_dir).
-                (Some(cur), None) if !Path::new(cur).starts_with(metadata_dir) && !Path::new(cur).exists() => {
-                    Some(None)
-                }
+                // Clear local artwork that vanished (downloaded art lives in the blob store).
+                (Some(cur), None) if !crate::store::is_blob(cur) && !Path::new(cur).exists() => Some(None),
                 _ => None,
             }
         };

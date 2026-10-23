@@ -19,7 +19,7 @@ use crate::events::ServerEvent;
 use crate::metadata::{ArtworkCandidate, MatchCandidate};
 use crate::overrides;
 use crate::state::AppState;
-use crate::util::{now, path_str};
+use crate::util::now;
 
 async fn detail(state: &AppState, user_id: i64, id: i64) -> ApiResult<ItemDetail> {
     let row = item_or_404(state, user_id, id).await?;
@@ -162,9 +162,8 @@ pub async fn choose_artwork(
 ) -> ApiResult<Json<ItemDetail>> {
     let row = item_or_404(&state, user.id, id).await?;
     let kind = artwork_kind(&kind)?;
-    let path =
-        state.metadata.download_artwork(id, kind, &body.url).await.map_err(|e| AppError::bad_request(e.to_string()))?;
-    overrides::set(&state.db, id, &[(kind.to_owned(), Some(path))]).await?;
+    let blob = state.metadata.download_artwork(&body.url).await.map_err(|e| AppError::bad_request(e.to_string()))?;
+    overrides::set(&state.db, id, &[(kind.to_owned(), Some(blob))]).await?;
     state.events.send(ServerEvent::LibraryChanged { library_id: row.library_id });
     Ok(Json(detail(&state, user.id, id).await?))
 }
@@ -200,11 +199,8 @@ pub async fn upload_artwork(
     })
     .await
     .map_err(|e| AppError::Internal(e.into()))??;
-    let dir = state.metadata.item_dir(id);
-    tokio::fs::create_dir_all(&dir).await.map_err(|e| AppError::Internal(e.into()))?;
-    let target = dir.join(format!("{kind}-upload-{}.jpg", now()));
-    tokio::fs::write(&target, jpeg).await.map_err(|e| AppError::Internal(e.into()))?;
-    overrides::set(&state.db, id, &[(kind, Some(path_str(&target)))]).await?;
+    let blob = state.store.put(&jpeg, "jpg").await.map_err(|e| AppError::Internal(e.into()))?;
+    overrides::set(&state.db, id, &[(kind, Some(blob))]).await?;
     state.events.send(ServerEvent::LibraryChanged { library_id: row.library_id });
     Ok(Json(detail(&state, user.id, id).await?))
 }

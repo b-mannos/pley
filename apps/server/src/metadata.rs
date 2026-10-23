@@ -15,7 +15,8 @@ use crate::db::Db;
 use crate::library::{LibraryKind, LibraryRow};
 use crate::people;
 use crate::settings::SettingsStore;
-use crate::util::{normalize_key, now, path_str, sort_title};
+use crate::store::{self, Store};
+use crate::util::{normalize_key, now, sort_title};
 
 const API: &str = "https://api.themoviedb.org/3";
 const IMAGES: &str = "https://image.tmdb.org/t/p";
@@ -24,7 +25,7 @@ pub struct MetadataAgent {
     db: Db,
     settings: Arc<SettingsStore>,
     http: reqwest::Client,
-    metadata_dir: PathBuf,
+    store: Arc<Store>,
     /// One credits backfill at a time (startup and scans can both start one).
     backfill: tokio::sync::Mutex<()>,
 }
@@ -244,13 +245,13 @@ enum TmdbError {
 }
 
 impl MetadataAgent {
-    pub fn new(db: Db, settings: Arc<SettingsStore>, metadata_dir: PathBuf) -> Arc<Self> {
+    pub fn new(db: Db, settings: Arc<SettingsStore>, store: Arc<Store>) -> Arc<Self> {
         let http = reqwest::Client::builder()
             .user_agent(concat!("pley/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(20))
             .build()
             .expect("http client");
-        Arc::new(Self { db, settings, http, metadata_dir, backfill: tokio::sync::Mutex::new(()) })
+        Arc::new(Self { db, settings, http, store, backfill: tokio::sync::Mutex::new(()) })
     }
 
     pub fn enabled(&self) -> bool {
@@ -411,38 +412,17 @@ impl MetadataAgent {
         Ok(())
     }
 
-    fn people_dir(&self) -> PathBuf {
-        self.metadata_dir.join("people")
-    }
-
     /// Forget people no longer credited anywhere (after scans removed items).
     pub async fn prune_people(&self) {
-        if let Err(err) = people::prune(&self.db, &self.people_dir()).await {
+        if let Err(err) = people::prune(&self.db).await {
             tracing::warn!("pruning people failed: {err}");
         }
     }
 
-    /// A person's photo on disk, downloaded from TMDB the first time.
-    pub async fn person_photo(&self, photo_path: &str) -> anyhow::Result<PathBuf> {
-        let dir = self.people_dir();
-        let file = people::photo_file(&dir, photo_path).context("invalid photo path")?;
-        if file.is_file() {
-            return Ok(file);
-        }
-        let url = people::tmdb_photo(photo_path).context("invalid photo path")?;
-        let bytes = self.http.get(&url).send().await?.error_for_status()?.bytes().await?;
-        tokio::fs::create_dir_all(&dir).await?;
-        // Two requests for the same photo may download it at once: each writes
-        // its own file and the last rename wins.
-        let tmp = dir.join(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
-        tokio::fs::write(&tmp, &bytes).await?;
-        if let Err(err) = tokio::fs::rename(&tmp, &file).await {
-            let _ = tokio::fs::remove_file(&tmp).await;
-            if !file.is_file() {
-                return Err(err.into());
-            }
-        }
-        Ok(file)
+    /// A person's photo on disk, downloaded the first time.
+    pub async fn person_photo(&self, url: &str) -> anyhow::Result<PathBuf> {
+        let blob = self.store.remote(url).await?;
+        self.store.path(&blob).context("invalid blob")
     }
 
     /// Refresh one item (movie, show, season or episode → its show).
@@ -596,25 +576,12 @@ impl MetadataAgent {
 
     /// Download a chosen TMDB image into the metadata folder. Only TMDB's
     /// image host is fetched, so the server can't be pointed at other URLs.
-    pub async fn download_artwork(&self, item_id: i64, kind: &str, url: &str) -> anyhow::Result<String> {
-        let Some(rest) = url.strip_prefix(&format!("{IMAGES}/")) else { bail!("only TMDB images can be chosen") };
-        let file = rest.rsplit('/').next().unwrap_or_default();
-        if file.is_empty() || !file.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')) {
-            bail!("unexpected image URL");
+    /// Store a picture picked from [`Self::artwork_candidates`]; returns its reference.
+    pub async fn download_artwork(&self, url: &str) -> anyhow::Result<String> {
+        if !url.starts_with(&format!("{IMAGES}/")) {
+            bail!("only TMDB images can be chosen");
         }
-        let bytes = self.http.get(url).send().await?.error_for_status()?.bytes().await?;
-        anyhow::ensure!(image::guess_format(&bytes).is_ok(), "that is not an image");
-        let dir = self.metadata_dir.join("items").join(item_id.to_string());
-        tokio::fs::create_dir_all(&dir).await?;
-        let ext = Path::new(file).extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "jpg".into());
-        let target = dir.join(format!("{kind}-chosen-{}.{ext}", now()));
-        tokio::fs::write(&target, &bytes).await?;
-        Ok(path_str(&target))
-    }
-
-    /// Where uploaded or chosen artwork of an item is kept.
-    pub fn item_dir(&self, item_id: i64) -> PathBuf {
-        self.metadata_dir.join("items").join(item_id.to_string())
+        self.store.remote(url).await
     }
 
     async fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T, TmdbError> {
@@ -691,11 +658,8 @@ impl MetadataAgent {
                 .and_then(|c| c.release_dates.iter().map(|r| r.certification.trim()).find(|c| !c.is_empty()))
                 .map(str::to_owned)
         });
-        let poster =
-            self.artwork(item.id, "poster", item.poster.as_deref(), details.poster_path.as_deref(), "w780").await;
-        let backdrop = self
-            .artwork(item.id, "backdrop", item.backdrop.as_deref(), details.backdrop_path.as_deref(), "w1280")
-            .await;
+        let poster = self.artwork(item.poster.as_deref(), details.poster_path.as_deref(), "w780").await;
+        let backdrop = self.artwork(item.backdrop.as_deref(), details.backdrop_path.as_deref(), "w1280").await;
         let title = details.title.clone().unwrap_or_else(|| item.title.clone());
         let genres: Vec<String> = details.genres.iter().map(|g| g.name.clone()).collect();
         let age = certification.as_deref().and_then(crate::ratings::rating_age);
@@ -735,7 +699,7 @@ impl MetadataAgent {
                 .map_err(|e| TmdbError::Other(e.into()))?;
         }
         let collection = details.belongs_to_collection.as_ref();
-        if let Err(err) = crate::collections::link_tmdb(&self.db, &self.metadata_dir, item.id, collection).await {
+        if let Err(err) = crate::collections::link_tmdb(&self.db, &self.store, item.id, collection).await {
             tracing::warn!("collection of item {} not updated: {err:#}", item.id);
         }
         Ok(())
@@ -761,11 +725,8 @@ impl MetadataAgent {
                 .map(|c| c.rating.clone())
                 .filter(|r| !r.is_empty())
         });
-        let poster =
-            self.artwork(item.id, "poster", item.poster.as_deref(), details.poster_path.as_deref(), "w780").await;
-        let backdrop = self
-            .artwork(item.id, "backdrop", item.backdrop.as_deref(), details.backdrop_path.as_deref(), "w1280")
-            .await;
+        let poster = self.artwork(item.poster.as_deref(), details.poster_path.as_deref(), "w780").await;
+        let backdrop = self.artwork(item.backdrop.as_deref(), details.backdrop_path.as_deref(), "w1280").await;
         let title = details.name.clone().unwrap_or_else(|| item.title.clone());
         let genres: Vec<String> = details.genres.iter().map(|g| g.name.clone()).collect();
         let age = rating.as_deref().and_then(crate::ratings::rating_age);
@@ -817,9 +778,7 @@ impl MetadataAgent {
                 Err(TmdbError::NotFound) => continue,
                 Err(e) => return Err(e),
             };
-            let poster = self
-                .artwork(season_id, "poster", season_poster.as_deref(), season.poster_path.as_deref(), "w780")
-                .await;
+            let poster = self.artwork(season_poster.as_deref(), season.poster_path.as_deref(), "w780").await;
             let name = season
                 .name
                 .filter(|n| !n.is_empty())
@@ -850,7 +809,7 @@ impl MetadataAgent {
             .map_err(|e| TmdbError::Other(e.into()))?;
             for (episode_id, ep_number, thumb) in episodes {
                 let Some(ep) = season.episodes.iter().find(|e| e.episode_number == ep_number) else { continue };
-                let still = self.artwork(episode_id, "thumb", thumb.as_deref(), ep.still_path.as_deref(), "w780").await;
+                let still = self.artwork(thumb.as_deref(), ep.still_path.as_deref(), "w780").await;
                 let title = ep.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Episode {ep_number}"));
                 sqlx::query(
                     "UPDATE items SET title = ?, sort_title = ?, summary = ?, release_date = ?, year = ?, rating = ?,
@@ -877,37 +836,24 @@ impl MetadataAgent {
         Ok(())
     }
 
-    /// Download `remote` into the metadata folder unless the item already has
-    /// local (sidecar) artwork. Returns the new path to store, if any.
-    async fn artwork(
-        &self,
-        item_id: i64,
-        name: &str,
-        current: Option<&str>,
-        remote: Option<&str>,
-        size: &str,
-    ) -> Option<String> {
+    /// The TMDB picture `remote` as a stored reference, unless the item has
+    /// local (sidecar) artwork, which always wins. Pictures already stored
+    /// from the same URL are not downloaded again.
+    async fn artwork(&self, current: Option<&str>, remote: Option<&str>, size: &str) -> Option<String> {
         let remote = remote?;
         if let Some(cur) = current {
-            if !Path::new(cur).starts_with(&self.metadata_dir) && Path::new(cur).exists() {
+            if !store::is_blob(cur) && Path::new(cur).exists() {
                 return None;
             }
         }
-        let ext =
-            Path::new(remote).extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "jpg".into());
-        let dir = self.metadata_dir.join("items").join(item_id.to_string());
-        let target = dir.join(format!("{name}.{ext}"));
         let url = format!("{IMAGES}/{size}{remote}");
-        let bytes = match self.http.get(&url).send().await.and_then(|r| r.error_for_status()) {
-            Ok(resp) => resp.bytes().await.ok()?,
+        match self.store.remote(&url).await {
+            Ok(blob) => Some(blob),
             Err(err) => {
-                tracing::debug!("artwork download failed for {url}: {err}");
-                return None;
+                tracing::debug!("artwork download failed for {url}: {err:#}");
+                None
             }
-        };
-        tokio::fs::create_dir_all(&dir).await.ok()?;
-        tokio::fs::write(&target, &bytes).await.ok()?;
-        Some(path_str(&target))
+        }
     }
 }
 

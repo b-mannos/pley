@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path as FsPath, PathBuf};
+use std::path::PathBuf;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -15,7 +15,7 @@ use crate::events::ServerEvent;
 use crate::library::scanner::remux_candidate;
 use crate::state::AppState;
 use crate::streams;
-use crate::util::{now, path_str};
+use crate::util::now;
 
 pub(crate) async fn item_or_404(state: &AppState, user_id: i64, id: i64) -> ApiResult<ItemRow> {
     catalog::item(&state.db, user_id, id).await?.ok_or_else(|| AppError::not_found(format!("item {id} not found")))
@@ -300,8 +300,8 @@ async fn resolve_artwork(state: &AppState, id: i64, kind: &str) -> ApiResult<Pat
             "backdrop" => row.backdrop.clone(),
             _ => row.thumb.clone(),
         };
-        if let Some(path) = existing.filter(|p| FsPath::new(p).is_file()) {
-            return Ok(PathBuf::from(path));
+        if let Some(path) = existing.and_then(|r| state.store.path(&r)).filter(|p| p.is_file()) {
+            return Ok(path);
         }
         match (kind, row.kind.as_str()) {
             ("thumb", "movie" | "episode") => return generate_thumb(state, current).await,
@@ -321,19 +321,24 @@ async fn resolve_artwork(state: &AppState, id: i64, kind: &str) -> ApiResult<Pat
     Err(AppError::not_found("no artwork"))
 }
 
+/// A frame grab of the item's first file, kept in the file's media folder.
 async fn generate_thumb(state: &AppState, item_id: i64) -> ApiResult<PathBuf> {
-    let lock = state.images.generation_lock(item_id);
-    let _guard = lock.lock().await;
-    let target = state.config.metadata_dir().join("items").join(item_id.to_string()).join("thumb.jpg");
-    if target.is_file() {
-        state.images.release_generation_lock(item_id);
-        return Ok(target);
-    }
     let file = catalog::files_for_item(&state.db, item_id)
         .await?
         .into_iter()
         .next()
         .ok_or_else(|| AppError::not_found("no media file"))?;
+    let fingerprint = state.store.fingerprint_of(file.id, &file.path, file.fingerprint.as_deref()).await?;
+    let dir = state.store.media_dir(&fingerprint).ok_or_else(|| AppError::not_found("no media folder"))?;
+    let target = dir.join("thumb.jpg");
+    if target.is_file() {
+        return Ok(target);
+    }
+    let lock = state.images.generation_lock(file.id);
+    let _guard = lock.lock().await;
+    if target.is_file() {
+        return Ok(target);
+    }
     let hdr = file.media_info().and_then(|m| m.video().map(|v| v.dynamic_range().is_hdr())).unwrap_or(false);
     let bytes = state
         .transcoder
@@ -345,30 +350,26 @@ async fn generate_thumb(state: &AppState, item_id: i64) -> ApiResult<PathBuf> {
             hdr,
         })
         .await?;
-    if let Some(dir) = target.parent() {
-        tokio::fs::create_dir_all(dir).await?;
-    }
-    tokio::fs::write(&target, &bytes).await?;
-    sqlx::query("UPDATE items SET thumb = ? WHERE id = ? AND thumb IS NULL")
-        .bind(path_str(&target))
-        .bind(item_id)
-        .execute(&state.db.write)
-        .await?;
-    state.images.release_generation_lock(item_id);
+    tokio::fs::create_dir_all(&dir).await?;
+    let tmp = dir.join("thumb.jpg.tmp");
+    tokio::fs::write(&tmp, &bytes).await?;
+    tokio::fs::rename(&tmp, &target).await?;
+    state.images.release_generation_lock(file.id);
     Ok(target)
 }
 
+/// The cover embedded in an album's tracks, stored as the album's poster.
 async fn extract_cover(state: &AppState, album_id: i64) -> ApiResult<Option<PathBuf>> {
     let lock = state.images.generation_lock(album_id);
     let _guard = lock.lock().await;
-    let dir = state.config.metadata_dir().join("items").join(album_id.to_string());
-    for ext in ["jpg", "png"] {
-        let candidate = dir.join(format!("poster.{ext}"));
-        if candidate.is_file() {
-            return Ok(Some(candidate));
-        }
+    // Another request may have stored it meanwhile.
+    let poster: Option<String> =
+        sqlx::query_scalar("SELECT poster FROM items WHERE id = ?").bind(album_id).fetch_one(&state.db.read).await?;
+    if let Some(path) = poster.and_then(|p| state.store.path(&p)).filter(|p| p.is_file()) {
+        return Ok(Some(path));
     }
-    let marker = dir.join("no-cover");
+    // Albums without embedded art are not opened again (until the cache is cleared).
+    let marker = state.config.cache_dir().join("covers").join(format!("{album_id}.none"));
     if marker.exists() {
         return Ok(None);
     }
@@ -386,22 +387,22 @@ async fn extract_cover(state: &AppState, album_id: i64) -> ApiResult<Option<Path
         if !has_cover {
             continue;
         }
-        if let Ok((bytes, content_type)) = state.transcoder.cover(&path).await {
-            let ext = if content_type.contains("png") { "png" } else { "jpg" };
-            tokio::fs::create_dir_all(&dir).await?;
-            let target = dir.join(format!("poster.{ext}"));
-            tokio::fs::write(&target, &bytes).await?;
+        if let Ok((bytes, _)) = state.transcoder.cover(&path).await {
+            let Some(ext) = crate::store::picture_ext(&bytes) else { continue };
+            let blob = state.store.put(&bytes, ext).await?;
             sqlx::query("UPDATE items SET poster = ?, updated_at = ? WHERE id = ? AND poster IS NULL")
-                .bind(path_str(&target))
+                .bind(&blob)
                 .bind(now())
                 .bind(album_id)
                 .execute(&state.db.write)
                 .await?;
-            return Ok(Some(target));
+            return Ok(state.store.path(&blob));
         }
     }
     if state.transcoder.is_available() {
-        let _ = tokio::fs::create_dir_all(&dir).await;
+        if let Some(dir) = marker.parent() {
+            let _ = tokio::fs::create_dir_all(dir).await;
+        }
         let _ = tokio::fs::write(&marker, b"").await;
     }
     Ok(None)

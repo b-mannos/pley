@@ -669,6 +669,7 @@ mod tests {
             audio_codec: None,
             media_info: None,
             external_subs: "[]".into(),
+            fingerprint: None,
         }
     }
 

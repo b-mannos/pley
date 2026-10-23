@@ -131,7 +131,7 @@ pub async fn update(
 
 pub async fn delete(State(state): State<AppState>, _admin: AdminUser, Path(id): Path<i64>) -> ApiResult<StatusCode> {
     let library_id = library_of(&state, id).await?;
-    collections::delete(&state.db, &state.config.metadata_dir(), id).await?;
+    collections::delete(&state.db, id).await?;
     state.events.send(ServerEvent::LibraryChanged { library_id });
     Ok(StatusCode::NO_CONTENT)
 }
@@ -198,7 +198,7 @@ pub async fn image(
         return Err(AppError::not_found("unknown image kind"));
     }
     let width = query.get("w").and_then(|w| w.parse::<u32>().ok()).filter(|w| *w > 0);
-    match collections::artwork(&state.db, &user, id, &kind).await? {
+    match collections::artwork(&state.db, &state.store, &user, id, &kind).await? {
         Some(Ok(path)) => serve_file(&state, &path, width, query.contains_key("v"), &headers).await,
         Some(Err(item_id)) => {
             let w = width.map(|w| format!("?w={w}")).unwrap_or_default();

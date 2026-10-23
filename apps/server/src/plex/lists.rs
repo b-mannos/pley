@@ -130,7 +130,7 @@ async fn collection_artwork(
         "art" => ("backdrop", "art"),
         _ => return Err(PlexError::NotFound),
     };
-    match collections::artwork(&state.db, &user, id, kind).await? {
+    match collections::artwork(&state.db, &state.store, &user, id, kind).await? {
         Some(Ok(path)) => {
             Ok(crate::api::collections::serve_file(&state, &path, width, version.is_some(), &headers).await?)
         }

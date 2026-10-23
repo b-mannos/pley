@@ -26,10 +26,8 @@ pub async fn photo(
     Query(query): Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
-    let photo: Option<Option<String>> = sqlx::query_scalar("SELECT photo_path FROM people WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&state.db.read)
-        .await?;
+    let photo: Option<Option<String>> =
+        sqlx::query_scalar("SELECT photo_url FROM people WHERE id = ?").bind(id).fetch_optional(&state.db.read).await?;
     let Some(remote) = photo.flatten() else { return Err(AppError::not_found("no photo")) };
     let path = state.metadata.person_photo(&remote).await.map_err(|err| {
         tracing::debug!("photo of person {id}: {err:#}");

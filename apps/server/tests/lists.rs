@@ -168,7 +168,7 @@ impl TestApp {
 
     /// What the metadata agent does after matching a movie.
     async fn link(&self, item: i64, found: Option<&TmdbCollection>) {
-        pley::collections::link_tmdb(&self.state.db, &self.state.config.metadata_dir(), item, found).await.unwrap();
+        pley::collections::link_tmdb(&self.state.db, &self.state.store, item, found).await.unwrap();
     }
 
     async fn set_rating(&self, title: &str, rating: &str) {

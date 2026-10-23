@@ -157,7 +157,7 @@ pub async fn load_files(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Vec<F
     for chunk in ids.chunks(500) {
         let sql = format!(
             "SELECT id, item_id, library_id, path, size, mtime, container, duration_ms, bitrate, width, height,
-                    video_codec, audio_codec, media_info, external_subs
+                    video_codec, audio_codec, media_info, external_subs, fingerprint
              FROM media_files WHERE item_id IN ({}) ORDER BY item_id, COALESCE(height, 0) DESC, id",
             vec!["?"; chunk.len()].join(",")
         );
@@ -440,7 +440,7 @@ fn credit_node(credit: &Credit) -> Node {
         .attr("tag", &credit.name)
         .attr("tagKey", credit.id.to_string())
         .opt("role", credit.character.as_deref())
-        .opt("thumb", credit.photo_path.as_deref().and_then(crate::people::tmdb_photo))
+        .opt("thumb", credit.photo_source.as_deref().filter(|u| crate::store::allowed_image_url(u)))
 }
 
 // ------------------------------------------------------------------ media

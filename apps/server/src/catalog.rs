@@ -298,11 +298,13 @@ pub struct FileRow {
     pub audio_codec: Option<String>,
     pub media_info: Option<String>,
     pub external_subs: String,
+    /// See [`crate::store::fingerprint`]; `None` until computed after a scan.
+    pub fingerprint: Option<String>,
 }
 
 const FILE_SELECT: &str =
     "SELECT id, item_id, library_id, path, size, mtime, container, duration_ms, bitrate, width, height,
-    video_codec, audio_codec, media_info, external_subs FROM media_files";
+    video_codec, audio_codec, media_info, external_subs, fingerprint FROM media_files";
 
 impl FileRow {
     pub fn media_info(&self) -> Option<MediaInfo> {

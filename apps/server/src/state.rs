@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::auth::AuthService;
+use crate::backup::Backups;
 use crate::config::Config;
 use crate::db::Db;
 use crate::events::EventBus;
@@ -13,6 +14,7 @@ use crate::markers::MarkerService;
 use crate::metadata::MetadataAgent;
 use crate::playback::Sessions;
 use crate::settings::SettingsStore;
+use crate::store::Store;
 use crate::transcoder::Transcoder;
 use crate::trickplay::TrickplayService;
 
@@ -30,6 +32,8 @@ pub struct Inner {
     pub events: EventBus,
     pub transcoder: Arc<Transcoder>,
     pub metadata: Arc<MetadataAgent>,
+    pub store: Arc<Store>,
+    pub backups: Arc<Backups>,
     pub scanner: Arc<Scanner>,
     pub watcher: Arc<LibraryWatcher>,
     pub images: Images,
@@ -49,16 +53,28 @@ impl Deref for AppState {
 
 impl AppState {
     pub async fn init(config: Config) -> anyhow::Result<Self> {
-        for dir in [config.data_dir.clone(), config.cache_dir(), config.metadata_dir(), config.transcode_dir.clone()] {
+        for dir in [
+            config.data_dir.clone(),
+            config.cache_dir(),
+            config.metadata_dir(),
+            config.media_dir(),
+            config.transcode_dir.clone(),
+        ] {
             std::fs::create_dir_all(&dir).map_err(|e| anyhow::anyhow!("cannot create {}: {e}", dir.display()))?;
         }
         let db = Db::open(&config.db_path()).await?;
+        let backups = Backups::new(db.clone(), &config.data_dir);
         crate::ratings::backfill(&db).await?;
         let settings = Arc::new(SettingsStore::load(&db).await?);
         let events = EventBus::new();
         let transcoder = Transcoder::new(&config);
-        let metadata = MetadataAgent::new(db.clone(), settings.clone(), config.metadata_dir());
-        let scanner = Scanner::new(db.clone(), transcoder.clone(), events.clone(), metadata.clone(), &config);
+        let store = Arc::new(Store::new(db.clone(), &config.metadata_dir(), &config.media_dir(), &config.cache_dir()));
+        if let Err(err) = store.migrate_legacy(&config.metadata_dir()).await {
+            tracing::warn!("moving pictures into the blob store failed: {err:#}");
+        }
+        let metadata = MetadataAgent::new(db.clone(), settings.clone(), store.clone());
+        let scanner =
+            Scanner::new(db.clone(), transcoder.clone(), events.clone(), metadata.clone(), store.clone(), &config);
         let watcher = LibraryWatcher::new(db.clone(), scanner.clone(), settings.clone());
         let images = Images::new(config.cache_dir().join("images"));
         let sessions = Arc::new(Sessions::default());
@@ -90,6 +106,8 @@ impl AppState {
                 events,
                 transcoder,
                 metadata,
+                store,
+                backups,
                 scanner,
                 watcher,
                 images,
@@ -105,6 +123,37 @@ impl AppState {
         tokio::spawn(async move {
             metadata.prune_people().await;
             metadata.backfill_credits(None).await;
+        });
+        // Check the database, then back it up once a day (right away when the
+        // last backup is older than that).
+        let backups = self.backups.clone();
+        tokio::spawn(async move {
+            backups.check().await;
+            if backups.health().ok != Some(true) {
+                return;
+            }
+            let last = backups.list().await.first().map(|b| b.created_at).unwrap_or(0);
+            let wait = (last + 24 * 3600 - crate::util::now()).max(60) as u64;
+            tokio::time::sleep(Duration::from_secs(wait.min(24 * 3600))).await;
+            let mut tick = tokio::time::interval(Duration::from_secs(24 * 3600));
+            loop {
+                tick.tick().await;
+                if let Err(err) = backups.create().await {
+                    tracing::error!("database backup failed: {err:#}");
+                }
+            }
+        });
+        // Fingerprints of files scanned by older versions, then a daily clean-up.
+        let store = self.store.clone();
+        tokio::spawn(async move {
+            store.fingerprint_pending().await;
+            let mut tick = tokio::time::interval(Duration::from_secs(24 * 3600));
+            loop {
+                tick.tick().await;
+                if let Err(err) = store.clean().await {
+                    tracing::warn!("storage clean-up failed: {err:#}");
+                }
+            }
         });
         let watcher = self.watcher.clone();
         tokio::spawn(async move { watcher.reload().await });

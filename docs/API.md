@@ -618,7 +618,11 @@ type ServerEvent =
 
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
-| GET | `/api/system` | – | `SystemInfo` |
+| GET | `/api/system` | – | `SystemInfo` (with `database: { ok, problem?, checked_at }`, the integrity check made at start) |
+| GET | `/api/system/storage` | – | `{ blobs, blob_bytes, media_folders, media_bytes, cache_bytes }`: space used by stored pictures, generated media files and the cache (docs/STORAGE.md) |
+| POST | `/api/system/storage/clean` | – | `{ blobs_removed, media_folders_removed, bytes_freed }`: removes what nothing uses any more |
+| GET | `/api/system/backups` | – | `{ health: { ok, problem?, checked_at }, backups: { name, path, bytes, created_at }[] }`, newest first |
+| POST | `/api/system/backups` | – | the new backup (a checked `VACUUM INTO` copy; the last 3 are kept) |
 | GET | `/api/transcoder` | – | `TranscoderStatus` – live metrics of the transcoder component (all jobs, counters) |
 | GET | `/api/settings` | – | `Settings` |
 | PUT | `/api/settings` | partial `Settings` | `Settings` |

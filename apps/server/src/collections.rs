@@ -5,9 +5,7 @@
 //! hidden from that user.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -15,7 +13,8 @@ use sqlx::FromRow;
 use crate::auth::AuthUser;
 use crate::catalog::{self, ItemRow, VISIBLE, me_cte};
 use crate::db::Db;
-use crate::util::{now, path_str, sort_title};
+use crate::store::Store;
+use crate::util::{now, sort_title};
 
 /// Automatic collections with fewer items than this are not listed (a
 /// collection holding a single film is clutter).
@@ -246,10 +245,9 @@ pub async fn update(
     tx.commit().await
 }
 
-pub async fn delete(db: &Db, metadata_dir: &Path, id: i64) -> sqlx::Result<bool> {
+pub async fn delete(db: &Db, id: i64) -> sqlx::Result<bool> {
     let deleted =
         sqlx::query("DELETE FROM collections WHERE id = ?").bind(id).execute(&db.write).await?.rows_affected();
-    let _ = tokio::fs::remove_dir_all(artwork_dir(metadata_dir, id)).await;
     Ok(deleted > 0)
 }
 
@@ -332,51 +330,33 @@ pub async fn reorder(db: &Db, id: i64, item_ids: &[i64]) -> sqlx::Result<()> {
     tx.commit().await
 }
 
-fn artwork_dir(metadata_dir: &Path, id: i64) -> PathBuf {
-    metadata_dir.join("collections").join(id.to_string())
-}
-
 /// Own artwork of the collection, or `Err(item)` to fall back to: the first
 /// visible item that has such artwork (else the first one).
-pub async fn artwork(db: &Db, user: &AuthUser, id: i64, kind: &str) -> sqlx::Result<Option<Result<PathBuf, i64>>> {
+pub async fn artwork(
+    db: &Db,
+    store: &Store,
+    user: &AuthUser,
+    id: i64,
+    kind: &str,
+) -> sqlx::Result<Option<Result<PathBuf, i64>>> {
     let Some(row) = row(db, id).await? else { return Ok(None) };
     let Some((_, items)) = get(db, user, id).await? else { return Ok(None) };
     let poster = kind == "poster";
     let own = if poster { row.poster } else { row.backdrop };
-    if let Some(path) = own.map(PathBuf::from).filter(|p| p.is_file()) {
+    if let Some(path) = own.and_then(|r| store.path(&r)).filter(|p| p.is_file()) {
         return Ok(Some(Ok(path)));
     }
     let with_art = items.iter().find(|i| if poster { i.has_poster } else { i.has_backdrop });
     Ok(with_art.or(items.first()).map(|i| Err(i.id)))
 }
 
-fn http() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .user_agent(concat!("pley/", env!("CARGO_PKG_VERSION")))
-            .timeout(Duration::from_secs(20))
-            .build()
-            .expect("http client")
-    })
-}
-
-async fn download(remote: &str, size: &str, target: &Path) -> Option<String> {
-    let url = format!("{IMAGES}/{size}{remote}");
-    let bytes = http().get(&url).send().await.ok()?.error_for_status().ok()?.bytes().await.ok()?;
-    tokio::fs::create_dir_all(target.parent()?).await.ok()?;
-    tokio::fs::write(target, &bytes).await.ok()?;
-    Some(path_str(target))
+async fn download(store: &Store, remote: &str, size: &str) -> Option<String> {
+    store.remote(&format!("{IMAGES}/{size}{remote}")).await.ok()
 }
 
 /// Put a movie into its TMDB collection (creating it), take it out of any
 /// other automatic one, and drop automatic collections left empty.
-pub async fn link_tmdb(
-    db: &Db,
-    metadata_dir: &Path,
-    item_id: i64,
-    found: Option<&TmdbCollection>,
-) -> anyhow::Result<()> {
+pub async fn link_tmdb(db: &Db, store: &Store, item_id: i64, found: Option<&TmdbCollection>) -> anyhow::Result<()> {
     let library_id: i64 =
         sqlx::query_scalar("SELECT library_id FROM items WHERE id = ?").bind(item_id).fetch_one(&db.read).await?;
     let found = found.filter(|c| !c.name.trim().is_empty());
@@ -432,14 +412,13 @@ pub async fn link_tmdb(
 
     // Artwork is fetched once, outside the transaction.
     if let Some((c, id, poster, backdrop)) = linked {
-        let dir = artwork_dir(metadata_dir, id);
-        let missing = |p: &Option<String>| p.as_deref().is_none_or(|p| !Path::new(p).is_file());
+        let missing = |p: &Option<String>| p.as_deref().is_none_or(|p| !store.exists(p));
         let new_poster = match (&c.poster_path, missing(&poster)) {
-            (Some(remote), true) => download(remote, "w780", &dir.join("poster.jpg")).await,
+            (Some(remote), true) => download(store, remote, "w780").await,
             _ => None,
         };
         let new_backdrop = match (&c.backdrop_path, missing(&backdrop)) {
-            (Some(remote), true) => download(remote, "w1280", &dir.join("backdrop.jpg")).await,
+            (Some(remote), true) => download(store, remote, "w1280").await,
             _ => None,
         };
         if new_poster.is_some() || new_backdrop.is_some() {
@@ -455,8 +434,8 @@ pub async fn link_tmdb(
             .await?;
         }
     }
-    for id in emptied {
-        let _ = tokio::fs::remove_dir_all(artwork_dir(metadata_dir, id)).await;
+    if !emptied.is_empty() {
+        tracing::debug!("removed {} empty automatic collections", emptied.len());
     }
     Ok(())
 }
