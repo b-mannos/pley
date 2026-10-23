@@ -16,8 +16,10 @@ pub const DEFAULT_PORT: u16 = 7539;
 /// Default port of the Plex-compatible API (Plex Media Server's).
 pub const PLEX_PORT: u16 = 32400;
 /// How long requests in progress may take to finish once the server is told
-/// to stop. Streams (a film playing directly) are cut after that.
-pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
+/// to stop. Streams (a film playing directly) are cut after that. Short
+/// enough to leave time for stopping the transcoder and closing the database
+/// before Docker's default stop timeout (10 s) kills the process.
+pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Parser)]
 #[command(name = "pley", version, about = "pley — a fast, self-hosted media server")]

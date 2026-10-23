@@ -15,6 +15,9 @@ async fn request_shutdown_ends_the_event_stream() {
     let data = tempfile::tempdir().unwrap();
     let mut config = pley::Config::for_data_dir(data.path());
     config.transcoder_path = Some(data.path().join("no-transcoder-in-tests"));
+    // Far longer than the test waits: stopping in time means the stream
+    // ended, not that the shutdown stopped waiting for it.
+    config.shutdown_grace = Duration::from_secs(60);
     let port = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap().local_addr().unwrap().port();
     config.bind = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let base = format!("http://127.0.0.1:{port}");
@@ -47,8 +50,6 @@ async fn request_shutdown_ends_the_event_stream() {
     assert_eq!(events.status(), reqwest::StatusCode::OK);
 
     pley::request_shutdown();
-    // Well within the grace period for requests in progress: the stream
-    // ended, it did not hold the shutdown up until it was given up on.
     let stopped = tokio::time::timeout(Duration::from_secs(5), &mut server).await;
     stopped.expect("pley still runs 5 s after request_shutdown() with /api/events open").unwrap().unwrap();
     let end = tokio::time::timeout(Duration::from_secs(5), events.chunk()).await.expect("the event stream ended");
