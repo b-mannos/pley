@@ -36,6 +36,8 @@ const MAX_REMOTE_BYTES: usize = 25 * 1024 * 1024;
 const GRACE: Duration = Duration::from_secs(3600);
 /// Bytes hashed at each end of a media file for its fingerprint.
 const FINGERPRINT_CHUNK: u64 = 64 * 1024;
+/// Fingerprints that could not be saved in a row before a run gives up.
+const MAX_FINGERPRINT_FAILURES: u32 = 3;
 
 /// Hosts pictures may be downloaded from (metadata providers' image servers).
 const IMAGE_HOSTS: &[&str] = &["image.tmdb.org", "static.tvmaze.com", "artworks.thetvdb.com", "coverartarchive.org"];
@@ -121,6 +123,7 @@ pub struct Store {
     cache: PathBuf,
     http: reqwest::Client,
     cleaning: tokio::sync::Mutex<()>,
+    fingerprinting: tokio::sync::Mutex<()>,
 }
 
 impl Store {
@@ -137,6 +140,7 @@ impl Store {
             cache: cache_dir.to_path_buf(),
             http,
             cleaning: tokio::sync::Mutex::new(()),
+            fingerprinting: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -226,11 +230,23 @@ impl Store {
     }
 
     /// Fingerprint media files scanned since the last run, one at a time.
+    ///
+    /// Each pending file is read once per run, whether or not its fingerprint
+    /// could be saved: when saving fails (a full disk, a read-only or damaged
+    /// database) the run stops after a few failures in a row instead of
+    /// reading the same files again and again, and the next run (after the
+    /// next scan, or the next start) tries again.
     pub async fn fingerprint_pending(&self) {
-        loop {
+        // One run at a time: start-up and every scan ask for one.
+        let _running = self.fingerprinting.lock().await;
+        let (mut after, mut done, mut failed, mut in_a_row) = (0i64, 0u64, 0u64, 0u32);
+        let mut last_error = None;
+        'run: loop {
             let batch: Vec<(i64, String, i64, i64)> = match sqlx::query_as(
-                "SELECT id, path, size, mtime FROM media_files WHERE fingerprint IS NULL ORDER BY id LIMIT 200",
+                "SELECT id, path, size, mtime FROM media_files
+                 WHERE fingerprint IS NULL AND id > ? ORDER BY id LIMIT 200",
             )
+            .bind(after)
             .fetch_all(&self.db.read)
             .await
             {
@@ -241,23 +257,44 @@ impl Store {
                 }
             };
             if batch.is_empty() {
-                return;
+                break;
             }
-            let mut done = 0;
             for (id, path, size, mtime) in batch {
+                after = id;
                 let owned = PathBuf::from(&path);
                 // Unreadable files (offline drives) get an empty marker so the
                 // loop moves on; the next scan that sees them changed resets it.
                 let fp = crate::util::blocking(move || Ok(fingerprint(&owned)?)).await.unwrap_or_default();
-                done += 1;
-                let _ = sqlx::query("UPDATE media_files SET fingerprint = ? WHERE id = ? AND size = ? AND mtime = ?")
-                    .bind(&fp)
-                    .bind(id)
-                    .bind(size)
-                    .bind(mtime)
-                    .execute(&self.db.write)
-                    .await;
+                let saved =
+                    sqlx::query("UPDATE media_files SET fingerprint = ? WHERE id = ? AND size = ? AND mtime = ?")
+                        .bind(&fp)
+                        .bind(id)
+                        .bind(size)
+                        .bind(mtime)
+                        .execute(&self.db.write)
+                        .await;
+                match saved {
+                    Ok(_) => {
+                        done += 1;
+                        in_a_row = 0;
+                    }
+                    Err(err) => {
+                        failed += 1;
+                        in_a_row += 1;
+                        last_error = Some(err);
+                        if in_a_row >= MAX_FINGERPRINT_FAILURES {
+                            break 'run;
+                        }
+                    }
+                }
             }
+        }
+        if let Some(err) = last_error {
+            tracing::warn!(
+                "could not save the fingerprints of {failed} media files ({err}); they are tried again after the next scan"
+            );
+        }
+        if done > 0 {
             tracing::debug!("fingerprinted {done} media files");
         }
     }
@@ -716,5 +753,81 @@ mod tests {
         assert!(store.media_dir("").is_none(), "the marker names no folder");
         let fp = store.fingerprint_of(2, &path_str(&readable), Some("")).await.unwrap();
         assert_eq!(fp.len(), 16, "an invalid stored value is computed again");
+    }
+
+    /// A store with `files` media files waiting for their fingerprint
+    /// (ids 1…, real files of 100 bytes).
+    async fn pending_files(dir: &Path, files: i64) -> Store {
+        let store = store_in(dir).await;
+        sqlx::query(
+            "INSERT INTO items (id, library_id, kind, key, title, sort_title, added_at, updated_at)
+             VALUES (1, 1, 'movie', 'm', 'M', 'm', 0, 0)",
+        )
+        .execute(&store.db.write)
+        .await
+        .unwrap();
+        for id in 1..=files {
+            let path = dir.join(format!("{id}.mkv"));
+            std::fs::write(&path, vec![id as u8; 100]).unwrap();
+            sqlx::query(
+                "INSERT INTO media_files (id, item_id, library_id, path, size, mtime, added_at, updated_at)
+                 VALUES (?, 1, 1, ?, 100, 0, 0, 0)",
+            )
+            .bind(id)
+            .bind(path_str(&path))
+            .execute(&store.db.write)
+            .await
+            .unwrap();
+        }
+        store
+    }
+
+    async fn count(store: &Store, sql: &str) -> i64 {
+        sqlx::query_scalar(sql).fetch_one(&store.db.read).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn fingerprinting_gives_up_when_saving_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = pending_files(dir.path(), 300).await;
+        // Saving fails, as on a full disk; the trigger counts the attempts.
+        for sql in [
+            "CREATE TABLE attempts (id INTEGER)",
+            "CREATE TRIGGER disk_full BEFORE UPDATE OF fingerprint ON media_files
+             BEGIN INSERT INTO attempts VALUES (NEW.id); SELECT RAISE(FAIL, 'database or disk is full'); END",
+        ] {
+            sqlx::query(sql).execute(&store.db.write).await.unwrap();
+        }
+        // It used to read the same 200 files again and again.
+        tokio::time::timeout(Duration::from_secs(20), store.fingerprint_pending()).await.expect("the run ends");
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM attempts").await, i64::from(MAX_FINGERPRINT_FAILURES));
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM media_files WHERE fingerprint IS NULL").await, 300);
+
+        // Space again: the next run saves them all.
+        sqlx::query("DROP TRIGGER disk_full").execute(&store.db.write).await.unwrap();
+        store.fingerprint_pending().await;
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM media_files WHERE fingerprint IS NULL").await, 0);
+    }
+
+    #[tokio::test]
+    async fn fingerprinting_moves_past_files_it_cannot_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = pending_files(dir.path(), 4).await;
+        // One update fails, one changes nothing: neither stops the others.
+        for sql in [
+            "CREATE TRIGGER fails BEFORE UPDATE OF fingerprint ON media_files WHEN NEW.id = 2
+             BEGIN SELECT RAISE(FAIL, 'database disk image is malformed'); END",
+            "CREATE TRIGGER ignored BEFORE UPDATE OF fingerprint ON media_files WHEN NEW.id = 3
+             BEGIN SELECT RAISE(IGNORE); END",
+        ] {
+            sqlx::query(sql).execute(&store.db.write).await.unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(20), store.fingerprint_pending()).await.expect("the run ends");
+        let saved: Vec<i64> =
+            sqlx::query_scalar("SELECT id FROM media_files WHERE fingerprint IS NOT NULL ORDER BY id")
+                .fetch_all(&store.db.read)
+                .await
+                .unwrap();
+        assert_eq!(saved, [1, 4]);
     }
 }

@@ -64,6 +64,7 @@ pub struct Scanner {
     store: Arc<Store>,
     queue: mpsc::UnboundedSender<ScanRequest>,
     status: Mutex<HashMap<i64, ScanStatus>>,
+    failures: Mutex<ScanFailures>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -71,6 +72,47 @@ struct Totals {
     added: u64,
     updated: u64,
     removed: u64,
+}
+
+/// Libraries whose last scan failed. `scanned_at` only moves when a scan
+/// succeeds, so without this a library that cannot be scanned (a full disk, a
+/// read-only or damaged database) would be walked and probed again every
+/// minute.
+#[derive(Debug, Default)]
+pub struct ScanFailures {
+    /// Library → when its last scan failed, and how many failed in a row.
+    failed: HashMap<i64, (i64, u32)>,
+}
+
+impl ScanFailures {
+    /// How long to wait after `failures` failed scans in a row: 5 minutes,
+    /// doubling up to 6 hours, never longer than the scan interval.
+    pub fn retry_delay(failures: u32, interval: i64) -> i64 {
+        let delay = (300i64 << failures.saturating_sub(1).min(7)).min(6 * 3600);
+        if interval > 0 { delay.min(interval) } else { delay }
+    }
+
+    pub fn record(&mut self, library_id: i64, ok: bool, at: i64) {
+        if ok {
+            self.failed.remove(&library_id);
+        } else {
+            let failures = self.failed.get(&library_id).map_or(0, |&(_, n)| n);
+            self.failed.insert(library_id, (at, failures + 1));
+        }
+    }
+
+    /// Whether a library whose last scan failed should not be scanned yet.
+    pub fn backing_off(&self, library_id: i64, interval: i64, now: i64) -> bool {
+        self.failed.get(&library_id).is_some_and(|&(at, n)| now - at < Self::retry_delay(n, interval))
+    }
+
+    /// Whether the periodic scan of `lib`, every `interval` seconds, is due.
+    pub fn due(&self, lib: &LibraryRow, interval: i64, now: i64) -> bool {
+        match self.failed.get(&lib.id) {
+            Some(&(at, n)) => now - at >= Self::retry_delay(n, interval),
+            None => lib.scanned_at.is_none_or(|t| now - t >= interval),
+        }
+    }
 }
 
 impl Scanner {
@@ -84,9 +126,28 @@ impl Scanner {
     ) -> Arc<Self> {
         let _ = config;
         let (tx, rx) = mpsc::unbounded_channel();
-        let scanner = Arc::new(Self { db, transcoder, events, metadata, store, queue: tx, status: Mutex::default() });
+        let scanner = Arc::new(Self {
+            db,
+            transcoder,
+            events,
+            metadata,
+            store,
+            queue: tx,
+            status: Mutex::default(),
+            failures: Mutex::default(),
+        });
         tokio::spawn(scanner.clone().worker(rx));
         scanner
+    }
+
+    /// Whether the periodic scan of `lib` is due ([`ScanFailures::due`]).
+    pub fn due(&self, lib: &LibraryRow, interval: i64) -> bool {
+        self.failures.lock().due(lib, interval, now())
+    }
+
+    /// Whether a library whose last scan failed should not be scanned yet.
+    pub fn backing_off(&self, library_id: i64, interval: i64) -> bool {
+        self.failures.lock().backing_off(library_id, interval, now())
     }
 
     pub fn enqueue(&self, library_id: i64, force: bool) {
@@ -136,7 +197,9 @@ impl Scanner {
             }
             let req = pending.remove(0);
             let started = Instant::now();
-            match self.scan(req.library_id, req.force).await {
+            let result = self.scan(req.library_id, req.force).await;
+            self.failures.lock().record(req.library_id, result.is_ok(), now());
+            match result {
                 Ok(Some(t)) => tracing::info!(
                     "library {} scanned in {:.1}s: {} added, {} updated, {} removed",
                     req.library_id,
@@ -1042,4 +1105,44 @@ fn extra_title(stem: &str, extra: &Extra) -> String {
     let cleaned: String = stem.chars().map(|c| if c == '.' || c == '_' { ' ' } else { c }).collect();
     let cleaned = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
     if cleaned.is_empty() { stem.to_owned() } else { cleaned }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn library(id: i64, scanned_at: Option<i64>) -> LibraryRow {
+        LibraryRow { id, name: "Movies".into(), kind: "movies".into(), paths: "[]".into(), created_at: 0, scanned_at }
+    }
+
+    #[test]
+    fn failed_scans_are_tried_again_less_and_less_often() {
+        const HOUR: i64 = 3600;
+        let interval = 6 * HOUR; // the default
+        let delays: Vec<i64> = (1..=9).map(|n| ScanFailures::retry_delay(n, interval)).collect();
+        assert_eq!(delays, [300, 600, 1200, 2400, 4800, 9600, 19200, 21600, 21600]);
+        assert_eq!(ScanFailures::retry_delay(3, 15 * 60), 15 * 60, "never longer than the interval");
+        assert_eq!(ScanFailures::retry_delay(30, 0), 6 * HOUR, "periodic scans off: changes still wait");
+
+        let mut failures = ScanFailures::default();
+        let t = 100 * HOUR;
+        let lib = library(1, Some(t - 7 * HOUR));
+        assert!(failures.due(&lib, interval, t));
+        failures.record(1, false, t);
+        // `scanned_at` is old: it used to be due again a minute later.
+        assert!(!failures.due(&lib, interval, t + 60));
+        assert!(failures.backing_off(1, interval, t + 60));
+        assert!(failures.due(&lib, interval, t + 300));
+        failures.record(1, false, t + 300);
+        assert!(!failures.due(&lib, interval, t + 300 + 599));
+        assert!(failures.due(&lib, interval, t + 300 + 600));
+        assert!(!failures.backing_off(2, interval, t + 60), "other libraries are not held back");
+
+        // A scan that works: the interval counts again.
+        failures.record(1, true, t + 1000);
+        let lib = library(1, Some(t + 1000));
+        assert!(!failures.backing_off(1, interval, t + 1001));
+        assert!(!failures.due(&lib, interval, t + 1000 + interval - 1));
+        assert!(failures.due(&lib, interval, t + 1000 + interval));
+    }
 }

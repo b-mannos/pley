@@ -1,5 +1,7 @@
 //! Automatic rescans: debounced filesystem notifications plus a periodic timer
-//! (for network shares where notifications are unreliable).
+//! (for network shares where notifications are unreliable). A library whose
+//! last scan failed is tried again after a growing delay
+//! ([`super::scanner::ScanFailures`]).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -14,7 +16,6 @@ use super::list_libraries;
 use super::scanner::Scanner;
 use crate::db::Db;
 use crate::settings::SettingsStore;
-use crate::util::now;
 
 const QUIET_PERIOD: Duration = Duration::from_secs(10);
 
@@ -94,9 +95,11 @@ impl LibraryWatcher {
             }
             let due: Vec<i64> =
                 pending.iter().filter(|(_, at)| at.elapsed() >= QUIET_PERIOD).map(|(id, _)| *id).collect();
+            let interval = self.settings.get().scan_interval_minutes as i64 * 60;
             for id in due {
-                if self.scanner.is_scanning(id) {
-                    // Try again once the running scan finished.
+                // Try again once the running scan finished, or once a library
+                // whose last scan failed has waited.
+                if self.scanner.is_scanning(id) || self.scanner.backing_off(id, interval) {
                     pending.insert(id, Instant::now());
                     continue;
                 }
@@ -117,8 +120,9 @@ impl LibraryWatcher {
             }
             let Ok(libraries) = list_libraries(&self.db).await else { continue };
             for lib in libraries {
-                let due = lib.scanned_at.is_none_or(|t| now() - t >= interval);
-                if due && !self.scanner.is_scanning(lib.id) {
+                // A failed scan leaves `scanned_at` as it was: the scanner
+                // spaces out the next tries.
+                if self.scanner.due(&lib, interval) && !self.scanner.is_scanning(lib.id) {
                     self.scanner.enqueue(lib.id, false);
                 }
             }

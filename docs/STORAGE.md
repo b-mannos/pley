@@ -45,7 +45,9 @@ and kept in a folder named after the file's **fingerprint**: the OpenSubtitles
 hash (the file size plus a checksum of its first and last 64 KiB). They follow
 the file when it is moved or renamed, and two copies of the same file share
 them. Fingerprints are computed in the background after scans; a file that
-changes gets a new one.
+changes gets a new one. When they cannot be saved (a full disk, a read-only
+database) the background run stops after a few failures and the next scan
+tries again.
 
 ## Database backups
 

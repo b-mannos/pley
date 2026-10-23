@@ -236,6 +236,35 @@ async fn rescans_do_not_hold_up_other_writes() {
     assert_eq!(with_subtitles, 1_500);
 }
 
+#[tokio::test]
+async fn a_library_that_fails_to_scan_waits_before_the_next_try() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Heat (1995).mkv", 1024);
+    // The end of the scan cannot be saved, as on a full disk.
+    sqlx::query(
+        "CREATE TRIGGER disk_full BEFORE UPDATE OF scanned_at ON libraries
+         BEGIN SELECT RAISE(FAIL, 'database or disk is full'); END",
+    )
+    .execute(&app.state.db.write)
+    .await
+    .unwrap();
+    let library = app.library(&admin, "Movies", "movies", "movies").await;
+    let row = pley::library::get_library(&app.state.db, library).await.unwrap().unwrap();
+    assert_eq!(row.scanned_at, None);
+    // The periodic scan used to start it again every minute.
+    let interval = 6 * 3600;
+    assert!(!app.state.scanner.due(&row, interval));
+    assert!(app.state.scanner.backing_off(library, interval));
+
+    sqlx::query("DROP TRIGGER disk_full").execute(&app.state.db.write).await.unwrap();
+    rescan(&app, &admin, library).await;
+    let row = pley::library::get_library(&app.state.db, library).await.unwrap().unwrap();
+    assert!(row.scanned_at.is_some());
+    assert!(!app.state.scanner.backing_off(library, interval));
+    assert!(!app.state.scanner.due(&row, interval));
+}
+
 /// A file name that is not valid UTF-8: a Latin-1 byte (Unix) or a lone
 /// surrogate (Windows).
 fn not_utf8(start: &str, end: &str) -> Option<std::ffi::OsString> {
