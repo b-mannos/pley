@@ -30,7 +30,8 @@ pub struct Caps {
     pub video_codecs: Vec<String>,
     #[serde(default)]
     pub audio_codecs: Vec<String>,
-    /// Client can display HDR10 / HLG without tone mapping.
+    /// Client shows HDR10 / HLG as it is: on an HDR screen, or tone-mapping
+    /// it itself (desktop Chromium does on SDR screens).
     #[serde(default)]
     pub hdr: bool,
     /// Client decodes Dolby Vision (including profile 5, which has no HDR10
@@ -176,6 +177,12 @@ fn range_problem(v: &MediaStream, caps: &Caps) -> Option<String> {
     Some(format!("{label} is converted to SDR for this screen."))
 }
 
+/// Video codecs HLS can carry in MPEG-TS segments, which players unpack
+/// (hls.js turns them into fragmented MP4 for the browser).
+fn hls_copyable(codec: &str) -> bool {
+    matches!(codec, "h264" | "hevc")
+}
+
 /// Containers the browser can play natively (used when a file was never probed).
 fn web_container(container: &str) -> bool {
     matches!(container, "mp4" | "m4v" | "webm" | "mp3" | "m4a" | "flac" | "ogg" | "wav" | "aac")
@@ -286,11 +293,11 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         _ => {}
     }
     let video_req = video.map(|v| {
+        // Whatever the client plays as it is goes through untouched, like
+        // Plex's Direct Stream: only the audio or the container changes.
         let copy = req.mode != PlaybackMode::Transcode
-            && v.codec == "h264"
-            && caps.video("h264")
-            && v.bit_depth.unwrap_or(8) <= 8
-            && !v.dynamic_range().is_hdr()
+            && video_ok
+            && hls_copyable(&v.codec)
             && v.interlaced != Some(true)
             && bitrate_ok
             && size_ok
@@ -996,6 +1003,58 @@ mod tests {
         let d = decide(&file("mkv", 20_000_000), Some(&p81), &p81.streams, &req);
         assert_eq!(d.method, Method::Transcode);
         assert!(d.reasons.iter().any(|r| r.contains("Dolby Vision P8.1")), "{:?}", d.reasons);
+    }
+
+    /// Chrome on Windows: HEVC through the graphics card, Matroska, no Dolby
+    /// Vision, no AC-3 family, an SDR screen it tone-maps HDR for.
+    fn chrome() -> Caps {
+        let mut caps = browser();
+        caps.containers.push("mkv".into());
+        caps.video_codecs.extend(["hevc".into(), "av1".into()]);
+        caps.hdr = true;
+        caps
+    }
+
+    #[test]
+    fn video_the_player_decodes_is_copied_when_only_the_audio_needs_work() {
+        let mut req = request();
+        req.caps = chrome();
+
+        // Blade Runner 2049's remux: Dolby Vision 8.1 with TrueHD Atmos, as
+        // Plex plays it in a browser: the video copied, the audio converted.
+        let mut p81 = dolby_vision(8, 1);
+        p81.streams[1].codec = "truehd".into();
+        let d = decide(&file("mkv", 60_000_000), Some(&p81), &p81.streams, &req);
+        assert_eq!(d.method, Method::Remux);
+        assert_eq!(d.video.unwrap().mode, VideoMode::Copy);
+        assert_eq!(d.audio.unwrap().mode, AudioMode::Transcode);
+        assert_eq!(d.reasons, ["This player can't play TrueHD audio."]);
+
+        // HDR10 and SDR HEVC alike.
+        for range in [DynamicRange::Hdr10, DynamicRange::Sdr] {
+            let i = info("hevc", &["eac3"], range);
+            let d = decide(&file("mkv", 20_000_000), Some(&i), &i.streams, &req);
+            assert_eq!((d.method, d.video.unwrap().mode), (Method::Remux, VideoMode::Copy), "{range:?}");
+        }
+
+        // VP9 and AV1 can't travel in MPEG-TS segments: they play directly
+        // when they can and are converted otherwise.
+        for codec in ["vp9", "av1"] {
+            let i = info(codec, &["aac"], DynamicRange::Sdr);
+            assert_eq!(decide(&file("mkv", 5_000_000), Some(&i), &i.streams, &req).method, Method::Direct);
+            let i = info(codec, &["ac3"], DynamicRange::Sdr);
+            let d = decide(&file("mkv", 5_000_000), Some(&i), &i.streams, &req);
+            assert_eq!((d.method, d.video.unwrap().mode), (Method::Transcode, VideoMode::Transcode), "{codec}");
+        }
+
+        // A screen without HDR, a lower quality or burned-in subtitles still
+        // convert the video.
+        let hdr10 = info("hevc", &["eac3"], DynamicRange::Hdr10);
+        req.caps.hdr = false;
+        assert_eq!(decide(&file("mkv", 20_000_000), Some(&hdr10), &hdr10.streams, &req).method, Method::Transcode);
+        req.caps.hdr = true;
+        req.max_bitrate = Some(8_000);
+        assert_eq!(decide(&file("mkv", 20_000_000), Some(&hdr10), &hdr10.streams, &req).method, Method::Transcode);
     }
 
     #[test]

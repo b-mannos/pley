@@ -67,7 +67,9 @@ export function videoCaps(): ClientCaps {
   if (decodes(v, 'video/mp4; codecs="av01.0.08M.08"', 'video/webm; codecs="av01.0.08M.08"')) video.push("av1");
   if (probe(v, 'video/webm; codecs="vp8"')) video.push("vp8");
 
-  // HDR needs an HDR display and a 10-bit decoder for an HDR-capable codec.
+  // HDR needs a 10-bit decoder for an HDR-capable codec, and an HDR display
+  // or desktop Chromium, which tone-maps HDR10 and HLG video for SDR displays
+  // itself (closer to the original than the transcoder's tone mapping).
   const tenBit = decodes(
     v,
     'video/mp4; codecs="hvc1.2.4.L153.B0"', // HEVC Main 10
@@ -81,7 +83,7 @@ export function videoCaps(): ClientCaps {
     containers,
     video_codecs: video,
     audio_codecs: audioCodecs(v),
-    hdr: hdrDisplay && tenBit,
+    hdr: tenBit && (hdrDisplay || (isChromium() && !/\bAndroid\b/.test(navigator.userAgent))),
     dolby_vision: dolbyVision,
   };
   return videoCache;

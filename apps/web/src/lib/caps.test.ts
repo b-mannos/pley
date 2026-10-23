@@ -55,6 +55,19 @@ describe("videoCaps", () => {
     expect(videoCaps().hdr).toBe(false);
   });
 
+  it("lets desktop Chromium tone-map HDR for an SDR screen", async () => {
+    Object.defineProperty(navigator, "userAgentData", { value: { brands: [{ brand: "Chromium" }] }, configurable: true });
+    browser({ types: ['video/mp4; codecs="hvc1.2.4.L153.B0"'], hdrDisplay: false });
+    expect((await caps()).videoCaps().hdr).toBe(true);
+
+    browser({ types: [], hdrDisplay: false });
+    expect((await caps()).videoCaps().hdr).toBe(false);
+
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Linux; Android 15) Chrome/152.0.0.0 Mobile");
+    browser({ types: ['video/mp4; codecs="hvc1.2.4.L153.B0"'], hdrDisplay: false });
+    expect((await caps()).videoCaps().hdr).toBe(false);
+  });
+
   it("probes once", async () => {
     browser({ types: ["video/mp4"] });
     const { videoCaps } = await caps();
