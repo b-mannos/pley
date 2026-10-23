@@ -24,13 +24,15 @@ pub type Result<T> = std::result::Result<T, &'static str>;
 
 /// Largest header box read whole (`elst`, `trex`, …).
 const MAX_SMALL_BOX: u64 = 1 << 20;
-/// Largest sample table read whole (`stts`, `ctts`, `stss`, `stps`, `stsc`).
-const MAX_TABLE: u64 = 128 << 20;
-/// Largest `trun` read whole.
-const MAX_TRUN: u64 = 64 << 20;
-/// Most samples of the video track, movie box and fragments together (about
-/// 90 hours at 25 frames per second).
-const MAX_SAMPLES: u64 = 8_000_000;
+/// What the video track's sample tables (`stts`, `ctts`, `stss`, `stps`,
+/// `stsc`) may take together: per-sample `stts` and `ctts` tables for
+/// `MAX_SAMPLES` samples would be 64 MB, real ones are a few.
+const TABLE_BUDGET: u64 = 48 << 20;
+/// Largest `trun` read whole (a million samples with every field).
+const MAX_TRUN: u64 = 16 << 20;
+/// Most samples of the video track, movie box and fragments together (46
+/// hours at 24 frames per second).
+const MAX_SAMPLES: u64 = 4_000_000;
 /// Most top-level boxes walked (a fragmented file has two per fragment).
 const MAX_TOP_LEVEL_BOXES: u64 = 4_000_000;
 /// Most children of one box.
@@ -81,7 +83,7 @@ fn index<R: Read + Seek>(inner: R, len: u64, deadline: Option<Instant>) -> Resul
     let tables = &track.tables;
 
     // Presentation times in media ticks.
-    let mut pts: Vec<i128> = Vec::new();
+    let mut pts: Vec<i64> = Vec::new();
     if movie.fragmented {
         let trex = movie.trex.iter().find(|t| t.track == track.id).copied().ok_or("fragment defaults missing")?;
         if edit.is_some() && tables.count > 0 {
@@ -109,15 +111,23 @@ fn index<R: Read + Seek>(inner: R, len: u64, deadline: Option<Instant>) -> Resul
         // FFmpeg reads every fragment before the first packet and delays
         // presentation by the most negative composition offset of the track
         // (decode times stay as they are).
-        let shift = i128::from(tables.dts_shift).max(-i128::from(frags.min_offset));
+        let shift = tables.dts_shift.max(-i64::from(frags.min_offset));
         if shift > 0 && tables.count > 0 {
             return Err("negative composition offsets in a fragmented file with samples in its movie box");
         }
-        pts.extend(Samples::new(tables).filter(|s| s.key).map(|s| s.cts));
-        pts.extend(fragment_pts.into_iter().map(|t| t + shift));
+        for s in Samples::new(tables).filter(|s| s.key) {
+            pts.push(narrow(s.cts)?);
+        }
+        for t in fragment_pts {
+            pts.push(t.checked_add(shift).ok_or("time out of range")?);
+        }
     } else {
         match edit {
-            None => pts.extend(Samples::new(tables).filter(|s| s.key).map(|s| s.cts)),
+            None => {
+                for s in Samples::new(tables).filter(|s| s.key) {
+                    pts.push(narrow(s.cts)?);
+                }
+            }
             Some(edit) => pts = edited_keyframes(tables, &edit)?,
         }
     }
@@ -126,7 +136,7 @@ fn index<R: Read + Seek>(inner: R, len: u64, deadline: Option<Instant>) -> Resul
     let mut times: Vec<i64> = pts
         .into_iter()
         .filter(|&t| t >= 0)
-        .filter_map(|t| i64::try_from((t * 1000 + scale / 2) / scale).ok())
+        .filter_map(|t| i64::try_from((i128::from(t) * 1000 + scale / 2) / scale).ok())
         .collect();
     times.sort_unstable();
     times.dedup();
@@ -134,6 +144,11 @@ fn index<R: Read + Seek>(inner: R, len: u64, deadline: Option<Instant>) -> Resul
         return Err("no keyframes");
     }
     Ok(times)
+}
+
+/// A time in media ticks, kept in 64 bits.
+fn narrow(ticks: i128) -> Result<i64> {
+    i64::try_from(ticks).map_err(|_| "time out of range")
 }
 
 // ---------------------------------------------------------------- reading
@@ -476,8 +491,18 @@ struct Tables {
     dts_shift: i64,
 }
 
+/// A sample table's payload, charged to what the track's tables may take.
+fn table<R: Read + Seek>(r: &mut Reader<R>, h: &BoxHead, budget: &mut u64) -> Result<Vec<u8>> {
+    if h.body_len() > *budget {
+        return Err("sample tables too large");
+    }
+    *budget -= h.body_len();
+    r.body(h, u64::MAX)
+}
+
 fn read_tables<R: Read + Seek>(r: &mut Reader<R>, boxes: &[BoxHead]) -> Result<Tables> {
     let mut t = Tables::default();
+    let mut budget = TABLE_BUDGET;
     let mut sizes = None;
     let mut chunks = None;
     let mut stsc = None;
@@ -486,7 +511,7 @@ fn read_tables<R: Read + Seek>(r: &mut Reader<R>, boxes: &[BoxHead]) -> Result<T
             b"stsz" | b"stz2" => sizes = Some(Fields::new(&r.prefix(h, 12)?[8..]).u32()?),
             b"stco" | b"co64" => chunks = Some(Fields::new(&r.prefix(h, 8)?[4..]).u32()?),
             b"stsc" => {
-                let data = r.body(h, MAX_TABLE)?;
+                let data = table(r, h, &mut budget)?;
                 let mut f = Fields::new(&data);
                 f.skip(4)?;
                 let n = f.count(12)?;
@@ -499,19 +524,19 @@ fn read_tables<R: Read + Seek>(r: &mut Reader<R>, boxes: &[BoxHead]) -> Result<T
                 stsc = Some(entries);
             }
             b"stts" => {
-                let data = r.body(h, MAX_TABLE)?;
+                let data = table(r, h, &mut budget)?;
                 let mut f = Fields::new(&data);
                 f.skip(4)?;
                 let n = f.count(8)?;
                 t.stts = (0..n).map(|_| Ok((f.u32()?, f.u32()?))).collect::<Result<_>>()?;
             }
             b"ctts" => {
-                let data = r.body(h, MAX_TABLE)?;
+                let data = table(r, h, &mut budget)?;
                 let mut f = Fields::new(&data);
                 f.skip(4)?;
                 let n = f.count(8)?;
-                let raw = (0..n).map(|_| Ok((f.u32()?, f.i32()?))).collect::<Result<Vec<_>>>()?;
-                for (i, &(count, offset)) in raw.iter().enumerate() {
+                for i in 0..n {
+                    let (count, offset) = (f.u32()?, f.i32()?);
                     // FFmpeg reads counts as signed and skips the ones that
                     // aren't positive; it ignores the last two entries when
                     // judging the offsets.
@@ -528,13 +553,13 @@ fn read_tables<R: Read + Seek>(r: &mut Reader<R>, boxes: &[BoxHead]) -> Result<T
                 }
             }
             b"stss" => {
-                let sync = sample_numbers(&r.body(h, MAX_TABLE)?)?;
+                let sync = sample_numbers(&table(r, h, &mut budget)?)?;
                 if sync.is_empty() {
                     return Err("empty sync sample table");
                 }
                 t.sync = Some(sync);
             }
-            b"stps" => t.partial_sync = sample_numbers(&r.body(h, MAX_TABLE)?)?,
+            b"stps" => t.partial_sync = sample_numbers(&table(r, h, &mut budget)?)?,
             b"sbgp" => {
                 let head = r.prefix(h, 8)?;
                 if matches!(&head[4..8], b"rap " | b"sync") {
@@ -729,7 +754,7 @@ fn edit_plan(edits: &[Edit], movie_scale: u32, media_scale: u32) -> Result<Optio
 /// libavformat (`mov_fix_index`): decoding starts at the last keyframe at or
 /// before the edit; the first sample presented in the edit, or the earliest
 /// one if that comes later, starts at the end of the empty edit.
-fn edited_keyframes(t: &Tables, edit: &EditPlan) -> Result<Vec<i128>> {
+fn edited_keyframes(t: &Tables, edit: &EditPlan) -> Result<Vec<i64>> {
     let m = edit.media_time;
     let duration = edit.duration.ok_or("edit list without a duration")?;
     let in_edit = |s: &Sample| s.cts >= m && s.cts < m + duration;
@@ -746,12 +771,12 @@ fn edited_keyframes(t: &Tables, edit: &EditPlan) -> Result<Vec<i128>> {
         first_dts.get_or_insert(s.dts);
         min_cts = Some(min_cts.map_or(s.cts, |c| c.min(s.cts)));
         if s.key {
-            keys.push(s.cts);
+            keys.push(narrow(s.cts)?);
         }
     }
     let (Some(first_dts), Some(min_cts)) = (first_dts, min_cts) else { return Err("no samples in the edit") };
     let shift = first_dts.max(min_cts);
-    Ok(keys.into_iter().map(|cts| edit.empty + cts - shift).collect())
+    keys.into_iter().map(|cts| narrow(edit.empty + i128::from(cts) - shift)).collect()
 }
 
 // ---------------------------------------------------------------- fragments
@@ -772,14 +797,14 @@ struct Fragments {
 }
 
 impl Fragments {
-    fn read_moof<R: Read + Seek>(&mut self, r: &mut Reader<R>, moof: &BoxHead, pts: &mut Vec<i128>) -> Result<()> {
+    fn read_moof<R: Read + Seek>(&mut self, r: &mut Reader<R>, moof: &BoxHead, pts: &mut Vec<i64>) -> Result<()> {
         for traf in r.children(moof)?.iter().filter(|h| h.kind == *b"traf") {
             self.read_traf(r, traf, pts)?;
         }
         Ok(())
     }
 
-    fn read_traf<R: Read + Seek>(&mut self, r: &mut Reader<R>, traf: &BoxHead, pts: &mut Vec<i128>) -> Result<()> {
+    fn read_traf<R: Read + Seek>(&mut self, r: &mut Reader<R>, traf: &BoxHead, pts: &mut Vec<i64>) -> Result<()> {
         let kids = r.children(traf)?;
         let Some(tfhd) = find(&kids, b"tfhd") else { return Ok(()) };
         let head = r.head_bytes(&tfhd, 40)?;
@@ -843,7 +868,7 @@ impl Fragments {
         mut dts: i128,
         default_duration: u32,
         default_flags: u32,
-        pts: &mut Vec<i128>,
+        pts: &mut Vec<i64>,
     ) -> Result<i128> {
         let mut f = Fields::new(data);
         let flags = f.u32()? & 0x00FF_FFFF;
@@ -872,7 +897,7 @@ impl Fragments {
             let offset = if flags & 0x800 != 0 { f.i32()? } else { 0 };
             self.min_offset = self.min_offset.min(offset);
             if sample_flags & NON_SYNC == 0 {
-                pts.push(dts + i128::from(offset));
+                pts.push(narrow(dts + i128::from(offset))?);
             }
             dts += i128::from(duration);
         }
