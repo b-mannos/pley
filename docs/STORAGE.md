@@ -8,6 +8,8 @@ artwork, which pley never moves or changes.
 <data>/
   pley.db                    the database (SQLite, WAL)
   pley.lock                  locked while pley runs: one server per data folder
+  secret.key                 the key that encrypts authenticator secrets
+                             (two-step sign-in): keep it with the database
   metadata/blobs/ab/<sha256>.<ext>
                              pictures that are metadata
   media/ab/<fingerprint>/    files generated from one media file
@@ -69,6 +71,11 @@ next one, apart from the daily backups.
 
 To restore one: stop pley, move `pley.db`, `pley.db-wal` and `pley.db-shm`
 aside, copy the backup to `pley.db`, and start pley again.
+
+To move pley to another computer, copy the whole data folder. A database
+without its `secret.key` can't check codes from authenticator apps: people
+with two-step sign-in then sign in with a recovery code and set it up again
+(or an administrator turns it off for them).
 
 Never copy `pley.db` while pley is running: most of the latest changes live in
 `pley.db-wal` until SQLite checkpoints them, so the copy would be stale or

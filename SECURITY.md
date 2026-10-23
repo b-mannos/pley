@@ -25,6 +25,9 @@ Only the latest release gets fixes.
   folders.
 - **Single sign-on:** use a provider you control, or set the group that may
   sign in; turn on new accounts only then.
+- **Two-step sign-in:** turn it on for administrators of a server reachable
+  from the internet (Account → Two-step sign-in), and keep the recovery codes
+  somewhere safe.
 
 ## What pley does
 
@@ -36,14 +39,26 @@ minutes from each address; a restart makes a new code.
 **Passwords.** Argon2id hashes; at least 8 characters, not the username, not
 a common password. Sign-ins, PINs and the current password on changes are
 limited to 5 failures every 15 minutes per account, and password checks
-queue, so a flood of sign-ins can't exhaust memory. A new password signs the
-account out on every other device.
+queue, so a flood of sign-ins can't exhaust memory. A PIN stops working
+after 100 wrong tries in a row, until it is set again. A new password signs
+the account out on every other device.
+
+**Two-step sign-in** (optional): after the password, a code from an
+authenticator app (TOTP) or one of ten recovery codes. Turning it on takes
+the password and a first code; turning it off, the password and a code. A
+code works once; wrong codes are limited like passwords, and after 100 in a
+row only a recovery code signs in. The authenticator secrets are encrypted
+with a key kept in the data folder (`secret.key`), so a copy of the database
+or of its backups can't make codes; recovery codes are stored hashed.
+Switching to a profile with its password, and linking the account to a
+single sign-on identity, take its code too. Single sign-on itself skips it:
+the provider asks for its own.
 
 **Sessions.** Random 256-bit tokens, stored hashed. Browsers keep them in an
 `HttpOnly`, `SameSite=Lax` cookie only: no answer gives a page's script the
 token. Event streams end once their session is signed out. Switching from a
 restricted profile to one that can see more (an administrator, a higher age
-limit, other libraries) takes that profile's PIN or password.
+limit, other libraries) takes that profile's PIN, or its password (and code).
 
 **Pages.** A `Content-Security-Policy` allows only pley's own scripts and
 styles, no other site may frame pley (`frame-ancestors 'none'`,

@@ -52,6 +52,8 @@ web app in React and TypeScript.
   Keycloak, Pocket ID…), linked account by account and optionally limited to
   a group. Providers that take client metadata documents need no
   registration.
+- Optional two-step sign-in with an authenticator app (scan a QR code), with
+  recovery codes for a lost phone.
 - First-run setup with a one-time code from the server's log, which the
   tray icon fills in. Passwords have at least 8 characters and can't be
   common ones. See [SECURITY.md](SECURITY.md).
@@ -127,7 +129,7 @@ Open it, create the administrator account and add a library. Nobody without
 the code can claim a new server.
 
 A lost password is reset with `pley reset-password <user> <new-password>
-[--admin]`.
+[--admin]`, which also turns that account's two-step sign-in off.
 
 ## Configuration
 

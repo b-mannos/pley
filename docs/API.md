@@ -33,9 +33,10 @@ Non-2xx responses carry:
 ```
 
 `code` is one of `bad_request`, `unauthorized`, `forbidden`, `not_found`,
-`conflict`, `too_many_requests` (sign-in, PIN and password attempts:
+`conflict`, `too_many_requests` (sign-in, PIN, password and code attempts:
 after 5 failures in 15 minutes, counting attempts still being checked),
-`unavailable`, `internal`.
+`two_step` (`401`: the account has two-step sign-in, and the code is missing
+or wrong), `unavailable`, `internal`.
 
 ---
 
@@ -67,6 +68,7 @@ interface User {
   subtitle_mode: "off" | "forced" | "foreign" | "always";
   has_password: boolean;           // false: a managed profile, or signs in only with single sign-on
   sso: boolean;                    // linked to an identity at the single sign-on provider
+  two_step: boolean;               // signs in with a code from an authenticator app after the password
 }
 
 type LibraryKind = "movies" | "shows" | "music";
@@ -262,7 +264,7 @@ interface PlaybackInfo {
 | GET | `/api/health` | – | `{ "status": "ok" }` |
 | GET | `/api/server` | – | `{ name: string, version: string, setup_required: boolean, setup_code_required: boolean, sso: { name, start } \| null }`. Setup takes the code from the server's log. `sso`: single sign-on is on; `start` is where browsers go to sign in (`?next=/page`) |
 | POST | `/api/setup` | `{ username, password, setup_code }` | `{ user: User, token? }` — creates the first (admin) account and signs in. `409` once a user exists, `403` without the right `setup_code` (5 tries per 15 minutes from each address, then `429`) |
-| POST | `/api/auth/login` | `{ username, password }` | `{ user: User, token? }` (`401` on bad credentials) |
+| POST | `/api/auth/login` | `{ username, password, code? }` | `{ user: User, token? }` (`401` on bad credentials). With two-step sign-in, `code` is a code from the authenticator app or a recovery code: without it, or with a wrong one, `401` with `code: "two_step"` |
 | GET | `/api/auth/sso/start` | `next=/page` | A page browsers are sent to: `303` to the provider (from pley's public address; elsewhere, first to that). Problems come back as `/login?sso=<code>` |
 | GET | `/api/auth/sso/callback` | `code`, `state` (from the provider) | `303` to `next` (or `/profiles?next=…` for a household), signed in; or `/login?sso=<code>`, `/account?sso=<code>` (see below) |
 | GET | `/api/auth/sso/client` | – | pley's client metadata document (when it has no client ID): `{ client_id, client_name, redirect_uris, grant_types, response_types, token_endpoint_auth_method: "none", scope }` |
@@ -275,8 +277,8 @@ interface PlaybackInfo {
 | GET | `/api/auth/me` | – | `User` |
 | PUT | `/api/auth/password` | `{ current_password, new_password }` | `204`; signs the user out everywhere but this device |
 | GET | `/api/auth/profiles` | – | `User[]`: home profiles this user can switch to (empty for non-home users) |
-| POST | `/api/auth/switch` | `{ user_id, pin?, password? }` | `{ user, token? }`: this device becomes that profile (old session ends). A profile with a PIN needs it. Without one, a profile that can see more than yours (an administrator, a higher age limit, libraries yours can't open) needs its password, unless you are an administrator; a managed one can't be switched to until it has a PIN. `429` after 5 wrong tries in 15 min. |
-| POST | `/api/auth/sso/link` | `{ password }` | `204`: the next single sign-on (`/api/auth/sso/start`, which the web app opens next) links that identity to this account. From pley's public address only (`409` elsewhere); not for managed profiles or accounts without a password |
+| POST | `/api/auth/switch` | `{ user_id, pin?, password?, code? }` | `{ user, token? }`: this device becomes that profile (old session ends). A profile with a PIN needs it; after 100 wrong PINs in a row it stops working until it is set again. Without one, a profile that can see more than yours (an administrator, a higher age limit, libraries yours can't open) needs its password, and its `code` with two-step sign-in, unless you are an administrator; a managed one can't be switched to until it has a PIN. `429` after 5 wrong tries in 15 min. |
+| POST | `/api/auth/sso/link` | `{ password, code? }` | `204`: the next single sign-on (`/api/auth/sso/start`, which the web app opens next) links that identity to this account. From pley's public address only (`409` elsewhere); not for managed profiles or accounts without a password. With two-step sign-in, it takes a `code` too (single sign-on skips it) |
 
 Login attempts are throttled the same way (5 failures per username per 15 min).
 Disabled accounts get `403` at login and their sessions stop working.
@@ -301,12 +303,28 @@ token was refused), `unknown` (no account is linked to that identity),
 not signed in as the user who asked any more), `taken` (linked to another
 account), `error`.
 
+### Two-step sign-in
+
+Optional for each account with a password: after the password, a 6-digit
+code from an authenticator app (TOTP: SHA-1, 30-second steps), or one of ten
+recovery codes. Each code works once; wrong ones count like wrong passwords,
+and after 100 in a row only a recovery code signs in. Single sign-on skips
+it. `pley reset-password` turns it off.
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/api/me/two-step` | – | `{ enabled, since: Timestamp \| null, recovery_codes_left }` |
+| POST | `/api/me/two-step/setup` | `{ password }` | `{ secret, uri, qr: { size, path }, expires_at }`: a new secret (base32), its `otpauth://` URI and a QR code of it (`path` draws its dark modules on a `size`-wide grid). `409` when it is on already |
+| POST | `/api/me/two-step` | `{ code }` | `{ recovery_codes: string[] }`: a code from the new secret turns it on (within 30 minutes, 5 tries); the codes are shown once |
+| DELETE | `/api/me/two-step` | `{ password, code }` | `204`, off |
+| POST | `/api/me/two-step/recovery-codes` | `{ password }` | `{ recovery_codes }`: new ones; the old ones stop working |
+
 ## Your account
 
 | Method | Path | Body | Response |
 |---|---|---|---|
 | PATCH | `/api/me` | `{ display_name?, avatar_color?, audio_language?, subtitle_language?, subtitle_mode? }` (`null` clears) | `User` |
-| PUT | `/api/me/pin` | `{ pin: string \| null, password }` | `204`; 4–8 digits, `null` removes it |
+| PUT | `/api/me/pin` | `{ pin: string \| null, password }` | `204`; 4–8 digits, `null` removes it (`403` with a wrong password) |
 | PUT | `/api/me/avatar` | raw image bytes (JPEG, PNG, WebP, GIF, BMP; ≤ 10 MB) | `User`; stored as a 256 px square JPEG |
 | DELETE | `/api/me/avatar` | – | `204` |
 | GET | `/api/users/{id}/avatar` | – | `image/jpeg` (any signed-in user, for the profile switcher) |
@@ -681,6 +699,7 @@ type ServerEvent =
 | GET | `/api/users/{id}/devices` | – | `Device[]` |
 | DELETE | `/api/users/{id}/devices` | – | `204`, signs the user out everywhere |
 | DELETE | `/api/users/{id}/sso` | – | `204`, unlinks the user's identities at the single sign-on provider |
+| DELETE | `/api/users/{id}/two-step` | – | `204`, turns two-step sign-in off (someone who lost their phone and recovery codes) |
 
 ## Invitations
 
