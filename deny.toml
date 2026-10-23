@@ -31,3 +31,11 @@ allow = [
 
 [licenses.private]
 ignore = true
+
+[advisories]
+# Known vulnerabilities in any crate that gets built fail the check (see
+# .github/workflows/audit.yml). Unmaintained crates only when pley depends
+# on them directly: for the others there is nothing to do but wait for the
+# crate that uses them to move on.
+unmaintained = "workspace"
+yanked = "warn"
