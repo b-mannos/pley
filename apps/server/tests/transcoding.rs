@@ -21,7 +21,7 @@ use parking_lot::Mutex;
 use pley_transcoder_api::{
     API_VERSION, AudioMode, AudioPlan, Capabilities, EncoderInfo, ErrorBody, HwAccel, JobCreated, JobRequest,
     JobStatus, Limits, MediaInfo, MediaStream, ProbeRequest, StreamKind, SubtitleRequest, TranscoderInfo,
-    TranscoderStatus, VideoCodec, VideoMode, VideoPlan,
+    TranscoderStatus, TrickplayInfo, TrickplayRequest, VideoCodec, VideoMode, VideoPlan,
 };
 use serde_json::{Value, json};
 
@@ -41,6 +41,8 @@ struct Fake {
     probes: Arc<Mutex<Vec<String>>>,
     subtitles: Arc<Mutex<Vec<SubtitleRequest>>>,
     thumbnails: Arc<AtomicUsize>,
+    /// Paths seek previews were asked for.
+    previews: Arc<Mutex<Vec<String>>>,
     next_id: Arc<AtomicUsize>,
     /// Segment count of new jobs instead of one per 4 s.
     layout: Arc<Mutex<Option<u32>>>,
@@ -300,7 +302,40 @@ async fn start_fake() -> (Fake, String) {
             }),
         )
         .route("/v1/keyframes", post(|| async { StatusCode::ACCEPTED }))
-        .route("/v1/trickplay", post(|| async { error(StatusCode::SERVICE_UNAVAILABLE, "busy") }))
+        // Previews of the MP4 work: one sheet of 5×2 tiles of 8×4. Others fail.
+        .route(
+            "/v1/trickplay",
+            post(|State(fake): State<Fake>, Json(req): Json<TrickplayRequest>| async move {
+                fake.previews.lock().push(req.path.clone());
+                if !req.path.ends_with(".mp4") {
+                    return error(StatusCode::INTERNAL_SERVER_ERROR, "ffmpeg_failed");
+                }
+                Json(TrickplayInfo {
+                    id: "previews1".into(),
+                    interval_ms: 10_000,
+                    width: 8,
+                    height: 4,
+                    columns: 5,
+                    rows: 2,
+                    count: 6,
+                    sheets: 1,
+                })
+                .into_response()
+            }),
+        )
+        .route(
+            "/v1/trickplay/{id}/{sheet}",
+            get(|Path((id, sheet)): Path<(String, String)>| async move {
+                if id != "previews1" || sheet != "0.jpg" {
+                    return error(StatusCode::NOT_FOUND, "not_found");
+                }
+                let mut jpeg = Vec::new();
+                image::RgbImage::from_fn(40, 8, |x, y| image::Rgb([(x * 6) as u8, (y * 30) as u8, 90]))
+                    .write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg)
+                    .unwrap();
+                ([(header::CONTENT_TYPE, "image/jpeg")], jpeg).into_response()
+            }),
+        )
         .with_state(fake.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr: SocketAddr = listener.local_addr().unwrap();
@@ -336,10 +371,11 @@ async fn world() -> World {
     // No seek previews in the background: only what the tests ask for.
     let settings = app.put("/api/settings", &admin, json!({"seek_previews": false})).await;
     assert_eq!(settings.status, StatusCode::OK);
+    // Different sizes: identical files would share their media folder.
     app.media_file("movies/Feature (2021)/Feature (2021).mkv", 4096);
     app.media_file("movies/Feature (2021)/Feature (2021).en.srt", 64);
-    app.media_file("movies/Clip (2020).mp4", 4096);
-    app.media_file("movies/Broken (2019).mkv", 4096);
+    app.media_file("movies/Clip (2020).mp4", 3072);
+    app.media_file("movies/Broken (2019).mkv", 2048);
     let library = app.library(&admin, "Movies", "movies", "movies").await;
     let movies = app.ids(library, &admin).await;
     World { app, fake, base, admin, movies }
@@ -662,4 +698,47 @@ async fn plex_clients_stream_through_the_universal_transcoder() {
     assert_eq!(stop.status, StatusCode::OK);
     eventually(|| w.fake.deleted.lock().contains(&"job1".to_owned())).await;
     assert_eq!(app.plex(Method::GET, &format!("{base}index.m3u8"), "", &[]).await.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn seek_previews_are_made_once_per_file() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    app.put("/api/settings", admin, json!({"seek_previews": true})).await;
+    let clip = app.file_of(w.movies["Clip"]).await;
+    let previews = format!("/api/files/{clip}/trickplay");
+
+    // Asking queues them; they are fetched from the transcoder in the background.
+    assert_eq!(app.get(&previews, admin).await.status, StatusCode::NOT_FOUND, "being made");
+    let mut info = Value::Null;
+    for _ in 0..200 {
+        let reply = app.get(&previews, admin).await;
+        if reply.status == StatusCode::OK {
+            info = reply.body;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!((&info["count"], &info["columns"], &info["sheets"]), (&json!(6), &json!(5), &json!(1)), "{info}");
+    let sheet = app.get(&format!("{previews}/0.jpg?v={}", info["id"].as_str().unwrap()), admin).await;
+    assert_eq!(sheet.status, StatusCode::OK);
+    assert_eq!(sheet.headers[header::CONTENT_TYPE], "image/jpeg");
+    assert!(sheet.headers[header::CACHE_CONTROL].to_str().unwrap().contains("immutable"));
+    assert_eq!(app.get(&format!("{previews}/1.jpg"), admin).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.get(&format!("{previews}/x.png"), admin).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(w.fake.previews.lock().len(), 1, "made once");
+
+    // A file the transcoder can't do is not asked for again (until a restart).
+    let feature = app.file_of(w.movies["Feature"]).await;
+    app.get(&format!("/api/files/{feature}/trickplay"), admin).await;
+    eventually(|| w.fake.previews.lock().len() == 2).await;
+    eventually(|| app.state.trickplay.pending() == 0).await;
+    let again = app.get(&format!("/api/files/{feature}/trickplay"), admin).await;
+    assert_eq!(again.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.state.trickplay.pending(), 0, "not queued again");
+    // Files ffprobe couldn't read have no video to preview.
+    let broken = app.file_of(w.movies["Broken"]).await;
+    assert_eq!(app.get(&format!("/api/files/{broken}/trickplay"), admin).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.state.trickplay.pending(), 0);
+    assert_eq!(w.fake.previews.lock().len(), 2);
 }
