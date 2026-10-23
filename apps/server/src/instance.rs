@@ -35,7 +35,7 @@ impl InstanceLock {
         if !try_lock(&file).with_context(|| format!("cannot lock {}", path.display()))? {
             let holder = std::fs::read_to_string(&path).ok().and_then(|pid| pid.trim().parse::<u32>().ok());
             anyhow::bail!(
-                "pley is already running{} with the data directory {}",
+                "another pley{} uses the data directory {}",
                 holder.map(|pid| format!(" (process {pid})")).unwrap_or_default(),
                 data_dir.display()
             );
@@ -104,9 +104,9 @@ mod tests {
         let first = InstanceLock::acquire(&data).expect("a free data directory");
         let err = InstanceLock::acquire(&data).expect_err("already held");
         let message = format!("{err:#}");
-        assert!(message.contains("already running"), "{message}");
-        assert!(message.contains(&format!("(process {})", std::process::id())), "{message}");
-        assert!(message.contains(&data.display().to_string()), "{message}");
+        let expected =
+            format!("another pley (process {}) uses the data directory {}", std::process::id(), data.display());
+        assert_eq!(message, expected);
         drop(first);
         let _again = InstanceLock::acquire(&data).expect("released with its holder");
     }

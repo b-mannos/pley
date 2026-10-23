@@ -66,9 +66,9 @@ async fn one_server_per_data_directory() {
 
     // A second copy gives up at once, before it opens the database.
     let second = tokio::time::timeout(Duration::from_secs(10), pley::run(config(data.path()))).await;
-    let message = format!("{:#}", second.expect("the second copy gives up at once").expect_err("the directory is taken"));
-    assert!(message.contains("pley is already running"), "{message}");
-    assert!(message.contains(&format!("(process {})", std::process::id())), "{message}");
+    let message =
+        format!("{:#}", second.expect("the second copy gives up at once").expect_err("the directory is taken"));
+    assert!(message.starts_with(&format!("another pley (process {}) uses", std::process::id())), "{message}");
 
     ctx.send(Command::Quit);
     stopped(server, Duration::from_secs(5)).await.unwrap();
@@ -91,17 +91,58 @@ async fn a_taken_port_stops_the_start_before_the_database_is_opened() {
     }
 }
 
+/// Runs `pley serve` with `args` and the data directory `data`, on a port
+/// that is taken (so it never runs for real, whatever happens), and returns
+/// its exit status, its standard error and its log file.
+async fn failed_start(data: &std::path::Path, args: &[&str]) -> (std::process::ExitStatus, String, String) {
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let run = pley_exe()
+        .args(["--no-tray", "--plex-bind", "off", "--bind"])
+        .arg(taken.local_addr().unwrap().to_string())
+        .arg("--data-dir")
+        .arg(data)
+        .args(args)
+        .output();
+    let output = tokio::time::timeout(Duration::from_secs(60), run).await.expect("pley exits").unwrap();
+    let log = std::fs::read_to_string(data.join("logs").join("pley.log")).unwrap_or_default();
+    (output.status, String::from_utf8_lossy(&output.stderr).into_owned(), log)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn why_the_server_could_not_start_is_in_its_log() {
+    // The port is taken.
+    let data = tempfile::tempdir().unwrap();
+    let (status, stderr, log) = failed_start(data.path(), &[]).await;
+    assert!(!status.success());
+    assert!(log.contains("ERROR pley could not start: cannot listen on 127.0.0.1:"), "{log}");
+    assert_eq!(stderr.matches("cannot listen on").count(), 1, "on the console once: {stderr}");
+
+    // Another pley uses the data directory (here, this process).
+    let busy = tempfile::tempdir().unwrap();
+    let (_, ctx, server) = start(config(busy.path())).await;
+    let (status, _, log) = failed_start(busy.path(), &[]).await;
+    assert!(!status.success());
+    let holder = format!("pley could not start: another pley (process {}) uses the data", std::process::id());
+    assert!(log.contains(&holder), "{log}");
+    ctx.send(Command::Quit);
+    stopped(server, Duration::from_secs(5)).await.unwrap();
+
+    // pley.toml can't be read: the log of the data directory it is in.
+    let broken = tempfile::tempdir().unwrap();
+    std::fs::write(broken.path().join("pley.toml"), "bindd = \"8080\"\n").unwrap();
+    let (status, _, log) = failed_start(broken.path(), &[]).await;
+    assert!(!status.success());
+    assert!(log.contains("ERROR pley could not start: parsing config file"), "{log}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn reset_password_works_next_to_a_running_server() {
     let data = tempfile::tempdir().unwrap();
     let (addr, ctx, server) = start(config(data.path())).await;
 
-    let output = pley_exe()
-        .args(["reset-password", "admin", "password1", "--admin", "--data-dir"])
-        .arg(data.path())
-        .output()
-        .await
-        .unwrap();
+    let run =
+        pley_exe().args(["reset-password", "admin", "password1", "--admin", "--data-dir"]).arg(data.path()).output();
+    let output = tokio::time::timeout(Duration::from_secs(60), run).await.expect("pley exits").unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert!(String::from_utf8_lossy(&output.stdout).contains("created user 'admin' (admin)"));
     let http = reqwest::Client::builder().no_proxy().build().unwrap();

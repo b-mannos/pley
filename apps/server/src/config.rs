@@ -202,7 +202,14 @@ impl Config {
 
     /// Server log (rotated at start-up when large).
     pub fn log_file(&self) -> PathBuf {
-        self.data_dir.join("logs").join("pley.log")
+        log_file(&self.data_dir)
+    }
+
+    /// The server log when the configuration can't be loaded: in the data
+    /// directory of the command line, or the default one (where `pley.toml`
+    /// is looked for).
+    pub fn fallback_log_file(cli: &Cli) -> PathBuf {
+        log_file(&absolutize(&cli.data_dir.clone().unwrap_or_else(default_data_dir)))
     }
 
     /// Resized images, extracted subtitles, …: safe to delete at any time.
@@ -223,6 +230,10 @@ impl Config {
 
 fn default_data_dir() -> PathBuf {
     dirs::data_local_dir().map(|d| d.join("pley")).unwrap_or_else(|| PathBuf::from("pley-data"))
+}
+
+fn log_file(data_dir: &Path) -> PathBuf {
+    data_dir.join("logs").join("pley.log")
 }
 
 fn absolutize(path: &Path) -> PathBuf {
