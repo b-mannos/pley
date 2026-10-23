@@ -23,10 +23,13 @@ HLG and Dolby Vision.
   - Extras: trailers, featurettes, behind-the-scenes and the rest with Plex's
     conventions (`Trailers/`, `Behind The Scenes/`, … folders or
     `Movie (2020)-trailer.mkv`), shown on the movie or show and playable.
-- **Metadata.**
-  - TMDB agent for posters, backdrops, summaries, ratings, certifications,
-    genres, studios, and season and episode details. It's optional and needs an
-    API key.
+- **Metadata** (see [Metadata sources](#metadata-sources)).
+  - Movies from TMDB: posters, backdrops, summaries, ratings, certifications,
+    genres and studios. It needs a free API key.
+  - TV shows from TMDB, TheTVDB or TVmaze, with season and episode details.
+    TVmaze needs no key, so shows get metadata out of the box.
+  - Music from MusicBrainz, without a key: genres, release dates and album
+    covers (from the Cover Art Archive) that the files' tags and folders lack.
   - Local artwork (`poster.jpg`, `fanart.jpg`, `season01-poster.jpg`,
     `cover.jpg`…) always wins over downloaded artwork.
   - Video frame grabs and embedded album art are extracted on demand.
@@ -161,7 +164,10 @@ To recover a lost password, use
 - Debug builds of the server read `apps/web/dist` from disk, so
   `npm run build` shows up without recompiling Rust.
 - Tests: `cargo test --workspace`. They cover parsers, decision logic, ffmpeg
-  argument building, plus HTTP API end-to-end tests.
+  argument building, plus HTTP API end-to-end tests. Metadata providers are
+  tested against a local stand-in; `cargo test -p pley-server --test providers
+  -- --ignored` checks the real TVmaze and MusicBrainz (and TheTVDB with
+  `PLEY_TEST_TVDB_KEY`, plus `PLEY_TEST_TVDB_PIN` if the key needs one).
 - Lint: `cargo clippy --workspace --all-targets`, `cargo fmt --all` and
   `npm run typecheck`.
 - License boundary: `powershell -File scripts/check-licenses.ps1`.
@@ -196,10 +202,46 @@ or `pley.toml` in the data directory; see
 
 Runtime settings are edited in the UI under **Settings → Server**:
 
-- server name, TMDB API key and metadata language
+- server name
+- metadata sources: TMDB API key, TV source, TheTVDB key and PIN,
+  MusicBrainz, metadata language
 - hardware acceleration, hardware decoding, tone mapping
 - maximum transcodes, encoder preset, throttling
 - scan interval, watching folders for changes
+
+## Metadata sources
+
+| Library | Source | Key |
+|---|---|---|
+| Movies | [TMDB](https://www.themoviedb.org) | free API key |
+| TV shows | TMDB, [TheTVDB](https://thetvdb.com) or [TVmaze](https://www.tvmaze.com) | TMDB: its key. TheTVDB: an API key, plus your subscriber PIN for user-supported keys. TVmaze: none |
+| Music | [MusicBrainz](https://musicbrainz.org) and the [Cover Art Archive](https://coverartarchive.org) | none |
+
+- The TV source is chosen under **Settings → Server → Metadata**.
+  *Automatic* uses TMDB when it has a key, then TheTVDB when it has one,
+  else TVmaze. Changing the source fetches every show again.
+- Movies stay with TMDB: no keyless source has movie artwork. Without a key,
+  movies keep their file names and local artwork.
+- TVmaze has English data and no content ratings. It files specials under
+  the season they aired in, without a number; pley numbers them in air date
+  order as season 0 (`S00E01`, `S00E02`, …).
+- MusicBrainz fills in what the tags lack and never renames artists or
+  albums; an album's own cover (a file next to it or one embedded in its
+  tracks) wins over the Cover Art Archive's. Files tagged with MusicBrainz
+  Picard are matched by their MusicBrainz ids. MusicBrainz allows a request
+  a second, so the first look-up of a large music library takes a while.
+- Local artwork always wins, and hand edits stay through every refresh.
+
+### Attribution
+
+- This product uses the TMDB API but is not endorsed or certified by TMDB.
+- TV data from [TVmaze](https://www.tvmaze.com) is licensed
+  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+- TV metadata from [TheTVDB](https://thetvdb.com). Please consider adding
+  missing information or subscribing.
+- Music data from [MusicBrainz](https://musicbrainz.org) is public domain
+  (CC0); covers come from the [Cover Art Archive](https://coverartarchive.org)
+  and belong to their owners.
 
 ## Status
 

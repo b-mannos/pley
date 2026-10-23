@@ -308,8 +308,8 @@ hubs, search, artwork, streams and the Plex-compatible API.
 | POST | `/api/items/{id}/progress` | `{ position_ms, duration_ms?, state: "playing"\|"paused"\|"stopped", session_id? }` | `204`. ≥ 90 % marks the item watched and clears the resume point. |
 | POST | `/api/items/{id}/watched` | – | `204` (containers: all leaves) |
 | PATCH | `/api/items/{id}` *(admin)* | `{ title?, sort_title?, original_title?, year?, summary?, tagline?, studio?, content_rating?, release_date?, genres? }` | `ItemDetail`. A value edits and locks the field (refreshes and scans keep it); `null` unlocks it. `locked_fields` in `ItemDetail` lists locked fields. |
-| GET | `/api/items/{id}/matches?title=&year=` *(admin)* | – | TMDB candidates `{ tmdb_id, title, original_title, year, overview, poster_url }[]` for movies and shows |
-| POST | `/api/items/{id}/match` *(admin)* | `{ tmdb_id }` | `ItemDetail` after re-matching and refreshing |
+| GET | `/api/items/{id}/matches?title=&year=` *(admin)* | – | TMDB candidates `{ tmdb_id, title, original_title, year, overview, poster_url }[]` for movies and shows (needs a TMDB key) |
+| POST | `/api/items/{id}/match` *(admin)* | `{ tmdb_id }` | `ItemDetail` after re-matching and refreshing. A show whose TV source is TVmaze or TheTVDB is found there by the chosen entry's IMDb and TheTVDB ids. |
 | GET | `/api/items/{id}/artwork/{poster\|backdrop\|thumb}` *(admin)* | – | TMDB images `{ url, preview_url, width, height, language, votes }[]` |
 | PUT | `/api/items/{id}/artwork/{kind}` *(admin)* | `{ url }` (a TMDB image) | `ItemDetail`; the picture is downloaded and locked |
 | POST | `/api/items/{id}/artwork/{kind}/upload` *(admin)* | raw image bytes (≤ 25 MB) | `ItemDetail`; stored as JPEG and locked |
@@ -317,7 +317,7 @@ hubs, search, artwork, streams and the Plex-compatible API.
 | PUT | `/api/items/{id}/rating` | `{ rating: number \| null }` (0-10, rounded to half stars; `null` clears it) | `204`; the user's own rating, shown as `user_state.rating` |
 | PUT | `/api/items/{id}/streams` | `{ file_id?, audio_index, subtitle_index }` (`subtitle_index: null` = off) | `204`. Remembers the choice for the whole show (episodes) or the movie, as language/title/forced, so every episode starts with its own matching tracks. |
 | POST | `/api/items/{id}/unwatched` | – | `204` |
-| POST | `/api/items/{id}/refresh` *(admin)* | – | `202` re-fetch metadata |
+| POST | `/api/items/{id}/refresh` *(admin)* | – | `202` re-fetch metadata from the item's source (movies: TMDB; shows, seasons, episodes: the TV source; artists, albums, tracks: MusicBrainz). `400` when that source is off or lacks its key. |
 | POST | `/api/items/{id}/analyze` *(admin)* | – | `202` find the intro and credits again: a movie's chapters, or every episode of an episode's season, a season or a show. `400` for other kinds. |
 | GET | `/api/items/{id}/images/{poster\|backdrop\|thumb}` | query: `w=<px>` (optional resize, bucketed), `v=` (cache buster, ignored) | image bytes (`image/jpeg`), long-lived cache headers. Falls back to parent artwork (season → show). `404` if none. |
 
@@ -330,16 +330,18 @@ hubs, search, artwork, streams and the Plex-compatible API.
 
 ## Cast and crew
 
-Credits come from TMDB with the rest of the metadata (movies: cast and crew;
-shows: everyone in any episode and the creators; episodes: guest stars,
-directors and writers). Items matched before an upgrade get theirs fetched in
-the background once. People only appear where the user can see an item they
-are credited in.
+Credits come with the rest of the metadata. From TMDB: movies' cast and
+crew; shows' everyone in any episode and the creators; episodes' guest stars,
+directors and writers. From TVmaze or TheTVDB: shows' main cast and creators.
+A person is known by the id of the source that credited them, so the same
+actor from two sources is two people. Items matched before an upgrade get
+theirs fetched in the background once. People only appear where the user can
+see an item they are credited in.
 
 | Method | Path | Query | Response |
 |---|---|---|---|
 | GET | `/api/people/{id}` | – | `PersonDetail`; `404` when the person has no credits this user can see |
-| GET | `/api/people/{id}/photo` | `w=<px>`, `v=` | image bytes; downloaded from TMDB the first time. `404` without a photo |
+| GET | `/api/people/{id}/photo` | `w=<px>`, `v=` | image bytes; downloaded from the source (TMDB, TVmaze, TheTVDB) the first time. `404` without a photo |
 
 ## Collections
 
@@ -638,8 +640,14 @@ type ServerEvent =
 ```ts
 interface Settings {
   server_name: string;
-  tmdb_api_key: string;             // "" = metadata only from file names / local artwork
-  metadata_language: string;        // e.g. "en-US"
+  tmdb_api_key: string;             // "" = movies only from file names / local artwork
+  metadata_language: string;        // e.g. "en-US" (TMDB and TheTVDB; TVmaze is English)
+  tv_metadata: "auto" | "tmdb" | "tvdb" | "tvmaze"; // TV source; "auto" (default) = TMDB if it has a key,
+                                    // else TheTVDB if it has one, else TVmaze (no key needed).
+                                    // "tmdb"/"tvdb" without their key → 400. A new source refetches every show.
+  tvdb_api_key: string;             // TheTVDB v4 key, "" = not set
+  tvdb_pin: string;                 // TheTVDB subscriber PIN, for user-supported keys
+  music_metadata: boolean;          // MusicBrainz + Cover Art Archive for music libraries (default true)
   hwaccel: "auto" | "none" | "nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox";
   hardware_decoding: boolean;       // decode on the GPU when possible
   tonemapping: "auto" | "libplacebo" | "opencl" | "zscale" | "none"; // HDR10/HLG/Dolby Vision → SDR
