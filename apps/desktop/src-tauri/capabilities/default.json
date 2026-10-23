@@ -3,5 +3,13 @@
   "identifier": "default",
   "description": "The server picker, bundled with the app. Pages from servers get none of this.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "allow-saved-servers",
+    "allow-save-server",
+    "allow-forget-server",
+    "allow-check-server",
+    "allow-discover",
+    "allow-open-server"
+  ]
 }

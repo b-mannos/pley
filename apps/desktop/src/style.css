@@ -144,6 +144,10 @@ h1 {
   color: var(--subtle);
 }
 
+.tag.warning {
+  color: var(--danger);
+}
+
 .forget {
   width: 2.75rem;
   border: 0;

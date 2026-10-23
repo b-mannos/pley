@@ -1,10 +1,11 @@
 import "./style.css";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  candidates,
   displayAddress,
   lastUsed,
   mergeServers,
-  normalizeUrl,
+  unencrypted,
   type FoundServer,
   type SavedServer,
   type ServerEntry,
@@ -35,6 +36,8 @@ let searching = false;
 const reachable = new Map<string, boolean>();
 let busy: string | null = null;
 let autoOpen: AbortController | null = null;
+/** An unencrypted address someone was warned about: connecting again goes ahead. */
+let warnedAbout: string | null = null;
 
 function message(err: unknown): string {
   return typeof err === "string" ? err : err instanceof Error ? err.message : String(err);
@@ -65,8 +68,16 @@ function row(entry: ServerEntry): HTMLLIElement {
   where.className = "address";
   where.textContent = busy === entry.url ? "Connecting…" : displayAddress(entry.url);
   const tag = document.createElement("span");
-  tag.className = "tag";
-  tag.textContent = entry.saved ? (entry.found ? "On this network" : "") : "New";
+  tag.className = entry.lookalike || unencrypted(entry.url) ? "tag warning" : "tag";
+  tag.textContent = entry.lookalike
+    ? "Not your saved server"
+    : unencrypted(entry.url)
+      ? "Not encrypted"
+      : entry.saved
+        ? entry.found
+          ? "On this network"
+          : ""
+        : "New";
   open.append(dot, name, where, tag);
   open.addEventListener("click", () => void openServer(entry.url, entry.id));
   li.append(open);
@@ -90,7 +101,7 @@ async function openServer(url: string, id: string | null): Promise<void> {
   try {
     const info = await invoke<ServerInfo>("check_server", { url });
     reachable.set(url, true);
-    await invoke("save_server", { server: { url, name: info.name, id, last_used: Date.now() } });
+    await invoke("save_server", { server: { url, name: info.name, id } });
     await invoke("open_server", { url });
   } catch (err) {
     reachable.set(url, false);
@@ -144,7 +155,7 @@ async function openLastUsed(server: SavedServer): Promise<void> {
   try {
     const info = await invoke<ServerInfo>("check_server", { url: server.url });
     if (cancelled.signal.aborted) return;
-    await invoke("save_server", { server: { ...server, name: info.name, last_used: Date.now() } });
+    await invoke("save_server", { server: { ...server, name: info.name } });
     await invoke("open_server", { url: server.url });
   } catch (err) {
     if (cancelled.signal.aborted) return;
@@ -154,17 +165,52 @@ async function openLastUsed(server: SavedServer): Promise<void> {
   }
 }
 
-form.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const url = normalizeUrl(address.value);
-  addError.hidden = true;
-  if (!url) {
+/** The first of `urls` where a pley server answers (https before http for names on the internet). */
+async function firstAnswering(urls: string[]): Promise<string> {
+  let failure: unknown = null;
+  for (const url of urls) {
+    try {
+      await invoke<ServerInfo>("check_server", { url });
+      return url;
+    } catch (err) {
+      failure ??= err;
+    }
+  }
+  throw failure;
+}
+
+async function addServer(input: string): Promise<void> {
+  const urls = candidates(input);
+  if (!urls.length) {
     addError.textContent = "Enter an address such as nas, 192.168.1.20 or https://pley.example.com.";
     addError.hidden = false;
     return;
   }
+  let url: string;
+  try {
+    url = await firstAnswering(urls);
+  } catch (err) {
+    addError.textContent = `Couldn't reach ${displayAddress(urls[urls.length - 1] ?? input)}: ${message(err)}`;
+    addError.hidden = false;
+    return;
+  }
+  // Plain http across the internet: say so once, then go ahead if asked again.
+  if (unencrypted(url) && warnedAbout !== url) {
+    warnedAbout = url;
+    addError.textContent =
+      `${displayAddress(url)} isn't encrypted: your password and what you watch could be read on the way. ` +
+      "Use its https address if it has one, or press Connect again to go ahead anyway.";
+    addError.hidden = false;
+    return;
+  }
+  await openServer(url, null);
+}
+
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  addError.hidden = true;
   connect.disabled = true;
-  void openServer(url, null).finally(() => {
+  void addServer(address.value).finally(() => {
     connect.disabled = false;
   });
 });

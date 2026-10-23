@@ -14,7 +14,8 @@ pub struct SavedServer {
     pub url: String,
     pub name: String,
     pub id: Option<String>,
-    /// When it was last opened (Unix ms).
+    /// When it was last opened (Unix ms), as the app noted it.
+    #[serde(default)]
     pub last_used: i64,
 }
 
@@ -76,10 +77,13 @@ pub fn saved_servers(app: AppHandle) -> Vec<SavedServer> {
     load(&app)
 }
 
+/// Remembers `server`, opened now (the app notes when: the page can't make
+/// a server open by itself at every start).
 #[tauri::command]
 pub fn save_server(app: AppHandle, server: SavedServer) -> Result<(), String> {
     let origin = server_origin(&server.url)?;
-    let server = SavedServer { url: origin.as_str().trim_end_matches('/').to_owned(), ..server };
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+    let server = SavedServer { url: origin.as_str().trim_end_matches('/').to_owned(), last_used: now, ..server };
     save(&app, &with_server(load(&app), server))
 }
 

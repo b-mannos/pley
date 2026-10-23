@@ -1,3 +1,14 @@
 fn main() {
-    tauri_build::build();
+    // The app's own commands each need a permission, which only the
+    // picker's capability grants (capabilities/default.json): pages of
+    // servers get none of them.
+    let commands = tauri_build::AppManifest::new().commands(&[
+        "saved_servers",
+        "save_server",
+        "forget_server",
+        "check_server",
+        "discover",
+        "open_server",
+    ]);
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands)).expect("tauri build");
 }
