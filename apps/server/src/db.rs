@@ -87,10 +87,10 @@ async fn backup_before_upgrade(write: &SqlitePool, path: &Path) -> anyhow::Resul
         return Ok(());
     }
     let dir = path.parent().unwrap_or(Path::new("")).join("backups");
-    let copy = crate::backup::write_checked(write, &dir, crate::backup::BEFORE_UPGRADE)
+    // Logged by write_checked; the name says why it was made.
+    crate::backup::write_checked(write, &dir, crate::backup::BEFORE_UPGRADE)
         .await
         .context("could not back up the database before upgrading it")?;
-    tracing::info!("database backed up to {} before upgrading it", copy.path);
     Ok(())
 }
 
