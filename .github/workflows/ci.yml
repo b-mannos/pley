@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
   workflow_dispatch:
   # The release workflow runs it first.
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  # A new push to a pull request replaces its running checks; main runs them all.
+  # A new push to a pull request replaces its running checks; master runs them all.
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -74,8 +74,8 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          # Pull requests reuse main's cache without writing their own.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # Pull requests reuse master's cache without writing their own.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Format
         if: matrix.name == 'linux-x86_64'
         run: cargo fmt --all --check
@@ -103,7 +103,7 @@ jobs:
           toolchain: "1.85"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - run: cargo check --workspace --all-targets --locked
 
   licenses:
@@ -119,7 +119,7 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Server never depends on the transcoder
         shell: pwsh
         run: ./scripts/check-licenses.ps1
@@ -145,7 +145,7 @@ jobs:
           push: false
           tags: pley:ci
           cache-from: type=gha
-          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max' || '' }}
+          cache-to: ${{ github.ref == 'refs/heads/master' && 'type=gha,mode=max' || '' }}
 
   workflows:
     name: Workflows

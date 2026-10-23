@@ -4,7 +4,7 @@ name: Audit
 # weekly, since advisories are published for versions already in use.
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths: [Cargo.lock, deny.toml, package-lock.json, .github/workflows/audit.yml]
   pull_request:
     paths: [Cargo.lock, deny.toml, package-lock.json, .github/workflows/audit.yml]
