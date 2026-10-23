@@ -124,6 +124,118 @@ async fn folders_that_go_offline_keep_their_items() {
     assert_eq!(rescan().await, ["Alien", "Brazil", "Dune"]);
 }
 
+/// Languages of the sidecar subtitles of an item's first file.
+async fn sidecar_languages(app: &TestApp, token: &str, item: i64) -> Vec<String> {
+    let item = app.get(&format!("/api/items/{item}"), token).await;
+    item.body["files"][0]["streams"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| s["external"] == json!(true))
+        .map(|s| s["language"].as_str().unwrap_or("?").to_owned())
+        .collect()
+}
+
+async fn rescan(app: &TestApp, token: &str, library: i64) {
+    let reply = app.post(&format!("/api/libraries/{library}/scan"), token, json!({})).await;
+    assert_eq!(reply.status, StatusCode::ACCEPTED);
+    app.wait_for_scans().await;
+}
+
+#[tokio::test]
+async fn sidecars_next_to_unchanged_videos_are_picked_up() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Heat (1995)/Heat (1995).mkv", 1024);
+    app.media_file("movies/Heat (1995)/Heat (1995).en.srt", 10);
+    app.media_file("tv/Show (2015)/Season 01/Show - S01E01.mkv", 1024);
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let tv = app.library(&admin, "TV", "shows", "tv").await;
+    // As if a transcoder had probed them: rescans find the videos unchanged.
+    sqlx::query("UPDATE media_files SET probed = 1").execute(&app.state.db.write).await.unwrap();
+    let heat = app.ids(movies, &admin).await["Heat"];
+    let show = app.ids(tv, &admin).await["Show"];
+    let season = app.children(show, &admin).await["Season 1"];
+    let episode = app.children(season, &admin).await.into_values().next().unwrap();
+    assert_eq!(sidecar_languages(&app, &admin, heat).await, ["eng"]);
+    assert!(app.get(&format!("/api/items/{heat}"), &admin).await.body.get("poster_url").is_none());
+
+    // Subtitles replaced, in a Subtitles folder, in Sonarr's Subs/<episode>/
+    // folder; a poster.
+    let media = app.media.path();
+    std::fs::remove_file(media.join("movies/Heat (1995)/Heat (1995).en.srt")).unwrap();
+    app.media_file("movies/Heat (1995)/Heat (1995).fr.srt", 10);
+    app.media_file("movies/Heat (1995)/Subtitles/2_German.srt", 10);
+    app.media_file("movies/Heat (1995)/poster.jpg", 10);
+    app.media_file("tv/Show (2015)/Season 01/Subs/Show - S01E01/3_Spanish.srt", 10);
+    rescan(&app, &admin, movies).await;
+    rescan(&app, &admin, tv).await;
+    assert_eq!(sidecar_languages(&app, &admin, heat).await, ["fre", "ger"]);
+    assert_eq!(sidecar_languages(&app, &admin, episode).await, ["spa"]);
+    assert!(app.get(&format!("/api/items/{heat}"), &admin).await.body["poster_url"].is_string());
+
+    // All gone: nothing stays behind.
+    std::fs::remove_dir_all(media.join("movies/Heat (1995)/Subtitles")).unwrap();
+    std::fs::remove_dir_all(media.join("tv/Show (2015)/Season 01/Subs")).unwrap();
+    for name in ["Heat (1995).fr.srt", "poster.jpg"] {
+        std::fs::remove_file(media.join("movies/Heat (1995)").join(name)).unwrap();
+    }
+    rescan(&app, &admin, movies).await;
+    rescan(&app, &admin, tv).await;
+    assert!(sidecar_languages(&app, &admin, heat).await.is_empty());
+    assert!(sidecar_languages(&app, &admin, episode).await.is_empty());
+    assert!(app.get(&format!("/api/items/{heat}"), &admin).await.body.get("poster_url").is_none());
+}
+
+/// A rescan works out what changed before it takes the database's single
+/// writer: other writes (progress reports, logins) barely wait. Matching
+/// sidecars against the whole library made them wait for seconds to minutes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn rescans_do_not_hold_up_other_writes() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let root = app.media.path().join("movies");
+    tokio::task::spawn_blocking(move || {
+        for n in 0..1_500 {
+            let dir = root.join(format!("Film {n} (2001)"));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(format!("Film {n} (2001).mkv")), (n as u64).to_le_bytes()).unwrap();
+            std::fs::write(dir.join(format!("Film {n} (2001).en.srt")), b"1").unwrap();
+            std::fs::write(dir.join("poster.jpg"), b"x").unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    let created = app
+        .post(
+            "/api/libraries",
+            &admin,
+            json!({"name": "Movies", "kind": "movies", "paths": [app.media_path("movies")]}),
+        )
+        .await;
+    let library = created.body["id"].as_i64().unwrap();
+    while !app.state.scanner.statuses().is_empty() {
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    sqlx::query("UPDATE media_files SET probed = 1").execute(&app.state.db.write).await.unwrap();
+    sqlx::query("CREATE TABLE writes (n INTEGER)").execute(&app.state.db.write).await.unwrap();
+
+    app.post(&format!("/api/libraries/{library}/scan"), &admin, json!({})).await;
+    let mut longest = std::time::Duration::ZERO;
+    while !app.state.scanner.statuses().is_empty() {
+        let started = std::time::Instant::now();
+        sqlx::query("INSERT INTO writes (n) VALUES (1)").execute(&app.state.db.write).await.unwrap();
+        longest = longest.max(started.elapsed());
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert!(longest < std::time::Duration::from_secs(2), "a write waited {longest:?}");
+    let with_subtitles: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM media_files WHERE external_subs != '[]'")
+        .fetch_one(&app.state.db.read)
+        .await
+        .unwrap();
+    assert_eq!(with_subtitles, 1_500);
+}
+
 #[tokio::test]
 async fn item_endpoints_refuse_what_makes_no_sense() {
     let app = TestApp::new().await;

@@ -1,5 +1,11 @@
-//! External subtitle files next to videos: `Movie.srt`, `Movie.en.srt`,
-//! `Movie.eng.forced.srt`, `Movie.English.sdh.srt`, `Subs/2_English.srt`.
+//! Sidecar files next to videos: local artwork (`poster.jpg`,
+//! `Movie (2020)-fanart.jpg`, `season01-poster.jpg`, …) and external subtitles
+//! (`Movie.srt`, `Movie.en.srt`, `Movie.eng.forced.srt`,
+//! `Movie.English.sdh.srt`, `Subs/2_English.srt`, `Subs/<video>/3_French.srt`).
+//!
+//! A scan collects the sidecar files of the whole library and indexes them
+//! once ([`Sidecars`]): finding the artwork or the subtitles of a video then
+//! takes a few look-ups, however large the library.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -7,7 +13,7 @@ use std::path::{Path, PathBuf};
 use pley_transcoder_api::{MediaStream, StreamKind, is_text_subtitle_codec};
 use serde::{Deserialize, Serialize};
 
-use super::walk::SUBTITLE_EXTENSIONS;
+use super::walk::{IMAGE_EXTENSIONS, SUBTITLE_EXTENSIONS};
 
 /// External subtitle streams get indexes from this value up.
 pub const EXTERNAL_INDEX_BASE: i64 = 1000;
@@ -57,51 +63,117 @@ fn codec_for(ext: &str) -> Option<&'static str> {
     })
 }
 
-/// Subtitle sidecars belonging to `video`.
-pub fn external_subtitles(video: &Path, sidecars: &HashMap<PathBuf, Vec<String>>) -> Vec<ExternalSub> {
-    let Some(dir) = video.parent() else { return Vec::new() };
-    let stem = video.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
-    let mut found: Vec<(PathBuf, String)> = Vec::new(); // (path, tag part)
+/// A subtitle file and the tags in its name (`en.forced`).
+type Tagged = (PathBuf, String);
 
-    if let Some(files) = sidecars.get(dir) {
-        for name in files {
-            let lower = name.to_lowercase();
-            let Some((base, ext)) = lower.rsplit_once('.') else { continue };
-            if !SUBTITLE_EXTENSIONS.contains(&ext) {
-                continue;
-            }
-            if base == stem {
-                found.push((dir.join(name), String::new()));
-            } else if let Some(tags) = base.strip_prefix(&stem).and_then(|r| r.strip_prefix('.')) {
-                found.push((dir.join(name), tags.to_owned()));
-            }
-        }
-    }
-    // "Subs" folders (common for single-movie folders).
-    for sub_dir_name in ["subs", "subtitles"] {
-        for (sub_dir, files) in sidecars {
-            let Some(parent) = sub_dir.parent() else { continue };
-            let name = sub_dir.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-            let matches_dir = (parent == dir && name == sub_dir_name)
-                || (parent.parent() == Some(dir)
-                    && parent.file_name().is_some_and(|p| p.to_string_lossy().to_lowercase() == sub_dir_name)
-                    && name == stem);
-            if !matches_dir {
-                continue;
-            }
-            for file in files {
-                let lower = file.to_lowercase();
+/// The sidecar files of a library, indexed by folder and video.
+#[derive(Debug, Default)]
+pub struct Sidecars {
+    /// Pictures by folder: lowercase name without extension → file name
+    /// (the first one found when pictures differ only by extension).
+    images: HashMap<PathBuf, HashMap<String, String>>,
+    /// Subtitle files by folder, sorted by lowercase name without extension,
+    /// so that the ones named after a video (`<stem>.srt`,
+    /// `<stem>.<tags>.srt`) are next to each other.
+    subtitles: HashMap<PathBuf, Vec<(String, PathBuf)>>,
+    /// Subtitles in `Subs` or `Subtitles` folders, which belong to every video
+    /// in the folder that holds them.
+    shared: HashMap<PathBuf, Vec<Tagged>>,
+    /// Subtitles in `Subs/<video stem>/` folders, by the video's folder and
+    /// lowercase stem.
+    per_video: HashMap<PathBuf, HashMap<String, Vec<Tagged>>>,
+}
+
+fn is_subs_folder(dir: &Path) -> bool {
+    dir.file_name().is_some_and(|name| matches!(name.to_string_lossy().to_lowercase().as_str(), "subs" | "subtitles"))
+}
+
+impl Sidecars {
+    /// Indexes sidecar file names by folder, as the walk found them.
+    pub fn new(files: HashMap<PathBuf, Vec<String>>) -> Self {
+        let mut index = Self::default();
+        for (dir, names) in files {
+            // Subs/2_English.srt belongs to the videos next to Subs, and
+            // Subs/<stem>/2_English.srt to the video named <stem> there.
+            let shared_by = dir.parent().filter(|_| is_subs_folder(&dir)).map(Path::to_path_buf);
+            let per_video = dir
+                .parent()
+                .filter(|parent| is_subs_folder(parent))
+                .and_then(Path::parent)
+                .zip(dir.file_name())
+                .map(|(owner, stem)| (owner.to_path_buf(), stem.to_string_lossy().to_lowercase()));
+            let mut subtitles = Vec::new();
+            for name in names {
+                let lower = name.to_ascii_lowercase();
+                if let Some((stem, ext)) = lower.rsplit_once('.') {
+                    if IMAGE_EXTENSIONS.contains(&ext) {
+                        let images = index.images.entry(dir.clone()).or_default();
+                        images.entry(stem.to_owned()).or_insert_with(|| name.clone());
+                    }
+                }
+                let lower = name.to_lowercase();
                 let Some((base, ext)) = lower.rsplit_once('.') else { continue };
-                if SUBTITLE_EXTENSIONS.contains(&ext) {
+                if !SUBTITLE_EXTENSIONS.contains(&ext) {
+                    continue;
+                }
+                let path = dir.join(&name);
+                if shared_by.is_some() || per_video.is_some() {
                     // "2_English" → "english"
                     let tags =
                         base.trim_start_matches(|c: char| c.is_ascii_digit() || c == '_' || c == ' ').replace('_', ".");
-                    found.push((sub_dir.join(file), tags));
+                    if let Some(owner) = &shared_by {
+                        index.shared.entry(owner.clone()).or_default().push((path.clone(), tags.clone()));
+                    }
+                    if let Some((owner, stem)) = &per_video {
+                        let by_stem = index.per_video.entry(owner.clone()).or_default();
+                        by_stem.entry(stem.clone()).or_default().push((path.clone(), tags));
+                    }
+                }
+                subtitles.push((base.to_owned(), path));
+            }
+            if !subtitles.is_empty() {
+                subtitles.sort_unstable();
+                index.subtitles.insert(dir, subtitles);
+            }
+        }
+        index
+    }
+
+    /// The picture in `dir` named after the first of `bases` that has one
+    /// (`poster` finds `Poster.JPG`).
+    pub fn image(&self, dir: &Path, bases: &[String]) -> Option<PathBuf> {
+        let images = self.images.get(dir)?;
+        bases.iter().find_map(|base| images.get(&base.to_ascii_lowercase())).map(|name| dir.join(name))
+    }
+
+    /// Subtitle files belonging to `video`.
+    pub fn subtitles(&self, video: &Path) -> Vec<ExternalSub> {
+        let Some(dir) = video.parent() else { return Vec::new() };
+        let stem = video.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let mut found: Vec<Tagged> = Vec::new();
+        if let Some(files) = self.subtitles.get(dir) {
+            // `<stem>` and `<stem>.<tags>`: within the run of names that start
+            // with the stem.
+            let start = files.partition_point(|(base, _)| base.as_str() < stem.as_str());
+            for (base, path) in files[start..].iter().take_while(|(base, _)| base.starts_with(stem.as_str())) {
+                match &base[stem.len()..] {
+                    "" => found.push((path.clone(), String::new())),
+                    rest => {
+                        if let Some(tags) = rest.strip_prefix('.') {
+                            found.push((path.clone(), tags.to_owned()));
+                        }
+                    }
                 }
             }
         }
+        found.extend(self.shared.get(dir).into_iter().flatten().cloned());
+        found.extend(self.per_video.get(dir).and_then(|by_stem| by_stem.get(&stem)).into_iter().flatten().cloned());
+        describe(found)
     }
+}
 
+/// Streams for subtitle files, numbered in path order.
+fn describe(mut found: Vec<Tagged>) -> Vec<ExternalSub> {
     found.sort_by(|a, b| a.0.cmp(&b.0));
     found.dedup_by(|a, b| a.0 == b.0);
     found
@@ -191,24 +263,36 @@ pub fn normalize_language(token: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use super::*;
+
+    fn sidecars(folders: &[(&Path, &[&str])]) -> Sidecars {
+        Sidecars::new(
+            folders
+                .iter()
+                .map(|(dir, names)| (dir.to_path_buf(), names.iter().map(|n| (*n).to_owned()).collect()))
+                .collect(),
+        )
+    }
 
     #[test]
     fn finds_sidecar_subtitles() {
         let dir = PathBuf::from("/m/Movie (2020)");
-        let mut sidecars = HashMap::new();
-        sidecars.insert(
-            dir.clone(),
-            vec![
-                "Movie (2020).srt".to_owned(),
-                "Movie (2020).en.forced.srt".to_owned(),
-                "Movie (2020).French.sdh.ass".to_owned(),
-                "Other Movie.srt".to_owned(),
-                "poster.jpg".to_owned(),
-            ],
-        );
-        sidecars.insert(dir.join("Subs"), vec!["2_English.srt".to_owned()]);
-        let subs = external_subtitles(&dir.join("Movie (2020).mkv"), &sidecars);
+        let index = sidecars(&[
+            (
+                &dir,
+                &[
+                    "Movie (2020).srt",
+                    "Movie (2020).en.forced.srt",
+                    "Movie (2020).French.sdh.ass",
+                    "Other Movie.srt",
+                    "poster.jpg",
+                ],
+            ),
+            (&dir.join("Subs"), &["2_English.srt"]),
+        ]);
+        let subs = index.subtitles(&dir.join("Movie (2020).mkv"));
         assert_eq!(subs.len(), 4);
         let forced = subs.iter().find(|s| s.forced).unwrap();
         assert_eq!(forced.language.as_deref(), Some("eng"));
@@ -221,6 +305,142 @@ mod tests {
         let stream = subs[0].to_stream();
         assert!(stream.external);
         assert_eq!(stream.text_based, Some(true));
+    }
+
+    #[test]
+    fn subtitle_folders_and_videos_whose_names_start_alike() {
+        let season = PathBuf::from("/tv/Show/Season 01");
+        let index = sidecars(&[
+            (&season, &["Show - S01E01.en.srt", "Show - S01E01 Part 2.srt", "Show - S01E010.fr.srt", "Show.srt"]),
+            (&season.join("Subs").join("Show - S01E01"), &["3_French.srt", "notes.txt"]),
+            (&season.join("SUBTITLES"), &["English.forced.srt"]),
+        ]);
+        let names = |video: &str| -> Vec<(String, Option<String>, bool)> {
+            index
+                .subtitles(&season.join(video))
+                .into_iter()
+                .map(|s| {
+                    let name = Path::new(&s.path).strip_prefix(&season).unwrap().to_string_lossy().replace('\\', "/");
+                    (name, s.language, s.forced)
+                })
+                .collect()
+        };
+        assert_eq!(
+            names("Show - S01E01.mkv"),
+            [
+                ("SUBTITLES/English.forced.srt".to_owned(), Some("eng".to_owned()), true),
+                ("Show - S01E01.en.srt".to_owned(), Some("eng".to_owned()), false),
+                ("Subs/Show - S01E01/3_French.srt".to_owned(), Some("fre".to_owned()), false),
+            ]
+        );
+        assert_eq!(names("Show - S01E010.mkv").len(), 2, "its own subtitle and the shared one");
+        assert_eq!(names("Show - S01E01 Part 2.mkv").len(), 2);
+        assert_eq!(names("Show.mkv").len(), 2);
+        assert!(index.subtitles(Path::new("/elsewhere/Show - S01E01.mkv")).is_empty());
+    }
+
+    #[test]
+    fn finds_images_case_insensitively() {
+        let dir = Path::new("/m/Movie (2020)");
+        let index = sidecars(&[(dir, &["Poster.JPG", "fanart.png", "poster.png", "movie.srt"])]);
+        let bases = |names: &[&str]| names.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>();
+        assert_eq!(index.image(dir, &bases(&["poster"])), Some(dir.join("Poster.JPG")), "the first one found");
+        assert_eq!(index.image(dir, &bases(&["folder", "FANART"])), Some(dir.join("fanart.png")));
+        assert_eq!(index.image(dir, &bases(&["movie"])), None, "subtitles are not pictures");
+        assert_eq!(index.image(Path::new("/m/other"), &bases(&["poster"])), None);
+    }
+
+    /// What the scanner did before the index: every folder of the library
+    /// looked at for every video.
+    fn reference(video: &Path, sidecars: &HashMap<PathBuf, Vec<String>>) -> Vec<ExternalSub> {
+        let Some(dir) = video.parent() else { return Vec::new() };
+        let stem = video.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let mut found: Vec<Tagged> = Vec::new();
+        if let Some(files) = sidecars.get(dir) {
+            for name in files {
+                let lower = name.to_lowercase();
+                let Some((base, ext)) = lower.rsplit_once('.') else { continue };
+                if !SUBTITLE_EXTENSIONS.contains(&ext) {
+                    continue;
+                }
+                if base == stem {
+                    found.push((dir.join(name), String::new()));
+                } else if let Some(tags) = base.strip_prefix(&stem).and_then(|r| r.strip_prefix('.')) {
+                    found.push((dir.join(name), tags.to_owned()));
+                }
+            }
+        }
+        for sub_dir_name in ["subs", "subtitles"] {
+            for (sub_dir, files) in sidecars {
+                let Some(parent) = sub_dir.parent() else { continue };
+                let name = sub_dir.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+                let matches_dir = (parent == dir && name == sub_dir_name)
+                    || (parent.parent() == Some(dir)
+                        && parent.file_name().is_some_and(|p| p.to_string_lossy().to_lowercase() == sub_dir_name)
+                        && name == stem);
+                if !matches_dir {
+                    continue;
+                }
+                for file in files {
+                    let lower = file.to_lowercase();
+                    let Some((base, ext)) = lower.rsplit_once('.') else { continue };
+                    if SUBTITLE_EXTENSIONS.contains(&ext) {
+                        let tags = base
+                            .trim_start_matches(|c: char| c.is_ascii_digit() || c == '_' || c == ' ')
+                            .replace('_', ".");
+                        found.push((sub_dir.join(file), tags));
+                    }
+                }
+            }
+        }
+        describe(found)
+    }
+
+    #[test]
+    fn the_index_finds_what_looking_everywhere_found() {
+        let root = PathBuf::from("/lib");
+        let flat = root.join("Flat");
+        let mut files: HashMap<PathBuf, Vec<String>> = HashMap::new();
+        let mut videos = Vec::new();
+        // Release names with dots, names that start alike, upper case.
+        for stem in ["Movie", "Movie.2019", "Movie.2019.1080p", "MOVIE 2", "Movie2", "Ünïcode Film", "a.b", "a"] {
+            videos.push(flat.join(format!("{stem}.mkv")));
+            for suffix in ["", ".en", ".EN.Forced", ".fr.sdh", ".x.y.z", "-commentary"] {
+                files.entry(flat.clone()).or_default().push(format!("{stem}{suffix}.srt"));
+            }
+        }
+        files.entry(flat.clone()).or_default().extend(["poster.jpg".to_owned(), "notes.txt".to_owned()]);
+        // Subs folders of several shapes and cases.
+        files.insert(flat.join("Subs"), vec!["2_English.srt".into(), "3_French.SDH.ass".into(), "x.nfo".into()]);
+        files.insert(flat.join("subtitles").join("movie.2019"), vec!["English.srt".into()]);
+        files.insert(flat.join("Subs").join("Movie"), vec!["1_Dutch.srt".into()]);
+        files.insert(root.join("Other").join("Subs"), vec!["German.srt".into()]);
+        videos.push(root.join("Other").join("Film.mkv"));
+        videos.push(root.join("Film.mkv"));
+
+        let index = Sidecars::new(files.clone());
+        for video in &videos {
+            assert_eq!(index.subtitles(video), reference(video, &files), "{}", video.display());
+        }
+        assert!(videos.iter().map(|v| index.subtitles(v).len()).sum::<usize>() > 40);
+    }
+
+    #[test]
+    fn matching_takes_linear_time() {
+        // 20k movie folders, each with a subtitle and a poster: looking at
+        // every folder for every video took about 8 minutes (release build).
+        let mut files: HashMap<PathBuf, Vec<String>> = HashMap::new();
+        let mut videos = Vec::new();
+        for d in 0..20_000 {
+            let dir = PathBuf::from(format!("/m/Title {d} (2000)"));
+            files.insert(dir.clone(), vec![format!("Title {d} (2000).en.srt"), "poster.jpg".to_owned()]);
+            videos.push(dir.join(format!("Title {d} (2000).mkv")));
+        }
+        let started = Instant::now();
+        let index = Sidecars::new(files);
+        let found: usize = videos.iter().map(|v| index.subtitles(v).len()).sum();
+        assert_eq!(found, 20_000);
+        assert!(started.elapsed() < Duration::from_secs(20), "{:?}", started.elapsed());
     }
 
     #[test]

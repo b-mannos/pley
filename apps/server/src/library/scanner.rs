@@ -6,6 +6,10 @@
 //! writes items in short transactions, removes vanished files (unless their
 //! drive is offline), refreshes sidecar artwork/subtitles, recomputes counts and
 //! finally lets the metadata agent enrich new items.
+//!
+//! The database has a single writer, which progress reports, logins and
+//! edits wait for: whatever takes time (matching sidecar files, deciding
+//! what changed) is done before taking it, and only changes are written.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -20,8 +24,8 @@ use sqlx::SqliteConnection;
 use tokio::sync::mpsc;
 
 use super::parse::{parse_episode, parse_movie, parse_track};
-use super::sidecar::{ExternalSub, external_subtitles};
-use super::walk::{Extra, ExtraKind, FoundFile, find_image, walk};
+use super::sidecar::{ExternalSub, Sidecars};
+use super::walk::{Extra, ExtraKind, FoundFile, walk};
 use super::{LibraryKind, LibraryRow, get_library, list_libraries};
 use crate::config::Config;
 use crate::db::Db;
@@ -33,6 +37,8 @@ use crate::util::{normalize_key, now, path_str, sort_title};
 
 const PROBE_CONCURRENCY: usize = 6;
 const WRITE_BATCH: usize = 64;
+/// Rows changed per transaction when a scan applies what changed.
+const CHANGE_BATCH: usize = 500;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanStatus {
@@ -181,20 +187,24 @@ impl Scanner {
         self.events.send(ServerEvent::ScanStarted { library_id });
         self.set_status(&lib, ScanPhase::Walking, 0, 0);
 
-        let walked = {
+        // Sidecar files are indexed once: matching them file by file against
+        // the whole library made every scan quadratic in its size.
+        let (mut walked, sidecars) = {
             let roots = roots.clone();
-            crate::util::blocking(move || Ok(walk(&roots, kind))).await?
+            crate::util::blocking(move || {
+                let mut walked = walk(&roots, kind);
+                let sidecars = Sidecars::new(std::mem::take(&mut walked.sidecars));
+                Ok((walked, Arc::new(sidecars)))
+            })
+            .await?
         };
 
-        let existing: Vec<(i64, String, i64, i64, bool)> =
-            sqlx::query_as("SELECT id, path, size, mtime, probed FROM media_files WHERE library_id = ?")
+        let existing: Vec<KnownFile> =
+            sqlx::query_as("SELECT id, path, size, mtime, probed, external_subs FROM media_files WHERE library_id = ?")
                 .bind(library_id)
                 .fetch_all(&self.db.read)
                 .await?;
-        let existing_by_path: HashMap<&str, (i64, i64, i64, bool)> = existing
-            .iter()
-            .map(|(id, path, size, mtime, probed)| (path.as_str(), (*id, *size, *mtime, *probed)))
-            .collect();
+        let existing_by_path: HashMap<&str, &KnownFile> = existing.iter().map(|f| (f.path.as_str(), f)).collect();
 
         let mut to_process = Vec::new();
         let mut unchanged = Vec::new();
@@ -202,8 +212,8 @@ impl Scanner {
         for file in &walked.media {
             let key = path_str(&file.path);
             match existing_by_path.get(key.as_str()) {
-                Some((id, size, mtime, probed)) if !force && *size == file.size && *mtime == file.mtime && *probed => {
-                    unchanged.push((*id, file.path.clone()));
+                Some(known) if !force && known.size == file.size && known.mtime == file.mtime && known.probed => {
+                    unchanged.push((known.id, file.path.clone(), known.external_subs.clone()));
                 }
                 _ => to_process.push(file.clone()),
             }
@@ -212,12 +222,11 @@ impl Scanner {
         // A root that suddenly holds no media at all is far more likely an
         // unmounted drive (the mount point exists but is empty) than a library
         // whose every file was deleted: keep its items.
-        let mut walked = walked;
         for root in &roots {
             let empty = !walked.media.iter().any(|f| &f.root == root);
             if empty
                 && !walked.offline_roots.contains(root)
-                && existing.iter().any(|(_, path, ..)| Path::new(path).starts_with(root))
+                && existing.iter().any(|f| Path::new(&f.path).starts_with(root))
             {
                 tracing::warn!("library folder {} is empty; assuming its drive is not mounted", root.display());
                 walked.offline_roots.push(root.clone());
@@ -225,8 +234,8 @@ impl Scanner {
         }
         let removed: Vec<i64> = existing
             .iter()
-            .filter(|(_, path, ..)| !seen.contains(path) && !walked.maybe_unavailable(Path::new(path)))
-            .map(|(id, ..)| *id)
+            .filter(|f| !seen.contains(&f.path) && !walked.maybe_unavailable(Path::new(&f.path)))
+            .map(|f| f.id)
             .collect();
 
         let mut totals = Totals { removed: removed.len() as u64, ..Default::default() };
@@ -236,7 +245,7 @@ impl Scanner {
             self.transcoder.wait_ready(Duration::from_secs(90)).await;
         }
 
-        let mut writer = Writer::new(&lib, &walked.sidecars);
+        let mut writer = Writer::new(&lib, &sidecars);
         let mut batch: Vec<(FoundFile, ProbeOutcome)> = Vec::with_capacity(WRITE_BATCH);
         let mut processed = 0u64;
         let mut last_emit = Instant::now();
@@ -283,26 +292,72 @@ impl Scanner {
         }
         self.set_status(&lib, ScanPhase::Probing, processed, total);
 
-        let mut conn = self.db.write.acquire().await?;
-        for chunk in removed.chunks(500) {
+        // Vanished files go, with the items they leave empty.
+        for chunk in removed.chunks(CHANGE_BATCH) {
             let placeholders = vec!["?"; chunk.len()].join(",");
             let sql = format!("DELETE FROM media_files WHERE id IN ({placeholders})");
             let mut q = sqlx::query(&sql);
             for id in chunk {
                 q = q.bind(id);
             }
-            q.execute(&mut *conn).await?;
+            let mut tx = self.db.write.begin().await?;
+            q.execute(&mut *tx).await?;
+            tx.commit().await?;
         }
-        cleanup_orphans(&mut conn, library_id).await?;
-        refresh_external_subs(&mut conn, &unchanged, &walked.sidecars).await?;
-        refresh_artwork(&mut conn, &lib, &walked.sidecars).await?;
-        update_counts(&mut conn, library_id).await?;
+        let mut tx = self.db.write.begin().await?;
+        cleanup_orphans(&mut tx, library_id).await?;
+        tx.commit().await?;
+
+        // Sidecar subtitles and local artwork can change without their video
+        // changing. What changed is worked out from the index, off the async
+        // workers and without the writer; only that is written.
+        let rows: Vec<ArtworkRow> = sqlx::query_as(ARTWORK_ROWS).bind(library_id).fetch_all(&self.db.read).await?;
+        let (subtitles, artwork) = {
+            let sidecars = sidecars.clone();
+            crate::util::blocking(move || {
+                // Music has no subtitles (scans don't look for them).
+                let subtitles =
+                    if kind == LibraryKind::Music { Vec::new() } else { subtitle_changes(unchanged, &sidecars) };
+                Ok((subtitles, artwork_changes(rows, &sidecars)))
+            })
+            .await?
+        };
+        for chunk in subtitles.chunks(CHANGE_BATCH) {
+            let mut tx = self.db.write.begin().await?;
+            for change in chunk {
+                // Unless something else changed it meanwhile.
+                sqlx::query("UPDATE media_files SET external_subs = ? WHERE id = ? AND external_subs = ?")
+                    .bind(&change.subs)
+                    .bind(change.file_id)
+                    .bind(&change.before)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            tx.commit().await?;
+        }
+        let at = now();
+        for chunk in artwork.chunks(CHANGE_BATCH) {
+            let mut tx = self.db.write.begin().await?;
+            for change in chunk {
+                change.save(&mut tx, at).await?;
+            }
+            tx.commit().await?;
+        }
+        if subtitles.len() + artwork.len() > 0 {
+            tracing::debug!(
+                "library {library_id}: subtitles of {} files and artwork of {} items changed",
+                subtitles.len(),
+                artwork.len()
+            );
+        }
+        let mut tx = self.db.write.begin().await?;
+        update_counts(&mut tx, library_id).await?;
         sqlx::query("UPDATE libraries SET scanned_at = ? WHERE id = ?")
             .bind(now())
             .bind(library_id)
-            .execute(&mut *conn)
+            .execute(&mut *tx)
             .await?;
-        drop(conn);
+        tx.commit().await?;
         // Scanning rewrites titles of unmatched items and local artwork;
         // hand edits win.
         crate::overrides::apply_library(&self.db, library_id).await?;
@@ -347,7 +402,7 @@ impl Scanner {
         &self,
         writer: &mut Writer<'_>,
         batch: &mut Vec<(FoundFile, ProbeOutcome)>,
-        existing: &HashMap<&str, (i64, i64, i64, bool)>,
+        existing: &HashMap<&str, &KnownFile>,
         totals: &mut Totals,
     ) -> anyhow::Result<()> {
         if batch.is_empty() {
@@ -359,7 +414,7 @@ impl Scanner {
             // A forced rescan while the transcoder is down must not replace
             // good probe data (and music tags) with nothing.
             if matches!(outcome, ProbeOutcome::Unavailable)
-                && known.is_some_and(|&(_, size, mtime, _)| size == file.size && mtime == file.mtime)
+                && known.is_some_and(|k| k.size == file.size && k.mtime == file.mtime)
             {
                 continue;
             }
@@ -375,6 +430,17 @@ impl Scanner {
     }
 }
 
+/// A media file of the library as the database knows it.
+#[derive(sqlx::FromRow)]
+struct KnownFile {
+    id: i64,
+    path: String,
+    size: i64,
+    mtime: i64,
+    probed: bool,
+    external_subs: String,
+}
+
 enum ProbeOutcome {
     Ok(Box<MediaInfo>),
     /// The transcoder could not be reached or timed out: store the file
@@ -388,7 +454,7 @@ enum ProbeOutcome {
 struct Writer<'a> {
     library_id: i64,
     kind: LibraryKind,
-    sidecars: &'a HashMap<PathBuf, Vec<String>>,
+    sidecars: &'a Sidecars,
     containers: HashMap<String, i64>,
 }
 
@@ -433,7 +499,7 @@ impl NewItem {
 }
 
 impl<'a> Writer<'a> {
-    fn new(lib: &LibraryRow, sidecars: &'a HashMap<PathBuf, Vec<String>>) -> Self {
+    fn new(lib: &LibraryRow, sidecars: &'a Sidecars) -> Self {
         Self { library_id: lib.id, kind: lib.kind(), sidecars, containers: HashMap::new() }
     }
 
@@ -459,8 +525,7 @@ impl<'a> Writer<'a> {
             (None, LibraryKind::Shows) => self.write_episode(conn, file, duration).await?,
             (None, LibraryKind::Music) => self.write_track(conn, file, info.as_ref(), duration).await?,
         };
-        let subs =
-            if self.kind == LibraryKind::Music { Vec::new() } else { external_subtitles(&file.path, self.sidecars) };
+        let subs = if self.kind == LibraryKind::Music { Vec::new() } else { self.sidecars.subtitles(&file.path) };
         upsert_file(conn, self.library_id, item_id, file, info.as_ref(), &subs, probed).await
     }
 
@@ -761,15 +826,18 @@ async fn cleanup_orphans(conn: &mut SqliteConnection, library_id: i64) -> sqlx::
 }
 
 async fn update_counts(conn: &mut SqliteConnection, library_id: i64) -> sqlx::Result<()> {
+    // `+kind`: children are counted through the parent indexes. Before the
+    // first `PRAGMA optimize` SQLite would otherwise go through every episode
+    // of the library for each show (seconds of holding the writer).
     let statements = [
         "UPDATE items SET
-            leaf_count = (SELECT COUNT(*) FROM items e WHERE e.grandparent_id = items.id AND e.kind = 'episode'),
-            child_count = (SELECT COUNT(*) FROM items s WHERE s.parent_id = items.id AND s.kind = 'season')
+            leaf_count = (SELECT COUNT(*) FROM items e WHERE e.grandparent_id = items.id AND +e.kind = 'episode'),
+            child_count = (SELECT COUNT(*) FROM items s WHERE s.parent_id = items.id AND +s.kind = 'season')
          WHERE library_id = ? AND kind = 'show'",
         "UPDATE items SET leaf_count = (SELECT COUNT(*) FROM items e WHERE e.parent_id = items.id)
          WHERE library_id = ? AND kind = 'season'",
         "UPDATE items SET
-            leaf_count = (SELECT COUNT(*) FROM items t WHERE t.grandparent_id = items.id AND t.kind = 'track'),
+            leaf_count = (SELECT COUNT(*) FROM items t WHERE t.grandparent_id = items.id AND +t.kind = 'track'),
             child_count = (SELECT COUNT(*) FROM items a WHERE a.parent_id = items.id)
          WHERE library_id = ? AND kind = 'artist'",
         "UPDATE items SET
@@ -783,30 +851,32 @@ async fn update_counts(conn: &mut SqliteConnection, library_id: i64) -> sqlx::Re
     Ok(())
 }
 
-/// Sidecar subtitles can appear without the video changing.
-async fn refresh_external_subs(
-    conn: &mut SqliteConnection,
-    files: &[(i64, PathBuf)],
-    sidecars: &HashMap<PathBuf, Vec<String>>,
-) -> sqlx::Result<()> {
-    for (id, path) in files {
-        if path.parent().is_none_or(|dir| !sidecars.contains_key(dir) && !has_subs_dir(dir, sidecars)) {
-            continue;
-        }
-        let subs = serde_json::to_string(&external_subtitles(path, sidecars)).unwrap_or_else(|_| "[]".into());
-        sqlx::query("UPDATE media_files SET external_subs = ? WHERE id = ? AND external_subs != ?")
-            .bind(&subs)
-            .bind(id)
-            .bind(&subs)
-            .execute(&mut *conn)
-            .await?;
-    }
-    Ok(())
+/// The sidecar subtitles of a file whose video did not change.
+struct SubtitleChange {
+    file_id: i64,
+    /// What the database has, and what it gets.
+    before: String,
+    subs: String,
 }
 
-fn has_subs_dir(dir: &Path, sidecars: &HashMap<PathBuf, Vec<String>>) -> bool {
-    sidecars.contains_key(&dir.join("Subs")) || sidecars.contains_key(&dir.join("subs"))
+/// Subtitles appear, change and go without their video changing: what the
+/// index finds for `files` (id, path, stored `external_subs`) where it is
+/// not what the database has.
+fn subtitle_changes(files: Vec<(i64, PathBuf, String)>, sidecars: &Sidecars) -> Vec<SubtitleChange> {
+    files
+        .into_iter()
+        .filter_map(|(file_id, path, before)| {
+            let subs = serde_json::to_string(&sidecars.subtitles(&path)).ok()?;
+            (subs != before).then_some(SubtitleChange { file_id, before, subs })
+        })
+        .collect()
 }
+
+/// Items and the files their local artwork is looked for next to.
+const ARTWORK_ROWS: &str = "SELECT i.id, i.kind, i.path, i.idx, i.poster, i.backdrop, i.thumb, p.path AS parent_path,
+        (SELECT f.path FROM media_files f WHERE f.item_id = i.id ORDER BY f.id LIMIT 1) AS file_path
+     FROM items i LEFT JOIN items p ON p.id = i.parent_id
+     WHERE i.library_id = ? AND i.kind IN ('movie', 'show', 'season', 'episode', 'artist', 'album')";
 
 #[derive(sqlx::FromRow)]
 struct ArtworkRow {
@@ -821,30 +891,47 @@ struct ArtworkRow {
     file_path: Option<String>,
 }
 
-/// Pick up local artwork (poster.jpg, fanart.jpg, season01-poster.jpg, …).
-/// Local files win over downloaded artwork; vanished local files are cleared.
-async fn refresh_artwork(
-    conn: &mut SqliteConnection,
-    lib: &LibraryRow,
-    sidecars: &HashMap<PathBuf, Vec<String>>,
-) -> sqlx::Result<()> {
-    let rows: Vec<ArtworkRow> = sqlx::query_as(
-        "SELECT i.id, i.kind, i.path, i.idx, i.poster, i.backdrop, i.thumb, p.path AS parent_path,
-                (SELECT f.path FROM media_files f WHERE f.item_id = i.id ORDER BY f.id LIMIT 1) AS file_path
-         FROM items i LEFT JOIN items p ON p.id = i.parent_id
-         WHERE i.library_id = ? AND i.kind IN ('movie', 'show', 'season', 'episode', 'artist', 'album')",
-    )
-    .bind(lib.id)
-    .fetch_all(&mut *conn)
-    .await?;
+/// A picture of an item that changes: what the database has, what it gets.
+type Swap = Option<(Option<String>, Option<String>)>;
 
+/// New local artwork of an item.
+struct ArtworkChange {
+    id: i64,
+    poster: Swap,
+    backdrop: Swap,
+    thumb: Swap,
+}
+
+impl ArtworkChange {
+    async fn save(&self, conn: &mut SqliteConnection, now: i64) -> sqlx::Result<()> {
+        let mut query = sqlx::query(
+            "UPDATE items SET
+                poster = CASE WHEN ? AND poster IS ? THEN ? ELSE poster END,
+                backdrop = CASE WHEN ? AND backdrop IS ? THEN ? ELSE backdrop END,
+                thumb = CASE WHEN ? AND thumb IS ? THEN ? ELSE thumb END,
+                updated_at = ?
+             WHERE id = ?",
+        );
+        // Each picture only changes if it is still what the scan saw: an edit
+        // or a metadata refresh meanwhile wins.
+        for swap in [&self.poster, &self.backdrop, &self.thumb] {
+            let (before, after) = swap.clone().unwrap_or_default();
+            query = query.bind(swap.is_some()).bind(before).bind(after);
+        }
+        query.bind(now).bind(self.id).execute(conn).await?;
+        Ok(())
+    }
+}
+
+/// Local artwork (poster.jpg, fanart.jpg, season01-poster.jpg, …) that is
+/// not what the items have. Local files win over downloaded artwork;
+/// vanished local files are cleared.
+fn artwork_changes(rows: Vec<ArtworkRow>, sidecars: &Sidecars) -> Vec<ArtworkChange> {
     let lookup = |dir: &str, bases: &[String]| -> Option<String> {
-        let dir = Path::new(dir);
-        sidecars.get(dir).and_then(|files| find_image(files, bases)).map(|name| path_str(&dir.join(name)))
+        sidecars.image(Path::new(dir), bases).map(|path| path_str(&path))
     };
     let strings = |names: &[&str]| names.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
-    let now = now();
-
+    let mut changes = Vec::new();
     for row in rows {
         let file_stem_bases = |suffixes: &[&str]| -> Vec<String> {
             let stem = row
@@ -906,41 +993,27 @@ async fn refresh_artwork(
             _ => (None, None, None),
         };
 
-        let decide = |current: &Option<String>, local: Option<String>| -> Option<Option<String>> {
-            match (current, local) {
-                (Some(cur), Some(new)) if *cur == new => None,
-                (_, Some(new)) => Some(Some(new)),
+        let decide = |current: &Option<String>, local: Option<String>| -> Swap {
+            let after = match (current, local) {
+                (Some(cur), Some(new)) if *cur == new => return None,
+                (_, Some(new)) => Some(new),
                 // Clear local artwork that vanished (downloaded art lives in the blob store).
-                (Some(cur), None) if !crate::store::is_blob(cur) && !Path::new(cur).exists() => Some(None),
-                _ => None,
-            }
+                (Some(cur), None) if !crate::store::is_blob(cur) && !Path::new(cur).exists() => None,
+                _ => return None,
+            };
+            Some((current.clone(), after))
         };
-        let poster = decide(&row.poster, poster);
-        let backdrop = decide(&row.backdrop, backdrop);
-        let thumb = decide(&row.thumb, thumb);
-        if poster.is_none() && backdrop.is_none() && thumb.is_none() {
-            continue;
+        let change = ArtworkChange {
+            id: row.id,
+            poster: decide(&row.poster, poster),
+            backdrop: decide(&row.backdrop, backdrop),
+            thumb: decide(&row.thumb, thumb),
+        };
+        if change.poster.is_some() || change.backdrop.is_some() || change.thumb.is_some() {
+            changes.push(change);
         }
-        sqlx::query(
-            "UPDATE items SET
-                poster = CASE WHEN ? THEN ? ELSE poster END,
-                backdrop = CASE WHEN ? THEN ? ELSE backdrop END,
-                thumb = CASE WHEN ? THEN ? ELSE thumb END,
-                updated_at = ?
-             WHERE id = ?",
-        )
-        .bind(poster.is_some())
-        .bind(poster.flatten())
-        .bind(backdrop.is_some())
-        .bind(backdrop.flatten())
-        .bind(thumb.is_some())
-        .bind(thumb.flatten())
-        .bind(now)
-        .bind(row.id)
-        .execute(&mut *conn)
-        .await?;
     }
-    Ok(())
+    changes
 }
 
 /// Is this file a good candidate for remuxing (copying H.264 into HLS)?

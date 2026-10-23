@@ -262,32 +262,9 @@ pub fn walk(roots: &[PathBuf], kind: LibraryKind) -> Walked {
     out
 }
 
-/// Find an image named `<base>.<image ext>` (case-insensitive) in `files`.
-pub fn find_image(files: &[String], bases: &[String]) -> Option<String> {
-    for base in bases {
-        for name in files {
-            let lower = name.to_ascii_lowercase();
-            if let Some((stem, ext)) = lower.rsplit_once('.') {
-                if IMAGE_EXTENSIONS.contains(&ext) && stem == base.to_ascii_lowercase() {
-                    return Some(name.clone());
-                }
-            }
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn finds_images_case_insensitively() {
-        let files = vec!["Poster.JPG".to_owned(), "fanart.png".to_owned(), "movie.srt".to_owned()];
-        assert_eq!(find_image(&files, &["poster".into()]), Some("Poster.JPG".into()));
-        assert_eq!(find_image(&files, &["folder".into(), "fanart".into()]), Some("fanart.png".into()));
-        assert_eq!(find_image(&files, &["movie".into()]), None);
-    }
 
     #[test]
     fn samples_and_trailers() {
