@@ -5,7 +5,7 @@ import { cn } from "@/lib/cn";
 import { streamLabel } from "@/lib/format";
 import { useDismiss } from "@/lib/hooks";
 import { Toggle } from "@/components/ui";
-import type { QualityOption } from "./quality";
+import { qualityById, type QualityOption } from "./quality";
 import { SUBTITLE_BACKGROUNDS, SUBTITLE_SIZES, type SubtitleStyle } from "./subtitles";
 
 type Panel = "root" | "quality" | "audio" | "subtitles" | "style";
@@ -73,6 +73,8 @@ export interface SettingsPopoverProps {
   quality: string;
   /** What the original is ("1080p · 8.2 Mbps"). */
   originalHint: string | null;
+  /** The quality the original is converted at here, when it has to be ("30m"). */
+  autoQuality?: string | null;
   onQuality: (id: string) => void;
   audioStreams: MediaStream[];
   audioIndex: number | null;
@@ -89,7 +91,7 @@ export interface SettingsPopoverProps {
 }
 
 export function SettingsPopover(props: SettingsPopoverProps) {
-  const { open, setOpen, details, qualities, quality, originalHint, onQuality } = props;
+  const { open, setOpen, details, qualities, quality, originalHint, autoQuality, onQuality } = props;
   const { audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle, autoSkip, onAutoSkip } = props;
   const { subtitleStyle, onSubtitleStyle } = props;
   const [panel, setPanel] = useState<Panel>("root");
@@ -101,7 +103,9 @@ export function SettingsPopover(props: SettingsPopoverProps) {
 
   const currentAudio = audioStreams.find((s) => s.index === audioIndex) ?? audioStreams.find((s) => s.default) ?? audioStreams[0];
   const currentSub = subtitleStreams.find((s) => s.index === subtitleIndex);
-  const qualityLabel = qualities.find((q) => q.id === quality)?.label ?? "Original";
+  // The original, converted: at the closest quality, which the menu names.
+  const auto = quality === "original" && autoQuality ? qualityById(autoQuality) : null;
+  const qualityLabel = auto && auto.id !== "original" ? `${auto.label} (auto)` : (qualities.find((q) => q.id === quality)?.label ?? "Original");
 
   const close = () => {
     setOpen(false);
@@ -176,7 +180,13 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                     <Option
                       key={q.id}
                       selected={q.id === quality}
-                      hint={i === 0 ? (originalHint ?? undefined) : "Converted"}
+                      hint={
+                        i === 0
+                          ? auto && auto.id !== "original"
+                            ? `Plays as ${auto.label} here${originalHint ? ` (the file: ${originalHint})` : ""}`
+                            : (originalHint ?? undefined)
+                          : "Converted"
+                      }
                       onClick={() => {
                         onQuality(q.id);
                         close();

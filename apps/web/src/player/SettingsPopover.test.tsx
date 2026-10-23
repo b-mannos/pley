@@ -37,6 +37,16 @@ describe("SettingsPopover", () => {
     expect(screen.queryByText("Playback")).not.toBeInTheDocument();
   });
 
+  it("names the quality the original is converted at", async () => {
+    const user = userEvent.setup();
+    renderPopover({ qualities: qualitiesFor({ bitrate: 60_000_000, height: 2160 }), originalHint: "4K · 60 Mbps", autoQuality: "30m" });
+    expect(screen.getByRole("button", { name: /Quality\s*30 Mbps 4K \(auto\)/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Quality/ }));
+    const original = screen.getAllByRole("menuitemradio")[0];
+    expect(original).toHaveTextContent("Plays as 30 Mbps 4K here (the file: 4K · 60 Mbps)");
+    expect(original).toHaveAttribute("aria-checked", "true");
+  });
+
   it("offers the original and the qualities that convert it", async () => {
     const user = userEvent.setup();
     const props = renderPopover();

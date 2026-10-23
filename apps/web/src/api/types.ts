@@ -449,6 +449,12 @@ export interface PlaybackInfo {
   reasons?: string[];
   /** The same, in one line. */
   reason: string | null;
+  /**
+   * The quality a conversion of the original aims for (the closest one the
+   * player offers, by id: "30m"…): absent when a quality was picked or the
+   * video isn't converted.
+   */
+  auto_quality?: string | null;
 }
 
 /** `GET /api/playback/{session}`: how a session plays, with its transcode's live numbers. */

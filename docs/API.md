@@ -252,7 +252,10 @@ interface PlaybackInfo {
   burn_subtitles: boolean;
   audio_converted: boolean;         // the audio is converted (also in a remux, where the video is copied)
   subtitles: SubtitleTrack[];       // all subtitle tracks of the file
-  reason: string | null;            // human readable "why not direct play"
+  reasons: string[];                // why it isn't played as it is, one short sentence each
+  reason: string | null;            // the same in one line
+  auto_quality: string | null;      // the original converted: the closest quality players offer ("30m" = 30 Mbps 4K,
+                                    // "20m", "15m" = 15 Mbps 4K, "12m", "8m", "4m", "2m"); null when a quality was asked for
 }
 ```
 

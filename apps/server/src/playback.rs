@@ -131,6 +131,46 @@ pub struct PlaybackInfo {
     pub reasons: Vec<String>,
     /// The same, in one line.
     pub reason: Option<String>,
+    /// The quality a transcode of the original aims for, by the players' id
+    /// ("30m"…, see [`QUALITIES`]): `None` when a quality was asked for or the
+    /// video isn't converted.
+    pub auto_quality: Option<String>,
+}
+
+/// The qualities players offer (apps/web/src/player/quality.ts), highest
+/// bitrate first: id, kbps, lines.
+pub const QUALITIES: [(&str, u32, u32); 7] = [
+    ("30m", 30_000, 2160),
+    ("20m", 20_000, 1080),
+    ("15m", 15_000, 2160),
+    ("12m", 12_000, 1080),
+    ("8m", 8_000, 1080),
+    ("4m", 4_000, 720),
+    ("2m", 2_000, 480),
+];
+
+/// What a transcode of the original aims for, instead of the file's own
+/// size and bitrate (heavy to make and to send, for no better picture): the
+/// closest quality players offer. It keeps the file's resolution and never
+/// goes above it (4K stays 4K, a 1920×800 film stays 1080p), with the
+/// highest bitrate up to 1.5 times the file's (H.264 needs more than HEVC
+/// for the same picture), or that resolution's lowest for a file with fewer
+/// bits than any.
+pub fn closest_quality(width: Option<i64>, height: Option<i64>, bitrate: Option<i64>) -> (&'static str, u32, u32) {
+    let (w, h) = (width.unwrap_or(0), height.unwrap_or(0));
+    let lines = if w >= 3800 || h >= 2100 {
+        2160
+    } else if w >= 1800 || h >= 1000 || (w <= 0 && h <= 0) {
+        1080
+    } else if w >= 1200 || h >= 700 {
+        720
+    } else {
+        480
+    };
+    let cap = bitrate.filter(|b| *b > 0).map(|b| b as f64 * 1.5 / 1000.0);
+    let mut tier = QUALITIES.iter().filter(|q| q.2 == lines);
+    let lowest = tier.clone().next_back();
+    tier.find(|q| cap.is_none_or(|cap| f64::from(q.1) <= cap)).or(lowest).copied().unwrap_or(QUALITIES[4])
 }
 
 /// `GET /api/playback/{session}`: how a session plays, with its transcode's
@@ -151,6 +191,8 @@ pub struct Decision {
     pub audio_index: Option<i64>,
     pub burn_index: Option<i64>,
     pub reasons: Vec<String>,
+    /// The quality picked for the original ([`closest_quality`]), by id.
+    pub quality: Option<&'static str>,
 }
 
 /// Why the client cannot show this video's dynamic range as is (the video is
@@ -210,6 +252,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             audio_index: None,
             burn_index: None,
             reasons: if direct { vec![] } else { vec!["This file hasn't been analyzed yet.".into()] },
+            quality: None,
         };
     };
 
@@ -286,6 +329,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             audio_index,
             burn_index: None,
             reasons: Vec::new(),
+            quality: None,
         };
     }
 
@@ -294,6 +338,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         PlaybackMode::Transcode => reasons.push("The player asked for the file converted.".into()),
         _ => {}
     }
+    let mut quality = None;
     let video_req = video.map(|v| {
         // Whatever the client plays as it is goes through untouched, like
         // Plex's Direct Stream: only the audio or the container changes.
@@ -304,13 +349,21 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             && bitrate_ok
             && size_ok
             && burn.is_none();
+        // The original, converted: at the closest quality players offer.
+        let (max_height, max_bitrate) = if copy || req.max_bitrate.is_some() || req.max_height.is_some() {
+            (req.max_height, req.max_bitrate)
+        } else {
+            let (id, kbps, lines) = closest_quality(v.width, v.height, file.bitrate);
+            quality = Some(id);
+            (Some(lines), Some(kbps))
+        };
         VideoRequest {
             stream_index: Some(v.index),
             mode: if copy { VideoMode::Copy } else { VideoMode::Transcode },
             codec: VideoCodec::H264,
             max_width: None,
-            max_height: req.max_height,
-            max_bitrate_kbps: req.max_bitrate.map(|b| b.saturating_sub(192).max(500)),
+            max_height,
+            max_bitrate_kbps: max_bitrate.map(|b| b.saturating_sub(192).max(500)),
         }
     });
     let audio_req = audio.map(|a| {
@@ -342,6 +395,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         subtitle,
         audio_index,
         reasons,
+        quality,
     }
 }
 
@@ -960,6 +1014,39 @@ mod tests {
         let d = decide(&file("mp4", 5_000_000), Some(&i), &i.streams, &req);
         assert_eq!(d.method, Method::Transcode);
         assert_eq!(d.subtitle.unwrap().stream_index, Some(9));
+    }
+
+    #[test]
+    fn the_original_converted_aims_for_the_closest_quality() {
+        let pick = |w, h, mbps: i64| closest_quality(Some(w), Some(h), Some(mbps * 1_000_000)).0;
+        assert_eq!(pick(3840, 2160, 57), "30m", "a 4K remux");
+        assert_eq!(pick(3840, 2160, 18), "15m");
+        assert_eq!(pick(3840, 2160, 6), "15m", "4K stays 4K, even with few bits");
+        assert_eq!(pick(3840, 1600, 40), "30m", "scope 4K");
+        assert_eq!(pick(1920, 1080, 25), "20m");
+        assert_eq!(pick(1920, 1080, 10), "12m", "HEVC 10 Mbps: H.264 needs more");
+        assert_eq!(pick(1920, 1080, 4), "8m");
+        assert_eq!(pick(1920, 800, 9), "12m", "scope 1080p stays 1080p");
+        assert_eq!(pick(1280, 720, 3), "4m");
+        assert_eq!(pick(720, 480, 2), "2m");
+        assert_eq!(closest_quality(None, None, None).0, "20m", "nothing known: 1080p's best");
+
+        // HEVC can't play here: converted at that quality, which the menu shows.
+        let i = info("hevc", &["aac"], DynamicRange::Sdr);
+        let d = decide(&file("mkv", 25_000_000), Some(&i), &i.streams, &request());
+        let v = d.video.as_ref().unwrap();
+        assert_eq!((d.method, d.quality), (Method::Transcode, Some("20m")));
+        assert_eq!((v.max_height, v.max_bitrate_kbps), (Some(1080), Some(19_808)));
+
+        // A quality asked for wins, and copied video has none.
+        let mut req = request();
+        req.max_bitrate = Some(4_000);
+        req.max_height = Some(720);
+        let d = decide(&file("mkv", 25_000_000), Some(&i), &i.streams, &req);
+        assert_eq!((d.quality, d.video.unwrap().max_height), (None, Some(720)));
+        let h264 = info("h264", &["ac3"], DynamicRange::Sdr);
+        let d = decide(&file("mkv", 5_000_000), Some(&h264), &h264.streams, &request());
+        assert_eq!((d.method, d.quality), (Method::Remux, None));
     }
 
     #[test]

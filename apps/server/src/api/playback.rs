@@ -103,6 +103,7 @@ pub async fn start(
             subtitles,
             reasons: Vec::new(),
             reason: None,
+            auto_quality: None,
         }));
     }
 
@@ -172,6 +173,9 @@ pub async fn start(
         subtitles,
         reason: (!reasons.is_empty()).then(|| reasons.join(" ")),
         reasons,
+        // Only when the video really is converted (a remux the transcoder
+        // turned into a transcode keeps its own default).
+        auto_quality: decision.quality.filter(|_| method == Method::Transcode).map(str::to_owned),
     }))
 }
 

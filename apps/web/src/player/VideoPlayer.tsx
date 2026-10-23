@@ -1214,6 +1214,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             qualities={qualities}
             quality={selectedQuality.id}
             originalHint={[fileResolution(file), formatBitrate(file?.bitrate)].filter(Boolean).join(" · ") || null}
+            autoQuality={info?.auto_quality ?? null}
             onQuality={changeQuality}
             audioStreams={audioStreams}
             audioIndex={audioIndex ?? info?.audio_index ?? null}
