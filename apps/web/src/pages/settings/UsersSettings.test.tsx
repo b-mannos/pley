@@ -19,6 +19,7 @@ const kid: User = {
   library_ids: [2],
   max_age: 7,
 };
+const ann: User = { ...testUser, id: 3, username: "ann", name: "Ann", is_admin: false, two_step: true };
 const libraries: Library[] = [
   { id: 1, name: "Movies", kind: "movies", paths: [], item_count: 0, created_at: 0, scanned_at: null, scanning: false },
   { id: 2, name: "Cartoons", kind: "shows", paths: [], item_count: 0, created_at: 0, scanned_at: null, scanning: false },
@@ -26,13 +27,15 @@ const libraries: Library[] = [
 
 function serve() {
   return mockApi({
-    "GET /api/users": () => [admin, kid],
+    "GET /api/users": () => [admin, kid, ann],
     "GET /api/libraries": () => libraries,
     "GET /api/users/1/devices": () => [],
     "GET /api/users/2/devices": () => [{ id: "d1", name: "Safari on iPhone", user_agent: null, ip: "192.0.2.4", created_at: 0, last_seen_at: 0, current: false }],
     "POST /api/users": (req) => ({ ...testUser, id: 3, name: (req.body as { username: string }).username }),
     "PATCH /api/users/2": () => ({ ...kid, name: "Kiddo Two" }),
     "DELETE /api/users/2": () => undefined,
+    "GET /api/users/3/devices": () => [],
+    "DELETE /api/users/3/two-step": () => undefined,
   });
 }
 
@@ -57,6 +60,20 @@ describe("UsersSettings", () => {
     expect(rows[0]).toHaveTextContent("(you)");
     expect(rows[1]).toHaveTextContent("@kid");
     for (const badge of ["Managed", "Home", "Cartoons", "Up to 7", "PIN"]) expect(rows[1]).toHaveTextContent(badge);
+  });
+
+  it("turns two-step sign-in off for someone who lost their phone", async () => {
+    const user = userEvent.setup();
+    const requests = renderUsers();
+    const rows = await screen.findAllByRole("listitem");
+    expect(rows[2]).toHaveTextContent("2FA");
+    await user.click(screen.getByRole("button", { name: /Ann/ }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Ann" });
+    await user.click(within(dialog).getByRole("button", { name: "Turn off" }));
+    expect(requests.some((r) => r.method === "DELETE")).toBe(false);
+    await user.click(within(dialog).getByRole("button", { name: "Turn off" }));
+    expect(await screen.findByText("Two-step sign-in is off for Ann")).toBeInTheDocument();
+    expect(requests.find((r) => r.method === "DELETE")?.path).toBe("/api/users/3/two-step");
   });
 
   it("adds an account after checking the form", async () => {

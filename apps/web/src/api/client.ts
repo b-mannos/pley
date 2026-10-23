@@ -5,6 +5,8 @@ export type ApiErrorCode =
   | "not_found"
   | "conflict"
   | "too_many_requests"
+  /** The second step of a sign-in: a code from the authenticator app is missing or wrong. */
+  | "two_step"
   | "unavailable"
   | "internal"
   | "network";
@@ -82,7 +84,8 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
     } catch {
       // not JSON
     }
-    if (res.status === 401 && !noAuthRedirect) unauthorizedHandler?.();
+    // A second step asked for is not an expired session.
+    if (res.status === 401 && !noAuthRedirect && code !== "two_step") unauthorizedHandler?.();
     throw new ApiError(res.status, code, message);
   }
 

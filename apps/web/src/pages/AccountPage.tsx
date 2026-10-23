@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   Camera,
@@ -15,7 +15,7 @@ import {
   Trash2,
   UserRound,
 } from "lucide-react";
-import { errorMessage, isApiError } from "@/api/client";
+import { errorMessage } from "@/api/client";
 import {
   useChangePassword,
   useDeleteAvatar,
@@ -35,23 +35,17 @@ import { useAuth } from "@/auth";
 import { Avatar, AVATAR_COLORS, avatarColor } from "@/components/Avatar";
 import { useToast } from "@/components/Toast";
 import { HistoryList } from "@/components/HistoryList";
-import { Badge, Button, Card, Field, Select, TextInput } from "@/components/ui";
+import { Badge, Button, Card, CardTitle, Field, Select, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatDay, formatRelative } from "@/lib/format";
 import { LANGUAGES } from "@/lib/languages";
 import { useDocumentTitle } from "@/lib/hooks";
 import { passwordProblem } from "@/lib/passwords";
 import { atPublicAddress, ssoNotice, ssoStartUrl } from "@/lib/sso";
+import { codeKind } from "@/lib/twoStep";
+import { TwoStepCard } from "./TwoStepCard";
 
 const MAX_AVATAR_BYTES = 10 * 1024 * 1024;
-
-function CardTitle({ icon, children }: { icon: ReactNode; children: ReactNode }) {
-  return (
-    <h2 className="mb-4 flex items-center gap-2 text-base font-semibold">
-      <span className="text-accent [&>svg]:size-4">{icon}</span> {children}
-    </h2>
-  );
-}
 
 function ProfileCard() {
   const user = useAuth();
@@ -330,7 +324,8 @@ function PinCard() {
           setPinValue("");
           setPassword("");
         },
-        onError: (err) => setError(isApiError(err, 400) ? "Your password is incorrect." : errorMessage(err)),
+        // The server says which: the password, or the PIN.
+        onError: (err) => setError(errorMessage(err)),
       },
     );
   };
@@ -467,7 +462,10 @@ function SingleSignOnCard() {
   // Changing how the account signs in takes its password: a session alone isn't enough.
   const [asking, setAsking] = useState<"link" | "unlink" | null>(null);
   const [password, setPassword] = useState("");
+  // Signing in through the provider skips two-step sign-in: linking takes its code.
+  const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const needsCode = asking === "link" && user.two_step;
   const info = sso.data;
   if (user.managed || !info?.enabled) return null;
   const name = info.name ?? "single sign-on";
@@ -480,7 +478,7 @@ function SingleSignOnCard() {
     e.preventDefault();
     setError(null);
     if (asking === "link") {
-      link.mutate(password, {
+      link.mutate(needsCode ? { password, code: code.trim() } : { password }, {
         // Off to the provider; it sends the browser back here.
         onSuccess: () => window.location.assign(ssoStartUrl(info.start ?? "", "/account")),
         onError: (err) => setError(errorMessage(err)),
@@ -540,12 +538,30 @@ function SingleSignOnCard() {
               required
             />
           </Field>
+          {needsCode ? (
+            <Field label="Code from your authenticator app" htmlFor="sso-code">
+              <TextInput
+                id="sso-code"
+                autoComplete="one-time-code"
+                autoCapitalize="off"
+                spellCheck={false}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                required
+              />
+            </Field>
+          ) : null}
           {error ? <p className="text-sm text-danger">{error}</p> : null}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setAsking(null)} disabled={busy}>
               Cancel
             </Button>
-            <Button type="submit" variant={asking === "unlink" ? "danger" : "primary"} loading={busy} disabled={!password}>
+            <Button
+              type="submit"
+              variant={asking === "unlink" ? "danger" : "primary"}
+              loading={busy}
+              disabled={!password || (needsCode && !codeKind(code))}
+            >
               {asking === "unlink" ? `Unlink ${name}` : `Continue to ${name}`}
             </Button>
           </div>
@@ -687,6 +703,7 @@ export function AccountPage() {
       <PinCard />
       <SingleSignOnCard />
       {user.managed || user.has_password === false ? null : <PasswordCard />}
+      <TwoStepCard />
       <HistoryCard />
       <DevicesCard />
     </div>

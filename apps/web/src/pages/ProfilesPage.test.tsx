@@ -10,12 +10,18 @@ const me: User = { ...testUser, id: 1, name: "Sam", is_admin: false };
 const kid: User = { ...testUser, id: 2, name: "Kid", is_admin: false };
 const locked: User = { ...testUser, id: 3, name: "Alex", is_admin: false, has_pin: true };
 const admin: User = { ...testUser, id: 4, name: "Owner", is_admin: true };
+const guarded: User = { ...testUser, id: 5, name: "Boss", is_admin: true, two_step: true };
 
 function serve() {
   return mockApi({
-    "GET /api/auth/profiles": () => [me, kid, locked, admin],
+    "GET /api/auth/profiles": () => [me, kid, locked, admin, guarded],
     "POST /api/auth/switch": (req) => {
-      const body = req.body as { user_id: number; pin?: string; password?: string };
+      const body = req.body as { user_id: number; pin?: string; password?: string; code?: string };
+      if (body.user_id === guarded.id) {
+        return body.password === "secret" && body.code === "123456"
+          ? { user: guarded, token: "t" }
+          : apiError(401, "two_step", "that code didn't work");
+      }
       if (body.user_id === locked.id && body.pin !== "2468") return apiError(403, "forbidden", "wrong PIN");
       if (body.user_id === admin.id && body.password !== "secret") return apiError(403, "forbidden", "wrong password");
       return { user: [kid, locked, admin].find((u) => u.id === body.user_id), token: "t" };
@@ -112,6 +118,23 @@ describe("ProfilesPage", () => {
     await user.type(screen.getByLabelText("Password"), "secret");
     await user.click(screen.getByRole("button", { name: "Switch" }));
     await waitFor(() => expect(lastSwitch(requests)?.body).toEqual({ user_id: admin.id, password: "secret" }));
+    expect(await screen.findByTestId("location")).toHaveTextContent("/library/2");
+  });
+
+  it("asks for the code too when the profile has two-step sign-in", async () => {
+    const user = userEvent.setup();
+    const requests = serve();
+    renderProfiles();
+
+    await user.click(await screen.findByRole("button", { name: "Boss" }));
+    expect(screen.getByText(/the code from its authenticator app/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Password"), "secret");
+    expect(screen.getByRole("button", { name: "Switch" })).toBeDisabled();
+    await user.type(screen.getByLabelText("Code from the authenticator app"), "123456");
+    await user.click(screen.getByRole("button", { name: "Switch" }));
+    await waitFor(() =>
+      expect(lastSwitch(requests)?.body).toEqual({ user_id: guarded.id, password: "secret", code: "123456" }),
+    );
     expect(await screen.findByTestId("location")).toHaveTextContent("/library/2");
   });
 

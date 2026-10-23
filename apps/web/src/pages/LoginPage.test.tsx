@@ -18,8 +18,15 @@ function serve({ setupRequired = false, signedIn = false, profiles = [testUser],
     "GET /api/server": () => ({ name: "Living Room", version: "1.0.0", setup_required: setupRequired, sso: sso ?? null }),
     "GET /api/auth/me": () => (signedIn ? testUser : apiError(401, "unauthorized", "not signed in")),
     "POST /api/auth/login": (req) => {
-      const { password } = req.body as { password: string };
+      const { password, code } = req.body as { password: string; code?: string };
       if (password === "too many") return apiError(429, "too_many_requests", "too many attempts, wait a minute");
+      if (password === "two-step") {
+        if (!code) return apiError(401, "two_step", "enter the 6-digit code from your authenticator app");
+        if (code !== "123456" && code !== "7k2m-q9xd-4hpt-3vwr") {
+          return apiError(401, "two_step", "that code didn't work: enter the newest code from your authenticator app");
+        }
+        return { user: testUser };
+      }
       return password === "open-sesame" ? { user: testUser, token: "t" } : apiError(401, "unauthorized", "invalid credentials");
     },
     "GET /api/auth/profiles": () => profiles,
@@ -82,6 +89,56 @@ describe("LoginPage", () => {
 
     await signIn("open-sesame");
     expect(await screen.findByTestId("location")).toHaveTextContent("/profiles?next=%2Flibrary%2F2");
+  });
+
+  it("asks for the code from the authenticator app, and signs in with it", async () => {
+    const requests = serve();
+    renderLogin();
+
+    await signIn("two-step");
+    expect(await screen.findByRole("heading", { name: "Two-step sign-in" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    const code = screen.getByLabelText("Code");
+    expect(code).toHaveAttribute("autocomplete", "one-time-code");
+
+    // A wrong code says so; a whole one goes as soon as it's typed.
+    await user.type(code, "999999");
+    expect(await screen.findByRole("alert")).toHaveTextContent("That code didn't work");
+    await user.clear(code);
+    await user.type(code, "123 456");
+    expect(await screen.findByTestId("location")).toHaveTextContent("/library/2");
+    expect(requests.filter((r) => r.method === "POST").at(-1)?.body).toEqual({
+      username: "admin",
+      password: "two-step",
+      code: "123456",
+    });
+  });
+
+  it("takes a recovery code instead", async () => {
+    serve();
+    renderLogin();
+
+    await signIn("two-step");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Use a recovery code" }));
+    const code = screen.getByLabelText("Recovery code");
+    const submit = screen.getByRole("button", { name: "Sign in" });
+    await user.type(code, "7k2m-q9xd");
+    expect(submit).toBeDisabled();
+    await user.type(code, "-4hpt-3vwr");
+    await user.click(submit);
+    expect(await screen.findByTestId("location")).toHaveTextContent("/library/2");
+  });
+
+  it("goes back to the password", async () => {
+    serve();
+    renderLogin();
+
+    await signIn("two-step");
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Back" }));
+    expect(await screen.findByLabelText("Password")).toHaveValue("");
+    expect(screen.getByLabelText("Username")).toHaveValue("  admin ");
   });
 
   it("says when the password is wrong", async () => {

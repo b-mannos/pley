@@ -23,6 +23,7 @@ import type {
   LibraryKind,
   LoginResponse,
   PersonDetail,
+  RecoveryCodes,
   ProfilePatch,
   SearchResults,
   ServerStatus,
@@ -33,6 +34,8 @@ import type {
   SystemInfo,
   TranscoderStatus,
   Trickplay,
+  TwoStepSetup,
+  TwoStepStatus,
   User,
 } from "./types";
 
@@ -62,6 +65,7 @@ export const keys = {
   invite: (code: string) => ["invite", code] as const,
   settings: ["settings"] as const,
   mySso: ["me", "sso"] as const,
+  twoStep: ["me", "two-step"] as const,
   system: ["system"] as const,
   storage: ["system", "storage"] as const,
   backups: ["system", "backups"] as const,
@@ -101,7 +105,8 @@ export function useMe(enabled = true) {
 export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { username: string; password: string }) =>
+    /** `code`: the second step, for accounts with two-step sign-in. */
+    mutationFn: (body: { username: string; password: string; code?: string }) =>
       api.post<LoginResponse>("/api/auth/login", body, { noAuthRedirect: true }),
     onSuccess: (res) => {
       qc.setQueryData(keys.me, res.user);
@@ -139,7 +144,9 @@ export function useMySso(enabled = true) {
 /** Asks for the next sign-in at the provider to link to this account; the browser goes there next. */
 export function useRequestSsoLink() {
   return useMutation({
-    mutationFn: (password: string) => api.post<void>("/api/auth/sso/link", { password }, { noAuthRedirect: true }),
+    /** `code`: with two-step sign-in, signing in through the provider skips it, so linking takes it. */
+    mutationFn: (body: { password: string; code?: string }) =>
+      api.post<void>("/api/auth/sso/link", body, { noAuthRedirect: true }),
   });
 }
 
@@ -159,6 +166,63 @@ export function useUnlinkUserSso() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: Id) => api.del<void>(`/api/users/${id}/sso`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.users }),
+  });
+}
+
+/** Two-step sign-in for the signed-in user. */
+export function useTwoStep(enabled = true) {
+  return useQuery({ queryKey: keys.twoStep, queryFn: () => api.get<TwoStepStatus>("/api/me/two-step"), enabled });
+}
+
+/** A new secret to add to an authenticator app; two-step sign-in turns on with its first code. */
+export function useStartTwoStep() {
+  return useMutation({
+    mutationFn: (password: string) =>
+      api.post<TwoStepSetup>("/api/me/two-step/setup", { password }, { noAuthRedirect: true }),
+  });
+}
+
+function twoStepChanged(qc: QueryClient, on: boolean) {
+  void qc.invalidateQueries({ queryKey: keys.twoStep });
+  qc.setQueryData<User | undefined>(keys.me, (u) => (u ? { ...u, two_step: on } : u));
+  void qc.invalidateQueries({ queryKey: keys.users });
+}
+
+/** Turns two-step sign-in on with a code from the app: the recovery codes, to show once. */
+export function useEnableTwoStep() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => api.post<RecoveryCodes>("/api/me/two-step", { code }, { noAuthRedirect: true }),
+    onSuccess: () => twoStepChanged(qc, true),
+  });
+}
+
+/** Turns it off: takes the password and a code (or a recovery code). */
+export function useDisableTwoStep() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { password: string; code: string }) =>
+      request<void>("/api/me/two-step", { method: "DELETE", body, noAuthRedirect: true }),
+    onSuccess: () => twoStepChanged(qc, false),
+  });
+}
+
+/** New recovery codes; the old ones stop working. */
+export function useNewRecoveryCodes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (password: string) =>
+      api.post<RecoveryCodes>("/api/me/two-step/recovery-codes", { password }, { noAuthRedirect: true }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.twoStep }),
+  });
+}
+
+/** An administrator turns two-step sign-in off for someone who lost their phone and recovery codes. */
+export function useResetUserTwoStep() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: Id) => api.del<void>(`/api/users/${id}/two-step`),
     onSuccess: () => void qc.invalidateQueries({ queryKey: keys.users }),
   });
 }
@@ -196,7 +260,7 @@ export function fetchProfiles(qc: QueryClient) {
 export function useSwitchProfile() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { user_id: Id; pin?: string; password?: string }) =>
+    mutationFn: (body: { user_id: Id; pin?: string; password?: string; code?: string }) =>
       api.post<LoginResponse>("/api/auth/switch", body, { noAuthRedirect: true }),
     onSuccess: (res) => {
       const server = qc.getQueryData<ServerStatus>(keys.server);

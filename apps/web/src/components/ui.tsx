@@ -247,6 +247,15 @@ export function Card({ children, className }: { children: ReactNode; className?:
   return <div className={cn("rounded-lg border border-border bg-surface p-5", className)}>{children}</div>;
 }
 
+/** A card's heading, with an icon in the accent color. */
+export function CardTitle({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+  return (
+    <h2 className="mb-4 flex items-center gap-2 text-base font-semibold">
+      <span className="text-accent [&>svg]:size-4">{icon}</span> {children}
+    </h2>
+  );
+}
+
 export function SectionTitle({ children, action, className }: { children: ReactNode; action?: ReactNode; className?: string }) {
   return (
     <div className={cn("mb-3 flex items-center justify-between gap-3", className)}>

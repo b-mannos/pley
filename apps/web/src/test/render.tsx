@@ -28,6 +28,7 @@ export const testUser: User = {
   subtitle_mode: "forced",
   has_password: true,
   sso: false,
+  two_step: false,
 };
 
 /** No retries (queries that ask for some get them right away) and no garbage collection. */

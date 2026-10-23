@@ -8,29 +8,12 @@ import { ConfirmModal, Modal } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
 import { Badge, Button, EmptyState, Field, IconButton, PageSpinner, Select, TextInput } from "@/components/ui";
 import { ageBadge, librariesLabel } from "@/lib/access";
+import { copyText } from "@/lib/clipboard";
 import { formatRelative, pluralize } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
 
 export function inviteUrl(code: string): string {
   return `${window.location.origin}/invite/${code}`;
-}
-
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    // Clipboard API needs a secure context; fall back to a hidden textarea.
-    const area = document.createElement("textarea");
-    area.value = text;
-    area.style.position = "fixed";
-    area.style.opacity = "0";
-    document.body.appendChild(area);
-    area.select();
-    const ok = document.execCommand("copy");
-    area.remove();
-    return ok;
-  }
 }
 
 function CopyButton({ text, label = "Copy link" }: { text: string; label?: string }) {

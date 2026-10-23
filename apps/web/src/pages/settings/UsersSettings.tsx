@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { ChevronRight, Laptop, Lock, LogOut, Plus, Smartphone, Trash2, UserPlus } from "lucide-react";
+import { ChevronRight, Laptop, Lock, LogOut, Plus, ShieldCheck, Smartphone, Trash2, UserPlus } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import {
   useCreateUser,
   useDeleteUser,
   useLibraries,
+  useResetUserTwoStep,
   useSignOutEverywhere,
   useUnlinkUserSso,
   useUpdateUser,
@@ -78,6 +79,46 @@ function SingleSignOnLink({ user }: { user: User }) {
       >
         Unlink
       </Button>
+    </section>
+  );
+}
+
+/** Two-step sign-in, which an administrator can turn off for someone who lost their phone and recovery codes. */
+function TwoStepReset({ user }: { user: User }) {
+  const reset = useResetUserTwoStep();
+  const toast = useToast();
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <section className="flex items-center justify-between gap-3">
+      <div>
+        <h3 className="text-sm font-medium">Two-step sign-in</h3>
+        <p className="text-xs text-subtle">Signs in with a code from an authenticator app after the password.</p>
+      </div>
+      {confirming ? (
+        <div className="flex shrink-0 gap-1">
+          <Button size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={reset.isPending}>
+            Keep it
+          </Button>
+          <Button
+            size="sm"
+            variant="danger"
+            loading={reset.isPending}
+            onClick={() =>
+              reset.mutate(user.id, {
+                onSuccess: () => toast.success(`Two-step sign-in is off for ${user.name}`),
+                onError: (e) => toast.error(errorMessage(e)),
+                onSettled: () => setConfirming(false),
+              })
+            }
+          >
+            Turn off
+          </Button>
+        </div>
+      ) : (
+        <Button size="sm" variant="ghost" onClick={() => setConfirming(true)} title="For someone who lost their phone and their recovery codes">
+          Turn off
+        </Button>
+      )}
     </section>
   );
 }
@@ -417,6 +458,7 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
         </Field>
 
         {!isNew && user?.sso ? <SingleSignOnLink user={user} /> : null}
+        {!isNew && user?.two_step ? <TwoStepReset user={user} /> : null}
         {!isNew && user ? <UserDevices user={user} self={self} /> : null}
 
         {error ? <p className="text-sm text-danger">{error}</p> : null}
@@ -455,6 +497,11 @@ function UserRow({ user, self, libraries, onOpen }: { user: User; self: boolean;
               </Badge>
             ) : null}
             {user.sso ? <Badge tone="info">Single sign-on</Badge> : null}
+            {user.two_step ? (
+              <Badge tone="success">
+                <ShieldCheck className="size-3" /> 2FA
+              </Badge>
+            ) : null}
           </div>
         </div>
         <ChevronRight className="size-4 shrink-0 text-subtle" />

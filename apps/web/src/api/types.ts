@@ -35,6 +35,8 @@ export interface User {
   has_password: boolean;
   /** Linked to an identity at the single sign-on provider. */
   sso: boolean;
+  /** Signs in with a code from an authenticator app after the password. */
+  two_step: boolean;
 }
 
 /**
@@ -107,6 +109,31 @@ export interface MySingleSignOn {
   /** pley's public address: linking happens there. */
   public_url?: string;
   start?: string;
+}
+
+/** `GET /api/me/two-step`: two-step sign-in for the signed-in user. */
+export interface TwoStepStatus {
+  enabled: boolean;
+  /** When it was turned on. */
+  since: Timestamp | null;
+  recovery_codes_left: number;
+}
+
+/** `POST /api/me/two-step/setup`: a new secret for an authenticator app. */
+export interface TwoStepSetup {
+  /** Base32, for typing in. */
+  secret: string;
+  /** `otpauth://totp/…`: what the QR code says, and a link that opens an authenticator app on this device. */
+  uri: string;
+  /** The QR code: its width in modules, and an SVG path of its dark modules. */
+  qr: { size: number; path: string };
+  /** The secret must be confirmed with a code before then. */
+  expires_at: Timestamp;
+}
+
+/** Shown once: each signs in once instead of a code from the app. */
+export interface RecoveryCodes {
+  recovery_codes: string[];
 }
 
 export interface LoginResponse {

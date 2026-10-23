@@ -11,6 +11,7 @@ import { Logo } from "@/components/Logo";
 import { Button, Spinner, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useDocumentTitle } from "@/lib/hooks";
+import { codeKind } from "@/lib/twoStep";
 
 /**
  * Where to go after signing in (`?next=`): a path on this site, but not the
@@ -157,20 +158,26 @@ function PasswordPrompt({
   target: User;
   busy: boolean;
   error: string | null;
-  onSubmit: (password: string) => void;
+  /** With the code from the profile's authenticator app, when it has two-step sign-in. */
+  onSubmit: (password: string, code?: string) => void;
   onCancel: () => void;
 }) {
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const ready = !!password && (!target.two_step || !!codeKind(code));
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (password) onSubmit(password);
+    if (ready) onSubmit(password, target.two_step ? code.trim() : undefined);
   };
   return (
     <form onSubmit={submit} className="flex w-full max-w-xs flex-col items-center">
       <Avatar user={target} size="lg" />
       <div className="mt-3 text-lg font-semibold">{target.name}</div>
       <p className="mt-1 text-center text-sm text-muted">
-        {target.is_admin ? "This is an administrator profile." : "This profile can see more than yours."} Enter its password to switch.
+        {target.is_admin ? "This is an administrator profile." : "This profile can see more than yours."}{" "}
+        {target.two_step
+          ? "Enter its password and the code from its authenticator app to switch."
+          : "Enter its password to switch."}
       </p>
       <TextInput
         autoFocus
@@ -181,6 +188,18 @@ function PasswordPrompt({
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
+      {target.two_step ? (
+        <TextInput
+          autoComplete="one-time-code"
+          autoCapitalize="off"
+          spellCheck={false}
+          aria-label="Code from the authenticator app"
+          placeholder="Code from the authenticator app"
+          className="mt-2"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+        />
+      ) : null}
       <p role="alert" className="mt-2 min-h-5 text-sm text-danger">
         {error}
       </p>
@@ -188,7 +207,7 @@ function PasswordPrompt({
         <Button variant="ghost" className="flex-1" onClick={onCancel} disabled={busy}>
           Cancel
         </Button>
-        <Button type="submit" variant="primary" className="flex-1" loading={busy} disabled={!password}>
+        <Button type="submit" variant="primary" className="flex-1" loading={busy} disabled={!ready}>
           Switch
         </Button>
       </div>
@@ -210,7 +229,7 @@ export function ProfilesPage() {
   const [error, setError] = useState<string | null>(null);
   const [failures, setFailures] = useState(0);
 
-  const doSwitch = (user: User, secret: { pin?: string; password?: string } = {}) => {
+  const doSwitch = (user: User, secret: { pin?: string; password?: string; code?: string } = {}) => {
     setError(null);
     switchProfile.mutate(
       { user_id: user.id, ...secret },
@@ -269,7 +288,7 @@ export function ProfilesPage() {
             target={target}
             busy={switchProfile.isPending}
             error={error}
-            onSubmit={(password) => doSwitch(target, { password })}
+            onSubmit={(password, code) => doSwitch(target, code ? { password, code } : { password })}
             onCancel={() => {
               setTarget(null);
               setError(null);
