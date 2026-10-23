@@ -5,7 +5,6 @@ import type HlsType from "hls.js";
 import type { ErrorData } from "hls.js";
 import {
   ArrowLeft,
-  Captions,
   LoaderCircle,
   Maximize,
   Minimize,
@@ -63,6 +62,12 @@ export interface VideoPlayerProps {
   /** Playing through a playlist or collection: "next" is its next entry. */
   queue?: QueuePosition | null;
 }
+
+/**
+ * How long a wait for media lasts before the spinner shows: a seek within
+ * what's loaded takes a few dozen milliseconds, and would flash it.
+ */
+const SPINNER_DELAY_MS = 400;
 
 /** How long playback may stand still, wanting to play, before it counts as stalled. */
 const STALL_MS = 12_000;
@@ -125,7 +130,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const lastAdvance = useRef({ at: 0, time: -1 });
   const lastData = useRef(0);
   const [loading, setLoading] = useState(true);
+  /** Waiting for media long enough to say so (see `SPINNER_DELAY_MS`). */
   const [buffering, setBuffering] = useState(false);
+  const bufferingTimer = useRef<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [needsGesture, setNeedsGesture] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -232,6 +239,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     setError(null);
     setNeedsGesture(false);
     setEnded(false);
+    window.clearTimeout(bufferingTimer.current);
+    bufferingTimer.current = undefined;
     setBuffering(false);
 
     // Release the previous session before asking for the next one, so a
@@ -542,25 +551,43 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       setBuffered(rangesOf(v.buffered));
     };
     const onDuration = () => setMediaDuration(Number.isFinite(v.duration) ? v.duration : 0);
-    const onWaiting = () => setBuffering(true);
-    const onPlaying = () => {
+    // Browsers say they wait on every seek, even within what's loaded: the
+    // spinner only comes for a wait that lasts, so seeks don't flash it.
+    const startWaiting = () => {
+      if (bufferingTimer.current !== undefined) return;
+      bufferingTimer.current = window.setTimeout(() => setBuffering(true), SPINNER_DELAY_MS);
+    };
+    const stopWaiting = () => {
+      window.clearTimeout(bufferingTimer.current);
+      bufferingTimer.current = undefined;
       setBuffering(false);
+    };
+    const onWaiting = startWaiting;
+    const onPlaying = () => {
+      stopWaiting();
       // hls.js resets the budget per loaded fragment; direct play once it plays again.
       if (!hlsRef.current) recoveries.current.recreate = 0;
     };
-    const onCanPlay = () => setBuffering(false);
+    const onCanPlay = stopWaiting;
     const onSeeked = () => {
-      setBuffering(false);
+      // The frame at the new time can arrive before anything to play on
+      // from it (a transcode starting there): playing again ends the wait.
+      if (v.paused || v.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) stopWaiting();
       if (!sessionRef.current) return;
       positionRef.current = v.currentTime;
       report(v.paused ? "paused" : "playing");
     };
-    const onEnded = () => onMediaEnded();
+    const onEnded = () => {
+      stopWaiting();
+      onMediaEnded();
+    };
     const onError = () => onMediaError();
     // Wherever a seek comes from, its target is where playback is meant to
     // be, also while it loads (a restart after a stall resumes there).
     const onSeeking = () => {
       if (sessionRef.current) positionRef.current = v.currentTime;
+      // Paused, a seek far away waits too (browsers only say so when playing).
+      startWaiting();
     };
 
     v.addEventListener("play", onPlay);
@@ -588,6 +615,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       v.removeEventListener("seeked", onSeeked);
       v.removeEventListener("ended", onEnded);
       v.removeEventListener("error", onError);
+      window.clearTimeout(bufferingTimer.current);
+      bufferingTimer.current = undefined;
     };
   }, [report]);
 
@@ -673,6 +702,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
   const showControls =
     active || hoveringControls || !playing || settingsOpen || chaptersOpen || loading || !!error || needsGesture || ended;
+  const spinning = (loading || buffering) && !error && !needsGesture;
 
   const togglePlay = () => {
     const v = videoRef.current;
@@ -924,11 +954,15 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       </video>
       <SubtitleOverlay cues={cues} lifted={showControls} style={subStyle} />
 
-      {(loading || buffering) && !error && !needsGesture ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <LoaderCircle className="size-14 animate-spin text-white/80" />
-        </div>
-      ) : null}
+      <div
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute inset-0 flex items-center justify-center transition-opacity duration-300",
+          spinning ? "opacity-100" : "opacity-0",
+        )}
+      >
+        <LoaderCircle className={cn("size-14 text-white/80", spinning && "animate-spin")} />
+      </div>
 
       {needsGesture && !error ? (
         <button
@@ -1074,20 +1108,6 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
               className="flex size-10 items-center justify-center rounded-full transition hover:bg-white/15"
             >
               <SkipForward className="size-5 fill-current" />
-            </button>
-          ) : null}
-          {subStreams.some((s) => s.text_based !== false) ? (
-            <button
-              type="button"
-              aria-label="Toggle subtitles (c)"
-              title="Subtitles (c)"
-              onClick={cycleSubtitles}
-              className={cn(
-                "flex size-10 items-center justify-center rounded-full transition hover:bg-white/15",
-                shownTextIndex != null && "text-accent",
-              )}
-            >
-              <Captions className="size-5" />
             </button>
           ) : null}
           {file && (file.chapters?.length ?? 0) > 1 ? (
