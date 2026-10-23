@@ -25,7 +25,9 @@ describe("quality choices", () => {
     // A 4K file at a low bitrate still gets smaller at 1080p.
     expect(ids({ bitrate: 6_000_000, height: 2160 })).toEqual(["original", "20m", "12m", "8m", "4m", "2m"]);
     // A 4K remux: 4K at 30 Mbps too (never offered to files it wouldn't make smaller).
-    expect(ids({ bitrate: 60_000_000, height: 2160 })).toEqual(["original", "30m", "20m", "12m", "8m", "4m", "2m"]);
+    expect(ids({ bitrate: 60_000_000, height: 2160 })).toEqual(["original", "30m", "20m", "15m", "12m", "8m", "4m", "2m"]);
+    // 4K at 20 Mbps: 4K at 15 is smaller, 4K at 30 isn't.
+    expect(ids({ bitrate: 20_000_000, height: 2160 })).toEqual(["original", "20m", "15m", "12m", "8m", "4m", "2m"]);
     expect(ids({ bitrate: null, height: null })).toHaveLength(QUALITIES.length);
     expect(ids(null)).toHaveLength(QUALITIES.length);
   });
