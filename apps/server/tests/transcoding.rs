@@ -296,10 +296,15 @@ async fn start_fake() -> (Fake, String) {
         )
         .route(
             "/v1/subtitles",
+            // Stream 99 can't be converted.
             post(|State(fake): State<Fake>, Json(req): Json<SubtitleRequest>| async move {
                 let text = format!("WEBVTT\n\n00:00.000 --> 00:01.000\n{}#{:?}\n", req.path, req.stream_index);
+                let fails = req.stream_index == Some(99);
                 fake.subtitles.lock().push(req);
-                ([(header::CONTENT_TYPE, "text/vtt")], text)
+                if fails {
+                    return error(StatusCode::INTERNAL_SERVER_ERROR, "ffmpeg_failed");
+                }
+                ([(header::CONTENT_TYPE, "text/vtt")], text).into_response()
             }),
         )
         .route(
@@ -651,6 +656,49 @@ async fn subtitles_are_converted_once() {
         assert_eq!(reply.status, StatusCode::NOT_FOUND, "{missing}");
     }
     assert_eq!(w.fake.subtitles.lock().len(), 2);
+}
+
+#[tokio::test]
+async fn subtitles_are_cached_whole_and_follow_their_sidecar() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let file = app.file_of(w.movies["Feature"]).await;
+    let mtime: i64 = sqlx::query_scalar("SELECT mtime FROM media_files WHERE id = ?")
+        .bind(file)
+        .fetch_one(&app.state.db.read)
+        .await
+        .unwrap();
+    let cache = app.state.config.cache_dir().join("subtitles");
+    let converted = || w.fake.subtitles.lock().len();
+
+    // Left cut short by a crash (earlier versions wrote in place): made again.
+    let embedded = cache.join(format!("{file}_4_{mtime}.vtt"));
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(&embedded, b"").unwrap();
+    let reply = app.get(&format!("/api/files/{file}/subtitles/4.vtt"), admin).await;
+    assert!(reply.text().starts_with("WEBVTT"), "{}", reply.text());
+    assert_eq!(converted(), 1);
+    assert_eq!(std::fs::read_to_string(&embedded).unwrap(), reply.text());
+
+    // A conversion that fails leaves nothing behind.
+    let failed = app.get(&format!("/api/files/{file}/subtitles/99.vtt"), admin).await;
+    assert!(failed.status.is_server_error(), "{}", failed.status);
+    let names: Vec<String> =
+        std::fs::read_dir(&cache).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, [format!("{file}_4_{mtime}.vtt")]);
+
+    // A sidecar replaced by a better one (as subtitle downloaders do) is
+    // converted again, though its video did not change.
+    let sidecar = format!("/api/files/{file}/subtitles/1000.vtt");
+    app.get(&sidecar, admin).await;
+    app.get(&sidecar, admin).await;
+    assert_eq!(converted(), 3, "the failed one, then the sidecar once");
+    let srt = app.media.path().join("movies/Feature (2021)/Feature (2021).en.srt");
+    std::fs::write(&srt, b"1\n00:00:00,000 --> 00:00:01,000\nBetter\n").unwrap();
+    let later = std::time::SystemTime::now() + Duration::from_secs(10);
+    std::fs::File::options().write(true).open(&srt).unwrap().set_modified(later).unwrap();
+    assert_eq!(app.get(&sidecar, admin).await.status, StatusCode::OK);
+    assert_eq!(converted(), 4);
 }
 
 #[tokio::test]

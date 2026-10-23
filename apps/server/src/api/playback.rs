@@ -359,27 +359,61 @@ pub async fn subtitles(
         .and_then(|n| n.parse().ok())
         .ok_or_else(|| AppError::not_found("unknown subtitle file"))?;
     let file = visible_file(&state, &user, id).await?;
-    let cache = state.config.cache_dir().join("subtitles").join(format!("{}_{}_{}.vtt", file.id, index, file.mtime));
-    let text = match tokio::fs::read_to_string(&cache).await {
-        Ok(text) => text,
-        Err(_) => {
-            let text = if index >= EXTERNAL_INDEX_BASE {
-                let sub = file
-                    .external_subs()
-                    .into_iter()
-                    .find(|s| s.index == index)
-                    .ok_or_else(|| AppError::not_found("subtitle not found"))?;
-                state.transcoder.subtitles(&sub.path, None).await?
-            } else {
-                state.transcoder.subtitles(&file.path, Some(index)).await?
-            };
-            if let Some(dir) = cache.parent() {
-                let _ = tokio::fs::create_dir_all(dir).await;
-            }
-            let _ = tokio::fs::write(&cache, &text).await;
-            text
-        }
+    let sidecar = if index >= EXTERNAL_INDEX_BASE {
+        let sub = file
+            .external_subs()
+            .into_iter()
+            .find(|s| s.index == index)
+            .ok_or_else(|| AppError::not_found("subtitle not found"))?;
+        Some(sub.path)
+    } else {
+        None
     };
-    Ok(([(header::CONTENT_TYPE, "text/vtt; charset=utf-8"), (header::CACHE_CONTROL, "private, max-age=3600")], text)
-        .into_response())
+    // A sidecar can be replaced without its video changing (subtitle
+    // downloaders upgrade them): its own time is part of the name too.
+    let version = match &sidecar {
+        Some(path) => {
+            let modified = tokio::fs::metadata(path).await.ok().and_then(|m| m.modified().ok());
+            format!("_{}", modified.map(crate::util::system_time_secs).unwrap_or(0))
+        }
+        None => String::new(),
+    };
+    let cache =
+        state.config.cache_dir().join("subtitles").join(format!("{}_{}_{}{version}.vtt", file.id, index, file.mtime));
+    // Anything but WebVTT is a file cut short by an earlier version (written
+    // in place) that crashed or ran out of space: it is made again.
+    if let Ok(text) = tokio::fs::read_to_string(&cache).await {
+        if text.starts_with("WEBVTT") {
+            return Ok(vtt(text));
+        }
+    }
+    let text = match &sidecar {
+        Some(path) => state.transcoder.subtitles(path, None).await?,
+        None => state.transcoder.subtitles(&file.path, Some(index)).await?,
+    };
+    cache_subtitles(&cache, &text).await;
+    Ok(vtt(text))
+}
+
+fn vtt(text: String) -> Response {
+    ([(header::CONTENT_TYPE, "text/vtt; charset=utf-8"), (header::CACHE_CONTROL, "private, max-age=3600")], text)
+        .into_response()
+}
+
+/// Caches converted subtitles whole or not at all: they go to a temporary
+/// file that is renamed into place, so a crash or a full disk never leaves a
+/// file cut short to be served from then on.
+async fn cache_subtitles(path: &std::path::Path, text: &str) {
+    let Some(dir) = path.parent() else { return };
+    let tmp = dir.join(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
+    let written = async {
+        tokio::fs::create_dir_all(dir).await?;
+        tokio::fs::write(&tmp, text).await?;
+        tokio::fs::rename(&tmp, path).await
+    }
+    .await;
+    if let Err(err) = written {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        tracing::debug!("subtitles not cached in {}: {err}", path.display());
+    }
 }
