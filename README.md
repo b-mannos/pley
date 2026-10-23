@@ -65,6 +65,11 @@ queues, sessions and notifications. See [docs/PLEX.md](docs/PLEX.md).
 **Web app** for phones, tablets and desktops, which installs as an app from
 the browser.
 
+**Apps**: pley for Windows, macOS and Linux, and pley for Android. Both find
+servers on the local network by themselves (or take an address) and show the
+server's web app; the Android app plays videos in its own player, which
+plays more files as they are than a browser.
+
 **Performance**: single binaries; SQLite in WAL mode with one writer;
 listings filtered, sorted and paged in SQL; compressed responses; pictures
 resized once and cached; transcodes throttled to about twice real time.
@@ -87,6 +92,8 @@ HTTP, so the two can have different licenses
 | `apps/server` | The media server (crate `pley-server`, binary `pley`) |
 | `apps/transcoder` | The FFmpeg engine (crate and binary `pley-transcoder`) |
 | `apps/web` | The web app (React, TypeScript, Vite, Tailwind), embedded into the server |
+| `apps/desktop` | pley for Windows, macOS and Linux (Tauri) |
+| `apps/android` | pley for Android (Kotlin, Compose, Media3) |
 | `packages/transcoder-api` | Protocol types shared by server and transcoder |
 | `deploy/` | Docker, systemd and launchd setups ([guide](deploy/README.md)) |
 | `docs/` | [HTTP API](docs/API.md), [Plex API](docs/PLEX.md), [transcoder](docs/TRANSCODER.md), [storage](docs/STORAGE.md) |
@@ -176,7 +183,14 @@ Archive belong to their owners.
   both APIs. `cargo test -p pley-server --test providers -- --ignored` also
   checks the real TVmaze and MusicBrainz (and TheTVDB with
   `PLEY_TEST_TVDB_KEY` and, if needed, `PLEY_TEST_TVDB_PIN`).
-- `npm run check` runs the web app's type check, ESLint and tests (Vitest).
+- `npm run check` runs the web app's type check, ESLint and tests (Vitest),
+  and the desktop app's.
+- `npm run desktop` runs the desktop app (Rust, and on Linux WebKitGTK:
+  `libwebkit2gtk-4.1-dev`); `npm run build -w apps/desktop` makes its
+  installers.
+- The Android app builds with the Android SDK and JDK 17 or newer:
+  `./gradlew testDebugUnitTest assembleDebug` in `apps/android`, then
+  `adb install app/build/outputs/apk/debug/app-debug.apk`.
 - `cargo clippy --workspace --all-targets` and `cargo fmt --all` lint and
   format the Rust code; `scripts/check-licenses.ps1` checks the license
   boundary.
