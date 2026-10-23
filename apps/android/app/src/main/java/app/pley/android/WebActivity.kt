@@ -1,14 +1,14 @@
 package app.pley.android
 
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.view.ViewGroup
 import android.webkit.CookieManager
-import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -22,25 +22,22 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
-
-/** The web app's way to the native player (`window.PleyAndroid` there). */
-class PlayerBridge(private val activity: Activity, private val server: String) {
-    @JavascriptInterface
-    fun play(json: String): Boolean {
-        val request = PlayRequest.parse(json) ?: return false
-        activity.runOnUiThread { activity.startActivity(PlayerActivity.intent(activity, server, request)) }
-        return true
-    }
-}
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 
 /**
  * A server's web app, full screen. Videos go to [PlayerActivity] (through
- * [PlayerBridge]); `/__app/servers` leads back to the list of servers, and
- * links to other sites open in the browser.
+ * `window.PleyAndroid`, which only the server's own pages get);
+ * `/__app/servers` leads back to the list of servers, and links to other
+ * sites open in the browser.
  */
 class WebActivity : ComponentActivity() {
     private lateinit var web: WebView
-    private lateinit var server: String
+    private lateinit var places: Places
+    /** The origin `window.PleyAndroid` is offered to. */
+    private var bridgeOrigin: String? = null
+    /** The web view's page process went away, and the web view with it. */
+    private var gone = false
     private var pendingFiles: ValueCallback<Array<Uri>>? = null
     private val pickFiles = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         pendingFiles?.onReceiveValue(uris.toTypedArray())
@@ -51,22 +48,26 @@ class WebActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        server = intent.getStringExtra(EXTRA_SERVER) ?: run {
+        val server = savedInstanceState?.getString(EXTRA_SERVER) ?: intent.getStringExtra(EXTRA_SERVER) ?: run {
             finish()
             return
         }
+        places = Places(server)
         CookieManager.getInstance().setAcceptCookie(true)
         web = WebView(this).apply {
             setBackgroundColor(0xFF0B0D10.toInt())
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
+            // Pages of servers have no business with this device's files.
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
             // The web app knows it runs here by this (src/lib/shell.ts).
             settings.userAgentString = "${settings.userAgentString} pleyAndroid/${BuildConfig.VERSION_NAME}"
             webViewClient = Client()
             webChromeClient = Chrome()
-            addJavascriptInterface(PlayerBridge(this@WebActivity, server), "PleyAndroid")
         }
+        offerPlayer()
         // The page stays clear of the status and navigation bars (and the
         // keyboard): a web view's own padding wouldn't move its content.
         val root = FrameLayout(this).apply { setBackgroundColor(0xFF0B0D10.toInt()) }
@@ -83,8 +84,26 @@ class WebActivity : ComponentActivity() {
         if (savedInstanceState == null || web.restoreState(savedInstanceState) == null) web.loadUrl(server)
     }
 
+    /**
+     * Offers `window.PleyAndroid` (the native player) to the server's pages:
+     * only to its origin and only to the page itself, not to frames in it,
+     * nor to a sign-in provider's pages.
+     */
+    private fun offerPlayer() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return
+        val origin = Links.address(places.server) ?: return
+        if (origin == bridgeOrigin) return
+        if (bridgeOrigin != null) WebViewCompat.removeWebMessageListener(web, BRIDGE)
+        WebViewCompat.addWebMessageListener(web, BRIDGE, setOf(origin)) { _, message, _, isMainFrame, _ ->
+            val request = message.data?.takeIf { isMainFrame }?.let(PlayRequest::parse) ?: return@addWebMessageListener
+            startActivity(PlayerActivity.intent(this, places.server, request))
+        }
+        bridgeOrigin = origin
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        outState.putString(EXTRA_SERVER, places.server)
         web.saveState(outState)
     }
 
@@ -102,14 +121,29 @@ class WebActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        if (::web.isInitialized) web.destroy()
+        if (::web.isInitialized && !gone) web.destroy()
         super.onDestroy()
     }
 
     private inner class Client : WebViewClient() {
+        // The page's process ended (out of memory, or a crash): open the
+        // server again rather than take the app down with it.
+        override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+            (view.parent as? ViewGroup)?.removeView(view)
+            view.destroy()
+            gone = true
+            startActivity(intent(this@WebActivity, places.server))
+            finish()
+            return true
+        }
+
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-            when (Links.navigation(request.url.toString(), server)) {
-                Navigation.Allow -> false
+            when (Links.navigation(request.url.toString(), places)) {
+                Navigation.Allow -> {
+                    // A sign-in at the server's public address makes it the server's address.
+                    offerPlayer()
+                    false
+                }
                 Navigation.Servers -> {
                     startActivity(ServersActivity.pick(this@WebActivity))
                     finish()
@@ -143,6 +177,8 @@ class WebActivity : ComponentActivity() {
 
     companion object {
         private const val EXTRA_SERVER = "server"
+        /** `window.PleyAndroid` in the web app (src/lib/shell.ts). */
+        private const val BRIDGE = "PleyAndroid"
 
         fun intent(context: Context, server: String): Intent =
             Intent(context, WebActivity::class.java).putExtra(EXTRA_SERVER, server)

@@ -35,6 +35,37 @@ class ServersTest {
         assertEquals("pley.example.com", Servers.displayAddress("https://pley.example.com"))
     }
 
+    @Test
+    fun unencryptedAddressesAreFineOnTheLocalNetworkOnly() {
+        for (host in listOf("localhost", "nas", "nas.local", "pley.lan", "192.168.1.20", "10.0.0.7", "172.20.0.1", "100.101.102.103", "box.tail1234.ts.net", "[fd00::5]", "fe80::1", "::1")) {
+            assertEquals(host, true, Servers.isLocalHost(host))
+        }
+        for (host in listOf("pley.example.com", "203.0.113.9", "172.32.0.1", "100.128.0.1", "[2001:db8::1]")) {
+            assertEquals(host, false, Servers.isLocalHost(host))
+        }
+        assertEquals(true, Servers.unencrypted("http://pley.example.com:7539"))
+        assertEquals(false, Servers.unencrypted("https://pley.example.com"))
+        assertEquals(false, Servers.unencrypted("http://192.168.1.20:7539"))
+    }
+
+    @Test
+    fun namesOnTheInternetAreTriedWithHttpsFirst() {
+        assertEquals(listOf("https://pley.example.com", "http://pley.example.com:7539"), Servers.candidates("pley.example.com"))
+        assertEquals(listOf("http://nas:7539"), Servers.candidates("nas"))
+        assertEquals(listOf("http://192.168.1.20:7539"), Servers.candidates("192.168.1.20"))
+        assertEquals(listOf("http://pley.example.com"), Servers.candidates("http://pley.example.com"))
+        assertEquals(listOf("http://pley.example.com:8443"), Servers.candidates("pley.example.com:8443"))
+        assertEquals(emptyList<String>(), Servers.candidates("two words"))
+    }
+
+    @Test
+    fun aNewServerNamedLikeASavedOneIsFlagged() {
+        val found = listOf(FoundServer("http://192.168.1.66:7539", "nas ", "evil", "0.1.0"))
+        val entry = Servers.merge(saved, found).last()
+        assertEquals(false, entry.saved)
+        assertEquals(true, entry.lookalike)
+    }
+
     private val saved = listOf(
         SavedServer("http://nas:7539", "NAS", "a1", 10),
         SavedServer("http://office:7539", "Office", null, 20),

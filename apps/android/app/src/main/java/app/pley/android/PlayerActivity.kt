@@ -25,7 +25,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
@@ -37,6 +37,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 
 /**
  * Plays a video with Media3, which plays more files as they are than the
@@ -99,10 +100,23 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private fun newPlayer(): ExoPlayer {
-        val http = DefaultHttpDataSource.Factory()
-            .setUserAgent(USER_AGENT)
-            .setAllowCrossProtocolRedirects(true)
-            .setDefaultRequestProperties(token?.let { mapOf("Authorization" to "Bearer $it") } ?: emptyMap())
+        val home = Links.address(server)
+        val client = OkHttpClient.Builder()
+            // Never from https down to http.
+            .followSslRedirects(false)
+            // The session token goes to the server only: not to another site a
+            // playlist or a redirect points to.
+            .addNetworkInterceptor { chain ->
+                val request = chain.request()
+                val signed = if (token != null && Links.address(request.url.toString()) == home) {
+                    request.newBuilder().header("Authorization", "Bearer $token").build()
+                } else {
+                    request
+                }
+                chain.proceed(signed)
+            }
+            .build()
+        val http = OkHttpDataSource.Factory(client).setUserAgent(USER_AGENT)
         val exo = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(http))
             .build()

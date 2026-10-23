@@ -12,8 +12,18 @@ data class SavedServer(val url: String, val name: String, val id: String?, val l
 /** A server that answered on the local network. */
 data class FoundServer(val url: String, val name: String, val id: String?, val version: String)
 
-/** One row of the server list: saved, found on the network, or both. */
-data class ServerEntry(val url: String, val name: String, val id: String?, val saved: Boolean, val found: Boolean)
+/**
+ * One row of the server list: saved, found on the network, or both.
+ * [lookalike]: found, not saved, and named like a saved server it isn't.
+ */
+data class ServerEntry(
+    val url: String,
+    val name: String,
+    val id: String?,
+    val saved: Boolean,
+    val found: Boolean,
+    val lookalike: Boolean = false,
+)
 
 /** The rules the desktop app's picker follows too (apps/desktop/src/servers.ts). */
 object Servers {
@@ -43,6 +53,50 @@ object Servers {
         return if (port == -1 || defaultPort) "$scheme://$host" else "$scheme://$host:$port"
     }
 
+    /**
+     * Whether [host] is this device, on its local network (a private address,
+     * a name without dots, `.local`…) or a Tailscale name: where plain http is
+     * how pley is reached, and the network itself is trusted.
+     */
+    fun isLocalHost(host: String): Boolean {
+        val h = host.lowercase().removePrefix("[").removeSuffix("]")
+        if (h == "localhost" || (!h.contains('.') && !h.contains(':'))) return true
+        if (Regex("""\.(local|lan|home|internal|localdomain|home\.arpa|ts\.net)$""").containsMatchIn(h)) return true
+        val v4 = Regex("""^(\d+)\.(\d+)\.\d+\.\d+$""").find(h)
+        if (v4 != null) {
+            val a = v4.groupValues[1].toInt()
+            val b = v4.groupValues[2].toInt()
+            return a == 10 || a == 127 || (a == 172 && b in 16..31) || (a == 192 && b == 168) ||
+                (a == 169 && b == 254) || (a == 100 && b in 64..127)
+        }
+        return h == "::1" || Regex("^f[cd][0-9a-f]{0,2}:").containsMatchIn(h) || Regex("^fe[89ab][0-9a-f]?:").containsMatchIn(h)
+    }
+
+    /** Whether a connection to [url] travels unencrypted beyond the local network: passwords and all. */
+    fun unencrypted(url: String): Boolean {
+        val uri = try {
+            URI(url)
+        } catch (_: URISyntaxException) {
+            return false
+        }
+        return uri.scheme?.lowercase() == "http" && !isLocalHost(uri.host ?: return false)
+    }
+
+    /**
+     * The addresses to try, in turn, for what someone typed: a name on the
+     * internet typed without `http://` is tried with https first (pley behind
+     * a proxy with a certificate), then with plain http on pley's port.
+     */
+    fun candidates(input: String): List<String> {
+        val url = normalizeUrl(input) ?: return emptyList()
+        val text = input.trim()
+        val typedScheme = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://").containsMatchIn(text)
+        val typedPort = Regex("""^[^/]*:\d+$""").matches(text.substringBefore('/'))
+        val host = URI(url).host ?: return listOf(url)
+        if (typedScheme || typedPort || isLocalHost(host)) return listOf(url)
+        return listOf("https://$host", url)
+    }
+
     /** The address to show for a server: its host and, unless it's pley's, its port. */
     fun displayAddress(url: String): String {
         val uri = try {
@@ -64,7 +118,8 @@ object Servers {
         }.toMutableList()
         for (f in found) {
             if (entries.none { same(it.url, it.id, f.url, f.id) }) {
-                entries.add(ServerEntry(f.url, f.name, f.id, saved = false, found = true))
+                val lookalike = saved.any { it.name.trim().equals(f.name.trim(), ignoreCase = true) }
+                entries.add(ServerEntry(f.url, f.name, f.id, saved = false, found = true, lookalike = lookalike))
             }
         }
         return entries

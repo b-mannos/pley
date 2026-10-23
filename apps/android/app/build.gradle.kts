@@ -44,6 +44,10 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.exoplayer.hls)
     implementation(libs.androidx.media3.ui)
+    // OkHttp sends the session token to the server only, also across redirects.
+    implementation(libs.androidx.media3.datasource.okhttp)
+    // The player bridge, offered to the server's own pages only.
+    implementation(libs.androidx.webkit)
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)

@@ -98,6 +98,8 @@ private fun ServersScreen(store: ServerStore, autoOpen: Boolean, onOpen: (String
     var status by remember { mutableStateOf<String?>(null) }
     var address by remember { mutableStateOf("") }
     var addressError by remember { mutableStateOf<String?>(null) }
+    // An unencrypted address someone was warned about: connecting again goes ahead.
+    var warnedAbout by remember { mutableStateOf<String?>(null) }
     var opening by remember { mutableStateOf(if (autoOpen) Servers.lastUsed(saved) else null) }
     var openingJob by remember { mutableStateOf<Job?>(null) }
 
@@ -222,13 +224,28 @@ private fun ServersScreen(store: ServerStore, autoOpen: Boolean, onOpen: (String
             HorizontalDivider(Modifier.padding(vertical = 20.dp), color = PleyColors.Border)
             Text("Or enter its address", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = PleyColors.Fg)
             Spacer(Modifier.height(8.dp))
-            val connect = {
-                val url = Servers.normalizeUrl(address)
-                if (url == null) {
+            val connect: () -> Unit = {
+                val urls = Servers.candidates(address)
+                if (urls.isEmpty()) {
                     addressError = "Enter an address such as nas, 192.168.1.20 or https://pley.example.com."
                 } else {
                     addressError = null
-                    open(url, null)
+                    busy = urls.last()
+                    scope.launch {
+                        // The first that answers (https before http for names on the internet).
+                        val url = urls.firstOrNull { runCatching { PleyApi(it, null).serverInfo() }.isSuccess }
+                        busy = null
+                        when {
+                            url == null -> addressError = "Couldn't reach ${Servers.displayAddress(urls.last())}."
+                            Servers.unencrypted(url) && warnedAbout != url -> {
+                                warnedAbout = url
+                                addressError = "${Servers.displayAddress(url)} isn't encrypted: your password and what you " +
+                                    "watch could be read on the way. Use its https address if it has one, or tap " +
+                                    "Connect again to go ahead anyway."
+                            }
+                            else -> open(url, null)
+                        }
+                    }
                 }
             }
             OutlinedTextField(
@@ -287,12 +304,22 @@ private fun ServerRow(
                     color = PleyColors.Muted,
                 )
             }
+            val warning = entry.lookalike || Servers.unencrypted(entry.url)
             val tag = when {
+                entry.lookalike -> "Not your saved server"
+                Servers.unencrypted(entry.url) -> "Not encrypted"
                 !entry.saved -> "New"
                 entry.found -> "On this network"
                 else -> null
             }
-            if (tag != null) Text(tag, fontSize = 12.sp, color = PleyColors.Subtle, modifier = Modifier.padding(end = 8.dp))
+            if (tag != null) {
+                Text(
+                    tag,
+                    fontSize = 12.sp,
+                    color = if (warning) PleyColors.Danger else PleyColors.Subtle,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
             if (onForget != null) {
                 TextButton(
                     onClick = onForget,
