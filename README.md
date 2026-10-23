@@ -133,6 +133,7 @@ Options come from command-line flags, `PLEY_*` environment variables or
 | `--web-dir` | | Serve the web app from a folder instead of the embedded copy |
 | `--log` | `info` | Log filter, e.g. `info,pley=debug`; also written to `logs/pley.log` |
 | `--no-tray` | | Never show the tray icon |
+| `--no-discovery` | | Don't answer the apps looking for servers on the local network |
 
 Everything else (server name, metadata sources and keys, hardware
 acceleration, tone mapping, transcode limits, scanning) is set in the web app

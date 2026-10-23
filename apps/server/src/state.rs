@@ -58,6 +58,11 @@ impl Deref for AppState {
 }
 
 impl AppState {
+    /// This server's stable id (Plex's `machineIdentifier`).
+    pub fn plex_machine_id(&self) -> String {
+        crate::plex::PlexInfo::load(&self.config.data_dir).machine_id
+    }
+
     pub async fn init(config: Config) -> anyhow::Result<Self> {
         for dir in [
             config.data_dir.clone(),

@@ -93,7 +93,7 @@ pub struct PlexInfo {
 
 impl PlexInfo {
     /// Reads `<data-dir>/plex-machine-id`, creating it on first use.
-    fn load(data_dir: &Path) -> Self {
+    pub(crate) fn load(data_dir: &Path) -> Self {
         let file = data_dir.join("plex-machine-id");
         let existing = std::fs::read_to_string(&file).ok().map(|s| s.trim().to_owned());
         let machine_id = match existing.filter(|id| id.len() == 40 && id.chars().all(|c| c.is_ascii_hexdigit())) {

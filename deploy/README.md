@@ -87,6 +87,10 @@ folder. Services, containers and SSH sessions never show the icon, and
 
 ## Firewall and remote access
 
-Only port 7539 (TCP) needs to be reachable. For access outside your network,
+Port 7539 (TCP) is the only one that needs to be reachable. The apps find
+servers on the local network through UDP port 7539; allow it too, or enter
+the server's address in the app. Containers only answer them with host
+networking (`--network host`), since broadcasts don't reach a bridge
+network. For access outside your network,
 put pley behind a reverse proxy with TLS (Caddy, nginx, Traefik); it serves
 plain HTTP and works under any host name.

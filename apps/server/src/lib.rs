@@ -13,6 +13,7 @@ pub mod collections;
 pub mod config;
 pub mod db;
 pub mod desktop;
+pub mod discovery;
 pub mod error;
 pub mod events;
 pub mod history;
@@ -141,6 +142,7 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
         tokio::net::TcpListener::bind(bind).await.map_err(|e| anyhow::anyhow!("cannot listen on {bind}: {e}"))?;
     let addr = listener.local_addr()?;
     let plex = plex::bind(config.plex_bind).await;
+    let discovery = if config.discovery { discovery::bind(addr).await } else { None };
 
     let grace = config.shutdown_grace;
     let state = AppState::init(config).await?;
@@ -161,6 +163,9 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
         .with_graceful_shutdown(stopping.clone().cancelled_owned())
         .into_future();
     let plex = plex.map(|listener| plex::serve(state.clone(), listener, stopping.clone().cancelled_owned()));
+    if let Some(socket) = discovery {
+        tokio::spawn(discovery::serve(state.clone(), socket, addr.port(), stopping.clone()));
+    }
     let serving = async move {
         let plex = async move {
             if let Some(plex) = plex {

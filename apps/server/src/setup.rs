@@ -81,7 +81,8 @@ pub fn is_local_request(headers: &HeaderMap, peer: Option<IpAddr>) -> bool {
     peer.is_some_and(is_local_address)
 }
 
-fn is_local_address(ip: IpAddr) -> bool {
+/// Loopback, private, link-local or Tailscale (carrier-grade NAT) addresses.
+pub fn is_local_address(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
             let [a, b, ..] = v4.octets();

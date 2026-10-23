@@ -11,6 +11,10 @@
 # port is taken (a real Plex server), pley logs a warning and runs without it.
 # plex_bind = "0.0.0.0:32400"
 
+# Answer the pley apps looking for servers on the local network (UDP, on the
+# web port). Servers bound to 127.0.0.1 never answer.
+# discovery = true
+
 # Database, caches and artwork (default: %LOCALAPPDATA%\pley, ~/.local/share/pley).
 # data_dir = "D:/Pley"
 

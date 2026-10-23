@@ -74,6 +74,10 @@ pub struct Cli {
     /// Never show the tray icon (it only appears in interactive desktop sessions anyway)
     #[arg(long, env = "PLEY_NO_TRAY", global = true)]
     pub no_tray: bool,
+
+    /// Don't answer the pley apps looking for servers on the local network
+    #[arg(long, env = "PLEY_NO_DISCOVERY", global = true)]
+    pub no_discovery: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -107,6 +111,7 @@ struct FileConfig {
     transcoder_url: Option<String>,
     transcoder_token: Option<String>,
     transcoder_max_jobs: Option<u32>,
+    discovery: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +135,8 @@ pub struct Config {
     pub metadata_endpoints: Option<crate::providers::Endpoints>,
     /// See [`SHUTDOWN_GRACE`] (tests shorten it).
     pub shutdown_grace: Duration,
+    /// Answer apps looking for servers on the local network (see [`crate::discovery`]).
+    pub discovery: bool,
 }
 
 impl Config {
@@ -173,6 +180,7 @@ impl Config {
             transcoder_max_jobs: file.transcoder_max_jobs.unwrap_or(8).max(1),
             metadata_endpoints: Some(crate::providers::Endpoints::default()),
             shutdown_grace: SHUTDOWN_GRACE,
+            discovery: !cli.no_discovery && file.discovery.unwrap_or(true),
             data_dir,
             transcode_dir,
         })
@@ -195,6 +203,7 @@ impl Config {
             transcoder_max_jobs: 8,
             metadata_endpoints: None,
             shutdown_grace: SHUTDOWN_GRACE,
+            discovery: false,
         }
     }
 
@@ -291,6 +300,7 @@ mod tests {
             transcoder_token: None,
             log: "info".into(),
             no_tray: false,
+            no_discovery: false,
         }
     }
 
