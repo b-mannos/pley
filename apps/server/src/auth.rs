@@ -57,13 +57,30 @@ impl AuthUser {
 #[derive(Debug, Clone)]
 pub struct AdminUser(pub AuthUser);
 
-pub async fn hash_password(password: String) -> anyhow::Result<String> {
-    tokio::task::spawn_blocking(move || {
+/// Password hashes made or checked at once. Each takes 19 MiB and a core
+/// for a moment (Argon2id), so a flood of sign-ins queues instead of
+/// exhausting memory.
+const HASHING_AT_ONCE: usize = 4;
+/// How long a password waits its turn before pley says it is busy.
+const HASHING_WAIT: Duration = Duration::from_secs(10);
+
+/// Runs Argon2 `work` when its turn comes.
+async fn hashing<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Result<T, AppError> {
+    static TURNS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(HASHING_AT_ONCE);
+    let _turn = tokio::time::timeout(HASHING_WAIT, TURNS.acquire())
+        .await
+        .map_err(|_| AppError::Unavailable("pley is busy checking passwords: try again in a moment".into()))?
+        .map_err(|e| AppError::Internal(e.into()))?;
+    tokio::task::spawn_blocking(work).await.map_err(|e| AppError::Internal(e.into()))
+}
+
+pub async fn hash_password(password: String) -> Result<String, AppError> {
+    hashing(move || {
         let salt = SaltString::generate(&mut OsRng);
         Argon2::default()
             .hash_password(password.as_bytes(), &salt)
             .map(|h| h.to_string())
-            .map_err(|e| anyhow::anyhow!("hashing password: {e}"))
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("hashing password: {e}")))
     })
     .await?
 }
@@ -81,13 +98,14 @@ pub async fn dummy_password_hash() -> String {
     .clone()
 }
 
-pub async fn verify_password(password: String, hash: String) -> bool {
-    tokio::task::spawn_blocking(move || {
+/// Whether `password` matches `hash` (never for the markers of accounts
+/// without a password); an error when pley is too busy to check.
+pub async fn verify_password(password: String, hash: String) -> Result<bool, AppError> {
+    hashing(move || {
         PasswordHash::new(&hash)
             .is_ok_and(|parsed| Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok())
     })
     .await
-    .unwrap_or(false)
 }
 
 pub fn new_token() -> String {
@@ -485,8 +503,19 @@ mod tests {
     #[tokio::test]
     async fn password_round_trip() {
         let hash = hash_password("hunter22".into()).await.unwrap();
-        assert!(verify_password("hunter22".into(), hash.clone()).await);
-        assert!(!verify_password("wrong".into(), hash).await);
+        assert!(verify_password("hunter22".into(), hash.clone()).await.unwrap());
+        assert!(!verify_password("wrong".into(), hash).await.unwrap());
+        assert!(!verify_password(String::new(), "!sso".into()).await.unwrap());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_flood_of_passwords_queues() {
+        // Many at once (an attacker trying usernames): at most a few hashes
+        // in memory at any moment, and every check still answers.
+        let hash = hash_password("hunter22".into()).await.unwrap();
+        let checks = (0..24).map(|_| verify_password("hunter22".into(), hash.clone()));
+        let results = futures::future::join_all(checks).await;
+        assert!(results.into_iter().all(|r| r.unwrap()));
     }
 
     #[test]

@@ -1420,6 +1420,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonwebtoken"
+version = "9.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a87cc7a48537badeae96744432de36f4be2b4a34a05a5ef32e9dd8a1c169dde"
+dependencies = [
+ "base64 0.22.1",
+ "js-sys",
+ "ring",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "keyboard-types"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1971,7 +1984,10 @@ dependencies = [
  "embed-resource",
  "futures",
  "hex",
+ "hyper",
+ "hyper-util",
  "image",
+ "jsonwebtoken",
  "ksni",
  "libc",
  "mimalloc",
@@ -1986,6 +2002,7 @@ dependencies = [
  "rand_core 0.6.4",
  "regex",
  "reqwest",
+ "ring",
  "rust-embed",
  "serde",
  "serde_json",
@@ -2003,6 +2020,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tray-icon",
+ "url",
  "uuid",
  "walkdir",
  "windows-sys 0.61.2",
@@ -3126,6 +3144,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

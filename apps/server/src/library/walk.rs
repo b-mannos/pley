@@ -182,6 +182,31 @@ pub fn is_media_file(path: &Path, kind: LibraryKind) -> bool {
     }
 }
 
+/// What kind of file an extension names: video, audio, picture or
+/// subtitles (`None`: something else).
+fn file_kind(ext: &str) -> Option<u8> {
+    [VIDEO_EXTENSIONS, AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, SUBTITLE_EXTENSIONS]
+        .iter()
+        .position(|list| list.contains(&ext))
+        .map(|kind| kind as u8)
+}
+
+/// Whether `path` is a file of the kind its name says, also when it is a
+/// symbolic link: a link is followed only to a file of the same kind (a
+/// video to a video…). Someone who can put a link named like a film in a
+/// library folder (a shared folder, an unpacked download) can't make pley
+/// hand out a password file or pley's own database to everyone who sees the
+/// library, whether the link was there when the library was scanned or
+/// swapped in later.
+pub fn leads_to_its_kind(path: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(path) else { return false };
+    if !meta.file_type().is_symlink() {
+        return true;
+    }
+    let kind = file_kind(&extension(path));
+    kind.is_some() && std::fs::canonicalize(path).is_ok_and(|target| file_kind(&extension(&target)) == kind)
+}
+
 /// Release samples: `sample.mkv`, `sample-movie.mkv`, `movie-sample.mkv`
 /// (small files only).
 fn is_sample(path: &Path, size: u64) -> bool {
@@ -242,6 +267,10 @@ pub fn walk(roots: &[PathBuf], kind: LibraryKind) -> Walked {
             let ext = extension(path);
             let sidecar = IMAGE_EXTENSIONS.contains(&ext.as_str()) || SUBTITLE_EXTENSIONS.contains(&ext.as_str());
             if !sidecar && !is_media_file(path, kind) {
+                continue;
+            }
+            if entry.path_is_symlink() && !leads_to_its_kind(path) {
+                tracing::warn!("{} links to a file of another kind: left out", path.display());
                 continue;
             }
             let Some(name) = entry.file_name().to_str() else {
@@ -378,6 +407,35 @@ mod tests {
         assert_eq!(walked.offline_roots, vec![root.join("missing")]);
         assert!(walked.maybe_unavailable(&root.join("missing/Film (1999)/Film.mkv")));
         assert!(!walked.maybe_unavailable(&root.join("Gone (2001)/Gone.mkv")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn links_only_lead_to_files_of_their_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("Movies");
+        std::fs::create_dir_all(library.join("Alien (1979)")).unwrap();
+        std::fs::write(dir.path().join("secrets.db"), b"not a film").unwrap();
+        std::fs::write(dir.path().join("elsewhere.mkv"), vec![0u8; 64]).unwrap();
+        std::fs::write(dir.path().join("passwd"), b"root:x:0:0").unwrap();
+        let link = |target: &str, name: &str| {
+            std::os::unix::fs::symlink(dir.path().join(target), library.join("Alien (1979)").join(name)).unwrap()
+        };
+        link("secrets.db", "Alien (1979).mkv");
+        link("elsewhere.mkv", "Alien (1979) - Extended.mkv");
+        link("passwd", "Alien (1979).en.srt");
+        let walked = walk(&[library.clone()], LibraryKind::Movies);
+        let names: Vec<_> = walked.media.iter().map(|f| f.path.file_name().unwrap().to_owned()).collect();
+        assert_eq!(names, ["Alien (1979) - Extended.mkv"]);
+        assert!(walked.sidecars.values().all(|names| names.is_empty()), "{:?}", walked.sidecars);
+
+        // A link swapped after the scan is caught when the file is served.
+        let film = library.join("Alien (1979)").join("Alien (1979) - Extended.mkv");
+        assert!(leads_to_its_kind(&film));
+        std::fs::remove_file(&film).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("secrets.db"), &film).unwrap();
+        assert!(!leads_to_its_kind(&film));
+        assert!(leads_to_its_kind(&dir.path().join("passwd")), "not a link: what the scan found");
     }
 
     #[test]

@@ -114,6 +114,9 @@ pub async fn part_file(
 ) -> PlexResult<Response> {
     let file = catalog::file(&state.db, id).await?.ok_or(PlexError::NotFound)?;
     catalog::item(&state.db, user.id, file.item_id).await?.ok_or(PlexError::NotFound)?;
+    if !crate::library::walk::leads_to_its_kind(std::path::Path::new(&file.path)) {
+        return Err(PlexError::NotFound);
+    }
     let response = ServeFile::new(&file.path)
         .oneshot(request)
         .await

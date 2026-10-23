@@ -75,10 +75,7 @@ pub async fn serve(
     if let Ok(addr) = listener.local_addr() {
         tracing::info!("Plex-compatible API listening on http://{}", display_addr(addr));
     }
-    let app = axum::ServiceExt::into_make_service_with_connect_info::<SocketAddr>(service(state));
-    if let Err(err) = axum::serve(listener, app).with_graceful_shutdown(shutdown).await {
-        tracing::warn!("Plex-compatible API stopped: {err}");
-    }
+    crate::http::serve(listener, service(state), shutdown).await;
 }
 
 fn display_addr(addr: SocketAddr) -> String {
@@ -298,6 +295,13 @@ async fn render(request: Request, next: Next) -> Response {
     headers.insert("x-plex-protocol", HeaderValue::from_static("1.0"));
     headers.entry(header::CACHE_CONTROL).or_insert(HeaderValue::from_static("no-cache"));
     headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+    // Data and pictures, never a page: nothing to sniff, run or frame.
+    headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
+    );
     response
 }
 

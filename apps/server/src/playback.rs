@@ -481,11 +481,27 @@ impl Drop for TranscodeSlot<'_> {
 const SESSION_IDLE_SECS: i64 = 15 * 60;
 const STOPPED_LINGER_SECS: i64 = 60;
 const ACTIVE_WINDOW_SECS: i64 = 90;
+/// Direct plays a user has at most: the oldest go first. They cost only
+/// memory (transcodes have their own limit), but a client starting plays in
+/// a loop mustn't be able to grow it without end.
+const MAX_DIRECT_PER_USER: usize = 20;
 
 impl Sessions {
     pub fn insert(&self, session: Session) -> Arc<Session> {
         let session = Arc::new(session);
-        self.map.lock().insert(session.id.clone(), session.clone());
+        let mut map = self.map.lock();
+        let mut direct: Vec<(i64, String)> = map
+            .values()
+            .filter(|s| s.user_id == session.user_id && s.transcode.is_none())
+            .map(|s| (s.started_at, s.id.clone()))
+            .collect();
+        if direct.len() >= MAX_DIRECT_PER_USER {
+            direct.sort_unstable();
+            for (_, id) in &direct[..=direct.len() - MAX_DIRECT_PER_USER] {
+                map.remove(id);
+            }
+        }
+        map.insert(session.id.clone(), session.clone());
         session
     }
 
@@ -700,6 +716,21 @@ pub fn transcode_info(job: &JobStatus) -> TranscodeInfo {
 mod tests {
     use super::*;
     use pley_transcoder_api::DynamicRange;
+
+    #[test]
+    fn a_user_keeps_a_bounded_number_of_direct_plays() {
+        let sessions = Sessions::default();
+        let play = |user: i64| Session::new(user, "u".into(), None, 1, 1, Method::Direct, 0, None, None, 0);
+        let other = sessions.insert(play(2));
+        let mut last = None;
+        for _ in 0..MAX_DIRECT_PER_USER + 5 {
+            last = Some(sessions.insert(play(1)));
+        }
+        let mine = sessions.list().into_iter().filter(|s| s.user_id == 1).count();
+        assert_eq!(mine, MAX_DIRECT_PER_USER);
+        assert!(sessions.get(&last.unwrap().id).is_some(), "the newest stays");
+        assert!(sessions.get(&other.id).is_some(), "other users' plays are theirs");
+    }
 
     fn file(container: &str, bitrate: i64) -> FileRow {
         FileRow {

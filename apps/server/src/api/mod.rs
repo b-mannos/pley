@@ -13,12 +13,13 @@ mod libraries;
 mod people;
 pub(crate) mod playback;
 mod playlists;
+mod sso;
 
 use std::time::Duration;
 
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
-use axum::http::{HeaderValue, header};
+use axum::http::{HeaderName, HeaderValue, header};
 use axum::routing::{delete, get, patch, post, put};
 use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
 use tower_http::compression::{CompressionLayer, CompressionLevel};
@@ -39,6 +40,11 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/password", put(auth::change_password))
         .route("/auth/profiles", get(auth::profiles))
         .route("/auth/switch", post(auth::switch))
+        .route("/auth/sso/start", get(sso::start))
+        .route("/auth/sso/callback", get(sso::callback))
+        .route("/auth/sso/client", get(sso::client))
+        .route("/auth/sso/link", post(sso::request_link))
+        .route("/me/sso", get(sso::mine).delete(sso::unlink))
         .route("/me", patch(accounts::update_me))
         .route("/me/pin", put(accounts::set_my_pin))
         .route(
@@ -109,6 +115,7 @@ pub fn router(state: AppState) -> Router {
         .route("/users/{id}", patch(accounts::update_user).delete(accounts::delete_user))
         .route("/users/{id}/avatar", get(accounts::avatar))
         .route("/users/{id}/devices", get(accounts::user_devices).delete(accounts::sign_out_everywhere))
+        .route("/users/{id}/sso", delete(sso::unlink_user))
         .route("/invites", get(accounts::list_invites).post(accounts::create_invite))
         .route("/invites/{code}", get(accounts::check_invite).delete(accounts::delete_invite))
         .route("/invites/{code}/accept", post(accounts::accept_invite))
@@ -134,6 +141,17 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .nest("/api", api)
         .fallback(crate::web::static_handler)
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(CONTENT_SECURITY_POLICY),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
+        .layer(SetResponseHeaderLayer::overriding(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
+        .layer(SetResponseHeaderLayer::overriding(header::REFERRER_POLICY, HeaderValue::from_static("same-origin")))
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("cross-origin-opener-policy"),
+            HeaderValue::from_static("same-origin"),
+        ))
         .layer(CompressionLayer::new().quality(CompressionLevel::Precise(4)).compress_when(compressible))
         .layer(TraceLayer::new_for_http().make_span_with(|req: &axum::http::Request<_>| {
             tracing::debug_span!("http", method = %req.method(), uri = %loggable_uri(req.uri()))
@@ -145,19 +163,34 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// What pages of the web app may load and do: only pley's own scripts and
+/// styles (an injected script can't run, nor send what it finds elsewhere),
+/// pictures from pley and TMDB (Fix Match, artwork), media and hls.js's
+/// worker from pley or `blob:`, and no other site may frame them.
+const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self'; style-src 'self'; \
+    img-src 'self' data: blob: https://image.tmdb.org; media-src 'self' blob:; worker-src 'self' blob:; \
+    connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; \
+    frame-ancestors 'none'";
+
 /// Query string helper: `"true"`/`"1"` → true.
 pub(crate) fn truthy(value: &str) -> bool {
     matches!(value, "1" | "true" | "yes")
 }
 
 /// The request URI for logs, with credentials in the query (`token`,
-/// `X-Plex-Token`, `api_key`) left out.
-fn loggable_uri(uri: &axum::http::Uri) -> String {
+/// `X-Plex-Token`, `api_key`, and a single sign-on's `code` and `state`)
+/// left out.
+pub(crate) fn loggable_uri(uri: &axum::http::Uri) -> String {
     let Some(query) = uri.query() else { return uri.path().to_owned() };
     let query: Vec<String> = query
         .split('&')
         .map(|pair| match pair.split_once('=') {
-            Some((key, _)) if matches!(key.to_ascii_lowercase().as_str(), "token" | "x-plex-token" | "api_key") => {
+            Some((key, _))
+                if matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "token" | "x-plex-token" | "api_key" | "code" | "state"
+                ) =>
+            {
                 format!("{key}=…")
             }
             _ => pair.to_owned(),
@@ -171,9 +204,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_policy_is_one_header_line() {
+        assert!(HeaderValue::from_static(CONTENT_SECURITY_POLICY).to_str().is_ok());
+        assert!(!CONTENT_SECURITY_POLICY.contains("unsafe") && !CONTENT_SECURITY_POLICY.contains("  "));
+    }
+
+    #[test]
     fn logs_leave_credentials_out() {
         let uri: axum::http::Uri = "/api/files/3/stream?token=secret&t=10&X-Plex-Token=abc&api_key=k".parse().unwrap();
         assert_eq!(loggable_uri(&uri), "/api/files/3/stream?token=…&t=10&X-Plex-Token=…&api_key=…");
+        let uri: axum::http::Uri = "/api/auth/sso/callback?code=c0de&state=st4te".parse().unwrap();
+        assert_eq!(loggable_uri(&uri), "/api/auth/sso/callback?code=…&state=…");
         assert_eq!(loggable_uri(&"/api/items/1".parse().unwrap()), "/api/items/1");
     }
 }

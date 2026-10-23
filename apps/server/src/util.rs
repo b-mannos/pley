@@ -48,6 +48,27 @@ pub fn system_time_secs(t: SystemTime) -> i64 {
     t.duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or_default()
 }
 
+/// Keeps the folder `dir` to the account pley runs as (on Unix, mode 0700
+/// whatever the umask): pley's data holds password hashes, sessions,
+/// backups and the log. On Windows, a user's own folders are private already.
+pub fn keep_private(dir: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let open = std::fs::metadata(dir).is_ok_and(|meta| meta.permissions().mode() & 0o077 != 0);
+        if open {
+            if let Err(err) = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)) {
+                tracing::warn!(
+                    "other users of this computer can read {}, and pley can't change that: {err}",
+                    dir.display()
+                );
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
+}
+
 /// Lossy UTF-8 string of a path (paths are stored as text in the database).
 /// Scans leave out names that are not valid UTF-8 (library/walk.rs), so the
 /// paths of library files convert back exactly.
@@ -101,6 +122,17 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_data_folder_is_kept_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        keep_private(dir.path());
+        let mode = std::fs::metadata(dir.path()).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+    }
 
     #[test]
     fn normalizes_keys() {

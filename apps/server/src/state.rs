@@ -42,6 +42,7 @@ pub struct Inner {
     pub sessions: Arc<Sessions>,
     pub markers: Arc<MarkerService>,
     pub trickplay: Arc<TrickplayService>,
+    pub sso: crate::sso::Sso,
     pub started_at: Instant,
     /// Cancelled when the server starts shutting down (the tray's Quit
     /// cancels it to ask for that). Responses that never end on their own,
@@ -73,6 +74,8 @@ impl AppState {
         ] {
             std::fs::create_dir_all(&dir).map_err(|e| anyhow::anyhow!("cannot create {}: {e}", dir.display()))?;
         }
+        crate::util::keep_private(&config.data_dir);
+        crate::util::keep_private(&config.transcode_dir);
         let db = Db::open(&config.db_path()).await?;
         let backups = Backups::new(db.clone(), &config.data_dir);
         crate::ratings::backfill(&db).await?;
@@ -121,6 +124,7 @@ impl AppState {
                 sessions,
                 markers,
                 trickplay,
+                sso: crate::sso::Sso::new(),
                 started_at: Instant::now(),
                 stopping: CancellationToken::new(),
                 config,

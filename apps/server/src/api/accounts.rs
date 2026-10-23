@@ -454,7 +454,7 @@ pub async fn set_my_pin(
         return Err(AppError::forbidden("ask an administrator to change this profile's PIN"));
     }
     let password = body.password.unwrap_or_default();
-    if !verify_password(password, password_hash).await {
+    if !verify_password(password, password_hash).await? {
         return Err(AppError::bad_request("the password is wrong"));
     }
     let hash = match body.pin.filter(|p| !p.is_empty()) {

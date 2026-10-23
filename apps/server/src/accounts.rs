@@ -36,6 +36,8 @@ struct UserRow {
     audio_language: Option<String>,
     subtitle_language: Option<String>,
     subtitle_mode: String,
+    has_password: bool,
+    sso: bool,
 }
 
 /// A user as the API shows it.
@@ -63,11 +65,17 @@ pub struct UserDto {
     pub audio_language: Option<String>,
     pub subtitle_language: Option<String>,
     pub subtitle_mode: SubtitleMode,
+    /// Signs in with a password (not only through single sign-on, nor by
+    /// switching to a managed profile).
+    pub has_password: bool,
+    /// Linked to an identity at the single sign-on provider.
+    pub sso: bool,
 }
 
 const USER_COLUMNS: &str = "id, username, display_name, is_admin, managed, home, pin_hash IS NOT NULL AS has_pin,
     avatar, avatar_color, all_libraries, max_age, disabled, created_at, audio_language, subtitle_language,
-    subtitle_mode";
+    subtitle_mode, password_hash NOT LIKE '!%' AS has_password,
+    EXISTS (SELECT 1 FROM user_identities i WHERE i.user_id = users.id) AS sso";
 
 impl UserRow {
     fn into_dto(self, library_ids: Vec<i64>) -> UserDto {
@@ -90,6 +98,8 @@ impl UserRow {
             audio_language: self.audio_language,
             subtitle_language: self.subtitle_language,
             subtitle_mode: SubtitleMode::parse(&self.subtitle_mode),
+            has_password: self.has_password,
+            sso: self.sso,
         }
     }
 }
@@ -521,6 +531,8 @@ mod tests {
             audio_language: None,
             subtitle_language: Some("fre".into()),
             subtitle_mode: "foreign".into(),
+            has_password: true,
+            sso: false,
         }
     }
 

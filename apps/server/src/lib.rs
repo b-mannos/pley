@@ -17,6 +17,7 @@ pub mod discovery;
 pub mod error;
 pub mod events;
 pub mod history;
+pub mod http;
 pub mod images;
 pub mod instance;
 pub mod labels;
@@ -34,6 +35,7 @@ pub mod ratings;
 pub mod related;
 pub mod settings;
 pub mod setup;
+pub mod sso;
 pub mod state;
 pub mod store;
 pub mod streams;
@@ -42,7 +44,6 @@ pub mod trickplay;
 pub mod util;
 pub mod web;
 
-use std::future::IntoFuture;
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -151,17 +152,22 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     tracing::info!("pley {} listening on http://{}", env!("CARGO_PKG_VERSION"), display_addr(addr));
     if let Some(code) = state.auth.setup.shown() {
         tracing::warn!(
-            "pley isn't set up yet: open http://{} on this computer to create the administrator account. \
-             From outside the local network, setting up also takes the setup code {code}.",
+            "pley isn't set up yet: open http://{}/setup#code={code} to create the administrator account \
+             (the setup code is {code})",
             display_addr(addr)
         );
     }
-    let tray = tray.and_then(|launch| launch(desktop::TrayContext::new(&state, addr)));
+    let tray = tray.and_then(|launch| {
+        let tray = desktop::TrayContext::new(&state, addr);
+        // A new server on a desktop: straight to setting it up, code and all.
+        if state.auth.setup.shown().is_some() {
+            tray.open_web_ui();
+        }
+        launch(tray)
+    });
 
     let stopping = state.stopping.clone();
-    let web = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .with_graceful_shutdown(stopping.clone().cancelled_owned())
-        .into_future();
+    let web = http::serve(listener, app, stopping.clone().cancelled_owned());
     let plex = plex.map(|listener| plex::serve(state.clone(), listener, stopping.clone().cancelled_owned()));
     if let Some(socket) = discovery {
         tokio::spawn(discovery::serve(state.clone(), socket, addr.port(), stopping.clone()));
@@ -172,10 +178,7 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
                 plex.await;
             }
         };
-        let (web, ()) = tokio::join!(web, plex);
-        if let Err(err) = web {
-            tracing::error!("the web server stopped: {err}");
-        }
+        tokio::join!(web, plex);
     };
     tokio::pin!(serving);
     let stopped = tokio::select! {

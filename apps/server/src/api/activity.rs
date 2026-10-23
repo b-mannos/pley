@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Json;
@@ -12,7 +13,7 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::access;
-use crate::auth::AuthUser;
+use crate::auth::{AuthUser, CurrentToken};
 use crate::catalog::{self, ItemSummary};
 use crate::error::ApiResult;
 use crate::library::scanner::ScanStatus;
@@ -85,25 +86,58 @@ pub async fn activity(State(state): State<AppState>, user: AuthUser) -> ApiResul
     Ok(Json(Activity { scans, sessions: out, analysis, previews_pending }))
 }
 
+/// How often an open event stream checks its session again.
+const RECHECK: Duration = Duration::from_secs(30);
+
 pub async fn events(
     State(state): State<AppState>,
     user: AuthUser,
+    CurrentToken(token): CurrentToken,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
-    // Events about libraries the user can't open aren't theirs to see. The
-    // set is read once: access changes take effect on the next connection.
-    let libraries = access::library_ids(&state.db, &user).await?;
+    // Events about libraries the user can't open aren't theirs to see.
+    let libraries = Arc::new(parking_lot::RwLock::new(access::library_ids(&state.db, &user).await?));
+    // The session is checked again every so often: the stream ends once it
+    // is signed out (or its user disabled), and follows changes of access.
+    let ended = tokio_util::sync::CancellationToken::new();
+    {
+        let (state, libraries, ended) = (state.clone(), libraries.clone(), ended.clone());
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(RECHECK);
+            tick.tick().await;
+            loop {
+                tokio::select! {
+                    _ = tick.tick() => {}
+                    () = ended.cancelled() => break,
+                }
+                let Some(user) = (match token.as_deref() {
+                    Some(token) => state.auth.validate(token).await,
+                    None => None,
+                }) else {
+                    ended.cancel();
+                    break;
+                };
+                if let Ok(ids) = access::library_ids(&state.db, &user).await {
+                    *libraries.write() = ids;
+                }
+            }
+        });
+    }
+    // Dropped with the stream (the page went away): the check above stops.
+    let gone = ended.clone().drop_guard();
     let stream = BroadcastStream::new(state.events.subscribe())
         .filter_map(|event| event.ok())
-        .filter(move |event| match (event.library_id(), &libraries) {
+        .filter(move |event| match (event.library_id(), &*libraries.read()) {
             (Some(id), Some(ids)) => ids.contains(&id),
             _ => true,
         })
-        .map(|event| {
+        .map(move |event| {
+            let _ = &gone;
             Ok(Event::default().json_data(event).unwrap_or_else(|_| Event::default().comment("encode error")))
         });
     // The stream never ends on its own and the web UI keeps one open while
     // someone is signed in: end it when the server stops, or the graceful
     // shutdown would wait for it.
     let stream = futures::StreamExt::take_until(stream, state.stopping.clone().cancelled_owned());
+    let stream = futures::StreamExt::take_until(stream, ended.cancelled_owned());
     Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
 }

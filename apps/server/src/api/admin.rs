@@ -11,20 +11,20 @@ use crate::auth::AdminUser;
 use crate::error::{ApiResult, AppError};
 use crate::playback::{TranscodeInfo, transcode_info};
 use crate::providers::{Check, ProviderError};
-use crate::settings::{Settings, SettingsPatch};
+use crate::settings::SettingsPatch;
 use crate::state::AppState;
 
 // ------------------------------------------------------------------ settings
 
-pub async fn get_settings(State(state): State<AppState>, _admin: AdminUser) -> Json<Settings> {
-    Json((*state.settings.get()).clone())
+pub async fn get_settings(State(state): State<AppState>, _admin: AdminUser) -> Json<serde_json::Value> {
+    Json(state.settings.get().for_admins())
 }
 
 pub async fn put_settings(
     State(state): State<AppState>,
     _admin: AdminUser,
     Json(patch): Json<SettingsPatch>,
-) -> ApiResult<Json<Settings>> {
+) -> ApiResult<Json<serde_json::Value>> {
     let before = state.settings.get();
     let after = state.settings.update(&state.db, patch).await?;
     if before.watch_libraries != after.watch_libraries {
@@ -35,7 +35,7 @@ pub async fn put_settings(
     if crate::providers::settings_changed(&state.db, &before, &after).await? {
         state.scanner.enqueue_all(false).await?;
     }
-    Ok(Json((*after).clone()))
+    Ok(Json(after.for_admins()))
 }
 
 /// A service the settings can test.
@@ -47,6 +47,8 @@ pub enum Service {
     Tvmaze,
     Musicbrainz,
     Transcoder,
+    /// The single sign-on provider.
+    Sso,
 }
 
 impl Service {
@@ -57,6 +59,7 @@ impl Service {
             Service::Tvmaze => "TVmaze",
             Service::Musicbrainz => "MusicBrainz",
             Service::Transcoder => "The transcoder",
+            Service::Sso => "The provider",
         }
     }
 }
@@ -70,6 +73,14 @@ pub struct TestRequest {
     /// TheTVDB's subscriber PIN, likewise.
     #[serde(default)]
     pin: Option<String>,
+    /// The single sign-on provider's issuer, client ID and pley's public
+    /// address, likewise.
+    #[serde(default)]
+    issuer: Option<String>,
+    #[serde(default)]
+    client_id: Option<String>,
+    #[serde(default)]
+    public_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -100,6 +111,25 @@ pub async fn test_service(
     if matches!(req.service, Service::Tmdb | Service::Tvdb) && key.is_empty() {
         return fail(format!("Enter a {name} API key first."), 0);
     }
+    if req.service == Service::Sso {
+        let issuer = req.issuer.as_deref().unwrap_or(&settings.sso_issuer).trim();
+        let client_id = req.client_id.as_deref().unwrap_or(&settings.sso_client_id).trim();
+        let public_url = req.public_url.as_deref().unwrap_or(&settings.public_url).trim().trim_end_matches('/');
+        if issuer.is_empty() {
+            return fail("Enter the provider's issuer first.".into(), 0);
+        }
+        if public_url.is_empty() {
+            return fail("Enter pley's public address first.".into(), 0);
+        }
+        let started = Instant::now();
+        let outcome = tokio::time::timeout(TEST_TIMEOUT, state.sso.check(issuer, client_id, public_url)).await;
+        let ms = started.elapsed().as_millis() as u64;
+        return match outcome {
+            Ok(Ok(message)) => Json(TestResult { ok: true, message, ms }),
+            Ok(Err(err)) => fail(capitalized(&format!("{err}.")), ms),
+            Err(_) => fail(format!("The provider didn't answer within {} seconds.", TEST_TIMEOUT.as_secs()), ms),
+        };
+    }
 
     let started = Instant::now();
     let outcome = tokio::time::timeout(TEST_TIMEOUT, async {
@@ -108,6 +138,7 @@ pub async fn test_service(
             Service::Tvdb => state.metadata.check_provider(Check::Tvdb { key: &key, pin: &pin }).await.map(|()| None),
             Service::Tvmaze => state.metadata.check_provider(Check::Tvmaze).await.map(|()| None),
             Service::Musicbrainz => state.metadata.check_provider(Check::MusicBrainz).await.map(|()| None),
+            Service::Sso => unreachable!("tested above"),
             Service::Transcoder => match state.transcoder.status().await {
                 Ok(status) => Ok(Some(match status.ffmpeg_version {
                     Some(ffmpeg) => format!("pley-transcoder {} with ffmpeg {ffmpeg}", status.version),
@@ -150,6 +181,12 @@ pub async fn test_service(
         Ok(Err(ProviderError::Other(err))) => fail(format!("Couldn't reach {}: {err:#}", object(name)), ms),
         Err(_) => fail(format!("{name} didn't answer within {} seconds.", TEST_TIMEOUT.as_secs()), ms),
     }
+}
+
+/// A sentence from an error message ("couldn't reach…" → "Couldn't reach…").
+fn capitalized(message: &str) -> String {
+    let mut chars = message.chars();
+    chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
 /// "The transcoder" in the middle of a sentence.

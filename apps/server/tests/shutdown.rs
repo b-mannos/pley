@@ -21,6 +21,9 @@ async fn request_shutdown_ends_the_event_stream() {
     let port = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap().local_addr().unwrap().port();
     config.bind = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let base = format!("http://127.0.0.1:{port}");
+    // The administrator, made as scripted installs do (setting up through
+    // the web takes the code in the log).
+    pley::reset_password(config.clone(), "admin", "secret-one", true).await.unwrap();
     let mut server = tokio::spawn(pley::run(config));
 
     let http = reqwest::Client::builder().no_proxy().build().unwrap();
@@ -37,7 +40,7 @@ async fn request_shutdown_ends_the_event_stream() {
     }
     assert!(ready, "pley did not start");
     let setup: Value = http
-        .post(format!("{base}/api/setup"))
+        .post(format!("{base}/api/auth/login"))
         .json(&json!({"username": "admin", "password": "secret-one"}))
         .send()
         .await

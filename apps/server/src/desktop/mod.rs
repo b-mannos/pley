@@ -57,6 +57,8 @@ pub struct TrayContext {
     commands: mpsc::UnboundedSender<Command>,
     /// One line about what the server is doing, refreshed every few seconds.
     status: Arc<RwLock<String>>,
+    /// For the setup code, while the server has no account.
+    state: AppState,
 }
 
 impl TrayContext {
@@ -95,6 +97,7 @@ impl TrayContext {
             logs_dir: state.config.log_file().parent().map(PathBuf::from).unwrap_or_default(),
             commands,
             status,
+            state: state.clone(),
         }
     }
 
@@ -111,9 +114,13 @@ impl TrayContext {
         let _ = self.commands.send(command);
     }
 
-    #[cfg_attr(not(feature = "tray"), allow(dead_code))]
-    fn open_web_ui(&self) {
-        open(&self.url);
+    /// Opens the web app in the browser: its setup page with the setup
+    /// code filled in, while the server has no account.
+    pub(crate) fn open_web_ui(&self) {
+        match self.state.auth.setup.shown() {
+            Some(code) => open(format!("{}/setup#code={code}", self.url)),
+            None => open(&self.url),
+        }
     }
 
     #[cfg_attr(not(feature = "tray"), allow(dead_code))]

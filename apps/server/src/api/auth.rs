@@ -6,18 +6,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::accounts::{self, UserDto};
 use crate::auth::{
-    AuthUser, ClientIp, CurrentToken, clear_cookie, dummy_password_hash, forwarded_https, hash_password,
+    AuthUser, ClientIp, CurrentToken, clear_cookie, dummy_password_hash, forwarded_https, hash_password, hash_token,
     session_cookie, token_from_parts, validate_password, validate_username, verify_password,
 };
 use crate::error::{ApiResult, AppError};
-use crate::setup::LocalRequest;
+use crate::setup::Peer;
 use crate::state::AppState;
 use crate::util::now;
 
 #[derive(Serialize)]
 pub struct LoginResponse {
     user: UserDto,
-    token: String,
+    /// For clients that aren't browsers (see [`login_response`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    token: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -26,17 +28,23 @@ pub struct Credentials {
     password: String,
 }
 
-pub async fn server_status(
-    State(state): State<AppState>,
-    LocalRequest(local): LocalRequest,
-) -> ApiResult<Json<serde_json::Value>> {
+pub async fn server_status(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
     let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&state.db.read).await?;
+    let settings = state.settings.get();
+    // The sign-in page's "Sign in with …" button.
+    let sso = settings.sso_enabled.then(|| {
+        serde_json::json!({
+            "name": super::sso::provider_name(&settings),
+            "start": crate::sso::Sso::start_url(&settings),
+        })
+    });
     Ok(Json(serde_json::json!({
-        "name": state.settings.get().server_name,
+        "name": settings.server_name,
         "version": env!("CARGO_PKG_VERSION"),
         "setup_required": users == 0,
-        // From outside the local network, setting up takes the code in the log.
-        "setup_code_required": users == 0 && !local,
+        // Setting up takes the code in the log (see crate::setup).
+        "setup_code_required": users == 0,
+        "sso": sso,
     })))
 }
 
@@ -50,6 +58,11 @@ pub(crate) async fn login_response(
     let token = state.auth.create_session(user_id, agent, ip).await?;
     let user = accounts::user(&state.db, user_id).await?.ok_or(AppError::Unauthorized)?;
     let cookie = session_cookie(&token, forwarded_https(headers));
+    // Browsers (whose requests carry an Origin, which page scripts can't
+    // remove) keep the session in the HttpOnly cookie only: no script on the
+    // page, an injected one included, ever sees it. Scripts and apps that
+    // sign in get the token to send.
+    let token = (!headers.contains_key(header::ORIGIN)).then_some(token);
     Ok(([(header::SET_COOKIE, cookie)], Json(LoginResponse { user, token })).into_response())
 }
 
@@ -57,7 +70,7 @@ pub(crate) async fn login_response(
 pub struct SetupRequest {
     username: String,
     password: String,
-    /// The code in the server's log: needed from outside the local network.
+    /// The code in the server's log.
     #[serde(default)]
     setup_code: Option<String>,
 }
@@ -66,7 +79,7 @@ pub struct SetupRequest {
 pub async fn setup(
     State(state): State<AppState>,
     headers: HeaderMap,
-    LocalRequest(local): LocalRequest,
+    Peer(peer): Peer,
     ClientIp(ip): ClientIp,
     Json(body): Json<SetupRequest>,
 ) -> ApiResult<Response> {
@@ -74,17 +87,17 @@ pub async fn setup(
     if set_up {
         return Err(AppError::conflict("pley is already set up"));
     }
-    if !local {
-        // Guessing gets 5 tries every 15 minutes, from all addresses together.
-        let attempt = state.auth.throttle.begin("setup-code")?;
-        if !state.auth.setup.matches(body.setup_code.as_deref().unwrap_or_default()) {
-            attempt.failed();
-            return Err(AppError::forbidden(
-                "enter the setup code from the server's log (or set pley up from the computer it runs on)",
-            ));
-        }
-        attempt.succeeded();
+    // 5 tries every 15 minutes from each address: someone guessing doesn't
+    // lock the owner out (31^8 codes; a restart makes a new one).
+    let peer = peer.map(|ip| ip.to_canonical().to_string()).unwrap_or_default();
+    let attempt = state.auth.throttle.begin(&format!("setup-code:{peer}"))?;
+    if !state.auth.setup.matches(body.setup_code.as_deref().unwrap_or_default()) {
+        attempt.failed();
+        return Err(AppError::forbidden(
+            "enter the setup code from the server's log (opening pley from its tray icon fills it in)",
+        ));
     }
+    attempt.succeeded();
     let username = body.username.trim();
     validate_username(username)?;
     validate_password(&body.password, username)?;
@@ -122,11 +135,11 @@ pub async fn login(
     let Some((id, hash, disabled)) = row else {
         // A real check against a stand-in hash takes as long as one against a
         // user's, so usernames can't be probed by timing.
-        let _ = verify_password(body.password, dummy_password_hash().await).await;
+        verify_password(body.password, dummy_password_hash().await).await?;
         attempt.failed();
         return Err(AppError::Unauthorized);
     };
-    if !verify_password(body.password, hash).await {
+    if !verify_password(body.password, hash).await? {
         attempt.failed();
         return Err(AppError::Unauthorized);
     }
@@ -155,9 +168,12 @@ pub struct PasswordChange {
     new_password: String,
 }
 
+/// Changes the signed-in user's password, and signs them out everywhere else
+/// (whoever knew the old one).
 pub async fn change_password(
     State(state): State<AppState>,
     user: AuthUser,
+    CurrentToken(token): CurrentToken,
     Json(body): Json<PasswordChange>,
 ) -> ApiResult<StatusCode> {
     validate_password(&body.new_password, &user.username)?;
@@ -168,15 +184,32 @@ pub async fn change_password(
     if hash == accounts::NO_PASSWORD {
         return Err(AppError::bad_request("managed profiles have no password"));
     }
-    if !verify_password(body.current_password, hash).await {
+    if hash == crate::sso::NO_PASSWORD {
+        return Err(AppError::bad_request(
+            "this account signs in with single sign-on and has no password: an administrator can give it one",
+        ));
+    }
+    let attempt = state.auth.throttle.begin(&format!("login:{}", user.username.to_lowercase()))?;
+    if !verify_password(body.current_password, hash).await? {
+        attempt.failed();
         return Err(AppError::bad_request("the current password is wrong"));
     }
+    attempt.succeeded();
     let new_hash = hash_password(body.new_password).await?;
+    let keep = token.as_deref().map(hash_token).unwrap_or_default();
+    let mut tx = state.db.write.begin().await?;
     sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
         .bind(new_hash)
         .bind(user.id)
-        .execute(&state.db.write)
+        .execute(&mut *tx)
         .await?;
+    sqlx::query("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?")
+        .bind(user.id)
+        .bind(keep)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    state.auth.forget_user(user.id);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -197,14 +230,17 @@ pub struct Switch {
     user_id: i64,
     #[serde(default)]
     pin: Option<String>,
-    /// Needed to switch into an administrator profile without a PIN.
+    /// Needed to switch into a freer profile without a PIN (see [`switch`]).
     #[serde(default)]
     password: Option<String>,
 }
 
 /// Switch this device to another home profile. The target's PIN is required
-/// when it has one; an administrator profile without a PIN needs its password
-/// unless the current profile is an administrator too.
+/// when it has one. A profile freer than the current one (an administrator,
+/// a higher age limit, libraries the current one can't see) without a PIN
+/// needs its password, so age limits and library choices hold: one that has
+/// neither can only be switched to from a profile at least as free, until it
+/// gets a PIN.
 pub async fn switch(
     State(state): State<AppState>,
     user: AuthUser,
@@ -213,30 +249,45 @@ pub async fn switch(
     CurrentToken(token): CurrentToken,
     Json(body): Json<Switch>,
 ) -> ApiResult<Response> {
-    let row: Option<(bool, bool, bool, Option<String>, String)> = sqlx::query_as(
-        "SELECT t.home AND me.home, t.disabled, t.is_admin, t.pin_hash, t.password_hash
+    #[allow(clippy::type_complexity)]
+    let row: Option<(bool, bool, bool, Option<String>, String, bool, Option<i64>, bool)> = sqlx::query_as(
+        "SELECT t.home AND me.home, t.disabled, t.is_admin, t.pin_hash, t.password_hash, t.all_libraries, t.max_age,
+                EXISTS (SELECT library_id FROM user_libraries WHERE user_id = t.id
+                        EXCEPT SELECT library_id FROM user_libraries WHERE user_id = me.id)
          FROM users t, users me WHERE t.id = ? AND me.id = ?",
     )
     .bind(body.user_id)
     .bind(user.id)
     .fetch_optional(&state.db.read)
     .await?;
-    let Some((both_home, disabled, target_admin, pin_hash, password_hash)) = row else {
+    let Some((both_home, disabled, target_admin, pin_hash, password_hash, all_libraries, max_age, more_libraries)) =
+        row
+    else {
         return Err(AppError::not_found("profile not found"));
     };
     if !both_home || disabled {
         return Err(AppError::forbidden("you can't switch to this profile"));
     }
+    // Administrators may go anywhere; anyone else not into more than they have.
+    let freer = !user.is_admin
+        && (target_admin
+            || user.max_age.is_some_and(|mine| max_age.is_none_or(|theirs| theirs > mine))
+            || (!user.all_libraries && (all_libraries || more_libraries)));
     if body.user_id != user.id {
         let attempt = state.auth.throttle.begin(&format!("profile:{}", body.user_id))?;
-        let ok = match (&pin_hash, target_admin && !user.is_admin) {
+        let ok = match (&pin_hash, freer) {
             (Some(pin_hash), _) => match &body.pin {
-                Some(pin) => verify_password(pin.clone(), pin_hash.clone()).await,
+                Some(pin) => verify_password(pin.clone(), pin_hash.clone()).await?,
                 None => return Err(AppError::forbidden("this profile is protected by a PIN")),
             },
+            (None, true) if password_hash.starts_with('!') => {
+                return Err(AppError::forbidden(
+                    "this profile can see more than yours: an administrator can give it a PIN to switch to it",
+                ));
+            }
             (None, true) => match &body.password {
-                Some(password) => verify_password(password.clone(), password_hash).await,
-                None => return Err(AppError::forbidden("switching to an administrator needs their password")),
+                Some(password) => verify_password(password.clone(), password_hash).await?,
+                None => return Err(AppError::forbidden("this profile can see more than yours: it needs its password")),
             },
             (None, false) => true,
         };

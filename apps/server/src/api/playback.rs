@@ -342,6 +342,9 @@ pub async fn stream_file(
     request: Request,
 ) -> ApiResult<Response> {
     let file = visible_file(&state, &user, id).await?;
+    if !crate::library::walk::leads_to_its_kind(std::path::Path::new(&file.path)) {
+        return Err(AppError::not_found("file not found"));
+    }
     let response =
         ServeFile::new(&file.path).oneshot(request).await.map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))?;
     let mut response = response.map(Body::new);
@@ -364,6 +367,7 @@ pub async fn subtitles(
             .external_subs()
             .into_iter()
             .find(|s| s.index == index)
+            .filter(|s| crate::library::walk::leads_to_its_kind(std::path::Path::new(&s.path)))
             .ok_or_else(|| AppError::not_found("subtitle not found"))?;
         Some(sub.path)
     } else {

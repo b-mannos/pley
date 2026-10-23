@@ -1,14 +1,13 @@
-//! First run: whoever reaches a server that has no account yet creates the
-//! administrator. From this computer or the local network that takes only a
-//! username and a password. From anywhere else (the internet, or through a
-//! reverse proxy) it also takes a one-time setup code, which the server
-//! prints in its log, so a server that is reachable from outside can't be
-//! claimed by someone else before its owner gets to it.
+//! First run: the administrator account is made with a one-time setup code,
+//! which the server prints in its log (in a link that fills it in) and the
+//! tray icon's "Open pley" passes along. Nobody else can claim a new server
+//! before its owner gets to it, wherever requests seem to come from: Docker
+//! and reverse proxies hide that, and a web page can reach servers on its
+//! visitor's network (DNS rebinding).
 
 use std::net::{IpAddr, SocketAddr};
 
 use axum::extract::{ConnectInfo, FromRequestParts};
-use axum::http::HeaderMap;
 use axum::http::request::Parts;
 use parking_lot::Mutex;
 use rand_core::{OsRng, RngCore};
@@ -54,31 +53,16 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
 }
 
-/// Whether the request comes straight from this computer or the local
-/// network (see [`is_local_request`]).
-pub struct LocalRequest(pub bool);
+/// The address a request came from: the other end of its connection, never
+/// a header (which anyone can send), so guesses can be counted per address.
+pub struct Peer(pub Option<IpAddr>);
 
-impl<S: Send + Sync> FromRequestParts<S> for LocalRequest {
+impl<S: Send + Sync> FromRequestParts<S> for Peer {
     type Rejection = std::convert::Infallible;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let peer = parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|ConnectInfo(addr)| addr.ip());
-        Ok(LocalRequest(is_local_request(&parts.headers, peer)))
+        Ok(Peer(parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|ConnectInfo(addr)| addr.ip())))
     }
-}
-
-/// Headers that proxies (nginx, Caddy, Traefik, Cloudflare…) add: a request
-/// that went through one may come from anywhere.
-const PROXY_HEADERS: &[&str] = &["forwarded", "x-forwarded-for", "x-real-ip", "cf-connecting-ip", "true-client-ip"];
-
-/// Whether a request comes straight from this computer or the local network:
-/// a loopback, private or link-local address, and no proxy in between. A
-/// request whose address isn't known counts as coming from elsewhere.
-pub fn is_local_request(headers: &HeaderMap, peer: Option<IpAddr>) -> bool {
-    if PROXY_HEADERS.iter().any(|h| headers.contains_key(*h)) {
-        return false;
-    }
-    peer.is_some_and(is_local_address)
 }
 
 /// Loopback, private, link-local or Tailscale (carrier-grade NAT) addresses.
@@ -131,9 +115,8 @@ mod tests {
     }
 
     #[test]
-    fn only_direct_requests_from_this_computer_or_network_are_local() {
-        let none = HeaderMap::new();
-        let local = |ip: &str| is_local_request(&none, Some(ip.parse().unwrap()));
+    fn local_addresses_are_this_computer_and_its_networks() {
+        let local = |ip: &str| is_local_address(ip.parse().unwrap());
         for ip in ["127.0.0.1", "::1", "192.168.1.20", "10.0.0.7", "172.20.0.1", "169.254.3.4", "100.101.102.103"] {
             assert!(local(ip), "{ip}");
         }
@@ -142,14 +125,6 @@ mod tests {
         }
         for ip in ["8.8.8.8", "172.32.0.1", "100.128.0.1", "2001:4860:4860::8888", "::ffff:8.8.8.8"] {
             assert!(!local(ip), "{ip}");
-        }
-        assert!(!is_local_request(&none, None), "an unknown address");
-
-        // A proxy on the same computer forwards requests from anywhere.
-        for header in PROXY_HEADERS {
-            let mut headers = HeaderMap::new();
-            headers.insert(*header, "203.0.113.9".parse().unwrap());
-            assert!(!is_local_request(&headers, Some("127.0.0.1".parse().unwrap())), "{header}");
         }
     }
 }

@@ -434,6 +434,106 @@ async fn changing_your_password() {
     assert!(managed.body["message"].as_str().unwrap().contains("managed"));
 }
 
+#[tokio::test]
+async fn a_new_password_signs_you_out_everywhere_else() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (here, _) = app.user(&admin, "bob", json!({})).await;
+    let elsewhere = app.login("bob", "test-pass-1").await;
+    assert_eq!(app.get("/api/auth/me", &elsewhere).await.status, StatusCode::OK);
+    assert_eq!(change_password(&app, &here, "test-pass-1", "a-new-one-2").await.status, StatusCode::NO_CONTENT);
+    assert_eq!(app.get("/api/auth/me", &elsewhere).await.status, StatusCode::UNAUTHORIZED, "whoever knew the old one");
+    assert_eq!(app.get("/api/auth/me", &here).await.status, StatusCode::OK, "not the device that changed it");
+}
+
+#[tokio::test]
+async fn restricted_profiles_cant_switch_into_freer_ones() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let new_profile = |body: Value| {
+        let (app, admin) = (&app, &admin);
+        async move { app.post("/api/users", admin, body).await.body["id"].as_i64().unwrap() }
+    };
+    let kid = new_profile(json!({"username": "kid", "managed": true, "max_age": 12})).await;
+    let teen = new_profile(json!({"username": "teen", "managed": true, "max_age": 16})).await;
+    let (_, parent) = app.user(&admin, "parent", json!({})).await;
+    // Switching ends the session it started from: a separate one to switch with.
+    let start = app.login("admin", "secret-one").await;
+    let kid_token = switch(&app, &start, json!({"user_id": kid})).await.body["token"].as_str().unwrap().to_owned();
+    let as_kid = |body: Value| switch(&app, &kid_token, body);
+
+    // A higher age limit without a PIN: not from the kid's profile.
+    let refused = as_kid(json!({"user_id": teen})).await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN);
+    assert!(refused.body["message"].as_str().unwrap().contains("PIN"), "{:?}", refused.body);
+    // No age limit at all: the profile's password.
+    assert_eq!(as_kid(json!({"user_id": parent})).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(as_kid(json!({"user_id": parent, "password": "wrong"})).await.status, StatusCode::FORBIDDEN);
+    let parent_token = as_kid(json!({"user_id": parent, "password": "test-pass-1"})).await;
+    assert_eq!(parent_token.status, StatusCode::OK, "{:?}", parent_token.body);
+    let parent_token = parent_token.body["token"].as_str().unwrap().to_owned();
+
+    // Down is always open; with a PIN, up is too.
+    let teen_token = switch(&app, &parent_token, json!({"user_id": teen})).await;
+    assert_eq!(teen_token.status, StatusCode::OK);
+    let teen_token = teen_token.body["token"].as_str().unwrap().to_owned();
+    let kid_token = switch(&app, &teen_token, json!({"user_id": kid})).await;
+    assert_eq!(kid_token.status, StatusCode::OK);
+    let kid_token = kid_token.body["token"].as_str().unwrap().to_owned();
+    app.patch(&format!("/api/users/{teen}"), &admin, json!({"pin": "1357"})).await;
+    assert_eq!(switch(&app, &kid_token, json!({"user_id": teen, "pin": "1357"})).await.status, StatusCode::OK);
+
+    // Libraries count too: one the current profile can't see is more.
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let shows = app.library(&admin, "Shows", "shows", "shows").await;
+    let one =
+        new_profile(json!({"username": "one", "managed": true, "all_libraries": false, "library_ids": [movies]})).await;
+    let both = new_profile(
+        json!({"username": "both", "managed": true, "all_libraries": false, "library_ids": [movies, shows]}),
+    )
+    .await;
+    let start = app.login("admin", "secret-one").await;
+    let one_token = switch(&app, &start, json!({"user_id": one})).await.body["token"].as_str().unwrap().to_owned();
+    assert_eq!(switch(&app, &one_token, json!({"user_id": both})).await.status, StatusCode::FORBIDDEN);
+    let start = app.login("admin", "secret-one").await;
+    let both_token = switch(&app, &start, json!({"user_id": both})).await.body["token"].as_str().unwrap().to_owned();
+    assert_eq!(switch(&app, &both_token, json!({"user_id": one})).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn pages_and_answers_carry_the_security_headers() {
+    let app = TestApp::new().await;
+    for uri in ["/api/health", "/", "/login"] {
+        let reply = app.call(Method::GET, uri, None, None, &[]).await;
+        let header = |name: &str| reply.headers.get(name).and_then(|v| v.to_str().ok()).unwrap_or_default().to_owned();
+        assert!(header("content-security-policy").contains("frame-ancestors 'none'"), "{uri}");
+        assert!(header("content-security-policy").contains("script-src 'self'"), "{uri}");
+        assert_eq!(header("x-content-type-options"), "nosniff", "{uri}");
+        assert_eq!(header("x-frame-options"), "DENY", "{uri}");
+        assert_eq!(header("referrer-policy"), "same-origin", "{uri}");
+    }
+    let plex = app.plex(Method::GET, "/identity", "", &[]).await;
+    assert_eq!(plex.headers["x-content-type-options"], "nosniff");
+    assert_eq!(plex.headers["x-frame-options"], "DENY");
+}
+
+#[tokio::test]
+async fn browsers_keep_the_session_in_the_cookie_only() {
+    let app = TestApp::new().await;
+    app.setup_admin().await;
+    let body = json!({"username": "admin", "password": "secret-one"});
+    let browser = app
+        .call(Method::POST, "/api/auth/login", None, Some(body.clone()), &[("origin", "http://pley.lan:7539")])
+        .await;
+    assert_eq!(browser.status, StatusCode::OK);
+    assert!(browser.body.get("token").is_none(), "no page script sees it: {:?}", browser.body);
+    assert!(browser.headers[header::SET_COOKIE].to_str().unwrap().starts_with("pley_token="));
+    assert_eq!(browser.body["user"]["username"], "admin");
+    // Scripts and apps (no Origin) get the token to send.
+    let script = app.call(Method::POST, "/api/auth/login", None, Some(body), &[]).await;
+    assert!(script.body["token"].as_str().is_some_and(|t| t.len() == 43));
+}
+
 /// `POST /api/setup` (or `GET /api/server` without a body) from `peer`,
 /// with extra headers.
 async fn from(
@@ -462,7 +562,7 @@ async fn from(
 }
 
 #[tokio::test]
-async fn setting_up_from_elsewhere_takes_the_code_in_the_log() {
+async fn setting_up_takes_the_code_in_the_log_from_anywhere() {
     let app = TestApp::new().await;
     let account = json!({"username": "owner", "password": "correct horse"});
     let with_code = |code: &str| {
@@ -470,41 +570,39 @@ async fn setting_up_from_elsewhere_takes_the_code_in_the_log() {
         body["setup_code"] = json!(code);
         body
     };
-    let server = |peer: &'static str, headers: &'static [(&'static str, &'static str)]| {
+    let server = |peer: &'static str| {
         let app = &app;
-        async move { from(app, peer, Method::GET, "/api/server", None, headers).await.body["setup_code_required"].clone() }
+        async move { from(app, peer, Method::GET, "/api/server", None, &[]).await.body["setup_code_required"].clone() }
     };
-    // This computer and the local network need no code; the internet and
-    // anything behind a proxy do.
-    assert_eq!(server("127.0.0.1:50000", &[]).await, json!(false));
-    assert_eq!(server("192.168.1.20:50000", &[]).await, json!(false));
-    assert_eq!(server("203.0.113.9:50000", &[]).await, json!(true));
-    assert_eq!(server("127.0.0.1:50000", &[("x-forwarded-for", "203.0.113.9")]).await, json!(true));
-
+    // Where a request seems to come from proves nothing (Docker, proxies and
+    // DNS rebinding all make the internet look local): the code, always.
+    for peer in ["127.0.0.1:50000", "192.168.1.20:50000", "203.0.113.9:50000"] {
+        assert_eq!(server(peer).await, json!(true), "{peer}");
+    }
+    let setup = |body: Value, peer: &'static str| {
+        let app = &app;
+        async move { from(app, peer, Method::POST, "/api/setup", Some(body), &[]).await }
+    };
+    for peer in ["127.0.0.1:50000", "192.168.1.20:50000"] {
+        let refused = setup(account.clone(), peer).await;
+        assert_eq!(refused.status, StatusCode::FORBIDDEN, "{peer}: {:?}", refused.body);
+        assert!(refused.body["message"].as_str().unwrap().contains("setup code"));
+    }
     let remote = "203.0.113.9:50000";
-    let setup = |body: Value, peer: &'static str, headers: &'static [(&'static str, &'static str)]| {
-        let app = &app;
-        async move { from(app, peer, Method::POST, "/api/setup", Some(body), headers).await }
-    };
-    let refused = setup(account.clone(), remote, &[]).await;
-    assert_eq!(refused.status, StatusCode::FORBIDDEN, "{:?}", refused.body);
-    assert!(refused.body["message"].as_str().unwrap().contains("setup code"));
-    let proxied = setup(account.clone(), "127.0.0.1:50000", &[("forwarded", "for=203.0.113.9")]).await;
-    assert_eq!(proxied.status, StatusCode::FORBIDDEN, "a proxy on this computer forwards the internet");
-    assert_eq!(setup(with_code("AAAA-AAAA"), remote, &[]).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(setup(with_code("AAAA-AAAA"), remote).await.status, StatusCode::FORBIDDEN);
 
     // The code works in any case, with or without its dash, and only once.
     let code = app.state.auth.setup.shown().unwrap();
-    let done = setup(with_code(&code.replace('-', "").to_lowercase()), remote, &[]).await;
+    let done = setup(with_code(&code.replace('-', "").to_lowercase()), remote).await;
     assert_eq!(done.status, StatusCode::OK, "{:?}", done.body);
     assert_eq!(app.state.auth.setup.shown(), None);
-    let again = setup(with_code(&code), remote, &[]).await;
+    let again = setup(with_code(&code), "127.0.0.1:50000").await;
     assert_eq!(again.status, StatusCode::CONFLICT, "already set up, whoever asks");
-    assert_eq!(server(remote, &[]).await, json!(false));
+    assert_eq!(server(remote).await, json!(false));
 }
 
 #[tokio::test]
-async fn setup_codes_cant_be_guessed() {
+async fn setup_codes_cant_be_guessed_and_guessing_locks_nobody_else_out() {
     let app = TestApp::new().await;
     let guess = || {
         let app = &app;
@@ -517,10 +615,11 @@ async fn setup_codes_cant_be_guessed() {
         assert_eq!(guess().await, StatusCode::FORBIDDEN);
     }
     assert_eq!(guess().await, StatusCode::TOO_MANY_REQUESTS);
-    // From this computer it still works.
-    let body = json!({"username": "owner", "password": "correct horse"});
-    let local = from(&app, "127.0.0.1:50000", Method::POST, "/api/setup", Some(body), &[]).await;
-    assert_eq!(local.status, StatusCode::OK, "{:?}", local.body);
+    // The owner, elsewhere, isn't held up by someone else's guesses.
+    let code = app.state.auth.setup.shown().unwrap();
+    let body = json!({"username": "owner", "password": "correct horse", "setup_code": code});
+    let owner = from(&app, "192.168.1.20:50000", Method::POST, "/api/setup", Some(body), &[]).await;
+    assert_eq!(owner.status, StatusCode::OK, "{:?}", owner.body);
 }
 
 #[tokio::test]

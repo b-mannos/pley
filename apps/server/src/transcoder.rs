@@ -100,7 +100,14 @@ impl Transcoder {
             .expect("http client");
         let (token, managed, base) = match &config.transcoder_url {
             Some(url) => {
-                (config.transcoder_token.clone().unwrap_or_default(), None, Some(url.trim_end_matches('/').to_owned()))
+                let token = config.transcoder_token.clone().unwrap_or_default();
+                if token.is_empty() {
+                    tracing::warn!(
+                        "the transcoder at {url} is used without a token: anyone who can reach it can use it \
+                         (set transcoder_token here and --token there)"
+                    );
+                }
+                (token, None, Some(url.trim_end_matches('/').to_owned()))
             }
             None => {
                 let token = crate::auth::new_token();
