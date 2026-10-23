@@ -8,6 +8,10 @@ services:
     image: pley:latest
     container_name: pley
     restart: unless-stopped
+    # pley lets requests in progress finish for 5 s, then stops the
+    # transcoder and closes the database: give it room (Docker's default
+    # is 10 s before it kills the container).
+    stop_grace_period: 30s
     ports:
       - "7539:7539"
     volumes:
