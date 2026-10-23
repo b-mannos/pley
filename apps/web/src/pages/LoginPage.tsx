@@ -6,6 +6,7 @@ import { fetchProfiles, useLogin, useMe, useServer } from "@/api/hooks";
 import { Splash } from "@/auth";
 import { Button, Field, TextInput } from "@/components/ui";
 import { useDocumentTitle } from "@/lib/hooks";
+import { appShell, SWITCH_SERVER_PATH } from "@/lib/shell";
 import { AuthLayout } from "./AuthLayout";
 import { safeNext } from "./ProfilesPage";
 
@@ -83,6 +84,13 @@ export function LoginPage() {
         <Button type="submit" variant="primary" size="lg" className="w-full" loading={login.isPending || (signingIn && !login.isError)}>
           Sign in
         </Button>
+        {appShell() ? (
+          <p className="text-center text-xs text-subtle">
+            <a href={SWITCH_SERVER_PATH} className="font-medium text-accent hover:text-accent-hover">
+              Use another server
+            </a>
+          </p>
+        ) : null}
       </form>
     </AuthLayout>
   );

@@ -1,0 +1,94 @@
+import { Route, Routes } from "react-router";
+import { screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ItemDetail } from "@/api/types";
+import { encodeId } from "@/lib/ids";
+import { itemUrl } from "@/lib/urls";
+import { makeItem } from "@/test/fixtures";
+import { LocationDisplay, mockApi, renderWithProviders } from "@/test/render";
+import { PlayerPage } from "./PlayerPage";
+
+// The web player needs a real video element; here it only shows that it's there.
+vi.mock("./VideoPlayer", () => ({
+  VideoPlayer: ({ item }: { item: ItemDetail }) => <div data-testid="web-player">{item.title}</div>,
+}));
+
+const ANDROID = "Mozilla/5.0 (Linux; Android 15; wv) Chrome/140.0 Mobile Safari/537.36 pleyAndroid/0.1.0";
+
+function detail(overrides: Partial<ItemDetail> = {}): ItemDetail {
+  return {
+    ...makeItem({ id: 7, kind: "episode", title: "Pilot", grandparent_title: "Taxi" }),
+    original_title: null,
+    tagline: null,
+    genres: [],
+    studio: null,
+    content_rating: null,
+    tmdb_id: null,
+    imdb_id: null,
+    files: [
+      {
+        id: 3,
+        path: "/tv/Taxi/S01E01.mkv",
+        size: 1,
+        container: "mkv",
+        duration_ms: 1_500_000,
+        bitrate: null,
+        width: 1920,
+        height: 1080,
+        video_codec: "h264",
+        audio_codec: "aac",
+        streams: [],
+        edition: null,
+        selected_audio: null,
+        selected_subtitle: null,
+        chapters: [],
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function renderPlayer(route: string) {
+  mockApi({ "GET /api/items/7": () => detail() });
+  renderWithProviders(
+    <Routes>
+      <Route path="/play/:id" element={<PlayerPage />} />
+      <Route path="*" element={<LocationDisplay />} />
+    </Routes>,
+    { route },
+  );
+}
+
+describe("PlayerPage in the Android app", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (window as unknown as { PleyAndroid?: unknown }).PleyAndroid;
+  });
+
+  it("hands the video to the app's player and steps back", async () => {
+    vi.stubGlobal("navigator", { ...navigator, userAgent: ANDROID });
+    const play = vi.fn<(request: string) => boolean>(() => true);
+    (window as unknown as { PleyAndroid: unknown }).PleyAndroid = { play };
+    renderPlayer(`/play/${encodeId(7)}?t=90000&audio=1`);
+
+    await waitFor(() => expect(play).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(play.mock.calls[0]?.[0] ?? "null")).toEqual({
+      item_id: 7,
+      start_ms: 90_000,
+      file_id: null,
+      audio: 1,
+      sub: null,
+      title: "Taxi · Pilot",
+    });
+    expect(await screen.findByTestId("location")).toHaveTextContent(itemUrl(7));
+  });
+
+  it("plays in the page when the app's player declines", async () => {
+    vi.stubGlobal("navigator", { ...navigator, userAgent: ANDROID });
+    const play = vi.fn<(request: string) => boolean>(() => false);
+    (window as unknown as { PleyAndroid: unknown }).PleyAndroid = { play };
+    renderPlayer(`/play/${encodeId(7)}`);
+    expect(await screen.findByTestId("web-player")).toHaveTextContent("Pilot");
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+});

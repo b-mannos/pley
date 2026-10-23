@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
-import { LogOut, Menu as MenuIcon, RefreshCw, Search, Settings, UserRound, Users, X } from "lucide-react";
+import { LogOut, Menu as MenuIcon, RefreshCw, Search, Server, Settings, UserRound, Users, X } from "lucide-react";
 import { useActivity, useLibraries, useLogout, useProfiles } from "@/api/hooks";
 import type { ScanPhase } from "@/api/types";
 import { useAudioPlayer } from "@/audio/AudioPlayer";
 import { useAuth } from "@/auth";
 import { cn } from "@/lib/cn";
 import { useDebouncedValue, useOnChange } from "@/lib/hooks";
+import { appShell, SWITCH_SERVER_PATH } from "@/lib/shell";
 import { Avatar } from "./Avatar";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { IconButton } from "./ui";
@@ -202,6 +203,19 @@ function UserMenu() {
             </MenuItem>
           ) : null}
           <MenuSeparator />
+          {appShell() ? (
+            <MenuItem
+              icon={<Server />}
+              onClick={() => {
+                close();
+                audio.close();
+                // A page load, not a route: the app catches it and shows its servers.
+                window.location.assign(SWITCH_SERVER_PATH);
+              }}
+            >
+              Switch server
+            </MenuItem>
+          ) : null}
           <MenuItem
             icon={<LogOut />}
             onClick={() => {

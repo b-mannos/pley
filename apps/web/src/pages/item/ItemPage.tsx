@@ -66,6 +66,8 @@ export function ItemPage() {
       return <ArtistView key={data.id} item={data} />;
     case "album":
       return <AlbumView key={data.id} item={data} highlightId={highlight} />;
+    case "extra":
+      return data.parent_id ? <Navigate to={itemUrl(data.parent_id)} replace /> : <NotFoundPage />;
     case "track":
       return data.parent_id ? <Navigate to={itemUrl(data.parent_id)} replace state={{ highlight: data.id }} /> : <NotFoundPage />;
     default:

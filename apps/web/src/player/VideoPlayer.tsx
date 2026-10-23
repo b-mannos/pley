@@ -133,7 +133,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const at = next.user_state.watched ? 0 : next.user_state.position_ms;
     return queue ? queuePlayUrl(queue.queue, queue.index + 1, next.id, at) : playUrl(next.id, { startMs: at });
   };
-  const endUrl = queue?.queue.returnTo ?? itemUrl(item.id);
+  // Bonus material belongs to its movie or show.
+  const home = itemUrl(item.kind === "extra" && item.parent_id ? item.parent_id : item.id);
+  const endUrl = queue?.queue.returnTo ?? home;
   const title = isEpisode ? (item.grandparent_title ?? item.title) : item.year ? `${item.title} (${item.year})` : item.title;
   const subtitle = isEpisode ? [episodeLabel(item), item.title].filter(Boolean).join(" — ") : null;
   useDocumentTitle(isEpisode ? `${title} ${episodeLabel(item)}` : item.title);
@@ -176,8 +178,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const goBack = useCallback(() => {
     const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
     if (idx > 0) void navigate(-1);
-    else void navigate(itemUrl(item.id), { replace: true });
-  }, [navigate, item.id]);
+    else void navigate(home, { replace: true });
+  }, [navigate, home]);
 
   // Pause any music when a video starts.
   useEffect(() => {

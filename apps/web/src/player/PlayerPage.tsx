@@ -1,12 +1,13 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import { LoaderCircle, TriangleAlert } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useItem } from "@/api/hooks";
+import { decodeId, idParam } from "@/lib/ids";
+import { androidPlayer } from "@/lib/shell";
+import { itemUrl } from "@/lib/urls";
 import { loadQueue } from "@/lib/videoQueue";
 import { VideoPlayer } from "./VideoPlayer";
-import { itemUrl } from "@/lib/urls";
-import { decodeId, idParam } from "@/lib/ids";
 
 function num(v: string | null): number | null {
   if (v == null || v === "") return null;
@@ -29,6 +30,16 @@ function PlayerMessage({ title, message, onBack }: { title: string; message: str
   );
 }
 
+function Loading() {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">
+      <LoaderCircle className="size-12 animate-spin text-white/70" />
+    </div>
+  );
+}
+
+const PLAYABLE = new Set(["movie", "episode", "extra"]);
+
 export function PlayerPage() {
   const { id } = useParams();
   const [params] = useSearchParams();
@@ -42,22 +53,40 @@ export function PlayerPage() {
     const q = loadQueue(queueKey);
     return q && queueIndex != null && q.ids[queueIndex] === itemId ? { queue: q, index: queueIndex } : null;
   }, [queueKey, queueIndex, itemId]);
+  const startMs = num(params.get("t")) ?? 0;
+  const fileId = decodeId(params.get("file"));
+  const audio = num(params.get("audio"));
+  const sub = num(params.get("sub"));
+
+  // In the Android app its own player takes over, and this page steps back
+  // (`?web=1`: it couldn't, the web player plays).
+  const native = useMemo(() => androidPlayer(), []);
+  const data = item.data;
+  const handOff = !!native && !params.has("web") && !!data && PLAYABLE.has(data.kind) && data.files.length > 0;
+  useEffect(() => {
+    if (!handOff || !native || !data) return;
+    const title = data.kind === "episode" && data.grandparent_title ? `${data.grandparent_title} · ${data.title}` : data.title;
+    if (native({ item_id: data.id, start_ms: startMs, file_id: fileId, audio, sub, title })) {
+      const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+      if (idx > 0) void navigate(-1);
+      else void navigate(itemUrl(data.kind === "extra" && data.parent_id ? data.parent_id : data.id), { replace: true });
+    } else {
+      const web = new URLSearchParams(params);
+      web.set("web", "1");
+      void navigate({ search: web.toString() }, { replace: true });
+    }
+    // Once per item: the Android player reports progress itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handOff, data?.id]);
 
   if (!Number.isFinite(itemId) || itemId <= 0) return <Navigate to="/" replace />;
-  if (item.isPending) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">
-        <LoaderCircle className="size-12 animate-spin text-white/70" />
-      </div>
-    );
-  }
+  if (item.isPending || handOff) return <Loading />;
   // A failed background refetch (e.g. after watch state changed) keeps the
   // previous data: don't tear down a playing video because of it.
-  const data = item.data;
   if (!data) {
     return <PlayerMessage title="Can't play this item" message={errorMessage(item.error)} onBack={() => void navigate(-1)} />;
   }
-  if (data.kind !== "movie" && data.kind !== "episode") return <Navigate to={itemUrl(data.id)} replace />;
+  if (!PLAYABLE.has(data.kind)) return <Navigate to={itemUrl(data.id)} replace />;
   if (!data.files.length) {
     return <PlayerMessage title="Nothing to play" message="This item has no media files." onBack={() => void navigate(-1)} />;
   }
@@ -66,10 +95,10 @@ export function PlayerPage() {
     <VideoPlayer
       key={`${data.id}:${queue?.index ?? ""}`}
       item={data}
-      startMs={num(params.get("t")) ?? 0}
-      fileId={decodeId(params.get("file"))}
-      audio={num(params.get("audio"))}
-      sub={num(params.get("sub"))}
+      startMs={startMs}
+      fileId={fileId}
+      audio={audio}
+      sub={sub}
       queue={queue}
     />
   );
