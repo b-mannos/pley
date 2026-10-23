@@ -210,7 +210,13 @@ With python-plexapi 4.18 the following work against the test media:
 - `editTitle()`, `editSummary()` and their `locked` argument, `fields`,
   `addGenre()`/`removeGenre()`, `addLabel()`/`removeLabel()`,
   `search(label=…)`, `listFilterChoices('label')`, `addCollection()`,
-  `collections()` and `uploadPoster()`.
+  `collections()` and `uploadPoster()`;
+- collections' `editSummary()`, `editSortTitle()`, `uploadPoster()`,
+  `createCollection()` (also `smart=True`), `filters()`, `updateFilters()`,
+  `removeItems()` and `delete()`; `createPlaylist(smart=True)`;
+- play queues: `PlayQueue.create()` (from items, a section listing or a
+  playlist, with `continuous`), `get()`, `addItem(playNext=True)`,
+  `moveItem()`, `removeItem()` and `clear()`.
 
 ## Not supported
 

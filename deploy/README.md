@@ -37,6 +37,8 @@ NVENC, VAAPI, QSV and Vulkan (libplacebo) tone mapping:
   The image already asks for the `video` driver capability that NVENC needs.
 
 The container runs as uid 1000; the `/config` folder must be writable by it.
+Setting pley up from outside your network asks for the code it prints at
+start (`docker logs pley`).
 `docker exec pley pley reset-password <user> <password>` recovers a lost
 password.
 
