@@ -12,12 +12,31 @@ use crate::error::AppError;
 
 const KEY: &str = "server";
 
+/// Where TV show metadata comes from.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TvMetadata {
+    /// TMDB when it has a key, else TheTVDB when it has one, else TVmaze.
+    #[default]
+    Auto,
+    Tmdb,
+    Tvdb,
+    /// No key needed.
+    Tvmaze,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Settings {
     pub server_name: String,
     pub tmdb_api_key: String,
     pub metadata_language: String,
+    pub tv_metadata: TvMetadata,
+    pub tvdb_api_key: String,
+    /// Subscriber PIN, for TheTVDB keys that need one.
+    pub tvdb_pin: String,
+    /// Look artists and albums up on MusicBrainz (covers from the Cover Art Archive).
+    pub music_metadata: bool,
     pub hwaccel: HwAccel,
     pub hardware_decoding: bool,
     pub tonemapping: TonemapMode,
@@ -41,6 +60,10 @@ impl Default for Settings {
             server_name: if host.is_empty() { "pley".into() } else { host },
             tmdb_api_key: String::new(),
             metadata_language: "en-US".into(),
+            tv_metadata: TvMetadata::Auto,
+            tvdb_api_key: String::new(),
+            tvdb_pin: String::new(),
+            music_metadata: true,
             hwaccel: HwAccel::Auto,
             hardware_decoding: true,
             tonemapping: TonemapMode::Auto,
@@ -73,6 +96,10 @@ pub struct SettingsPatch {
     pub server_name: Option<String>,
     pub tmdb_api_key: Option<String>,
     pub metadata_language: Option<String>,
+    pub tv_metadata: Option<TvMetadata>,
+    pub tvdb_api_key: Option<String>,
+    pub tvdb_pin: Option<String>,
+    pub music_metadata: Option<bool>,
     pub hwaccel: Option<HwAccel>,
     pub hardware_decoding: Option<bool>,
     pub tonemapping: Option<TonemapMode>,
@@ -120,6 +147,27 @@ impl SettingsStore {
                 return Err(AppError::bad_request("metadata language must look like 'en-US'"));
             }
             next.metadata_language = v;
+        }
+        if let Some(v) = patch.tv_metadata {
+            next.tv_metadata = v;
+        }
+        if let Some(v) = patch.tvdb_api_key {
+            next.tvdb_api_key = v.trim().to_owned();
+        }
+        if let Some(v) = patch.tvdb_pin {
+            next.tvdb_pin = v.trim().to_owned();
+        }
+        if let Some(v) = patch.music_metadata {
+            next.music_metadata = v;
+        }
+        match next.tv_metadata {
+            TvMetadata::Tmdb if next.tmdb_api_key.is_empty() => {
+                return Err(AppError::bad_request("TMDB needs an API key to be the TV source"));
+            }
+            TvMetadata::Tvdb if next.tvdb_api_key.is_empty() => {
+                return Err(AppError::bad_request("TheTVDB needs an API key to be the TV source"));
+            }
+            _ => {}
         }
         if let Some(v) = patch.hwaccel {
             next.hwaccel = v;
