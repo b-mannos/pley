@@ -15,6 +15,7 @@ class LinksTest {
         assertEquals(Navigation.Servers, at("http://192.168.1.20:7539/__app/servers"))
         assertEquals(Navigation.Browser, at("https://www.themoviedb.org/movie/603"))
         assertEquals(Navigation.Browser, at("http://192.168.1.20:8080/"), "another port")
+        assertEquals(Navigation.Browser, at("otpauth://totp/pley:bob?secret=JBSWY3DPEHPK3PXP&issuer=pley"), "authenticator apps")
         assertEquals(Navigation.Ignore, at("intent://scan/#Intent;end"))
         assertEquals(Navigation.Ignore, at("file:///sdcard/Download/x.html"))
         assertEquals(Navigation.Allow, at("https://pley.example.com/library/x", "https://pley.example.com"))

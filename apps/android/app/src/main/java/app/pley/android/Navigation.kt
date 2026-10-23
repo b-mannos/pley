@@ -17,7 +17,7 @@ enum class Navigation {
     /** Back to the list of servers. */
     Servers,
 
-    /** Another site: the browser opens it. */
+    /** Another site (the browser opens it), or a link for another app. */
     Browser,
 
     /** Nothing to do with it. */
@@ -89,7 +89,8 @@ object Links {
             if (web) return Navigation.Allow
         }
         return when (scheme) {
-            "http", "https", "mailto" -> Navigation.Browser
+            // otpauth: adds pley to an authenticator app on this phone (two-step sign-in).
+            "http", "https", "mailto", "otpauth" -> Navigation.Browser
             else -> Navigation.Ignore
         }
     }
