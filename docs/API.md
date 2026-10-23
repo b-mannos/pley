@@ -73,6 +73,7 @@ interface UserState {
   watched: boolean;             // containers: true when every leaf is watched
   play_count: number;
   last_played_at?: Timestamp;
+  rating?: number;                  // the user's own rating, 0-10 (two points per star)
 }
 
 // Optional fields are left out when they have no value, which keeps big
@@ -289,7 +290,7 @@ hubs, search, artwork, streams and the Plex-compatible API.
 | DELETE | `/api/libraries/{id}` *(admin)* | – | `204` |
 | POST | `/api/libraries/{id}/scan` *(admin)* | `{ force?: boolean }` (force = re-probe files and refresh metadata) | `202` |
 | POST | `/api/libraries/scan` *(admin)* | – | `202` (scan all) |
-| GET | `/api/libraries/{id}/items` | query: `sort=title\|year\|added\|rating\|release\|duration\|last_played` (default `title`), `order=asc\|desc`, `watched=true\|false`, `genre=<name>`, `year=<yyyy>`, `offset`, `limit` | `{ total: number, items: ItemSummary[] }` — top-level items only; `total` counts every match, not just the page; `watched=true` matches shows whose every episode is watched |
+| GET | `/api/libraries/{id}/items` | query: `sort=title\|year\|added\|rating\|user_rating\|release\|duration\|last_played` (default `title`), `order=asc\|desc`, `watched=true\|false`, `genre=<name>`, `year=<yyyy>`, `offset`, `limit` | `{ total: number, items: ItemSummary[] }` — top-level items only; `total` counts every match, not just the page; `watched=true` matches shows whose every episode is watched |
 | GET | `/api/libraries/{id}/filters` | – | `{ genres: string[], years: number[] }` |
 | GET | `/api/libraries/{id}/hubs` | – | `{ hubs: Hub[] }` (continue watching, recently added, recently released, top rated – empty hubs omitted) |
 
@@ -310,6 +311,7 @@ hubs, search, artwork, streams and the Plex-compatible API.
 | PUT | `/api/items/{id}/artwork/{kind}` *(admin)* | `{ url }` (a TMDB image) | `ItemDetail`; the picture is downloaded and locked |
 | POST | `/api/items/{id}/artwork/{kind}/upload` *(admin)* | raw image bytes (≤ 25 MB) | `ItemDetail`; stored as JPEG and locked |
 | DELETE | `/api/items/{id}/artwork/{kind}` *(admin)* | – | `204`; back to local or downloaded artwork |
+| PUT | `/api/items/{id}/rating` | `{ rating: number \| null }` (0-10, rounded to half stars; `null` clears it) | `204`; the user's own rating, shown as `user_state.rating` |
 | PUT | `/api/items/{id}/streams` | `{ file_id?, audio_index, subtitle_index }` (`subtitle_index: null` = off) | `204`. Remembers the choice for the whole show (episodes) or the movie, as language/title/forced, so every episode starts with its own matching tracks. |
 | POST | `/api/items/{id}/unwatched` | – | `204` |
 | POST | `/api/items/{id}/refresh` *(admin)* | – | `202` re-fetch metadata |

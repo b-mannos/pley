@@ -478,6 +478,14 @@ export function useSetWatched() {
   });
 }
 
+export function useSetRating() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, rating }: { id: Id; rating: number | null }) => api.put<void>(`/api/items/${id}/rating`, { rating }),
+    onSuccess: () => invalidateWatchState(qc),
+  });
+}
+
 export function useRefreshItem() {
   return useMutation({
     mutationFn: (id: Id) => api.post<void>(`/api/items/${id}/refresh`),

@@ -6,6 +6,7 @@ import type { ItemDetail } from "@/api/types";
 import { useAudioPlayer } from "@/audio/AudioPlayer";
 import { CardSkeleton, MediaCard } from "@/components/cards";
 import { ListButtons } from "@/components/lists/ListButtons";
+import { StarRating } from "@/components/StarRating";
 import { Button, SectionTitle, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatClock, formatDuration, pluralize } from "@/lib/format";
@@ -106,6 +107,7 @@ export function AlbumView({ item, highlightId }: { item: ItemDetail; highlightId
               item.year,
               list.length ? pluralize(list.length, "track") : null,
               totalMs ? formatDuration(totalMs) : null,
+              <StarRating key="mine" item={item} />,
             ]}
           />
         }

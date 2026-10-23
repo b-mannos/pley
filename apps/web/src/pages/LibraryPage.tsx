@@ -26,12 +26,13 @@ const SORT_LABELS: Record<LibrarySort, string> = {
   release: "Release date",
   duration: "Duration",
   last_played: "Last played",
+  user_rating: "Your rating",
 };
 
 const SORTS_BY_KIND: Record<LibraryKind, LibrarySort[]> = {
-  movies: ["title", "year", "added", "rating", "release", "duration", "last_played"],
-  shows: ["title", "year", "added", "rating", "release", "last_played"],
-  music: ["title", "added", "last_played"],
+  movies: ["title", "year", "added", "rating", "user_rating", "release", "duration", "last_played"],
+  shows: ["title", "year", "added", "rating", "user_rating", "release", "last_played"],
+  music: ["title", "added", "user_rating", "last_played"],
 };
 
 const ITEM_NOUN: Record<LibraryKind, [string, string]> = {

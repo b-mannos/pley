@@ -87,6 +87,8 @@ export interface UserState {
   watched: boolean;
   play_count: number;
   last_played_at?: Timestamp | null;
+  /** The user's own rating, 0-10 (two points per star). */
+  rating?: number | null;
 }
 
 /** Fields without a value are left out of the JSON (smaller lists). */
@@ -572,7 +574,7 @@ export interface FsListing {
   entries: FsEntry[];
 }
 
-export type LibrarySort = "title" | "year" | "added" | "rating" | "release" | "duration" | "last_played";
+export type LibrarySort = "title" | "year" | "added" | "rating" | "release" | "duration" | "last_played" | "user_rating";
 export type SortOrder = "asc" | "desc";
 
 export interface LibraryItemsQuery {

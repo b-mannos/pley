@@ -159,8 +159,8 @@ With python-plexapi 4.18 the following work against the test media:
 - Smart collections and smart playlists, play queues, and creating or editing
   collections through the Plex API (they are read-only here; manage them in
   pley). Playlists can be created and edited.
-- Editing metadata, labels, ratings and posters through the Plex API:
-  `/:/rate` is accepted and ignored, edit requests fail. Edit in pley.
+- Editing metadata, labels and posters through the Plex API: edit requests
+  fail. Edit in pley. (Ratings work: `/:/rate` sets the user's `userRating`.)
 - Filters on descendants (`episode.title` on shows) and on `resolution`, `hdr`,
   audio or subtitle language: ignored, so they don't narrow results.
 - The `/:/websockets/notifications` event stream, player remote control, markers,

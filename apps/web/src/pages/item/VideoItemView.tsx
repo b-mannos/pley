@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Play, RotateCcw } from "lucide-react";
 import type { ItemDetail, MediaFile } from "@/api/types";
 import { ListButtons, PartOfCollections } from "@/components/lists/ListButtons";
+import { StarRating } from "@/components/StarRating";
 import { Button, Select } from "@/components/ui";
 import { codecLabel, formatBytes, formatDate, formatDuration, resolutionLabel, seasonTitle, streamLabel } from "@/lib/format";
 import { saveStreamChoice } from "@/lib/progress";
@@ -124,6 +125,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
               item.content_rating ? <ContentRating key="cr" value={item.content_rating} /> : null,
               item.rating != null && item.rating > 0 ? <RatingBadge key="r" rating={item.rating} /> : null,
               qualityBadgeLabels(item).length ? <QualityBadges key="q" item={item} /> : null,
+              <StarRating key="mine" item={item} />,
             ]}
           />
 
