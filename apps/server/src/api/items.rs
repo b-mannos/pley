@@ -243,8 +243,12 @@ pub async fn refresh(
     Path(id): Path<i64>,
 ) -> ApiResult<StatusCode> {
     let row = item_or_404(&state, user.id, id).await?;
-    if !state.metadata.enabled() {
-        return Err(AppError::bad_request("add a TMDB API key in Settings → Server to fetch metadata"));
+    if !state.metadata.can_refresh(&row.kind) {
+        return Err(AppError::bad_request(match row.kind.as_str() {
+            "movie" => "add a TMDB API key in Settings → Server to fetch metadata",
+            "artist" | "album" | "track" => "turn on MusicBrainz in Settings → Server to fetch metadata",
+            _ => "choose a TV source in Settings → Server to fetch metadata",
+        }));
     }
     let metadata = state.metadata.clone();
     let events = state.events.clone();

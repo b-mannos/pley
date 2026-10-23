@@ -119,6 +119,9 @@ pub struct Config {
     pub transcoder_url: Option<String>,
     pub transcoder_token: Option<String>,
     pub transcoder_max_jobs: u32,
+    /// Where TVmaze, TheTVDB, MusicBrainz and the Cover Art Archive are
+    /// reached. `None` (tests) never contacts them.
+    pub metadata_endpoints: Option<crate::providers::Endpoints>,
 }
 
 impl Config {
@@ -160,12 +163,14 @@ impl Config {
             transcoder_url: cli.transcoder_url.clone().or(file.transcoder_url).filter(|u| !u.trim().is_empty()),
             transcoder_token: cli.transcoder_token.clone().or(file.transcoder_token),
             transcoder_max_jobs: file.transcoder_max_jobs.unwrap_or(8).max(1),
+            metadata_endpoints: Some(crate::providers::Endpoints::default()),
             data_dir,
             transcode_dir,
         })
     }
 
-    /// Configuration rooted in `data_dir`, used by tests.
+    /// Configuration rooted in `data_dir`, used by tests. Metadata providers
+    /// that need no key are not contacted.
     pub fn for_data_dir(data_dir: &Path) -> Self {
         Self {
             bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
@@ -179,6 +184,7 @@ impl Config {
             transcoder_url: None,
             transcoder_token: None,
             transcoder_max_jobs: 8,
+            metadata_endpoints: None,
         }
     }
 

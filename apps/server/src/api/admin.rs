@@ -28,8 +28,9 @@ pub async fn put_settings(
     if before.watch_libraries != after.watch_libraries {
         state.watcher.reload().await;
     }
-    if before.tmdb_api_key != after.tmdb_api_key && !after.tmdb_api_key.is_empty() {
-        // New key: fetch metadata for everything that has none yet.
+    // A new key or source: fetch metadata for everything that has none yet
+    // (shows are fetched again from a new TV source).
+    if crate::providers::settings_changed(&state.db, &before, &after).await? {
         state.scanner.enqueue_all(false).await?;
     }
     Ok(Json((*after).clone()))

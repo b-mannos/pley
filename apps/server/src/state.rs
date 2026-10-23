@@ -72,7 +72,12 @@ impl AppState {
         if let Err(err) = store.migrate_legacy(&config.metadata_dir()).await {
             tracing::warn!("moving pictures into the blob store failed: {err:#}");
         }
-        let metadata = MetadataAgent::new(db.clone(), settings.clone(), store.clone());
+        let metadata = MetadataAgent::with_endpoints(
+            db.clone(),
+            settings.clone(),
+            store.clone(),
+            config.metadata_endpoints.clone(),
+        );
         let scanner =
             Scanner::new(db.clone(), transcoder.clone(), events.clone(), metadata.clone(), store.clone(), &config);
         let watcher = LibraryWatcher::new(db.clone(), scanner.clone(), settings.clone());

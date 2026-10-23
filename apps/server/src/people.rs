@@ -671,11 +671,12 @@ mod tests {
         let tvmaze = credit(PersonId::Tvmaze(7), "Ann Actor", Role::Actor, Some("Ann"));
         replace(&db, 1, &[tmdb, tvmaze.clone()]).await.unwrap();
         replace(&db, 2, &[NewCredit { name: "Ann B. Actor".into(), ..tvmaze }]).await.unwrap();
-        let people: Vec<(Option<i64>, Option<i64>, Option<i64>, String)> =
-            sqlx::query_as("SELECT tmdb_id, tvmaze_id, tvdb_id, name FROM people ORDER BY id")
-                .fetch_all(&db.read)
-                .await
-                .unwrap();
+        /// TMDB, TVmaze and TheTVDB ids, and the name.
+        type Person = (Option<i64>, Option<i64>, Option<i64>, String);
+        let people: Vec<Person> = sqlx::query_as("SELECT tmdb_id, tvmaze_id, tvdb_id, name FROM people ORDER BY id")
+            .fetch_all(&db.read)
+            .await
+            .unwrap();
         assert_eq!(
             people,
             vec![(Some(7), None, None, "Ann Actor".to_owned()), (None, Some(7), None, "Ann B. Actor".to_owned())]

@@ -308,7 +308,7 @@ impl Scanner {
         crate::overrides::apply_library(&self.db, library_id).await?;
         self.events.send(ServerEvent::LibraryChanged { library_id });
 
-        if kind != LibraryKind::Music && self.metadata.enabled() {
+        if self.metadata.enabled_for(kind) {
             self.set_status(&lib, ScanPhase::Metadata, 0, 0);
             let progress = |done: u64, total: u64| self.set_status(&lib, ScanPhase::Metadata, done, total);
             if let Err(err) = self.metadata.refresh_library(&lib, force, &progress).await {
@@ -642,6 +642,8 @@ impl<'a> Writer<'a> {
 
 async fn upsert_item(conn: &mut SqliteConnection, library_id: i64, item: &NewItem) -> sqlx::Result<i64> {
     let now = now();
+    // Titles and years come from the files until a metadata agent matched the
+    // item; music tags keep them (MusicBrainz only fills in what they lack).
     sqlx::query_scalar(
         "INSERT INTO items (library_id, parent_id, grandparent_id, kind, key, title, sort_title, original_title, year, idx, disc,
                             duration_ms, path, release_date, genres, tmdb_id, imdb_id, added_at, updated_at)
@@ -649,10 +651,10 @@ async fn upsert_item(conn: &mut SqliteConnection, library_id: i64, item: &NewIte
          ON CONFLICT(library_id, key) DO UPDATE SET
             parent_id = excluded.parent_id,
             grandparent_id = excluded.grandparent_id,
-            title = CASE WHEN items.metadata_at IS NULL AND items.metadata_locked = 0 THEN excluded.title ELSE items.title END,
-            sort_title = CASE WHEN items.metadata_at IS NULL AND items.metadata_locked = 0 THEN excluded.sort_title ELSE items.sort_title END,
-            original_title = CASE WHEN items.metadata_at IS NULL AND items.metadata_locked = 0 THEN excluded.original_title ELSE items.original_title END,
-            year = CASE WHEN items.metadata_at IS NULL AND items.metadata_locked = 0 THEN COALESCE(excluded.year, items.year) ELSE items.year END,
+            title = CASE WHEN (items.metadata_at IS NULL OR items.kind IN ('artist', 'album')) AND items.metadata_locked = 0 THEN excluded.title ELSE items.title END,
+            sort_title = CASE WHEN (items.metadata_at IS NULL OR items.kind IN ('artist', 'album')) AND items.metadata_locked = 0 THEN excluded.sort_title ELSE items.sort_title END,
+            original_title = CASE WHEN (items.metadata_at IS NULL OR items.kind IN ('artist', 'album')) AND items.metadata_locked = 0 THEN excluded.original_title ELSE items.original_title END,
+            year = CASE WHEN (items.metadata_at IS NULL OR items.kind IN ('artist', 'album')) AND items.metadata_locked = 0 THEN COALESCE(excluded.year, items.year) ELSE items.year END,
             idx = excluded.idx,
             disc = excluded.disc,
             duration_ms = COALESCE(excluded.duration_ms, items.duration_ms),

@@ -61,7 +61,7 @@ pub async fn edit(
         changes.push((field, value));
     }
     overrides::set(&state.db, id, &changes).await?;
-    if changes.iter().any(|(_, v)| v.is_none()) && state.metadata.enabled() {
+    if changes.iter().any(|(_, v)| v.is_none()) && state.metadata.can_refresh(&row.kind) {
         refresh_later(&state, id, row.library_id);
     }
     state.events.send(ServerEvent::LibraryChanged { library_id: row.library_id });
@@ -93,7 +93,7 @@ pub async fn matches(
     Query(query): Query<MatchQuery>,
 ) -> ApiResult<Json<Vec<MatchCandidate>>> {
     let row = item_or_404(&state, user.id, id).await?;
-    if !state.metadata.enabled() {
+    if !state.metadata.tmdb_enabled() {
         return Err(AppError::bad_request("add a TMDB API key in Settings → Server to search for matches"));
     }
     let tv = match row.kind.as_str() {
@@ -142,7 +142,7 @@ pub async fn artwork_options(
 ) -> ApiResult<Json<Vec<ArtworkCandidate>>> {
     item_or_404(&state, user.id, id).await?;
     let kind = artwork_kind(&kind)?;
-    if !state.metadata.enabled() {
+    if !state.metadata.tmdb_enabled() {
         return Err(AppError::bad_request("add a TMDB API key in Settings → Server to browse artwork"));
     }
     Ok(Json(state.metadata.artwork_candidates(id, kind).await.map_err(|e| AppError::bad_request(e.to_string()))?))
@@ -220,7 +220,7 @@ pub async fn reset_artwork(
         .bind(id)
         .execute(&state.db.write)
         .await?;
-    if state.metadata.enabled() {
+    if state.metadata.can_refresh(&row.kind) {
         refresh_later(&state, id, row.library_id);
     } else {
         state.scanner.enqueue(row.library_id, false);

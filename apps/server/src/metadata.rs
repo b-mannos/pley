@@ -14,6 +14,7 @@ use serde::de::DeserializeOwned;
 use crate::db::Db;
 use crate::library::{LibraryKind, LibraryRow};
 use crate::people;
+use crate::providers::{Endpoints, ProviderError, Providers, TvSource};
 use crate::settings::SettingsStore;
 use crate::store::{self, Store};
 use crate::util::{normalize_key, now, sort_title};
@@ -28,6 +29,8 @@ pub struct MetadataAgent {
     store: Arc<Store>,
     /// One credits backfill at a time (startup and scans can both start one).
     backfill: tokio::sync::Mutex<()>,
+    /// TV shows from TVmaze or TheTVDB, music from MusicBrainz.
+    providers: Providers,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -188,6 +191,7 @@ struct ShowCredits {
 #[derive(Deserialize)]
 struct ExternalIds {
     imdb_id: Option<String>,
+    tvdb_id: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -244,18 +248,70 @@ enum TmdbError {
     Other(#[from] anyhow::Error),
 }
 
+impl From<ProviderError> for TmdbError {
+    fn from(err: ProviderError) -> Self {
+        match err {
+            ProviderError::Unauthorized(_) => TmdbError::Unauthorized,
+            ProviderError::NotFound => TmdbError::NotFound,
+            ProviderError::Other(err) => TmdbError::Other(err),
+        }
+    }
+}
+
 impl MetadataAgent {
     pub fn new(db: Db, settings: Arc<SettingsStore>, store: Arc<Store>) -> Arc<Self> {
+        Self::with_endpoints(db, settings, store, Some(Endpoints::default()))
+    }
+
+    /// `endpoints`: where TVmaze, TheTVDB and MusicBrainz are reached; `None`
+    /// never contacts them.
+    pub fn with_endpoints(
+        db: Db,
+        settings: Arc<SettingsStore>,
+        store: Arc<Store>,
+        endpoints: Option<Endpoints>,
+    ) -> Arc<Self> {
         let http = reqwest::Client::builder()
             .user_agent(concat!("pley/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(20))
             .build()
             .expect("http client");
-        Arc::new(Self { db, settings, http, store, backfill: tokio::sync::Mutex::new(()) })
+        let providers = Providers::new(db.clone(), settings.clone(), store.clone(), endpoints);
+        Arc::new(Self { db, settings, http, store, backfill: tokio::sync::Mutex::new(()), providers })
     }
 
+    /// Whether any metadata source is in use (TMDB, a TV source or MusicBrainz).
     pub fn enabled(&self) -> bool {
+        self.tmdb_enabled() || self.can_refresh("show") || self.can_refresh("album")
+    }
+
+    /// TMDB has a key: movies, collections, "Fix match" and artwork choices.
+    pub fn tmdb_enabled(&self) -> bool {
         !self.settings.get().tmdb_api_key.is_empty()
+    }
+
+    /// Whether items of this kind (`movie`, `show`, `episode`, `album`, …)
+    /// get metadata from somewhere.
+    pub fn can_refresh(&self, kind: &str) -> bool {
+        match kind {
+            "movie" => self.tmdb_enabled(),
+            "show" | "season" | "episode" => match self.providers.tv_source() {
+                Some(TvSource::Tmdb) => self.tmdb_enabled(),
+                Some(_) => true,
+                None => false,
+            },
+            "artist" | "album" | "track" => self.providers.music_enabled(),
+            _ => false,
+        }
+    }
+
+    /// Whether scans of a library of this kind fetch metadata.
+    pub fn enabled_for(&self, kind: LibraryKind) -> bool {
+        self.can_refresh(match kind {
+            LibraryKind::Movies => "movie",
+            LibraryKind::Shows => "show",
+            LibraryKind::Music => "album",
+        })
     }
 
     /// Fetch metadata for items that never had any (or all, when `force`).
@@ -268,7 +324,7 @@ impl MetadataAgent {
         let kind = match lib.kind() {
             LibraryKind::Movies => "movie",
             LibraryKind::Shows => "show",
-            LibraryKind::Music => return Ok(()),
+            LibraryKind::Music => return self.providers.refresh_music_library(lib, force, progress).await,
         };
         let items: Vec<Candidate> = sqlx::query_as(
             "SELECT id, kind, title, year, tmdb_id, imdb_id, poster, backdrop FROM items
@@ -296,11 +352,13 @@ impl MetadataAgent {
             match result {
                 Ok(()) => {}
                 Err(TmdbError::Unauthorized) => {
-                    tracing::error!("TMDB rejected the API key; check Settings → Server");
-                    bail!("invalid TMDB API key");
+                    let source =
+                        if kind == "show" { self.providers.tv_source().map_or("TMDB", TvSource::name) } else { "TMDB" };
+                    tracing::error!("{source} rejected the API key; check Settings → Server");
+                    bail!("invalid {source} API key");
                 }
                 Err(TmdbError::NotFound) => {
-                    tracing::debug!("no TMDB match for item {id}");
+                    tracing::debug!("no metadata match for item {id}");
                     let _ = sqlx::query("UPDATE items SET metadata_at = ? WHERE id = ?")
                         .bind(-now())
                         .bind(id)
@@ -320,16 +378,19 @@ impl MetadataAgent {
     /// Cast and crew of movies and shows matched before credits were stored:
     /// one request per movie, and one per show and season.
     pub async fn backfill_credits(&self, library_id: Option<i64>) {
-        if !self.enabled() {
+        if !self.tmdb_enabled() {
             return;
         }
         let _running = self.backfill.lock().await;
+        // Shows only when TMDB is their source.
+        let shows = self.providers.tv_source() == Some(TvSource::Tmdb);
         let items: Vec<(i64, String, i64)> = match sqlx::query_as(
             "SELECT id, kind, tmdb_id FROM items
-             WHERE kind IN ('movie', 'show') AND tmdb_id IS NOT NULL AND credits_at IS NULL AND metadata_locked = 0
-               AND (?1 IS NULL OR library_id = ?1)",
+             WHERE (kind = 'movie' OR (kind = 'show' AND ?2)) AND tmdb_id IS NOT NULL AND credits_at IS NULL
+               AND metadata_locked = 0 AND (?1 IS NULL OR library_id = ?1)",
         )
         .bind(library_id)
+        .bind(shows)
         .fetch_all(&self.db.read)
         .await
         {
@@ -433,10 +494,14 @@ impl MetadataAgent {
                 .fetch_optional(&self.db.read)
                 .await?;
         let Some((kind, parent, grandparent)) = row else { bail!("item not found") };
+        if !self.can_refresh(&kind) {
+            return Ok(());
+        }
         let target = match kind.as_str() {
-            "movie" | "show" => item_id,
+            "movie" | "show" | "artist" | "album" => item_id,
             "season" => parent.context("season without show")?,
             "episode" => grandparent.context("episode without show")?,
+            "track" => parent.context("track without album")?,
             _ => return Ok(()),
         };
         let item: Candidate =
@@ -451,7 +516,11 @@ impl MetadataAgent {
         let id = item.id;
         match item.kind.as_str() {
             "movie" => self.refresh_movie(&item).await?,
-            "show" => self.refresh_show(&item).await?,
+            "show" => match self.providers.tv_source() {
+                Some(source @ (TvSource::Tvmaze | TvSource::Tvdb)) => self.providers.refresh_show(source, id).await?,
+                _ => self.refresh_show(&item).await?,
+            },
+            "artist" | "album" => self.providers.refresh_music_item(id).await?,
             _ => return Ok(()),
         }
         // Hand edits win over whatever was just fetched.
@@ -498,6 +567,21 @@ impl MetadataAgent {
             .bind(item_id)
             .execute(&self.db.write)
             .await?;
+        // A show refreshed from TVmaze or TheTVDB is found there by the ids
+        // TMDB has for the chosen entry.
+        if matches!(self.providers.tv_source(), Some(TvSource::Tvmaze | TvSource::Tvdb)) {
+            let kind: Option<String> = sqlx::query_scalar("SELECT kind FROM items WHERE id = ?")
+                .bind(item_id)
+                .fetch_optional(&self.db.read)
+                .await?;
+            if kind.as_deref() == Some("show") {
+                let ids: ExternalIds = self
+                    .get(&format!("/tv/{tmdb_id}/external_ids"), &[])
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                self.providers.rematched(item_id, ids.imdb_id, ids.tvdb_id).await?;
+            }
+        }
         self.refresh_item(item_id).await
     }
 
