@@ -955,21 +955,31 @@ async fn update_counts(conn: &mut SqliteConnection, library_id: i64) -> sqlx::Re
     // `+kind`: children are counted through the parent indexes. Before the
     // first `PRAGMA optimize` SQLite would otherwise go through every episode
     // of the library for each show (seconds of holding the writer).
+    // Only counts that changed are written: every write to an item makes
+    // apps fetch the library's listings again (see `listing_versions`).
     let statements = [
-        "UPDATE items SET
-            leaf_count = (SELECT COUNT(*) FROM items e WHERE e.grandparent_id = items.id AND +e.kind = 'episode'),
-            child_count = (SELECT COUNT(*) FROM items s WHERE s.parent_id = items.id AND +s.kind = 'season')
-         WHERE library_id = ? AND kind = 'show'",
-        "UPDATE items SET leaf_count = (SELECT COUNT(*) FROM items e WHERE e.parent_id = items.id)
-         WHERE library_id = ? AND kind = 'season'",
-        "UPDATE items SET
-            leaf_count = (SELECT COUNT(*) FROM items t WHERE t.grandparent_id = items.id AND +t.kind = 'track'),
-            child_count = (SELECT COUNT(*) FROM items a WHERE a.parent_id = items.id)
-         WHERE library_id = ? AND kind = 'artist'",
-        "UPDATE items SET
-            leaf_count = (SELECT COUNT(*) FROM items t WHERE t.parent_id = items.id),
-            duration_ms = (SELECT SUM(t.duration_ms) FROM items t WHERE t.parent_id = items.id)
-         WHERE library_id = ? AND kind = 'album'",
+        "UPDATE items SET leaf_count = c.leaves, child_count = c.children
+         FROM (SELECT p.id,
+                 (SELECT COUNT(*) FROM items e WHERE e.grandparent_id = p.id AND +e.kind = 'episode') AS leaves,
+                 (SELECT COUNT(*) FROM items s WHERE s.parent_id = p.id AND +s.kind = 'season') AS children
+               FROM items p WHERE p.library_id = ? AND p.kind = 'show') AS c
+         WHERE items.id = c.id AND (items.leaf_count IS NOT c.leaves OR items.child_count IS NOT c.children)",
+        "UPDATE items SET leaf_count = c.leaves
+         FROM (SELECT p.id, (SELECT COUNT(*) FROM items e WHERE e.parent_id = p.id) AS leaves
+               FROM items p WHERE p.library_id = ? AND p.kind = 'season') AS c
+         WHERE items.id = c.id AND items.leaf_count IS NOT c.leaves",
+        "UPDATE items SET leaf_count = c.leaves, child_count = c.children
+         FROM (SELECT p.id,
+                 (SELECT COUNT(*) FROM items t WHERE t.grandparent_id = p.id AND +t.kind = 'track') AS leaves,
+                 (SELECT COUNT(*) FROM items a WHERE a.parent_id = p.id) AS children
+               FROM items p WHERE p.library_id = ? AND p.kind = 'artist') AS c
+         WHERE items.id = c.id AND (items.leaf_count IS NOT c.leaves OR items.child_count IS NOT c.children)",
+        "UPDATE items SET leaf_count = c.leaves, duration_ms = c.duration
+         FROM (SELECT p.id,
+                 (SELECT COUNT(*) FROM items t WHERE t.parent_id = p.id) AS leaves,
+                 (SELECT SUM(t.duration_ms) FROM items t WHERE t.parent_id = p.id) AS duration
+               FROM items p WHERE p.library_id = ? AND p.kind = 'album') AS c
+         WHERE items.id = c.id AND (items.leaf_count IS NOT c.leaves OR items.duration_ms IS NOT c.duration)",
     ];
     for sql in statements {
         sqlx::query(sql).bind(library_id).execute(&mut *conn).await?;

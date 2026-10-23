@@ -816,6 +816,40 @@ async fn library_listings_answer_304_while_nothing_changed() {
 }
 
 #[tokio::test]
+async fn rescans_that_find_nothing_new_keep_listings_cached() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    for (s, e) in [(1, 1), (1, 2), (2, 1)] {
+        app.media_file(&format!("tv/Show (2015)/Season {s:02}/Show - S{s:02}E{e:02}.mkv"), 1024);
+    }
+    let tv = app.library(&admin, "TV", "shows", "tv").await;
+    sqlx::query("UPDATE media_files SET probed = 1").execute(&app.state.db.write).await.unwrap();
+    let uri = format!("/api/libraries/{tv}/items");
+    let first = app.get(&uri, &admin).await;
+    assert_eq!(
+        (first.body["items"][0]["leaf_count"].clone(), first.body["items"][0]["child_count"].clone()),
+        (json!(3), json!(2))
+    );
+    let etag = first.headers["etag"].to_str().unwrap().to_owned();
+
+    // Every scan used to write the counts of every show and season again,
+    // which made every app fetch its listings again.
+    rescan(&app, &admin, tv).await;
+    assert_eq!(revalidate(&app, &uri, &admin, &etag).await.status, StatusCode::NOT_MODIFIED);
+
+    // A new episode changes the counts, and the listing.
+    app.media_file("tv/Show (2015)/Season 02/Show - S02E02.mkv", 1024);
+    rescan(&app, &admin, tv).await;
+    let changed = revalidate(&app, &uri, &admin, &etag).await;
+    assert_eq!(changed.status, StatusCode::OK);
+    assert_eq!(changed.body["items"][0]["leaf_count"], json!(4));
+    let show = changed.body["items"][0]["id"].as_i64().unwrap();
+    let seasons = app.get(&format!("/api/items/{show}/children"), &admin).await;
+    let counts: Vec<_> = seasons.body["items"].as_array().unwrap().iter().map(|s| s["leaf_count"].clone()).collect();
+    assert_eq!(counts, [json!(2), json!(2)]);
+}
+
+#[tokio::test]
 async fn editions_are_versions_of_one_movie_with_their_names() {
     let app = TestApp::new().await;
     let token = app.setup_admin().await;
