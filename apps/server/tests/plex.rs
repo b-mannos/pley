@@ -314,7 +314,7 @@ async fn shows_hierarchy_search_and_hubs() {
 
 #[tokio::test]
 async fn cast_and_crew_tags_and_filters() {
-    use pley::people::{self, NewCredit, Role};
+    use pley::people::{self, NewCredit, PersonId, Role};
 
     let app = TestApp::new().await;
     let token = app.setup().await;
@@ -331,7 +331,7 @@ async fn cast_and_crew_tags_and_filters() {
     };
     let (alpha, beta) = (id_of("Alpha"), id_of("Beta"));
     let credit = |tmdb_id: i64, name: &str, role: Role, character: Option<&str>| NewCredit {
-        tmdb_id,
+        person: PersonId::Tmdb(tmdb_id),
         name: name.into(),
         photo: Some("https://image.tmdb.org/t/p/h632/face.jpg".into()),
         role,

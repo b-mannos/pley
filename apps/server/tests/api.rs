@@ -11,7 +11,7 @@ use axum::http::{Method, Request, StatusCode, header};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use pley::people::{self, NewCredit, Role};
+use pley::people::{self, NewCredit, PersonId, Role};
 use pley::{AppState, Config};
 
 struct TestApp {
@@ -866,7 +866,7 @@ async fn metadata_edits_survive_rescans() {
 
 fn credit(tmdb_id: i64, name: &str, role: Role, character: Option<&str>, photo: Option<&str>) -> NewCredit {
     NewCredit {
-        tmdb_id,
+        person: PersonId::Tmdb(tmdb_id),
         name: name.into(),
         photo: photo.map(str::to_owned),
         role,

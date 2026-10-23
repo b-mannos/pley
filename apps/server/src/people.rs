@@ -1,6 +1,7 @@
-//! Cast and crew. Credits come from TMDB along with the rest of the metadata;
-//! people are shared between items, and a person's photo is downloaded into
-//! the blob store ([`crate::store`]) the first time someone looks at it.
+//! Cast and crew. Credits come from the metadata provider along with the rest
+//! of the metadata (TMDB, or TVmaze or TheTVDB for TV shows); people are
+//! shared between items, and a person's photo is downloaded into the blob
+//! store ([`crate::store`]) the first time someone looks at it.
 
 use std::collections::HashMap;
 
@@ -120,10 +121,30 @@ impl Role {
     }
 }
 
+/// A person's id at the provider their credit comes from. People are stored
+/// once per provider id; the same actor from two providers is two people.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PersonId {
+    Tmdb(i64),
+    Tvmaze(i64),
+    Tvdb(i64),
+}
+
+impl PersonId {
+    /// The `people` column holding this kind of id, and the id.
+    fn column(self) -> (&'static str, i64) {
+        match self {
+            PersonId::Tmdb(id) => ("tmdb_id", id),
+            PersonId::Tvmaze(id) => ("tvmaze_id", id),
+            PersonId::Tvdb(id) => ("tvdb_id", id),
+        }
+    }
+}
+
 /// A credit to store for an item.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewCredit {
-    pub tmdb_id: i64,
+    pub person: PersonId,
     pub name: String,
     /// Full URL of the person's photo.
     pub photo: Option<String>,
@@ -149,7 +170,7 @@ pub fn tmdb_photo(profile_path: Option<&str>) -> Option<String> {
 
 fn actor(c: &CastCredit) -> NewCredit {
     NewCredit {
-        tmdb_id: c.id,
+        person: PersonId::Tmdb(c.id),
         name: c.name.clone(),
         photo: tmdb_photo(c.profile_path.as_deref()),
         role: Role::Actor,
@@ -169,7 +190,7 @@ fn crew(crew: &[CrewCredit], producers: bool) -> Vec<NewCredit> {
                 _ => return None,
             };
             Some(NewCredit {
-                tmdb_id: c.id,
+                person: PersonId::Tmdb(c.id),
                 name: c.name.clone(),
                 photo: tmdb_photo(c.profile_path.as_deref()),
                 role,
@@ -194,9 +215,9 @@ fn crew(crew: &[CrewCredit], producers: bool) -> Vec<NewCredit> {
 /// all ("Alice / Bob").
 fn dedupe(credits: Vec<NewCredit>) -> Vec<NewCredit> {
     let mut out: Vec<NewCredit> = Vec::with_capacity(credits.len());
-    let mut index: HashMap<(i64, Role), usize> = HashMap::new();
+    let mut index: HashMap<(PersonId, Role), usize> = HashMap::new();
     for credit in credits {
-        match index.get(&(credit.tmdb_id, credit.role)) {
+        match index.get(&(credit.person, credit.role)) {
             Some(&i) => {
                 if let Some(part) = credit.character {
                     let existing = &mut out[i].character;
@@ -211,7 +232,7 @@ fn dedupe(credits: Vec<NewCredit>) -> Vec<NewCredit> {
                 }
             }
             None => {
-                index.insert((credit.tmdb_id, credit.role), out.len());
+                index.insert((credit.person, credit.role), out.len());
                 out.push(credit);
             }
         }
@@ -236,7 +257,7 @@ pub fn show_credits(credits: &AggregateCredits, creators: &[Creator]) -> Vec<New
         .into_iter()
         .take(MAX_CAST)
         .map(|c| NewCredit {
-            tmdb_id: c.id,
+            person: PersonId::Tmdb(c.id),
             name: c.name.clone(),
             photo: tmdb_photo(c.profile_path.as_deref()),
             role: Role::Actor,
@@ -245,12 +266,22 @@ pub fn show_credits(credits: &AggregateCredits, creators: &[Creator]) -> Vec<New
         })
         .collect();
     out.extend(creators.iter().map(|c| NewCredit {
-        tmdb_id: c.id,
+        person: PersonId::Tmdb(c.id),
         name: c.name.clone(),
         photo: tmdb_photo(c.profile_path.as_deref()),
         role: Role::Creator,
         character: None,
     }));
+    dedupe(out)
+}
+
+/// Credits of a show from another provider (TVmaze, TheTVDB): the billed
+/// cast in order, then the creators, with the same limits and merging as
+/// TMDB's.
+pub fn provider_show_credits(cast: Vec<NewCredit>, creators: Vec<NewCredit>) -> Vec<NewCredit> {
+    let mut out = dedupe(cast);
+    out.truncate(MAX_CAST);
+    out.extend(creators);
     dedupe(out)
 }
 
@@ -265,19 +296,22 @@ pub fn episode_credits(guests: &[CastCredit], crew_credits: &[CrewCredit]) -> Ve
     dedupe(out)
 }
 
-/// Replace the credits of an item.
+/// Replace the credits of an item. People are found by the id of the
+/// provider the credit comes from.
 pub async fn replace(db: &Db, item_id: i64, credits: &[NewCredit]) -> sqlx::Result<()> {
     let now = now();
     let mut tx = db.write.begin().await?;
     sqlx::query("DELETE FROM item_people WHERE item_id = ?").bind(item_id).execute(&mut *tx).await?;
     for (position, credit) in credits.iter().enumerate() {
-        let person: i64 = sqlx::query_scalar(
-            "INSERT INTO people (tmdb_id, name, photo_url, updated_at) VALUES (?, ?, ?, ?)
-             ON CONFLICT (tmdb_id) DO UPDATE SET name = excluded.name,
+        let (column, id) = credit.person.column();
+        // `column` is one of three fixed names.
+        let person: i64 = sqlx::query_scalar(&format!(
+            "INSERT INTO people ({column}, name, photo_url, updated_at) VALUES (?, ?, ?, ?)
+             ON CONFLICT ({column}) DO UPDATE SET name = excluded.name,
                  photo_url = COALESCE(excluded.photo_url, photo_url), updated_at = excluded.updated_at
-             RETURNING id",
-        )
-        .bind(credit.tmdb_id)
+             RETURNING id"
+        ))
+        .bind(id)
         .bind(&credit.name)
         .bind(&credit.photo)
         .bind(now)
@@ -523,6 +557,17 @@ mod tests {
         CrewCredit { id, name: name.into(), job: job.into(), department: department.into(), profile_path: None }
     }
 
+    fn tmdb(credit: &NewCredit) -> i64 {
+        match credit.person {
+            PersonId::Tmdb(id) => id,
+            other => panic!("not a TMDB person: {other:?}"),
+        }
+    }
+
+    fn credit(person: PersonId, name: &str, role: Role, character: Option<&str>) -> NewCredit {
+        NewCredit { person, name: name.into(), photo: None, role, character: character.map(str::to_owned) }
+    }
+
     #[test]
     fn movie_credits_keep_billing_and_merge_duplicates() {
         let credits = Credits {
@@ -543,7 +588,7 @@ mod tests {
         };
         let out = movie_credits(&credits);
         let summary: Vec<(i64, Role, Option<&str>)> =
-            out.iter().map(|c| (c.tmdb_id, c.role, c.character.as_deref())).collect();
+            out.iter().map(|c| (tmdb(c), c.role, c.character.as_deref())).collect();
         assert_eq!(
             summary,
             vec![
@@ -576,7 +621,67 @@ mod tests {
         let out = show_credits(&credits, &creators);
         assert_eq!(out[0].character.as_deref(), Some("Walter White"));
         assert_eq!(out[0].photo.as_deref(), Some("https://image.tmdb.org/t/p/h632/abc.jpg"));
-        assert_eq!((out[1].tmdb_id, out[1].role), (9, Role::Creator));
+        assert_eq!((tmdb(&out[1]), out[1].role), (9, Role::Creator));
+    }
+
+    #[test]
+    fn provider_credits_merge_parts_and_list_creators_last() {
+        let out = provider_show_credits(
+            vec![
+                credit(PersonId::Tvmaze(1), "Tatiana Maslany", Role::Actor, Some("Sarah Manning")),
+                credit(PersonId::Tvmaze(2), "Jordan Gavaris", Role::Actor, Some("Felix Dawkins")),
+                credit(PersonId::Tvmaze(1), "Tatiana Maslany", Role::Actor, Some("Cosima Niehaus")),
+            ],
+            vec![credit(PersonId::Tvmaze(3), "Graeme Manson", Role::Creator, None)],
+        );
+        let summary: Vec<(PersonId, Role, Option<&str>)> =
+            out.iter().map(|c| (c.person, c.role, c.character.as_deref())).collect();
+        assert_eq!(
+            summary,
+            vec![
+                (PersonId::Tvmaze(1), Role::Actor, Some("Sarah Manning / Cosima Niehaus")),
+                (PersonId::Tvmaze(2), Role::Actor, Some("Felix Dawkins")),
+                (PersonId::Tvmaze(3), Role::Creator, None),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn people_are_kept_per_provider_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("pley.db")).await.unwrap();
+        sqlx::query("INSERT INTO libraries (id, name, kind, created_at) VALUES (1, 'TV', 'shows', 0)")
+            .execute(&db.write)
+            .await
+            .unwrap();
+        for id in [1, 2] {
+            sqlx::query(
+                "INSERT INTO items (id, library_id, kind, key, title, sort_title, added_at, updated_at)
+                 VALUES (?, 1, 'show', ?, 'Show', 'show', 0, 0)",
+            )
+            .bind(id)
+            .bind(format!("show:{id}"))
+            .execute(&db.write)
+            .await
+            .unwrap();
+        }
+        // The same number at two providers is two people; the same TVmaze id
+        // on two shows is one.
+        let tmdb = credit(PersonId::Tmdb(7), "Ann Actor", Role::Actor, Some("Ann"));
+        let tvmaze = credit(PersonId::Tvmaze(7), "Ann Actor", Role::Actor, Some("Ann"));
+        replace(&db, 1, &[tmdb, tvmaze.clone()]).await.unwrap();
+        replace(&db, 2, &[NewCredit { name: "Ann B. Actor".into(), ..tvmaze }]).await.unwrap();
+        let people: Vec<(Option<i64>, Option<i64>, Option<i64>, String)> =
+            sqlx::query_as("SELECT tmdb_id, tvmaze_id, tvdb_id, name FROM people ORDER BY id")
+                .fetch_all(&db.read)
+                .await
+                .unwrap();
+        assert_eq!(
+            people,
+            vec![(Some(7), None, None, "Ann Actor".to_owned()), (None, Some(7), None, "Ann B. Actor".to_owned())]
+        );
+        assert_eq!(for_item(&db, 1).await.unwrap().len(), 2);
+        assert_eq!(for_item(&db, 2).await.unwrap()[0].id, for_item(&db, 1).await.unwrap()[1].id);
     }
 
     #[test]
