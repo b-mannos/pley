@@ -89,6 +89,17 @@ pub(super) async fn item_nodes(
             }
         }
     }
+    if detail.markers {
+        // The first version's: the one played unless the client picks another.
+        let first: Vec<(i64, i64)> = files.iter().filter_map(|(item, f)| Some((*item, f.first()?.id))).collect();
+        let file_ids: Vec<i64> = first.iter().map(|(_, file)| *file).collect();
+        let mut markers = meta::load_markers(&state.db, &file_ids).await?;
+        for (item, file) in first {
+            if let Some(found) = markers.remove(&file) {
+                extras.entry(item).or_default().markers = found;
+            }
+        }
+    }
     Ok(rows
         .iter()
         .map(|r| {
@@ -107,7 +118,7 @@ async fn add_people(db: &Db, ids: &[i64], extras: &mut HashMap<i64, Extras>) -> 
 }
 
 pub(super) fn listing_detail(params: &Params) -> Detail {
-    Detail { guids: params.flag("includeGuids"), full: false, media: true }
+    Detail { guids: params.flag("includeGuids"), full: false, media: true, markers: false }
 }
 
 // ------------------------------------------------------------------ sections
@@ -1458,12 +1469,13 @@ pub async fn metadata(
     let Some(first) = rows.first() else { return Err(PlexError::NotFound) };
     let lib = libraries.iter().find(|l| l.id == first.library_id);
     let sections = Sections::new(&libraries);
-    let mut nodes = item_nodes(&state, &rows, &sections, Detail { guids: true, full: true, media: true }).await?;
+    let detail = Detail { guids: true, full: true, media: true, markers: params.flag("includeMarkers") };
+    let mut nodes = item_nodes(&state, &rows, &sections, detail).await?;
     if params.flag("includeOnDeck") {
         for (node, row) in nodes.iter_mut().zip(&rows) {
             if let Some(next) = catalog::on_deck(&state.db, user.id, row).await? {
                 if let Some(next_row) = catalog::item(&state.db, user.id, next).await? {
-                    let detail = Detail { guids: true, full: false, media: true };
+                    let detail = Detail { guids: true, full: false, media: true, markers: false };
                     let next_node = item_nodes(&state, &[next_row], &sections, detail).await?;
                     let mut on_deck = Node::new("OnDeck");
                     on_deck.extend(next_node);
@@ -1859,7 +1871,9 @@ pub async fn hub_search(State(state): State<AppState>, PlexUser(user): PlexUser,
         if group.is_empty() {
             continue;
         }
-        let items = item_nodes(&state, &group, &sections, Detail { guids: true, full: false, media: true }).await?;
+        let items =
+            item_nodes(&state, &group, &sections, Detail { guids: true, full: false, media: true, markers: false })
+                .await?;
         mc.push(hub(kind.into(), plural(kind).into(), kind, None, items));
         size += 1;
     }

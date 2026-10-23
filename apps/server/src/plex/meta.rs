@@ -13,6 +13,7 @@ use crate::catalog::{FileRow, ItemRow};
 use crate::db::Db;
 use crate::library::LibraryRow;
 use crate::library::sidecar::EXTERNAL_INDEX_BASE;
+use crate::markers::Marker;
 
 /// Plex type of a pley item kind (they happen to match).
 pub fn plex_type(kind: &str) -> &'static str {
@@ -123,6 +124,8 @@ pub struct Extras {
     /// Files of the item with seek previews (full details only): their parts
     /// get `indexes="sd"` and their chapters pictures.
     pub previews: Vec<i64>,
+    /// Intro and credits of the first version (`includeMarkers=1`).
+    pub markers: Vec<Marker>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -171,11 +174,36 @@ pub async fn load_extras(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Extr
                     path: row.path,
                     people: Vec::new(),
                     previews: Vec::new(),
+                    markers: Vec::new(),
                 },
             );
         }
     }
     Ok(out)
+}
+
+/// Intro and credits markers of these files, by file.
+pub async fn load_markers(db: &Db, file_ids: &[i64]) -> sqlx::Result<HashMap<i64, Vec<Marker>>> {
+    let mut out: HashMap<i64, Vec<Marker>> = HashMap::new();
+    for chunk in file_ids.chunks(500) {
+        let sql = format!(
+            "SELECT file_id, kind, start_ms, end_ms, source FROM markers WHERE file_id IN ({}) ORDER BY start_ms",
+            vec!["?"; chunk.len()].join(",")
+        );
+        let mut query = sqlx::query_as::<_, Marker>(&sql);
+        for id in chunk {
+            query = query.bind(id);
+        }
+        for marker in query.fetch_all(&db.read).await? {
+            out.entry(marker.file_id).or_default().push(marker);
+        }
+    }
+    Ok(out)
+}
+
+/// Plex's marker id: unique per file and kind.
+fn marker_id(marker: &Marker) -> i64 {
+    marker.file_id * 10 + if marker.kind == "credits" { 2 } else { 1 }
 }
 
 /// Media files of already loaded items, best quality first (like
@@ -219,6 +247,8 @@ pub struct Detail {
     pub full: bool,
     /// `Media`/`Part` of playable items (listings and details).
     pub media: bool,
+    /// `Marker`s: intro and credits (`includeMarkers=1` in details).
+    pub markers: bool,
 }
 
 /// `/api/items/{id}/images/{kind}?v={v}` → `(id, version)`.
@@ -448,6 +478,20 @@ pub fn item_node(
                 }
                 node.push(node_chapter);
             }
+        }
+    }
+    // Intro and credits of the first version, as Plex marks them.
+    if detail.markers && is_leaf(kind) {
+        for marker in extras.map(|e| e.markers.as_slice()).unwrap_or_default() {
+            node.push(
+                Node::new("Marker")
+                    .attr("id", marker_id(marker))
+                    .attr("type", &marker.kind)
+                    .attr("startTimeOffset", marker.start_ms)
+                    .attr("endTimeOffset", marker.end_ms)
+                    // pley's credits run to the end: the last marker.
+                    .opt("final", (marker.kind == "credits").then_some(1)),
+            );
         }
     }
     if let Some(extras) = extras {

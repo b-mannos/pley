@@ -129,6 +129,39 @@ async fn provider_guids_as_plex_reports_them() {
 }
 
 #[tokio::test]
+async fn intro_and_credits_markers_on_request() {
+    let (app, admin, movies, ..) = world().await;
+    let alien = app.ids(movies, &admin).await["Alien"];
+    let file: i64 = sqlx::query_scalar("SELECT id FROM media_files WHERE item_id = ?")
+        .bind(alien)
+        .fetch_one(&app.state.db.read)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO markers (file_id, kind, start_ms, end_ms, source, created_at)
+         VALUES (?, 'intro', 30000, 90000, 'fingerprint', 0), (?, 'credits', 5000000, 5400000, 'chapter', 0)",
+    )
+    .bind(file)
+    .bind(file)
+    .execute(&app.state.db.write)
+    .await
+    .unwrap();
+    let markers = |details: &Value| details["Metadata"][0]["Marker"].as_array().cloned().unwrap_or_default();
+
+    let plain = app.plex_json(&format!("/library/metadata/{alien}"), &admin).await;
+    assert!(markers(&plain).is_empty(), "only when asked for, as Plex does");
+    let details = app.plex_json(&format!("/library/metadata/{alien}?includeMarkers=1"), &admin).await;
+    let found = markers(&details);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(found[0]["type"], json!("intro"));
+    assert_eq!((found[0]["startTimeOffset"].as_i64(), found[0]["endTimeOffset"].as_i64()), (Some(30000), Some(90000)));
+    assert_eq!(found[0]["final"], Value::Null);
+    assert_eq!(found[1]["type"], json!("credits"));
+    assert_eq!(found[1]["final"].as_i64(), Some(1));
+    assert_ne!(found[0]["id"], found[1]["id"]);
+}
+
+#[tokio::test]
 async fn only_administrators_refresh() {
     let (app, admin, movies, ..) = world().await;
     let (bob, _) = app.user(&admin, "bob", json!({})).await;

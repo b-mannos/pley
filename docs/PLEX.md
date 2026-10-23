@@ -90,6 +90,10 @@ parameters; containers report `size`, `totalSize` and `offset`.
 - **Preview thumbnails and chapters.** Parts of files with seek previews have
   `indexes="sd"`; the BIF index is cut from pley's previews. Details list the
   first version's `Chapter`s, with a `thumb` once the file has previews.
+- **Markers.** With `includeMarkers=1`, details list the intro and credits
+  pley found in the first version as `Marker`s (`type`, `startTimeOffset`,
+  `endTimeOffset` in ms; credits are `final`), for Skip Intro and Skip
+  Credits in clients.
 - **Cast and crew.** Details carry `Role` (with the part as `role`),
   `Director`, `Writer` and `Producer` tags. Their `id` is the pley person id and
   `thumb` the TMDB photo.
@@ -165,7 +169,7 @@ With python-plexapi 4.18 the following work against the test media:
   fail. Edit in pley. (Ratings work: `/:/rate` sets the user's `userRating`.)
 - Filters on descendants (`episode.title` on shows) and on `resolution`, `hdr`,
   audio or subtitle language: ignored, so they don't narrow results.
-- The `/:/websockets/notifications` event stream, player remote control, markers,
+- The `/:/websockets/notifications` event stream, player remote control,
   related and similar items, photos and live TV.
 - Per-client capability profiles: universal transcode streams are H.264/AAC
   HLS.

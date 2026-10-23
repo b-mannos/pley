@@ -406,7 +406,7 @@ pub async fn sessions(State(state): State<AppState>, PlexUser(user): PlexUser) -
             extras.get(&row.id),
             &files,
             &sections,
-            Detail { guids: true, full: true, media: true },
+            Detail { guids: true, full: true, media: true, markers: false },
         );
         let (key, client) = session_key(&session.id);
         let play = session.play.lock().clone();
@@ -602,7 +602,7 @@ pub async fn universal_decision(
         extras.get(&row.id),
         &files[..files.len().min(1)],
         &Sections::new(&libraries),
-        Detail { guids: false, full: true, media: true },
+        Detail { guids: false, full: true, media: true, markers: false },
     );
     mark_decision(&mut node, Method::Transcode);
     Ok(Node::container()
