@@ -686,6 +686,79 @@ pub async fn item_detail(db: &Db, row: ItemRow) -> sqlx::Result<ItemDetail> {
     })
 }
 
+// ------------------------------------------------------------------ listings with conditions built by the caller
+
+/// A value for a `?` in the SQL of an [`ItemsQuery`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum SqlArg {
+    Int(i64),
+    Real(f64),
+    Text(String),
+}
+
+/// Items of one kind in a library, chosen and ordered by SQL that the caller
+/// builds (the Plex API's filters and sorts, see `plex::library`). [`VISIBLE`]
+/// applies as everywhere else.
+pub struct ItemsQuery<'a> {
+    pub library_id: i64,
+    pub kind: &'a str,
+    /// Conditions, each starting with ` AND `, on the item `i`, its parent `p`
+    /// and grandparent `gp`, the user's state `s` and the `me` CTE. Their `?`
+    /// take `args` in order.
+    pub filter: &'a str,
+    pub args: &'a [SqlArg],
+    /// Whether `filter` reads `s`; counting leaves the join out otherwise.
+    pub uses_state: bool,
+    /// `ORDER BY` terms, which may read `s` too.
+    pub order_by: &'a str,
+    pub offset: i64,
+    pub limit: Option<i64>,
+}
+
+/// Binds the arguments of an [`ItemsQuery`] after those already bound.
+macro_rules! bind_sql_args {
+    ($query:expr, $args:expr) => {{
+        let mut query = $query;
+        for arg in $args {
+            query = match arg {
+                SqlArg::Int(value) => query.bind(*value),
+                SqlArg::Real(value) => query.bind(*value),
+                SqlArg::Text(value) => query.bind(value.as_str()),
+            };
+        }
+        query
+    }};
+}
+
+/// `limit` matching items from `offset`, in the query's order.
+pub async fn items_matching(db: &Db, user_id: i64, q: &ItemsQuery<'_>) -> sqlx::Result<Vec<ItemRow>> {
+    let sql = format!(
+        "{SUMMARY_SELECT} WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ?{} ORDER BY {} LIMIT ? OFFSET ?",
+        q.filter, q.order_by
+    );
+    let query = sqlx::query_as::<_, ItemRow>(&sql).bind(user_id).bind(q.library_id).bind(q.kind);
+    bind_sql_args!(query, q.args)
+        .bind(q.limit.unwrap_or(i64::MAX).max(0))
+        .bind(q.offset.max(0))
+        .fetch_all(&db.read)
+        .await
+}
+
+/// How many items match, whatever the offset and limit.
+pub async fn count_matching(db: &Db, user_id: i64, q: &ItemsQuery<'_>) -> sqlx::Result<i64> {
+    let state = if q.uses_state {
+        " LEFT JOIN user_item_state s ON s.item_id = i.id AND s.user_id = (SELECT uid FROM me)"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "{ME_CTE} SELECT COUNT(*) FROM {VISIBLE_ITEMS}{state} WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ?{}",
+        q.filter
+    );
+    let query = sqlx::query_scalar::<_, i64>(&sql).bind(user_id).bind(q.library_id).bind(q.kind);
+    bind_sql_args!(query, q.args).fetch_one(&db.read).await
+}
+
 // ------------------------------------------------------------------ watch state
 
 pub const WATCHED_THRESHOLD: f64 = 0.9;

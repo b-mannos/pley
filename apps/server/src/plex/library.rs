@@ -13,7 +13,8 @@ use axum::response::Response;
 use super::meta::{self, Detail, Extras, Sections, kind_for_number, kinds_of, plex_type, section_type, type_number};
 use super::{Node, Page, Params, PlexAdmin, PlexError, PlexInfo, PlexResult, PlexUser};
 use crate::auth::AuthUser;
-use crate::catalog::{self, ItemRow, LibraryQuery, ME_CTE, VISIBLE, VISIBLE_ITEMS};
+use crate::catalog::{self, ItemRow, ItemsQuery, LibraryQuery, ME_CTE, SqlArg, VISIBLE, VISIBLE_ITEMS};
+use crate::db::Db;
 use crate::events::ServerEvent;
 use crate::library::LibraryRow;
 use crate::people;
@@ -74,7 +75,7 @@ pub(super) async fn item_nodes(
     let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
     let mut extras = meta::load_extras(&state.db, &ids).await?;
     if detail.full {
-        add_people(state, &ids, &mut extras).await?;
+        add_people(&state.db, &ids, &mut extras).await?;
     }
     let leaves: Vec<i64> = rows.iter().filter(|r| meta::is_leaf(&r.kind)).map(|r| r.id).collect();
     let files =
@@ -98,8 +99,8 @@ pub(super) async fn item_nodes(
 }
 
 /// Cast and crew of `ids` into their extras (seasons get their show's).
-async fn add_people(state: &AppState, ids: &[i64], extras: &mut HashMap<i64, Extras>) -> PlexResult<()> {
-    for (id, credits) in people::for_items(&state.db, ids).await? {
+async fn add_people(db: &Db, ids: &[i64], extras: &mut HashMap<i64, Extras>) -> PlexResult<()> {
+    for (id, credits) in people::for_items(db, ids).await? {
         extras.entry(id).or_default().people = credits;
     }
     Ok(())
@@ -665,33 +666,434 @@ fn sort_rows(rows: &mut [ItemRow], spec: &[(SortField, bool)]) {
     });
 }
 
-/// Items of `kind` in `lib` after Plex filters and sorting.
-async fn query_items(
-    state: &AppState,
-    user: &AuthUser,
-    lib: &LibraryRow,
-    kind: &str,
-    params: &Params,
-) -> PlexResult<(Vec<ItemRow>, HashMap<i64, Extras>)> {
-    let (mut rows, _) = catalog::library_items(&state.db, user.id, &LibraryQuery::all(lib.id, kind)).await?;
-    let filters = Filter::parse(params, kind);
-    let mut extras = HashMap::new();
-    if filters.iter().any(Filter::needs_extras) {
-        let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
-        extras = meta::load_extras(&state.db, &ids).await?;
-        if filters.iter().any(Filter::needs_people) {
-            add_people(state, &ids, &mut extras).await?;
+// ------------------------------------------------------------------ the same filters and sorts in SQL
+
+/// Plex's `viewCount` of an item (see [`meta::view_count`]).
+const VIEW_COUNT_SQL: &str = "(CASE WHEN COALESCE(s.watched, 0) THEN MAX(COALESCE(s.play_count, 0), 1) ELSE 0 END)";
+
+/// Whether the user watched an item of `kind` as [`Filter::matches`] sees
+/// it (shows and seasons: every episode), and whether that reads `s`.
+fn watched_sql(kind: &str) -> (&'static str, bool) {
+    match kind {
+        "show" => (
+            "(COALESCE(i.leaf_count, 0) > 0 AND COALESCE(i.leaf_count, 0) <= (SELECT COUNT(*) FROM items e
+               JOIN user_item_state us ON us.item_id = e.id WHERE e.grandparent_id = i.id AND e.kind = 'episode'
+               AND us.user_id = (SELECT uid FROM me) AND us.watched = 1))",
+            false,
+        ),
+        "season" => (
+            "(COALESCE(i.leaf_count, 0) > 0 AND COALESCE(i.leaf_count, 0) <= (SELECT COUNT(*) FROM items e
+               JOIN user_item_state us ON us.item_id = e.id WHERE e.parent_id = i.id
+               AND us.user_id = (SELECT uid FROM me) AND us.watched = 1))",
+            false,
+        ),
+        _ => ("COALESCE(s.watched, 0)", true),
+    }
+}
+
+/// A filter as SQL, for listings filtered, sorted and paged by the database:
+/// it keeps exactly the items [`Filter::matches`] keeps.
+#[derive(Debug)]
+enum Condition {
+    /// Every item.
+    All,
+    /// ` AND …` and its arguments; `state`: it reads the user's state `s`.
+    Sql { sql: String, args: Vec<SqlArg>, state: bool },
+    /// Only [`Filter::matches`] can tell (Unicode case folding, calendar dates).
+    InMemory,
+}
+
+impl Condition {
+    fn sql(sql: String, args: Vec<SqlArg>) -> Self {
+        Condition::Sql { sql, args, state: false }
+    }
+
+    /// No item.
+    fn none() -> Self {
+        Self::sql(" AND 0".into(), Vec::new())
+    }
+
+    fn reading_state(self, state: bool) -> Self {
+        match self {
+            Condition::Sql { sql, args, state: before } => Condition::Sql { sql, args, state: before || state },
+            other => other,
         }
     }
-    if !filters.is_empty() {
-        let now = now();
-        rows.retain(|r| filters.iter().all(|f| f.matches(r, extras.get(&r.id), now)));
+}
+
+impl Filter {
+    /// This filter as a condition on the item `i` (of `kind`), its parent
+    /// `p`, grandparent `gp` and the user's state `s`.
+    fn condition(&self, kind: &str, now: i64) -> Condition {
+        match (self.level, self.field.as_str()) {
+            (Level::Parent, "id") => self.number_sql("i.parent_id"),
+            (Level::Parent, "title") => self.text_sql("p.title"),
+            (Level::Parent, "index") => self.number_sql("p.idx"),
+            (Level::Grandparent, "id") => self.number_sql("i.grandparent_id"),
+            (Level::Grandparent, "title") => self.text_sql("gp.title"),
+            (Level::Parent | Level::Grandparent, _) => Condition::All,
+            (Level::Own, "title") => self.text_sql("i.title"),
+            (Level::Own, "studio") => self.text_sql("i.studio"),
+            (Level::Own, "year") => self.number_sql("i.year"),
+            (Level::Own, "decade") => self.number_sql("(i.year / 10 * 10)"),
+            (Level::Own, "index") => self.number_sql("i.idx"),
+            (Level::Own, "id") => self.number_sql("i.id"),
+            (Level::Own, "duration") => self.number_sql("i.duration_ms"),
+            (Level::Own, "viewCount") => self.number_sql(VIEW_COUNT_SQL).reading_state(true),
+            (Level::Own, "viewOffset") => self.number_sql("COALESCE(s.position_ms, 0)").reading_state(true),
+            (Level::Own, "rating" | "audienceRating") => self.number_sql("i.rating"),
+            (Level::Own, "userRating") => self.number_sql("s.rating").reading_state(true),
+            (Level::Own, "leafCount") => self.number_sql("i.leaf_count"),
+            (Level::Own, "genre") => self.tags_sql(|list| {
+                format!(
+                    "EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(i.genres) THEN i.genres END) g
+                     WHERE g.value COLLATE NOCASE IN ({list}))"
+                )
+            }),
+            (Level::Own, "contentRating") => self.tags_sql(|list| {
+                format!("(i.content_rating IS NOT NULL AND i.content_rating COLLATE NOCASE IN ({list}))")
+            }),
+            (Level::Own, field) if people_role(field).is_some() => {
+                self.people_sql(people_role(field).map(people::Role::as_str).unwrap_or_default())
+            }
+            (Level::Own, "unwatched" | "unwatchedLeaves") => {
+                let (watched, state) = watched_sql(kind);
+                self.boolean_sql(&format!("(NOT {watched})")).reading_state(state)
+            }
+            (Level::Own, "watched") => {
+                let (watched, state) = watched_sql(kind);
+                self.boolean_sql(watched).reading_state(state)
+            }
+            (Level::Own, "inProgress") => {
+                self.boolean_sql("(COALESCE(s.position_ms, 0) > 0 AND NOT COALESCE(s.watched, 0))").reading_state(true)
+            }
+            (Level::Own, "addedAt") => self.date_sql("i.added_at", now),
+            (Level::Own, "updatedAt") => self.date_sql("i.updated_at", now),
+            (Level::Own, "lastViewedAt") => self.date_sql("s.last_played_at", now).reading_state(true),
+            (Level::Own, "originallyAvailableAt") => Condition::InMemory,
+            (Level::Own, "guid") => self.guid_sql(kind),
+            (Level::Own, _) => Condition::All,
+        }
     }
-    sort_rows(&mut rows, &parse_sort(params.get("sort")));
-    if let Some(limit) = params.parse::<usize>("limit") {
-        rows.truncate(limit);
+
+    /// Whether any of `tests` holds, or none of them for `!=` and `!==`.
+    fn any_sql(&self, tests: Vec<String>, args: Vec<SqlArg>) -> Condition {
+        let negated = matches!(self.op, Op::Not | Op::NotExactly);
+        match (tests.is_empty(), negated) {
+            (true, false) => Condition::none(),
+            (true, true) => Condition::All,
+            (false, false) => Condition::sql(format!(" AND ({})", tests.join(" OR ")), args),
+            (false, true) => Condition::sql(format!(" AND NOT ({})", tests.join(" OR ")), args),
+        }
     }
-    Ok((rows, extras))
+
+    /// [`Filter::text`]: in SQL when every value is ASCII once lowercased.
+    fn text_sql(&self, column: &str) -> Condition {
+        if matches!(self.op, Op::Greater | Op::Less) {
+            return Condition::All;
+        }
+        let needles: Vec<String> = self.values.iter().map(|v| v.to_lowercase()).collect();
+        if needles.iter().any(|n| !n.is_ascii()) {
+            return Condition::InMemory;
+        }
+        // SQLite's lower() only folds ASCII. Two other characters lowercase to
+        // ASCII ('İ' to "i\u{307}", the Kelvin sign to 'k'); with those mapped
+        // first, both lowercasings have the same runs of ASCII, so they agree
+        // on every comparison with an ASCII needle.
+        let value =
+            format!("lower(replace(replace(COALESCE({column}, ''), char(304), 'i' || char(775)), char(8490), 'k'))");
+        let mut tests = Vec::new();
+        let mut args = Vec::new();
+        for needle in needles {
+            match self.op {
+                Op::Begins => tests.push(format!("instr({value}, ?) = 1")),
+                Op::Ends => {
+                    tests.push(format!("substr({value}, ?) = ?"));
+                    args.push(SqlArg::Int(-i64::try_from(needle.len()).unwrap_or(i64::MAX)));
+                }
+                Op::Exactly | Op::NotExactly => tests.push(format!("{value} = ?")),
+                _ => tests.push(format!("instr({value}, ?) > 0")),
+            }
+            args.push(SqlArg::Text(needle));
+        }
+        self.any_sql(tests, args)
+    }
+
+    /// [`Filter::number`]: compared as `f64`.
+    fn number_sql(&self, expr: &str) -> Condition {
+        let targets: Vec<f64> = self.values.iter().filter_map(|v| v.parse().ok()).collect();
+        // SQLite would compare an integer with a real exactly; `f64` doesn't.
+        let value = format!("({expr} + 0.0)");
+        match self.op {
+            Op::Is | Op::Exactly | Op::Not | Op::NotExactly => {
+                let mut tests = Vec::new();
+                let mut args = Vec::new();
+                // NaN equals nothing (and SQLite would take it for NULL).
+                for target in targets.into_iter().filter(|t| !t.is_nan()) {
+                    tests.push(format!("abs({value} - ?) < ?"));
+                    args.extend([SqlArg::Real(target), SqlArg::Real(1e-9)]);
+                }
+                let any = if tests.is_empty() { "0".to_owned() } else { tests.join(" OR ") };
+                // A missing value equals nothing.
+                let sql = if matches!(self.op, Op::Not | Op::NotExactly) {
+                    format!(" AND ({expr} IS NULL OR NOT ({any}))")
+                } else {
+                    format!(" AND {expr} IS NOT NULL AND ({any})")
+                };
+                Condition::sql(sql, args)
+            }
+            Op::Greater | Op::Less => match targets.first() {
+                Some(target) if !target.is_nan() => {
+                    let op = if self.op == Op::Greater { ">" } else { "<" };
+                    Condition::sql(format!(" AND {value} {op} ?"), vec![SqlArg::Real(*target)])
+                }
+                _ => Condition::none(),
+            },
+            Op::Begins | Op::Ends => Condition::sql(format!(" AND {expr} IS NOT NULL"), Vec::new()),
+        }
+    }
+
+    /// [`Filter::tags`]; `test` gets the placeholders of the values.
+    fn tags_sql(&self, test: impl Fn(&str) -> String) -> Condition {
+        if self.values.is_empty() {
+            return self.any_sql(Vec::new(), Vec::new());
+        }
+        let list = vec!["?"; self.values.len()].join(", ");
+        self.any_sql(vec![test(&list)], self.values.iter().map(|v| SqlArg::Text(v.clone())).collect())
+    }
+
+    /// People credited in `role`, by person id or name.
+    fn people_sql(&self, role: &str) -> Condition {
+        if self.values.is_empty() {
+            return self.any_sql(Vec::new(), Vec::new());
+        }
+        let mut args = vec![SqlArg::Text(role.to_owned())];
+        let mut who = Vec::new();
+        let ids: Vec<i64> = self.values.iter().filter_map(|v| v.parse().ok()).collect();
+        if !ids.is_empty() {
+            who.push(format!("pe.id IN ({})", vec!["?"; ids.len()].join(", ")));
+            args.extend(ids.into_iter().map(SqlArg::Int));
+        }
+        who.push(format!("pe.name COLLATE NOCASE IN ({})", vec!["?"; self.values.len()].join(", ")));
+        args.extend(self.values.iter().map(|v| SqlArg::Text(v.clone())));
+        let test = format!(
+            "EXISTS (SELECT 1 FROM item_people ip WHERE ip.item_id = i.id AND ip.role = ?
+               AND ip.person_id IN (SELECT pe.id FROM people pe WHERE {}))",
+            who.join(" OR ")
+        );
+        self.any_sql(vec![test], args)
+    }
+
+    /// [`Filter::boolean`] of `expr`, a parenthesised condition.
+    fn boolean_sql(&self, expr: &str) -> Condition {
+        let wanted = !self.values.first().is_some_and(|v| matches!(v.as_str(), "0" | "false"));
+        let negated = matches!(self.op, Op::Not | Op::NotExactly);
+        Condition::sql(if wanted != negated { format!(" AND {expr}") } else { format!(" AND NOT {expr}") }, Vec::new())
+    }
+
+    /// [`Filter::date`] of a unix time.
+    fn date_sql(&self, expr: &str, now: i64) -> Condition {
+        let Some(target) = self.values.first().and_then(|v| parse_date(v, now)) else {
+            // An unreadable date keeps whatever has a date.
+            return Condition::sql(format!(" AND {expr} IS NOT NULL"), Vec::new());
+        };
+        // The same day: less than a day apart.
+        let day = [SqlArg::Int(target.saturating_sub(DAY - 1)), SqlArg::Int(target.saturating_add(DAY - 1))];
+        match self.op {
+            Op::Greater => Condition::sql(format!(" AND {expr} > ?"), vec![SqlArg::Int(target)]),
+            Op::Less => Condition::sql(format!(" AND {expr} < ?"), vec![SqlArg::Int(target)]),
+            Op::Not | Op::NotExactly => Condition::sql(format!(" AND {expr} NOT BETWEEN ? AND ?"), day.into()),
+            _ => Condition::sql(format!(" AND {expr} BETWEEN ? AND ?"), day.into()),
+        }
+    }
+
+    /// `plex://`, `imdb://` and `tmdb://` guids (whatever the operator, like
+    /// [`Filter::matches`]).
+    fn guid_sql(&self, kind: &str) -> Condition {
+        let mut tests = Vec::new();
+        let mut args = Vec::new();
+        for value in &self.values {
+            let own = value
+                .rsplit_once('/')
+                .and_then(|(_, hex)| u64::from_str_radix(hex, 16).ok())
+                .map(|id| id as i64)
+                .filter(|id| meta::guid(kind, *id) == *value);
+            if let Some(id) = own {
+                tests.push("i.id = ?".to_owned());
+                args.push(SqlArg::Int(id));
+            }
+            if let Some(imdb) = value.strip_prefix("imdb://") {
+                tests.push("i.imdb_id = ?".to_owned());
+                args.push(SqlArg::Text(imdb.to_owned()));
+            }
+            let tmdb = value.strip_prefix("tmdb://").and_then(|t| t.parse::<i64>().ok());
+            if let Some(tmdb) = tmdb.filter(|t| format!("tmdb://{t}") == *value) {
+                tests.push("i.tmdb_id = ?".to_owned());
+                args.push(SqlArg::Int(tmdb));
+            }
+        }
+        if tests.is_empty() {
+            Condition::none()
+        } else {
+            Condition::sql(format!(" AND ({})", tests.join(" OR ")), args)
+        }
+    }
+}
+
+impl SortField {
+    /// The expression sorted on, and whether it can be NULL.
+    fn sql(self) -> (&'static str, bool) {
+        match self {
+            SortField::Title => ("i.sort_title", false),
+            SortField::Added => ("i.added_at", false),
+            SortField::Released => ("i.release_date", true),
+            SortField::Year => ("i.year", true),
+            SortField::Rating => ("i.rating", true),
+            SortField::UserRating => ("s.rating", true),
+            SortField::LastViewed => ("s.last_played_at", true),
+            SortField::ViewCount => (VIEW_COUNT_SQL, false),
+            SortField::Duration => ("i.duration_ms", true),
+            SortField::Index => ("i.idx", true),
+            SortField::Id => ("i.id", false),
+            SortField::Updated => ("i.updated_at", false),
+        }
+    }
+}
+
+/// `ORDER BY` terms that sort like [`sort_rows`] does the rows of one
+/// library (which come by sort title, then id): missing values last in both
+/// directions, then by sort title, then by id.
+fn order_by_sql(sort: &[(SortField, bool)]) -> String {
+    let mut terms = Vec::new();
+    for &(field, descending) in sort {
+        let (expr, nullable) = field.sql();
+        if descending {
+            // NULL sorts first, so it comes last when descending.
+            terms.push(format!("{expr} DESC"));
+        } else {
+            if nullable {
+                terms.push(format!("{expr} IS NULL"));
+            }
+            terms.push(format!("{expr} ASC"));
+        }
+    }
+    terms.push("i.sort_title ASC".into());
+    terms.push("i.id ASC".into());
+    terms.join(", ")
+}
+
+/// The filters of a listing as SQL, when all of them can be.
+struct SqlFilters {
+    filter: String,
+    args: Vec<SqlArg>,
+    uses_state: bool,
+}
+
+/// A section listing: the items of one kind in a library that pass Plex
+/// filters, in a Plex sort order, at most `limit` of them.
+struct SectionQuery<'a> {
+    library_id: i64,
+    kind: &'a str,
+    filters: Vec<Filter>,
+    sort: Vec<(SortField, bool)>,
+    /// Plex's `limit`: how many items there are at most.
+    cap: Option<usize>,
+    now: i64,
+}
+
+impl<'a> SectionQuery<'a> {
+    fn new(library_id: i64, kind: &'a str, params: &Params) -> Self {
+        SectionQuery {
+            library_id,
+            kind,
+            filters: Filter::parse(params, kind),
+            sort: parse_sort(params.get("sort")),
+            cap: params.parse("limit"),
+            now: now(),
+        }
+    }
+
+    /// The `page` of the items and how many there are: filtered, sorted and
+    /// paged in SQL unless a filter can only be checked in memory.
+    async fn page(&self, db: &Db, user_id: i64, page: &Page) -> PlexResult<(Vec<ItemRow>, usize)> {
+        match self.sql_filters() {
+            Some(filters) => self.page_in_sql(db, user_id, &filters, page).await,
+            None => self.page_in_memory(db, user_id, page).await,
+        }
+    }
+
+    fn sql_filters(&self) -> Option<SqlFilters> {
+        let mut out = SqlFilters { filter: String::new(), args: Vec::new(), uses_state: false };
+        for filter in &self.filters {
+            match filter.condition(self.kind, self.now) {
+                Condition::All => {}
+                Condition::Sql { sql, args, state } => {
+                    out.filter.push_str(&sql);
+                    out.args.extend(args);
+                    out.uses_state |= state;
+                }
+                Condition::InMemory => return None,
+            }
+        }
+        Some(out)
+    }
+
+    async fn page_in_sql(
+        &self,
+        db: &Db,
+        user_id: i64,
+        filters: &SqlFilters,
+        page: &Page,
+    ) -> PlexResult<(Vec<ItemRow>, usize)> {
+        let end = self.cap.unwrap_or(usize::MAX);
+        let start = page.start.min(end);
+        let size = page.size.unwrap_or(usize::MAX).min(end - start);
+        let order_by = order_by_sql(&self.sort);
+        let query = ItemsQuery {
+            library_id: self.library_id,
+            kind: self.kind,
+            filter: &filters.filter,
+            args: &filters.args,
+            uses_state: filters.uses_state,
+            order_by: &order_by,
+            offset: i64::try_from(start).unwrap_or(i64::MAX),
+            limit: (size < usize::MAX).then(|| i64::try_from(size).unwrap_or(i64::MAX)),
+        };
+        let rows = catalog::items_matching(db, user_id, &query).await?;
+        let total = if rows.len() < size && (start == 0 || !rows.is_empty()) {
+            // The page ends the list.
+            start + rows.len()
+        } else if size > 0 && rows.len() == size && start + size == end {
+            // The page ends at `limit`.
+            end
+        } else {
+            usize::try_from(catalog::count_matching(db, user_id, &query).await?).unwrap_or(0).min(end)
+        };
+        Ok((rows, total))
+    }
+
+    /// Everything loaded, then filtered and sorted here.
+    async fn page_in_memory(&self, db: &Db, user_id: i64, page: &Page) -> PlexResult<(Vec<ItemRow>, usize)> {
+        let (mut rows, _) = catalog::library_items(db, user_id, &LibraryQuery::all(self.library_id, self.kind)).await?;
+        // Titles tie by id, in SQL as here.
+        rows.sort_by(|a, b| a.sort_title.cmp(&b.sort_title).then(a.id.cmp(&b.id)));
+        let mut extras = HashMap::new();
+        if self.filters.iter().any(Filter::needs_extras) {
+            let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+            extras = meta::load_extras(db, &ids).await?;
+            if self.filters.iter().any(Filter::needs_people) {
+                add_people(db, &ids, &mut extras).await?;
+            }
+        }
+        if !self.filters.is_empty() {
+            rows.retain(|r| self.filters.iter().all(|f| f.matches(r, extras.get(&r.id), self.now)));
+        }
+        sort_rows(&mut rows, &self.sort);
+        if let Some(cap) = self.cap {
+            rows.truncate(cap);
+        }
+        Ok(page.apply(rows))
+    }
 }
 
 /// `/library/sections/{id}/all`
@@ -708,12 +1110,11 @@ pub async fn all(
     }
     let (lib, libraries) = library_for(&state, &user, &id).await?;
     let kind = params.get("type").and_then(kind_for_number).unwrap_or(lib.kind().top_level_kind());
-    let rows = if kinds_of(&lib).contains(&kind) {
-        query_items(&state, &user, &lib, kind, &params).await?.0
+    let (rows, total) = if kinds_of(&lib).contains(&kind) {
+        SectionQuery::new(lib.id, kind, &params).page(&state.db, user.id, &page).await?
     } else {
-        Vec::new()
+        (Vec::new(), 0)
     };
-    let (rows, total) = page.apply(rows);
     let nodes = item_nodes(&state, &rows, &Sections::new(&libraries), listing_detail(&params)).await?;
     let mut mc = list_container(Some(&lib), &info, nodes, total, &page)
         .attr("title2", format!("All {}", plural(kind)))
@@ -748,7 +1149,10 @@ pub async fn library_all(
 ) -> PlexResult<Node> {
     let libraries = visible_libraries(&state, &user).await?;
     let wanted = params.get("type").and_then(kind_for_number);
+    // Each library's share of the page is among its first `start + size` items.
+    let window = Page { start: 0, size: page.size.map(|size| size.saturating_add(page.start)) };
     let mut rows = Vec::new();
+    let mut total = 0;
     for lib in &libraries {
         let kinds: Vec<&str> = match wanted {
             Some(kind) if kinds_of(lib).contains(&kind) => vec![kind],
@@ -756,11 +1160,13 @@ pub async fn library_all(
             None => vec![lib.kind().top_level_kind()],
         };
         for kind in kinds {
-            rows.extend(query_items(&state, &user, lib, kind, &params).await?.0);
+            let (found, count) = SectionQuery::new(lib.id, kind, &params).page(&state.db, user.id, &window).await?;
+            rows.extend(found);
+            total += count;
         }
     }
     sort_rows(&mut rows, &parse_sort(params.get("sort")));
-    let (rows, total) = page.apply(rows);
+    let rows: Vec<ItemRow> = rows.into_iter().skip(page.start).take(page.size.unwrap_or(usize::MAX)).collect();
     let nodes = item_nodes(&state, &rows, &Sections::new(&libraries), listing_detail(&params)).await?;
     Ok(list_container(None, &info, nodes, total, &page))
 }
@@ -1232,7 +1638,8 @@ pub async fn home_recently_added(
     for lib in libraries.iter().filter(|l| section.is_none_or(|s| s == l.id)) {
         match wanted {
             Some(kind) if kinds_of(lib).contains(&kind) => {
-                rows.extend(query_items(&state, &user, lib, kind, &newest).await?.0);
+                let query = SectionQuery::new(lib.id, kind, &newest);
+                rows.extend(query.page(&state.db, user.id, &Page::default()).await?.0);
             }
             Some(_) => {}
             None => rows.extend(recent_rows(&state, &user, lib, 50).await?),
@@ -1903,5 +2310,626 @@ mod tests {
         assert_eq!(titles(&[("addedAt", min.as_str())]), nothing);
         assert_eq!(titles(&[("addedAt!", min.as_str())]), ["Old", "New"]);
         assert_eq!(titles(&[("addedAt>>", min.as_str())]), ["Old", "New"]);
+    }
+
+    /// What the text filters in SQL rely on.
+    #[test]
+    fn only_two_characters_lowercase_to_ascii() {
+        let odd: Vec<char> =
+            (0x80..=0x10_FFFF).filter_map(char::from_u32).filter(|c| c.to_lowercase().any(|l| l.is_ascii())).collect();
+        assert_eq!(odd, ['\u{130}', '\u{212A}']);
+    }
+
+    // ------------------------------------------------------------------ listings in SQL
+
+    #[derive(Default)]
+    struct Item {
+        id: i64,
+        library: i64,
+        kind: &'static str,
+        title: &'static str,
+        sort: &'static str,
+        parent: Option<i64>,
+        grandparent: Option<i64>,
+        idx: Option<i64>,
+        year: Option<i64>,
+        rating: Option<f64>,
+        genres: Option<&'static str>,
+        content_rating: Option<&'static str>,
+        age: Option<i64>,
+        studio: Option<&'static str>,
+        release: Option<&'static str>,
+        duration: Option<i64>,
+        added: i64,
+        updated: i64,
+        imdb: Option<&'static str>,
+        tmdb: Option<i64>,
+        leaves: Option<i64>,
+    }
+
+    async fn exec(db: &Db, sql: &str) {
+        sqlx::query(sql).execute(&db.write).await.unwrap();
+    }
+
+    /// Movies (library 1) and shows (library 2) with what filters and sorts
+    /// look at, ties included, for an administrator (user 1) and a user who
+    /// may open both libraries and watch titles up to 12 (user 2).
+    async fn listing_fixture(dir: &std::path::Path) -> Db {
+        let db = Db::open(&dir.join("pley.db")).await.unwrap();
+        exec(
+            &db,
+            "INSERT INTO users (id, username, password_hash, is_admin, created_at, all_libraries, max_age)
+             VALUES (1, 'admin', 'x', 1, 0, 1, NULL), (2, 'kid', 'x', 0, 0, 0, 12)",
+        )
+        .await;
+        exec(
+            &db,
+            "INSERT INTO libraries (id, name, kind, paths, created_at)
+             VALUES (1, 'Movies', 'movies', '[]', 0), (2, 'Shows', 'shows', '[]', 0)",
+        )
+        .await;
+        exec(&db, "INSERT INTO user_libraries (user_id, library_id) VALUES (2, 1), (2, 2)").await;
+        let movie = |id, title, sort| Item { id, library: 1, kind: "movie", title, sort, ..Default::default() };
+        let items = [
+            Item {
+                year: Some(2001),
+                rating: Some(7.5),
+                genres: Some(r#"["Horror","Drama"]"#),
+                content_rating: Some("R"),
+                age: Some(17),
+                studio: Some("Brandywine"),
+                release: Some("2001-05-01"),
+                duration: Some(5_400_000),
+                added: 1_000,
+                updated: 1_000,
+                imdb: Some("tt0001"),
+                tmdb: Some(348),
+                ..movie(1, "Alpha", "alpha")
+            },
+            // Ties with Alpha on everything but the id.
+            Item {
+                year: Some(2001),
+                rating: Some(7.5),
+                genres: Some(r#"["drama"]"#),
+                content_rating: Some("PG"),
+                age: Some(10),
+                release: Some("2001-05-01"),
+                duration: Some(5_400_000),
+                added: 1_000,
+                updated: 1_000,
+                ..movie(2, "alpha", "alpha")
+            },
+            Item {
+                rating: Some(9.0),
+                genres: Some("[]"),
+                content_rating: Some("pg-13"),
+                age: Some(13),
+                studio: Some("ÉTUDE Films"),
+                added: 2_000,
+                updated: 3_000,
+                imdb: Some("tt0003"),
+                tmdb: Some(3),
+                ..movie(3, "Beta", "beta")
+            },
+            // Unrated: hidden from user 2.
+            Item {
+                year: Some(1999),
+                studio: Some("Day Studio"),
+                release: Some("1999-12-31"),
+                duration: Some(6_000_000),
+                added: 500,
+                updated: 500,
+                ..movie(4, "The Gamma", "gamma")
+            },
+            Item {
+                year: Some(2010),
+                rating: Some(6.0),
+                genres: Some(r#"["Comedy"]"#),
+                content_rating: Some("G"),
+                age: Some(0),
+                release: Some("2010"),
+                duration: Some(4_000_000),
+                added: 999_000,
+                updated: 4_000,
+                ..movie(5, "École", "école")
+            },
+            // Genres that aren't JSON; a date that doesn't exist.
+            Item {
+                year: Some(2005),
+                rating: Some(8.1),
+                genres: Some("nope"),
+                content_rating: Some("PG"),
+                age: Some(10),
+                studio: Some("Night Studio"),
+                release: Some("2005-02-31"),
+                duration: Some(7_200_000),
+                added: 998_000,
+                updated: 998_000,
+                ..movie(6, "İstanbul", "istanbul")
+            },
+            // With a Kelvin sign: lowercase "kiss".
+            Item {
+                year: Some(2005),
+                rating: Some(8.1),
+                genres: Some(r#"["Horror"]"#),
+                content_rating: Some("PG"),
+                age: Some(10),
+                added: 86_400,
+                updated: 86_400,
+                ..movie(7, "\u{212A}iss", "kiss")
+            },
+            Item {
+                year: Some(1985),
+                rating: Some(5.0),
+                genres: Some(r#"["Horror","Comedy"]"#),
+                content_rating: Some("PG"),
+                age: Some(10),
+                release: Some("1985-07-03"),
+                duration: Some(3_000_000),
+                added: 2_000,
+                updated: 2_000,
+                ..movie(8, "123 Go", "123 go")
+            },
+            Item {
+                year: Some(2020),
+                rating: Some(7.0),
+                genres: Some(r#"["Drama"]"#),
+                content_rating: Some("R"),
+                age: Some(17),
+                studio: Some("Night Studio"),
+                release: Some("2020-01-01"),
+                duration: Some(5_000_000),
+                added: 3_000,
+                updated: 3_000,
+                ..movie(9, "Zeta", "zeta")
+            },
+            Item {
+                year: Some(2020),
+                rating: Some(7.0),
+                genres: Some(r#"["Drama"]"#),
+                content_rating: Some("PG"),
+                age: Some(10),
+                release: Some("2020-01-01"),
+                duration: Some(5_000_000),
+                added: 3_000,
+                updated: 3_000,
+                ..movie(10, "zeta", "zeta")
+            },
+            Item {
+                year: Some(1969),
+                rating: Some(3.3),
+                genres: Some(r#"["Science Fiction"]"#),
+                content_rating: Some("G"),
+                age: Some(0),
+                studio: Some("MGM"),
+                release: Some("1969-10-01"),
+                added: 100,
+                updated: 100,
+                ..movie(11, "Omega", "omega")
+            },
+            Item {
+                content_rating: Some("PG"),
+                age: Some(10),
+                added: 4_000,
+                updated: 4_000,
+                ..movie(12, "Delta Force", "delta force")
+            },
+            // A show user 2 may not watch, one they may, and two without episodes.
+            Item {
+                library: 2,
+                kind: "show",
+                year: Some(2004),
+                rating: Some(8.0),
+                genres: Some(r#"["Drama"]"#),
+                age: Some(14),
+                added: 5_000,
+                updated: 5_000,
+                leaves: Some(4),
+                ..movie(100, "Lost", "lost")
+            },
+            Item {
+                library: 2,
+                kind: "show",
+                year: Some(2008),
+                rating: Some(7.0),
+                genres: Some(r#"["Sci-Fi"]"#),
+                age: Some(10),
+                added: 6_000,
+                updated: 6_000,
+                leaves: Some(2),
+                ..movie(110, "Fringe", "fringe")
+            },
+            Item {
+                library: 2,
+                kind: "show",
+                age: Some(0),
+                added: 7_000,
+                updated: 7_000,
+                leaves: Some(0),
+                ..movie(120, "Empty", "empty")
+            },
+            Item { library: 2, kind: "show", age: Some(0), added: 7_000, updated: 7_000, ..movie(121, "Bare", "bare") },
+        ];
+        let season = |id, show, idx, title, leaves| Item {
+            id,
+            library: 2,
+            kind: "season",
+            title,
+            sort: title,
+            parent: Some(show),
+            idx: Some(idx),
+            added: 5_000 + id,
+            updated: 5_000 + id,
+            leaves: Some(leaves),
+            ..Default::default()
+        };
+        let episode = |id, season, show, idx, title, sort| Item {
+            id,
+            library: 2,
+            kind: "episode",
+            title,
+            sort,
+            parent: Some(season),
+            grandparent: Some(show),
+            idx: Some(idx),
+            duration: Some(2_000_000 + id),
+            release: Some("2004-09-22"),
+            added: 5_000 + id % 3,
+            updated: 5_000,
+            ..Default::default()
+        };
+        let children = [
+            season(101, 100, 1, "Season 1", 3),
+            season(102, 100, 2, "Season 2", 1),
+            season(111, 110, 1, "Season 1", 2),
+            episode(103, 101, 100, 1, "Pilot", "pilot"),
+            episode(104, 101, 100, 2, "Tabula Rasa", "tabula rasa"),
+            episode(105, 101, 100, 3, "Walkabout", "walkabout"),
+            episode(106, 102, 100, 1, "Man of Science", "man of science"),
+            episode(112, 111, 110, 1, "Pilot", "pilot"),
+            episode(113, 111, 110, 2, "The Same Old Story", "same old story"),
+        ];
+        for item in items.iter().chain(&children) {
+            sqlx::query(
+                "INSERT INTO items (id, library_id, kind, key, title, sort_title, parent_id, grandparent_id, idx,
+                    year, rating, genres, content_rating, rating_age, studio, release_date, duration_ms,
+                    added_at, updated_at, imdb_id, tmdb_id, leaf_count)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(item.id)
+            .bind(item.library)
+            .bind(item.kind)
+            .bind(format!("key-{}", item.id))
+            .bind(item.title)
+            .bind(item.sort)
+            .bind(item.parent)
+            .bind(item.grandparent)
+            .bind(item.idx)
+            .bind(item.year)
+            .bind(item.rating)
+            .bind(item.genres)
+            .bind(item.content_rating)
+            .bind(item.age)
+            .bind(item.studio)
+            .bind(item.release)
+            .bind(item.duration)
+            .bind(item.added)
+            .bind(item.updated)
+            .bind(item.imdb)
+            .bind(item.tmdb)
+            .bind(item.leaves)
+            .execute(&db.write)
+            .await
+            .unwrap();
+        }
+        exec(
+            &db,
+            "INSERT INTO user_item_state (user_id, item_id, position_ms, watched, play_count, last_played_at, updated_at, rating)
+             VALUES (1, 1, 0, 1, 2, 5000, 0, 8), (1, 2, 0, 1, 0, 6000, 0, NULL), (1, 3, 5000, 0, 0, 7000, 0, NULL),
+                    (1, 5, 0, 0, 3, NULL, 0, 4), (1, 9, 0, 1, 1, NULL, 0, NULL), (1, 7, 0, 0, 0, 999500, 0, 10),
+                    (1, 103, 0, 1, 1, 5000, 0, NULL), (1, 104, 0, 1, 1, 5001, 0, NULL), (1, 105, 0, 1, 1, 5002, 0, NULL),
+                    (1, 106, 0, 1, 1, 5003, 0, NULL), (1, 112, 0, 1, 1, 5004, 0, NULL), (1, 113, 1000, 0, 0, 5005, 0, NULL),
+                    (1, 110, 0, 0, 0, 7777, 0, NULL),
+                    (2, 2, 0, 1, 1, 100, 0, NULL), (2, 7, 1000, 0, 0, 200, 0, 6), (2, 112, 0, 1, 1, 300, 0, NULL),
+                    (2, 113, 0, 1, 1, 400, 0, NULL)",
+        )
+        .await;
+        exec(
+            &db,
+            "INSERT INTO people (id, tmdb_id, name, updated_at)
+             VALUES (1, 1, 'Ann Actor', 0), (2, 2, 'Dan Director', 0), (3, 3, 'ANN ACTOR', 0), (4, 4, '7', 0)",
+        )
+        .await;
+        exec(
+            &db,
+            "INSERT INTO item_people (item_id, person_id, role, character, position)
+             VALUES (1, 1, 'actor', NULL, 0), (1, 2, 'director', NULL, 1), (2, 2, 'director', NULL, 0),
+                    (3, 3, 'actor', NULL, 0), (5, 4, 'actor', NULL, 0), (7, 1, 'writer', NULL, 0),
+                    (100, 1, 'actor', NULL, 0)",
+        )
+        .await;
+        db
+    }
+
+    /// Ids and total of a listing, through SQL (`None` when it can't be).
+    async fn in_sql(db: &Db, user: i64, query: &SectionQuery<'_>, page: &Page) -> Option<(Vec<i64>, usize)> {
+        let filters = query.sql_filters()?;
+        let (rows, total) = query.page_in_sql(db, user, &filters, page).await.unwrap();
+        Some((rows.iter().map(|r| r.id).collect(), total))
+    }
+
+    async fn in_memory(db: &Db, user: i64, query: &SectionQuery<'_>, page: &Page) -> (Vec<i64>, usize) {
+        let (rows, total) = query.page_in_memory(db, user, page).await.unwrap();
+        (rows.iter().map(|r| r.id).collect(), total)
+    }
+
+    const NOW: i64 = 1_000_000;
+
+    fn section_query<'a>(library: i64, kind: &'a str, pairs: &[(&str, &str)]) -> SectionQuery<'a> {
+        SectionQuery { now: NOW, ..SectionQuery::new(library, kind, &params(pairs)) }
+    }
+
+    const SORTS: &[&str] = &[
+        "",
+        "titleSort",
+        "titleSort:desc",
+        "addedAt",
+        "addedAt:desc",
+        "originallyAvailableAt",
+        "originallyAvailableAt:desc",
+        "year",
+        "year:desc",
+        "rating",
+        "audienceRating:desc",
+        "userRating",
+        "userRating:desc",
+        "lastViewedAt",
+        "lastViewedAt:desc",
+        "viewCount",
+        "viewCount:desc",
+        "duration",
+        "duration:desc",
+        "index",
+        "index:desc",
+        "id:desc",
+        "updatedAt:desc",
+        "year:desc,rating,titleSort:desc",
+        "random",
+    ];
+
+    #[tokio::test]
+    async fn filters_and_sorts_in_sql_list_what_the_in_memory_path_lists() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = listing_fixture(dir.path()).await;
+        let guid = meta::guid("movie", 3);
+        let show_guid = meta::guid("show", 3);
+        let mut movie_filters: Vec<Vec<(&str, &str)>> = vec![
+            vec![],
+            vec![("title", "alpha")],
+            vec![("title", "ALPHA")],
+            vec![("title!", "alpha")],
+            vec![("title", "=alpha")],
+            vec![("title!", "=alpha")],
+            vec![("title<", "al")],
+            vec![("title>", "TA")],
+            vec![("title", "i")],
+            vec![("title<", "i")],
+            vec![("title>", "L")],
+            vec![("title", "cole")],
+            vec![("title>", "le")],
+            vec![("title", "=kiss")],
+            vec![("title<", "k")],
+            vec![("title", "x,ze")],
+            vec![("title>>", "a")],
+            vec![("title", "")],
+            vec![("title!", "")],
+            vec![("title", "123")],
+            vec![("studio", "brandy")],
+            vec![("studio!", "studio")],
+            vec![("studio", "tude")],
+            vec![("studio", "=")],
+            vec![("year", "2001")],
+            vec![("year", "2001,1999")],
+            vec![("year!", "2001")],
+            vec![("year>>", "2000")],
+            vec![("year<<", "2000")],
+            vec![("year", "abc")],
+            vec![("year!", "abc")],
+            vec![("year", "nan")],
+            vec![("year!", "NaN")],
+            vec![("year>>", "nan")],
+            vec![("year<<", "inf")],
+            vec![("year>>", "-inf")],
+            vec![("year", "2001.0000000001")],
+            vec![("year", "2001.1")],
+            vec![("year<", "20")],
+            vec![("decade", "2000")],
+            vec![("decade", "1960")],
+            vec![("decade!", "2000")],
+            vec![("rating>>", "7.5")],
+            vec![("rating", "8.1")],
+            vec![("audienceRating<<", "7")],
+            vec![("duration<<", "5000000")],
+            vec![("duration", "5400000")],
+            vec![("index", "3")],
+            vec![("index!", "3")],
+            vec![("id", "3")],
+            vec![("id>>", "5")],
+            vec![("viewCount>>", "0")],
+            vec![("viewCount", "0")],
+            vec![("viewCount", "1")],
+            vec![("viewCount>>", "1")],
+            vec![("viewOffset>>", "0")],
+            vec![("userRating>>", "5")],
+            vec![("userRating", "4")],
+            vec![("userRating!", "4")],
+            vec![("leafCount>>", "1")],
+            vec![("leafCount!", "1")],
+            vec![("genre", "horror")],
+            vec![("genre", "Drama,Comedy")],
+            vec![("genre!", "horror")],
+            vec![("genre", "")],
+            vec![("genre!", "")],
+            vec![("genre>>", "horror")],
+            vec![("contentRating", "pg")],
+            vec![("contentRating!", "R")],
+            vec![("contentRating", "PG-13,g")],
+            vec![("contentRating!", "")],
+            vec![("actor", "1")],
+            vec![("actor", "ann actor")],
+            vec![("actor!", "1")],
+            vec![("actor", "7")],
+            vec![("actor", "1,dan director")],
+            vec![("director", "2")],
+            vec![("director!", "2")],
+            vec![("writer", "Ann Actor")],
+            vec![("producer", "2")],
+            vec![("actor", "")],
+            vec![("unwatched", "1")],
+            vec![("unwatched", "0")],
+            vec![("unwatched!", "1")],
+            vec![("unwatched", "")],
+            vec![("watched", "1")],
+            vec![("watched", "false")],
+            vec![("unwatchedLeaves", "1")],
+            vec![("inProgress", "1")],
+            vec![("inProgress", "0")],
+            vec![("inProgress!", "1")],
+            vec![("addedAt>>", "1500")],
+            vec![("addedAt<<", "1500")],
+            vec![("addedAt", "1000")],
+            vec![("addedAt!", "1000")],
+            vec![("addedAt>>", "-9999999999999y")],
+            vec![("addedAt<<", "-9999999999999y")],
+            vec![("addedAt", "-9999999999999y")],
+            vec![("addedAt>>", "soon")],
+            vec![("addedAt", "1970-01-02")],
+            vec![("addedAt>>", "-2d")],
+            vec![("addedAt<<", "-2d")],
+            vec![("updatedAt>>", "2000")],
+            vec![("lastViewedAt>>", "5500")],
+            vec![("lastViewedAt", "soon")],
+            vec![("lastViewedAt<<", "-1d")],
+            vec![("lastViewedAt!", "6000")],
+            vec![("guid", "imdb://tt0001")],
+            vec![("guid", "tmdb://348")],
+            vec![("guid", "tmdb://0348")],
+            vec![("guid", guid.as_str())],
+            vec![("guid", show_guid.as_str())],
+            vec![("guid!", "imdb://tt0003,tmdb://3")],
+            vec![("guid", "imdb://")],
+            vec![("resolution", "4k")],
+            vec![("show.title", "x")],
+            vec![("genre", "horror"), ("unwatched", "1")],
+            vec![("year>>", "2000"), ("rating>>", "7"), ("title!", "zeta")],
+            vec![("actor!", "1"), ("contentRating", "PG"), ("lastViewedAt>>", "0")],
+        ];
+        // Only the in-memory path can check these.
+        let memory_only: Vec<Vec<(&str, &str)>> = vec![
+            vec![("title", "é")],
+            vec![("title", "İ")],
+            vec![("studio", "Étude")],
+            vec![("title", "alpha,ÉCOLE")],
+            vec![("originallyAvailableAt>>", "2000-01-01")],
+            vec![("originallyAvailableAt", "2005-03-03")],
+        ];
+        movie_filters.extend(memory_only.iter().cloned());
+        let show_filters: Vec<Vec<(&str, &str)>> = vec![
+            vec![],
+            vec![("unwatched", "1")],
+            vec![("unwatched", "0")],
+            vec![("watched", "1")],
+            vec![("show.unwatched", "0")],
+            vec![("unwatched!", "1")],
+            vec![("inProgress", "1")],
+            vec![("leafCount>>", "1")],
+            vec![("leafCount", "0")],
+            vec![("title", "e")],
+            vec![("genre", "drama")],
+            vec![("actor", "Ann Actor")],
+            vec![("lastViewedAt>>", "1")],
+        ];
+        let season_filters: Vec<Vec<(&str, &str)>> = vec![
+            vec![],
+            vec![("unwatched", "1")],
+            vec![("watched", "1")],
+            vec![("show.id", "100")],
+            vec![("show.title", "fringe")],
+            vec![("show.index", "1")],
+            vec![("show.year", "2004")],
+            vec![("index", "1")],
+            vec![("season.title", "2")],
+        ];
+        let episode_filters: Vec<Vec<(&str, &str)>> = vec![
+            vec![],
+            vec![("show.id", "100")],
+            vec![("show.id!", "100")],
+            vec![("season.id", "101")],
+            vec![("season.index", "2")],
+            vec![("show.title", "LOST")],
+            vec![("show.title<", "fr")],
+            vec![("season.title", "season")],
+            vec![("show.year", "2004")],
+            vec![("unwatched", "1")],
+            vec![("inProgress", "1")],
+            vec![("title", "pilot")],
+            vec![("title", "=pilot")],
+            vec![("index", "1")],
+            vec![("viewCount>>", "0")],
+            vec![("addedAt", "5001")],
+        ];
+        let mut compared = 0;
+        for user in [1, 2] {
+            for (library, kind, filters) in [
+                (1, "movie", &movie_filters),
+                (2, "show", &show_filters),
+                (2, "season", &season_filters),
+                (2, "episode", &episode_filters),
+            ] {
+                for (n, filter) in filters.iter().enumerate() {
+                    // Every filter with the default order, a few with every order.
+                    let sorts = if n < 3 || filter.len() > 1 { SORTS } else { &SORTS[..1] };
+                    for &sort in sorts {
+                        let mut pairs = filter.clone();
+                        pairs.push(("sort", sort));
+                        let query = section_query(library, kind, &pairs);
+                        let expected = in_memory(&db, user, &query, &Page::default()).await;
+                        match in_sql(&db, user, &query, &Page::default()).await {
+                            Some(found) => assert_eq!(found, expected, "user {user}, {kind}s, {pairs:?}"),
+                            None => assert!(memory_only.contains(filter), "{pairs:?} should be checked in SQL"),
+                        }
+                        compared += 1;
+                    }
+                }
+            }
+        }
+        assert!(compared > 500, "{compared}");
+    }
+
+    #[tokio::test]
+    async fn pages_and_totals_in_sql_match_the_in_memory_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = listing_fixture(dir.path()).await;
+        let pages = [(0, None), (0, Some(0)), (0, Some(3)), (2, Some(3)), (3, Some(100)), (11, Some(5)), (50, Some(5))];
+        for user in [1, 2] {
+            for pairs in [
+                vec![],
+                vec![("sort", "year:desc")],
+                vec![("unwatched", "1"), ("sort", "rating")],
+                vec![("limit", "4")],
+                vec![("limit", "4"), ("sort", "addedAt:desc")],
+                vec![("limit", "0")],
+                vec![("limit", "100"), ("genre", "drama")],
+                vec![("genre", "nothing")],
+            ] {
+                for (start, size) in pages {
+                    let page = Page { start, size };
+                    let query = section_query(1, "movie", &pairs);
+                    let found = in_sql(&db, user, &query, &page).await.unwrap();
+                    let expected = in_memory(&db, user, &query, &page).await;
+                    assert_eq!(found, expected, "user {user}, {pairs:?}, {page:?}");
+                }
+            }
+        }
     }
 }
