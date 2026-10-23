@@ -137,10 +137,13 @@ async fn world() -> (TestApp, Arc<AtomicUsize>, String) {
 
 /// The markers of an item once the background worker stored `count` of them.
 async fn markers(app: &TestApp, admin: &str, id: i64, count: usize) -> Vec<Value> {
-    for _ in 0..500 {
+    for _ in 0..1000 {
+        // Scans queue an analysis of their own: read the markers once no
+        // analysis is running, so they are the final ones.
+        let busy = app.state.markers.status().is_some();
         let item = app.get(&format!("/api/items/{id}"), admin).await;
         let markers = item.body["markers"].as_array().cloned().unwrap_or_default();
-        if markers.len() >= count {
+        if !busy && markers.len() >= count {
             return markers;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
