@@ -188,7 +188,12 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/library/metadata/{id}/{image}/{version}", get(library::image_version))
         .route("/library/collections/{id}", get(lists::collection))
         .route("/library/collections/{id}/children", get(lists::collection_children))
-        .route("/library/collections/{id}/{image}", get(lists::collection_image))
+        .route(
+            "/library/collections/{id}/{image}",
+            get(lists::collection_image)
+                .post(edit::upload_collection_artwork)
+                .layer(axum::extract::DefaultBodyLimit::max(25 * 1024 * 1024)),
+        )
         .route("/library/collections/{id}/{image}/{version}", get(lists::collection_image_version))
         .route("/library/parts/{id}/indexes/{quality}", get(playback::part_index))
         .route("/library/parts/{id}/indexes/{quality}/{offset}", get(playback::part_index_frame))

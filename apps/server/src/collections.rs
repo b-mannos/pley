@@ -37,6 +37,7 @@ struct CollectionRow {
     id: i64,
     library_id: i64,
     title: String,
+    sort_title: String,
     summary: Option<String>,
     tmdb_id: Option<i64>,
     poster: Option<String>,
@@ -46,13 +47,18 @@ struct CollectionRow {
     updated_at: i64,
 }
 
-const COLUMNS: &str = "id, library_id, title, summary, tmdb_id, poster, backdrop, sort, created_at, updated_at";
+const COLUMNS: &str =
+    "id, library_id, title, sort_title, summary, tmdb_id, poster, backdrop, sort, created_at, updated_at";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CollectionDto {
     pub id: i64,
     pub library_id: i64,
     pub title: String,
+    /// What it is ordered by; set by hand (through the Plex API) when it isn't
+    /// the title's own.
+    #[serde(skip)]
+    pub sort_title: String,
     pub summary: Option<String>,
     /// Filled automatically from TMDB.
     pub automatic: bool,
@@ -75,6 +81,7 @@ impl CollectionRow {
             id: self.id,
             library_id: self.library_id,
             title: self.title,
+            sort_title: self.sort_title,
             summary: self.summary,
             automatic: self.tmdb_id.is_some(),
             sort: self.sort,
@@ -114,11 +121,12 @@ fn listed(row: &CollectionRow, count: i64, user: &AuthUser) -> bool {
 
 /// Collections of a library (the caller checked library access).
 pub async fn list(db: &Db, user: &AuthUser, library_id: i64) -> sqlx::Result<Vec<CollectionDto>> {
-    let rows: Vec<CollectionRow> =
-        sqlx::query_as(&format!("SELECT {COLUMNS} FROM collections WHERE library_id = ? ORDER BY sort_title, id"))
-            .bind(library_id)
-            .fetch_all(&db.read)
-            .await?;
+    let rows: Vec<CollectionRow> = sqlx::query_as(&format!(
+        "SELECT {COLUMNS} FROM collections WHERE library_id = ? ORDER BY sort_title COLLATE NOCASE, id"
+    ))
+    .bind(library_id)
+    .fetch_all(&db.read)
+    .await?;
     let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
     let counts = visible_counts(db, user.id, &ids).await?;
     Ok(rows
@@ -178,7 +186,7 @@ pub struct CollectionRef {
 pub async fn for_item(db: &Db, user: &AuthUser, item_id: i64) -> sqlx::Result<Vec<CollectionRef>> {
     let rows: Vec<CollectionRow> = sqlx::query_as(&format!(
         "SELECT {COLUMNS} FROM collections WHERE id IN (SELECT collection_id FROM collection_items WHERE item_id = ?)
-         ORDER BY sort_title"
+         ORDER BY sort_title COLLATE NOCASE"
     ))
     .bind(item_id)
     .fetch_all(&db.read)

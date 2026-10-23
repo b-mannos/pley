@@ -121,6 +121,25 @@ async fn genres_labels_and_collections_as_tags() {
     assert_eq!(put(&w, &left, "collection[].tag.tag-=Gilliam%2520%2526%2520Scott").await, StatusCode::OK);
     let collections = w.app.plex_json(&format!("/library/sections/{}/collections", w.movies), &w.admin).await;
     assert_eq!(collections["Metadata"][0]["childCount"], json!(1));
+
+    // The collection itself, edited through its section as python-plexapi does.
+    let id = collections["Metadata"][0]["ratingKey"].as_str().unwrap().to_owned();
+    let query = format!("type=18&id={id}&summary.value=Two%20films&summary.locked=1&titleSort.value=%21001%20Gilliam");
+    assert_eq!(put(&w, &both, &query).await, StatusCode::OK);
+    let collection = w.app.plex_json(&format!("/library/collections/{id}"), &w.admin).await;
+    assert_eq!(collection["Metadata"][0]["summary"], json!("Two films"));
+    assert_eq!(collection["Metadata"][0]["titleSort"], json!("!001 Gilliam"), "as it was set");
+    let mut png = Vec::new();
+    image::RgbImage::from_pixel(40, 60, image::Rgb([30, 30, 200]))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    let uploaded = w.app.plex_upload(Method::POST, &format!("/library/collections/{id}/posters"), &w.admin, png).await;
+    assert_eq!(uploaded.status, StatusCode::OK, "{}", uploaded.text());
+    let poster = w.app.plex(Method::GET, &format!("/library/collections/{id}/thumb"), &w.admin, &[]).await;
+    assert_eq!(poster.status, StatusCode::OK);
+    // Not a collection of this section.
+    let elsewhere = "type=18&id=999&summary.value=x";
+    assert_eq!(put(&w, &both, elsewhere).await, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

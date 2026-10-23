@@ -39,6 +39,8 @@ fn collection_node(c: &CollectionDto, lib: &LibraryRow) -> Node {
         .attr("guid", format!("collection://{:024x}", c.id))
         .attr("type", "collection")
         .attr("title", &c.title)
+        // Only a sort title set by hand, as Plex does.
+        .opt("titleSort", Some(&c.sort_title).filter(|s| **s != crate::util::sort_title(&c.title)))
         .attr("subtype", subtype)
         .opt("summary", c.summary.as_deref())
         .attr("index", c.id)

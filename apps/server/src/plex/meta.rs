@@ -243,7 +243,7 @@ pub async fn load_collections(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64,
     for chunk in ids.chunks(500) {
         let sql = format!(
             "SELECT ci.item_id, c.id, c.title FROM collection_items ci JOIN collections c ON c.id = ci.collection_id
-             WHERE ci.item_id IN ({}) ORDER BY c.sort_title",
+             WHERE ci.item_id IN ({}) ORDER BY c.sort_title COLLATE NOCASE",
             vec!["?"; chunk.len()].join(",")
         );
         let mut query = sqlx::query_as::<_, (i64, i64, String)>(&sql);

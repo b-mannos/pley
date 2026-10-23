@@ -12,7 +12,9 @@
 //!   library, which is made when missing;
 //! - `POST /library/metadata/{id}/posters` (or `/arts`) with a picture as the
 //!   body sets the poster (or background); with `?url=`, and
-//!   `PUT /library/metadata/{id}/poster?url=` (or `/art`), a TMDB image.
+//!   `PUT /library/metadata/{id}/poster?url=` (or `/art`), a TMDB image;
+//! - collections (`type=18` edits through their section): title, sort title
+//!   and summary, and `POST /library/collections/{id}/posters` (or `/arts`).
 
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -22,6 +24,9 @@ use super::{Params, PlexAdmin, PlexError, PlexResult};
 use crate::events::ServerEvent;
 use crate::state::AppState;
 use crate::{collections, labels, overrides};
+
+/// Plex's type number of collections.
+const COLLECTION_TYPE: &str = "18";
 
 /// Plex's field names and pley's.
 const FIELDS: &[(&str, &str)] = &[
@@ -141,7 +146,34 @@ pub async fn section(
     if ids.is_empty() {
         return Err(PlexError::BadRequest("edits name the items they change (`id`)".into()));
     }
+    if params.get("type") == Some(COLLECTION_TYPE) {
+        return edit_collections(&state, section, &ids, &params).await;
+    }
     apply(&state, Some(section), &ids, &Edit::parse(&params)).await
+}
+
+/// Title, sort title and summary of collections, which python-plexapi edits
+/// through their section like items.
+async fn edit_collections(state: &AppState, section: i64, ids: &[i64], params: &Params) -> PlexResult<StatusCode> {
+    let value = |name: &str| params.get(&format!("{name}.value")).map(str::trim);
+    for &id in ids {
+        if collections::library_of(&state.db, id).await? != Some(section) {
+            return Err(PlexError::NotFound);
+        }
+        let title = value("title").filter(|t| !t.is_empty());
+        let summary = value("summary").map(|s| Some(s).filter(|s| !s.is_empty()));
+        collections::update(&state.db, id, title, summary, None).await?;
+        // An explicit sort title (Kometa orders collections with them).
+        if let Some(sort) = value("titleSort").filter(|s| !s.is_empty()) {
+            sqlx::query("UPDATE collections SET sort_title = ?, edited = 1 WHERE id = ?")
+                .bind(sort)
+                .bind(id)
+                .execute(&state.db.write)
+                .await?;
+        }
+    }
+    state.events.send(ServerEvent::LibraryChanged { library_id: section });
+    Ok(StatusCode::OK)
 }
 
 /// `PUT /library/metadata/{id}?…`
@@ -295,6 +327,32 @@ pub async fn choose_artwork(
     let url = params.get("url").filter(|u| !u.is_empty()).ok_or(PlexError::BadRequest("`url` is missing".into()))?;
     let blob = state.metadata.download_artwork(url).await.map_err(|e| PlexError::BadRequest(e.to_string()))?;
     set_artwork_blob(&state, id, field, blob).await
+}
+
+/// `POST /library/collections/{id}/posters` (or `/arts`): a collection's
+/// picture, uploaded or (`?url=`) a TMDB image.
+pub async fn upload_collection_artwork(
+    State(state): State<AppState>,
+    PlexAdmin(_admin): PlexAdmin,
+    Path((id, name)): Path<(i64, String)>,
+    params: Params,
+    body: Bytes,
+) -> PlexResult<StatusCode> {
+    let field = artwork_field(&name).filter(|_| name.ends_with('s')).ok_or(PlexError::NotFound)?;
+    let library_id = collections::library_of(&state.db, id).await?.ok_or(PlexError::NotFound)?;
+    let blob = match params.get("url").filter(|u| !u.is_empty()) {
+        Some(url) => state.metadata.download_artwork(url).await.map_err(|e| PlexError::BadRequest(e.to_string()))?,
+        None => crate::api::editing::store_picture(&state, body).await.map_err(PlexError::from)?,
+    };
+    // `field` is `poster` or `backdrop`, both columns of collections.
+    sqlx::query(&format!("UPDATE collections SET {field} = ?, updated_at = ? WHERE id = ?"))
+        .bind(blob)
+        .bind(crate::util::now())
+        .bind(id)
+        .execute(&state.db.write)
+        .await?;
+    state.events.send(ServerEvent::LibraryChanged { library_id });
+    Ok(StatusCode::OK)
 }
 
 async fn set_artwork_blob(state: &AppState, id: i64, field: &str, blob: String) -> PlexResult<StatusCode> {

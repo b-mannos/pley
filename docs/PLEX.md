@@ -152,6 +152,10 @@ Administrators edit metadata the way python-plexapi (and so Kometa) does:
   `?url=` and `PUT /library/metadata/{id}/poster?url=` (or `/art`) with a
   TMDB image. Other URLs are refused: the server doesn't fetch arbitrary
   addresses.
+- Collections: their title, sort title (kept as set, and listed as
+  `titleSort`) and summary through their section (`type=18&id=…`, as
+  python-plexapi edits them), their poster and background through
+  `POST /library/collections/{id}/posters` (or `/arts`).
 
 ## Searching and filtering
 
@@ -204,9 +208,8 @@ With python-plexapi 4.18 the following work against the test media:
 - plex.tv: sign-in, server claiming, sharing, remote access and the official
   Plex apps.
 - Smart collections and smart playlists, and play queues. Collections are
-  joined and left through items' `collection` tags; their own title,
-  summary, artwork and order are edited in pley. Playlists can be created
-  and edited.
+  joined and left through items' `collection` tags; their order and mode
+  are set in pley. Playlists can be created and edited.
 - Editing episodes' and seasons' artwork from URLs other than TMDB images
   (upload the file instead), and per-item preferences (`/prefs`).
 - Filters on descendants (`episode.title` on shows) and on `resolution`, `hdr`,
