@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { User } from "@/api/types";
-import { apiError, LocationDisplay, mockApi, renderWithProviders, testUser } from "@/test/render";
+import { apiError, type FakeRequest, LocationDisplay, mockApi, renderWithProviders, testUser } from "@/test/render";
 import { ProfilesPage } from "./ProfilesPage";
 
 const me: User = { ...testUser, id: 1, name: "Sam", is_admin: false };
@@ -21,6 +21,11 @@ function serve() {
       return { user: [kid, locked, admin].find((u) => u.id === body.user_id), token: "t" };
     },
   });
+}
+
+/** The last profile switch: queries refetched after it may come later. */
+function lastSwitch(requests: FakeRequest[]) {
+  return requests.filter((r) => r.method === "POST" && r.path === "/api/auth/switch").at(-1);
 }
 
 function renderProfiles() {
@@ -41,7 +46,7 @@ describe("ProfilesPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Kid" }));
     expect(await screen.findByTestId("location")).toHaveTextContent("/library/2");
-    expect(requests.at(-1)?.body).toEqual({ user_id: kid.id });
+    expect(lastSwitch(requests)?.body).toEqual({ user_id: kid.id });
   });
 
   it("goes on as the current profile without asking the server", async () => {
@@ -106,7 +111,7 @@ describe("ProfilesPage", () => {
     await user.clear(screen.getByLabelText("Password"));
     await user.type(screen.getByLabelText("Password"), "secret");
     await user.click(screen.getByRole("button", { name: "Switch" }));
-    await waitFor(() => expect(requests.at(-1)?.body).toEqual({ user_id: admin.id, password: "secret" }));
+    await waitFor(() => expect(lastSwitch(requests)?.body).toEqual({ user_id: admin.id, password: "secret" }));
     expect(await screen.findByTestId("location")).toHaveTextContent("/library/2");
   });
 
