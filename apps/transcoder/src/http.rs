@@ -229,6 +229,9 @@ async fn trickplay_sheet(State(state): Shared, Path((id, sheet)): Path<(String, 
         .ok_or_else(|| ApiError::NotFound(format!("unknown file {sheet}")))?;
     let path = state.trickplay.sheet_path(&id, n).ok_or_else(|| ApiError::NotFound("no such sheet".into()))?;
     let bytes = tokio::fs::read(path).await?;
+    // Read whole: the set may go now that this sheet has been fetched.
+    let trickplay = state.trickplay.clone();
+    let _ = tokio::task::spawn_blocking(move || trickplay.sheet_served(&id, n)).await;
     Ok(([(header::CONTENT_TYPE, "image/jpeg")], bytes).into_response())
 }
 
@@ -446,6 +449,41 @@ mod tests {
             let answer = request(addr, "GET", path, None, None).await;
             assert_eq!((answer.status, answer.code()), (404, "not_found".to_owned()), "{path}");
         }
+    }
+
+    #[tokio::test]
+    async fn preview_sheets_go_once_all_have_been_fetched() {
+        let dir = tempfile::tempdir().unwrap();
+        let addr = serve(dir.path(), None).await;
+        let id = "0123abcd-2000-320";
+        let set = dir.path().join("trickplay").join(id);
+        std::fs::create_dir_all(&set).unwrap();
+        let info = TrickplayInfo {
+            id: id.into(),
+            interval_ms: 2_000,
+            width: 320,
+            height: 180,
+            columns: 10,
+            rows: 10,
+            count: 150,
+            sheets: 2,
+        };
+        std::fs::write(set.join("index.json"), serde_json::to_vec(&info).unwrap()).unwrap();
+        std::fs::write(set.join("0.jpg"), b"sheet 0").unwrap();
+        std::fs::write(set.join("1.jpg"), b"sheet 1").unwrap();
+        let sheet = |n: u32| {
+            let path = format!("/v1/trickplay/{id}/{n}.jpg");
+            async move { request(addr, "GET", &path, None, None).await }
+        };
+        // In any order, more than once…
+        assert_eq!(sheet(1).await.status, 200);
+        assert_eq!(sheet(1).await.status, 200);
+        assert!(set.exists(), "sheet 0 has not been fetched yet");
+        let last = sheet(0).await;
+        assert_eq!((last.status, last.body.as_str()), (200, "sheet 0"));
+        // …and once every sheet has been fetched, the server has its copy.
+        assert!(!set.exists());
+        assert_eq!(sheet(0).await.status, 404);
     }
 
     #[tokio::test]

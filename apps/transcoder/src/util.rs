@@ -42,6 +42,20 @@ pub fn write_atomically(target: &Path, data: &[u8]) -> std::io::Result<()> {
     result
 }
 
+/// Mark a cache file as used now, so cache pruning keeps it (see
+/// `cache.rs`). At most once a day per file: it costs a write.
+pub fn touch(path: &Path) {
+    const EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+    let recent = std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .is_ok_and(|t| t.elapsed().map(|age| age < EVERY).unwrap_or(true));
+    if !recent {
+        if let Ok(file) = std::fs::File::options().write(true).open(path) {
+            let _ = file.set_modified(SystemTime::now());
+        }
+    }
+}
+
 /// Seconds with millisecond precision, the way ffmpeg expects time arguments.
 pub fn secs(ms: i64) -> String {
     let ms = ms.max(0);
@@ -269,6 +283,25 @@ mod tests {
         let mut names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name()).collect();
         names.sort();
         assert_eq!(names, vec![OsString::from("a.vtt"), OsString::from("blocked")]);
+    }
+
+    #[test]
+    fn touching_marks_files_used_at_most_daily() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"x").unwrap();
+        let set = |ago: u64| {
+            let when = SystemTime::now() - std::time::Duration::from_secs(ago);
+            std::fs::File::options().write(true).open(&path).unwrap().set_modified(when).unwrap();
+        };
+        let age = || std::fs::metadata(&path).unwrap().modified().unwrap().elapsed().unwrap().as_secs();
+        set(3 * 24 * 3600);
+        touch(&path);
+        assert!(age() < 60, "used now");
+        set(3600);
+        touch(&path);
+        assert!(age() >= 3600, "used an hour ago: not worth a write");
+        touch(&dir.path().join("missing"));
     }
 
     #[test]

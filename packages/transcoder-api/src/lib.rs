@@ -715,8 +715,9 @@ pub struct Fingerprint {
 }
 
 /// `POST /v1/trickplay`: seek-bar preview thumbnails of a video, tiled into
-/// JPEG sprite sheets fetched with `GET /v1/trickplay/{id}/{n}`. Cached: asking
-/// again for the same file version returns at once.
+/// JPEG sprite sheets fetched with `GET /v1/trickplay/{id}/{n}`. Cached until
+/// every sheet has been fetched (callers keep their own copy), or for a day:
+/// asking again for the same file version meanwhile returns at once.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct TrickplayRequest {
     pub path: String,

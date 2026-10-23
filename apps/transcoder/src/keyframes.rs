@@ -22,7 +22,7 @@ use tokio::sync::mpsc;
 
 use crate::ffmpeg::Ffmpeg;
 use crate::metrics::Metrics;
-use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg, write_atomically};
+use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg, touch, write_atomically};
 
 const MEMORY_ENTRIES: usize = 256;
 /// How long creating a job may spend reading a file's own index (only walking
@@ -80,11 +80,14 @@ impl KeyframeStore {
         if let Some(hit) = self.memory.lock().get(&key) {
             return Some(hit.clone());
         }
-        let text = std::fs::read_to_string(self.dir.join(format!("{key}.txt"))).ok()?;
+        let file = self.dir.join(format!("{key}.txt"));
+        let text = std::fs::read_to_string(&file).ok()?;
         let times: Vec<i64> = text.lines().filter_map(|l| l.trim().parse().ok()).collect();
         if times.is_empty() {
             return None;
         }
+        // In use: cache pruning keeps it.
+        touch(&file);
         let times = Arc::new(times);
         self.remember(key, times.clone());
         Some(times)

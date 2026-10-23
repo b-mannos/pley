@@ -18,7 +18,7 @@ use crate::ffmpeg::Ffmpeg;
 use crate::metrics::Metrics;
 use crate::plan::{MAX_DURATION_MS, TextSource, ZSCALE_TONEMAP, untagged_hdr_fix};
 use crate::probe::Prober;
-use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg, secs, write_atomically};
+use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg, secs, touch, write_atomically};
 
 pub struct Extractor {
     ff: Arc<Ffmpeg>,
@@ -304,7 +304,12 @@ impl Picture {
 /// one (then it is extracted again).
 async fn cached_vtt(path: &Path) -> Option<String> {
     let text = tokio::fs::read_to_string(path).await.ok()?;
-    text.starts_with("WEBVTT").then_some(text)
+    if !text.starts_with("WEBVTT") {
+        return None;
+    }
+    // In use: cache pruning keeps it.
+    touch(path);
+    Some(text)
 }
 
 /// Make sure a file another process wrote is on disk.

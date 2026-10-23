@@ -6,6 +6,7 @@
 //! Standalone transcoding service. It is the only pley component that runs
 //! FFmpeg; the media server talks to it over HTTP (docs/TRANSCODER.md).
 
+mod cache;
 mod error;
 mod extract;
 mod ffmpeg;
@@ -151,6 +152,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         limits.clone(),
     );
     jobs.spawn_reaper();
+    cache::spawn_janitor(work_dir.clone());
 
     let info = TranscoderInfo {
         name: "pley-transcoder".into(),

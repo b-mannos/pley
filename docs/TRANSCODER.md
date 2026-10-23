@@ -72,8 +72,8 @@ following status codes:
 | POST | `/v1/cover` | `CoverRequest {path}` | embedded cover art (`image/jpeg` or `image/png`) |
 | POST | `/v1/subtitles` | `SubtitleRequest {path, stream_index?}` | `text/vtt` |
 | POST | `/v1/keyframes` | `KeyframesRequest {path}` | `200` if indexed, `202` if queued |
-| POST | `/v1/trickplay` | `TrickplayRequest {path, interval_ms?, width?}` | `TrickplayInfo {id, interval_ms, width, height, columns, rows, count, sheets}`: seek-bar previews, cached per file version. Keyframes only are decoded (seconds for a film); HDR and Dolby Vision are tone-mapped with libplacebo when available. |
-| GET | `/v1/trickplay/{id}/{n}.jpg` | – | sprite sheet `n` (`columns × rows` thumbnails) |
+| POST | `/v1/trickplay` | `TrickplayRequest {path, interval_ms?, width?}` | `TrickplayInfo {id, interval_ms, width, height, columns, rows, count, sheets}`: seek-bar previews, cached per file version until all sheets have been fetched (or for a day). Keyframes only are decoded (seconds for a film); HDR and Dolby Vision are tone-mapped with libplacebo when available. |
+| GET | `/v1/trickplay/{id}/{n}.jpg` | – | sprite sheet `n` (`columns × rows` thumbnails); once every sheet of a set has been fetched, the set is deleted (fetch them all in one go and keep them) |
 | POST | `/v1/fingerprint` | `FingerprintRequest {path, stream_index?, start_ms, duration_ms}` | `Fingerprint {start_ms, item_seconds, data: u32[]}`: raw Chromaprint values of the audio (`400` when FFmpeg lacks Chromaprint) |
 | POST | `/v1/jobs` | `JobRequest` | `201 JobCreated` |
 | GET | `/v1/jobs` | – | `JobStatus[]` |
@@ -131,6 +131,20 @@ following status codes:
    - Segments more than 90 behind the playhead are deleted (in small batches,
      off the async runtime).
    - On startup, segments left over from an earlier run are removed.
+   - The caches in the work directory are pruned an hour apart (the first
+     time two minutes after start-up). Entries unused for longer than their
+     age limit go, then the least recently used ones until the folder fits its
+     budget; temporaries left by a crash go after 3 hours. Reading an entry
+     counts as using it.
+
+     | Folder | Holds | Age limit | Budget |
+     |---|---|---|---|
+     | `keyframes/` | keyframe indexes | 90 days | 256 MB |
+     | `subtitles/` | converted and extracted subtitles | 60 days | 512 MB |
+     | `trickplay/` | seek-preview sheets | 1 day | 1 GB |
+
+     A set of seek-preview sheets is also deleted as soon as every sheet in
+     it has been fetched: the server stores the sheets it fetches.
    - ffmpeg never outlives the transcoder: on Windows the transcoder runs in a
      kill-on-close job object, on Linux every child gets a parent-death signal.
      On shutdown (signal, or stdin closed with `--exit-with-parent`) all jobs

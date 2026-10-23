@@ -3,9 +3,10 @@
 //! seconds, tiled into JPEG sprite sheets. Only keyframes are decoded, so even
 //! a long film takes seconds to a minute; HDR and Dolby Vision are tone-mapped
 //! so previews look like the transcoded picture. Results are cached per file
-//! version.
+//! version until every sheet has been fetched (the server keeps its own copy),
+//! or for a day (see `cache.rs`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,11 +20,14 @@ use crate::extract::run_capture;
 use crate::ffmpeg::Ffmpeg;
 use crate::plan::{ZSCALE_TONEMAP, untagged_hdr_fix};
 use crate::probe::Prober;
-use crate::util::{MEDIA_INPUT_OPTIONS, background_priority, file_key, input_arg};
+use crate::util::{MEDIA_INPUT_OPTIONS, background_priority, file_key, input_arg, touch};
 
 const COLUMNS: u32 = 10;
 const ROWS: u32 = 10;
 const TIMEOUT: Duration = Duration::from_secs(60 * 60);
+/// Sets whose fetched sheets are tracked at once (sets fetched only in part
+/// are forgotten beyond that, and left to cache pruning).
+const MAX_TRACKED: usize = 1000;
 
 pub struct Trickplay {
     ff: Arc<Ffmpeg>,
@@ -32,6 +36,8 @@ pub struct Trickplay {
     /// One generation at a time: it is background work.
     limiter: Semaphore,
     locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Sheets fetched so far, per set.
+    served: Mutex<HashMap<String, HashSet<u32>>>,
 }
 
 /// Thumbnails every 2–10 s: about 360 for a film, more density for short clips.
@@ -42,12 +48,41 @@ pub fn default_interval_ms(duration_ms: i64) -> i64 {
 impl Trickplay {
     pub fn new(ff: Arc<Ffmpeg>, prober: Arc<Prober>, dir: PathBuf) -> Self {
         let _ = std::fs::create_dir_all(&dir);
-        Self { ff, prober, dir, limiter: Semaphore::new(1), locks: Mutex::default() }
+        Self { ff, prober, dir, limiter: Semaphore::new(1), locks: Mutex::default(), served: Mutex::default() }
     }
 
     pub fn sheet_path(&self, id: &str, n: u32) -> Option<PathBuf> {
-        let valid = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
-        valid.then(|| self.dir.join(id).join(format!("{n}.jpg"))).filter(|p| p.is_file())
+        valid_id(id).then(|| self.dir.join(id).join(format!("{n}.jpg"))).filter(|p| p.is_file())
+    }
+
+    /// Note that sheet `n` of set `id` has been read for a client. Once every
+    /// sheet of the set has been, the set is deleted: the server stores the
+    /// sheets it fetches, so this copy would only take space. Blocking.
+    pub fn sheet_served(&self, id: &str, n: u32) {
+        if !valid_id(id) {
+            return;
+        }
+        let dir = self.dir.join(id);
+        let Some(info) = read_index(&dir) else { return };
+        let complete = {
+            let mut served = self.served.lock();
+            if served.len() >= MAX_TRACKED && !served.contains_key(id) {
+                served.clear();
+            }
+            let sheets = served.entry(id.to_owned()).or_default();
+            sheets.insert(n);
+            let complete = (0..info.sheets).all(|k| sheets.contains(&k));
+            if complete {
+                served.remove(id);
+            }
+            complete
+        };
+        if complete {
+            match std::fs::remove_dir_all(&dir) {
+                Ok(()) => tracing::debug!("seek previews {id} fetched in full, removed"),
+                Err(err) => tracing::debug!("could not remove seek previews {id}: {err}"),
+            }
+        }
     }
 
     pub async fn generate(&self, req: &TrickplayRequest) -> ApiResult<TrickplayInfo> {
@@ -67,11 +102,13 @@ impl Trickplay {
         let id = format!("{}-{interval}-{width}", file_key(path)?);
         let dir = self.dir.join(&id);
         if let Some(info) = read_index(&dir) {
+            touch(&dir.join("index.json"));
             return Ok(info);
         }
         let lock = self.locks.lock().entry(id.clone()).or_default().clone();
         let _guard = lock.lock().await;
         if let Some(info) = read_index(&dir) {
+            touch(&dir.join("index.json"));
             return Ok(info);
         }
         let _permit = self.limiter.acquire().await.map_err(|e| ApiError::Internal(e.into()))?;
@@ -142,6 +179,11 @@ impl Trickplay {
         );
         Ok(info)
     }
+}
+
+/// Set ids are file keys plus numbers: nothing that could leave the folder.
+fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 fn read_index(dir: &Path) -> Option<TrickplayInfo> {
