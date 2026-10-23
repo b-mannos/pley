@@ -425,6 +425,8 @@ interface Playlist {
   item_count: number;               // visible entries
   duration_ms: number;
   artwork: string[];                // artwork urls of the first entries (≤ 4), for a mosaic
+  smart_filter: string | null;      // smart playlists: the listing of library_id they play
+  library_id: Id | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }
@@ -438,13 +440,19 @@ interface PlaylistEntry {
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/api/playlists` | – | `{ playlists: Playlist[] }` by title |
-| POST | `/api/playlists` | `{ title, kind?, item_ids?: Id[] }` | `201` `Playlist & { entries: PlaylistEntry[] }`; without `kind`, the first visible item decides |
+| POST | `/api/playlists` | `{ title, kind?, item_ids?: Id[] }`, or `{ title, library_id, smart_filter }` | `201` `Playlist & { entries: PlaylistEntry[] }`; without `kind`, the first visible item decides |
 | GET | `/api/playlists/{id}` | – | `Playlist & { entries }` |
-| PATCH | `/api/playlists/{id}` | `{ title }` | `Playlist & { entries }` |
+| PATCH | `/api/playlists/{id}` | `{ title?, smart_filter? }` | `Playlist & { entries }` |
 | DELETE | `/api/playlists/{id}` | – | `204` |
 | POST | `/api/playlists/{id}/items` | `{ item_ids: Id[] }` | `{ added: number }`; `400` when an item doesn't fit the playlist's kind |
 | DELETE | `/api/playlists/{id}/items/{entry_id}` | – | `204` |
 | PUT | `/api/playlists/{id}/order` | `{ entry_ids: Id[] }` | `Playlist & { entries }`; these first in this order, the rest after |
+
+A smart playlist plays what a listing of its library finds (`smart_filter`,
+the same syntax as smart collections'), shows and albums as their episodes
+and tracks, in the filter's order, at most 5,000 entries, as its owner may
+see them. Its entries are keyed by item and can't be added, removed or
+reordered (`400`).
 
 Another user's playlist answers `404`. The web player plays a video playlist
 in order (its *Next* is the next entry); music playlists go to the audio

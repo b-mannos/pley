@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { ArrowDownWideNarrow, ArrowUpNarrowWide, FolderSearch, RefreshCw, Sparkles } from "lucide-react";
+import { ArrowDownWideNarrow, ArrowUpNarrowWide, FolderSearch, Layers, ListMusic, ListVideo, RefreshCw, Sparkles } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useLibrary, useLibraryFilters, useLibraryHubs, useLibraryItems, useScanLibrary } from "@/api/hooks";
 import type { LibraryKind, LibrarySort, SortOrder } from "@/api/types";
@@ -14,6 +14,8 @@ import { useToast } from "@/components/Toast";
 import { Button, EmptyState, IconButton, Select } from "@/components/ui";
 import { NotFoundPage } from "./NotFoundPage";
 import { CollectionFormModal } from "./collections/CollectionFormModal";
+import { PlaylistFormModal } from "./playlists/PlaylistFormModal";
+import { Menu, MenuItem } from "@/components/Menu";
 import { CollectionsTab } from "./collections/CollectionsTab";
 import type { CardAspect } from "@/components/cards";
 import { cn } from "@/lib/cn";
@@ -157,7 +159,7 @@ function LibraryTab({
   const toast = useToast();
   const navigate = useNavigate();
   const scan = useScanLibrary();
-  const [savingSmart, setSavingSmart] = useState(false);
+  const [saving, setSaving] = useState<"collection" | "playlist" | null>(null);
   const sorts = SORTS_BY_KIND[kind];
   const rawSort = params.get("sort") as LibrarySort | null;
   const sort: LibrarySort = rawSort && sorts.includes(rawSort) ? rawSort : "title";
@@ -242,18 +244,51 @@ function LibraryTab({
               Clear filters
             </Button>
           ) : null}
-          {filtered && user.is_admin && kind !== "music" ? (
-            <Button size="sm" variant="ghost" icon={<Sparkles className="size-4" />} onClick={() => setSavingSmart(true)}>
-              Save as smart collection
-            </Button>
+          {filtered ? (
+            <Menu
+              align="left"
+              trigger={({ open, toggle }) => (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<Sparkles className="size-4" />}
+                  aria-haspopup="menu"
+                  aria-expanded={open}
+                  onClick={toggle}
+                >
+                  Save as…
+                </Button>
+              )}
+            >
+              {(close) => (
+                <>
+                  <MenuItem icon={kind === "music" ? <ListMusic /> : <ListVideo />} onClick={() => (close(), setSaving("playlist"))}>
+                    Smart playlist
+                  </MenuItem>
+                  {user.is_admin && kind !== "music" ? (
+                    <MenuItem icon={<Layers />} onClick={() => (close(), setSaving("collection"))}>
+                      Smart collection
+                    </MenuItem>
+                  ) : null}
+                </>
+              )}
+            </Menu>
           ) : null}
-          {savingSmart ? (
+          {saving === "collection" ? (
             <CollectionFormModal
               open
-              onClose={() => setSavingSmart(false)}
+              onClose={() => setSaving(null)}
               libraryId={libraryId}
               smartFilter={smartFilterOf(query)}
               onCreated={(created) => void navigate(`/collection/${created.id}`)}
+            />
+          ) : null}
+          {saving === "playlist" ? (
+            <PlaylistFormModal
+              open
+              onClose={() => setSaving(null)}
+              smart={{ libraryId, filter: smartFilterOf(query) }}
+              onCreated={(created) => void navigate(`/playlists/${created.id}`)}
             />
           ) : null}
 

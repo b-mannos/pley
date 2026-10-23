@@ -18,7 +18,8 @@ export function AddToPlaylistModal({ item, onClose }: { item: ItemSummary | null
   const add = useAddToPlaylist();
   const toast = useToast();
   const [title, setTitle] = useState("");
-  const matching = playlists.data?.filter((p) => p.kind === kind) ?? [];
+  // Smart playlists fill themselves.
+  const matching = playlists.data?.filter((p) => p.kind === kind && !p.smart_filter) ?? [];
   const busy = create.isPending || add.isPending;
 
   const onCreate = (e: FormEvent) => {

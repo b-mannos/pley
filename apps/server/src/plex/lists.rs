@@ -175,7 +175,12 @@ fn playlist_node(p: &PlaylistDto) -> Node {
         .attr("guid", format!("com.plexapp.agents.none://pley-playlist-{}", p.id))
         .attr("type", "playlist")
         .attr("title", &p.title)
-        .attr("smart", false)
+        .attr("smart", p.smart_filter.is_some())
+        // A smart playlist's filter, which python-plexapi reads back.
+        .opt(
+            "content",
+            p.smart_filter.as_ref().zip(p.library_id).map(|(f, lib)| format!("/library/sections/{lib}/all?{f}")),
+        )
         .attr("playlistType", &p.kind)
         .attr("composite", format!("/playlists/{}/composite/{}", p.id, p.updated_at))
         .attr("leafCount", p.item_count)
@@ -199,8 +204,8 @@ pub async fn list(State(state): State<AppState>, PlexUser(user): PlexUser, param
     if let Some(kind) = params.get("playlistType") {
         rows.retain(|p| p.kind == kind);
     }
-    if params.flag("smart") {
-        rows.clear();
+    if let Some(smart) = params.get("smart") {
+        rows.retain(|p| p.smart_filter.is_some() == (smart == "1"));
     }
     let mut mc = base_container().attr("size", rows.len());
     mc.extend(rows.iter().map(playlist_node));
@@ -317,12 +322,24 @@ fn uri_items(uri: &str) -> Vec<i64> {
 
 /// `POST /playlists?type=video&title=…&uri=…`
 pub async fn create(State(state): State<AppState>, PlexUser(user): PlexUser, params: Params) -> PlexResult<Node> {
-    if params.flag("smart") {
-        return Err(PlexError::BadRequest("smart playlists are not supported".into()));
-    }
     let title = params.get("title").unwrap_or_default().trim().chars().take(200).collect::<String>();
     if title.is_empty() {
         return Err(PlexError::BadRequest("title is required".into()));
+    }
+    if params.flag("smart") {
+        // A listing of a section the user may open.
+        let (section, filter) = params
+            .get("uri")
+            .and_then(uri_filter)
+            .ok_or_else(|| PlexError::BadRequest("a smart playlist needs a section listing as uri".into()))?;
+        let lib =
+            visible_libraries(&state, &user).await?.into_iter().find(|l| l.id == section).ok_or(PlexError::NotFound)?;
+        if !crate::plex::valid_smart_filter(&lib, &filter) {
+            return Err(PlexError::BadRequest("that listing finds nothing to play".into()));
+        }
+        let kind = if lib.kind() == LibraryKind::Music { Kind::Audio } else { Kind::Video };
+        let id = playlists::create_smart(&state.db, &user, &title, kind, section, &filter).await?;
+        return playlist_container_of(&state, &user, id).await;
     }
     let items = params.get("uri").map(uri_items).unwrap_or_default();
     let kind = match params.get("type") {
@@ -410,6 +427,23 @@ pub async fn add(
     Path(id): Path<i64>,
     params: Params,
 ) -> PlexResult<Node> {
+    // A smart playlist gets a new listing (python-plexapi's updateFilters).
+    if playlists::is_smart(&state.db, &user, id).await? {
+        let (playlist, _) = playlists::get_rows(&state.db, &user, id).await?.ok_or(PlexError::NotFound)?;
+        let lib = visible_libraries(&state, &user)
+            .await?
+            .into_iter()
+            .find(|l| Some(l.id) == playlist.library_id)
+            .ok_or(PlexError::NotFound)?;
+        let filter = params
+            .get("uri")
+            .and_then(uri_filter)
+            .filter(|(s, f)| *s == lib.id && crate::plex::valid_smart_filter(&lib, f))
+            .ok_or_else(|| PlexError::BadRequest("a smart playlist's filter is a listing of its section".into()))?
+            .1;
+        playlists::set_smart_filter(&state.db, &user, id, &filter).await?;
+        return playlist_container_of(&state, &user, id).await;
+    }
     let items = params.get("uri").map(uri_items).unwrap_or_default();
     if items.is_empty() {
         return Err(PlexError::BadRequest("uri is required".into()));
@@ -425,6 +459,9 @@ pub async fn remove(
     PlexUser(user): PlexUser,
     Path((id, entry)): Path<(i64, i64)>,
 ) -> PlexResult<Node> {
+    if playlists::is_smart(&state.db, &user, id).await? {
+        return Err(PlexError::BadRequest("a smart playlist is filled by its filter".into()));
+    }
     if !playlists::remove_entry(&state.db, &user, id, entry).await? {
         return Err(PlexError::NotFound);
     }
@@ -439,6 +476,9 @@ pub async fn move_item(
     params: Params,
 ) -> PlexResult<Node> {
     let after = params.parse::<i64>("after").filter(|after| *after > 0);
+    if playlists::is_smart(&state.db, &user, id).await? {
+        return Err(PlexError::BadRequest("a smart playlist plays in its filter's order".into()));
+    }
     if !playlists::move_entry(&state.db, &user, id, entry, after).await? {
         return Err(PlexError::NotFound);
     }

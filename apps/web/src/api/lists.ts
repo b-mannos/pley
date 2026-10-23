@@ -45,6 +45,10 @@ export interface Playlist {
   duration_ms: number;
   /** Artwork of the first entries (up to 4), for a mosaic. */
   artwork: string[];
+  /** A smart playlist's filter: a listing of `library_id` (Plex's syntax, see
+   * `lib/smartFilter`); it plays what that finds. */
+  smart_filter: string | null;
+  library_id: Id | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }
@@ -214,7 +218,8 @@ export function usePlaylist(id: Id) {
 export function useCreatePlaylist() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { title: string; kind?: PlaylistKind; item_ids?: Id[] }) => api.post<PlaylistDetail>("/api/playlists", body),
+    mutationFn: (body: { title: string; kind?: PlaylistKind; item_ids?: Id[]; smart_filter?: string; library_id?: Id }) =>
+      api.post<PlaylistDetail>("/api/playlists", body),
     onSuccess: (data) => {
       qc.setQueryData(listKeys.playlist(data.id), data);
       void qc.invalidateQueries({ queryKey: listKeys.playlists, exact: true });

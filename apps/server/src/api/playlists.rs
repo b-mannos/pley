@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::AuthUser;
 use crate::error::{ApiResult, AppError};
+use crate::library::LibraryRow;
 use crate::playlists::{self, EntryDto, Kind, PlaylistDto};
 use crate::state::AppState;
 
@@ -57,6 +58,32 @@ pub struct NewPlaylist {
     kind: Option<String>,
     #[serde(default)]
     item_ids: Vec<i64>,
+    /// A smart playlist: a listing of `library_id` in the Plex API's filter
+    /// syntax (`genre=Comedy&unwatched=1&sort=year:desc`) whose items it plays.
+    #[serde(default)]
+    smart_filter: Option<String>,
+    #[serde(default)]
+    library_id: Option<i64>,
+}
+
+/// A smart filter of a library the user may open.
+async fn smart_filter_of(
+    state: &AppState,
+    user: &AuthUser,
+    library_id: Option<i64>,
+    filter: &str,
+) -> ApiResult<(LibraryRow, String)> {
+    let library_id = library_id.ok_or_else(|| AppError::bad_request("a smart playlist names its library_id"))?;
+    let lib = crate::access::visible_libraries(&state.db, user)
+        .await?
+        .into_iter()
+        .find(|l| l.id == library_id)
+        .ok_or_else(|| AppError::not_found(format!("library {library_id} not found")))?;
+    let filter = filter.trim().trim_start_matches('?');
+    if filter.len() > 2000 || !crate::plex::valid_smart_filter(&lib, filter) {
+        return Err(AppError::bad_request("smart_filter must be a library filter such as genre=Comedy&unwatched=1"));
+    }
+    Ok((lib, filter.to_owned()))
 }
 
 pub async fn create(
@@ -65,6 +92,12 @@ pub async fn create(
     Json(body): Json<NewPlaylist>,
 ) -> ApiResult<(StatusCode, Json<PlaylistDetail>)> {
     let title = clean_title(&body.title)?;
+    if let Some(filter) = &body.smart_filter {
+        let (lib, filter) = smart_filter_of(&state, &user, body.library_id, filter).await?;
+        let kind = if lib.kind() == crate::library::LibraryKind::Music { Kind::Audio } else { Kind::Video };
+        let id = playlists::create_smart(&state.db, &user, &title, kind, lib.id, &filter).await?;
+        return Ok((StatusCode::CREATED, Json(detail(&state, &user, id).await?)));
+    }
     let kind = match body.kind.as_deref() {
         Some(k) => Kind::parse(k).ok_or_else(|| AppError::bad_request("kind must be video or audio"))?,
         None => playlists::kind_of_first(&state.db, &user, &body.item_ids).await?.ok_or_else(|| {
@@ -83,7 +116,11 @@ pub async fn create(
 
 #[derive(Deserialize)]
 pub struct PlaylistPatch {
-    title: String,
+    #[serde(default)]
+    title: Option<String>,
+    /// A new filter for a smart playlist.
+    #[serde(default)]
+    smart_filter: Option<String>,
 }
 
 pub async fn rename(
@@ -92,9 +129,21 @@ pub async fn rename(
     Path(id): Path<i64>,
     Json(body): Json<PlaylistPatch>,
 ) -> ApiResult<Json<PlaylistDetail>> {
-    let title = clean_title(&body.title)?;
-    if !playlists::rename(&state.db, &user, id, &title).await? {
-        return Err(AppError::not_found(format!("playlist {id} not found")));
+    if let Some(filter) = &body.smart_filter {
+        let (playlist, _) = playlists::get_rows(&state.db, &user, id)
+            .await?
+            .ok_or_else(|| AppError::not_found(format!("playlist {id} not found")))?;
+        if playlist.smart_filter.is_none() {
+            return Err(AppError::bad_request("only smart playlists have a filter"));
+        }
+        let (_, filter) = smart_filter_of(&state, &user, playlist.library_id, filter).await?;
+        playlists::set_smart_filter(&state.db, &user, id, &filter).await?;
+    }
+    if let Some(title) = &body.title {
+        let title = clean_title(title)?;
+        if !playlists::rename(&state.db, &user, id, &title).await? {
+            return Err(AppError::not_found(format!("playlist {id} not found")));
+        }
     }
     Ok(Json(detail(&state, &user, id).await?))
 }
@@ -131,6 +180,9 @@ pub async fn remove(
     user: AuthUser,
     Path((id, entry_id)): Path<(i64, i64)>,
 ) -> ApiResult<StatusCode> {
+    if playlists::is_smart(&state.db, &user, id).await? {
+        return Err(AppError::bad_request("a smart playlist is filled by its filter"));
+    }
     if !playlists::remove_entry(&state.db, &user, id, entry_id).await? {
         return Err(AppError::not_found("entry not found"));
     }
@@ -148,6 +200,9 @@ pub async fn reorder(
     Path(id): Path<i64>,
     Json(body): Json<EntryIds>,
 ) -> ApiResult<Json<PlaylistDetail>> {
+    if playlists::is_smart(&state.db, &user, id).await? {
+        return Err(AppError::bad_request("a smart playlist plays in its filter's order"));
+    }
     if !playlists::reorder(&state.db, &user, id, &body.entry_ids).await? {
         return Err(AppError::not_found(format!("playlist {id} not found")));
     }

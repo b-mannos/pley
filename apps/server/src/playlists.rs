@@ -54,9 +54,13 @@ struct PlaylistRow {
     id: i64,
     title: String,
     kind: String,
+    library_id: Option<i64>,
+    smart_filter: Option<String>,
     created_at: i64,
     updated_at: i64,
 }
+
+const COLUMNS: &str = "id, title, kind, library_id, smart_filter, created_at, updated_at";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PlaylistDto {
@@ -69,6 +73,10 @@ pub struct PlaylistDto {
     pub duration_ms: i64,
     /// Artwork of the first entries, for a mosaic.
     pub artwork: Vec<String>,
+    /// A smart playlist's filter: a listing of `library_id` in Plex's syntax
+    /// (see `crate::plex::smart_items`). `None` for playlists of entries.
+    pub smart_filter: Option<String>,
+    pub library_id: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -115,11 +123,38 @@ pub async fn expand(db: &Db, user: &AuthUser, item_ids: &[i64]) -> sqlx::Result<
 }
 
 async fn owned(db: &Db, user: &AuthUser, id: i64) -> sqlx::Result<Option<PlaylistRow>> {
-    sqlx::query_as("SELECT id, title, kind, created_at, updated_at FROM playlists WHERE id = ? AND user_id = ?")
+    sqlx::query_as(&format!("SELECT {COLUMNS} FROM playlists WHERE id = ? AND user_id = ?"))
         .bind(id)
         .bind(user.id)
         .fetch_optional(&db.read)
         .await
+}
+
+/// What a smart playlist plays: its filter's finds, shows and albums as
+/// their episodes and tracks, at most [`MAX_ENTRIES`]. Entries are keyed by
+/// item.
+async fn smart_entries(db: &Db, user: &AuthUser, row: &PlaylistRow) -> sqlx::Result<Vec<(i64, ItemRow)>> {
+    let (Some(library_id), Some(filter)) = (row.library_id, row.smart_filter.as_deref()) else { return Ok(Vec::new()) };
+    let Some(lib) = crate::library::get_library(db, library_id).await? else { return Ok(Vec::new()) };
+    let found = crate::plex::smart_items(db, user.id, &lib, filter).await?;
+    let mut leaves = Vec::new();
+    for item in found {
+        if leaves.len() as i64 >= MAX_ENTRIES {
+            break;
+        }
+        if matches!(item.kind.as_str(), "movie" | "episode" | "track") {
+            leaves.push(item);
+        } else {
+            leaves.extend(expand(db, user, &[item.id]).await?);
+        }
+    }
+    leaves.truncate(usize::try_from(MAX_ENTRIES).unwrap_or(usize::MAX));
+    Ok(leaves.into_iter().map(|item| (item.id, item)).collect())
+}
+
+/// Whether the user's playlist is a smart one (it holds no entries).
+pub async fn is_smart(db: &Db, user: &AuthUser, id: i64) -> sqlx::Result<bool> {
+    Ok(owned(db, user, id).await?.is_some_and(|row| row.smart_filter.is_some()))
 }
 
 fn artwork_of(item: &ItemSummary) -> Option<String> {
@@ -131,13 +166,11 @@ fn artwork_of(item: &ItemSummary) -> Option<String> {
 
 /// The user's playlists with visible counts and durations.
 pub async fn list(db: &Db, user: &AuthUser) -> sqlx::Result<Vec<PlaylistDto>> {
-    let rows: Vec<PlaylistRow> = sqlx::query_as(
-        "SELECT id, title, kind, created_at, updated_at FROM playlists WHERE user_id = ?
-         ORDER BY title COLLATE NOCASE, id",
-    )
-    .bind(user.id)
-    .fetch_all(&db.read)
-    .await?;
+    let rows: Vec<PlaylistRow> =
+        sqlx::query_as(&format!("SELECT {COLUMNS} FROM playlists WHERE user_id = ? ORDER BY title COLLATE NOCASE, id"))
+            .bind(user.id)
+            .fetch_all(&db.read)
+            .await?;
     let sql = format!(
         "{} SELECT pi.playlist_id, COUNT(*), COALESCE(SUM(i.duration_ms), 0) FROM playlist_items pi
            JOIN playlists pl ON pl.id = pi.playlist_id
@@ -157,6 +190,11 @@ pub async fn list(db: &Db, user: &AuthUser) -> sqlx::Result<Vec<PlaylistDto>> {
         .collect();
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
+        if row.smart_filter.is_some() {
+            let entries = smart_entries(db, user, &row).await?;
+            out.push(dto_of(row, entries).0);
+            continue;
+        }
         let first: Vec<i64> =
             sqlx::query_scalar("SELECT item_id FROM playlist_items WHERE playlist_id = ? ORDER BY position LIMIT 12")
                 .bind(row.id)
@@ -180,6 +218,8 @@ pub async fn list(db: &Db, user: &AuthUser) -> sqlx::Result<Vec<PlaylistDto>> {
             item_count,
             duration_ms,
             artwork,
+            smart_filter: None,
+            library_id: row.library_id,
             created_at: row.created_at,
             updated_at: row.updated_at,
         });
@@ -187,22 +227,8 @@ pub async fn list(db: &Db, user: &AuthUser) -> sqlx::Result<Vec<PlaylistDto>> {
     Ok(out)
 }
 
-/// A playlist and its visible entries as `(entry id, item)`, if it belongs
-/// to the user.
-pub async fn get_rows(db: &Db, user: &AuthUser, id: i64) -> sqlx::Result<Option<(PlaylistDto, Vec<(i64, ItemRow)>)>> {
-    let Some(row) = owned(db, user, id).await? else { return Ok(None) };
-    let entries: Vec<(i64, i64)> =
-        sqlx::query_as("SELECT id, item_id FROM playlist_items WHERE playlist_id = ? ORDER BY position, id")
-            .bind(id)
-            .fetch_all(&db.read)
-            .await?;
-    let mut ids: Vec<i64> = entries.iter().map(|(_, item)| *item).collect();
-    ids.sort_unstable();
-    ids.dedup();
-    let rows: HashMap<i64, ItemRow> =
-        catalog::items_by_ids(db, user.id, &ids).await?.into_iter().map(|r| (r.id, r)).collect();
-    let entries: Vec<(i64, ItemRow)> =
-        entries.into_iter().filter_map(|(entry_id, item)| rows.get(&item).map(|r| (entry_id, r.clone()))).collect();
+/// A playlist as the API shows it, with its visible `entries`.
+fn dto_of(row: PlaylistRow, entries: Vec<(i64, ItemRow)>) -> (PlaylistDto, Vec<(i64, ItemRow)>) {
     let mut artwork = Vec::new();
     for (_, item) in &entries {
         if let Some(url) = artwork_of(&item.to_summary()).filter(|u| !artwork.contains(u)) {
@@ -219,10 +245,35 @@ pub async fn get_rows(db: &Db, user: &AuthUser, id: i64) -> sqlx::Result<Option<
         item_count: entries.len() as i64,
         duration_ms: entries.iter().map(|(_, item)| item.duration_ms.unwrap_or(0)).sum(),
         artwork,
+        smart_filter: row.smart_filter,
+        library_id: row.library_id,
         created_at: row.created_at,
         updated_at: row.updated_at,
     };
-    Ok(Some((dto, entries)))
+    (dto, entries)
+}
+
+/// A playlist and its visible entries as `(entry id, item)`, if it belongs
+/// to the user.
+pub async fn get_rows(db: &Db, user: &AuthUser, id: i64) -> sqlx::Result<Option<(PlaylistDto, Vec<(i64, ItemRow)>)>> {
+    let Some(row) = owned(db, user, id).await? else { return Ok(None) };
+    if row.smart_filter.is_some() {
+        let entries = smart_entries(db, user, &row).await?;
+        return Ok(Some(dto_of(row, entries)));
+    }
+    let entries: Vec<(i64, i64)> =
+        sqlx::query_as("SELECT id, item_id FROM playlist_items WHERE playlist_id = ? ORDER BY position, id")
+            .bind(id)
+            .fetch_all(&db.read)
+            .await?;
+    let mut ids: Vec<i64> = entries.iter().map(|(_, item)| *item).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let rows: HashMap<i64, ItemRow> =
+        catalog::items_by_ids(db, user.id, &ids).await?.into_iter().map(|r| (r.id, r)).collect();
+    let entries: Vec<(i64, ItemRow)> =
+        entries.into_iter().filter_map(|(entry_id, item)| rows.get(&item).map(|r| (entry_id, r.clone()))).collect();
+    Ok(Some(dto_of(row, entries)))
 }
 
 /// A playlist and its visible entries, if it belongs to the user.
@@ -245,6 +296,39 @@ pub async fn create(db: &Db, user: &AuthUser, title: &str, kind: Kind) -> sqlx::
     .bind(now)
     .fetch_one(&db.write)
     .await
+}
+
+/// A smart playlist of `library_id`, filled by `filter`.
+pub async fn create_smart(
+    db: &Db,
+    user: &AuthUser,
+    title: &str,
+    kind: Kind,
+    library_id: i64,
+    filter: &str,
+) -> sqlx::Result<i64> {
+    let id = create(db, user, title, kind).await?;
+    sqlx::query("UPDATE playlists SET library_id = ?, smart_filter = ? WHERE id = ?")
+        .bind(library_id)
+        .bind(filter)
+        .bind(id)
+        .execute(&db.write)
+        .await?;
+    Ok(id)
+}
+
+/// A new filter for the user's smart playlist; whether there was one to change.
+pub async fn set_smart_filter(db: &Db, user: &AuthUser, id: i64, filter: &str) -> sqlx::Result<bool> {
+    let done = sqlx::query(
+        "UPDATE playlists SET smart_filter = ?, updated_at = ? WHERE id = ? AND user_id = ? AND smart_filter IS NOT NULL",
+    )
+    .bind(filter)
+    .bind(now())
+    .bind(id)
+    .bind(user.id)
+    .execute(&db.write)
+    .await?;
+    Ok(done.rows_affected() > 0)
 }
 
 pub async fn rename(db: &Db, user: &AuthUser, id: i64, title: &str) -> sqlx::Result<bool> {
@@ -272,6 +356,9 @@ pub async fn delete(db: &Db, user: &AuthUser, id: i64) -> sqlx::Result<bool> {
 /// were added, or an error when they don't fit the playlist's kind.
 pub async fn add(db: &Db, user: &AuthUser, id: i64, item_ids: &[i64]) -> Result<u64, AppError> {
     let row = owned(db, user, id).await?.ok_or_else(|| AppError::not_found("playlist not found"))?;
+    if row.smart_filter.is_some() {
+        return Err(AppError::bad_request("a smart playlist is filled by its filter"));
+    }
     let kind = Kind::parse(&row.kind).unwrap_or(Kind::Video);
     let leaves = expand(db, user, item_ids).await?;
     if leaves.iter().any(|l| Kind::of_item(&l.kind) != Some(kind)) {

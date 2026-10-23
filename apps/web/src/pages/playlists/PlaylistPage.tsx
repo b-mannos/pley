@@ -10,13 +10,14 @@ import { PlaylistArt } from "@/components/lists/PlaylistArt";
 import { moved, useDragReorder } from "@/components/lists/reorder";
 import { ConfirmModal } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
-import { Button, EmptyState, IconButton, Skeleton } from "@/components/ui";
+import { Badge, Button, EmptyState, IconButton, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatDuration, progressFraction } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
 import { posterCandidates, thumbCandidates } from "@/lib/images";
 import { useVideoQueue } from "@/lib/videoQueue";
 import { NotFoundPage } from "../NotFoundPage";
+import { describeSmartFilter } from "@/lib/smartFilter";
 import { MetaLine } from "../item/shared";
 import { PlaylistFormModal } from "./PlaylistFormModal";
 import { playlistMeta } from "./PlaylistsPage";
@@ -55,6 +56,8 @@ function PlaylistView({ playlist: p }: { playlist: PlaylistDetail }) {
   const [deleting, setDeleting] = useState(false);
   const items = p.entries.map((e) => e.item);
   const video = p.kind === "video";
+  // A smart playlist plays its filter's finds in their order.
+  const editable = !p.smart_filter;
 
   const playFrom = (index: number, shuffle = false) => {
     if (!items.length) return;
@@ -75,9 +78,12 @@ function PlaylistView({ playlist: p }: { playlist: PlaylistDetail }) {
       <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:gap-8">
         <PlaylistArt playlist={p} width={240} className="w-44 shrink-0 shadow-2xl shadow-black/60 sm:w-52 lg:w-60" />
         <div className="min-w-0 flex-1 space-y-3">
-          <div className="text-sm font-medium text-muted">{video ? "Video playlist" : "Music playlist"}</div>
+          <div className="flex items-center gap-2 text-sm font-medium text-muted">
+            {video ? "Video playlist" : "Music playlist"}
+            {p.smart_filter ? <Badge tone="accent">Smart</Badge> : null}
+          </div>
           <h1 className="text-3xl font-bold leading-tight tracking-tight text-balance sm:text-5xl">{p.title}</h1>
-          <MetaLine parts={[playlistMeta(p)]} />
+          <MetaLine parts={[playlistMeta(p), ...(p.smart_filter ? describeSmartFilter(p.smart_filter) : [])]} />
           <div className="flex flex-wrap items-center gap-2.5 pt-1">
             <Button variant="primary" size="lg" icon={<Play className="size-5 fill-current" />} onClick={() => playFrom(0)} disabled={!items.length}>
               Play
@@ -96,7 +102,9 @@ function PlaylistView({ playlist: p }: { playlist: PlaylistDetail }) {
       </div>
 
       <section className="mt-10 max-w-5xl">
-        {p.entries.length === 0 ? (
+        {p.entries.length === 0 && p.smart_filter ? (
+          <p className="text-sm text-muted">Nothing matches this playlist's filter yet.</p>
+        ) : p.entries.length === 0 ? (
           <p className="text-sm text-muted">
             This playlist is empty. Use “Add to playlist” on {video ? "a movie, show or episode" : "an artist or album"}, or right-click a poster.
           </p>
@@ -111,7 +119,7 @@ function PlaylistView({ playlist: p }: { playlist: PlaylistDetail }) {
               return (
                 <li
                   key={entry.entry_id}
-                  {...rowProps(i)}
+                  {...(editable ? rowProps(i) : {})}
                   onDoubleClick={() => playFrom(i)}
                   className={cn(
                     "group flex items-center gap-3 rounded-md border-y-2 border-transparent px-2 py-1.5 transition-colors hover:bg-white/[0.04]",
@@ -121,7 +129,7 @@ function PlaylistView({ playlist: p }: { playlist: PlaylistDetail }) {
                     mark === "after" && "border-b-accent",
                   )}
                 >
-                  <GripVertical className="hidden size-4 shrink-0 cursor-grab text-subtle sm:block" aria-hidden />
+                  {editable ? <GripVertical className="hidden size-4 shrink-0 cursor-grab text-subtle sm:block" aria-hidden /> : null}
                   <span className={cn("w-6 shrink-0 text-right text-sm tabular-nums", current ? "text-accent" : "text-subtle")}>
                     {current && audio.playing ? <AudioLines className="ml-auto size-4 animate-pulse" /> : i + 1}
                   </span>
@@ -158,7 +166,10 @@ function PlaylistView({ playlist: p }: { playlist: PlaylistDetail }) {
                     {subtitle ? <div className="truncate text-xs text-muted">{subtitle}</div> : null}
                   </div>
                   <span className="hidden shrink-0 text-xs tabular-nums text-muted sm:inline">{formatDuration(item.duration_ms)}</span>
-                  <div className="flex shrink-0 items-center opacity-100 transition-opacity sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
+                  <div
+                    hidden={!editable}
+                    className="flex shrink-0 items-center opacity-100 transition-opacity sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
+                  >
                     <IconButton label="Move up" size="sm" disabled={i === 0} onClick={() => move(i, i - 1)}>
                       <ChevronUp className="size-4" />
                     </IconButton>
