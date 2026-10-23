@@ -21,11 +21,15 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i
 
 pub async fn photo(
     State(state): State<AppState>,
-    _user: AuthUser,
+    user: AuthUser,
     Path(id): Path<i64>,
     Query(query): Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
+    // Like the person's page: only through titles this user may see.
+    if !people::is_visible(&state.db, user.id, id).await? {
+        return Err(AppError::not_found("no photo"));
+    }
     let photo: Option<Option<String>> =
         sqlx::query_scalar("SELECT photo_url FROM people WHERE id = ?").bind(id).fetch_optional(&state.db.read).await?;
     let Some(remote) = photo.flatten() else { return Err(AppError::not_found("no photo")) };

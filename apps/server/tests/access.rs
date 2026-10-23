@@ -308,21 +308,35 @@ async fn people_are_listed_only_through_titles_the_user_can_see() {
     let w = world().await;
     let (app, kid) = (&w.app, w.kid.as_str());
     let movies = app.ids(w.movies, &w.admin).await;
-    let credit = |id: i64, name: &str, role: Role| NewCredit {
+    // Both have photos, already stored (as if downloaded before).
+    let photo = |name: &str| format!("https://image.tmdb.org/t/p/h632/{name}.jpg");
+    for name in ["rachel", "dan"] {
+        let blob =
+            app.state.store.put(&[b"\xff\xd8\xff\xe0".as_slice(), name.as_bytes()].concat(), "jpg").await.unwrap();
+        sqlx::query("INSERT INTO remote_images (url, blob, fetched_at) VALUES (?, ?, 0)")
+            .bind(photo(name))
+            .bind(blob)
+            .execute(&app.state.db.write)
+            .await
+            .unwrap();
+    }
+    let credit = |id: i64, name: &str, role: Role, picture: &str| NewCredit {
         person: PersonId::Tmdb(id),
         name: name.into(),
-        photo: None,
+        photo: Some(photo(picture)),
         role,
         character: None,
     };
     people::replace(
         &app.state.db,
         movies["Adult Film"],
-        &[credit(1, "Rachel Restricted", Role::Actor), credit(2, "Dan Director", Role::Director)],
+        &[credit(1, "Rachel Restricted", Role::Actor, "rachel"), credit(2, "Dan Director", Role::Director, "dan")],
     )
     .await
     .unwrap();
-    people::replace(&app.state.db, movies["Family Film"], &[credit(2, "Dan Director", Role::Director)]).await.unwrap();
+    people::replace(&app.state.db, movies["Family Film"], &[credit(2, "Dan Director", Role::Director, "dan")])
+        .await
+        .unwrap();
 
     let actors = app.plex_json(&format!("/library/sections/{}/actor", w.movies), kid).await;
     assert!(actors.get("Directory").is_none(), "only credited in a hidden title: {actors}");
@@ -331,8 +345,16 @@ async fn people_are_listed_only_through_titles_the_user_can_see() {
     // Administrators see everyone.
     let actors = app.plex_json(&format!("/library/sections/{}/actor", w.movies), &w.admin).await;
     assert_eq!(titles(&actors["Directory"]), ["Rachel Restricted"]);
-    // pley's own search agrees.
+    // pley's own search and pages agree, photos included.
     assert_eq!(app.get("/api/search?q=rachel", kid).await.body["people"], json!([]));
+    let cast = &app.get(&format!("/api/items/{}", movies["Adult Film"]), &w.admin).await.body["cast"];
+    let rachel = cast[0]["id"].as_i64().unwrap();
+    let dan =
+        app.get(&format!("/api/items/{}", movies["Family Film"]), kid).await.body["crew"][0]["id"].as_i64().unwrap();
+    assert_eq!(app.get(&format!("/api/people/{rachel}"), kid).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.get(&format!("/api/people/{rachel}/photo"), kid).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.get(&format!("/api/people/{rachel}/photo"), &w.admin).await.status, StatusCode::OK);
+    assert_eq!(app.get(&format!("/api/people/{dan}/photo"), kid).await.status, StatusCode::OK);
 }
 
 #[tokio::test]

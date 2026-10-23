@@ -531,6 +531,19 @@ pub async fn search(db: &Db, user_id: i64, input: &str, limit: i64) -> sqlx::Res
         .collect())
 }
 
+/// Whether the person is credited in an item `user_id` may see.
+pub async fn is_visible(db: &Db, user_id: i64, person_id: i64) -> sqlx::Result<bool> {
+    let sql = format!(
+        "{} SELECT EXISTS (SELECT 1 FROM item_people ip JOIN items i ON i.id = ip.item_id
+                           LEFT JOIN items p ON p.id = i.parent_id
+                           LEFT JOIN items gp ON gp.id = i.grandparent_id
+                           WHERE ip.person_id = ? AND {})",
+        catalog::ME_CTE,
+        catalog::VISIBLE,
+    );
+    sqlx::query_scalar(&sql).bind(user_id).bind(person_id).fetch_one(&db.read).await
+}
+
 /// Forget people no item credits any more (their photos go with the next
 /// storage clean-up).
 pub async fn prune(db: &Db) -> sqlx::Result<u64> {
