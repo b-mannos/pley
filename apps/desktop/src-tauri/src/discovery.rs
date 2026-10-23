@@ -119,7 +119,10 @@ mod tests {
     fn answers_become_addresses() {
         let answer = br#"{"pley":1,"id":"ab","name":"Den","version":"0.1.0","port":7539}"#;
         let found = read_answer(answer, "192.168.1.20:7539".parse().unwrap()).unwrap();
-        assert_eq!((found.url.as_str(), found.name.as_str(), found.id.as_deref()), ("http://192.168.1.20:7539", "Den", Some("ab")));
+        assert_eq!(
+            (found.url.as_str(), found.name.as_str(), found.id.as_deref()),
+            ("http://192.168.1.20:7539", "Den", Some("ab"))
+        );
         assert_eq!(read_answer(answer, "127.0.0.1:7539".parse().unwrap()).unwrap().url, "http://localhost:7539");
         assert_eq!(read_answer(answer, "[fd00::5]:7539".parse().unwrap()).unwrap().url, "http://[fd00::5]:7539");
         assert_eq!(read_answer(b"hello", "192.168.1.20:7539".parse().unwrap()), None);

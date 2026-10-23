@@ -12,6 +12,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.annotation.OptIn
+import androidx.core.content.edit
 import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -276,7 +277,7 @@ class PlayerActivity : ComponentActivity() {
         fun clientId(context: Context): String {
             val prefs = context.getSharedPreferences("device", Context.MODE_PRIVATE)
             return prefs.getString("client_id", null) ?: "android-${UUID.randomUUID()}".also {
-                prefs.edit().putString("client_id", it).apply()
+                prefs.edit { putString("client_id", it) }
             }
         }
     }

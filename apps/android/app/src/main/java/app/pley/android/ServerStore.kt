@@ -1,6 +1,7 @@
 package app.pley.android
 
 import android.content.Context
+import androidx.core.content.edit
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -11,11 +12,11 @@ class ServerStore(context: Context) {
     fun all(): List<SavedServer> = decode(prefs.getString(KEY, null))
 
     fun save(server: SavedServer) {
-        prefs.edit().putString(KEY, encode(Servers.withServer(all(), server))).apply()
+        prefs.edit { putString(KEY, encode(Servers.withServer(all(), server))) }
     }
 
     fun forget(url: String) {
-        prefs.edit().putString(KEY, encode(all().filter { it.url != url })).apply()
+        prefs.edit { putString(KEY, encode(all().filter { it.url != url })) }
     }
 
     companion object {

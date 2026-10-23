@@ -131,13 +131,16 @@ mod tests {
     fn saving_replaces_the_same_address_or_id() {
         let list = vec![server("http://a:7539", Some("1"), 1), server("http://b:7539", None, 2)];
         let list = with_server(list, server("http://b:7539", None, 3));
-        assert_eq!(list.iter().map(|s| (s.url.as_str(), s.last_used)).collect::<Vec<_>>(), [
-            ("http://a:7539", 1),
-            ("http://b:7539", 3)
-        ]);
+        assert_eq!(
+            list.iter().map(|s| (s.url.as_str(), s.last_used)).collect::<Vec<_>>(),
+            [("http://a:7539", 1), ("http://b:7539", 3)]
+        );
         // The same server at a new address.
         let list = with_server(list, server("http://192.168.1.5:7539", Some("1"), 4));
-        assert_eq!(list.iter().map(|s| s.url.as_str()).collect::<Vec<_>>(), ["http://b:7539", "http://192.168.1.5:7539"]);
+        assert_eq!(
+            list.iter().map(|s| s.url.as_str()).collect::<Vec<_>>(),
+            ["http://b:7539", "http://192.168.1.5:7539"]
+        );
     }
 
     /// A one-request HTTP server that answers `body` with `status`.
