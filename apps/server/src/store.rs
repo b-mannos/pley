@@ -14,7 +14,8 @@
 //! - Local artwork next to the media (`poster.jpg`, …) stays where it is and
 //!   is referenced by its path.
 //!
-//! [`Store::clean`] removes whatever nothing references any more.
+//! [`Store::clean`] removes whatever nothing references any more, and the
+//! files of `<data>/cache` once they are old.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
@@ -40,6 +41,18 @@ const GRACE: Duration = Duration::from_secs(3600);
 const FINGERPRINT_CHUNK: u64 = 64 * 1024;
 /// Fingerprints that could not be saved in a row before a run gives up.
 const MAX_FINGERPRINT_FAILURES: u32 = 3;
+const DAY: u64 = 24 * 3600;
+/// Caches under `<data>/cache`, and how long their files are kept after they
+/// were made. Their names change with what they were made from (a path, a
+/// size, a modification time), so the files of media that changed or went
+/// are never asked for again. Resized pictures are quick to make again;
+/// subtitles extracted from a large file and audio fingerprints are not.
+const CACHES: &[(&str, Duration)] = &[
+    ("images", Duration::from_secs(30 * DAY)),       // images.rs: resized pictures
+    ("covers", Duration::from_secs(30 * DAY)),       // api/items.rs: albums without embedded covers
+    ("subtitles", Duration::from_secs(90 * DAY)),    // api/playback.rs: WebVTT
+    ("fingerprints", Duration::from_secs(90 * DAY)), // markers: audio fingerprints
+];
 
 /// Hosts pictures may be downloaded from (metadata providers' image servers).
 const IMAGE_HOSTS: &[&str] = &["image.tmdb.org", "static.tvmaze.com", "artworks.thetvdb.com", "coverartarchive.org"];
@@ -115,7 +128,11 @@ pub struct Usage {
 pub struct CleanReport {
     pub blobs_removed: u64,
     pub media_folders_removed: u64,
+    /// By the blobs and media folders.
     pub bytes_freed: u64,
+    /// Old files of the caches ([`CACHES`]).
+    pub cache_files_removed: u64,
+    pub cache_bytes_freed: u64,
 }
 
 pub struct Store {
@@ -376,7 +393,8 @@ impl Store {
         Ok(out)
     }
 
-    /// Remove blobs and media folders nothing references any more.
+    /// Remove blobs and media folders nothing references any more, and old
+    /// cache files ([`CACHES`]).
     pub async fn clean(&self) -> anyhow::Result<CleanReport> {
         self.clean_older_than(GRACE).await
     }
@@ -438,12 +456,24 @@ impl Store {
         .await?;
         report.media_folders_removed = count;
         report.bytes_freed += bytes;
-        if report.blobs_removed + report.media_folders_removed > 0 {
+
+        let cache = self.cache.clone();
+        let (count, bytes) = crate::util::blocking(move || {
+            Ok(CACHES.iter().fold((0, 0), |(count, bytes), (name, max_age)| {
+                let (n, b) = prune(&cache.join(name), *max_age);
+                (count + n, bytes + b)
+            }))
+        })
+        .await?;
+        report.cache_files_removed = count;
+        report.cache_bytes_freed = bytes;
+        if report.blobs_removed + report.media_folders_removed + report.cache_files_removed > 0 {
             tracing::info!(
-                "storage cleaned: {} pictures and {} media folders removed, {} MB freed",
+                "storage cleaned: {} pictures, {} media folders and {} old cache files removed, {} MB freed",
                 report.blobs_removed,
                 report.media_folders_removed,
-                report.bytes_freed / 1_000_000
+                report.cache_files_removed,
+                (report.bytes_freed + report.cache_bytes_freed) / 1_000_000
             );
         }
         Ok(report)
@@ -642,6 +672,24 @@ fn sweep(
                 count += 1;
                 bytes += size;
             }
+        }
+    }
+    (count, bytes)
+}
+
+/// Remove the files of a cache folder (and of the folders in it) made more
+/// than `max_age` ago; returns how many, and their bytes.
+fn prune(dir: &Path, max_age: Duration) -> (u64, u64) {
+    let (mut count, mut bytes) = (0, 0);
+    for entry in walkdir::WalkDir::new(dir).min_depth(1).max_depth(2).into_iter().flatten() {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        let age = meta.modified().ok().and_then(|t| SystemTime::now().duration_since(t).ok());
+        if age.is_some_and(|age| age >= max_age) && std::fs::remove_file(entry.path()).is_ok() {
+            count += 1;
+            bytes += meta.len();
         }
     }
     (count, bytes)
@@ -895,6 +943,38 @@ mod tests {
             sqlx::query_scalar("SELECT url FROM remote_images").fetch_all(&store.db.read).await.unwrap();
         assert_eq!(urls, ["https://image.tmdb.org/fresh.jpg"]);
         assert!(store.exists(&fresh) && !store.exists(&old));
+    }
+
+    #[tokio::test]
+    async fn old_cache_files_go() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path()).await;
+        let cache = dir.path().join("cache");
+        let files = [
+            ("images/ab/old.jpg", 31),
+            ("images/ab/recent.jpg", 29),
+            ("covers/12.none", 31),
+            ("subtitles/7_4_100.vtt", 91),
+            ("subtitles/8_4_100.vtt", 60),
+            ("fingerprints/7_100_5_0_1000.fp", 91),
+            ("trickplay/7/index.bif", 400), // not one of the caches the clean-up prunes
+        ];
+        for (name, days) in files {
+            let path = cache.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"cached").unwrap();
+            age(&path, days * DAY);
+        }
+        let report = store.clean().await.unwrap();
+        assert_eq!((report.cache_files_removed, report.cache_bytes_freed), (4, 24));
+        let mut left: Vec<String> = walkdir::WalkDir::new(&cache)
+            .into_iter()
+            .flatten()
+            .filter(|e| e.file_type().is_file())
+            .map(|e| e.path().strip_prefix(&cache).unwrap().to_string_lossy().replace('\\', "/"))
+            .collect();
+        left.sort();
+        assert_eq!(left, ["images/ab/recent.jpg", "subtitles/8_4_100.vtt", "trickplay/7/index.bif"]);
     }
 
     #[tokio::test]

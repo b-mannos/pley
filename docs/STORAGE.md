@@ -16,7 +16,8 @@ artwork, which pley never moves or changes.
     chapters/<n>.jpg         chapter pictures, cut from the previews
   avatars/                   profile pictures
   backups/pley-<date>.db     the last 3 daily database backups
-  cache/                     resized images, subtitles, fingerprints; safe to delete
+  cache/                     resized images, subtitles, fingerprints; safe to
+                             delete, old files are removed (see Clean-up)
   logs/pley.log              the server log, then pley.log.1 to .3 (10 MB each)
 ```
 
@@ -80,6 +81,22 @@ never removed between being stored and being used:
   right before each removal, so it holds while a clean-up runs.
 - The URLs of downloads nothing uses are forgotten with their pictures, after
   the same hour.
+
+The same clean-ups remove old files from `cache/`. Cached files are named
+after what they were made from (a path, a size, a modification time), so the
+files of media that changed or went are never asked for again; the age limits
+keep the cache from growing for ever:
+
+| Folder | What | Kept for |
+|---|---|---|
+| `cache/images` | resized pictures | 30 days |
+| `cache/covers` | albums known to have no embedded cover | 30 days |
+| `cache/subtitles` | subtitles converted to WebVTT | 90 days |
+| `cache/fingerprints` | audio fingerprints (intro and credits detection) | 90 days |
+
+A file that is needed again later is simply made again. Subtitles are written
+to a temporary file first, so a crash or a full disk never leaves one cut
+short.
 
 `GET /api/system/storage` reports the space used.
 
