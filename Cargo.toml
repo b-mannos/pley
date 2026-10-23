@@ -6,6 +6,9 @@ members = [
     "packages/transcoder-api",
 ]
 default-members = ["apps/server", "apps/transcoder"]
+# The desktop app is a workspace of its own (Tauri and its webview
+# libraries), so server builds don't compile it.
+exclude = ["apps/desktop/src-tauri"]
 
 # NOTE: licensing boundary.
 # - apps/server               pley-server; must never depend on pley-transcoder or any GPL crate

@@ -3,7 +3,8 @@
   "private": true,
   "description": "pley media server monorepo (Rust apps are built with cargo, see Cargo.toml)",
   "workspaces": [
-    "apps/web"
+    "apps/web",
+    "apps/desktop"
   ],
   "scripts": {
     "dev": "npm run dev -w apps/web",
@@ -11,7 +12,8 @@
     "typecheck": "npm run typecheck -w apps/web",
     "lint": "npm run lint -w apps/web",
     "test": "npm test -w apps/web",
-    "check": "npm run check -w apps/web"
+    "check": "npm run check -w apps/web && npm run check -w apps/desktop",
+    "desktop": "npm run dev -w apps/desktop"
   },
   "engines": {
     "node": ">=22"

@@ -1,0 +1,25 @@
+{
+  "name": "pley-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "pley for Windows, macOS and Linux: a window on a pley server's web app",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "ui:dev": "vite",
+    "ui:build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "tsc --noEmit && vitest run"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.4"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4",
+    "typescript": "~5.9",
+    "vite": "^7.3.7",
+    "vitest": "^5.0.5"
+  }
+}

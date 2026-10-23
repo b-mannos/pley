@@ -1,0 +1,183 @@
+import "./style.css";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  displayAddress,
+  lastUsed,
+  mergeServers,
+  normalizeUrl,
+  type FoundServer,
+  type SavedServer,
+  type ServerEntry,
+  type ServerInfo,
+} from "./servers";
+
+function element<T extends HTMLElement>(id: string): T {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`#${id} is missing`);
+  return el as T;
+}
+
+const list = element<HTMLUListElement>("servers");
+const status = element<HTMLParagraphElement>("status");
+const searchAgain = element<HTMLButtonElement>("search-again");
+const form = element<HTMLFormElement>("add");
+const address = element<HTMLInputElement>("address");
+const connect = element<HTMLButtonElement>("connect");
+const addError = element<HTMLParagraphElement>("add-error");
+const chooser = element<HTMLElement>("choose-section");
+const connecting = element<HTMLElement>("connecting");
+const connectingText = element<HTMLParagraphElement>("connecting-text");
+
+let saved: SavedServer[] = [];
+let found: FoundServer[] = [];
+let searching = false;
+/** Whether each server answered lately (by address). */
+const reachable = new Map<string, boolean>();
+let busy: string | null = null;
+let autoOpen: AbortController | null = null;
+
+function message(err: unknown): string {
+  return typeof err === "string" ? err : err instanceof Error ? err.message : String(err);
+}
+
+function render(): void {
+  const entries = mergeServers(saved, found);
+  list.replaceChildren(...entries.map(row));
+  if (searching) status.textContent = "Looking for servers on this network…";
+  else if (!entries.length) status.textContent = "No server answered. Check that pley is running on it, or enter its address.";
+  else status.textContent = "";
+  searchAgain.hidden = searching;
+}
+
+function row(entry: ServerEntry): HTMLLIElement {
+  const li = document.createElement("li");
+  const open = document.createElement("button");
+  open.type = "button";
+  open.className = "server";
+  open.disabled = busy !== null;
+  const state = reachable.get(entry.url);
+  const dot = document.createElement("span");
+  dot.className = `dot${entry.found || state ? " online" : state === false ? " offline" : ""}`;
+  const name = document.createElement("span");
+  name.className = "name";
+  name.textContent = entry.name;
+  const where = document.createElement("span");
+  where.className = "address";
+  where.textContent = busy === entry.url ? "Connecting…" : displayAddress(entry.url);
+  const tag = document.createElement("span");
+  tag.className = "tag";
+  tag.textContent = entry.saved ? (entry.found ? "On this network" : "") : "New";
+  open.append(dot, name, where, tag);
+  open.addEventListener("click", () => void openServer(entry.url, entry.id));
+  li.append(open);
+  if (entry.saved) {
+    const forget = document.createElement("button");
+    forget.type = "button";
+    forget.className = "forget";
+    forget.textContent = "×";
+    forget.title = "Forget this server";
+    forget.setAttribute("aria-label", `Forget ${entry.name}`);
+    forget.addEventListener("click", () => void forgetServer(entry.url));
+    li.append(forget);
+  }
+  return li;
+}
+
+/** Checks the server, remembers it and shows its web app in this window. */
+async function openServer(url: string, id: string | null): Promise<void> {
+  busy = url;
+  render();
+  try {
+    const info = await invoke<ServerInfo>("check_server", { url });
+    reachable.set(url, true);
+    await invoke("save_server", { server: { url, name: info.name, id, last_used: Date.now() } });
+    await invoke("open_server", { url });
+  } catch (err) {
+    reachable.set(url, false);
+    busy = null;
+    render();
+    status.textContent = `Couldn't reach ${displayAddress(url)}: ${message(err)}`;
+  }
+}
+
+async function forgetServer(url: string): Promise<void> {
+  await invoke("forget_server", { url });
+  saved = saved.filter((s) => s.url !== url);
+  render();
+}
+
+async function search(): Promise<void> {
+  searching = true;
+  render();
+  const checks = saved.map(async (s) => {
+    try {
+      await invoke<ServerInfo>("check_server", { url: s.url });
+      reachable.set(s.url, true);
+    } catch {
+      reachable.set(s.url, false);
+    }
+  });
+  try {
+    found = await invoke<FoundServer[]>("discover");
+  } catch (err) {
+    status.textContent = message(err);
+  }
+  await Promise.all(checks);
+  searching = false;
+  render();
+}
+
+function showChooser(): void {
+  autoOpen?.abort();
+  connecting.hidden = true;
+  chooser.hidden = false;
+  void search();
+}
+
+/** At start, the server opened last opens by itself if it answers. */
+async function openLastUsed(server: SavedServer): Promise<void> {
+  const cancelled = new AbortController();
+  autoOpen = cancelled;
+  chooser.hidden = true;
+  connecting.hidden = false;
+  connectingText.textContent = `Opening ${server.name}…`;
+  try {
+    const info = await invoke<ServerInfo>("check_server", { url: server.url });
+    if (cancelled.signal.aborted) return;
+    await invoke("save_server", { server: { ...server, name: info.name, last_used: Date.now() } });
+    await invoke("open_server", { url: server.url });
+  } catch (err) {
+    if (cancelled.signal.aborted) return;
+    reachable.set(server.url, false);
+    showChooser();
+    status.textContent = `${server.name} didn't answer: ${message(err)}`;
+  }
+}
+
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const url = normalizeUrl(address.value);
+  addError.hidden = true;
+  if (!url) {
+    addError.textContent = "Enter an address such as nas, 192.168.1.20 or https://pley.example.com.";
+    addError.hidden = false;
+    return;
+  }
+  connect.disabled = true;
+  void openServer(url, null).finally(() => {
+    connect.disabled = false;
+  });
+});
+searchAgain.addEventListener("click", () => void search());
+element<HTMLButtonElement>("choose").addEventListener("click", showChooser);
+
+async function start(): Promise<void> {
+  saved = await invoke<SavedServer[]>("saved_servers");
+  // "Switch server" in the web app comes back here with ?pick: no opening by itself then.
+  const pick = new URLSearchParams(window.location.search).has("pick");
+  const last = lastUsed(saved);
+  if (last && !pick) void openLastUsed(last);
+  else showChooser();
+}
+
+void start();

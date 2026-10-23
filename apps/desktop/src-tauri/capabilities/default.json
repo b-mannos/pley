@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The server picker, bundled with the app. Pages from servers get none of this.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

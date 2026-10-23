@@ -2,6 +2,9 @@
 /data
 node_modules/
 /apps/web/dist
+/apps/desktop/dist
+/apps/desktop/src-tauri/target
+/apps/desktop/src-tauri/gen
 *.log
 .DS_Store
 Thumbs.db
