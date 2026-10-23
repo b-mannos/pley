@@ -6,12 +6,13 @@ import { PageSpinner } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useDocumentTitle } from "@/lib/hooks";
 
+/** The first is where Settings opens. */
 const NAV = [
+  { to: "/settings/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/settings/libraries", label: "Libraries", icon: LibraryBig },
   { to: "/settings/users", label: "Users", icon: Users },
   { to: "/settings/invitations", label: "Invitations", icon: MailPlus },
   { to: "/settings/server", label: "Server", icon: Server },
-  { to: "/settings/dashboard", label: "Dashboard", icon: LayoutDashboard },
 ];
 
 export function SettingsLayout() {

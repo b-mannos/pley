@@ -100,7 +100,7 @@ const router = createBrowserRouter([
             path: "settings",
             ...onDemand(() => import("@/pages/settings/SettingsLayout"), (m) => m.SettingsLayout),
             children: [
-              { index: true, element: <Navigate to="libraries" replace /> },
+              { index: true, element: <Navigate to="dashboard" replace /> },
               {
                 path: "libraries",
                 ...onDemand(
