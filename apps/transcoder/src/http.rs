@@ -291,3 +291,173 @@ async fn job_file(State(state): Shared, Path((id, file)): Path<(String, String)>
         .body(body)
         .map_err(|e| ApiError::Internal(e.into()))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::SocketAddr;
+
+    use pley_transcoder_api::{Capabilities, ErrorBody, Limits};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::*;
+    use crate::ffmpeg::Ffmpeg;
+
+    /// A transcoder whose FFmpeg is missing, on a free local port.
+    async fn serve(dir: &std::path::Path, token: Option<&str>) -> SocketAddr {
+        let ff = Arc::new(Ffmpeg {
+            ffmpeg: dir.join("no-ffmpeg"),
+            ffprobe: dir.join("no-ffprobe"),
+            caps: Capabilities::default(),
+            segment_times_relative: true,
+        });
+        let metrics = Arc::new(Metrics::default());
+        let prober = Arc::new(Prober::new(ff.clone(), metrics.clone(), 1));
+        let keyframes = KeyframeStore::new(ff.clone(), metrics.clone(), dir.join("keyframes"));
+        let extractor = Arc::new(Extractor::new(ff.clone(), prober.clone(), metrics.clone(), dir.join("subtitles"), 1));
+        let fingerprinter = Arc::new(Fingerprinter::new(ff.clone(), 1));
+        let trickplay = Arc::new(Trickplay::new(ff.clone(), prober.clone(), dir.join("trickplay")));
+        let limits = Limits { max_jobs: 3, max_hw_jobs: 1 };
+        let jobs = JobManager::new(
+            ff.clone(),
+            prober.clone(),
+            keyframes.clone(),
+            extractor.clone(),
+            metrics.clone(),
+            dir.join("jobs"),
+            limits.clone(),
+        );
+        let info =
+            TranscoderInfo { version: "1.2.3".into(), capabilities: ff.caps.clone(), limits, ..Default::default() };
+        let state = Arc::new(AppState::new(
+            jobs,
+            prober,
+            extractor,
+            keyframes,
+            fingerprinter,
+            trickplay,
+            metrics,
+            info,
+            token.map(str::to_owned),
+            dir.to_path_buf(),
+        ));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, router(state)).await.unwrap() });
+        addr
+    }
+
+    struct Answer {
+        status: u16,
+        body: String,
+    }
+
+    impl Answer {
+        fn code(&self) -> String {
+            serde_json::from_str::<ErrorBody>(&self.body).map(|e| e.code).unwrap_or_default()
+        }
+    }
+
+    /// One HTTP/1.1 request, read until the server closes the connection.
+    async fn request(addr: SocketAddr, method: &str, path: &str, auth: Option<&str>, json: Option<String>) -> Answer {
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let body = json.unwrap_or_default();
+        let mut message = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n");
+        if let Some(auth) = auth {
+            message.push_str(&format!("Authorization: {auth}\r\n"));
+        }
+        message.push_str(&format!("Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()));
+        stream.write_all(message.as_bytes()).await.unwrap();
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).await.unwrap();
+        let text = String::from_utf8_lossy(&raw).into_owned();
+        let (head, body) = text.split_once("\r\n\r\n").expect("an HTTP response");
+        let status = head.split_whitespace().nth(1).and_then(|s| s.parse().ok()).expect("a status line");
+        Answer { status, body: body.to_owned() }
+    }
+
+    #[tokio::test]
+    async fn the_token_guards_everything_but_health() {
+        let dir = tempfile::tempdir().unwrap();
+        let addr = serve(dir.path(), Some("s3cret")).await;
+        let health = request(addr, "GET", "/health", None, None).await;
+        assert_eq!((health.status, health.body.as_str()), (200, "ok"));
+        for auth in [
+            None,
+            Some("Bearer wrong"),
+            Some("Bearer s3cret2"),
+            Some("Bearer s3cre"),
+            Some("bearer s3cret"),
+            Some("s3cret"),
+        ] {
+            for path in ["/v1/info", "/v1/status", "/v1/jobs", "/metrics"] {
+                let answer = request(addr, "GET", path, auth, None).await;
+                assert_eq!((answer.status, answer.code()), (401, "unauthorized".to_owned()), "{path} with {auth:?}");
+            }
+        }
+        let info = request(addr, "GET", "/v1/info", Some("Bearer s3cret"), None).await;
+        assert_eq!(info.status, 200);
+        assert_eq!(serde_json::from_str::<TranscoderInfo>(&info.body).unwrap().version, "1.2.3");
+    }
+
+    #[tokio::test]
+    async fn status_and_metrics() {
+        let dir = tempfile::tempdir().unwrap();
+        let addr = serve(dir.path(), None).await;
+        let status = request(addr, "GET", "/v1/status", None, None).await;
+        assert_eq!(status.status, 200, "no token configured: open");
+        let status: TranscoderStatus = serde_json::from_str(&status.body).unwrap();
+        assert_eq!((status.max_jobs, status.max_hw_jobs, status.running_processes), (3, 1, 0));
+        assert!(status.jobs.is_empty());
+        let metrics = request(addr, "GET", "/metrics", None, None).await;
+        assert_eq!(metrics.status, 200);
+        assert!(metrics.body.contains("# TYPE pley_transcoder_jobs_created_total counter\n"), "{}", metrics.body);
+        assert!(metrics.body.contains("pley_transcoder_max_jobs 3\n"), "{}", metrics.body);
+    }
+
+    #[tokio::test]
+    async fn unknown_jobs_are_reported_as_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let addr = serve(dir.path(), None).await;
+        for (method, path) in [
+            ("GET", "/v1/jobs/nope"),
+            ("DELETE", "/v1/jobs/nope"),
+            ("POST", "/v1/jobs/nope/touch"),
+            ("GET", "/v1/jobs/nope/index.m3u8"),
+            ("GET", "/v1/jobs/nope/3.ts"),
+        ] {
+            let answer = request(addr, method, path, None, None).await;
+            assert_eq!((answer.status, answer.code()), (404, "job_not_found".to_owned()), "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_files_and_bad_names_are_plain_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let addr = serve(dir.path(), None).await;
+        let missing = serde_json::json!({"path": dir.path().join("missing.mkv")}).to_string();
+        for path in ["/v1/probe", "/v1/keyframes", "/v1/trickplay"] {
+            let answer = request(addr, "POST", path, None, Some(missing.clone())).await;
+            assert_eq!((answer.status, answer.code()), (404, "not_found".to_owned()), "{path}");
+        }
+        // Sheet ids can't leave the previews folder.
+        std::fs::create_dir_all(dir.path().join("secret")).unwrap();
+        std::fs::write(dir.path().join("secret").join("0.jpg"), b"jpeg").unwrap();
+        for path in ["/v1/trickplay/..%2Fsecret/0.jpg", "/v1/trickplay/a.b/0.jpg", "/v1/trickplay/abc/first.jpg"] {
+            let answer = request(addr, "GET", path, None, None).await;
+            assert_eq!((answer.status, answer.code()), (404, "not_found".to_owned()), "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn jobs_need_a_working_ffmpeg() {
+        let dir = tempfile::tempdir().unwrap();
+        let addr = serve(dir.path(), None).await;
+        let input = dir.path().join("movie.mkv");
+        std::fs::write(&input, b"not really a movie").unwrap();
+        let job = serde_json::json!({"input": input, "video": {}, "audio": {}}).to_string();
+        let answer = request(addr, "POST", "/v1/jobs", None, Some(job)).await;
+        assert_eq!((answer.status, answer.code()), (500, "ffmpeg_failed".to_owned()));
+        let jobs = request(addr, "GET", "/v1/jobs", None, None).await;
+        assert_eq!(jobs.body, "[]", "nothing was left behind");
+    }
+}

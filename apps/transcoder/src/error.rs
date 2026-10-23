@@ -56,3 +56,47 @@ impl IntoResponse for ApiError {
         (status, Json(ErrorBody { code: code.into(), message })).into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn answer(err: ApiError) -> (u16, ErrorBody) {
+        let response = err.into_response();
+        let status = response.status().as_u16();
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 16).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    /// The server tells a lost job (`job_not_found`, recreate it) from other
+    /// 404s and unreadable files (`ffmpeg_failed`, don't retry) by these codes.
+    #[tokio::test]
+    async fn errors_keep_their_status_and_code() {
+        for (err, status, code) in [
+            (ApiError::BadRequest("bad".into()), 400, "bad_request"),
+            (ApiError::Unauthorized, 401, "unauthorized"),
+            (ApiError::NotFound("missing".into()), 404, "not_found"),
+            (ApiError::JobNotFound("gone".into()), 404, "job_not_found"),
+            (ApiError::Busy("full".into()), 503, "busy"),
+            (ApiError::Timeout("slow".into()), 504, "timeout"),
+            (ApiError::Failed("unreadable".into()), 500, "ffmpeg_failed"),
+            (ApiError::Internal(anyhow::anyhow!("boom")), 500, "internal"),
+        ] {
+            let (got_status, body) = answer(err).await;
+            assert_eq!((got_status, body.code.as_str()), (status, code));
+            assert!(!body.message.is_empty());
+        }
+        assert_eq!(
+            answer(ApiError::NotFound("segment 9 out of range".into())).await.1.message,
+            "segment 9 out of range"
+        );
+    }
+
+    #[test]
+    fn missing_files_are_not_found_other_io_errors_internal() {
+        let missing = ApiError::from(std::io::Error::from(std::io::ErrorKind::NotFound));
+        assert!(matches!(missing, ApiError::NotFound(_)));
+        let denied = ApiError::from(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert!(matches!(denied, ApiError::Internal(_)));
+    }
+}

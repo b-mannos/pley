@@ -853,5 +853,187 @@ mod tests {
         slots.release(true);
         assert_eq!(slots.counts(), (1, 0));
         assert_eq!(slots.acquire(true), Some(true));
+        // Releasing more than was taken never underflows.
+        let slots = Slots::new(&Limits { max_jobs: 0, max_hw_jobs: 0 });
+        slots.release(true);
+        assert_eq!(slots.counts(), (0, 0));
+        assert_eq!(slots.acquire(true), Some(false), "at least one job, in software");
+    }
+
+    /// A job with the given segment boundaries whose segments live in `dir`.
+    fn job(dir: &Path, boundaries: Vec<i64>) -> Job {
+        let count = boundaries.len() - 1;
+        Job {
+            id: "test".into(),
+            request: JobRequest::default(),
+            media: Arc::new(MediaInfo::default()),
+            plan: Plan {
+                duration_ms: *boundaries.last().unwrap(),
+                split_at: boundaries.clone(),
+                boundaries,
+                segment_seconds: 4.0,
+                video: None,
+                audio: None,
+                burn: None,
+                throttle: false,
+                warnings: vec![],
+            },
+            input: dir.join("input.mkv"),
+            dir: dir.to_path_buf(),
+            created_at_ms: 0,
+            last_access_ms: AtomicI64::new(0),
+            last_requested: AtomicU32::new(0),
+            ready: Mutex::new(vec![false; count]),
+            ready_count: AtomicU32::new(0),
+            waiting: Mutex::default(),
+            closed: AtomicBool::new(false),
+            notify: Notify::new(),
+            process: tokio::sync::Mutex::new(None),
+            runtime: Mutex::new(Runtime::default()),
+            served_segments: AtomicU64::new(0),
+            served_bytes: AtomicU64::new(0),
+        }
+    }
+
+    #[test]
+    fn playlists_list_every_segment_with_its_length() {
+        let dir = tempfile::tempdir().unwrap();
+        let job = job(dir.path(), vec![0, 4_000, 8_400, 10_500]);
+        assert_eq!(
+            job.playlist(),
+            "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:5\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n\
+             #EXTINF:4.000,\n0.ts\n#EXTINF:4.400,\n1.ts\n#EXTINF:2.100,\n2.ts\n#EXT-X-ENDLIST\n",
+            "the target duration covers the longest segment"
+        );
+    }
+
+    #[test]
+    fn segments_become_ready_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let job = job(dir.path(), vec![0, 4_000, 8_000, 12_000]);
+        job.mark_ready(1);
+        job.mark_ready(1);
+        job.mark_ready(7);
+        assert_eq!(job.ready_count.load(Relaxed), 1, "counted once; out of range ignored");
+        assert!(job.is_ready(1) && !job.is_ready(0) && !job.is_ready(7));
+        assert_eq!(job.first_ready(0, 3), Some(1));
+        assert_eq!(job.first_ready(2, 3), None);
+        assert_eq!(job.status().segments_ready, 1);
+        assert_eq!(job.segment_path(2), dir.path().join("2.ts"));
+        job.record_served(1_000);
+        job.record_served(500);
+        let status = job.status();
+        assert_eq!((status.served_segments, status.served_bytes), (2, 1_500));
+    }
+
+    #[test]
+    fn requests_count_as_waiting_while_they_wait() {
+        let dir = tempfile::tempdir().unwrap();
+        let job = job(dir.path(), vec![0, 4_000, 8_000]);
+        let first = Waiting::register(&job, 1);
+        let second = Waiting::register(&job, 1);
+        assert!(job.is_awaited(|n| n == 1));
+        drop(first);
+        assert!(job.is_awaited(|n| n == 1), "the other request still waits");
+        drop(second);
+        assert!(!job.is_awaited(|n| n == 1));
+    }
+
+    #[cfg(unix)]
+    fn exit(code: i32) -> ExitStatus {
+        use std::os::unix::process::ExitStatusExt;
+        ExitStatus::from_raw(code << 8)
+    }
+
+    #[cfg(windows)]
+    fn exit(code: u32) -> ExitStatus {
+        use std::os::windows::process::ExitStatusExt;
+        ExitStatus::from_raw(code)
+    }
+
+    #[test]
+    fn process_exits_decide_the_job_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let job = job(dir.path(), vec![0, 4_000, 8_000]);
+        let metrics = Metrics::default();
+        let tail = Mutex::new(VecDeque::new());
+        job.on_exit(2, 2, Ok(exit(0)), false, &tail, &metrics);
+        assert_eq!(job.status().state, JobState::Finished, "produced up to the end");
+        job.on_exit(1, 1, Ok(exit(0)), false, &tail, &metrics);
+        assert_eq!(job.status().state, JobState::Idle, "the window ended before the file did");
+        job.on_exit(2, 1, Ok(exit(1)), true, &tail, &metrics);
+        assert_eq!(job.status().state, JobState::Idle, "stopped on purpose is no failure");
+        assert_eq!(metrics.process_failures.load(Relaxed), 0);
+
+        // A failure keeps the end of ffmpeg's output.
+        tail.lock().extend(["one", "two", "three", "four", "five"].map(String::from));
+        job.on_exit(2, 1, Ok(exit(1)), false, &tail, &metrics);
+        let status = job.status();
+        assert_eq!(status.state, JobState::Failed);
+        assert_eq!(status.last_error.as_deref(), Some("two | three | four | five"));
+        job.on_exit(2, 1, Err(std::io::Error::other("gone")), false, &Mutex::new(VecDeque::new()), &metrics);
+        assert!(job.status().last_error.unwrap().contains("could not be awaited: gone"));
+        assert_eq!(metrics.process_failures.load(Relaxed), 2);
+        assert_eq!(metrics.jobs_failed.load(Relaxed), 1, "a failing job counts once");
+        assert_eq!(job.runtime.lock().failures.get(&1), Some(&2), "failures per start segment");
+    }
+
+    #[test]
+    fn progress_lines_update_the_running_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let job = job(dir.path(), vec![0, 4_000]);
+        let block = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+            pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect()
+        };
+        job.update_progress(&block(&[("fps", "50")]), 0);
+        assert!(job.status().process.is_none(), "no process, nothing to update");
+
+        job.runtime.lock().process = Some(ProcessStatus::default());
+        job.update_progress(
+            &block(&[
+                ("frame", "120"),
+                ("fps", "48.5"),
+                ("speed", " 2.1x"),
+                ("bitrate", "3000.5kbits/s"),
+                ("out_time_us", "5000000"),
+                ("drop_frames", "2"),
+            ]),
+            12_000,
+        );
+        let p = job.status().process.unwrap();
+        assert_eq!((p.frame, p.fps, p.speed, p.bitrate_kbps), (Some(120), Some(48.5), Some(2.1), Some(3000.5)));
+        assert_eq!((p.out_time_ms, p.drop_frames), (17_000, Some(2)), "absolute media time");
+
+        // Values ffmpeg doesn't know yet.
+        job.update_progress(
+            &block(&[("fps", "0.00"), ("speed", "N/A"), ("bitrate", "N/A"), ("out_time_us", "-9223372036854775807")]),
+            12_000,
+        );
+        let p = job.status().process.unwrap();
+        assert_eq!((p.fps, p.speed, p.bitrate_kbps), (None, None, None));
+        assert_eq!(p.out_time_ms, 17_000, "a negative time keeps the last one");
+    }
+
+    #[test]
+    fn segments_far_behind_the_playhead_are_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let job = job(dir.path(), (0..=200).map(|i| i * 4_000).collect());
+        for n in [0, 10, 59, 60, 100, 150] {
+            std::fs::write(job.segment_path(n), b"ts").unwrap();
+            job.mark_ready(n);
+        }
+        job.last_requested.store(KEEP_BEHIND, Relaxed);
+        job.prune();
+        assert_eq!(job.ready_count.load(Relaxed), 6, "nothing is that far behind yet");
+
+        job.last_requested.store(150, Relaxed);
+        job.prune();
+        for n in [0, 10, 59] {
+            assert!(!job.is_ready(n) && !job.segment_path(n).exists(), "segment {n}");
+        }
+        for n in [60, 100, 150] {
+            assert!(job.is_ready(n) && job.segment_path(n).exists(), "segment {n}");
+        }
+        assert_eq!(job.ready_count.load(Relaxed), 3);
     }
 }
