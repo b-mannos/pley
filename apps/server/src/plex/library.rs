@@ -1727,6 +1727,58 @@ fn hub(identifier: String, title: String, hub_type: &str, key: Option<String>, i
     node
 }
 
+/// The items like `id` that pley's own item page shows ("More Like This"),
+/// for an item the user may see.
+async fn like_this(
+    state: &AppState,
+    user: &AuthUser,
+    id: &str,
+    params: &Params,
+) -> PlexResult<(Vec<ItemRow>, Vec<LibraryRow>)> {
+    let id: i64 = id.parse().map_err(|_| PlexError::NotFound)?;
+    let item = catalog::item(&state.db, user.id, id).await?.ok_or(PlexError::NotFound)?;
+    let libraries = visible_libraries(state, user).await?;
+    if !libraries.iter().any(|l| l.id == item.library_id) {
+        return Err(PlexError::NotFound);
+    }
+    let count = params.parse::<usize>("count").unwrap_or(20).clamp(1, 50);
+    Ok((crate::related::related(&state.db, user.id, id, count).await?, libraries))
+}
+
+/// `/library/metadata/{id}/related`: "More Like This" as a hub, which is
+/// what Plex clients show under an item.
+pub async fn related(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Path(id): Path<String>,
+    params: Params,
+) -> PlexResult<Node> {
+    let (rows, libraries) = like_this(&state, &user, &id, &params).await?;
+    let mut mc = base_container();
+    if !rows.is_empty() {
+        let nodes = item_nodes(&state, &rows, &Sections::new(&libraries), listing_detail(&params)).await?;
+        let kind = hub_type(&rows);
+        let identifier = format!("{}.similar", if kind == "show" { "tv" } else { kind });
+        mc.push(hub(identifier, "More Like This".into(), kind, None, nodes));
+    }
+    let size = usize::from(!rows.is_empty());
+    Ok(mc.attr("size", size))
+}
+
+/// `/library/metadata/{id}/similar`: the same items, as a plain list.
+pub async fn similar(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Extension(info): Extension<Arc<PlexInfo>>,
+    Path(id): Path<String>,
+    params: Params,
+) -> PlexResult<Node> {
+    let (rows, libraries) = like_this(&state, &user, &id, &params).await?;
+    let nodes = item_nodes(&state, &rows, &Sections::new(&libraries), listing_detail(&params)).await?;
+    let total = nodes.len();
+    Ok(list_container(None, &info, nodes, total, &Page::default()))
+}
+
 fn hub_type(rows: &[ItemRow]) -> &'static str {
     match rows.first() {
         Some(first) if rows.iter().all(|r| r.kind == first.kind) => plex_type(&first.kind),

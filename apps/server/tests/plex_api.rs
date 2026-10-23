@@ -162,6 +162,30 @@ async fn intro_and_credits_markers_on_request() {
 }
 
 #[tokio::test]
+async fn more_like_this_as_plex_clients_read_it() {
+    let (app, admin, movies, ..) = world().await;
+    let m = app.ids(movies, &admin).await;
+    let alien = m["Alien"];
+
+    let related = app.plex_json(&format!("/library/metadata/{alien}/related"), &admin).await;
+    let hub = &related["Hub"][0];
+    assert_eq!(
+        (&hub["title"], &hub["hubIdentifier"], &hub["type"]),
+        (&json!("More Like This"), &json!("movie.similar"), &json!("movie"))
+    );
+    let titles = plex_titles(hub);
+    assert!(titles.contains(&"Brazil".to_owned()) && titles.contains(&"2001 A Space Odyssey".to_owned()), "{titles:?}");
+    assert!(!titles.contains(&"Alien".to_owned()), "not the item itself");
+    let similar = app.plex_json(&format!("/library/metadata/{alien}/similar"), &admin).await;
+    assert_eq!(plex_titles(&similar), titles, "the same items as a list");
+
+    // Hidden items have no neighbours either.
+    let (kid, _) = app.user(&admin, "kid", json!({"max_age": 12})).await;
+    let hidden = app.plex(Method::GET, &format!("/library/metadata/{alien}/related"), &kid, &[]).await;
+    assert_eq!(hidden.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn only_administrators_refresh() {
     let (app, admin, movies, ..) = world().await;
     let (bob, _) = app.user(&admin, "bob", json!({})).await;

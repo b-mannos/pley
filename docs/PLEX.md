@@ -120,7 +120,7 @@ parameters; containers report `size`, `totalSize` and `offset`.
 |---|---|
 | Server | `/`, `/identity`, `/servers`, `/accounts`, `/myplex/account`, `/system`, `/prefs`, `/:/prefs`, `/media/providers`, `/:/websockets/notifications` |
 | Sections | `/library`, `/library/sections`, `/library/sections/{id}`, `…/all`, `…/albums`, `…/recentlyAdded`, `…/onDeck`, `…/search`, `…/firstCharacter`, `…/collections`, `…/{genre,year,decade,contentRating,studio,actor,director,writer,producer}`, `…/refresh`, `/library/sections/all/refresh` |
-| Items | `/library/metadata/{id}` (comma-separated ids allowed), `…/extras` (trailers and other bonus material as `clip`s with Plex's `extraType` and `subtype`), `…/children`, `…/allLeaves`, `…/grandchildren`, `…/thumb`, `…/art`, `…/refresh` |
+| Items | `/library/metadata/{id}` (comma-separated ids allowed), `…/extras` (trailers and other bonus material as `clip`s with Plex's `extraType` and `subtype`), `…/children`, `…/allLeaves`, `…/grandchildren`, `…/related` ("More Like This" hub), `…/similar` (the same items), `…/thumb`, `…/art`, `…/refresh` |
 | Lists | `/library/all`, `/library/onDeck`, `/library/recentlyAdded`, `/hubs`, `/hubs/sections/{id}`, `/hubs/continueWatching/items`, `/hubs/home/recentlyAdded`, `/hubs/search`, `/search` |
 | Collections | `/library/sections/{id}/collections` (also `…/all?type=18`), `/library/collections/{id}`, `…/children`, `…/{thumb,art,composite}[/{version}]` |
 | Playlists | `GET`/`POST /playlists` (`?type=&title=&uri=…/library/metadata/1,2`), `GET`/`PUT` (`?title=`)/`DELETE /playlists/{id}`, `GET`/`PUT /playlists/{id}/items` (`?uri=`), `DELETE /playlists/{id}/items/{playlistItemID}`, `PUT …/{playlistItemID}/move?after=`, `/playlists/{id}/composite/{version}` |
@@ -182,7 +182,7 @@ With python-plexapi 4.18 the following work against the test media:
   fail. Edit in pley. (Ratings work: `/:/rate` sets the user's `userRating`.)
 - Filters on descendants (`episode.title` on shows) and on `resolution`, `hdr`,
   audio or subtitle language: ignored, so they don't narrow results.
-- Player remote control, related and similar items, photos and live TV.
+- Player remote control, photos and live TV.
 - Notifications about transcodes (`transcodeSession.*`), deleted items and
   reachability.
 - Per-client capability profiles: universal transcode streams are H.264/AAC
