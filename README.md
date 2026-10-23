@@ -42,7 +42,9 @@ HLG and Dolby Vision.
   - HLS VOD playlists are seekable anywhere; ffmpeg restarts at the exact
     segment.
   - Remux copies H.264 without re-encoding. Segments line up on source
-    keyframes from a background keyframe index.
+    keyframes, read from the file's own index (Matroska cues, MP4/MOV sample
+    tables) the moment playback starts; other containers are indexed in the
+    background.
   - Transcoding auto-detects hardware: NVENC, QSV, AMF, VAAPI or VideoToolbox,
     with libx264 as fallback. Decoding on the GPU is supported too.
   - HDR10, HLG and Dolby Vision are tone-mapped to SDR with libplacebo (GPU),
