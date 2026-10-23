@@ -70,9 +70,18 @@ inconsistent. Use a backup instead.
 
 Pictures and media folders that nothing uses any more (a removed movie, a
 replaced poster, a deleted file) are removed after scans that removed items,
-once a day, and on demand (`POST /api/system/storage/clean`). Files younger than
-an hour are left alone, so a picture is never removed between being stored and
-being used. `GET /api/system/storage` reports the space used.
+once a day, and on demand (`POST /api/system/storage/clean`). A picture is
+never removed between being stored and being used:
+
+- Files younger than an hour are left alone.
+- So are pictures and media folders handed out in the last hour, however old
+  their files: a picture stored again or found again by its URL (a refresh,
+  a re-upload), a media folder asked for (a file moved back). This is checked
+  right before each removal, so it holds while a clean-up runs.
+- The URLs of downloads nothing uses are forgotten with their pictures, after
+  the same hour.
+
+`GET /api/system/storage` reports the space used.
 
 Earlier versions kept pictures as files under `metadata/items`,
 `metadata/collections` and `metadata/people` with absolute paths in the

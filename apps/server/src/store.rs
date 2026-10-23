@@ -19,9 +19,11 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, bail};
+use parking_lot::Mutex;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -31,8 +33,8 @@ use crate::util::{now, path_str};
 const BLOB_PREFIX: &str = "blob:";
 /// Largest picture accepted from the internet.
 const MAX_REMOTE_BYTES: usize = 25 * 1024 * 1024;
-/// Files younger than this are never cleaned up: their database row may not
-/// be committed yet.
+/// Files younger than this, and blobs and media folders handed out within it,
+/// are never cleaned up: their database row may not be committed yet.
 const GRACE: Duration = Duration::from_secs(3600);
 /// Bytes hashed at each end of a media file for its fingerprint.
 const FINGERPRINT_CHUNK: u64 = 64 * 1024;
@@ -124,6 +126,35 @@ pub struct Store {
     http: reqwest::Client,
     cleaning: tokio::sync::Mutex<()>,
     fingerprinting: tokio::sync::Mutex<()>,
+    handed_out: Arc<Mutex<HandedOut>>,
+}
+
+/// Blobs and media folders handed out lately: a picture stored, stored again
+/// or found by its URL, a media folder asked for, a fingerprint computed.
+/// Whoever got them may not have saved their reference yet, so the clean-up
+/// spares them for the grace period, however old their files are.
+#[derive(Debug, Default)]
+struct HandedOut {
+    /// Blob file name or fingerprint → when it was last handed out.
+    at: HashMap<String, Instant>,
+    /// Size at which entries older than the grace period are dropped.
+    prune_at: usize,
+}
+
+impl HandedOut {
+    fn add(&mut self, name: &str) {
+        let now = Instant::now();
+        self.at.insert(name.to_owned(), now);
+        if self.at.len() >= self.prune_at {
+            self.at.retain(|_, at| now.duration_since(*at) < GRACE);
+            self.prune_at = (self.at.len() * 2).max(1024);
+        }
+    }
+
+    /// Whether `name` was handed out at or after `since` (`None`: ever).
+    fn since(&self, name: &str, since: Option<Instant>) -> bool {
+        self.at.get(name).is_some_and(|at| since.is_none_or(|since| *at >= since))
+    }
 }
 
 impl Store {
@@ -141,7 +172,16 @@ impl Store {
             http,
             cleaning: tokio::sync::Mutex::new(()),
             fingerprinting: tokio::sync::Mutex::new(()),
+            handed_out: Arc::default(),
         }
+    }
+
+    /// Remember that a blob (by file name) or a media folder (by
+    /// fingerprint) was handed out. Callers do this before they look at the
+    /// file: a clean-up running meanwhile then either removed it already
+    /// (and it is made again) or sees it handed out and spares it.
+    fn hand_out(&self, name: &str) {
+        self.handed_out.lock().add(name);
     }
 
     /// The file behind a reference: a blob in the store, or a local file.
@@ -164,6 +204,9 @@ impl Store {
         let name = format!("{hash}.{ext}");
         let dir = self.blobs.join(&hash[..2]);
         let path = dir.join(&name);
+        // A picture stored long ago and unused since may be in a clean-up's
+        // way right now: it must stay until the caller saved its reference.
+        self.hand_out(&name);
         if !path.is_file() {
             tokio::fs::create_dir_all(&dir).await?;
             let tmp = dir.join(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
@@ -186,8 +229,13 @@ impl Store {
             .bind(url)
             .fetch_optional(&self.db.read)
             .await?;
-        if let Some(blob) = known.filter(|b| self.exists(b)) {
-            return Ok(blob);
+        if let Some(blob) = known {
+            if let Some(name) = blob.strip_prefix(BLOB_PREFIX) {
+                self.hand_out(name);
+            }
+            if self.exists(&blob) {
+                return Ok(blob);
+            }
         }
         if !allowed_image_url(url) {
             bail!("pictures are not downloaded from {url}");
@@ -211,7 +259,11 @@ impl Store {
 
     /// Folder of files generated from the media file with this fingerprint.
     pub fn media_dir(&self, fingerprint: &str) -> Option<PathBuf> {
-        valid_fingerprint(fingerprint).then(|| self.media.join(&fingerprint[..2]).join(fingerprint))
+        if !valid_fingerprint(fingerprint) {
+            return None;
+        }
+        self.hand_out(fingerprint);
+        Some(self.media.join(&fingerprint[..2]).join(fingerprint))
     }
 
     /// The fingerprint of a media file, computed (and saved) when missing.
@@ -221,6 +273,8 @@ impl Store {
         }
         let owned = PathBuf::from(path);
         let fp = crate::util::blocking(move || Ok(fingerprint(&owned)?)).await?;
+        // A moved file finds its old media folder again.
+        self.hand_out(&fp);
         sqlx::query("UPDATE media_files SET fingerprint = ? WHERE id = ?")
             .bind(&fp)
             .bind(file_id)
@@ -265,6 +319,9 @@ impl Store {
                 // Unreadable files (offline drives) get an empty marker so the
                 // loop moves on; the next scan that sees them changed resets it.
                 let fp = crate::util::blocking(move || Ok(fingerprint(&owned)?)).await.unwrap_or_default();
+                if valid_fingerprint(&fp) {
+                    self.hand_out(&fp);
+                }
                 let saved =
                     sqlx::query("UPDATE media_files SET fingerprint = ? WHERE id = ? AND size = ? AND mtime = ?")
                         .bind(&fp)
@@ -324,24 +381,47 @@ impl Store {
         self.clean_older_than(GRACE).await
     }
 
-    /// [`Self::clean`], sparing files younger than `grace`.
+    /// [`Self::clean`], sparing files younger than `grace` and what was
+    /// handed out within `grace` of the start (or since).
     pub async fn clean_older_than(&self, grace: Duration) -> anyhow::Result<CleanReport> {
         let _running = self.cleaning.lock().await;
+        // What is handed out from here on may be referenced after the
+        // snapshot of references below: the sweeps spare it.
+        let since = Instant::now().checked_sub(grace);
         let mut report = CleanReport::default();
         let referenced = self.referenced_blobs().await?;
-        // Downloads nothing uses any more are forgotten with their pictures.
-        let remote: Vec<(String, String)> =
-            sqlx::query_as("SELECT url, blob FROM remote_images").fetch_all(&self.db.read).await?;
-        for (url, blob) in remote {
-            if !referenced.contains(&blob) {
-                sqlx::query("DELETE FROM remote_images WHERE url = ?").bind(url).execute(&self.db.write).await?;
+        // Downloads nothing uses any more are forgotten with their pictures,
+        // once they are as old as the grace period too.
+        let fetched_before = now() - i64::try_from(grace.as_secs()).unwrap_or(i64::MAX);
+        let remote: Vec<(String, String, i64)> =
+            sqlx::query_as("SELECT url, blob, fetched_at FROM remote_images").fetch_all(&self.db.read).await?;
+        let forget: Vec<String> = {
+            let handed_out = self.handed_out.lock();
+            remote
+                .into_iter()
+                .filter(|(_, blob, fetched_at)| {
+                    !referenced.contains(blob)
+                        && *fetched_at <= fetched_before
+                        && !handed_out.since(blob.strip_prefix(BLOB_PREFIX).unwrap_or(blob), since)
+                })
+                .map(|(url, ..)| url)
+                .collect()
+        };
+        for chunk in forget.chunks(500) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let sql = format!("DELETE FROM remote_images WHERE url IN ({placeholders})");
+            let mut query = sqlx::query(&sql);
+            for url in chunk {
+                query = query.bind(url);
             }
+            query.execute(&self.db.write).await?;
         }
         let names: HashSet<String> =
             referenced.iter().filter_map(|r| r.strip_prefix(BLOB_PREFIX)).map(str::to_owned).collect();
-        let blobs = self.blobs.clone();
+        let (blobs, handed_out) = (self.blobs.clone(), self.handed_out.clone());
         let (count, bytes) =
-            crate::util::blocking(move || Ok(sweep(&blobs, grace, |name| names.contains(name)))).await?;
+            crate::util::blocking(move || Ok(sweep(&blobs, grace, |name| names.contains(name), &handed_out, since)))
+                .await?;
         report.blobs_removed = count;
         report.bytes_freed += bytes;
 
@@ -351,9 +431,11 @@ impl Store {
                 .await?
                 .into_iter()
                 .collect();
-        let media = self.media.clone();
-        let (count, bytes) =
-            crate::util::blocking(move || Ok(sweep(&media, grace, |name| fingerprints.contains(name)))).await?;
+        let (media, handed_out) = (self.media.clone(), self.handed_out.clone());
+        let (count, bytes) = crate::util::blocking(move || {
+            Ok(sweep(&media, grace, |name| fingerprints.contains(name), &handed_out, since))
+        })
+        .await?;
         report.media_folders_removed = count;
         report.bytes_freed += bytes;
         if report.blobs_removed + report.media_folders_removed > 0 {
@@ -512,8 +594,21 @@ fn old_enough(path: &Path, grace: Duration) -> bool {
         .is_none_or(|age| age >= grace)
 }
 
-/// Remove entries of a two-level store (`ab/<name>`) that `keep` rejects.
-fn sweep(root: &Path, grace: Duration, keep: impl Fn(&str) -> bool) -> (u64, u64) {
+/// Remove entries of a two-level store (`ab/<name>`) that `keep` rejects,
+/// older than `grace` and not handed out since `since`.
+///
+/// Whether an entry was handed out is checked under the lock that handing
+/// out takes, right before it goes: a picture or folder is either handed out
+/// first (and stays), or removed first (and made again by whoever asks for it
+/// next). Shard folders stay even when empty, for `put` may be about to write
+/// into one.
+fn sweep(
+    root: &Path,
+    grace: Duration,
+    keep: impl Fn(&str) -> bool,
+    handed_out: &Mutex<HandedOut>,
+    since: Option<Instant>,
+) -> (u64, u64) {
     let (mut count, mut bytes) = (0, 0);
     let Ok(shards) = std::fs::read_dir(root) else { return (0, 0) };
     for shard in shards.flatten() {
@@ -521,21 +616,33 @@ fn sweep(root: &Path, grace: Duration, keep: impl Fn(&str) -> bool) -> (u64, u64
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
             let path = entry.path();
+            // A picture being stored is a temporary file until it is complete.
+            let grace = if name.ends_with(".tmp") { grace.max(GRACE) } else { grace };
             if keep(&name) || !old_enough(&path, grace) {
                 continue;
             }
-            let size = if path.is_dir() { tree_size(&path).1 } else { entry.metadata().map(|m| m.len()).unwrap_or(0) };
             let removed = if path.is_dir() {
-                std::fs::remove_dir_all(&path).is_ok()
+                let size = tree_size(&path).1;
+                // Moved out of the way under the lock; removing it takes longer.
+                let trash = shard.path().join(format!(".{}.trash", uuid::Uuid::new_v4().simple()));
+                let moved = {
+                    let handed_out = handed_out.lock();
+                    !handed_out.since(&name, since) && std::fs::rename(&path, &trash).is_ok()
+                };
+                if moved {
+                    let _ = std::fs::remove_dir_all(&trash);
+                }
+                moved.then_some(size)
             } else {
-                std::fs::remove_file(&path).is_ok()
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let handed_out = handed_out.lock();
+                (!handed_out.since(&name, since) && std::fs::remove_file(&path).is_ok()).then_some(size)
             };
-            if removed {
+            if let Some(size) = removed {
                 count += 1;
                 bytes += size;
             }
         }
-        let _ = std::fs::remove_dir(shard.path()); // only when empty
     }
     (count, bytes)
 }
@@ -679,6 +786,115 @@ mod tests {
         assert_eq!(remote, 0);
         let after = store.usage().await.unwrap();
         assert_eq!((after.blobs, after.media_folders), (1, 1));
+    }
+
+    /// Makes a file look `secs` seconds old.
+    fn age(path: &Path, secs: u64) {
+        let file = std::fs::File::options().write(true).open(path).unwrap();
+        file.set_modified(SystemTime::now() - Duration::from_secs(secs)).unwrap();
+    }
+
+    /// The same store as after a restart: nothing handed out yet.
+    fn restarted(store: &Store, dir: &Path) -> Store {
+        Store::new(store.db.clone(), &dir.join("metadata"), &dir.join("media"), &dir.join("cache"))
+    }
+
+    #[tokio::test]
+    async fn pictures_used_again_stay_until_their_reference_is_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path()).await;
+        let (poster, photo, unused) =
+            (b"\xff\xd8\xff\xe0 poster", b"\xff\xd8\xff\xe0 photo", b"\xff\xd8\xff\xe0 unused");
+        let poster_ref = store.put(poster, "jpg").await.unwrap();
+        let photo_ref = store.put(photo, "jpg").await.unwrap();
+        let unused_ref = store.put(unused, "jpg").await.unwrap();
+        let url = "https://image.tmdb.org/t/p/original/photo.jpg";
+        sqlx::query("INSERT INTO remote_images (url, blob, fetched_at) VALUES (?, ?, ?)")
+            .bind(url)
+            .bind(&photo_ref)
+            .bind(now() - 7200)
+            .execute(&store.db.write)
+            .await
+            .unwrap();
+        // Stored hours ago, unused since, and the server restarted meanwhile.
+        for blob in [&poster_ref, &photo_ref, &unused_ref] {
+            age(&store.path(blob).unwrap(), 7200);
+        }
+        let store = restarted(&store, dir.path());
+
+        // A refresh stores the poster again and finds the photo by its URL;
+        // it saves the references after the clean-up took its snapshot.
+        assert_eq!(store.put(poster, "jpg").await.unwrap(), poster_ref);
+        assert_eq!(store.remote(url).await.unwrap(), photo_ref);
+        let report = store.clean().await.unwrap();
+        assert_eq!(report.blobs_removed, 1);
+        assert!(store.exists(&poster_ref) && store.exists(&photo_ref) && !store.exists(&unused_ref));
+        let urls: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM remote_images").fetch_one(&store.db.read).await.unwrap();
+        assert_eq!(urls, 1, "the photo's URL is remembered too");
+    }
+
+    #[tokio::test]
+    async fn what_is_handed_out_during_a_clean_up_stays() {
+        // The steps of clean_older_than(0), with a refresh and a file moved
+        // back between its snapshot of references and its sweeps.
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path()).await;
+        let bytes = b"\xff\xd8\xff\xe0 poster";
+        let blob = store.put(bytes, "jpg").await.unwrap();
+        let (moved, gone) = ("0123456789abcdef", "fedcba9876543210");
+        for fp in [moved, gone] {
+            std::fs::create_dir_all(store.media_dir(fp).unwrap().join("trickplay")).unwrap();
+        }
+
+        let since = Instant::now().checked_sub(Duration::ZERO);
+        let referenced = store.referenced_blobs().await.unwrap();
+        assert!(referenced.is_empty());
+        assert_eq!(store.put(bytes, "jpg").await.unwrap(), blob);
+        sqlx::query(
+            "INSERT INTO items (id, library_id, kind, key, title, sort_title, poster, added_at, updated_at)
+             VALUES (1, 1, 'movie', 'm', 'M', 'm', ?, 0, 0)",
+        )
+        .bind(&blob)
+        .execute(&store.db.write)
+        .await
+        .unwrap();
+        let folder = store.media_dir(moved).unwrap();
+
+        let (blobs, _) = sweep(&store.blobs, Duration::ZERO, |_| false, &store.handed_out, since);
+        let (folders, _) = sweep(&store.media, Duration::ZERO, |_| false, &store.handed_out, since);
+        assert_eq!((blobs, folders), (0, 1));
+        assert!(store.exists(&blob), "the poster refers to it");
+        assert!(folder.join("trickplay").is_dir());
+        assert!(!store.media_dir(gone).unwrap().exists());
+    }
+
+    #[tokio::test]
+    async fn downloads_are_forgotten_after_the_grace_period_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path()).await;
+        let fresh = store.put(b"\xff\xd8\xff\xe0 fresh", "jpg").await.unwrap();
+        let old = store.put(b"\xff\xd8\xff\xe0 old", "jpg").await.unwrap();
+        age(&store.path(&old).unwrap(), 7200);
+        for (url, blob, fetched_at) in [
+            ("https://image.tmdb.org/fresh.jpg", &fresh, now() - 60),
+            ("https://image.tmdb.org/old.jpg", &old, now() - 7200),
+        ] {
+            sqlx::query("INSERT INTO remote_images (url, blob, fetched_at) VALUES (?, ?, ?)")
+                .bind(url)
+                .bind(blob)
+                .bind(fetched_at)
+                .execute(&store.db.write)
+                .await
+                .unwrap();
+        }
+        let store = restarted(&store, dir.path());
+        store.clean().await.unwrap();
+        // Downloaded a minute ago and not used yet: remembered, with its picture.
+        let urls: Vec<String> =
+            sqlx::query_scalar("SELECT url FROM remote_images").fetch_all(&store.db.read).await.unwrap();
+        assert_eq!(urls, ["https://image.tmdb.org/fresh.jpg"]);
+        assert!(store.exists(&fresh) && !store.exists(&old));
     }
 
     #[tokio::test]
