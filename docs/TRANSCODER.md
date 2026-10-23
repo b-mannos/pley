@@ -201,7 +201,9 @@ following status codes:
   - MP4, MOV and M4V: the index is read just as quickly from the video
     track's sample tables (`stss`, `stts`, `ctts`) and edit list, or from the
     movie fragments' sample flags in fragmented files (CMAF, OBS
-    recordings). Times match FFmpeg's packet timestamps, edit lists included.
+    recordings). Times match FFmpeg's packet timestamps, edit lists included:
+    checked against ffprobe on files written by FFmpeg and by Windows Media
+    Foundation (`moov` at the end, B-frames without an edit list).
     Files with structures this doesn't model (several edits, sync points in
     sample groups, inconsistent tables) are left to the packet scan below,
     as are fragmented files whose fragments take more than 2 s to walk.
