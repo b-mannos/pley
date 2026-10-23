@@ -85,6 +85,9 @@ parameters; containers report `size`, `totalSize` and `offset`.
   `subtitleStreamID`. The master playlist points at
   `session/<id>/base/index.m3u8`. Session URLs need no token: the 128-bit
   session id is the credential, as with Plex.
+- **Preview thumbnails and chapters.** Parts of files with seek previews have
+  `indexes="sd"`; the BIF index is cut from pley's previews. Details list the
+  first version's `Chapter`s, with a `thumb` once the file has previews.
 - **Cast and crew.** Details carry `Role` (with the part as `role`),
   `Director`, `Writer` and `Producer` tags. Their `id` is the pley person id and
   `thumb` the TMDB photo.
@@ -102,6 +105,7 @@ parameters; containers report `size`, `totalSize` and `offset`.
 | Lists | `/library/all`, `/library/onDeck`, `/library/recentlyAdded`, `/hubs`, `/hubs/sections/{id}`, `/hubs/continueWatching/items`, `/hubs/home/recentlyAdded`, `/hubs/search`, `/search` |
 | Collections | `/library/sections/{id}/collections` (also `…/all?type=18`), `/library/collections/{id}`, `…/children`, `…/{thumb,art,composite}[/{version}]` |
 | Playlists | `GET`/`POST /playlists` (`?type=&title=&uri=…/library/metadata/1,2`), `GET`/`PUT` (`?title=`)/`DELETE /playlists/{id}`, `GET`/`PUT /playlists/{id}/items` (`?uri=`), `DELETE /playlists/{id}/items/{playlistItemID}`, `PUT …/{playlistItemID}/move?after=`, `/playlists/{id}/composite/{version}` |
+| Previews | `/library/parts/{id}/indexes/sd` (BIF), `/library/parts/{id}/indexes/sd/{offset}` (the frame at `offset` ms), `/library/media/{id}/chapterImages/{n}` |
 | Playback | `/library/parts/…`, `/library/streams/{id}` (subtitles), `/:/timeline`, `/:/progress`, `/:/scrobble`, `/:/unscrobble`, `/status/sessions`, `/transcode/sessions`, `/{video,audio}/:/transcode/universal/{start.m3u8,decision,stop,ping,session/…}` |
 | History | `/status/sessions/history/all` (`accountID`, `librarySectionID`, `metadataItemID`, `viewedAt>=`; administrators see every account, others their own), `DELETE /status/sessions/history/{id}` |
 | Images | `/photo/:/transcode` |

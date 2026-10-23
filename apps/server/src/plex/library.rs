@@ -79,6 +79,15 @@ pub(super) async fn item_nodes(
     let leaves: Vec<i64> = rows.iter().filter(|r| meta::is_leaf(&r.kind)).map(|r| r.id).collect();
     let files =
         if detail.media && !leaves.is_empty() { meta::load_files(&state.db, &leaves).await? } else { HashMap::new() };
+    if detail.full {
+        for (item, item_files) in &files {
+            let with_previews: Vec<i64> =
+                item_files.iter().filter(|f| state.trickplay.index(f).is_some()).map(|f| f.id).collect();
+            if !with_previews.is_empty() {
+                extras.entry(*item).or_default().previews = with_previews;
+            }
+        }
+    }
     Ok(rows
         .iter()
         .map(|r| {

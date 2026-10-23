@@ -49,8 +49,10 @@ HLG and Dolby Vision.
     names and by comparing the audio of episodes (Chromaprint), with Up Next
     when an episode's credits start and optional automatic intro skipping.
   - Seek-bar previews: thumbnails while hovering the timeline, made from
-    keyframes in the background (seconds per film, HDR tone-mapped).
-  - Chapters are marked on the seek bar and listed in a Chapters menu.
+    keyframes in the background for whole libraries (seconds per film, HDR
+    tone-mapped), and served to Plex clients as BIF indexes.
+  - Chapters are marked on the seek bar and listed with pictures in a
+    Chapters menu.
   - Subtitle and audio choices are remembered per show, so the next episode
     starts with the same language.
 - **Watch state.**
@@ -78,6 +80,10 @@ HLG and Dolby Vision.
 - **Plex-compatible API** on port 32400 for Plex tools such as python-plexapi
   and Tautulli: libraries, metadata, collections, playlists, watch state,
   sessions, direct play and HLS streams. See [docs/PLEX.md](docs/PLEX.md).
+- **Storage.** Downloaded and uploaded pictures are stored once by content,
+  files generated from media (frame grabs, previews, chapter pictures) follow
+  their file through moves and renames, unused files are cleaned up, and the
+  database is backed up daily. See [docs/STORAGE.md](docs/STORAGE.md).
 - **Performance.**
   - Single binaries.
   - SQLite in WAL mode with a dedicated writer connection, and a mimalloc

@@ -30,6 +30,8 @@ pub struct Settings {
     pub detect_markers: bool,
     /// Make seek-bar preview thumbnails in the background.
     pub seek_previews: bool,
+    /// Make them for whole libraries after scans, not only when a title is opened.
+    pub previews_in_background: bool,
 }
 
 impl Default for Settings {
@@ -49,6 +51,7 @@ impl Default for Settings {
             watch_libraries: true,
             detect_markers: true,
             seek_previews: true,
+            previews_in_background: true,
         }
     }
 }
@@ -80,6 +83,7 @@ pub struct SettingsPatch {
     pub watch_libraries: Option<bool>,
     pub detect_markers: Option<bool>,
     pub seek_previews: Option<bool>,
+    pub previews_in_background: Option<bool>,
 }
 
 pub struct SettingsStore {
@@ -152,6 +156,9 @@ impl SettingsStore {
         }
         if let Some(v) = patch.seek_previews {
             next.seek_previews = v;
+        }
+        if let Some(v) = patch.previews_in_background {
+            next.previews_in_background = v;
         }
         let json = serde_json::to_string(&next).map_err(|e| AppError::Internal(e.into()))?;
         sqlx::query(

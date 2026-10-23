@@ -58,6 +58,53 @@ fn forget_ended(live: &[Arc<Session>]) {
 // ------------------------------------------------------------------ files
 
 /// `/library/parts/{id}/{version}/file.ext`: the media file, with ranges.
+/// A media file a Plex user may see, by part (or media) id.
+async fn visible_file(state: &AppState, user: &AuthUser, id: i64) -> PlexResult<crate::catalog::FileRow> {
+    let file = catalog::file(&state.db, id).await?.ok_or(PlexError::NotFound)?;
+    catalog::item(&state.db, user.id, file.item_id).await?.ok_or(PlexError::NotFound)?;
+    Ok(file)
+}
+
+fn jpeg(bytes: Vec<u8>) -> Response {
+    ([(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "private, max-age=86400")], bytes).into_response()
+}
+
+/// `/library/parts/{id}/indexes/sd`: the seek previews as a BIF file.
+pub async fn part_index(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Path((id, _quality)): Path<(i64, String)>,
+) -> PlexResult<Response> {
+    let file = visible_file(&state, &user, id).await?;
+    let path = state.trickplay.bif(&file).await.map_err(PlexError::Internal)?.ok_or(PlexError::NotFound)?;
+    let bytes = tokio::fs::read(path).await.map_err(|e| PlexError::Internal(e.into()))?;
+    Ok(([(header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response())
+}
+
+/// `/library/parts/{id}/indexes/sd/{offset}`: the preview frame at `offset` ms.
+pub async fn part_index_frame(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Path((id, _quality, offset)): Path<(i64, String, i64)>,
+) -> PlexResult<Response> {
+    let file = visible_file(&state, &user, id).await?;
+    let frame =
+        state.trickplay.frame_at(&file, offset).await.map_err(PlexError::Internal)?.ok_or(PlexError::NotFound)?;
+    Ok(jpeg(frame))
+}
+
+/// `/library/media/{id}/chapterImages/{n}`.
+pub async fn chapter_image(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Path((id, n)): Path<(i64, usize)>,
+) -> PlexResult<Response> {
+    let file = visible_file(&state, &user, id).await?;
+    let path =
+        state.trickplay.chapter_image(&file, n).await.map_err(PlexError::Internal)?.ok_or(PlexError::NotFound)?;
+    Ok(jpeg(tokio::fs::read(path).await.map_err(|e| PlexError::Internal(e.into()))?))
+}
+
 pub async fn part_file(
     State(state): State<AppState>,
     PlexUser(user): PlexUser,

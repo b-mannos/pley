@@ -39,6 +39,8 @@ pub struct Activity {
     sessions: Vec<SessionInfo>,
     /// Intro/credits detection in progress.
     analysis: Option<AnalysisStatus>,
+    /// Files waiting for seek previews (administrators only).
+    previews_pending: usize,
 }
 
 pub async fn activity(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Activity>> {
@@ -70,7 +72,8 @@ pub async fn activity(State(state): State<AppState>, user: AuthUser) -> ApiResul
         });
     }
     let analysis = if user.is_admin { state.markers.status() } else { None };
-    Ok(Json(Activity { scans: state.scanner.statuses(), sessions: out, analysis }))
+    let previews_pending = if user.is_admin { state.trickplay.pending() } else { 0 };
+    Ok(Json(Activity { scans: state.scanner.statuses(), sessions: out, analysis, previews_pending }))
 }
 
 pub async fn events(

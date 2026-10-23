@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
-import { Activity as ActivityIcon, Cpu, FastForward, History, MonitorPlay, Pause, Play, RefreshCw, Square } from "lucide-react";
+import { Activity as ActivityIcon, Cpu, FastForward, History, Images, MonitorPlay, Pause, Play, RefreshCw, Square } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useActivity, useSystemInfo, useTranscoderStatus } from "@/api/hooks";
 import type {
@@ -316,6 +316,7 @@ export function DashboardSettings() {
   const sessions = activity.data?.sessions ?? [];
   const scans = (activity.data?.scans ?? []).filter((s) => s.phase !== "done");
   const analysis = activity.data?.analysis ?? null;
+  const previewsPending = activity.data?.previews_pending ?? 0;
 
   return (
     <div className="space-y-10">
@@ -405,6 +406,20 @@ export function DashboardSettings() {
             </div>
             <ProgressBar value={analysis.total > 0 ? analysis.done / analysis.total : 0} className="h-1.5" />
           </div>
+        </section>
+      ) : null}
+
+      {previewsPending > 0 ? (
+        <section>
+          <SectionTitle>
+            <span className="flex items-center gap-2">
+              <Images className="size-5 text-accent" /> Making seek previews
+            </span>
+          </SectionTitle>
+          <p className="rounded-lg border border-border bg-surface px-4 py-3 text-sm text-muted">
+            {previewsPending === 1 ? "1 file left" : `${previewsPending.toLocaleString()} files left`}, one at a time,
+            pausing while videos are being transcoded.
+          </p>
         </section>
       ) : null}
 

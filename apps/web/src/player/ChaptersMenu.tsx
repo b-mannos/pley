@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ListOrdered } from "lucide-react";
 import type { Chapter } from "@/api/types";
 import { cn } from "@/lib/cn";
@@ -13,6 +13,18 @@ export function chapterIndexAt(chapters: Chapter[], ms: number): number {
   let found = -1;
   for (let i = 0; i < chapters.length && chapters[i].start_ms <= ms; i++) found = i;
   return found;
+}
+
+/** A chapter's picture, or an empty frame until it loads (or when it fails). */
+function ChapterPicture({ url }: { url?: string }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <span className="relative aspect-video w-24 shrink-0 overflow-hidden rounded bg-white/10">
+      {url && !failed ? (
+        <img src={url} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setFailed(true)} className="absolute inset-0 size-full object-cover" />
+      ) : null}
+    </span>
+  );
 }
 
 /** Chapter list above the control bar; picking one seeks to its start. */
@@ -34,6 +46,7 @@ export function ChaptersMenu({
   const activeRef = useRef<HTMLButtonElement>(null);
   const currentMs = current * 1000;
   const active = chapterIndexAt(chapters, currentMs + 250);
+  const pictures = chapters.some((c) => c.thumb_url);
 
   useEffect(() => {
     if (!open) return;
@@ -68,7 +81,12 @@ export function ChaptersMenu({
         <ListOrdered className="size-5" />
       </button>
       {open ? (
-        <div className="absolute bottom-full right-0 mb-2 max-h-[min(60vh,28rem)] w-72 animate-pop-in overflow-y-auto rounded-lg border border-white/10 bg-black/90 p-1.5 shadow-2xl backdrop-blur">
+        <div
+          className={cn(
+            "absolute bottom-full right-0 mb-2 max-h-[min(60vh,28rem)] animate-pop-in overflow-y-auto rounded-lg border border-white/10 bg-black/90 p-1.5 shadow-2xl backdrop-blur",
+            pictures ? "w-[min(24rem,calc(100vw-2rem))]" : "w-72",
+          )}
+        >
           <div className="px-2.5 pb-1.5 pt-1 text-xs font-semibold uppercase tracking-wide text-white/50">Chapters</div>
           {chapters.map((chapter, i) => (
             <button
@@ -84,8 +102,17 @@ export function ChaptersMenu({
                 i === active ? "text-accent" : "text-white/90",
               )}
             >
-              <span className="w-12 shrink-0 tabular-nums text-xs text-white/50">{formatClock(chapter.start_ms / 1000)}</span>
-              <span className="truncate">{chapterTitle(chapter, i)}</span>
+              {pictures ? (
+                <ChapterPicture url={chapter.thumb_url} />
+              ) : (
+                <span className="w-12 shrink-0 tabular-nums text-xs text-white/50">{formatClock(chapter.start_ms / 1000)}</span>
+              )}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{chapterTitle(chapter, i)}</span>
+                {pictures ? (
+                  <span className="block tabular-nums text-xs text-white/50">{formatClock(chapter.start_ms / 1000)}</span>
+                ) : null}
+              </span>
             </button>
           ))}
         </div>

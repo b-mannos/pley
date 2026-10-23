@@ -271,6 +271,18 @@ export function ServerSettings() {
         >
           <Toggle checked={form.seek_previews} onChange={(v) => set("seek_previews", v)} label="Seek previews" />
         </Row>
+        {form.seek_previews ? (
+          <Row
+            label="Previews for whole libraries"
+            hint="After each scan, make seek previews and chapter pictures for everything that lacks them, one file at a time, pausing while videos are being transcoded."
+          >
+            <Toggle
+              checked={form.previews_in_background}
+              onChange={(v) => set("previews_in_background", v)}
+              label="Previews for whole libraries"
+            />
+          </Row>
+        ) : null}
         <Row label="Periodic scan interval" htmlFor="scan-interval" hint="Minutes between full scans. 0 disables periodic scans.">
           <div className="flex items-center gap-2">
             <TextInput

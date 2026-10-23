@@ -179,7 +179,17 @@ pub struct MediaFileDto {
     /// see [`crate::streams`]); `None` = the file's default audio / no subtitles.
     pub selected_audio: Option<i64>,
     pub selected_subtitle: Option<i64>,
-    pub chapters: Vec<pley_transcoder_api::Chapter>,
+    pub chapters: Vec<ChapterDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ChapterDto {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub title: Option<String>,
+    /// Picture of the chapter, cut from the seek previews once they exist.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumb_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -342,7 +352,10 @@ impl FileRow {
             streams: self.streams_of(streams),
             selected_audio: None,
             selected_subtitle: None,
-            chapters,
+            chapters: chapters
+                .into_iter()
+                .map(|c| ChapterDto { start_ms: c.start_ms, end_ms: c.end_ms, title: c.title, thumb_url: None })
+                .collect(),
         }
     }
 }
@@ -367,6 +380,16 @@ pub async fn item(db: &Db, user_id: i64, item_id: i64) -> sqlx::Result<Option<It
 }
 
 /// Rows for `ids`, in the order given.
+/// Files of movies and episodes, newest first.
+pub async fn video_files(db: &Db) -> sqlx::Result<Vec<FileRow>> {
+    sqlx::query_as(&format!(
+        "{FILE_SELECT} WHERE video_codec IS NOT NULL
+         AND item_id IN (SELECT id FROM items WHERE kind IN ('movie', 'episode')) ORDER BY added_at DESC"
+    ))
+    .fetch_all(&db.read)
+    .await
+}
+
 pub async fn items_by_ids(db: &Db, user_id: i64, ids: &[i64]) -> sqlx::Result<Vec<ItemRow>> {
     if ids.is_empty() {
         return Ok(Vec::new());

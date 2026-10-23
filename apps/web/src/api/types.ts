@@ -231,6 +231,8 @@ export interface Chapter {
   start_ms: number;
   end_ms: number;
   title: string | null;
+  /** Picture of the chapter, once the file has seek previews. */
+  thumb_url?: string;
 }
 
 /** Seek-bar preview sprite sheets of a file (`GET /api/files/{id}/trickplay`). */
@@ -406,6 +408,8 @@ export interface Activity {
   sessions: SessionInfo[];
   /** Intro/credits detection in progress (admins only). */
   analysis?: AnalysisStatus | null;
+  /** Files waiting for seek previews (admins only). */
+  previews_pending?: number;
 }
 
 export interface AnalysisStatus {
@@ -441,6 +445,7 @@ export interface Settings {
   watch_libraries: boolean;
   detect_markers: boolean;
   seek_previews: boolean;
+  previews_in_background: boolean;
 }
 
 export interface TranscoderInfo {

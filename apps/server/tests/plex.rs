@@ -50,6 +50,14 @@ impl TestApp {
         serde_json::from_slice(&bytes).unwrap_or(Value::Null)
     }
 
+    /// Raw bytes of a pley API response.
+    async fn api_raw(&self, uri: &str, token: &str) -> (StatusCode, Vec<u8>) {
+        let req = Request::builder().uri(uri).header(header::AUTHORIZATION, format!("Bearer {token}"));
+        let resp = self.api.clone().oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+        let status = resp.status();
+        (status, axum::body::to_bytes(resp.into_body(), 1 << 24).await.unwrap().to_vec())
+    }
+
     async fn plex(&self, uri: &str, headers: &[(&str, &str)]) -> Reply {
         let mut req = Request::builder().method(Method::GET).uri(uri);
         for (k, v) in headers {
@@ -419,4 +427,85 @@ async fn user_ratings_through_rate() {
     .await;
     let details = app.plex_json(&format!("/library/metadata/{beta}"), &token).await;
     assert!(metadata(&details)[0].get("userRating").is_none());
+}
+
+#[tokio::test]
+async fn preview_indexes_and_chapter_thumbs() {
+    use pley_transcoder_api::{Chapter, MediaInfo, TrickplayInfo};
+
+    let app = TestApp::new().await;
+    let token = app.setup().await;
+    app.media_file("movies/Alpha (2001).mkv");
+    let lib = app.library(&token, "Movies", "movies", "movies").await;
+    let all = app.plex_json(&format!("/library/sections/{lib}/all"), &token).await;
+    let item: i64 = metadata(&all)[0]["ratingKey"].as_str().unwrap().parse().unwrap();
+    let db = &app.state.db;
+    let (file_id, path): (i64, String) = sqlx::query_as("SELECT id, path FROM media_files WHERE item_id = ?")
+        .bind(item)
+        .fetch_one(&db.read)
+        .await
+        .unwrap();
+
+    // A file with three chapters and (fake) seek previews: tests have no transcoder.
+    let chapter = |start_ms, end_ms, title: &str| Chapter { start_ms, end_ms, title: Some(title.into()) };
+    let info = MediaInfo {
+        duration_ms: Some(90_000),
+        chapters: vec![
+            chapter(0, 30_000, "Opening"),
+            chapter(30_000, 60_000, "Middle"),
+            chapter(60_000, 90_000, "End"),
+        ],
+        ..Default::default()
+    };
+    sqlx::query("UPDATE media_files SET media_info = ?, video_codec = 'h264' WHERE id = ?")
+        .bind(serde_json::to_string(&info).unwrap())
+        .bind(file_id)
+        .execute(&db.write)
+        .await
+        .unwrap();
+    let fingerprint = app.state.store.fingerprint_of(file_id, &path, None).await.unwrap();
+    let dir = app.state.store.media_dir(&fingerprint).unwrap().join("trickplay");
+    std::fs::create_dir_all(&dir).unwrap();
+    // One sheet of 10 tiles (8x4 each), a different color per tile.
+    let mut sheet = image::RgbImage::new(8 * 5, 4 * 2);
+    for (x, y, px) in sheet.enumerate_pixels_mut() {
+        let n = (y / 4) * 5 + x / 8;
+        *px = image::Rgb([(n * 25) as u8, 100, 200]);
+    }
+    sheet.save(dir.join("0.jpg")).unwrap();
+    let trickplay = TrickplayInfo {
+        id: "t".into(),
+        interval_ms: 10_000,
+        width: 8,
+        height: 4,
+        columns: 5,
+        rows: 2,
+        count: 10,
+        sheets: 1,
+    };
+    std::fs::write(dir.join("index.json"), serde_json::to_vec(&trickplay).unwrap()).unwrap();
+
+    // pley's API: chapters get pictures.
+    let detail = app.api(Method::GET, &format!("/api/items/{item}"), Some(&token), None).await;
+    let chapters = detail["files"][0]["chapters"].as_array().unwrap().clone();
+    assert_eq!(chapters.len(), 3);
+    let url = chapters[1]["thumb_url"].as_str().unwrap().to_owned();
+    let picture = app.api_raw(&url, &token).await;
+    assert_eq!(picture.0, StatusCode::OK);
+    assert_eq!(&picture.1[..2], &[0xff, 0xd8], "a JPEG");
+
+    // Plex: the part has preview indexes and the chapters have pictures.
+    let details = app.plex_json(&format!("/library/metadata/{item}"), &token).await;
+    let movie = &metadata(&details)[0];
+    assert_eq!(movie["Media"][0]["Part"][0]["indexes"], "sd");
+    assert_eq!(movie["Chapter"][1]["tag"], "Middle");
+    assert_eq!(movie["Chapter"][1]["startTimeOffset"], 30_000);
+    let thumb = movie["Chapter"][2]["thumb"].as_str().unwrap().to_owned();
+    let image = app.plex(&format!("{thumb}?X-Plex-Token={token}"), &[]).await;
+    assert_eq!(image.status, StatusCode::OK);
+
+    let bif = app.plex(&format!("/library/parts/{file_id}/indexes/sd?X-Plex-Token={token}"), &[]).await;
+    assert_eq!(bif.status, StatusCode::OK);
+    let frame = app.plex(&format!("/library/parts/{file_id}/indexes/sd/45000?X-Plex-Token={token}"), &[]).await;
+    assert_eq!(frame.status, StatusCode::OK);
 }

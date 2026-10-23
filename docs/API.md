@@ -168,6 +168,7 @@ interface Chapter {
   start_ms: number;
   end_ms: number;
   title: string | null;
+  thumb_url?: string;               // picture of the chapter, once the file has seek previews
 }
 
 interface MediaStream {
@@ -430,6 +431,7 @@ queue.
 | GET | `/api/files/{id}/subtitles/{index}.vtt` | – | WebVTT (text subtitles; extracted/converted on demand and cached) |
 | GET | `/api/files/{id}/trickplay` | – | `{ id, interval_ms, width, height, columns, rows, count, sheets }` seek-bar previews; `404` while they are being made (asking, or opening the item, queues them) |
 | GET | `/api/files/{id}/trickplay/{n}.jpg?v={id}` | – | sprite sheet `n`: thumbnail `k` is at column `k % columns`, row `k / columns` of sheet `k / (columns × rows)` and shows the video at `k × interval_ms` |
+| GET | `/api/files/{id}/chapters/{n}.jpg` | – | picture of chapter `n` (0-based), cut from the seek previews (a few seconds into the chapter); `404` until the file has previews |
 
 `POST /api/playback` body:
 
@@ -643,6 +645,7 @@ interface Settings {
   watch_libraries: boolean;         // pick up file changes automatically
   detect_markers: boolean;          // find intros and credits in the background (default true)
   seek_previews: boolean;           // make seek-bar thumbnails when an item is first opened (default true)
+  previews_in_background: boolean;  // also for whole libraries after scans, one file at a time (default true)
 }
 
 interface SystemInfo {

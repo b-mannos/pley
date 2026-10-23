@@ -101,6 +101,7 @@ pub fn router(state: AppState) -> Router {
         .route("/files/{id}/subtitles/{file}", get(playback::subtitles))
         .route("/files/{id}/trickplay", get(playback::trickplay))
         .route("/files/{id}/trickplay/{sheet}", get(playback::trickplay_sheet))
+        .route("/files/{id}/chapters/{image}", get(playback::chapter_image))
         .route("/activity", get(activity::activity))
         .route("/events", get(activity::events))
         .route("/users", get(accounts::list_users).post(accounts::create_user))

@@ -39,6 +39,13 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i
     if matches!(detail.summary.kind.as_str(), "movie" | "episode") {
         for file in catalog::files_for_item(&state.db, detail.summary.id).await? {
             state.trickplay.request(&file);
+            let Some(dto) = detail.files.iter_mut().find(|f| f.id == file.id) else { continue };
+            if dto.chapters.len() > 1 && state.trickplay.has_chapter_images(&file) {
+                let version = file.fingerprint.as_deref().unwrap_or_default();
+                for (n, chapter) in dto.chapters.iter_mut().enumerate() {
+                    chapter.thumb_url = Some(format!("/api/files/{}/chapters/{n}.jpg?v={version}", file.id));
+                }
+            }
         }
     }
     if state.transcoder.is_available() {

@@ -309,6 +309,26 @@ pub async fn trickplay_sheet(
         .into_response())
 }
 
+/// A chapter's picture (`{n}.jpg`), cut from the seek previews.
+pub async fn chapter_image(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path((id, name)): Path<(i64, String)>,
+) -> ApiResult<Response> {
+    let n: usize =
+        name.strip_suffix(".jpg").and_then(|n| n.parse().ok()).ok_or_else(|| AppError::not_found("unknown chapter"))?;
+    let file = visible_file(&state, &user, id).await?;
+    let path = state
+        .trickplay
+        .chapter_image(&file, n)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::not_found("no chapter image"))?;
+    let bytes = tokio::fs::read(path).await.map_err(|e| AppError::Internal(e.into()))?;
+    Ok(([(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "private, max-age=31536000, immutable")], bytes)
+        .into_response())
+}
+
 /// Direct play: the raw file with HTTP range support.
 pub async fn stream_file(
     State(state): State<AppState>,

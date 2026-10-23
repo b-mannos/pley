@@ -101,6 +101,9 @@ pub struct Extras {
     pub path: Option<String>,
     /// Cast and crew, loaded only for full details and people filters.
     pub people: Vec<Credit>,
+    /// Files of the item with seek previews (full details only): their parts
+    /// get `indexes="sd"` and their chapters pictures.
+    pub previews: Vec<i64>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -143,6 +146,7 @@ pub async fn load_extras(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Extr
                     imdb_id: row.imdb_id,
                     path: row.path,
                     people: Vec::new(),
+                    previews: Vec::new(),
                 },
             );
         }
@@ -393,7 +397,29 @@ pub fn item_node(
     // Children elements.
     if detail.media && is_leaf(kind) {
         for file in files {
-            node.push(media_node(file, kind, detail.full));
+            let previews = extras.is_some_and(|e| e.previews.contains(&file.id));
+            node.push(media_node(file, kind, detail.full, previews));
+        }
+        // Chapters of the first version, with pictures once it has previews.
+        if let Some(file) = files.first().filter(|_| detail.full) {
+            let previews = extras.is_some_and(|e| e.previews.contains(&file.id));
+            let chapters = file.media_info().map(|m| m.chapters).unwrap_or_default();
+            for (n, chapter) in chapters.iter().enumerate().filter(|_| chapters.len() > 1) {
+                let title =
+                    chapter.title.clone().filter(|t| !t.trim().is_empty()).unwrap_or(format!("Chapter {}", n + 1));
+                let mut node_chapter = Node::new("Chapter")
+                    .attr("id", n + 1)
+                    .attr("tag", title)
+                    .attr("index", n + 1)
+                    .attr("startTimeOffset", chapter.start_ms)
+                    .attr("endTimeOffset", chapter.end_ms);
+                if previews {
+                    node_chapter = node_chapter
+                        .attr("filter", format!("thumb={}", n + 1))
+                        .attr("thumb", format!("/library/media/{}/chapterImages/{n}", file.id));
+                }
+                node.push(node_chapter);
+            }
         }
     }
     if let Some(extras) = extras {
@@ -506,7 +532,7 @@ pub fn stream_index(file_id: i64, stream_id: i64) -> Option<i64> {
     (0..10_000).contains(&index).then_some(index)
 }
 
-pub fn media_node(file: &FileRow, kind: &str, full: bool) -> Node {
+pub fn media_node(file: &FileRow, kind: &str, full: bool, previews: bool) -> Node {
     let info = file.media_info();
     let video = info.as_ref().and_then(MediaInfo::video);
     let audio = info.as_ref().and_then(MediaInfo::default_audio);
@@ -547,6 +573,9 @@ pub fn media_node(file: &FileRow, kind: &str, full: bool) -> Node {
         .opt("container", container)
         .opt("videoProfile", video.and_then(|v| v.profile.as_deref()).map(str::to_lowercase))
         .opt("audioProfile", audio.and_then(|a| a.profile.as_deref()).map(str::to_lowercase));
+    if previews {
+        part = part.attr("indexes", "sd");
+    }
     if full {
         let default_audio = audio.map(|a| a.index);
         for stream in file.streams() {

@@ -91,6 +91,7 @@ impl AppState {
             transcoder.clone(),
             settings.clone(),
             sessions.clone(),
+            store.clone(),
             config.cache_dir().join("trickplay"),
         );
         Ok(Self {
@@ -143,10 +144,23 @@ impl AppState {
                 }
             }
         });
-        // Fingerprints of files scanned by older versions, then a daily clean-up.
-        let store = self.store.clone();
+        // Seek previews of whole libraries after each scan.
+        let (trickplay, mut events) = (self.trickplay.clone(), self.events.subscribe());
+        tokio::spawn(async move {
+            loop {
+                match events.recv().await {
+                    Ok(crate::events::ServerEvent::ScanFinished { .. }) => trickplay.request_all().await,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    _ => {}
+                }
+            }
+        });
+        // Fingerprints of files scanned by older versions (then previews of
+        // what lacks them), and a daily clean-up.
+        let (store, trickplay) = (self.store.clone(), self.trickplay.clone());
         tokio::spawn(async move {
             store.fingerprint_pending().await;
+            trickplay.request_all().await;
             let mut tick = tokio::time::interval(Duration::from_secs(24 * 3600));
             loop {
                 tick.tick().await;
