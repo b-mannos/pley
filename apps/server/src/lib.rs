@@ -60,6 +60,31 @@ pub fn request_shutdown() {
     SHUTDOWN.notify_one();
 }
 
+/// Whether the server finished shutting down (its database is closed), see
+/// [`wait_until_stopped`].
+static STOPPED: parking_lot::Mutex<bool> = parking_lot::const_mutex(false);
+static STOPPED_CHANGED: parking_lot::Condvar = parking_lot::Condvar::new();
+
+fn set_stopped(stopped: bool) {
+    *STOPPED.lock() = stopped;
+    STOPPED_CHANGED.notify_all();
+}
+
+/// Blocks the calling thread until the server has shut down, for at most
+/// `timeout`; whether it has. For Windows, which may end the process as soon
+/// as it has told it that the session ends.
+#[cfg_attr(not(all(feature = "tray", windows)), allow(dead_code))]
+pub(crate) fn wait_until_stopped(timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    let mut stopped = STOPPED.lock();
+    while !*stopped {
+        if STOPPED_CHANGED.wait_until(&mut stopped, deadline).timed_out() {
+            break;
+        }
+    }
+    *stopped
+}
+
 /// `pley serve`: run the server on a new runtime, with a tray icon when `tray`
 /// is set and this is an interactive desktop session.
 pub fn serve(config: Config, tray: bool) -> anyhow::Result<()> {
@@ -108,6 +133,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 /// (see [`serve`]).
 pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) -> anyhow::Result<()> {
     let _instance = instance::InstanceLock::acquire(&config.data_dir)?;
+    set_stopped(false);
     let bind = config.bind;
     let listener =
         tokio::net::TcpListener::bind(bind).await.map_err(|e| anyhow::anyhow!("cannot listen on {bind}: {e}"))?;
@@ -153,6 +179,7 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     if tokio::time::timeout(Duration::from_secs(25), state.shutdown()).await.is_err() {
         tracing::warn!("shutdown did not finish in time");
     }
+    set_stopped(true);
     drop(tray);
     Ok(())
 }
@@ -212,8 +239,12 @@ fn display_addr(addr: SocketAddr) -> String {
 }
 
 /// Ctrl+C, SIGTERM, [`request_shutdown`] or `stopping` cancelled (the tray's
-/// Quit). A signal that can't be watched is ignored rather than taken as a
-/// request to stop.
+/// Quit). On Windows also Ctrl+Break, the console window closing and, for a
+/// service, the system shutting down: Windows waits for pley to stop then
+/// (a few seconds at most), as tokio holds those events until the process
+/// exits. Not a sign-out: a service gets that when anyone signs out. A
+/// signal that can't be watched is ignored rather than taken as a request to
+/// stop.
 async fn shutdown_signal(stopping: &CancellationToken) {
     let ctrl_c = async {
         if tokio::signal::ctrl_c().await.is_err() {
@@ -229,7 +260,21 @@ async fn shutdown_signal(stopping: &CancellationToken) {
             Err(_) => std::future::pending::<()>().await,
         }
     };
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    let terminate = async {
+        use tokio::signal::windows::{ctrl_break, ctrl_close, ctrl_shutdown};
+        match (ctrl_break(), ctrl_close(), ctrl_shutdown()) {
+            (Ok(mut brk), Ok(mut close), Ok(mut shutdown)) => {
+                tokio::select! {
+                    _ = brk.recv() => {},
+                    _ = close.recv() => {},
+                    _ = shutdown.recv() => {},
+                }
+            }
+            _ => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(any(unix, windows)))]
     let terminate = std::future::pending::<()>();
     tokio::select! {
         () = ctrl_c => {},

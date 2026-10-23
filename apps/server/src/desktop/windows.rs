@@ -1,20 +1,26 @@
 //! Windows: the notification-area icon lives on its own thread with a Win32
 //! message loop. Left click opens the web UI, right click shows the menu, and
-//! a thread timer keeps the tooltip current.
+//! a thread timer keeps the tooltip current. A hidden window stops pley when
+//! Windows asks it to close (`taskkill`, installers) or the session ends.
 
-use std::ptr::null_mut;
+use std::cell::RefCell;
+use std::ptr::{null, null_mut};
 use std::sync::mpsc;
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::Console::{
     FreeConsole, GetConsoleProcessList, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
 };
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, GetSystemMetrics, KillTimer, MSG, PostThreadMessageW, SM_CXSMICON, SetTimer,
-    TranslateMessage, WM_QUIT, WM_TIMER,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, GetSystemMetrics, KillTimer, MSG,
+    PostThreadMessageW, RegisterClassW, SM_CXSMICON, SetTimer, TranslateMessage, WM_CLOSE, WM_ENDSESSION,
+    WM_QUERYENDSESSION, WM_QUIT, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
 };
 
 use super::{Command, TrayContext, TrayGuard, autostart, item};
@@ -22,6 +28,14 @@ use super::{Command, TrayContext, TrayGuard, autostart, item};
 /// Resource id of the application icon (see build.rs).
 const ICON_RESOURCE: u16 = 1;
 const REFRESH_MS: u32 = 3000;
+/// How long the end of the Windows session waits for pley to stop (Windows
+/// lists apps that take longer as holding up the sign-out or shutdown).
+const SESSION_END_WAIT: Duration = Duration::from_secs(4);
+
+thread_local! {
+    /// The tray's context, for [`stop_window_proc`] (on the tray's thread).
+    static STOP_CONTEXT: RefCell<Option<TrayContext>> = const { RefCell::new(None) };
+}
 
 struct Guard {
     thread_id: u32,
@@ -117,6 +131,7 @@ fn run(ctx: TrayContext, ready: mpsc::Sender<Result<u32, String>>) {
     // SAFETY: plain Win32 calls on this thread's message queue.
     let thread_id = unsafe { GetCurrentThreadId() };
     let timer = unsafe { SetTimer(null_mut(), 0, REFRESH_MS, None) };
+    let stop = stop_window(&ctx);
     let _ = ready.send(Ok(thread_id));
 
     let mut tooltip = ctx.tooltip();
@@ -127,6 +142,12 @@ fn run(ctx: TrayContext, ready: mpsc::Sender<Result<u32, String>>) {
         let got = unsafe { GetMessageW(&mut msg, null_mut(), 0, 0) };
         if got == 0 || got == -1 {
             break; // WM_QUIT (server stopped) or error
+        }
+        // `taskkill` posts WM_CLOSE to each window of the process: pley
+        // stops instead of the icon's window closing.
+        if msg.message == WM_CLOSE {
+            ctx.send(Command::Quit);
+            continue;
         }
         if msg.message == WM_TIMER && msg.hwnd.is_null() {
             let current = ctx.tooltip();
@@ -150,9 +171,77 @@ fn run(ctx: TrayContext, ready: mpsc::Sender<Result<u32, String>>) {
             }
         }
     }
-    // SAFETY: the timer was created on this thread.
-    unsafe { KillTimer(null_mut(), timer) };
+    // SAFETY: the timer and the window were created on this thread.
+    unsafe {
+        KillTimer(null_mut(), timer);
+        if !stop.is_null() {
+            DestroyWindow(stop);
+        }
+    }
     drop(tray); // removes the icon right away instead of leaving a ghost
+}
+
+/// A hidden top-level window that Windows asks to close (`taskkill`,
+/// installers) and tells when the session ends; the icon's own window does
+/// nothing useful with either. Null when it can't be made.
+fn stop_window(ctx: &TrayContext) -> HWND {
+    STOP_CONTEXT.with(|c| *c.borrow_mut() = Some(ctx.clone()));
+    let class: Vec<u16> = "pley-stop".encode_utf16().chain(Some(0)).collect();
+    // SAFETY: the class name outlives both calls (Windows copies it), the
+    // window procedure is a plain function, and the remaining fields of the
+    // class may be zero.
+    unsafe {
+        let instance = GetModuleHandleW(null());
+        let wc = WNDCLASSW {
+            lpfnWndProc: Some(stop_window_proc),
+            hInstance: instance,
+            lpszClassName: class.as_ptr(),
+            ..std::mem::zeroed()
+        };
+        RegisterClassW(&wc);
+        CreateWindowExW(
+            0,
+            class.as_ptr(),
+            class.as_ptr(),
+            WS_OVERLAPPED,
+            0,
+            0,
+            0,
+            0,
+            null_mut(),
+            null_mut(),
+            instance,
+            null(),
+        )
+    }
+}
+
+unsafe extern "system" fn stop_window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    match msg {
+        WM_CLOSE => {
+            quit();
+            0
+        }
+        // The session may end: pley agrees.
+        WM_QUERYENDSESSION => 1,
+        // It ends: Windows may end the process once this returns, so the
+        // server gets to close the database first.
+        WM_ENDSESSION if wparam != 0 => {
+            quit();
+            crate::wait_until_stopped(SESSION_END_WAIT);
+            0
+        }
+        // SAFETY: what this window doesn't handle goes to the default procedure.
+        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
+fn quit() {
+    STOP_CONTEXT.with(|c| {
+        if let Some(ctx) = c.borrow().as_ref() {
+            ctx.send(Command::Quit);
+        }
+    });
 }
 
 fn handle_menu(ctx: &TrayContext, items: &Items, event: &MenuEvent) {

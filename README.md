@@ -238,6 +238,11 @@ or `pley.toml` in the data directory; see
 | `--log` | `info` | e.g. `debug`, `info,pley=debug`; also written to `logs/pley.log` in the data directory |
 | `--no-tray` | off | never show the tray icon (it only appears in interactive desktop sessions) |
 
+pley shuts down cleanly (playback in progress gets a few seconds, then the
+transcoder stops and the database closes) on Ctrl+C, `SIGTERM` (Docker,
+systemd), the tray's Quit, and on Windows also on `taskkill` without `/F`,
+when its console window is closed, and when you sign out or shut down.
+
 Runtime settings are edited in the UI under **Settings → Server**:
 
 - server name
