@@ -1246,6 +1246,9 @@ async fn trailers_and_other_extras() {
         .post(&format!("/api/items/{trailer}/progress"), &admin, json!({"position_ms": 30_000, "duration_ms": 120_000}))
         .await;
     assert_eq!(progress.status, StatusCode::NO_CONTENT, "{:?}", progress.body);
+    let play = app.post("/api/playback", &admin, json!({"item_id": trailer, "caps": {}, "mode": "direct"})).await;
+    assert_eq!(play.status, StatusCode::OK, "{:?}", play.body);
+    assert_eq!(play.body["method"], json!("direct"));
     assert_eq!(app.get("/api/search?q=teaser", &admin).await.body["items"], json!([]));
 
     // Removing the movie removes its extras.

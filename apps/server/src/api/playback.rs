@@ -41,7 +41,7 @@ pub async fn start(
     Json(req): Json<PlaybackRequest>,
 ) -> ApiResult<Json<PlaybackInfo>> {
     let row = item_or_404(&state, user.id, req.item_id).await?;
-    if !matches!(row.kind.as_str(), "movie" | "episode" | "track") {
+    if !matches!(row.kind.as_str(), "movie" | "episode" | "track" | "extra") {
         return Err(AppError::bad_request("this item cannot be played directly"));
     }
     let files = catalog::files_for_item(&state.db, row.id).await?;
