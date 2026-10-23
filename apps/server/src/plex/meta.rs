@@ -333,6 +333,11 @@ pub fn item_node(
             .attr("audienceRatingImage", "themoviedb://image.rating");
     }
     node = node.opt("userRating", row.user_rating);
+    // The edition of the version played by default, as Plex names it.
+    if kind == "movie" {
+        let edition = files.first().and_then(|f| crate::library::parse::edition(std::path::Path::new(&f.path)));
+        node = node.opt("editionTitle", edition);
+    }
     node = node
         .opt("originallyAvailableAt", row.release_date.as_deref())
         .opt("duration", row.duration_ms.filter(|d| *d > 0))

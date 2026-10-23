@@ -168,8 +168,9 @@ interface MediaFile {
   video_codec: string | null;       // ffprobe codec name: "h264", "hevc", "av1", ...
   audio_codec: string | null;       // codec of the default audio stream
   streams: MediaStream[];
+  edition: string | null;           // from `{edition-Final Cut}` in the file's or its folder's name
   selected_audio: number | null;    // tracks to start with for this user (remembered
-  selected_subtitle: number | null; // choice for the show or movie); null = default / off
+  selected_subtitle: number | null; // choice or their defaults); null = default / off
   chapters: Chapter[];              // from the container, by start time (empty if none)
 }
 

@@ -2,8 +2,13 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { User } from "@/api/types";
-import { mockApi, renderWithProviders, testUser } from "@/test/render";
+import { type FakeRequest, mockApi, renderWithProviders, testUser } from "@/test/render";
 import { PlaybackCard } from "./AccountPage";
+
+/** The last account change: queries refetched after it may come later. */
+function lastSave(requests: FakeRequest[]) {
+  return requests.filter((r) => r.method === "PATCH" && r.path === "/api/me").at(-1);
+}
 
 function serve() {
   return mockApi({ "PATCH /api/me": (req) => ({ ...testUser, ...(req.body as Partial<User>) }) });
@@ -20,11 +25,11 @@ describe("PlaybackCard", () => {
     expect(screen.getByText(/they translate the lines you're meant to read/)).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Audio language"), "French");
-    await waitFor(() => expect(requests.at(-1)?.body).toEqual({ audio_language: "fre" }));
+    await waitFor(() => expect(lastSave(requests)?.body).toEqual({ audio_language: "fre" }));
     expect(await screen.findByText("Audio language saved")).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Subtitles"), "Always");
-    await waitFor(() => expect(requests.at(-1)?.body).toEqual({ subtitle_mode: "always" }));
+    await waitFor(() => expect(lastSave(requests)?.body).toEqual({ subtitle_mode: "always" }));
   });
 
   it("asks for the language subtitles are read in", async () => {
@@ -37,11 +42,11 @@ describe("PlaybackCard", () => {
     expect(language).toHaveValue("");
     expect(screen.queryByText(/without one, only forced subtitles/)).not.toBeInTheDocument();
     await user.selectOptions(language, "English");
-    await waitFor(() => expect(requests.at(-1)?.body).toEqual({ subtitle_language: "eng" }));
+    await waitFor(() => expect(lastSave(requests)?.body).toEqual({ subtitle_language: "eng" }));
 
     // The audio language back to the file's: nothing says which language is read.
     await user.selectOptions(screen.getByLabelText("Audio language"), "The file's default");
-    await waitFor(() => expect(requests.at(-1)?.body).toEqual({ audio_language: null }));
+    await waitFor(() => expect(lastSave(requests)?.body).toEqual({ audio_language: null }));
   });
 
   it("explains that a language is needed", () => {

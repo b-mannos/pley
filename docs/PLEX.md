@@ -70,6 +70,9 @@ parameters; containers report `size`, `totalSize` and `offset`.
   metadata found, as Plex reports them: `imdb://`, `tmdb://` (movies and
   shows), `tvdb://` (shows) and `mbid://` (artists and albums). The `guid`
   filter finds items by any of them.
+- **Editions.** Movies whose versions are tagged like Plex's
+  (`{edition-Director's Cut}` in the file or folder name) carry the default
+  version's `editionTitle`.
 - **Watch state.** `viewCount` is the play count of watched items and 0 once an
   item is marked unplayed. `viewOffset` is the resume position.
   `/:/scrobble`, `/:/unscrobble`, `/:/progress` and `/:/timeline` use the same

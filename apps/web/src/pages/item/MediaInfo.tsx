@@ -128,7 +128,7 @@ export function MediaInfo({ files }: { files: MediaFile[] }) {
       {open ? (
         <div className="mt-3 space-y-3">
           {files.map((f, i) => (
-            <FileInfo key={f.id} file={f} title={files.length > 1 ? `Version ${i + 1}` : undefined} />
+            <FileInfo key={f.id} file={f} title={f.edition ?? (files.length > 1 ? `Version ${i + 1}` : undefined)} />
           ))}
         </div>
       ) : null}

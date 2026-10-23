@@ -72,6 +72,8 @@ static JUNK: LazyLock<Regex> = LazyLock::new(|| {
 static BRACKETS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[[^\]]*\]|\{[^}]*\}").unwrap());
 static TMDB_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)[\[{(]tmdb(?:id)?[-= ](\d+)[\]})]").unwrap());
 static IMDB_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(tt\d{7,9})\b").unwrap());
+/// Plex's edition tag: `Blade Runner (1982) {edition-Final Cut}`.
+static EDITION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\{edition-([^}]+)\}").unwrap());
 static PART_SUFFIX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)[ ._-]+(?:cd|dvd|disc|disk|part|pt)[ ._-]?\d{1,2}$").unwrap());
 static TRACK_PREFIX: LazyLock<Regex> =
@@ -148,6 +150,13 @@ fn extract_ids(s: &str) -> (Option<i64>, Option<String>) {
     let tmdb = TMDB_ID.captures(s).and_then(|c| c[1].parse().ok());
     let imdb = IMDB_ID.captures(s).map(|c| c[1].to_owned());
     (tmdb, imdb)
+}
+
+/// The edition a movie file is tagged with (`{edition-Director's Cut}`), in
+/// its name or its folder's. Editions of a film are versions of one movie.
+pub fn edition(path: &Path) -> Option<String> {
+    let tagged = |name: &str| EDITION.captures(name).map(|c| c[1].trim().to_owned()).filter(|e| !e.is_empty());
+    tagged(&file_stem(path)).or_else(|| path.parent()?.file_name().and_then(|f| tagged(&f.to_string_lossy())))
 }
 
 fn rel_components(path: &Path, root: &Path) -> Vec<String> {
@@ -385,6 +394,20 @@ mod tests {
 
     fn episode(rel: &str) -> EpisodeName {
         parse_episode(&Path::new("/media/tv").join(rel), Path::new("/media/tv"))
+    }
+
+    #[test]
+    fn editions_are_read_from_the_file_or_its_folder() {
+        let edition = |rel: &str| edition(&Path::new("/media/movies").join(rel));
+        assert_eq!(edition("Blade Runner (1982) {edition-Final Cut}.mkv").as_deref(), Some("Final Cut"));
+        assert_eq!(
+            edition("Blade Runner (1982) {Edition-Director's Cut}/Blade Runner (1982).mkv").as_deref(),
+            Some("Director's Cut")
+        );
+        assert_eq!(edition("Alien (1979) {edition- }.mkv"), None, "an empty tag is no edition");
+        assert_eq!(edition("Alien (1979) {tmdb-348}.mkv"), None);
+        // The tag stays out of the title, as every brace tag does.
+        assert_eq!(movie("Blade Runner (1982) {edition-Final Cut}.mkv").title, "Blade Runner");
     }
 
     #[test]

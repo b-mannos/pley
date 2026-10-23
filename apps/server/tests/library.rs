@@ -814,3 +814,30 @@ async fn library_listings_answer_304_while_nothing_changed() {
         app.call(Method::GET, &format!("{uri}&order=desc"), Some(&admin), None, &[("if-none-match", &etag)]).await;
     assert_eq!(other.status, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn editions_are_versions_of_one_movie_with_their_names() {
+    let app = TestApp::new().await;
+    let token = app.setup_admin().await;
+    app.media_file("movies/Blade Runner (1982) {edition-Final Cut}/Blade Runner (1982) {edition-Final Cut}.mkv", 2048);
+    app.media_file("movies/Blade Runner (1982) {edition-Theatrical Cut}/Blade Runner (1982).mkv", 1024);
+    let lib = app.library(&token, "Movies", "movies", "movies").await;
+    let movies = app.ids(lib, &token).await;
+    assert_eq!(movies.len(), 1, "one film: {movies:?}");
+    let film = movies["Blade Runner"];
+
+    let detail = app.get(&format!("/api/items/{film}"), &token).await.body;
+    let mut editions: Vec<String> = detail["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["edition"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    editions.sort();
+    assert_eq!(editions, ["Final Cut", "Theatrical Cut"]);
+
+    // The Plex API names the edition of the version played by default.
+    let plex = app.plex_json(&format!("/library/metadata/{film}"), &token).await;
+    let edition = plex["Metadata"][0]["editionTitle"].as_str().unwrap().to_owned();
+    assert!(editions.contains(&edition), "{edition}");
+}

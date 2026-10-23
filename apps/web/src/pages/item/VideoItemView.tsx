@@ -30,8 +30,8 @@ import {
   WatchedButton,
 } from "./shared";
 
-function versionLabel(f: MediaFile, i: number): string {
-  const parts = [resolutionLabel(f.width, f.height), codecLabel(f.video_codec), f.container?.toUpperCase(), formatBytes(f.size)].filter(Boolean);
+export function versionLabel(f: MediaFile, i: number): string {
+  const parts = [f.edition, resolutionLabel(f.width, f.height), codecLabel(f.video_codec), f.container?.toUpperCase(), formatBytes(f.size)].filter(Boolean);
   return parts.length ? parts.join(" · ") : `Version ${i + 1}`;
 }
 
@@ -127,6 +127,8 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
             <MetaLine
               parts={[
                 isEpisode ? formatDate(item.release_date) : item.year,
+                // The edition of the version that plays.
+                file?.edition,
                 formatDuration(item.duration_ms),
                 item.content_rating ? <ContentRating key="cr" value={item.content_rating} /> : null,
                 item.rating != null && item.rating > 0 ? <RatingBadge key="r" rating={item.rating} /> : null,

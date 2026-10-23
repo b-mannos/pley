@@ -181,6 +181,8 @@ pub struct MediaFileDto {
     pub video_codec: Option<String>,
     pub audio_codec: Option<String>,
     pub streams: Vec<MediaStream>,
+    /// The edition the file is tagged with (`{edition-Final Cut}`).
+    pub edition: Option<String>,
     /// Tracks to start with for the requesting user (remembered choices,
     /// see [`crate::streams`]); `None` = the file's default audio / no subtitles.
     pub selected_audio: Option<i64>,
@@ -359,6 +361,7 @@ impl FileRow {
             video_codec: self.video_codec.clone(),
             audio_codec: self.audio_codec.clone(),
             streams: self.streams_of(streams),
+            edition: crate::library::parse::edition(std::path::Path::new(&self.path)),
             selected_audio: None,
             selected_subtitle: None,
             chapters: chapters
