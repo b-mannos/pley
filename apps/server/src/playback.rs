@@ -514,6 +514,11 @@ const STOPPED_LINGER_SECS: i64 = 60;
 /// a session not heard from for this long has lost its player.
 const ACTIVE_WINDOW_SECS: i64 = 90;
 const REAP_EVERY: Duration = Duration::from_secs(15);
+/// Background work that reads whole files (seek previews for a library,
+/// intro detection) starts only once nothing has played for this long, so it
+/// never takes the disk, the network or the GPU from someone watching (or
+/// about to start the next episode).
+pub const QUIET_BEFORE_BACKGROUND_SECS: i64 = 60;
 /// Direct plays a user has at most: the oldest go first. They cost only
 /// memory (transcodes have their own limit), but a client starting plays in
 /// a loop mustn't be able to grow it without end.
@@ -593,6 +598,18 @@ impl Sessions {
     pub fn active(&self) -> Vec<Arc<Session>> {
         let now = now();
         self.list().into_iter().filter(|s| s.is_active(now)).collect()
+    }
+
+    /// Seconds since anything played: 0 while a player is there, counted
+    /// from the last sign of the sessions still kept otherwise, and "long
+    /// ago" without any.
+    pub fn quiet_for(&self) -> i64 {
+        let now = now();
+        let list = self.list();
+        if list.iter().any(|s| s.is_active(now)) {
+            return 0;
+        }
+        list.iter().map(|s| now - s.play.lock().updated_at).min().unwrap_or(i64::MAX)
     }
 
     /// One look at every session at `now`: those to forget (stopped a
@@ -1245,6 +1262,20 @@ mod tests {
         let forgotten = ids(sessions.sweep(later).forgotten);
         assert_eq!(forgotten.len(), 4);
         assert!(sessions.list().is_empty());
+    }
+
+    #[test]
+    fn background_work_waits_for_quiet() {
+        let sessions = Sessions::default();
+        assert_eq!(sessions.quiet_for(), i64::MAX, "nothing played since the start");
+        let playing = sessions.insert(session(1, None, false));
+        assert_eq!(sessions.quiet_for(), 0);
+        playing.update(5_000, "paused");
+        assert_eq!(sessions.quiet_for(), 0, "a paused player is still there");
+        playing.update(5_000, "stopped");
+        playing.play.lock().updated_at = now() - 30;
+        assert_eq!(sessions.quiet_for(), 30, "stopped half a minute ago");
+        assert!(sessions.quiet_for() < QUIET_BEFORE_BACKGROUND_SECS);
     }
 
     #[test]

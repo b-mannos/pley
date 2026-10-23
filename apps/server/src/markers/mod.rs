@@ -29,7 +29,7 @@ use tokio::sync::mpsc;
 use crate::db::Db;
 use crate::events::{EventBus, ServerEvent};
 use crate::library::{LibraryKind, get_library};
-use crate::playback::Sessions;
+use crate::playback::{QUIET_BEFORE_BACKGROUND_SECS, Sessions};
 use crate::settings::SettingsStore;
 use crate::transcoder::{Transcoder, TranscoderError};
 use crate::util::now;
@@ -53,8 +53,6 @@ const START_OFFSET_MS: i64 = 300;
 const TRUNCATION_MS: f64 = 3_000.0;
 /// Credits ending this close to the end of the file run to the end.
 const CREDITS_TAIL_MS: i64 = 5_000;
-/// Fingerprinting waits while this many transcodes are running.
-const BUSY_TRANSCODES: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MarkerKind {
@@ -527,8 +525,8 @@ impl MarkerService {
         if let Some(fp) = read_cached(&cache) {
             return Ok(Some(fp));
         }
-        // Background work: let playback have the machine.
-        while self.sessions.active_transcodes() >= BUSY_TRANSCODES {
+        // Background work: playback has the machine to itself.
+        while self.sessions.quiet_for() < QUIET_BEFORE_BACKGROUND_SECS {
             tokio::time::sleep(Duration::from_secs(15)).await;
         }
         let req = FingerprintRequest { path: file.path.clone(), stream_index: file.audio_index, start_ms, duration_ms };

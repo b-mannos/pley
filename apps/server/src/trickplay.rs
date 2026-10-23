@@ -2,13 +2,14 @@
 //! chapter images cut from them. The transcoder makes the sprite sheets; they
 //! are kept in the file's media folder ([`crate::store`]), so they follow the
 //! file when it is moved or renamed. Files are done one at a time in the
-//! background â€” when a title is opened, and for whole libraries after scans
-//! when the setting allows â€” waiting while the server is busy transcoding.
+//! background: first the titles people open (unless the server is busy
+//! transcoding), then whole libraries after scans when the setting allows,
+//! only while nothing plays.
 //!
 //! Chapter images and Plex's BIF index (`index-sd.bif`) are cut from the
 //! sprite sheets, so they cost no extra decoding of the video.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,11 +18,10 @@ use anyhow::Context;
 use image::codecs::jpeg::JpegEncoder;
 use parking_lot::Mutex;
 use pley_transcoder_api::TrickplayInfo;
-use tokio::sync::mpsc;
 
 use crate::catalog::{self, FileRow};
 use crate::db::Db;
-use crate::playback::Sessions;
+use crate::playback::{QUIET_BEFORE_BACKGROUND_SECS, Sessions};
 use crate::settings::SettingsStore;
 use crate::store::Store;
 use crate::transcoder::Transcoder;
@@ -40,12 +40,21 @@ pub struct TrickplayService {
     settings: Arc<SettingsStore>,
     sessions: Arc<Sessions>,
     store: Arc<Store>,
-    queue: mpsc::UnboundedSender<i64>,
+    /// Files waiting: the ones people opened first, then the libraries'.
+    queues: Mutex<Queues>,
+    /// A file was queued.
+    queued: tokio::sync::Notify,
     pending: Mutex<HashSet<i64>>,
     /// File versions that could not be done (by fingerprint); retried after a restart.
     failed: Mutex<HashMap<i64, String>>,
     /// One chapter-image or BIF job per file at a time.
     cutting: Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>,
+}
+
+#[derive(Default)]
+struct Queues {
+    opened: VecDeque<i64>,
+    library: VecDeque<i64>,
 }
 
 /// What `TrickplayInfo` says about a tile: its sheet and position.
@@ -76,14 +85,14 @@ impl TrickplayService {
         store: Arc<Store>,
         legacy_cache: PathBuf,
     ) -> Arc<Self> {
-        let (queue, rx) = mpsc::unbounded_channel();
         let service = Arc::new(Self {
             db,
             transcoder,
             settings,
             sessions,
             store,
-            queue,
+            queues: Mutex::default(),
+            queued: tokio::sync::Notify::new(),
             pending: Mutex::default(),
             failed: Mutex::default(),
             cutting: Mutex::default(),
@@ -92,7 +101,7 @@ impl TrickplayService {
         tokio::spawn(async move {
             let _ = tokio::fs::remove_dir_all(legacy_cache).await;
         });
-        tokio::spawn(service.clone().worker(rx));
+        tokio::spawn(service.clone().worker());
         service
     }
 
@@ -120,17 +129,33 @@ impl TrickplayService {
         if !self.settings.get().seek_previews || file.video_codec.is_none() || self.index(file).is_some() {
             return;
         }
-        self.enqueue(file.id, file.fingerprint.as_deref());
+        self.enqueue(file.id, file.fingerprint.as_deref(), true);
     }
 
-    /// Queue a file without previews unless it is queued or failed.
-    fn enqueue(&self, file_id: i64, fingerprint: Option<&str>) {
+    /// Queue a file without previews unless it is queued or failed: one
+    /// someone opened (`opened`) goes before the libraries' backlog, also
+    /// when it was already in it.
+    fn enqueue(&self, file_id: i64, fingerprint: Option<&str>, opened: bool) {
         if fingerprint.is_some() && self.failed.lock().get(&file_id).map(String::as_str) == fingerprint {
             return;
         }
-        if self.pending.lock().insert(file_id) {
-            let _ = self.queue.send(file_id);
+        let new = self.pending.lock().insert(file_id);
+        let mut queues = self.queues.lock();
+        if opened {
+            if !new {
+                if queues.opened.contains(&file_id) {
+                    return;
+                }
+                queues.library.retain(|id| *id != file_id);
+            }
+            queues.opened.push_back(file_id);
+        } else if new {
+            queues.library.push_back(file_id);
+        } else {
+            return;
         }
+        drop(queues);
+        self.queued.notify_one();
     }
 
     /// Queue every video file without previews, newest first (when previews
@@ -159,7 +184,7 @@ impl TrickplayService {
         .unwrap_or_default();
         let before = self.pending();
         for (id, fingerprint) in &missing {
-            self.enqueue(*id, fingerprint.as_deref());
+            self.enqueue(*id, fingerprint.as_deref(), false);
         }
         let queued = self.pending().saturating_sub(before);
         if queued > 0 {
@@ -167,8 +192,24 @@ impl TrickplayService {
         }
     }
 
-    async fn worker(self: Arc<Self>, mut rx: mpsc::UnboundedReceiver<i64>) {
-        while let Some(file_id) = rx.recv().await {
+    async fn worker(self: Arc<Self>) {
+        loop {
+            let next = {
+                let mut queues = self.queues.lock();
+                queues.opened.pop_front().or_else(|| {
+                    // A library's previews read whole files: only while nothing plays.
+                    if self.sessions.quiet_for() >= QUIET_BEFORE_BACKGROUND_SECS {
+                        queues.library.pop_front()
+                    } else {
+                        None
+                    }
+                })
+            };
+            let Some(file_id) = next else {
+                // Until something is queued, or a look again (playback may have ended).
+                let _ = tokio::time::timeout(Duration::from_secs(15), self.queued.notified()).await;
+                continue;
+            };
             while self.sessions.active_transcodes() >= BUSY_TRANSCODES {
                 tokio::time::sleep(Duration::from_secs(15)).await;
             }
