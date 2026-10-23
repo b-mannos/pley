@@ -177,6 +177,12 @@ impl Tvmaze {
         Self { api: Api::new(http, "TVmaze", throttle), base: base.trim_end_matches('/').to_owned() }
     }
 
+    /// Whether TVmaze answers a search.
+    pub async fn check(&self) -> Result<(), ProviderError> {
+        let request = self.api.http.get(format!("{}/search/shows", self.base)).query(&[("q", "pley")]);
+        self.api.json::<serde::de::IgnoredAny>(request).await.map(|_| ())
+    }
+
     /// Everything TVmaze has about a show: found by its TVmaze, TheTVDB or
     /// IMDb id, else by title and year. `specials` also fetches the episodes
     /// that aren't part of a season.

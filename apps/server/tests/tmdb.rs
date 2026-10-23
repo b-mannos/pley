@@ -76,6 +76,7 @@ fn search_result(id: i64, title: &str, date: &str, popularity: f64) -> Value {
 fn answer(path: &str, query: &[(String, String)]) -> Option<Value> {
     let param = |name: &str| query.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
     Some(match path {
+        "/configuration" => json!({"images": {"secure_base_url": "https://image.tmdb.org/t/p/"}}),
         "/search/movie" => json!({"results": match param("query") {
             // The most popular result is not the right one.
             Some("Alien") => vec![
@@ -206,6 +207,24 @@ async fn refreshed(app: &TestApp, admin: &str, id: i64, done: impl Fn(&Value) ->
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     panic!("item {id} was not refreshed");
+}
+
+#[tokio::test]
+async fn settings_test_a_tmdb_key_before_saving_it() {
+    let (app, mock, admin, _) = world().await;
+    let test = |key: &str| app.post("/api/settings/test", &admin, json!({"service": "tmdb", "api_key": key}));
+    let good = test(KEY).await;
+    assert_eq!((good.body["ok"].clone(), good.body["message"].clone()), (json!(true), json!("TMDB accepted the key.")));
+    let bad = test("nope").await;
+    assert_eq!(bad.body["ok"], json!(false));
+    assert!(bad.body["message"].as_str().unwrap().starts_with("TMDB rejected this key."), "{:?}", bad.body);
+    // The key never shows up in what the test says.
+    assert!(!bad.mentions("nope"));
+    let none = app.post("/api/settings/test", &admin, json!({"service": "tmdb"})).await;
+    assert_eq!(none.body["message"], json!("Enter a TMDB API key first."));
+    // Testing saves nothing.
+    assert_eq!(app.get("/api/settings", &admin).await.body["tmdb_api_key"], json!(""));
+    assert_eq!(mock.requests.lock().iter().filter(|r| r.starts_with("/configuration")).count(), 2);
 }
 
 #[tokio::test]

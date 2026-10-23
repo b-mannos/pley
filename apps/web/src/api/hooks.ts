@@ -25,6 +25,8 @@ import type {
   ProfilePatch,
   SearchResults,
   ServerStatus,
+  ServiceTest,
+  ServiceTestResult,
   Settings,
   StorageUsage,
   SystemInfo,
@@ -741,6 +743,13 @@ export function useSaveSettings() {
       void qc.invalidateQueries({ queryKey: keys.system });
       void qc.invalidateQueries({ queryKey: keys.server });
     },
+  });
+}
+
+/** Whether a metadata service accepts a key and answers, or the transcoder does. */
+export function useTestService() {
+  return useMutation({
+    mutationFn: (body: ServiceTest) => api.post<ServiceTestResult>("/api/settings/test", body),
   });
 }
 

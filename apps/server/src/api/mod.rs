@@ -118,6 +118,7 @@ pub fn router(state: AppState) -> Router {
         .route("/system/storage/clean", post(admin::clean_storage))
         .route("/transcoder", get(admin::transcoder_status))
         .route("/settings", get(admin::get_settings).put(admin::put_settings))
+        .route("/settings/test", post(admin::test_service))
         .route("/fs", get(admin::browse_fs))
         .fallback(|| async { AppError::not_found("no such endpoint") })
         .layer(SetResponseHeaderLayer::if_not_present(header::CACHE_CONTROL, HeaderValue::from_static("no-store")));

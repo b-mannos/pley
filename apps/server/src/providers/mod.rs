@@ -127,6 +127,18 @@ impl From<sqlx::Error> for ProviderError {
     }
 }
 
+/// A connection test from the settings.
+#[derive(Debug, Clone, Copy)]
+pub enum Check<'a> {
+    /// Signs in with this key and PIN (not necessarily the saved ones).
+    Tvdb {
+        key: &'a str,
+        pin: &'a str,
+    },
+    Tvmaze,
+    MusicBrainz,
+}
+
 /// TV shows and music from the providers that aren't TMDB.
 pub struct Providers {
     db: Db,
@@ -175,6 +187,16 @@ impl Providers {
             TvSource::Tmdb => Some(TvSource::Tmdb),
             TvSource::Tvdb => self.tvdb.as_ref().map(|_| TvSource::Tvdb),
             TvSource::Tvmaze => self.tvmaze.as_ref().map(|_| TvSource::Tvmaze),
+        }
+    }
+
+    /// Whether a service answers: one request (TheTVDB: a sign-in).
+    pub async fn check(&self, check: Check<'_>) -> Result<(), ProviderError> {
+        let off = || ProviderError::Other(anyhow!("this server doesn't contact metadata services"));
+        match check {
+            Check::Tvdb { key, pin } => self.tvdb.as_ref().ok_or_else(off)?.check(key, pin).await,
+            Check::Tvmaze => self.tvmaze.as_ref().ok_or_else(off)?.check().await,
+            Check::MusicBrainz => self.musicbrainz.as_ref().ok_or_else(off)?.check().await,
         }
     }
 

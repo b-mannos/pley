@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use axum::Json;
 use axum::extract::{Query, State};
 use pley_transcoder_api::Counters;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::auth::AdminUser;
 use crate::error::{ApiResult, AppError};
 use crate::playback::{TranscodeInfo, transcode_info};
+use crate::providers::{Check, ProviderError};
 use crate::settings::{Settings, SettingsPatch};
 use crate::state::AppState;
 
@@ -34,6 +36,128 @@ pub async fn put_settings(
         state.scanner.enqueue_all(false).await?;
     }
     Ok(Json((*after).clone()))
+}
+
+/// A service the settings can test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Service {
+    Tmdb,
+    Tvdb,
+    Tvmaze,
+    Musicbrainz,
+    Transcoder,
+}
+
+impl Service {
+    fn name(self) -> &'static str {
+        match self {
+            Service::Tmdb => "TMDB",
+            Service::Tvdb => "TheTVDB",
+            Service::Tvmaze => "TVmaze",
+            Service::Musicbrainz => "MusicBrainz",
+            Service::Transcoder => "The transcoder",
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct TestRequest {
+    service: Service,
+    /// A key typed in the form, maybe not saved yet; the saved one otherwise.
+    #[serde(default)]
+    api_key: Option<String>,
+    /// TheTVDB's subscriber PIN, likewise.
+    #[serde(default)]
+    pin: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TestResult {
+    ok: bool,
+    message: String,
+    /// How long the answer took.
+    ms: u64,
+}
+
+/// How long a test waits for an answer.
+const TEST_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// `POST /api/settings/test`: whether a metadata service accepts a key (the
+/// one typed in, before it is saved) and answers, or whether the transcoder
+/// does. Each test sends one request to the service's usual address.
+pub async fn test_service(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Json(req): Json<TestRequest>,
+) -> Json<TestResult> {
+    let settings = state.settings.get();
+    let saved = if req.service == Service::Tvdb { &settings.tvdb_api_key } else { &settings.tmdb_api_key };
+    let key = req.api_key.as_deref().unwrap_or(saved).trim().to_owned();
+    let pin = req.pin.as_deref().unwrap_or(&settings.tvdb_pin).trim().to_owned();
+    let name = req.service.name();
+    let fail = |message: String, ms: u64| Json(TestResult { ok: false, message, ms });
+    if matches!(req.service, Service::Tmdb | Service::Tvdb) && key.is_empty() {
+        return fail(format!("Enter a {name} API key first."), 0);
+    }
+
+    let started = Instant::now();
+    let outcome = tokio::time::timeout(TEST_TIMEOUT, async {
+        match req.service {
+            Service::Tmdb => state.metadata.check_tmdb(&key).await.map(|()| None),
+            Service::Tvdb => state.metadata.check_provider(Check::Tvdb { key: &key, pin: &pin }).await.map(|()| None),
+            Service::Tvmaze => state.metadata.check_provider(Check::Tvmaze).await.map(|()| None),
+            Service::Musicbrainz => state.metadata.check_provider(Check::MusicBrainz).await.map(|()| None),
+            Service::Transcoder => match state.transcoder.status().await {
+                Ok(status) => Ok(Some(match status.ffmpeg_version {
+                    Some(ffmpeg) => format!("pley-transcoder {} with ffmpeg {ffmpeg}", status.version),
+                    None => format!("pley-transcoder {}", status.version),
+                })),
+                Err(crate::transcoder::TranscoderError::Unavailable(why)) => Err(ProviderError::Other(
+                    anyhow::anyhow!("it isn't running{}", why.map(|w| format!(" ({w})")).unwrap_or_default()),
+                )),
+                Err(err) => Err(ProviderError::Other(anyhow::anyhow!("{err}"))),
+            },
+        }
+    })
+    .await;
+    let ms = started.elapsed().as_millis() as u64;
+    match outcome {
+        Ok(Ok(detail)) => Json(TestResult {
+            ok: true,
+            message: match (req.service, detail) {
+                (Service::Tmdb, _) => "TMDB accepted the key.".into(),
+                (Service::Tvdb, _) if !pin.is_empty() => "TheTVDB accepted the key and PIN.".into(),
+                (Service::Tvdb, _) => "TheTVDB accepted the key.".into(),
+                (_, Some(detail)) => format!("{name} answered: {detail}."),
+                (_, None) => format!("{name} answered."),
+            },
+            ms,
+        }),
+        Ok(Err(ProviderError::Unauthorized(_))) => fail(
+            match req.service {
+                Service::Tvdb if pin.is_empty() => {
+                    "TheTVDB rejected this key. A user-supported key also needs your subscriber PIN.".into()
+                }
+                Service::Tvdb => "TheTVDB rejected this key and PIN.".into(),
+                _ => format!(
+                    "{name} rejected this key. Use the API key or the API read access token from themoviedb.org/settings/api."
+                ),
+            },
+            ms,
+        ),
+        Ok(Err(ProviderError::NotFound)) => fail(format!("{name} answered, but not as expected (HTTP 404)."), ms),
+        Ok(Err(ProviderError::Other(err))) => fail(format!("Couldn't reach {}: {err:#}", object(name)), ms),
+        Err(_) => fail(format!("{name} didn't answer within {} seconds.", TEST_TIMEOUT.as_secs()), ms),
+    }
+}
+
+/// "The transcoder" in the middle of a sentence.
+fn object(name: &str) -> String {
+    match name.strip_prefix("The ") {
+        Some(rest) => format!("the {rest}"),
+        None => name.to_owned(),
+    }
 }
 
 // ------------------------------------------------------------------ system

@@ -682,9 +682,34 @@ impl MetadataAgent {
         self.store.remote(url).await
     }
 
+    /// Whether TMDB accepts `key` (one not saved yet, say): one request.
+    pub async fn check_tmdb(&self, key: &str) -> Result<(), ProviderError> {
+        match self.get_with::<serde::de::IgnoredAny>(key, "/configuration", &[]).await {
+            Ok(_) => Ok(()),
+            Err(TmdbError::Unauthorized) => Err(ProviderError::Unauthorized("TMDB")),
+            Err(TmdbError::NotFound) => Err(ProviderError::NotFound),
+            Err(TmdbError::Other(err)) => Err(ProviderError::Other(err)),
+        }
+    }
+
+    /// Whether TheTVDB (with this key and PIN), TVmaze or MusicBrainz answers.
+    pub async fn check_provider(&self, check: crate::providers::Check<'_>) -> Result<(), ProviderError> {
+        self.providers.check(check).await
+    }
+
     async fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T, TmdbError> {
+        let key = self.settings.get().tmdb_api_key.clone();
+        self.get_with(&key, path, query).await
+    }
+
+    async fn get_with<T: DeserializeOwned>(
+        &self,
+        key: &str,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<T, TmdbError> {
         let settings = self.settings.get();
-        let key = settings.tmdb_api_key.trim();
+        let key = key.trim();
         if key.is_empty() {
             return Err(TmdbError::Unauthorized);
         }

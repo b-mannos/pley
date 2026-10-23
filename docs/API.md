@@ -667,6 +667,7 @@ type ServerEvent =
 | GET | `/api/transcoder` | – | `TranscoderStatus` – live metrics of the transcoder component (all jobs, counters) |
 | GET | `/api/settings` | – | `Settings` |
 | PUT | `/api/settings` | partial `Settings` | `Settings` |
+| POST | `/api/settings/test` | `{ service: "tmdb" \| "tvdb" \| "tvmaze" \| "musicbrainz" \| "transcoder", api_key?, pin? }` | `{ ok, message, ms }`: one request to the service, with the key and PIN given (not saved) or else the saved ones. `message` says what happened, for people |
 | GET | `/api/fs` | `path` (omit for roots/drives) | `{ path: string \| null, parent: string \| null, entries: { name: string, path: string }[] }` – directories only |
 
 ```ts

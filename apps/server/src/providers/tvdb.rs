@@ -367,6 +367,27 @@ impl Tvdb {
         }
     }
 
+    /// Whether TheTVDB signs in with this key and PIN. The token pley uses
+    /// meanwhile is left alone.
+    pub async fn check(&self, key: &str, pin: &str) -> Result<(), ProviderError> {
+        let (key, pin) = (key.trim(), pin.trim());
+        if key.is_empty() {
+            return Err(ProviderError::Unauthorized("TheTVDB"));
+        }
+        let mut body = serde_json::json!({ "apikey": key });
+        if !pin.is_empty() {
+            body["pin"] = pin.into();
+        }
+        let login: Envelope<Login> =
+            self.api.json(self.api.http.post(format!("{}/login", self.base)).json(&body)).await?;
+        login
+            .data
+            .and_then(|d| d.token)
+            .filter(|t| !t.is_empty())
+            .map(|_| ())
+            .ok_or(ProviderError::Unauthorized("TheTVDB"))
+    }
+
     async fn token(&self, auth: &Credentials) -> Result<String, ProviderError> {
         let mut cached = self.token.lock().await;
         if let Some(token) = cached.as_ref().filter(|t| t.credentials == *auth) {

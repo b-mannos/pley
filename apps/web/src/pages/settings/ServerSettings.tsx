@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
-import { Eye, EyeOff, Save } from "lucide-react";
+import { CircleAlert, CircleCheck, Eye, EyeOff, Save } from "lucide-react";
 import { errorMessage } from "@/api/client";
-import { useSaveSettings, useSettings, useSystemInfo } from "@/api/hooks";
-import type { HwAccel, Settings, ToneMapping, TranscodePreset, TvMetadata } from "@/api/types";
+import { useSaveSettings, useSettings, useSystemInfo, useTestService } from "@/api/hooks";
+import type { HwAccel, ServiceTest, Settings, ToneMapping, TranscodePreset, TvMetadata } from "@/api/types";
 import { useToast } from "@/components/Toast";
 import { Button, Card, EmptyState, IconButton, PageSpinner, Select, TextInput, Toggle } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -121,6 +121,36 @@ function SecretInput({
   );
 }
 
+/**
+ * Tests a service with what the form holds (a key not saved yet) and says
+ * how it went. Give it a `key` that changes with the key it tests, so an
+ * answer about another key doesn't linger.
+ */
+export function TestButton({ test, label, className = "mt-2" }: { test: ServiceTest; label: string; className?: string }) {
+  const check = useTestService();
+  const result = check.data;
+  return (
+    <div className={cn("flex min-w-0 items-start gap-3", className)}>
+      <Button size="sm" variant="outline" loading={check.isPending} onClick={() => check.mutate(test)} aria-label={label} className="shrink-0">
+        Test
+      </Button>
+      <div role="status" className="min-w-0 pt-1 text-xs">
+        {check.isError ? (
+          <span className="text-danger">{errorMessage(check.error)}</span>
+        ) : result ? (
+          <span className={cn("flex items-start gap-1.5", result.ok ? "text-success" : "text-danger")}>
+            {result.ok ? <CircleCheck className="mt-px size-3.5 shrink-0" /> : <CircleAlert className="mt-px size-3.5 shrink-0" />}
+            <span>
+              {result.message}
+              {result.ok ? <span className="text-subtle"> {result.ms} ms</span> : null}
+            </span>
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function Row({ label, hint, children, htmlFor }: { label: string; hint?: ReactNode; children: ReactNode; htmlFor?: string }) {
   return (
     <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] sm:items-center sm:gap-6">
@@ -220,6 +250,7 @@ export function ServerSettings() {
           }
         >
           <SecretInput id="tmdb-key" what="key" value={form.tmdb_api_key} onChange={(v) => setKey("tmdb_api_key", v)} />
+          <TestButton key={form.tmdb_api_key} label="Test the TMDB key" test={{ service: "tmdb", api_key: form.tmdb_api_key }} />
         </Row>
         <Row
           label="TV shows"
@@ -241,6 +272,7 @@ export function ServerSettings() {
             </option>
             <option value="tvmaze">TVmaze (no key needed)</option>
           </Select>
+          <TestButton label="Test TVmaze" test={{ service: "tvmaze" }} />
         </Row>
         <Row
           label="TheTVDB API key"
@@ -255,6 +287,12 @@ export function ServerSettings() {
         </Row>
         <Row label="TheTVDB PIN" htmlFor="tvdb-pin" hint="User-supported keys also need your subscriber PIN. Leave empty for other keys.">
           <SecretInput id="tvdb-pin" what="PIN" value={form.tvdb_pin} onChange={(v) => set("tvdb_pin", v)} />
+          <TestButton
+            key={`${form.tvdb_api_key}
+${form.tvdb_pin}`}
+            label="Test the TheTVDB key"
+            test={{ service: "tvdb", api_key: form.tvdb_api_key, pin: form.tvdb_pin }}
+          />
         </Row>
         <Row
           label="Music metadata"
@@ -266,6 +304,7 @@ export function ServerSettings() {
           }
         >
           <Toggle checked={form.music_metadata} onChange={(v) => set("music_metadata", v)} label="Music metadata from MusicBrainz" />
+          <TestButton label="Test MusicBrainz" test={{ service: "musicbrainz" }} />
         </Row>
         <Row label="Metadata language" htmlFor="meta-lang" hint="For TMDB and TheTVDB. TVmaze is in English.">
           <Select id="meta-lang" value={form.metadata_language} onChange={(e) => set("metadata_language", e.target.value)} className="w-full">
@@ -277,8 +316,9 @@ export function ServerSettings() {
           </Select>
         </Row>
         <p className="text-xs text-subtle">
-          TV data from TVmaze is licensed <Link href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA</Link>, music data from
-          MusicBrainz is public domain. This product uses the TMDB API but is not endorsed or certified by TMDB.
+          This product uses the TMDB API but is not endorsed or certified by TMDB. TV metadata from{" "}
+          <Link href="https://thetvdb.com">TheTVDB</Link>. TV data from TVmaze is licensed{" "}
+          <Link href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA</Link>; music data from MusicBrainz is public domain.
         </p>
       </Group>
 
@@ -292,6 +332,9 @@ export function ServerSettings() {
             : undefined
         }
       >
+        <Row label="Connection" hint={tc?.managed === false ? `External transcoder at ${tc.url ?? "?"}` : "Started by pley on this computer."}>
+          <TestButton label="Test the transcoder" test={{ service: "transcoder" }} className="" />
+        </Row>
         <Row
           label="Hardware acceleration"
           htmlFor="hwaccel"

@@ -375,6 +375,49 @@ async fn shows_from_tvmaze_then_thetvdb() {
 }
 
 #[tokio::test]
+async fn settings_test_keys_and_services() {
+    let (mock, base) = start_mock().await;
+    let app = TestApp::new(&base).await;
+    let token = app.setup_admin().await;
+    let test = |body: Value| {
+        let app = &app;
+        let token = token.clone();
+        async move {
+            let (status, reply) = app.call(Method::POST, "/api/settings/test", Some(&token), Some(body)).await;
+            assert_eq!(status, StatusCode::OK, "{reply}");
+            (reply["ok"].as_bool().unwrap(), reply["message"].as_str().unwrap().to_owned())
+        }
+    };
+
+    // A key typed in the form, not saved: it signs in, and pley's own token
+    // (none yet) is left alone.
+    let (ok, message) = test(json!({"service": "tvdb", "api_key": "test-key"})).await;
+    assert!(ok, "{message}");
+    assert_eq!(message, "TheTVDB accepted the key.");
+    let (ok, message) = test(json!({"service": "tvdb", "api_key": "wrong"})).await;
+    assert!(!ok);
+    assert!(message.starts_with("TheTVDB rejected this key."), "{message}");
+    let (ok, message) = test(json!({"service": "tvdb", "api_key": "test-key", "pin": "1234"})).await;
+    assert_eq!((ok, message.as_str()), (false, "TheTVDB rejected this key and PIN."));
+    // Nothing saved and nothing typed.
+    let (ok, message) = test(json!({"service": "tvdb"})).await;
+    assert_eq!((ok, message.as_str()), (false, "Enter a TheTVDB API key first."));
+    assert_eq!(mock.requested("POST /tvdb/login"), 3);
+
+    let (ok, message) = test(json!({"service": "tvmaze"})).await;
+    assert_eq!((ok, message.as_str()), (true, "TVmaze answered."));
+    let (ok, message) = test(json!({"service": "musicbrainz"})).await;
+    assert_eq!((ok, message.as_str()), (true, "MusicBrainz answered."));
+    // No transcoder runs in the tests.
+    let (ok, message) = test(json!({"service": "transcoder"})).await;
+    assert!(!ok && message.starts_with("Couldn't reach the transcoder"), "{message}");
+
+    // Administrators only.
+    let (status, _) = app.call(Method::POST, "/api/settings/test", None, Some(json!({"service": "tvmaze"}))).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn music_from_musicbrainz() {
     let (mock, base) = start_mock().await;
     let app = TestApp::new(&base).await;

@@ -414,6 +414,11 @@ impl MusicBrainz {
         Ok(Some(AlbumMatch::new(group, genres)))
     }
 
+    /// Whether MusicBrainz answers a search.
+    pub async fn check(&self) -> Result<(), ProviderError> {
+        self.search::<serde::de::IgnoredAny>("release-group", "pley").await.map(|_| ())
+    }
+
     async fn get<T: DeserializeOwned>(&self, path_and_query: &str) -> Result<T, ProviderError> {
         let request = self.api.http.get(format!("{}{path_and_query}", self.base)).header(ACCEPT, "application/json");
         self.api.json(request).await

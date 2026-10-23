@@ -517,6 +517,23 @@ export interface Settings {
   previews_in_background: boolean;
 }
 
+/** A service the settings can test (`POST /api/settings/test`). */
+export type TestedService = "tmdb" | "tvdb" | "tvmaze" | "musicbrainz" | "transcoder";
+
+export interface ServiceTest {
+  service: TestedService;
+  /** A key typed in the form (not saved yet); the saved one when left out. */
+  api_key?: string;
+  pin?: string;
+}
+
+export interface ServiceTestResult {
+  ok: boolean;
+  message: string;
+  /** How long the answer took. */
+  ms: number;
+}
+
 export interface TranscoderInfo {
   available: boolean;
   managed: boolean;
