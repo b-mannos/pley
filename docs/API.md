@@ -250,6 +250,7 @@ interface PlaybackInfo {
   audio_index: number | null;
   subtitle_index: number | null;    // the subtitle that is burned in (only when burn_subtitles)
   burn_subtitles: boolean;
+  audio_converted: boolean;         // the audio is converted (also in a remux, where the video is copied)
   subtitles: SubtitleTrack[];       // all subtitle tracks of the file
   reason: string | null;            // human readable "why not direct play"
 }

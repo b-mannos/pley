@@ -10,6 +10,11 @@ export const METHOD_LABEL: Record<PlaybackMethod, string> = {
   transcode: "Transcoding",
 };
 
+/** How a session plays, in a few words: a direct stream says when its audio is converted. */
+export function methodLabel(info: PlaybackInfo): string {
+  return info.method === "remux" && info.audio_converted ? `${METHOD_LABEL.remux} · Audio transcoding` : METHOD_LABEL[info.method];
+}
+
 /** What it means, when nothing more specific is known. */
 const METHOD_TEXT: Record<PlaybackMethod, string> = {
   direct: "The original file, as it is.",
@@ -136,7 +141,7 @@ export function PlaybackDetails({
   return (
     <div className="px-4 pb-3 pt-1">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-semibold text-accent">{METHOD_LABEL[info.method]}</span>
+        <span className="text-sm font-semibold text-accent">{methodLabel(info)}</span>
         {live?.pipeline && live.video === "transcode" ? (
           <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white/75">
             {PIPELINE[live.pipeline]}

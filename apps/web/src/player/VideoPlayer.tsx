@@ -35,7 +35,7 @@ import { nextInQueue, queuePlayUrl, type QueuePosition } from "@/lib/videoQueue"
 import { modeFor, qualitiesFor, qualityById } from "./quality";
 import { ChaptersMenu } from "./ChaptersMenu";
 import { SeekBar } from "./SeekBar";
-import { METHOD_LABEL, PlaybackDetails } from "./PlaybackDetails";
+import { methodLabel, PlaybackDetails } from "./PlaybackDetails";
 import { SettingsPopover } from "./SettingsPopover";
 import { fileMarkers, SkipButton, useSkipMarkers } from "./SkipButton";
 import { SubtitleOverlay } from "./SubtitleOverlay";
@@ -170,6 +170,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const [muted, setMuted] = useLocalStorage<boolean>("pley.muted", false);
   const [fullscreen, setFullscreen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [methodHover, setMethodHover] = useState(false);
   // How subtitles look, chosen on each device (as Plex keeps it per player).
   const [storedSubtitleStyle, setSubtitleStyle] = useLocalStorage<SubtitleStyle>("pley.subtitleStyle", DEFAULT_SUBTITLE_STYLE);
   const subStyle = subtitleStyle(storedSubtitleStyle);
@@ -984,7 +985,6 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       ? "The original didn't play smoothly in this browser."
       : "This browser couldn't play the original file."
     : null;
-  const methodReason = fallbackNote ?? info?.reason ?? null;
 
   return (
     <div
@@ -1143,15 +1143,40 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           <div className="flex-1" />
 
           {info ? (
-            <span
-              title={methodReason ?? undefined}
-              className={cn(
-                "mr-1 hidden rounded px-2 py-0.5 text-xs font-semibold md:inline",
-                info.method === "direct" ? "bg-success/20 text-success" : info.method === "remux" ? "bg-info/20 text-info" : "bg-accent/20 text-accent",
-              )}
+            // Hovering (or focusing) the badge shows how it plays, as at the top of the menu.
+            <div
+              className="relative mr-1 hidden md:block"
+              onMouseEnter={() => setMethodHover(true)}
+              onMouseLeave={() => setMethodHover(false)}
+              onFocus={() => setMethodHover(true)}
+              onBlur={() => setMethodHover(false)}
             >
-              {METHOD_LABEL[info.method]}
-            </span>
+              <span
+                tabIndex={0}
+                aria-label={[methodLabel(info), fallbackNote ?? info.reason].filter(Boolean).join(". ")}
+                className={cn(
+                  "cursor-default rounded px-2 py-0.5 text-xs font-semibold outline-none focus-visible:ring-2 focus-visible:ring-white/60",
+                  info.method === "direct" ? "bg-success/20 text-success" : info.method === "remux" ? "bg-info/20 text-info" : "bg-accent/20 text-accent",
+                )}
+              >
+                {methodLabel(info)}
+              </span>
+              {methodHover && !settingsOpen ? (
+                <div
+                  role="tooltip"
+                  className="absolute bottom-full right-0 mb-3 w-80 animate-pop-in rounded-xl border border-white/10 bg-black/90 py-2 text-white shadow-2xl backdrop-blur-md"
+                >
+                  <PlaybackDetails
+                    info={info}
+                    file={file}
+                    audioIndex={audioIndex}
+                    note={fallbackNote}
+                    positionMs={current * 1000}
+                    open
+                  />
+                </div>
+              ) : null}
+            </div>
           ) : null}
           {hasNext ? (
             <button

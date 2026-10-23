@@ -442,6 +442,8 @@ export interface PlaybackInfo {
   audio_index: number | null;
   subtitle_index: number | null;
   burn_subtitles: boolean;
+  /** The audio is converted, also when the video is copied (a direct stream). */
+  audio_converted?: boolean;
   subtitles: SubtitleTrack[];
   /** Why the file isn't played as it is, one short sentence each. */
   reasons?: string[];

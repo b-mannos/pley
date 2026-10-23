@@ -466,6 +466,7 @@ async fn remux_sessions_stream_hls_from_the_transcoder() {
     assert_eq!(started.status, StatusCode::OK, "{:?}", started.body);
     let info = &started.body;
     assert_eq!((&info["method"], &info["hls"], &info["duration_ms"]), (&json!("remux"), &json!(true), &json!(60_000)));
+    assert_eq!(info["audio_converted"], json!(true), "AC-3 doesn't play in browsers");
     let session = info["session_id"].as_str().unwrap().to_owned();
     assert_eq!(info["url"], json!(format!("/api/playback/{session}/index.m3u8")));
     assert_eq!(
@@ -756,6 +757,7 @@ async fn image_subtitles_and_other_tracks_need_a_transcode() {
     // The French AAC track plays in a remux with the audio copied.
     let french = play(app, admin, json!({"item_id": feature, "caps": browser(), "audio_index": 2})).await;
     assert_eq!((french.body["method"].clone(), french.body["audio_index"].clone()), (json!("remux"), json!(2)));
+    assert_eq!(french.body["audio_converted"], json!(false));
     let audio = w.fake.last_request().audio.unwrap();
     assert_eq!((audio.mode, audio.stream_index), (AudioMode::Copy, Some(2)));
     // And starting later starts the transcoder there.

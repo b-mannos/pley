@@ -124,6 +124,8 @@ pub struct PlaybackInfo {
     pub audio_index: Option<i64>,
     pub subtitle_index: Option<i64>,
     pub burn_subtitles: bool,
+    /// The audio is converted, also when the video is copied (a direct stream).
+    pub audio_converted: bool,
     pub subtitles: Vec<SubtitleTrack>,
     /// Why the file isn't played as it is, one short sentence each.
     pub reasons: Vec<String>,
