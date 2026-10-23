@@ -17,6 +17,10 @@ Change it with `--data-dir` or `PLEY_DATA_DIR`. Every option is listed in
 
 ## Docker
 
+Releases publish the image to GitHub Container Registry for amd64 and
+arm64 (`ghcr.io/<owner>/<repo>:latest`, or a version such as `:0.2`). To build
+it yourself instead:
+
 ```sh
 docker build -f deploy/docker/Dockerfile -t pley .
 docker run -d --name pley -p 7539:7539 \

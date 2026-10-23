@@ -8,7 +8,7 @@
 # See deploy/README.md for hardware transcoding.
 
 # ---- web UI -----------------------------------------------------------------
-FROM node:22-bookworm-slim AS web
+FROM node:24-bookworm-slim AS web
 WORKDIR /src
 COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/

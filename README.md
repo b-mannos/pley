@@ -132,7 +132,7 @@ npm workspace for the web UI, both rooted at the top level.
 | `deploy/` | Docker image and compose file, systemd unit, launchd agent ([guide](deploy/README.md)) |
 | `docs/` | HTTP API, transcoder protocol |
 | `scripts/` | Release build, license check |
-| `.github/workflows/` | CI on Linux, macOS and Windows; release builds for x86_64 and arm64 |
+| `.github/` | CI on Linux, macOS and Windows; release builds for x86_64 and arm64; Dependabot |
 
 ## Requirements
 
@@ -178,7 +178,37 @@ To recover a lost password, use
   `noUncheckedIndexedAccess`).
 - License boundary: `powershell -File scripts/check-licenses.ps1`.
 
+### Continuous integration
+
+GitHub Actions runs on every push to `main` and every pull request
+([`ci.yml`](.github/workflows/ci.yml)):
+
+- **Web UI**: type check, ESLint, tests, production build.
+- **Rust** on Linux (x86_64, arm64), Windows and macOS: rustfmt, Clippy with
+  warnings as errors, tests. Another job builds with Rust 1.85, the minimum
+  supported version.
+- **License boundary**: the server never depends on GPL code, third-party
+  licenses are allowed by [`deny.toml`](deny.toml).
+- **Docker image** builds, and the workflows themselves pass actionlint.
+
+Actions are pinned to commits; Dependabot proposes weekly updates for them,
+Cargo, npm and the Docker base images.
+
 ### Release
+
+Push a version tag (`git tag v0.2.0 && git push origin v0.2.0`) and
+[`release.yml`](.github/workflows/release.yml) runs CI, then:
+
+- builds archives for Linux, Windows (x86_64, arm64) and macOS (Apple
+  silicon, Intel), with `SHA256SUMS` and build provenance
+  (`gh attestation verify <archive> --repo <owner>/<repo>`),
+- drafts a GitHub release with them and generated notes, to read over and
+  publish,
+- publishes the Docker image for amd64 and arm64 to GitHub Container Registry
+  as `ghcr.io/<owner>/<repo>`, tagged `0.2.0`, `0.2` and `latest`
+  (pre-releases like `v0.3.0-rc.1` only get their own tag).
+
+To build an archive locally:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build.ps1     # or ./scripts/build.sh
