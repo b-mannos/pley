@@ -1050,6 +1050,52 @@ pub async fn search(db: &Db, user_id: i64, input: &str, limit: i64) -> sqlx::Res
 }
 
 #[cfg(test)]
+impl ItemRow {
+    /// A bare row for unit tests: no parents, artwork, ratings or user state.
+    pub(crate) fn test_row(id: i64, kind: &str, title: &str) -> Self {
+        ItemRow {
+            id,
+            library_id: 1,
+            kind: kind.into(),
+            title: title.into(),
+            sort_title: title.into(),
+            year: None,
+            idx: None,
+            disc: None,
+            parent_id: None,
+            parent_title: None,
+            parent_idx: None,
+            grandparent_id: None,
+            grandparent_title: None,
+            duration_ms: None,
+            rating: None,
+            added_at: 0,
+            updated_at: 0,
+            summary: None,
+            release_date: None,
+            extra_type: None,
+            has_poster: false,
+            has_backdrop: false,
+            has_thumb: false,
+            parent_has_poster: false,
+            parent_has_backdrop: false,
+            parent_updated_at: None,
+            grandparent_has_poster: false,
+            grandparent_has_backdrop: false,
+            grandparent_updated_at: None,
+            position_ms: 0,
+            watched: false,
+            play_count: 0,
+            last_played_at: None,
+            user_rating: None,
+            leaf_count: None,
+            child_count: None,
+            viewed_leaf_count: None,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1077,5 +1123,237 @@ mod tests {
         // Next one in progress → it's in "continue watching" already.
         let eps = vec![ep(1, true, 0, Some(10)), ep(2, false, 5000, Some(11))];
         assert_eq!(next_after_last_watched(&eps), None);
+        // The last episode was watched last: nothing comes next.
+        let eps = vec![ep(1, false, 0, None), ep(2, true, 0, Some(10))];
+        assert_eq!(next_after_last_watched(&eps), None);
+    }
+
+    #[test]
+    fn ratings_are_half_stars_between_zero_and_ten() {
+        assert_eq!(valid_rating(6.6), Some(7.0));
+        assert_eq!(valid_rating(6.4), Some(6.0));
+        assert_eq!(valid_rating(0.0), Some(0.0));
+        assert_eq!(valid_rating(10.0), Some(10.0));
+        assert_eq!(valid_rating(10.2), None, "above the range, even if it would round to 10");
+        assert_eq!(valid_rating(-0.1), None);
+        assert_eq!(valid_rating(f64::NAN), None);
+        assert_eq!(valid_rating(f64::INFINITY), None);
+    }
+
+    #[test]
+    fn summaries_fall_back_to_parent_artwork() {
+        let mut season = ItemRow::test_row(2, "season", "Season 1");
+        (season.parent_id, season.parent_updated_at) = (Some(1), Some(50));
+        assert_eq!(season.to_summary().poster_url, None, "the show has no poster either");
+        season.parent_has_poster = true;
+        assert_eq!(season.to_summary().poster_url.as_deref(), Some("/api/items/1/images/poster?v=50"));
+
+        // Episodes show their show's poster, never their season's.
+        let mut episode = ItemRow::test_row(3, "episode", "Pilot");
+        (episode.parent_id, episode.grandparent_id) = (Some(2), Some(1));
+        (episode.parent_updated_at, episode.grandparent_updated_at) = (Some(60), Some(50));
+        episode.parent_has_poster = true;
+        assert_eq!(episode.to_summary().poster_url, None);
+        episode.grandparent_has_poster = true;
+        assert_eq!(episode.to_summary().poster_url.as_deref(), Some("/api/items/1/images/poster?v=50"));
+        // Backdrops: own, else the parent's, else the grandparent's.
+        episode.grandparent_has_backdrop = true;
+        assert_eq!(episode.to_summary().backdrop_url.as_deref(), Some("/api/items/1/images/backdrop?v=50"));
+        episode.parent_has_backdrop = true;
+        assert_eq!(episode.to_summary().backdrop_url.as_deref(), Some("/api/items/2/images/backdrop?v=60"));
+        episode.has_backdrop = true;
+        episode.updated_at = 70;
+        assert_eq!(episode.to_summary().backdrop_url.as_deref(), Some("/api/items/3/images/backdrop?v=70"));
+        // Frame grabs exist for videos only.
+        assert_eq!(episode.to_summary().thumb_url.as_deref(), Some("/api/items/3/images/thumb?v=70"));
+        assert_eq!(season.to_summary().thumb_url, None);
+
+        // Albums always offer a cover (embedded art is extracted on request);
+        // tracks use their album's.
+        let album = ItemRow::test_row(5, "album", "Discovery");
+        assert_eq!(album.to_summary().poster_url.as_deref(), Some("/api/items/5/images/poster?v=0"));
+        let mut track = ItemRow::test_row(6, "track", "One More Time");
+        track.parent_id = Some(5);
+        assert_eq!(track.to_summary().poster_url.as_deref(), Some("/api/items/5/images/poster?v=0"));
+        assert_eq!(ItemRow::test_row(7, "artist", "Daft Punk").to_summary().poster_url, None);
+    }
+
+    #[test]
+    fn summaries_of_containers_and_tracks() {
+        let mut show = ItemRow::test_row(1, "show", "Lost");
+        show.summary = Some("Plane crash.".into());
+        (show.leaf_count, show.viewed_leaf_count) = (Some(2), Some(2));
+        let summary = show.to_summary();
+        assert!(summary.user_state.watched, "every episode watched");
+        assert_eq!(summary.summary, None, "listings leave synopses out, except for episodes");
+        show.viewed_leaf_count = Some(1);
+        assert!(!show.to_summary().user_state.watched);
+        (show.leaf_count, show.viewed_leaf_count) = (Some(0), Some(0));
+        assert!(!show.to_summary().user_state.watched, "a show without episodes is not watched");
+
+        let mut episode = ItemRow::test_row(2, "episode", "Pilot");
+        episode.summary = Some("Plane crash.".into());
+        episode.parent_idx = Some(1);
+        let summary = episode.to_summary();
+        assert_eq!(summary.summary.as_deref(), Some("Plane crash."));
+        assert_eq!(summary.parent_index, Some(1), "the season number");
+
+        let mut track = ItemRow::test_row(3, "track", "Song");
+        (track.disc, track.parent_idx) = (Some(2), Some(7));
+        assert_eq!(track.to_summary().parent_index, Some(2), "tracks show their disc number");
+    }
+
+    /// A database with a user (1), a movie library (1) and movies 1..=`n`.
+    async fn db_with_movies(dir: &std::path::Path, n: i64) -> Db {
+        let db = Db::open(&dir.join("pley.db")).await.unwrap();
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'viewer', 'x', 0)")
+            .execute(&db.write)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO libraries (id, name, kind, paths, created_at) VALUES (1, 'Movies', 'movies', '[]', 0)",
+        )
+        .execute(&db.write)
+        .await
+        .unwrap();
+        for id in 1..=n {
+            sqlx::query(
+                "INSERT INTO items (id, library_id, kind, key, title, sort_title, added_at, updated_at)
+                 VALUES (?, 1, 'movie', ?, ?, ?, 0, 0)",
+            )
+            .bind(id)
+            .bind(format!("movie-{id}"))
+            .bind(format!("Movie {id}"))
+            .bind(format!("Movie {id}"))
+            .execute(&db.write)
+            .await
+            .unwrap();
+        }
+        db
+    }
+
+    /// (position_ms, watched, play_count) of movie `id`, and its history entries.
+    async fn state_of(db: &Db, id: i64) -> ((i64, bool, i64), i64) {
+        let state = sqlx::query_as("SELECT position_ms, watched, play_count FROM user_item_state WHERE item_id = ?")
+            .bind(id)
+            .fetch_optional(&db.read)
+            .await
+            .unwrap()
+            .unwrap_or((0, false, 0));
+        let plays = sqlx::query_scalar("SELECT COUNT(*) FROM play_history WHERE item_id = ?")
+            .bind(id)
+            .fetch_one(&db.read)
+            .await
+            .unwrap();
+        (state, plays)
+    }
+
+    #[tokio::test]
+    async fn progress_keeps_resume_points_and_counts_each_play_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db_with_movies(dir.path(), 1).await;
+        let duration = 100_000;
+
+        // The first seconds are not worth resuming.
+        assert!(!record_progress(&db, 1, 1, 14_999, duration, None).await.unwrap());
+        assert_eq!(state_of(&db, 1).await, ((0, false, 0), 0));
+        record_progress(&db, 1, 1, 15_000, duration, None).await.unwrap();
+        assert_eq!(state_of(&db, 1).await, ((15_000, false, 0), 0));
+
+        // 90 % is the end: watched, no resume point, one play from that device.
+        assert!(record_progress(&db, 1, 1, 90_000, duration, Some("TV")).await.unwrap());
+        assert_eq!(state_of(&db, 1).await, ((0, true, 1), 1));
+        let device: Option<String> =
+            sqlx::query_scalar("SELECT device FROM play_history").fetch_one(&db.read).await.unwrap();
+        assert_eq!(device.as_deref(), Some("TV"));
+
+        // Reports keep coming during the credits: still one play.
+        assert!(!record_progress(&db, 1, 1, 99_000, duration, Some("TV")).await.unwrap());
+        assert_eq!(state_of(&db, 1).await, ((0, true, 1), 1));
+
+        // Watching it again counts again; the watched flag stays meanwhile.
+        record_progress(&db, 1, 1, 40_000, duration, None).await.unwrap();
+        assert_eq!(state_of(&db, 1).await, ((40_000, true, 1), 1));
+        assert!(record_progress(&db, 1, 1, 95_000, duration, None).await.unwrap());
+        assert_eq!(state_of(&db, 1).await, ((0, true, 2), 2));
+    }
+
+    #[tokio::test]
+    async fn progress_without_a_duration_never_completes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db_with_movies(dir.path(), 1).await;
+        assert!(!record_progress(&db, 1, 1, 7_200_000, 0, None).await.unwrap());
+        assert_eq!(state_of(&db, 1).await, ((7_200_000, false, 0), 0));
+        // Negative positions (clock glitches) are treated as the start.
+        record_progress(&db, 1, 1, -5_000, 100_000, None).await.unwrap();
+        assert_eq!(state_of(&db, 1).await, ((0, false, 0), 0));
+    }
+
+    #[tokio::test]
+    async fn marking_watched_by_hand_is_not_a_play() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db_with_movies(dir.path(), 2).await;
+        record_progress(&db, 1, 1, 30_000, 100_000, None).await.unwrap();
+        set_watched(&db, 1, 1, "movie", true).await.unwrap();
+        assert_eq!(state_of(&db, 1).await, ((0, true, 1), 0), "counted as seen, not as a play");
+        // Marking it again changes nothing.
+        set_watched(&db, 1, 1, "movie", true).await.unwrap();
+        assert_eq!(state_of(&db, 1).await, ((0, true, 1), 0));
+        // A play that ends after that is recorded.
+        record_progress(&db, 1, 1, 20_000, 100_000, None).await.unwrap();
+        assert!(record_progress(&db, 1, 1, 91_000, 100_000, None).await.unwrap());
+        assert_eq!(state_of(&db, 1).await, ((0, true, 2), 1));
+
+        // Unwatching clears the flag and the resume point but keeps the count.
+        record_progress(&db, 1, 2, 50_000, 100_000, None).await.unwrap();
+        set_watched(&db, 1, 2, "movie", false).await.unwrap();
+        assert_eq!(state_of(&db, 2).await, ((0, false, 0), 0));
+        set_watched(&db, 1, 1, "movie", false).await.unwrap();
+        assert_eq!(state_of(&db, 1).await, ((0, false, 2), 1));
+    }
+
+    #[tokio::test]
+    async fn library_pages_filter_sort_and_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db_with_movies(dir.path(), 4).await;
+        for (id, year, genres, rating) in [
+            (1, Some(1999), r#"["Horror","Drama"]"#, Some(7.0)),
+            (2, Some(2005), r#"["Drama"]"#, None),
+            (3, None, r#"["Comedy"]"#, Some(9.0)),
+            (4, Some(2005), "[]", Some(5.0)),
+        ] {
+            sqlx::query("UPDATE items SET year = ?, genres = ?, rating = ? WHERE id = ?")
+                .bind(year)
+                .bind(genres)
+                .bind(rating)
+                .bind(id)
+                .execute(&db.write)
+                .await
+                .unwrap();
+        }
+        set_watched(&db, 1, 2, "movie", true).await.unwrap();
+        let page = |q: LibraryQuery<'static>| {
+            let db = db.clone();
+            async move {
+                let (rows, total) = library_items(&db, 1, &q).await.unwrap();
+                (rows.iter().map(|r| r.id).collect::<Vec<_>>(), total)
+            }
+        };
+        let base = || LibraryQuery::all(1, "movie");
+        assert_eq!(page(LibraryQuery { genre: Some("Drama"), ..base() }).await, (vec![1, 2], 2));
+        assert_eq!(page(LibraryQuery { year: Some(2005), ..base() }).await, (vec![2, 4], 2));
+        assert_eq!(page(LibraryQuery { watched: Some(true), ..base() }).await, (vec![2], 1));
+        assert_eq!(page(LibraryQuery { watched: Some(false), ..base() }).await, (vec![1, 3, 4], 3));
+        // Missing values sort last whichever the direction.
+        let by_year = LibraryQuery { sort: SortKey::Year, ..base() };
+        assert_eq!(page(LibraryQuery { descending: false, ..by_year }).await.0, vec![1, 2, 4, 3]);
+        let by_year = LibraryQuery { sort: SortKey::Year, ..base() };
+        assert_eq!(page(LibraryQuery { descending: true, ..by_year }).await.0, vec![2, 4, 1, 3]);
+        let by_rating = LibraryQuery { sort: SortKey::Rating, descending: true, ..base() };
+        assert_eq!(page(by_rating).await.0, vec![3, 1, 4, 2]);
+        // Paging: the total counts every match.
+        assert_eq!(page(LibraryQuery { offset: 1, limit: Some(2), ..base() }).await, (vec![2, 3], 4));
+        assert_eq!(page(LibraryQuery { limit: Some(0), ..base() }).await, (vec![], 4));
+        assert_eq!(page(LibraryQuery { offset: 10, ..base() }).await, (vec![], 4));
     }
 }

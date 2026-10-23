@@ -356,7 +356,7 @@ impl Filter {
             .0
             .iter()
             .filter_map(|(raw_key, raw_value)| {
-                if raw_key.len() > 7 && raw_key[..7].eq_ignore_ascii_case("x-plex-") {
+                if raw_key.len() > 7 && raw_key.get(..7).is_some_and(|p| p.eq_ignore_ascii_case("x-plex-")) {
                     return None;
                 }
                 if NOT_FILTERS.contains(&raw_key.as_str()) {
@@ -1584,5 +1584,279 @@ mod tests {
         assert_eq!(parse_date("-2d", 1_000_000), Some(1_000_000 - 2 * 86_400));
         assert_eq!(parse_date("1700000000", 0), Some(1_700_000_000));
         assert_eq!(encode("Sci-Fi & Fantasy"), "Sci-Fi%20%26%20Fantasy");
+    }
+
+    fn row(id: i64, kind: &str, title: &str) -> ItemRow {
+        ItemRow::test_row(id, kind, title)
+    }
+
+    /// Titles of `rows` that pass every filter in `pairs` (query keys as
+    /// Plex clients send them: `year>>=2000` arrives as `("year>>", "2000")`).
+    fn matching(
+        rows: &[ItemRow],
+        kind: &str,
+        pairs: &[(&str, &str)],
+        extras: &HashMap<i64, Extras>,
+        now: i64,
+    ) -> Vec<String> {
+        let filters = Filter::parse(&params(pairs), kind);
+        rows.iter()
+            .filter(|r| filters.iter().all(|f| f.matches(r, extras.get(&r.id), now)))
+            .map(|r| r.title.clone())
+            .collect()
+    }
+
+    #[test]
+    fn string_filters_follow_plex_operators() {
+        let rows: Vec<ItemRow> = ["Alpha", "Alphabet City", "Bravo", "The Charlie Movie"]
+            .iter()
+            .enumerate()
+            .map(|(i, t)| row(i as i64 + 1, "movie", t))
+            .collect();
+        let none = HashMap::new();
+        let titles = |pairs: &[(&str, &str)]| matching(&rows, "movie", pairs, &none, 0);
+        assert_eq!(titles(&[("title", "ALPHA")]), ["Alpha", "Alphabet City"], "contains, any case");
+        assert_eq!(titles(&[("title!", "alpha")]), ["Bravo", "The Charlie Movie"], "does not contain");
+        assert_eq!(titles(&[("title", "=alpha")]), ["Alpha"], "`==` is");
+        assert_eq!(titles(&[("title!", "=Alpha")]), ["Alphabet City", "Bravo", "The Charlie Movie"], "`!==` is not");
+        assert_eq!(titles(&[("title<", "the")]), ["The Charlie Movie"], "`<=` begins with");
+        assert_eq!(titles(&[("title>", "MOVIE")]), ["The Charlie Movie"], "`>=` ends with");
+        assert_eq!(titles(&[("title", "bravo,charlie")]), ["Bravo", "The Charlie Movie"], "any of several values");
+        // Every filter must match.
+        assert_eq!(titles(&[("title", "alpha"), ("title>", "city")]), ["Alphabet City"]);
+    }
+
+    #[test]
+    fn number_filters_compare_and_treat_missing_values_as_different() {
+        let mut rows = Vec::new();
+        for (id, title, year) in [(1, "Alpha", Some(1999)), (2, "Bravo", Some(2001)), (3, "Charlie", Some(2010))] {
+            let mut r = row(id, "movie", title);
+            r.year = year;
+            rows.push(r);
+        }
+        rows.push(row(4, "movie", "Delta"));
+        let none = HashMap::new();
+        let titles = |pairs: &[(&str, &str)]| matching(&rows, "movie", pairs, &none, 0);
+        assert_eq!(titles(&[("year", "2001")]), ["Bravo"]);
+        assert_eq!(titles(&[("year", "1999,2010")]), ["Alpha", "Charlie"]);
+        assert_eq!(titles(&[("year!", "2001")]), ["Alpha", "Charlie", "Delta"], "no year is not 2001");
+        assert_eq!(titles(&[("year>>", "2001")]), ["Charlie"], "strictly after");
+        assert_eq!(titles(&[("year<<", "2001")]), ["Alpha"], "strictly before; no year is never before");
+        assert_eq!(titles(&[("decade", "2000")]), ["Bravo"]);
+        assert_eq!(titles(&[("decade", "1990")]), ["Alpha"]);
+        assert_eq!(titles(&[("id", "3")]), ["Charlie"]);
+    }
+
+    #[test]
+    fn watch_state_filters() {
+        let mut watched = row(1, "movie", "Watched");
+        watched.watched = true;
+        watched.play_count = 2;
+        let mut started = row(2, "movie", "Started");
+        started.position_ms = 5_000;
+        let fresh = row(3, "movie", "Fresh");
+        let rows = vec![watched, started, fresh];
+        let none = HashMap::new();
+        let titles = |pairs: &[(&str, &str)]| matching(&rows, "movie", pairs, &none, 0);
+        assert_eq!(titles(&[("unwatched", "1")]), ["Started", "Fresh"]);
+        assert_eq!(titles(&[("unwatched", "0")]), ["Watched"]);
+        assert_eq!(titles(&[("unwatched!", "1")]), ["Watched"], "`!=` negates");
+        assert_eq!(titles(&[("inProgress", "1")]), ["Started"]);
+        assert_eq!(titles(&[("viewCount>>", "1")]), ["Watched"]);
+
+        // A show counts as watched once every episode is.
+        let mut done = row(4, "show", "Done");
+        (done.leaf_count, done.viewed_leaf_count) = (Some(3), Some(3));
+        let mut halfway = row(5, "show", "Halfway");
+        (halfway.leaf_count, halfway.viewed_leaf_count) = (Some(3), Some(1));
+        let mut empty = row(6, "show", "Empty");
+        (empty.leaf_count, empty.viewed_leaf_count) = (Some(0), Some(0));
+        let shows = vec![done, halfway, empty];
+        assert_eq!(matching(&shows, "show", &[("unwatched", "1")], &none, 0), ["Halfway", "Empty"]);
+        assert_eq!(matching(&shows, "show", &[("show.unwatched", "0")], &none, 0), ["Done"]);
+    }
+
+    #[test]
+    fn tag_studio_and_guid_filters_use_the_extras() {
+        let rows = vec![row(1, "movie", "Alien"), row(2, "movie", "Airplane")];
+        let mut extras = HashMap::new();
+        extras.insert(
+            1,
+            Extras {
+                genres: vec!["Horror".into(), "Science Fiction".into()],
+                content_rating: Some("R".into()),
+                studio: Some("Brandywine Productions".into()),
+                imdb_id: Some("tt0078748".into()),
+                tmdb_id: Some(348),
+                ..Default::default()
+            },
+        );
+        extras.insert(
+            2,
+            Extras { genres: vec!["Comedy".into()], content_rating: Some("PG".into()), ..Default::default() },
+        );
+        let titles = |pairs: &[(&str, &str)]| matching(&rows, "movie", pairs, &extras, 0);
+        assert_eq!(titles(&[("genre", "horror")]), ["Alien"], "tags ignore case");
+        assert_eq!(titles(&[("genre!", "horror")]), ["Airplane"]);
+        assert_eq!(titles(&[("genre", "comedy,horror")]), ["Alien", "Airplane"]);
+        assert_eq!(titles(&[("contentRating", "PG")]), ["Airplane"], "a tag is matched whole, not as a prefix");
+        assert_eq!(titles(&[("studio", "brandywine")]), ["Alien"]);
+        assert_eq!(titles(&[("studio!", "brandywine")]), ["Airplane"], "no studio does not contain it");
+        assert_eq!(titles(&[("guid", "imdb://tt0078748")]), ["Alien"]);
+        assert_eq!(titles(&[("guid", "tmdb://348")]), ["Alien"]);
+        let own = meta::guid("movie", 2);
+        assert_eq!(titles(&[("guid", own.as_str())]), ["Airplane"]);
+    }
+
+    #[test]
+    fn people_filters_match_ids_or_names_in_their_role() {
+        let credit = |id: i64, name: &str, role: people::Role| people::Credit {
+            id,
+            name: name.into(),
+            role,
+            character: None,
+            photo_url: None,
+            photo_source: None,
+        };
+        let rows = vec![row(1, "movie", "Alpha"), row(2, "movie", "Beta")];
+        let mut extras = HashMap::new();
+        extras.insert(
+            1,
+            Extras {
+                people: vec![
+                    credit(7, "Ann Actor", people::Role::Actor),
+                    credit(8, "Dan Director", people::Role::Director),
+                ],
+                ..Default::default()
+            },
+        );
+        extras.insert(
+            2,
+            Extras { people: vec![credit(8, "Dan Director", people::Role::Director)], ..Default::default() },
+        );
+        let titles = |pairs: &[(&str, &str)]| matching(&rows, "movie", pairs, &extras, 0);
+        assert_eq!(titles(&[("actor", "7")]), ["Alpha"]);
+        assert_eq!(titles(&[("actor", "ann actor")]), ["Alpha"]);
+        assert_eq!(titles(&[("actor!", "7")]), ["Beta"]);
+        assert_eq!(titles(&[("director", "8")]), ["Alpha", "Beta"]);
+        assert_eq!(titles(&[("actor", "8")]), Vec::<String>::new(), "directing is not acting");
+        assert_eq!(titles(&[("writer", "Dan Director")]), Vec::<String>::new());
+    }
+
+    #[test]
+    fn date_filters_take_unix_times_dates_and_relative_times() {
+        let now = 1_000_000_000;
+        let mut recent = row(1, "movie", "Recent");
+        recent.added_at = now - 2 * 86_400;
+        recent.last_played_at = Some(now - 3_600);
+        recent.release_date = Some("2000-01-02".into());
+        let mut old = row(2, "movie", "Old");
+        old.added_at = now - 40 * 86_400;
+        old.release_date = Some("1999-12-31".into());
+        let rows = vec![recent, old];
+        let none = HashMap::new();
+        let titles = |pairs: &[(&str, &str)]| matching(&rows, "movie", pairs, &none, now);
+        assert_eq!(titles(&[("addedAt>>", "-30d")]), ["Recent"]);
+        assert_eq!(titles(&[("addedAt<<", "-30d")]), ["Old"]);
+        let exact = (now - 40 * 86_400 + 600).to_string();
+        assert_eq!(titles(&[("addedAt", exact.as_str())]), ["Old"], "`=` is the same day");
+        assert_eq!(titles(&[("lastViewedAt>>", "-1d")]), ["Recent"], "never played never matches");
+        assert_eq!(titles(&[("originallyAvailableAt>>", "2000-01-01")]), ["Recent"]);
+        assert_eq!(titles(&[("addedAt>>", "-3x")]), ["Recent", "Old"], "an unreadable date filters nothing");
+    }
+
+    #[test]
+    fn ancestor_filters_look_at_the_parent_or_grandparent() {
+        let episode = |id: i64, title: &str, season: i64, show_id: i64, show: &str| {
+            let mut r = row(id, "episode", title);
+            r.parent_id = Some(100 + id);
+            r.parent_title = Some(format!("Season {season}"));
+            r.parent_idx = Some(season);
+            r.grandparent_id = Some(show_id);
+            r.grandparent_title = Some(show.into());
+            r
+        };
+        let rows = vec![episode(1, "Pilot", 1, 10, "Lost"), episode(2, "Return", 2, 11, "Fringe")];
+        let none = HashMap::new();
+        let titles = |pairs: &[(&str, &str)]| matching(&rows, "episode", pairs, &none, 0);
+        assert_eq!(titles(&[("show.title", "lost")]), ["Pilot"]);
+        assert_eq!(titles(&[("show.id", "11")]), ["Return"]);
+        assert_eq!(titles(&[("season.index", "2")]), ["Return"]);
+        assert_eq!(titles(&[("season.id", "101")]), ["Pilot"]);
+        assert_eq!(titles(&[("show.year", "2004")]), ["Pilot", "Return"], "unsupported ancestor fields are ignored");
+
+        let mut album = row(3, "album", "Discovery");
+        album.parent_id = Some(5);
+        album.parent_title = Some("Daft Punk".into());
+        let albums = vec![album, row(4, "album", "Loose")];
+        assert_eq!(matching(&albums, "album", &[("artist.id", "5")], &none, 0), ["Discovery"]);
+        assert_eq!(matching(&albums, "album", &[("artist.title!", "daft")], &none, 0), ["Loose"]);
+    }
+
+    #[test]
+    fn unknown_and_non_ascii_parameters_filter_nothing() {
+        let rows = vec![row(1, "movie", "Alpha"), row(2, "movie", "Beta")];
+        let none = HashMap::new();
+        let pairs = [
+            ("resolution", "4k"),
+            ("X-Plex-Product", "Plex Web"),
+            ("x-plex-container-start", "0"),
+            ("includeGuids", "1"),
+            ("sort", "titleSort"),
+            // Keys whose 7th byte falls inside a character.
+            ("abcdefé", "1"),
+            ("ééééé", "x"),
+        ];
+        assert_eq!(matching(&rows, "movie", &pairs, &none, 0), ["Alpha", "Beta"]);
+        let filters = Filter::parse(&params(&pairs), "movie");
+        let fields: Vec<&str> = filters.iter().map(|f| f.field.as_str()).collect();
+        assert_eq!(fields, ["resolution", "abcdefé", "ééééé"]);
+    }
+
+    #[test]
+    fn sorting_keeps_missing_values_last_in_both_directions() {
+        let mut rows = Vec::new();
+        for (id, title, year, rating) in [
+            (1, "Alpha", Some(2001), Some(7.5)),
+            (2, "Bravo", None, Some(9.0)),
+            (3, "Charlie", Some(1999), None),
+            (4, "Delta", Some(2001), Some(6.0)),
+        ] {
+            let mut r = row(id, "movie", title);
+            r.year = year;
+            r.rating = rating;
+            rows.push(r);
+        }
+        let sorted = |spec: &str| {
+            let mut rows = rows.clone();
+            sort_rows(&mut rows, &parse_sort(Some(spec)));
+            rows.iter().map(|r| r.title.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(sorted("year"), ["Charlie", "Alpha", "Delta", "Bravo"], "ties by title, missing last");
+        assert_eq!(sorted("year:desc"), ["Alpha", "Delta", "Charlie", "Bravo"]);
+        assert_eq!(sorted("rating:desc,titleSort"), ["Bravo", "Alpha", "Delta", "Charlie"]);
+        assert_eq!(sorted("audienceRating"), ["Delta", "Alpha", "Bravo", "Charlie"]);
+        assert_eq!(sorted("titleSort:desc"), ["Delta", "Charlie", "Bravo", "Alpha"]);
+        assert_eq!(sorted("random"), ["Alpha", "Bravo", "Charlie", "Delta"], "unknown sorts fall back to title");
+        assert_eq!(parse_sort(Some("random,id:desc")), vec![(SortField::Id, true)]);
+    }
+
+    #[test]
+    fn relative_dates_and_calendar_dates() {
+        let now = 10_000_000;
+        assert_eq!(parse_date("-30s", now), Some(now - 30));
+        assert_eq!(parse_date("-5m", now), Some(now - 300));
+        assert_eq!(parse_date("-2h", now), Some(now - 7_200));
+        assert_eq!(parse_date("-1w", now), Some(now - 7 * 86_400));
+        assert_eq!(parse_date("-1mon", now), Some(now - 30 * 86_400));
+        assert_eq!(parse_date("-1y", now), Some(now - 365 * 86_400));
+        assert_eq!(parse_date("-3x", now), None);
+        assert_eq!(parse_date("soon", now), None);
+        assert_eq!(parse_date("2024-02-29", now), Some(1_709_164_800));
+        assert_eq!(date_secs("2024-05-01T12:30:00Z"), date_secs("2024-05-01"));
+        assert_eq!(date_secs("2024-13-01"), None);
+        assert_eq!(date_secs("2024-00-10"), None);
+        assert_eq!(date_secs("2024-5-1"), None);
+        assert_eq!(date_secs(""), None);
     }
 }
