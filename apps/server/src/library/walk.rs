@@ -160,6 +160,8 @@ pub struct Walked {
     /// offline network share behind a symlink, a permission problem, an I/O
     /// error): files below them must not be treated as deleted either.
     pub unreadable: Vec<PathBuf>,
+    /// Folders listed.
+    pub folders: usize,
 }
 
 impl Walked {
@@ -260,6 +262,10 @@ pub fn walk(roots: &[PathBuf], kind: LibraryKind) -> Walked {
                     continue;
                 }
             };
+            if entry.file_type().is_dir() {
+                out.folders += 1;
+                continue;
+            }
             if !entry.file_type().is_file() {
                 continue;
             }

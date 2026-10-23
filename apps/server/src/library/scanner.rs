@@ -74,6 +74,34 @@ struct Totals {
     removed: u64,
 }
 
+/// What a scan went through and how long each of its phases took, for the
+/// log: a slow scan says where its time went.
+#[derive(Debug, Default)]
+struct Phases {
+    folders: usize,
+    files: usize,
+    /// Listing the folders, and indexing the sidecar files found.
+    walk: Duration,
+    /// Telling new, changed and vanished files apart.
+    diff: Duration,
+    /// Waiting for the transcoder's probes.
+    probe: Duration,
+    /// Saving files and items, removing vanished ones, counting children.
+    write: Duration,
+    /// Subtitles and local artwork next to unchanged files.
+    sidecars: Duration,
+    metadata: Duration,
+}
+
+/// A duration for the log: `35ms`, `1.2s`.
+fn took(duration: Duration) -> String {
+    if duration < Duration::from_secs(1) {
+        format!("{}ms", duration.as_millis())
+    } else {
+        format!("{:.1}s", duration.as_secs_f64())
+    }
+}
+
 /// Libraries whose last scan failed. `scanned_at` only moves when a scan
 /// succeeds, so without this a library that cannot be scanned (a full disk, a
 /// read-only or damaged database) would be walked and probed again every
@@ -200,13 +228,22 @@ impl Scanner {
             let result = self.scan(req.library_id, req.force).await;
             self.failures.lock().record(req.library_id, result.is_ok(), now());
             match result {
-                Ok(Some(t)) => tracing::info!(
-                    "library {} scanned in {:.1}s: {} added, {} updated, {} removed",
+                Ok(Some((t, p))) => tracing::info!(
+                    "library {} scanned in {}: {} added, {} updated, {} removed ({} folders, {} media files; \
+                     walk {}, diff {}, probe {}, write {}, sidecars {}, metadata {})",
                     req.library_id,
-                    started.elapsed().as_secs_f32(),
+                    took(started.elapsed()),
                     t.added,
                     t.updated,
-                    t.removed
+                    t.removed,
+                    p.folders,
+                    p.files,
+                    took(p.walk),
+                    took(p.diff),
+                    took(p.probe),
+                    took(p.write),
+                    took(p.sidecars),
+                    took(p.metadata)
                 ),
                 Ok(None) => {}
                 Err(err) => tracing::error!("scan of library {} failed: {err:#}", req.library_id),
@@ -241,7 +278,7 @@ impl Scanner {
         self.events.send(ServerEvent::ScanProgress { library_id: lib.id, phase, processed, total });
     }
 
-    async fn scan(&self, library_id: i64, force: bool) -> anyhow::Result<Option<Totals>> {
+    async fn scan(&self, library_id: i64, force: bool) -> anyhow::Result<Option<(Totals, Phases)>> {
         let Some(lib) = get_library(&self.db, library_id).await? else {
             return Ok(None);
         };
@@ -252,6 +289,7 @@ impl Scanner {
 
         // Sidecar files are indexed once: matching them file by file against
         // the whole library made every scan quadratic in its size.
+        let mut phase = Instant::now();
         let (mut walked, sidecars) = {
             let roots = roots.clone();
             crate::util::blocking(move || {
@@ -261,7 +299,10 @@ impl Scanner {
             })
             .await?
         };
+        let mut phases =
+            Phases { folders: walked.folders, files: walked.media.len(), walk: phase.elapsed(), ..Default::default() };
 
+        phase = Instant::now();
         let existing: Vec<KnownFile> =
             sqlx::query_as("SELECT id, path, size, mtime, probed, external_subs FROM media_files WHERE library_id = ?")
                 .bind(library_id)
@@ -301,9 +342,15 @@ impl Scanner {
             .map(|f| f.id)
             .collect();
 
+        phases.diff = phase.elapsed();
+
         let mut totals = Totals { removed: removed.len() as u64, ..Default::default() };
         let total = to_process.len() as u64;
         self.set_status(&lib, ScanPhase::Probing, 0, total);
+        // Probes and writes take turns: the time spent writing is taken out
+        // of the probing time.
+        phase = Instant::now();
+        let mut writing = Duration::ZERO;
         if !to_process.is_empty() && !self.transcoder.is_available() {
             self.transcoder.wait_ready(Duration::from_secs(90)).await;
         }
@@ -343,7 +390,9 @@ impl Scanner {
                 batch.push(result);
                 processed += 1;
                 if batch.len() >= WRITE_BATCH || last_flush.elapsed() > Duration::from_millis(750) {
+                    let flushing = Instant::now();
                     self.flush(&mut writer, &mut batch, &existing_by_path, &mut totals).await?;
+                    writing += flushing.elapsed();
                     last_flush = Instant::now();
                 }
                 if last_emit.elapsed() > Duration::from_millis(400) {
@@ -351,11 +400,15 @@ impl Scanner {
                     last_emit = Instant::now();
                 }
             }
+            let flushing = Instant::now();
             self.flush(&mut writer, &mut batch, &existing_by_path, &mut totals).await?;
+            writing += flushing.elapsed();
         }
         self.set_status(&lib, ScanPhase::Probing, processed, total);
+        phases.probe = phase.elapsed().saturating_sub(writing);
 
         // Vanished files go, with the items they leave empty.
+        phase = Instant::now();
         for chunk in removed.chunks(CHANGE_BATCH) {
             let placeholders = vec!["?"; chunk.len()].join(",");
             let sql = format!("DELETE FROM media_files WHERE id IN ({placeholders})");
@@ -370,10 +423,12 @@ impl Scanner {
         let mut tx = self.db.write.begin().await?;
         cleanup_orphans(&mut tx, library_id).await?;
         tx.commit().await?;
+        writing += phase.elapsed();
 
         // Sidecar subtitles and local artwork can change without their video
         // changing. What changed is worked out from the index, off the async
         // workers and without the writer; only that is written.
+        phase = Instant::now();
         let rows: Vec<ArtworkRow> = sqlx::query_as(ARTWORK_ROWS).bind(library_id).fetch_all(&self.db.read).await?;
         let (subtitles, artwork) = {
             let sidecars = sidecars.clone();
@@ -413,6 +468,9 @@ impl Scanner {
                 artwork.len()
             );
         }
+        phases.sidecars = phase.elapsed();
+
+        phase = Instant::now();
         let mut tx = self.db.write.begin().await?;
         update_counts(&mut tx, library_id).await?;
         sqlx::query("UPDATE libraries SET scanned_at = ? WHERE id = ?")
@@ -424,8 +482,10 @@ impl Scanner {
         // Scanning rewrites titles of unmatched items and local artwork;
         // hand edits win.
         crate::overrides::apply_library(&self.db, library_id).await?;
+        writing += phase.elapsed();
         self.events.send(ServerEvent::LibraryChanged { library_id });
 
+        phase = Instant::now();
         if self.metadata.enabled_for(kind) {
             self.set_status(&lib, ScanPhase::Metadata, 0, 0);
             let progress = |done: u64, total: u64| self.set_status(&lib, ScanPhase::Metadata, done, total);
@@ -437,6 +497,7 @@ impl Scanner {
         if totals.removed > 0 {
             self.metadata.prune_people().await;
         }
+        phases.metadata = phase.elapsed();
         // New and changed files get their fingerprint; then whatever removed
         // items left behind goes.
         let store = self.store.clone();
@@ -457,8 +518,10 @@ impl Scanner {
             updated: totals.updated,
             removed: totals.removed,
         });
+        phase = Instant::now();
         self.db.optimize().await;
-        Ok(Some(totals))
+        phases.write = writing + phase.elapsed();
+        Ok(Some((totals, phases)))
     }
 
     async fn flush(
