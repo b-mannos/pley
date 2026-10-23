@@ -465,6 +465,57 @@ async fn library_hubs_show_what_has_content() {
 }
 
 #[tokio::test]
+async fn events_announce_library_changes_and_scans() {
+    use futures::StreamExt;
+
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let anonymous = app.call(Method::GET, "/api/events", None, None, &[]).await;
+    assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
+
+    let request = axum::http::Request::builder()
+        .uri("/api/events")
+        .header("authorization", format!("Bearer {admin}"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = tower::ServiceExt::oneshot(app.api.clone(), request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let mut stream = response.into_body().into_data_stream();
+
+    app.media_file("movies/Alien (1979).mkv", 1024);
+    app.media_file("movies/Brazil (1985).mkv", 1024);
+    let lib = app.library(&admin, "Movies", "movies", "movies").await;
+
+    // Every event is a `data:` line of JSON.
+    let mut events: Vec<Value> = Vec::new();
+    let mut pending = String::new();
+    let read = async {
+        while let Some(chunk) = stream.next().await {
+            pending.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
+            while let Some(end) = pending.find("\n\n") {
+                let frame: String = pending.drain(..end + 2).collect();
+                for line in frame.lines() {
+                    if let Some(data) = line.strip_prefix("data:") {
+                        events.push(serde_json::from_str(data.trim()).unwrap());
+                    }
+                }
+            }
+            if events.iter().any(|e| e["type"] == "scan_finished") {
+                return;
+            }
+        }
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), read).await.expect("a scan_finished event");
+    let types: Vec<&str> = events.iter().map(|e| e["type"].as_str().unwrap()).collect();
+    for wanted in ["libraries_changed", "scan_started", "library_changed"] {
+        assert!(types.contains(&wanted), "{wanted} in {types:?}");
+    }
+    let finished = events.iter().find(|e| e["type"] == "scan_finished").unwrap();
+    assert_eq!(finished, &json!({"type": "scan_finished", "library_id": lib, "added": 2, "updated": 0, "removed": 0}));
+}
+
+#[tokio::test]
 async fn administration_endpoints() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;
