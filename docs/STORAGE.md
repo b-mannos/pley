@@ -15,7 +15,8 @@ artwork, which pley never moves or changes.
     trickplay/               seek-bar previews (sprite sheets, Plex's index-sd.bif)
     chapters/<n>.jpg         chapter pictures, cut from the previews
   avatars/                   profile pictures
-  backups/pley-<date>.db     the last 3 daily database backups
+  backups/pley-<date>.db     the last 3 daily database backups, and the copy
+                             made before the last upgrade
   cache/                     resized images, subtitles, fingerprints; safe to
                              delete, old files are removed (see Clean-up)
   logs/pley.log              the server log, then pley.log.1 to .3 (10 MB each)
@@ -59,6 +60,12 @@ keeps running. The copy is checked before it counts, and the last three are
 kept. `POST /api/system/backups` makes one on demand; `GET /api/system/backups`
 lists them with the result of the check of the live database that runs at
 every start.
+
+Before a new version changes the database (it brings the schema up to date
+when it starts), pley writes a checked copy to
+`backups/pley-YYYY-MM-DD-HHMM-before-upgrade.db`, and doesn't start when it
+can't (a full disk, say). The copy from the last upgrade is kept until the
+next one, apart from the daily backups.
 
 To restore one: stop pley, move `pley.db`, `pley.db-wal` and `pley.db-shm`
 aside, copy the backup to `pley.db`, and start pley again.

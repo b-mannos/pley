@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use serde::Serialize;
-use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 use sqlx::{ConnectOptions, Connection};
 
 use crate::db::Db;
@@ -18,6 +18,10 @@ use crate::util::{now, path_str};
 
 /// Backups kept (oldest removed first).
 const KEEP: usize = 3;
+
+/// The end of the names of copies made before an upgrade migrates the
+/// database (see `db.rs`). The newest is kept, apart from the others.
+pub(crate) const BEFORE_UPGRADE: &str = "-before-upgrade";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BackupInfo {
@@ -77,58 +81,72 @@ impl Backups {
 
     /// Backups, newest first.
     pub async fn list(&self) -> Vec<BackupInfo> {
-        let dir = self.dir.clone();
-        crate::util::blocking(move || {
-            let mut out: Vec<BackupInfo> = std::fs::read_dir(&dir)
-                .map(|entries| {
-                    entries
-                        .flatten()
-                        .filter(|e| e.file_name().to_string_lossy().ends_with(".db"))
-                        .filter_map(|e| {
-                            let meta = e.metadata().ok()?;
-                            let created = meta.modified().ok().map(crate::util::system_time_secs).unwrap_or(0);
-                            Some(BackupInfo {
-                                name: e.file_name().to_string_lossy().into_owned(),
-                                path: path_str(&e.path()),
-                                bytes: meta.len(),
-                                created_at: created,
-                            })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.name.cmp(&a.name)));
-            Ok(out)
-        })
-        .await
-        .unwrap_or_default()
+        list(&self.dir).await
     }
 
     /// Write a checked copy of the database and drop old ones.
     pub async fn create(&self) -> anyhow::Result<BackupInfo> {
         let _running = self.running.lock().await;
-        tokio::fs::create_dir_all(&self.dir).await?;
-        let stamp = chrono_stamp(now());
-        let target = self.dir.join(format!("pley-{stamp}.db"));
-        let partial = self.dir.join(format!("pley-{stamp}.db.part"));
-        let _ = tokio::fs::remove_file(&partial).await;
-        sqlx::query("VACUUM INTO ?").bind(path_str(&partial)).execute(&self.db.read).await?;
-        // A copy that fails its own check is not a backup.
-        let mut conn = SqliteConnectOptions::new().filename(&partial).read_only(true).connect().await?;
-        let check: String = sqlx::query_scalar("PRAGMA quick_check").fetch_one(&mut conn).await?;
-        conn.close().await?;
-        if check != "ok" {
-            let _ = tokio::fs::remove_file(&partial).await;
-            anyhow::bail!("the backup failed its check: {check}");
-        }
-        tokio::fs::rename(&partial, &target).await?;
-        for old in self.list().await.into_iter().skip(KEEP) {
-            let _ = tokio::fs::remove_file(&old.path).await;
-        }
-        let bytes = tokio::fs::metadata(&target).await.map(|m| m.len()).unwrap_or(0);
-        tracing::info!("database backed up to {} ({} KB)", target.display(), bytes / 1024);
-        Ok(BackupInfo { name: format!("pley-{stamp}.db"), path: path_str(&target), bytes, created_at: now() })
+        write_checked(&self.db.read, &self.dir, "").await
     }
+}
+
+/// The backups in `dir`, newest first.
+async fn list(dir: &Path) -> Vec<BackupInfo> {
+    let dir = dir.to_path_buf();
+    crate::util::blocking(move || {
+        let mut out: Vec<BackupInfo> = std::fs::read_dir(&dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter(|e| e.file_name().to_string_lossy().ends_with(".db"))
+                    .filter_map(|e| {
+                        let meta = e.metadata().ok()?;
+                        let created = meta.modified().ok().map(crate::util::system_time_secs).unwrap_or(0);
+                        Some(BackupInfo {
+                            name: e.file_name().to_string_lossy().into_owned(),
+                            path: path_str(&e.path()),
+                            bytes: meta.len(),
+                            created_at: created,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.name.cmp(&a.name)));
+        Ok(out)
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Writes a checked copy of the database behind `pool` to
+/// `dir/pley-<date><suffix>.db`, then drops old copies: the daily ones
+/// beyond [`KEEP`], and all copies made before an upgrade but the newest.
+pub(crate) async fn write_checked(pool: &SqlitePool, dir: &Path, suffix: &str) -> anyhow::Result<BackupInfo> {
+    tokio::fs::create_dir_all(dir).await?;
+    let name = format!("pley-{}{suffix}.db", chrono_stamp(now()));
+    let target = dir.join(&name);
+    let partial = dir.join(format!("{name}.part"));
+    let _ = tokio::fs::remove_file(&partial).await;
+    sqlx::query("VACUUM INTO ?").bind(path_str(&partial)).execute(pool).await?;
+    // A copy that fails its own check is not a backup.
+    let mut conn = SqliteConnectOptions::new().filename(&partial).read_only(true).connect().await?;
+    let check: String = sqlx::query_scalar("PRAGMA quick_check").fetch_one(&mut conn).await?;
+    conn.close().await?;
+    if check != "ok" {
+        let _ = tokio::fs::remove_file(&partial).await;
+        anyhow::bail!("the backup failed its check: {check}");
+    }
+    tokio::fs::rename(&partial, &target).await?;
+    let upgrade = format!("{BEFORE_UPGRADE}.db");
+    let (upgrades, daily): (Vec<_>, Vec<_>) = list(dir).await.into_iter().partition(|b| b.name.ends_with(&upgrade));
+    for old in daily.into_iter().skip(KEEP).chain(upgrades.into_iter().skip(1)) {
+        let _ = tokio::fs::remove_file(&old.path).await;
+    }
+    let bytes = tokio::fs::metadata(&target).await.map(|m| m.len()).unwrap_or(0);
+    tracing::info!("database backed up to {} ({} KB)", target.display(), bytes / 1024);
+    Ok(BackupInfo { name, path: path_str(&target), bytes, created_at: now() })
 }
 
 /// `2026-10-22-1830` (UTC) for backup file names.
@@ -197,12 +215,29 @@ mod tests {
         std::fs::write(folder.join("notes.txt"), b"x").unwrap();
         let listed: Vec<String> = backups.list().await.into_iter().map(|b| b.name).collect();
         assert_eq!(listed, ["pley-2020-01-03-0000.db", "pley-2020-01-02-0000.db", "pley-2020-01-01-0000.db"]);
+        // Copies made before two upgrades, older than every daily one.
+        for (n, name) in
+            ["pley-2019-01-01-0000-before-upgrade.db", "pley-2019-06-01-0000-before-upgrade.db"].into_iter().enumerate()
+        {
+            let file = std::fs::File::create(folder.join(name)).unwrap();
+            file.set_modified(std::time::SystemTime::now() - day * (30 - n as u32)).unwrap();
+        }
 
         let new = backups.create().await.unwrap();
         let listed: Vec<String> = backups.list().await.into_iter().map(|b| b.name).collect();
-        assert_eq!(listed, [new.name.as_str(), "pley-2020-01-03-0000.db", "pley-2020-01-02-0000.db"]);
+        assert_eq!(
+            listed,
+            [
+                new.name.as_str(),
+                "pley-2020-01-03-0000.db",
+                "pley-2020-01-02-0000.db",
+                "pley-2019-06-01-0000-before-upgrade.db"
+            ]
+        );
         assert!(!folder.join("pley-2020-01-01-0000.db").exists(), "the oldest is removed");
         assert!(folder.join("notes.txt").exists(), "other files are left alone");
+        assert!(folder.join("pley-2019-06-01-0000-before-upgrade.db").exists(), "the last upgrade's copy stays");
+        assert!(!folder.join("pley-2019-01-01-0000-before-upgrade.db").exists(), "older upgrades' copies go");
     }
 
     #[tokio::test]
