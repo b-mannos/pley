@@ -6,8 +6,11 @@ unless stated otherwise. Timestamps are **unix seconds**; durations/positions ar
 
 ## Authentication
 
-* `POST /api/auth/login` (or `/api/setup`) sets an `HttpOnly` cookie named
-  `pley_token` and also returns the token in the body.
+* `POST /api/auth/login` (or `/api/setup`, `/api/auth/switch`, accepting an
+  invitation, a single sign-on) sets an `HttpOnly` cookie named `pley_token`.
+  Clients that aren't browsers (requests without an `Origin` header) also get
+  the token in the body; browsers keep it in the cookie only, so no script on
+  the page ever sees it.
 * Every other endpoint (except the public ones listed below) requires one of:
   * the `pley_token` cookie (what the web UI uses — `<img>`, `<video>`, hls.js
     requests carry it automatically because the UI is same-origin),
@@ -15,6 +18,11 @@ unless stated otherwise. Timestamps are **unix seconds**; durations/positions ar
   * `X-Pley-Token: <token>` header,
   * `?token=<token>` query parameter (handy for external players like VLC).
 * Missing/invalid token → `401`. Non-admin calling an admin endpoint → `403`.
+
+Every answer carries `X-Content-Type-Options: nosniff`, `X-Frame-Options:
+DENY`, `Referrer-Policy: same-origin` and a `Content-Security-Policy` that
+lets pages load only pley's own scripts and styles. Password checks queue
+(a few at a time); when one has waited 10 seconds the answer is `503`.
 
 ### Errors
 
@@ -57,6 +65,8 @@ interface User {
   audio_language: string | null;    // ISO 639 code ("eng", "fr"); null = the file's default track
   subtitle_language: string | null; // null = the audio language
   subtitle_mode: "off" | "forced" | "foreign" | "always";
+  has_password: boolean;           // false: a managed profile, or signs in only with single sign-on
+  sso: boolean;                    // linked to an identity at the single sign-on provider
 }
 
 type LibraryKind = "movies" | "shows" | "music";
@@ -250,9 +260,12 @@ interface PlaybackInfo {
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/api/health` | – | `{ "status": "ok" }` |
-| GET | `/api/server` | – | `{ name: string, version: string, setup_required: boolean, setup_code_required: boolean }`. `setup_code_required`: this request comes from outside the local network (or through a proxy), so setup needs the code from the server's log |
-| POST | `/api/setup` | `{ username, password, setup_code? }` | `{ user: User, token: string }` — creates the first (admin) account and logs in. `409` once a user exists. From outside the local network, `403` without the right `setup_code` (5 tries per 15 minutes, then `429`) |
-| POST | `/api/auth/login` | `{ username, password }` | `{ user: User, token: string }` (`401` on bad credentials) |
+| GET | `/api/server` | – | `{ name: string, version: string, setup_required: boolean, setup_code_required: boolean, sso: { name, start } \| null }`. Setup takes the code from the server's log. `sso`: single sign-on is on; `start` is where browsers go to sign in (`?next=/page`) |
+| POST | `/api/setup` | `{ username, password, setup_code }` | `{ user: User, token? }` — creates the first (admin) account and signs in. `409` once a user exists, `403` without the right `setup_code` (5 tries per 15 minutes from each address, then `429`) |
+| POST | `/api/auth/login` | `{ username, password }` | `{ user: User, token? }` (`401` on bad credentials) |
+| GET | `/api/auth/sso/start` | `next=/page` | A page browsers are sent to: `303` to the provider (from pley's public address; elsewhere, first to that). Problems come back as `/login?sso=<code>` |
+| GET | `/api/auth/sso/callback` | `code`, `state` (from the provider) | `303` to `next` (or `/profiles?next=…` for a household), signed in; or `/login?sso=<code>`, `/account?sso=<code>` (see below) |
+| GET | `/api/auth/sso/client` | – | pley's client metadata document (when it has no client ID): `{ client_id, client_name, redirect_uris, grant_types, response_types, token_endpoint_auth_method: "none", scope }` |
 
 ## Auth
 
@@ -260,12 +273,33 @@ interface PlaybackInfo {
 |---|---|---|---|
 | POST | `/api/auth/logout` | – | `204`, cookie cleared |
 | GET | `/api/auth/me` | – | `User` |
-| PUT | `/api/auth/password` | `{ current_password, new_password }` | `204` |
+| PUT | `/api/auth/password` | `{ current_password, new_password }` | `204`; signs the user out everywhere but this device |
 | GET | `/api/auth/profiles` | – | `User[]`: home profiles this user can switch to (empty for non-home users) |
-| POST | `/api/auth/switch` | `{ user_id, pin?, password? }` | `{ user, token }`: this device becomes that profile (old session ends). A profile with a PIN needs it; an administrator without a PIN needs its password unless you are an administrator. `429` after 5 wrong tries in 15 min. |
+| POST | `/api/auth/switch` | `{ user_id, pin?, password? }` | `{ user, token? }`: this device becomes that profile (old session ends). A profile with a PIN needs it. Without one, a profile that can see more than yours (an administrator, a higher age limit, libraries yours can't open) needs its password, unless you are an administrator; a managed one can't be switched to until it has a PIN. `429` after 5 wrong tries in 15 min. |
+| POST | `/api/auth/sso/link` | `{ password }` | `204`: the next single sign-on (`/api/auth/sso/start`, which the web app opens next) links that identity to this account. From pley's public address only (`409` elsewhere); not for managed profiles or accounts without a password |
 
 Login attempts are throttled the same way (5 failures per username per 15 min).
 Disabled accounts get `403` at login and their sessions stop working.
+
+### Single sign-on
+
+With `sso_enabled`, people sign in with an OpenID Connect provider
+(authorization code flow with PKCE, the `state` bound to the browser by a
+cookie, the ID token's signature, issuer, audience, nonce and expiry
+checked). pley asks for the scopes `openid email`, plus `profile` when it
+makes new accounts and `groups` when it checks a group, and keeps none of the
+provider's tokens. An identity (the issuer and the ID token's `sub`) signs in
+to the account it was linked to; names and e-mail addresses never match
+accounts. With `sso_new_accounts`, someone new gets an account without
+libraries; with `sso_group`, only members of that group get in at all.
+
+`?sso=` codes: `linked` (done), `off`, `expired` (took too long, or started in
+another browser), `denied` (cancelled at the provider), `provider` (the
+provider couldn't be reached or refused; the log says why), `invalid` (the ID
+token was refused), `unknown` (no account is linked to that identity),
+`disabled`, `group` (not in the group that may sign in), `signin` (linking:
+not signed in as the user who asked any more), `taken` (linked to another
+account), `error`.
 
 ## Your account
 
@@ -277,6 +311,8 @@ Disabled accounts get `403` at login and their sessions stop working.
 | DELETE | `/api/me/avatar` | – | `204` |
 | GET | `/api/users/{id}/avatar` | – | `image/jpeg` (any signed-in user, for the profile switcher) |
 | GET | `/api/me/devices` | – | `Device[]`: `{ id, name, user_agent, ip, created_at, last_seen_at, current }` |
+| GET | `/api/me/sso` | – | `{ enabled, name?, linked?, email?, has_password?, public_url?, start? }`: single sign-on for this account |
+| DELETE | `/api/me/sso` | `{ password }` | `204`, unlinks the identity (`403` for accounts without a password: they would be locked out) |
 | DELETE | `/api/me/devices/{id}` | – | `204`, signs that device out |
 
 Titles you haven't picked tracks for start with your defaults: the main
@@ -644,6 +680,7 @@ type ServerEvent =
 | DELETE | `/api/users/{id}` | – | `204` (cannot delete yourself) |
 | GET | `/api/users/{id}/devices` | – | `Device[]` |
 | DELETE | `/api/users/{id}/devices` | – | `204`, signs the user out everywhere |
+| DELETE | `/api/users/{id}/sso` | – | `204`, unlinks the user's identities at the single sign-on provider |
 
 ## Invitations
 
@@ -665,9 +702,9 @@ type ServerEvent =
 | GET | `/api/system/backups` | – | `{ health: { ok, problem?, checked_at }, backups: { name, path, bytes, created_at }[] }`, newest first |
 | POST | `/api/system/backups` | – | the new backup (a checked `VACUUM INTO` copy; the last 3 are kept) |
 | GET | `/api/transcoder` | – | `TranscoderStatus` – live metrics of the transcoder component (all jobs, counters) |
-| GET | `/api/settings` | – | `Settings` |
+| GET | `/api/settings` | – | `Settings` (`sso_client_secret` always empty, `sso_client_secret_set` says whether there is one) |
 | PUT | `/api/settings` | partial `Settings` | `Settings` |
-| POST | `/api/settings/test` | `{ service: "tmdb" \| "tvdb" \| "tvmaze" \| "musicbrainz" \| "transcoder", api_key?, pin? }` | `{ ok, message, ms }`: one request to the service, with the key and PIN given (not saved) or else the saved ones. `message` says what happened, for people |
+| POST | `/api/settings/test` | `{ service: "tmdb" \| "tvdb" \| "tvmaze" \| "musicbrainz" \| "transcoder" \| "sso", api_key?, pin?, issuer?, client_id?, public_url? }` | `{ ok, message, ms }`: one request to the service, with the key and PIN given (not saved) or else the saved ones; for `sso`, the provider's discovery document and keys, and how pley would sign in with it. `message` says what happened, for people |
 | GET | `/api/fs` | `path` (omit for roots/drives) | `{ path: string \| null, parent: string \| null, entries: { name: string, path: string }[] }` – directories only |
 
 ```ts
@@ -692,6 +729,14 @@ interface Settings {
   detect_markers: boolean;          // find intros and credits in the background (default true)
   seek_previews: boolean;           // make seek-bar thumbnails when an item is first opened (default true)
   previews_in_background: boolean;  // also for whole libraries after scans, one file at a time (default true)
+  public_url: string;               // where people reach pley ("https://pley.example.com"); single sign-on runs there
+  sso_enabled: boolean;             // needs sso_issuer and public_url (https without a client ID)
+  sso_name: string;                 // on the sign-in button
+  sso_issuer: string;               // the provider's issuer, exactly
+  sso_client_id: string;            // "" = pley's client metadata document (CIMD), for providers that take those
+  sso_client_secret: string;        // write-only: always "" in answers
+  sso_new_accounts: boolean;        // identities pley doesn't know get an account, without libraries (default false)
+  sso_group: string;                // only members of this group (the `groups` claim) may sign in; "" = anyone
 }
 
 interface SystemInfo {

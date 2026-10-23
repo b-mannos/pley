@@ -48,9 +48,13 @@ web app in React and TypeScript.
   own libraries and age limit.
 - A profile switcher with optional PINs, invitation links, and a list of
   signed-in devices that can be signed out remotely.
-- First-run setup that only the local network can complete, or someone with
-  the code from the server's log. Passwords have at least 8 characters and
-  can't be common ones.
+- Single sign-on with an OpenID Connect provider (Authentik, Authelia,
+  Keycloak, Pocket ID…), linked account by account and optionally limited to
+  a group. Providers that take client metadata documents need no
+  registration.
+- First-run setup with a one-time code from the server's log, which the
+  tray icon fills in. Passwords have at least 8 characters and can't be
+  common ones. See [SECURITY.md](SECURITY.md).
 
 **Administration**
 
@@ -117,10 +121,10 @@ cargo build                                      # build pley and pley-transcode
 .\target\debug\pley.exe --data-dir .\data        # http://localhost:7539
 ```
 
-Open pley on the computer it runs on, or from your home network, create the
-administrator account and add a library. From anywhere else (over the
-internet, or through a reverse proxy), setup also asks for the one-time code
-pley prints in its log when it starts, so nobody else can claim a new server.
+pley prints a link with a one-time setup code when it starts
+(`http://localhost:7539/setup#code=…`; on a desktop the tray icon opens it).
+Open it, create the administrator account and add a library. Nobody without
+the code can claim a new server.
 
 A lost password is reset with `pley reset-password <user> <new-password>
 [--admin]`.

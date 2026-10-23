@@ -36,9 +36,9 @@ NVENC, VAAPI, QSV and Vulkan (libplacebo) tone mapping:
 - **NVIDIA:** install the NVIDIA Container Toolkit and run with `--gpus all`.
   The image already asks for the `video` driver capability that NVENC needs.
 
-The container runs as uid 1000; the `/config` folder must be writable by it.
-Setting pley up from outside your network asks for the code it prints at
-start (`docker logs pley`).
+The container runs as uid 1000, with no extra privileges; the `/config`
+folder must be writable by it. Setting pley up takes the code it prints at
+start: `docker logs pley` shows a link that fills it in.
 `docker exec pley pley reset-password <user> <password>` recovers a lost
 password.
 
@@ -93,4 +93,26 @@ the server's address in the app. Containers only answer them with host
 networking (`--network host`), since broadcasts don't reach a bridge
 network. For access outside your network,
 put pley behind a reverse proxy with TLS (Caddy, nginx, Traefik); it serves
-plain HTTP and works under any host name.
+plain HTTP and works under any host name. Docker publishes ports around host
+firewalls: behind a proxy on the same host, publish pley on `127.0.0.1` only.
+
+## Single sign-on
+
+pley signs people in with an OpenID Connect provider. In **Settings →
+Server → Single sign-on**:
+
+1. Enter pley's **public address** (`https://pley.example.com`): sign-ins
+   happen there, and the provider sends people back to it.
+2. Enter the provider's **issuer** exactly as it shows it, and test it.
+3. Either register pley with the provider as a client (redirect URI
+   `https://pley.example.com/api/auth/sso/callback`, shown in the settings)
+   and enter its client ID and secret, or leave the client ID empty if the
+   provider takes client metadata documents: it then reads pley's at
+   `https://pley.example.com/api/auth/sso/client`.
+4. Turn it on. People link their account from their account page (with
+   their password) and then sign in with the provider.
+
+Optionally, let only members of one group in (the provider must send a
+`groups` claim), or give accounts to people the provider knows but pley
+doesn't: they start without libraries. pley asks the provider only who
+signed in and keeps none of its tokens.
