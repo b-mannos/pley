@@ -2,6 +2,8 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use tokio_util::sync::CancellationToken;
+
 use crate::auth::AuthService;
 use crate::backup::Backups;
 use crate::config::Config;
@@ -41,6 +43,10 @@ pub struct Inner {
     pub markers: Arc<MarkerService>,
     pub trickplay: Arc<TrickplayService>,
     pub started_at: Instant,
+    /// Cancelled when the server starts shutting down (the tray's Quit
+    /// cancels it to ask for that). Responses that never end on their own,
+    /// such as the event stream, end with it.
+    pub stopping: CancellationToken,
 }
 
 impl Deref for AppState {
@@ -106,6 +112,7 @@ impl AppState {
                 markers,
                 trickplay,
                 started_at: Instant::now(),
+                stopping: CancellationToken::new(),
                 config,
                 db,
                 settings,
@@ -187,6 +194,7 @@ impl AppState {
     }
 
     pub async fn shutdown(&self) {
+        self.stopping.cancel();
         // External transcoders keep running: delete our jobs there. A managed
         // one stops all of its jobs itself when it shuts down.
         if !self.transcoder.is_managed() {

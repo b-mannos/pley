@@ -60,9 +60,9 @@ pub struct TrayContext {
 }
 
 impl TrayContext {
-    /// Wire tray commands to the server and keep the status line fresh.
-    /// Must be called inside the server's runtime.
-    pub fn new(state: &AppState, bind: SocketAddr) -> Self {
+    /// Wire tray commands to the server listening on `addr` and keep the
+    /// status line fresh. Must be called inside the server's runtime.
+    pub fn new(state: &AppState, addr: SocketAddr) -> Self {
         let (commands, mut rx) = mpsc::unbounded_channel();
         let worker = state.clone();
         tokio::spawn(async move {
@@ -73,7 +73,8 @@ impl TrayContext {
                             tracing::warn!("could not start a scan: {err}");
                         }
                     }
-                    Command::Quit => crate::request_shutdown(),
+                    // Stops this server (see `crate::run_with_tray`).
+                    Command::Quit => worker.stopping.cancel(),
                 }
             }
         });
@@ -90,7 +91,7 @@ impl TrayContext {
             }
         });
         Self {
-            url: web_url(bind),
+            url: web_url(addr),
             logs_dir: state.config.log_file().parent().map(PathBuf::from).unwrap_or_default(),
             commands,
             status,
@@ -179,6 +180,9 @@ pub fn interactive_session() -> bool {
 
 /// "2 streams (1 transcoding), scanning Movies" or "idle".
 fn status_line(state: &AppState) -> String {
+    if state.stopping.is_cancelled() {
+        return "shutting down".to_owned();
+    }
     let playing = state.sessions.list().iter().filter(|s| s.play.lock().state != "stopped").count();
     let transcoding = state.sessions.active_transcodes();
     let mut parts = Vec::new();

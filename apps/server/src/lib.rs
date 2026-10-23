@@ -38,13 +38,21 @@ pub mod trickplay;
 pub mod util;
 pub mod web;
 
+use std::future::IntoFuture;
+use std::net::SocketAddr;
 use std::time::Duration;
+
+use tokio_util::sync::CancellationToken;
 
 pub use config::Config;
 pub use state::AppState;
 
-/// Woken by [`request_shutdown`] (the tray's "Quit").
+/// Woken by [`request_shutdown`].
 static SHUTDOWN: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// How long stopping the runtime waits for blocking work that is still
+/// running, such as a library walk on a slow network share.
+const RUNTIME_STOP: Duration = Duration::from_secs(3);
 
 /// Ask the running server to shut down gracefully.
 pub fn request_shutdown() {
@@ -62,36 +70,79 @@ pub fn serve(config: Config, tray: bool) -> anyhow::Result<()> {
         return desktop::macos::serve(runtime, config);
     }
     let launcher = tray.then(|| Box::new(desktop::start_tray) as desktop::TrayLauncher);
-    runtime.block_on(run_with_tray(config, launcher))
+    run_on(runtime, config, launcher)
+}
+
+/// Run the server on `runtime`, then stop the runtime: tasks still running
+/// (connections that outlived the grace period) are dropped, and blocking
+/// work gets [`RUNTIME_STOP`]. Dropping the runtime instead would wait for
+/// that work however long it takes.
+pub(crate) fn run_on(
+    runtime: tokio::runtime::Runtime,
+    config: Config,
+    tray: Option<desktop::TrayLauncher>,
+) -> anyhow::Result<()> {
+    let result = runtime.block_on(run_with_tray(config, tray));
+    runtime.shutdown_timeout(RUNTIME_STOP);
+    result
 }
 
 /// Build the application state, start background services and serve HTTP until
-/// Ctrl+C / SIGTERM.
+/// Ctrl+C, SIGTERM or [`request_shutdown`].
 pub async fn run(config: Config) -> anyhow::Result<()> {
     run_with_tray(config, None).await
 }
 
 /// Like [`run`]; once the server listens, `tray` gets the context for the tray
-/// icon (if any), which is removed again after shutdown.
+/// icon (if any), which is removed again after shutdown. The tray's Quit stops
+/// this server.
+///
+/// On shutdown the listeners close, the event streams end, and requests in
+/// progress get [`Config::shutdown_grace`] to finish; connections still open
+/// after that (a film playing directly) are left to the runtime's shutdown
+/// (see [`serve`]).
 pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) -> anyhow::Result<()> {
     let bind = config.bind;
+    let grace = config.shutdown_grace;
     let state = AppState::init(config).await?;
     state.start_background_tasks();
 
     let app = api::router(state.clone());
     let listener =
         tokio::net::TcpListener::bind(bind).await.map_err(|e| anyhow::anyhow!("cannot listen on {bind}: {e}"))?;
-    tracing::info!("pley {} listening on http://{}", env!("CARGO_PKG_VERSION"), display_addr(bind));
-    let plex = plex::start(&state).await;
-    let tray = tray.and_then(|launch| launch(desktop::TrayContext::new(&state, bind)));
+    let addr = listener.local_addr()?;
+    tracing::info!("pley {} listening on http://{}", env!("CARGO_PKG_VERSION"), display_addr(addr));
+    let plex = plex::bind(state.config.plex_bind).await;
+    let tray = tray.and_then(|launch| launch(desktop::TrayContext::new(&state, addr)));
 
-    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
-
+    let stopping = state.stopping.clone();
+    let web = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+        .with_graceful_shutdown(stopping.clone().cancelled_owned())
+        .into_future();
+    let plex = plex.map(|listener| plex::serve(state.clone(), listener, stopping.clone().cancelled_owned()));
+    let serving = async move {
+        let plex = async move {
+            if let Some(plex) = plex {
+                plex.await;
+            }
+        };
+        let (web, ()) = tokio::join!(web, plex);
+        if let Err(err) = web {
+            tracing::error!("the web server stopped: {err}");
+        }
+    };
+    tokio::pin!(serving);
+    let stopped = tokio::select! {
+        () = &mut serving => true,
+        () = shutdown_signal(&stopping) => false,
+    };
     tracing::info!("shutting down");
-    if let Some(plex) = plex {
-        plex.stop().await;
+    stopping.cancel();
+    if !stopped && tokio::time::timeout(grace, serving).await.is_err() {
+        tracing::warn!(
+            "not waiting any longer for connections still open {}s after the shutdown signal (a film playing?)",
+            grace.as_secs_f32()
+        );
     }
     if tokio::time::timeout(Duration::from_secs(25), state.shutdown()).await.is_err() {
         tracing::warn!("shutdown did not finish in time");
@@ -150,25 +201,34 @@ pub async fn health(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn display_addr(addr: std::net::SocketAddr) -> String {
+fn display_addr(addr: SocketAddr) -> String {
     if addr.ip().is_unspecified() { format!("localhost:{}", addr.port()) } else { addr.to_string() }
 }
 
-async fn shutdown_signal() {
+/// Ctrl+C, SIGTERM, [`request_shutdown`] or `stopping` cancelled (the tray's
+/// Quit). A signal that can't be watched is ignored rather than taken as a
+/// request to stop.
+async fn shutdown_signal(stopping: &CancellationToken) {
     let ctrl_c = async {
-        tokio::signal::ctrl_c().await.ok();
+        if tokio::signal::ctrl_c().await.is_err() {
+            std::future::pending::<()>().await;
+        }
     };
     #[cfg(unix)]
     let terminate = async {
-        if let Ok(mut sig) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            sig.recv().await;
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
         }
     };
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
     tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
-        _ = SHUTDOWN.notified() => {},
+        () = ctrl_c => {},
+        () = terminate => {},
+        () = SHUTDOWN.notified() => {},
+        () = stopping.cancelled() => {},
     }
 }

@@ -5,6 +5,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
@@ -14,6 +15,9 @@ use serde::Deserialize;
 pub const DEFAULT_PORT: u16 = 7539;
 /// Default port of the Plex-compatible API (Plex Media Server's).
 pub const PLEX_PORT: u16 = 32400;
+/// How long requests in progress may take to finish once the server is told
+/// to stop. Streams (a film playing directly) are cut after that.
+pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Parser)]
 #[command(name = "pley", version, about = "pley — a fast, self-hosted media server")]
@@ -122,6 +126,8 @@ pub struct Config {
     /// Where TVmaze, TheTVDB, MusicBrainz and the Cover Art Archive are
     /// reached. `None` (tests) never contacts them.
     pub metadata_endpoints: Option<crate::providers::Endpoints>,
+    /// See [`SHUTDOWN_GRACE`] (tests shorten it).
+    pub shutdown_grace: Duration,
 }
 
 impl Config {
@@ -164,6 +170,7 @@ impl Config {
             transcoder_token: cli.transcoder_token.clone().or(file.transcoder_token),
             transcoder_max_jobs: file.transcoder_max_jobs.unwrap_or(8).max(1),
             metadata_endpoints: Some(crate::providers::Endpoints::default()),
+            shutdown_grace: SHUTDOWN_GRACE,
             data_dir,
             transcode_dir,
         })
@@ -185,6 +192,7 @@ impl Config {
             transcoder_token: None,
             transcoder_max_jobs: 8,
             metadata_endpoints: None,
+            shutdown_grace: SHUTDOWN_GRACE,
         }
     }
 

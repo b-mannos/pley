@@ -101,5 +101,9 @@ pub async fn events(
         .map(|event| {
             Ok(Event::default().json_data(event).unwrap_or_else(|_| Event::default().comment("encode error")))
         });
+    // The stream never ends on its own and the web UI keeps one open while
+    // someone is signed in: end it when the server stops, or the graceful
+    // shutdown would wait for it.
+    let stream = futures::StreamExt::take_until(stream, state.stopping.clone().cancelled_owned());
     Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
 }

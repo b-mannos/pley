@@ -20,7 +20,7 @@ pub fn serve(runtime: tokio::runtime::Runtime, config: Config) -> anyhow::Result
             let _ = ctx_tx.send(ctx);
             None
         });
-        runtime.block_on(crate::run_with_tray(config, Some(launcher)))
+        crate::run_on(runtime, config, Some(launcher))
     })?;
     let Ok(ctx) = ctx_rx.recv() else {
         // The server stopped before listening (e.g. the port is taken).

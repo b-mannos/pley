@@ -17,7 +17,6 @@ mod xml;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
@@ -49,42 +48,33 @@ pub fn service(state: AppState) -> Service {
     MapRequestLayer::new(normalize as fn(Request) -> Request).layer(router(state, info))
 }
 
-/// Running listener; stop it together with the main server.
-pub struct Listener {
-    stop: tokio::sync::watch::Sender<bool>,
-    task: tokio::task::JoinHandle<()>,
-}
-
-impl Listener {
-    pub async fn stop(self) {
-        let _ = self.stop.send(true);
-        let _ = tokio::time::timeout(Duration::from_secs(5), self.task).await;
+/// The listener of this API when `plex_bind` is configured. A port that is
+/// taken (a real Plex server, for instance) only disables this API.
+pub async fn bind(addr: Option<SocketAddr>) -> Option<tokio::net::TcpListener> {
+    let addr = addr?;
+    match tokio::net::TcpListener::bind(addr).await {
+        Ok(listener) => Some(listener),
+        Err(err) => {
+            tracing::warn!("Plex-compatible API disabled: cannot listen on {addr}: {err}");
+            None
+        }
     }
 }
 
-/// Start the listener when `plex_bind` is configured. A port that is taken
-/// (a real Plex server, for instance) only disables this API.
-pub async fn start(state: &AppState) -> Option<Listener> {
-    let addr = state.config.plex_bind?;
-    let listener = match tokio::net::TcpListener::bind(addr).await {
-        Ok(listener) => listener,
-        Err(err) => {
-            tracing::warn!("Plex-compatible API disabled: cannot listen on {addr}: {err}");
-            return None;
-        }
-    };
-    tracing::info!("Plex-compatible API listening on http://{}", display_addr(addr));
-    let app = axum::ServiceExt::into_make_service_with_connect_info::<SocketAddr>(service(state.clone()));
-    let (stop, mut stopped) = tokio::sync::watch::channel(false);
-    let task = tokio::spawn(async move {
-        let shutdown = async move {
-            let _ = stopped.wait_for(|stop| *stop).await;
-        };
-        if let Err(err) = axum::serve(listener, app).with_graceful_shutdown(shutdown).await {
-            tracing::warn!("Plex-compatible API stopped: {err}");
-        }
-    });
-    Some(Listener { stop, task })
+/// Serve this API on `listener` until `shutdown` completes, then wait for the
+/// requests in progress (the main server limits that wait).
+pub async fn serve(
+    state: AppState,
+    listener: tokio::net::TcpListener,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) {
+    if let Ok(addr) = listener.local_addr() {
+        tracing::info!("Plex-compatible API listening on http://{}", display_addr(addr));
+    }
+    let app = axum::ServiceExt::into_make_service_with_connect_info::<SocketAddr>(service(state));
+    if let Err(err) = axum::serve(listener, app).with_graceful_shutdown(shutdown).await {
+        tracing::warn!("Plex-compatible API stopped: {err}");
+    }
 }
 
 fn display_addr(addr: SocketAddr) -> String {
