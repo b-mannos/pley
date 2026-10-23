@@ -137,7 +137,8 @@ npm workspace for the web UI, both rooted at the top level.
 ## Requirements
 
 - Rust 1.85 or newer (edition 2024).
-- Node.js 20 or newer, to build the web UI.
+- Node.js 22 or newer, to build the web UI (22.22+ or 24.15+ to run its
+  tests).
 - FFmpeg and ffprobe on `PATH`, or configured. Version 6.1 or newer is
   recommended for transcode throttling. For hardware transcoding and GPU tone
   mapping, use a build with NVENC/QSV/AMF/VAAPI and libplacebo, such as the
@@ -168,8 +169,13 @@ To recover a lost password, use
   tested against a local stand-in; `cargo test -p pley-server --test providers
   -- --ignored` checks the real TVmaze and MusicBrainz (and TheTVDB with
   `PLEY_TEST_TVDB_KEY`, plus `PLEY_TEST_TVDB_PIN` if the key needs one).
+- Web UI: `npm test` runs its tests (Vitest, Testing Library, jsdom; next to
+  the code as `*.test.ts(x)`), `npm run check` runs the type check, ESLint and
+  the tests, as CI does. `npm run coverage -w apps/web` writes a coverage
+  report.
 - Lint: `cargo clippy --workspace --all-targets`, `cargo fmt --all` and
-  `npm run typecheck`.
+  `npm run lint` (ESLint with type-aware rules; TypeScript is strict, with
+  `noUncheckedIndexedAccess`).
 - License boundary: `powershell -File scripts/check-licenses.ps1`.
 
 ### Release
