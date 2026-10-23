@@ -133,6 +133,9 @@ data class ServerInfo(val name: String, val version: String, val setupRequired: 
 
 class ApiException(val status: Int, message: String) : IOException(message)
 
+/** How the app's requests introduce themselves (the server names the device after it). */
+val USER_AGENT = "pleyAndroid/${BuildConfig.VERSION_NAME} (Android ${android.os.Build.VERSION.RELEASE})"
+
 /** Why a request failed, in a few words for people. */
 fun describe(error: Throwable): String = when (error) {
     is java.net.ConnectException -> "nothing answers there"
@@ -154,6 +157,7 @@ class PleyApi(private val server: String, private val token: String?) {
                 connection.connectTimeout = 10_000
                 connection.readTimeout = 20_000
                 connection.setRequestProperty("Accept", "application/json")
+                connection.setRequestProperty("User-Agent", USER_AGENT)
                 if (token != null) connection.setRequestProperty("Authorization", "Bearer $token")
                 if (body != null) {
                     connection.doOutput = true

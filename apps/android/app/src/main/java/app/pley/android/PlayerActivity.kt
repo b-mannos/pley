@@ -99,7 +99,7 @@ class PlayerActivity : ComponentActivity() {
 
     private fun newPlayer(): ExoPlayer {
         val http = DefaultHttpDataSource.Factory()
-            .setUserAgent("pleyAndroid/${BuildConfig.VERSION_NAME}")
+            .setUserAgent(USER_AGENT)
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(token?.let { mapOf("Authorization" to "Bearer $it") } ?: emptyMap())
         val exo = ExoPlayer.Builder(this)

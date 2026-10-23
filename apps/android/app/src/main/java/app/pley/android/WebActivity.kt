@@ -14,6 +14,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.activity.enableEdgeToEdge
@@ -66,12 +67,16 @@ class WebActivity : ComponentActivity() {
             webChromeClient = Chrome()
             addJavascriptInterface(PlayerBridge(this@WebActivity, server), "PleyAndroid")
         }
-        ViewCompat.setOnApplyWindowInsetsListener(web) { view, insets ->
+        // The page stays clear of the status and navigation bars (and the
+        // keyboard): a web view's own padding wouldn't move its content.
+        val root = FrameLayout(this).apply { setBackgroundColor(0xFF0B0D10.toInt()) }
+        root.addView(web, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
             view.updatePadding(left = bars.left, top = bars.top, right = bars.right, bottom = bars.bottom)
             WindowInsetsCompat.CONSUMED
         }
-        setContentView(web)
+        setContentView(root)
         onBackPressedDispatcher.addCallback(this) {
             if (web.canGoBack()) web.goBack() else finish()
         }

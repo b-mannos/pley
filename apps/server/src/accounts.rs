@@ -274,6 +274,10 @@ impl Drop for Attempt<'_> {
 /// "Chrome on Windows", "Safari on iPhone", or the raw agent for other clients.
 pub fn device_name(user_agent: Option<&str>) -> String {
     let Some(ua) = user_agent.filter(|u| !u.is_empty()) else { return "Unknown device".into() };
+    // The Android app, its web view and its player all say pleyAndroid/.
+    if ua.contains("pleyAndroid/") {
+        return "pley for Android".into();
+    }
     let browser = if ua.contains("Edg/") {
         Some("Edge")
     } else if ua.contains("OPR/") || ua.contains("Opera") {
@@ -356,6 +360,9 @@ mod tests {
         assert_eq!(device_name(Some(iphone)), "Safari on iPhone");
         assert_eq!(device_name(Some("python-requests/2.32")), "python-requests/2.32");
         assert_eq!(device_name(None), "Unknown device");
+        let web_view = "Mozilla/5.0 (Linux; Android 16; Pixel 9; wv) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36 pleyAndroid/0.1.0";
+        assert_eq!(device_name(Some(web_view)), "pley for Android");
+        assert_eq!(device_name(Some("pleyAndroid/0.1.0 (Android 16)")), "pley for Android");
     }
 
     #[test]
