@@ -59,6 +59,7 @@ pub fn router(state: AppState) -> Router {
         .route("/me/devices/{id}", delete(accounts::sign_out_device))
         .route("/libraries", get(libraries::list).post(libraries::create))
         .route("/libraries/scan", post(libraries::scan_all))
+        .route("/libraries/order", put(libraries::reorder))
         .route("/libraries/{id}", get(libraries::get).patch(libraries::update).delete(libraries::remove))
         .route("/libraries/{id}/scan", post(libraries::scan))
         .route("/libraries/{id}/items", get(libraries::items))

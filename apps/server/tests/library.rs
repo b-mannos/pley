@@ -1,7 +1,8 @@
 //! Libraries and items through pley's API (docs/API.md: Libraries, Items,
 //! Watch history, System): what administrators may change and how it is
-//! checked, folders that go offline, item endpoints that refuse what makes
-//! no sense, metadata edits, hubs and history filters.
+//! checked, the order libraries are listed in, folders that go offline, item
+//! endpoints that refuse what makes no sense, metadata edits, hubs and
+//! history filters.
 
 mod common;
 
@@ -92,6 +93,79 @@ async fn moving_and_deleting_a_library() {
     assert_eq!(app.delete(&format!("/api/libraries/{lib}"), &admin).await.status, StatusCode::NOT_FOUND);
     // The file on disk is never touched.
     assert!(app.media.path().join("new/Brazil (1985).mkv").is_file());
+}
+
+/// Names of a list of libraries.
+fn names(libraries: &Value) -> Vec<String> {
+    libraries.as_array().unwrap().iter().map(|l| l["name"].as_str().unwrap().to_owned()).collect()
+}
+
+/// Names of the libraries `token` sees, in their order.
+async fn library_names(app: &TestApp, token: &str) -> Vec<String> {
+    let reply = app.get("/api/libraries", token).await;
+    assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+    names(&reply.body)
+}
+
+#[tokio::test]
+async fn libraries_are_listed_in_the_order_administrators_choose() {
+    use pley::events::ServerEvent;
+
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("tv/Show (2015)/Season 01/Show - S01E01.mkv", 1024);
+    app.media_file("movies/Alien (1979).mkv", 1024);
+    app.media_file("music/Band/Record (2001)/01 - Song.mp3", 512);
+    // New libraries go last, whatever they are called.
+    let tv = app.library(&admin, "TV", "shows", "tv").await;
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let music = app.library(&admin, "Music", "music", "music").await;
+    assert_eq!(library_names(&app, &admin).await, ["TV", "Movies", "Music"]);
+
+    let mut events = app.state.events.subscribe();
+    let order = app.put("/api/libraries/order", &admin, json!({"ids": [music, tv, movies]})).await;
+    assert_eq!(order.status, StatusCode::OK, "{:?}", order.body);
+    assert_eq!(names(&order.body), ["Music", "TV", "Movies"], "the answer is the new order");
+    assert_eq!(library_names(&app, &admin).await, ["Music", "TV", "Movies"]);
+    let announced = std::iter::from_fn(|| events.try_recv().ok()).any(|e| matches!(e, ServerEvent::LibrariesChanged));
+    assert!(announced, "open pages are told");
+
+    // The order lists every library once; nothing changes otherwise.
+    for (ids, status) in [
+        (json!([music, tv, movies, tv]), StatusCode::BAD_REQUEST),
+        (json!([music, tv]), StatusCode::CONFLICT),
+        (json!([music, tv, 999]), StatusCode::CONFLICT),
+        (json!([music, tv, movies, 999]), StatusCode::CONFLICT),
+        (json!([]), StatusCode::CONFLICT),
+    ] {
+        let reply = app.put("/api/libraries/order", &admin, json!({"ids": ids})).await;
+        assert_eq!(reply.status, status, "{ids}: {:?}", reply.body);
+    }
+    let (bob, _) = app.user(&admin, "bob", json!({})).await;
+    let theirs = app.put("/api/libraries/order", &bob, json!({"ids": [movies, tv, music]})).await;
+    assert_eq!(theirs.status, StatusCode::FORBIDDEN, "only administrators choose it");
+    assert_eq!(library_names(&app, &admin).await, ["Music", "TV", "Movies"]);
+
+    // Everyone sees that order, with only the libraries they may open, and
+    // so do the home page's rows of each library.
+    assert_eq!(library_names(&app, &bob).await, ["Music", "TV", "Movies"]);
+    let (kid, _) = app.user(&admin, "kid", json!({"all_libraries": false, "library_ids": [movies, music]})).await;
+    assert_eq!(library_names(&app, &kid).await, ["Music", "Movies"]);
+    let rows = ["Recently Added in Music", "Recently Added in TV", "Recently Added in Movies"];
+    assert_eq!(titles(&app.get("/api/hubs/home", &admin).await.body["hubs"]), rows);
+    assert_eq!(titles(&app.get("/api/hubs/home", &kid).await.body["hubs"]), [rows[0], rows[2]]);
+
+    // New libraries still go last; a deleted one leaves the others in place.
+    app.media_file("anime/Akira (1988).mkv", 1024);
+    let anime = app.library(&admin, "Anime", "movies", "anime").await;
+    assert_eq!(library_names(&app, &admin).await, ["Music", "TV", "Movies", "Anime"]);
+    assert_eq!(app.delete(&format!("/api/libraries/{tv}"), &admin).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(library_names(&app, &admin).await, ["Music", "Movies", "Anime"]);
+    let stale = app.put("/api/libraries/order", &admin, json!({"ids": [anime, tv, movies, music]})).await;
+    assert_eq!(stale.status, StatusCode::CONFLICT, "made before the library was deleted");
+    let order = app.put("/api/libraries/order", &admin, json!({"ids": [anime, movies, music]})).await;
+    assert_eq!(order.status, StatusCode::OK, "{:?}", order.body);
+    assert_eq!(library_names(&app, &admin).await, ["Anime", "Movies", "Music"]);
 }
 
 #[tokio::test]

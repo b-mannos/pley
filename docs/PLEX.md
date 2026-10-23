@@ -62,6 +62,8 @@ parameters; containers report `size`, `totalSize` and `offset`.
 - **IDs.** `ratingKey` is the pley item id and `librarySectionID` the library
   id. Media and parts use the media file id. Stream ids are
   `file id × 10000 + stream index`.
+- **Order.** Sections, and the home hubs of each, come in the order
+  administrators choose in pley (Settings → Libraries); new ones come last.
 - **Types.** Movies and episodes are `Video` elements, shows, seasons, artists
   and albums are `Directory` elements, and tracks are `Track` elements, with
   Plex's `type` values.

@@ -1,13 +1,14 @@
 //! More of the Plex-compatible API (docs/PLEX.md): server endpoints, section
-//! listings and filter choices, hubs, watch-state reports and what only
-//! administrators may do. tests/plex.rs covers the basics.
+//! listings and filter choices, the order of sections, hubs, watch-state
+//! reports and what only administrators may do. tests/plex.rs covers the
+//! basics.
 
 mod common;
 
 use axum::http::{Method, StatusCode};
 use serde_json::{Value, json};
 
-use common::{TestApp, plex_titles};
+use common::{TestApp, plex_titles, titles};
 
 /// Movies with genres and ratings, a two-season show and an album.
 async fn world() -> (TestApp, String, i64, i64, i64) {
@@ -251,6 +252,25 @@ async fn section_directories_and_filter_choices() {
     assert_eq!(plex_titles(&tracks), ["First", "Second"]);
     assert_eq!(tracks["Metadata"][1]["grandparentTitle"], json!("Band"));
     assert_eq!(tracks["Metadata"][1]["parentIndex"], json!(1), "disc 1 when there is no disc number");
+}
+
+#[tokio::test]
+async fn sections_and_hubs_follow_the_library_order() {
+    let (app, admin, movies, tv, music) = world().await;
+    let order = app.put("/api/libraries/order", &admin, json!({"ids": [tv, music, movies]})).await;
+    assert_eq!(order.status, StatusCode::OK, "{:?}", order.body);
+    let (kid, _) = app.user(&admin, "kid", json!({"all_libraries": false, "library_ids": [movies, tv]})).await;
+
+    // Everyone sees the sections in that order, users only theirs.
+    for (token, wanted) in [(&admin, vec!["TV", "Music", "Movies"]), (&kid, vec!["TV", "Movies"])] {
+        let sections = app.plex_json("/library/sections", token).await;
+        assert_eq!(directory_titles(&sections), wanted);
+        let providers = app.plex_json("/media/providers", token).await;
+        assert_eq!(directory_titles(&providers["MediaProvider"][0]["Feature"][0]), wanted);
+        let hubs = app.plex_json("/hubs", token).await;
+        let rows: Vec<String> = wanted.iter().map(|name| format!("Recently Added in {name}")).collect();
+        assert_eq!(titles(&hubs["Hub"]), rows);
+    }
 }
 
 #[tokio::test]

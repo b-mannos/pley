@@ -291,11 +291,12 @@ async fn sections_paged_together_and_newest_first() {
     for size in [1, 2, 5, 7] {
         assert_eq!(paged_titles(app, admin, "/library/all?type=1&sort=year:desc", size).await.len(), 18);
     }
-    // Equal titles in different sections: section by section (by name), then by id.
+    // Equal titles in different sections: section by section (in the order
+    // they are listed, the newest last), then by id.
     let uri = "/library/all?type=1&title=alien&sort=titleSort:desc";
     assert_eq!(paged_titles(app, admin, uri, 1).await.len(), 4);
     let [first, second] = aliens(&w);
-    let expected = [more_ids["Aliens"], more_ids["Alien"], w.ids[first], w.ids[second]].map(|id| id.to_string());
+    let expected = [more_ids["Aliens"], w.ids[first], w.ids[second], more_ids["Alien"]].map(|id| id.to_string());
     assert_eq!(keys(&app.plex_json(uri, admin).await), expected);
 
     let recent = app.plex_json(&format!("/hubs/home/recentlyAdded?type=1&sectionID={more}"), admin).await;

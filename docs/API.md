@@ -367,10 +367,16 @@ hubs, search, artwork, streams and the Plex-compatible API.
 
 ## Libraries
 
+Libraries are listed in one order, the same for every user: the one
+administrators choose (new libraries go last). Lists of libraries, the home
+page's rows and the Plex-compatible API's sections all follow it; users who
+may open only some libraries see those, in that order.
+
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
-| GET | `/api/libraries` | – | `Library[]` |
+| GET | `/api/libraries` | – | `Library[]` in their order |
 | POST | `/api/libraries` *(admin)* | `{ name, kind, paths: string[] }` | `Library` (a scan is queued automatically) |
+| PUT | `/api/libraries/order` *(admin)* | `{ ids: Id[] }` (every library, once) | `Library[]` in the new order. `400` when an id is listed twice, `409` when `ids` aren't the libraries there are (one was added or deleted since they were listed) |
 | GET | `/api/libraries/{id}` | – | `Library` |
 | PATCH | `/api/libraries/{id}` *(admin)* | `{ name?, paths? }` | `Library` |
 | DELETE | `/api/libraries/{id}` *(admin)* | – | `204` |
@@ -409,7 +415,7 @@ hubs, search, artwork, streams and the Plex-compatible API.
 
 | Method | Path | Query | Response |
 |---|---|---|---|
-| GET | `/api/hubs/home` | – | `{ hubs: Hub[] }` – `continue_watching` (in-progress + next up), then `recently_added:<library_id>` per library |
+| GET | `/api/hubs/home` | – | `{ hubs: Hub[] }` – `continue_watching` (in-progress + next up), then `recently_added:<library_id>` per library, in the libraries' order |
 | GET | `/api/search` | `q`, `limit` (default 40) | `{ items: ItemSummary[], people: PersonSummary[] }`: items ranked by relevance; people whose name has words starting with each word of `q`, most credited first |
 
 ## Cast and crew
@@ -698,7 +704,7 @@ type ServerEvent =
   | { type: "scan_progress"; library_id: Id; phase: ScanStatus["phase"]; processed: number; total: number }
   | { type: "scan_finished"; library_id: Id; added: number; updated: number; removed: number }
   | { type: "library_changed"; library_id: Id }      // items/metadata changed → refetch
-  | { type: "libraries_changed" }                    // library created/updated/deleted
+  | { type: "libraries_changed" }                    // library created/updated/deleted, or the order changed
   | { type: "sessions_changed" };
 ```
 

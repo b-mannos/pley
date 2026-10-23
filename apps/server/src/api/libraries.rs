@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use axum::Json;
@@ -14,7 +14,7 @@ use crate::auth::{AdminUser, AuthUser};
 use crate::catalog::{self, ItemSummary, LibraryQuery, SortKey};
 use crate::error::{ApiResult, AppError};
 use crate::events::ServerEvent;
-use crate::library::{LibraryKind, LibraryRow, get_library};
+use crate::library::{LibraryKind, LibraryRow, get_library, set_order};
 use crate::state::AppState;
 use crate::util::now;
 
@@ -116,14 +116,17 @@ pub async fn create(
         return Err(AppError::bad_request("library name must be 1-100 characters"));
     }
     let paths = validate_paths(&body.paths)?;
-    let id: i64 =
-        sqlx::query_scalar("INSERT INTO libraries (name, kind, paths, created_at) VALUES (?, ?, ?, ?) RETURNING id")
-            .bind(name)
-            .bind(body.kind.as_str())
-            .bind(serde_json::to_string(&paths).map_err(|e| AppError::Internal(e.into()))?)
-            .bind(now())
-            .fetch_one(&state.db.write)
-            .await?;
+    // Listed last.
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO libraries (name, kind, paths, created_at, position)
+         VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(position) + 1, 0) FROM libraries)) RETURNING id",
+    )
+    .bind(name)
+    .bind(body.kind.as_str())
+    .bind(serde_json::to_string(&paths).map_err(|e| AppError::Internal(e.into()))?)
+    .bind(now())
+    .fetch_one(&state.db.write)
+    .await?;
     state.scanner.enqueue(id, false);
     state.watcher.reload().await;
     state.events.send(ServerEvent::LibrariesChanged);
@@ -166,6 +169,29 @@ pub async fn update(
     state.events.send(ServerEvent::LibrariesChanged);
     let lib = library_or_404(&state, id).await?;
     Ok(Json(to_dto(&state, &lib).await?))
+}
+
+#[derive(Deserialize)]
+pub struct LibraryOrder {
+    ids: Vec<i64>,
+}
+
+/// The order libraries are listed in, for everyone: `ids` lists every
+/// library once. Answers them in their new order.
+pub async fn reorder(
+    State(state): State<AppState>,
+    AdminUser(admin): AdminUser,
+    Json(body): Json<LibraryOrder>,
+) -> ApiResult<Json<Vec<LibraryDto>>> {
+    let mut seen = HashSet::new();
+    if let Some(id) = body.ids.iter().find(|id| !seen.insert(**id)) {
+        return Err(AppError::bad_request(format!("library {id} is listed twice")));
+    }
+    if !set_order(&state.db, &body.ids).await? {
+        return Err(AppError::conflict("the libraries have changed: the order must list each of them once"));
+    }
+    state.events.send(ServerEvent::LibrariesChanged);
+    list(State(state), admin).await
 }
 
 pub async fn remove(State(state): State<AppState>, _admin: AdminUser, Path(id): Path<i64>) -> ApiResult<StatusCode> {

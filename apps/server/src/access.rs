@@ -22,6 +22,7 @@ pub async fn library_ids(db: &Db, user: &AuthUser) -> sqlx::Result<Option<Vec<i6
     Ok(Some(ids))
 }
 
+/// The libraries the user may open, in the order everyone sees them in.
 pub async fn visible_libraries(db: &Db, user: &AuthUser) -> sqlx::Result<Vec<LibraryRow>> {
     let all = list_libraries(db).await?;
     Ok(match library_ids(db, user).await? {

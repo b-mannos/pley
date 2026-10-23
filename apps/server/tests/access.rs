@@ -213,7 +213,7 @@ async fn a_library_the_user_may_not_open_does_not_exist_for_them() {
 
     let libraries = app.get("/api/libraries", kid).await;
     let names: Vec<&str> = libraries.body.as_array().unwrap().iter().map(|l| l["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["Movies", "Music", "TV"]);
+    assert_eq!(names, ["Movies", "TV", "Music"]);
     for path in ["", "/items", "/filters", "/hubs", "/collections"] {
         let reply = app.get(&format!("/api/libraries/{}{path}", w.private), kid).await;
         assert_eq!(reply.status, StatusCode::NOT_FOUND, "/api/libraries/{{private}}{path}");
@@ -227,7 +227,7 @@ async fn a_library_the_user_may_not_open_does_not_exist_for_them() {
     let sections = app.plex_json("/library/sections", kid).await;
     let keys: Vec<&str> =
         sections["Directory"].as_array().unwrap().iter().map(|d| d["key"].as_str().unwrap()).collect();
-    assert_eq!(keys, [w.movies.to_string(), w.music.to_string(), w.tv.to_string()]);
+    assert_eq!(keys, [w.movies.to_string(), w.tv.to_string(), w.music.to_string()]);
     for path in ["", "/all", "/recentlyAdded", "/onDeck", "/genre", "/firstCharacter", "/search?query=secret"] {
         let reply = app.plex(Method::GET, &format!("/library/sections/{}{path}", w.private), kid, &[]).await;
         assert_eq!(reply.status, StatusCode::NOT_FOUND, "/library/sections/{{private}}{path}");
