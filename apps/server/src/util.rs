@@ -23,6 +23,8 @@ pub fn system_time_secs(t: SystemTime) -> i64 {
 }
 
 /// Lossy UTF-8 string of a path (paths are stored as text in the database).
+/// Scans leave out names that are not valid UTF-8 (library/walk.rs), so the
+/// paths of library files convert back exactly.
 pub fn path_str(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }

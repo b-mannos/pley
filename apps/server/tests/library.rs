@@ -236,6 +236,70 @@ async fn rescans_do_not_hold_up_other_writes() {
     assert_eq!(with_subtitles, 1_500);
 }
 
+/// A file name that is not valid UTF-8: a Latin-1 byte (Unix) or a lone
+/// surrogate (Windows).
+fn not_utf8(start: &str, end: &str) -> Option<std::ffi::OsString> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        let mut bytes = start.as_bytes().to_vec();
+        bytes.push(0xe9);
+        bytes.extend_from_slice(end.as_bytes());
+        Some(std::ffi::OsString::from_vec(bytes))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        let mut wide: Vec<u16> = start.encode_utf16().collect();
+        wide.push(0xd800);
+        wide.extend(end.encode_utf16());
+        Some(std::ffi::OsString::from_wide(&wide))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (start, end);
+        None
+    }
+}
+
+#[tokio::test]
+async fn files_whose_names_are_not_utf8_are_left_out() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Heat (1995).mkv", 1024);
+    let Some(name) = not_utf8("Caf", " (2001).mkv") else { return };
+    // Some file systems (APFS) refuse such names: nothing to test there.
+    if std::fs::write(app.media.path().join("movies").join(&name), b"x").is_err() {
+        return;
+    }
+    let library = app.library(&admin, "Movies", "movies", "movies").await;
+    assert_eq!(titles(&app.get(&format!("/api/libraries/{library}/items"), &admin).await.body["items"]), ["Heat"]);
+
+    // Earlier versions listed it under a lossy name that could not be played:
+    // the next scan removes that.
+    let lossy = app.media.path().join("movies").join(&name).to_string_lossy().into_owned();
+    assert!(lossy.contains('\u{fffd}'));
+    sqlx::query(
+        "INSERT INTO items (id, library_id, kind, key, title, sort_title, added_at, updated_at)
+         VALUES (999, ?, 'movie', 'movie:caf:2001', 'Caf (2001)', 'caf', 0, 0)",
+    )
+    .bind(library)
+    .execute(&app.state.db.write)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO media_files (item_id, library_id, path, size, mtime, added_at, updated_at)
+         VALUES (999, ?, ?, 1, 0, 0, 0)",
+    )
+    .bind(library)
+    .bind(&lossy)
+    .execute(&app.state.db.write)
+    .await
+    .unwrap();
+    rescan(&app, &admin, library).await;
+    assert_eq!(titles(&app.get(&format!("/api/libraries/{library}/items"), &admin).await.body["items"]), ["Heat"]);
+}
+
 #[tokio::test]
 async fn item_endpoints_refuse_what_makes_no_sense() {
     let app = TestApp::new().await;

@@ -2,7 +2,8 @@
 //! subtitles) next to them, skipping system folders and samples. Bonus
 //! material (trailers, featurettes, …) is found with Plex's conventions:
 //! folders such as `Trailers` or `Behind The Scenes` next to the movie or in
-//! the show folder, or a suffix such as `Movie (2020)-trailer.mkv`.
+//! the show folder, or a suffix such as `Movie (2020)-trailer.mkv`. Names
+//! that are not valid UTF-8 are left out: paths are kept as text.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -193,6 +194,10 @@ fn is_sample(path: &Path, size: u64) -> bool {
 
 pub fn walk(roots: &[PathBuf], kind: LibraryKind) -> Walked {
     let mut out = Walked::default();
+    // Paths are kept as text: a name that is not valid UTF-8 (a Latin-1 name
+    // on Linux, say) could not be found again to play or probe it.
+    let mut not_utf8_dirs = Vec::new();
+    let mut not_utf8_files = Vec::new();
     for root in roots {
         if std::fs::read_dir(root).is_err() {
             tracing::warn!("library folder {} is not accessible; skipping", root.display());
@@ -214,6 +219,10 @@ pub fn walk(roots: &[PathBuf], kind: LibraryKind) -> Walked {
                 if kind != LibraryKind::Music && SAMPLE_DIRS.contains(&name.as_str()) {
                     return false;
                 }
+                if entry.file_name().to_str().is_none() {
+                    not_utf8_dirs.push(entry.path().to_path_buf());
+                    return false;
+                }
             }
             true
         });
@@ -231,16 +240,18 @@ pub fn walk(roots: &[PathBuf], kind: LibraryKind) -> Walked {
             }
             let path = entry.path();
             let ext = extension(path);
-            if IMAGE_EXTENSIONS.contains(&ext.as_str()) || SUBTITLE_EXTENSIONS.contains(&ext.as_str()) {
-                if let Some(dir) = path.parent() {
-                    out.sidecars
-                        .entry(dir.to_path_buf())
-                        .or_default()
-                        .push(entry.file_name().to_string_lossy().into_owned());
-                }
+            let sidecar = IMAGE_EXTENSIONS.contains(&ext.as_str()) || SUBTITLE_EXTENSIONS.contains(&ext.as_str());
+            if !sidecar && !is_media_file(path, kind) {
                 continue;
             }
-            if !is_media_file(path, kind) {
+            let Some(name) = entry.file_name().to_str() else {
+                not_utf8_files.push(path.to_path_buf());
+                continue;
+            };
+            if sidecar {
+                if let Some(dir) = path.parent() {
+                    out.sidecars.entry(dir.to_path_buf()).or_default().push(name.to_owned());
+                }
                 continue;
             }
             let Ok(meta) = entry.metadata() else {
@@ -259,12 +270,74 @@ pub fn walk(roots: &[PathBuf], kind: LibraryKind) -> Walked {
             });
         }
     }
+    // Once per scan rather than once per file.
+    let skipped = not_utf8_dirs.len() + not_utf8_files.len();
+    if let Some(example) = not_utf8_dirs.first().or(not_utf8_files.first()) {
+        tracing::warn!(
+            "left out {skipped} folders and files whose names are not valid UTF-8, such as {}: rename them to add them",
+            example.display()
+        );
+    }
     out
 }
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+
     use super::*;
+
+    /// A name with a byte (Unix) or a code unit (Windows) that is not valid
+    /// UTF-8, as Latin-1 names from old Samba shares are.
+    fn not_utf8(start: &str, end: &str) -> Option<OsString> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            let mut bytes = start.as_bytes().to_vec();
+            bytes.push(0xe9);
+            bytes.extend_from_slice(end.as_bytes());
+            Some(OsString::from_vec(bytes))
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStringExt;
+            let mut wide: Vec<u16> = start.encode_utf16().collect();
+            wide.push(0xd800);
+            wide.extend(end.encode_utf16());
+            Some(OsString::from_wide(&wide))
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = (start, end);
+            None
+        }
+    }
+
+    #[test]
+    fn names_that_are_not_utf8_are_left_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("Heat (1995).mkv"), b"x").unwrap();
+        let (Some(file), Some(folder), Some(poster)) =
+            (not_utf8("Caf", " (2001).mkv"), not_utf8("Am", "lie (2001)"), not_utf8("Caf", ".jpg"))
+        else {
+            return;
+        };
+        // Some file systems (APFS) refuse such names: nothing to test there.
+        if std::fs::write(root.join(&file), b"x").is_err() {
+            return;
+        }
+        std::fs::create_dir(root.join(&folder)).unwrap();
+        std::fs::write(root.join(&folder).join("Amelie (2001).mkv"), b"x").unwrap();
+        std::fs::write(root.join(&poster), b"x").unwrap();
+        std::fs::write(root.join("poster.jpg"), b"x").unwrap();
+
+        let walked = walk(&[root.to_path_buf()], LibraryKind::Movies);
+        let media: Vec<_> = walked.media.iter().map(|f| f.path.clone()).collect();
+        assert_eq!(media, [root.join("Heat (1995).mkv")]);
+        assert_eq!(walked.sidecars[root], ["poster.jpg"]);
+        assert!(walked.unreadable.is_empty() && walked.offline_roots.is_empty());
+    }
 
     #[test]
     fn samples_and_trailers() {
