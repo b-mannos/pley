@@ -578,4 +578,143 @@ mod tests {
         assert!(path.starts_with(dir.path().join("metadata").join("blobs")));
         assert_eq!(store.path("C:/media/poster.jpg").unwrap(), PathBuf::from("C:/media/poster.jpg"));
     }
+
+    async fn store_in(dir: &Path) -> Store {
+        let db = Db::open(&dir.join("pley.db")).await.unwrap();
+        sqlx::query(
+            "INSERT INTO libraries (id, name, kind, paths, created_at) VALUES (1, 'Movies', 'movies', '[]', 0)",
+        )
+        .execute(&db.write)
+        .await
+        .unwrap();
+        Store::new(db, &dir.join("metadata"), &dir.join("media"), &dir.join("cache"))
+    }
+
+    #[tokio::test]
+    async fn clean_up_spares_what_is_used_and_what_is_new() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path()).await;
+        let used = store.put(b"\xff\xd8\xff\xe0 used", "jpg").await.unwrap();
+        let unused = store.put(b"\xff\xd8\xff\xe0 unused", "jpg").await.unwrap();
+        let photo = store.put(b"\xff\xd8\xff\xe0 photo", "jpg").await.unwrap();
+        sqlx::query(
+            "INSERT INTO items (id, library_id, kind, key, title, sort_title, poster, added_at, updated_at)
+             VALUES (1, 1, 'movie', 'm', 'M', 'm', ?, 0, 0)",
+        )
+        .bind(&used)
+        .execute(&store.db.write)
+        .await
+        .unwrap();
+        // A download nothing uses any more is forgotten with its picture.
+        sqlx::query("INSERT INTO remote_images (url, blob, fetched_at) VALUES ('https://image.tmdb.org/x.jpg', ?, 0)")
+            .bind(&photo)
+            .execute(&store.db.write)
+            .await
+            .unwrap();
+        // Media folders: one of a known file, one of a file that is gone.
+        sqlx::query(
+            "INSERT INTO media_files (item_id, library_id, path, size, mtime, fingerprint, added_at, updated_at)
+             VALUES (1, 1, '/m/a.mkv', 1, 0, '0123456789abcdef', 0, 0)",
+        )
+        .execute(&store.db.write)
+        .await
+        .unwrap();
+        for fp in ["0123456789abcdef", "fedcba9876543210"] {
+            let folder = store.media_dir(fp).unwrap();
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(folder.join("thumb.jpg"), b"jpeg").unwrap();
+        }
+        let before = store.usage().await.unwrap();
+        assert_eq!((before.blobs, before.media_folders), (3, 2));
+
+        // Everything is younger than the grace period: nothing goes.
+        let report = store.clean().await.unwrap();
+        assert_eq!((report.blobs_removed, report.media_folders_removed), (0, 0));
+
+        let report = store.clean_older_than(Duration::ZERO).await.unwrap();
+        assert_eq!((report.blobs_removed, report.media_folders_removed), (2, 1));
+        assert!(report.bytes_freed > 0);
+        assert!(store.exists(&used) && !store.exists(&unused) && !store.exists(&photo));
+        assert!(store.media_dir("0123456789abcdef").unwrap().is_dir());
+        assert!(!store.media_dir("fedcba9876543210").unwrap().exists());
+        let remote: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM remote_images").fetch_one(&store.db.read).await.unwrap();
+        assert_eq!(remote, 0);
+        let after = store.usage().await.unwrap();
+        assert_eq!((after.blobs, after.media_folders), (1, 1));
+    }
+
+    #[tokio::test]
+    async fn downloads_are_reused_and_only_from_image_hosts() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path()).await;
+        let blob = store.put(b"\x89PNG\r\n\x1a\n known", "png").await.unwrap();
+        let url = "https://image.tmdb.org/t/p/original/known.png";
+        sqlx::query("INSERT INTO remote_images (url, blob, fetched_at) VALUES (?, ?, 0)")
+            .bind(url)
+            .bind(&blob)
+            .execute(&store.db.write)
+            .await
+            .unwrap();
+        assert_eq!(store.remote(url).await.unwrap(), blob, "no download for a known URL");
+        for url in [
+            "http://image.tmdb.org/x.jpg",
+            "https://127.0.0.1/x.jpg",
+            "file:///etc/passwd",
+            "https://evil.example/x.jpg",
+        ] {
+            let err = store.remote(url).await.unwrap_err();
+            assert!(err.to_string().contains("not downloaded"), "{url}: {err}");
+        }
+    }
+
+    #[test]
+    fn only_fingerprints_name_media_folders() {
+        let store_dir = Path::new("/data/media");
+        let path = |fp: &str| valid_fingerprint(fp).then(|| store_dir.join(&fp[..2]).join(fp));
+        assert!(path("0123456789abcdef").is_some());
+        assert!(path("../../etc/passwd").is_none());
+        assert!(path("0123456789abcde").is_none());
+        assert!(path("0123456789abcdeg").is_none());
+        assert_eq!(like_escape("C:\\100%_done^"), "C:\\100^%^_done^^");
+        assert_eq!(picture_ext(b"\xff\xd8\xff\xe0 jpeg"), Some("jpg"));
+        assert_eq!(picture_ext(b"GIF89a......"), Some("gif"));
+        assert_eq!(picture_ext(b"%PDF-1.7"), None);
+    }
+
+    #[tokio::test]
+    async fn unreadable_files_get_an_empty_fingerprint_and_are_retried_when_they_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path()).await;
+        let readable = dir.path().join("a.mkv");
+        std::fs::write(&readable, vec![1u8; 100]).unwrap();
+        sqlx::query(
+            "INSERT INTO items (id, library_id, kind, key, title, sort_title, added_at, updated_at)
+             VALUES (1, 1, 'movie', 'm', 'M', 'm', 0, 0)",
+        )
+        .execute(&store.db.write)
+        .await
+        .unwrap();
+        for (id, path) in [(1, path_str(&readable)), (2, path_str(&dir.path().join("offline.mkv")))] {
+            sqlx::query(
+                "INSERT INTO media_files (id, item_id, library_id, path, size, mtime, added_at, updated_at)
+                 VALUES (?, 1, 1, ?, 100, 0, 0, 0)",
+            )
+            .bind(id)
+            .bind(path)
+            .execute(&store.db.write)
+            .await
+            .unwrap();
+        }
+        store.fingerprint_pending().await;
+        let fps: Vec<Option<String>> = sqlx::query_scalar("SELECT fingerprint FROM media_files ORDER BY id")
+            .fetch_all(&store.db.read)
+            .await
+            .unwrap();
+        assert_eq!(fps[0].as_deref(), Some(fingerprint(&readable).unwrap().as_str()));
+        assert_eq!(fps[1].as_deref(), Some(""), "marked, so the loop ends");
+        assert!(store.media_dir("").is_none(), "the marker names no folder");
+        let fp = store.fingerprint_of(2, &path_str(&readable), Some("")).await.unwrap();
+        assert_eq!(fp.len(), 16, "an invalid stored value is computed again");
+    }
 }

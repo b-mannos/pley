@@ -176,4 +176,45 @@ mod tests {
         assert_eq!(value, "1");
         assert_eq!(backups.list().await.len(), 1);
     }
+
+    #[tokio::test]
+    async fn only_the_newest_backups_are_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("pley.db")).await.unwrap();
+        let backups = Backups::new(db, dir.path());
+        let folder = dir.path().join("backups");
+        std::fs::create_dir_all(&folder).unwrap();
+        // Three older backups, a day apart, and files that are not backups.
+        let day = std::time::Duration::from_secs(86_400);
+        for (n, name) in
+            ["pley-2020-01-01-0000.db", "pley-2020-01-02-0000.db", "pley-2020-01-03-0000.db"].into_iter().enumerate()
+        {
+            let file = std::fs::File::create(folder.join(name)).unwrap();
+            let age = day * (10 - n as u32);
+            file.set_modified(std::time::SystemTime::now() - age).unwrap();
+        }
+        std::fs::write(folder.join("pley-2020-01-04-0000.db.part"), b"unfinished").unwrap();
+        std::fs::write(folder.join("notes.txt"), b"x").unwrap();
+        let listed: Vec<String> = backups.list().await.into_iter().map(|b| b.name).collect();
+        assert_eq!(listed, ["pley-2020-01-03-0000.db", "pley-2020-01-02-0000.db", "pley-2020-01-01-0000.db"]);
+
+        let new = backups.create().await.unwrap();
+        let listed: Vec<String> = backups.list().await.into_iter().map(|b| b.name).collect();
+        assert_eq!(listed, [new.name.as_str(), "pley-2020-01-03-0000.db", "pley-2020-01-02-0000.db"]);
+        assert!(!folder.join("pley-2020-01-01-0000.db").exists(), "the oldest is removed");
+        assert!(folder.join("notes.txt").exists(), "other files are left alone");
+    }
+
+    #[tokio::test]
+    async fn health_is_unknown_until_checked() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("pley.db")).await.unwrap();
+        let backups = Backups::new(db, dir.path());
+        assert_eq!((backups.health().ok, backups.health().checked_at), (None, None));
+        assert!(backups.list().await.is_empty(), "no folder yet: no backups");
+        backups.check().await;
+        let health = backups.health();
+        assert_eq!((health.ok, health.problem), (Some(true), None));
+        assert!(health.checked_at.is_some());
+    }
 }
