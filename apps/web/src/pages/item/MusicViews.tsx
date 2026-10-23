@@ -13,6 +13,7 @@ import { useElementWidth } from "@/lib/hooks";
 import { usePlayItem } from "@/lib/usePlayItem";
 import { MoreActions } from "./ItemActions";
 import { Genres, ItemArt, MetaLine, Summary } from "./shared";
+import { itemUrl } from "@/lib/urls";
 
 function MusicHeader({ item, kindLabel, meta, actions }: { item: ItemDetail; kindLabel: string; meta: React.ReactNode; actions: React.ReactNode }) {
   return (
@@ -98,7 +99,7 @@ export function AlbumView({ item, highlightId }: { item: ItemDetail; highlightId
             <MetaLine
               parts={[
                 item.parent_id ? (
-                  <Link key="artist" to={`/item/${item.parent_id}`} className="font-semibold text-fg hover:text-accent">
+                  <Link key="artist" to={itemUrl(item.parent_id)} className="font-semibold text-fg hover:text-accent">
                     {item.parent_title ?? "Artist"}
                   </Link>
                 ) : (

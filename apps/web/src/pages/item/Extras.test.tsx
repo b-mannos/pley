@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { makeItem } from "@/test/fixtures";
 import { renderWithProviders } from "@/test/render";
 import { extraSubtitle, ExtrasRow } from "./Extras";
+import { encodeId } from "@/lib/ids";
 
 describe("extraSubtitle", () => {
   it("names the kind of extra and its length", () => {
@@ -23,8 +24,8 @@ describe("ExtrasRow", () => {
     expect(screen.getByText("Trailer · 2m")).toBeInTheDocument();
     const links = screen.getAllByRole("link", { name: /Official Trailer/ });
     expect(links.length).toBeGreaterThan(0);
-    for (const link of links) expect(link).toHaveAttribute("href", "/play/41");
-    expect(screen.getAllByRole("link", { name: /Making Of/ })[0]).toHaveAttribute("href", "/play/42");
+    for (const link of links) expect(link).toHaveAttribute("href", `/play/${encodeId(41)}`);
+    expect(screen.getAllByRole("link", { name: /Making Of/ })[0]).toHaveAttribute("href", `/play/${encodeId(42)}`);
   });
 
   it("renders nothing without extras", () => {

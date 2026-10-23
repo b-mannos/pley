@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { makeItem } from "@/test/fixtures";
 import { apiError, mockApi, renderWithProviders } from "@/test/render";
 import { SearchPage } from "./SearchPage";
+import { personUrl } from "@/lib/urls";
 
 function search(q: string) {
   return renderWithProviders(<SearchPage />, { route: `/search?q=${encodeURIComponent(q)}` });
@@ -25,7 +26,7 @@ describe("SearchPage", () => {
     expect(await screen.findByRole("heading", { name: "Results for “heat ”" })).toBeInTheDocument();
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
     expect(headings).toEqual(["People 1", "Movies 2", "Episodes 1"]);
-    expect(screen.getByRole("link", { name: /Heath Ledger/ })).toHaveAttribute("href", "/person/9");
+    expect(screen.getByRole("link", { name: /Heath Ledger/ })).toHaveAttribute("href", personUrl(9));
 
     const movies = screen.getByRole("heading", { name: "Movies 2" }).closest("section") as HTMLElement;
     expect(within(movies).getByText("1995")).toBeInTheDocument();

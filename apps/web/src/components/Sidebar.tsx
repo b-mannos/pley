@@ -8,6 +8,7 @@ import { useAuth } from "@/auth";
 import { cn } from "@/lib/cn";
 import { Logo } from "./Logo";
 import { IconButton, Skeleton } from "./ui";
+import { libraryUrl, playlistUrl } from "@/lib/urls";
 
 export function LibraryIcon({ kind, className }: { kind: LibraryKind; className?: string }) {
   const cls = cn("size-[18px] shrink-0", className);
@@ -70,7 +71,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
           : libs.data?.map((lib) => (
               <NavItem
                 key={lib.id}
-                to={`/library/${lib.id}`}
+                to={libraryUrl(lib.id)}
                 icon={<LibraryIcon kind={lib.kind} />}
                 trailing={
                   lib.scanning ? (
@@ -122,7 +123,7 @@ function PlaylistsSection() {
         {shown.map((p) => (
           <NavItem
             key={p.id}
-            to={`/playlists/${p.id}`}
+            to={playlistUrl(p.id)}
             icon={p.kind === "audio" ? <ListMusic className="size-[18px]" /> : <ListVideo className="size-[18px]" />}
           >
             {p.title}

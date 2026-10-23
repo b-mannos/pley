@@ -29,6 +29,7 @@ import {
   Summary,
   WatchedButton,
 } from "./shared";
+import { itemUrl } from "@/lib/urls";
 
 export function versionLabel(f: MediaFile, i: number): string {
   const parts = [f.edition, resolutionLabel(f.width, f.height), codecLabel(f.video_codec), f.container?.toUpperCase(), formatBytes(f.size)].filter(Boolean);
@@ -104,7 +105,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
             <div className="space-y-1">
               {item.grandparent_id ? (
                 <Link
-                  to={`/item/${item.grandparent_id}`}
+                  to={itemUrl(item.grandparent_id)}
                   className="text-lg font-semibold text-fg/90 transition-colors hover:text-accent"
                 >
                   {item.grandparent_title}
@@ -112,7 +113,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
               ) : null}
               <div className="text-sm text-muted">
                 {item.parent_id ? (
-                  <Link to={`/item/${item.parent_id}`} className="hover:text-fg">
+                  <Link to={itemUrl(item.parent_id)} className="hover:text-fg">
                     {item.parent_index != null ? seasonTitle({ title: "", index: item.parent_index }) : (item.parent_title ?? "Season")}
                   </Link>
                 ) : null}

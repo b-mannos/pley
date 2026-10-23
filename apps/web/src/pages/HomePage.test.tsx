@@ -5,6 +5,7 @@ import type { Hub, Library } from "@/api/types";
 import { makeItem } from "@/test/fixtures";
 import { apiError, mockApi, renderWithProviders, testUser } from "@/test/render";
 import { HomePage } from "./HomePage";
+import { libraryUrl } from "@/lib/urls";
 
 const movies: Library = {
   id: 1,
@@ -49,7 +50,7 @@ describe("HomePage", () => {
     expect(within(continueRow).getByText("S1 · E1 · Pilot")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Recently Added in Movies" })).toHaveAttribute(
       "href",
-      "/library/1?tab=library&sort=added&order=desc",
+      libraryUrl(1, "tab=library&sort=added&order=desc"),
     );
     expect(screen.queryByRole("heading", { name: "Top Rated" })).not.toBeInTheDocument();
   });

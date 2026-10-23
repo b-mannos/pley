@@ -9,6 +9,8 @@ import { AlbumView, ArtistView } from "./MusicViews";
 import { SeasonView } from "./SeasonView";
 import { ShowView } from "./ShowView";
 import { VideoItemView } from "./VideoItemView";
+import { itemUrl } from "@/lib/urls";
+import { idParam } from "@/lib/ids";
 
 function ItemSkeleton() {
   return (
@@ -32,7 +34,7 @@ export function ItemPage() {
   const { id } = useParams();
   const location = useLocation();
   const highlight = (location.state as { highlight?: number } | null)?.highlight;
-  const itemId = Number(id);
+  const itemId = idParam(id);
   const item = useItem(itemId);
   useDocumentTitle(item.data ? fullTitle(item.data) : null);
 
@@ -65,7 +67,7 @@ export function ItemPage() {
     case "album":
       return <AlbumView key={data.id} item={data} highlightId={highlight} />;
     case "track":
-      return data.parent_id ? <Navigate to={`/item/${data.parent_id}`} replace state={{ highlight: data.id }} /> : <NotFoundPage />;
+      return data.parent_id ? <Navigate to={itemUrl(data.parent_id)} replace state={{ highlight: data.id }} /> : <NotFoundPage />;
     default:
       return <NotFoundPage />;
   }

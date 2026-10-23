@@ -10,6 +10,7 @@ import { usePlayItem } from "@/lib/usePlayItem";
 import { MoreActions } from "./ItemActions";
 import { ItemArt, ItemPageShell, MetaLine, Summary, WatchedButton } from "./shared";
 import { CastRow } from "./Credits";
+import { itemUrl } from "@/lib/urls";
 
 function EpisodeRow({ ep }: { ep: ChildItem }) {
   const play = usePlayItem();
@@ -17,7 +18,7 @@ function EpisodeRow({ ep }: { ep: ChildItem }) {
   return (
     <div className="group flex gap-4 rounded-lg p-2 transition-colors hover:bg-white/[0.035] sm:gap-5">
       <div className="relative w-36 shrink-0 sm:w-56">
-        <Link to={`/item/${ep.id}`} className="block overflow-hidden rounded-md ring-1 ring-white/5" aria-label={ep.title}>
+        <Link to={itemUrl(ep.id)} className="block overflow-hidden rounded-md ring-1 ring-white/5" aria-label={ep.title}>
           <Artwork candidates={thumbCandidates(ep)} width={224} alt="" title={ep.title} className="aspect-video w-full" />
           {progress > 0 ? (
             <div className="absolute inset-x-0 bottom-0 h-1 bg-black/60">
@@ -37,7 +38,7 @@ function EpisodeRow({ ep }: { ep: ChildItem }) {
       <div className="min-w-0 flex-1 py-0.5">
         <div className="flex items-start justify-between gap-2">
           <Link
-            to={`/item/${ep.id}`}
+            to={itemUrl(ep.id)}
             className="line-clamp-2 font-semibold leading-snug text-fg transition-colors hover:text-accent"
           >
             {ep.index != null ? `${ep.index}. ` : ""}
@@ -67,7 +68,7 @@ export function SeasonView({ item }: { item: ItemDetail }) {
     <ItemPageShell item={item}>
       <nav className="mb-4 flex items-center gap-1 text-sm text-muted" aria-label="Breadcrumb">
         {item.parent_id ? (
-          <Link to={`/item/${item.parent_id}`} className="font-medium transition-colors hover:text-fg">
+          <Link to={itemUrl(item.parent_id)} className="font-medium transition-colors hover:text-fg">
             {item.parent_title ?? "Show"}
           </Link>
         ) : null}

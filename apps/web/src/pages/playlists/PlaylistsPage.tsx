@@ -8,6 +8,7 @@ import { Button, EmptyState, Skeleton } from "@/components/ui";
 import { formatDuration, pluralize } from "@/lib/format";
 import { useDocumentTitle, useElementWidth } from "@/lib/hooks";
 import { PlaylistFormModal } from "./PlaylistFormModal";
+import { playlistUrl } from "@/lib/urls";
 
 const CARD_WIDTH = 180;
 
@@ -76,7 +77,7 @@ export function PlaylistsPage() {
             style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, columnGap: gap, rowGap: gap < 18 ? 18 : 26 }}
           >
             {list.map((p) => (
-              <Link key={p.id} to={`/playlists/${p.id}`} className="group/card min-w-0 outline-none">
+              <Link key={p.id} to={playlistUrl(p.id)} className="group/card min-w-0 outline-none">
                 <PlaylistArt
                   playlist={p}
                   width={colWidth}
@@ -98,7 +99,7 @@ export function PlaylistsPage() {
         key={creating ? "open" : "closed"}
         open={creating}
         onClose={() => setCreating(false)}
-        onCreated={(p) => void navigate(`/playlists/${p.id}`)}
+        onCreated={(p) => void navigate(playlistUrl(p.id))}
       />
     </div>
   );

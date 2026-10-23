@@ -5,6 +5,7 @@ import type { HistoryEntry } from "@/api/types";
 import { makeHistoryEntry, makeItem } from "@/test/fixtures";
 import { apiError, mockApi, renderWithProviders } from "@/test/render";
 import { HistoryList } from "./HistoryList";
+import { itemUrl } from "@/lib/urls";
 
 const pilot = makeHistoryEntry(
   1,
@@ -48,7 +49,7 @@ describe("HistoryList", () => {
     expect(rows[1]).toHaveTextContent("Heat");
     expect(rows[1]).toHaveTextContent("1995");
     expect(rows[2]).toHaveTextContent("Daft Punk · Discovery");
-    expect(within(rows[1] as HTMLElement).getByRole("link", { name: "Heat" })).toHaveAttribute("href", `/item/${heat.item.id}`);
+    expect(within(rows[1] as HTMLElement).getByRole("link", { name: "Heat" })).toHaveAttribute("href", itemUrl(heat.item.id));
   });
 
   it("shows who played what in everyone's history", async () => {

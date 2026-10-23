@@ -6,6 +6,7 @@ import { Artwork } from "@/components/Artwork";
 import { fitCards } from "@/components/HubRow";
 import { pluralize } from "@/lib/format";
 import { useMediaQuery } from "@/lib/hooks";
+import { collectionUrl, libraryUrl } from "@/lib/urls";
 
 /** What a collection of this library holds: ["movie", "movies"] or ["show", "shows"]. */
 export function collectionNoun(kind: LibraryKind | undefined): [string, string] {
@@ -23,7 +24,7 @@ export function CollectionCard({
   noun: [string, string];
   fixed?: boolean;
 }) {
-  const to = `/collection/${collection.id}`;
+  const to = collectionUrl(collection.id);
   return (
     <div className="group/card min-w-0" style={fixed ? { width } : undefined}>
       <Link
@@ -85,11 +86,11 @@ export function CollectionsRow({ libraryId, kind }: { libraryId: Id; kind: Libra
     <section>
       <div className="mb-2 flex items-center justify-between gap-4 px-4 sm:px-8">
         <h2 className="truncate text-lg font-semibold tracking-tight">
-          <Link to={`/library/${libraryId}?tab=collections`} className="transition-colors hover:text-accent">
+          <Link to={libraryUrl(libraryId, "tab=collections")} className="transition-colors hover:text-accent">
             Collections
           </Link>
         </h2>
-        <Link to={`/library/${libraryId}?tab=collections`} className="shrink-0 text-xs font-medium text-muted transition-colors hover:text-accent">
+        <Link to={libraryUrl(libraryId, "tab=collections")} className="shrink-0 text-xs font-medium text-muted transition-colors hover:text-accent">
           See all
         </Link>
       </div>

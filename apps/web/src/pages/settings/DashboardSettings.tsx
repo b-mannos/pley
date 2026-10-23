@@ -21,6 +21,7 @@ import { cn } from "@/lib/cn";
 import { formatBytes, formatClock, formatUptime, fullTitle, transcodeSummary } from "@/lib/format";
 import { thumbCandidates } from "@/lib/images";
 import { useDocumentTitle } from "@/lib/hooks";
+import { itemUrl } from "@/lib/urls";
 
 const METHOD: Record<PlaybackMethod, { label: string; tone: "success" | "info" | "accent" }> = {
   direct: { label: "Direct Play", tone: "success" },
@@ -75,7 +76,7 @@ function SessionCard({ s }: { s: SessionInfo }) {
   const t = s.transcode;
   return (
     <div className="flex gap-4 rounded-lg border border-border bg-surface p-3">
-      <Link to={`/item/${s.item.id}`} className="w-32 shrink-0 sm:w-40">
+      <Link to={itemUrl(s.item.id)} className="w-32 shrink-0 sm:w-40">
         <Artwork
           candidates={thumbCandidates(s.item)}
           width={160}
@@ -86,7 +87,7 @@ function SessionCard({ s }: { s: SessionInfo }) {
       </Link>
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="flex items-start justify-between gap-2">
-          <Link to={`/item/${s.item.id}`} className="line-clamp-2 text-sm font-semibold hover:text-accent">
+          <Link to={itemUrl(s.item.id)} className="line-clamp-2 text-sm font-semibold hover:text-accent">
             {fullTitle(s.item)}
           </Link>
           <Badge tone={method.tone} className="shrink-0">

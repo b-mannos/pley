@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import type { Id } from "@/api/types";
 import { cn } from "@/lib/cn";
 import { placeholderGradient, sizedImage } from "@/lib/images";
+import { personUrl } from "@/lib/urls";
 
 function initials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
@@ -79,7 +80,7 @@ export function PersonCard({
 }) {
   return (
     <Link
-      to={`/person/${person.id}`}
+      to={personUrl(person.id)}
       className={cn("group/person block rounded-md text-center outline-none", className)}
       style={{ width }}
     >

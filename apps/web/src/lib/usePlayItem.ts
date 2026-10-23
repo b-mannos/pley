@@ -6,6 +6,7 @@ import { fetchChildren, fetchOnDeck } from "@/api/hooks";
 import type { Id, ItemSummary } from "@/api/types";
 import { useOptionalAudioPlayer } from "@/audio/AudioPlayer";
 import { useToast } from "@/components/Toast";
+import { encodeId } from "./ids";
 
 export interface PlayUrlOptions {
   startMs?: number;
@@ -18,11 +19,11 @@ export interface PlayUrlOptions {
 export function playUrl(id: Id, opts: PlayUrlOptions = {}): string {
   const p = new URLSearchParams();
   if (opts.startMs && opts.startMs > 0) p.set("t", String(Math.floor(opts.startMs)));
-  if (opts.fileId != null) p.set("file", String(opts.fileId));
+  if (opts.fileId != null) p.set("file", encodeId(opts.fileId));
   if (opts.audio != null) p.set("audio", String(opts.audio));
   if (opts.sub != null) p.set("sub", String(opts.sub));
   const q = p.toString();
-  return `/play/${id}${q ? `?${q}` : ""}`;
+  return `/play/${encodeId(id)}${q ? `?${q}` : ""}`;
 }
 
 export interface PlayOptions extends Omit<PlayUrlOptions, "startMs"> {

@@ -5,12 +5,13 @@ import type { ItemSummary } from "@/api/types";
 import { makeItem } from "@/test/fixtures";
 import { apiError, LocationDisplay, mockApi, TestProviders, testQueryClient } from "@/test/render";
 import { playUrl, usePlayItem, type PlayOptions } from "./usePlayItem";
+import { encodeId } from "./ids";
 
 describe("playUrl", () => {
   it("adds only the options given", () => {
-    expect(playUrl(5)).toBe("/play/5");
-    expect(playUrl(5, { startMs: 0, sub: null })).toBe("/play/5");
-    expect(playUrl(5, { startMs: 1234.6, fileId: 2, audio: 0, sub: 3 })).toBe("/play/5?t=1234&file=2&audio=0&sub=3");
+    expect(playUrl(5)).toBe(`/play/${encodeId(5)}`);
+    expect(playUrl(5, { startMs: 0, sub: null })).toBe(`/play/${encodeId(5)}`);
+    expect(playUrl(5, { startMs: 1234.6, fileId: 2, audio: 0, sub: 3 })).toBe(`/play/${encodeId(5)}?t=1234&file=${encodeId(2)}&audio=0&sub=3`);
   });
 });
 
@@ -35,25 +36,25 @@ const resumable = { position_ms: 90_000, watched: false, play_count: 0 };
 
 describe("usePlayItem", () => {
   it("resumes movies and episodes", async () => {
-    expect(await play(makeItem({ id: 3, user_state: resumable }))).toBe("/play/3?t=90000");
+    expect(await play(makeItem({ id: 3, user_state: resumable }))).toBe(`/play/${encodeId(3)}?t=90000`);
   });
 
   it("starts over when asked or once watched", async () => {
-    expect(await play(makeItem({ id: 3, user_state: resumable }), { fromStart: true })).toBe("/play/3");
-    expect(await play(makeItem({ id: 3, kind: "episode", user_state: { ...resumable, watched: true } }))).toBe("/play/3");
+    expect(await play(makeItem({ id: 3, user_state: resumable }), { fromStart: true })).toBe(`/play/${encodeId(3)}`);
+    expect(await play(makeItem({ id: 3, kind: "episode", user_state: { ...resumable, watched: true } }))).toBe(`/play/${encodeId(3)}`);
   });
 
   it("passes the chosen file and tracks", async () => {
-    expect(await play(makeItem({ id: 3 }), { fileId: 8, audio: 1, sub: 2 })).toBe("/play/3?file=8&audio=1&sub=2");
+    expect(await play(makeItem({ id: 3 }), { fileId: 8, audio: 1, sub: 2 })).toBe(`/play/${encodeId(3)}?file=${encodeId(8)}&audio=1&sub=2`);
   });
 
   it("plays extras", async () => {
-    expect(await play(makeItem({ id: 41, kind: "extra", extra_type: "trailer" }))).toBe("/play/41");
+    expect(await play(makeItem({ id: 41, kind: "extra", extra_type: "trailer" }))).toBe(`/play/${encodeId(41)}`);
   });
 
   it("plays the next episode of a show", async () => {
     mockApi({ "GET /api/items/1/on-deck": () => ({ item: makeItem({ id: 12, kind: "episode", user_state: resumable }) }) });
-    expect(await play(makeItem({ id: 1, kind: "show" }))).toBe("/play/12?t=90000");
+    expect(await play(makeItem({ id: 1, kind: "show" }))).toBe(`/play/${encodeId(12)}?t=90000`);
   });
 
   it("says when a show has nothing to play", async () => {

@@ -5,6 +5,8 @@ import { errorMessage } from "@/api/client";
 import { useItem } from "@/api/hooks";
 import { loadQueue } from "@/lib/videoQueue";
 import { VideoPlayer } from "./VideoPlayer";
+import { itemUrl } from "@/lib/urls";
+import { decodeId, idParam } from "@/lib/ids";
 
 function num(v: string | null): number | null {
   if (v == null || v === "") return null;
@@ -31,7 +33,7 @@ export function PlayerPage() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const itemId = Number(id);
+  const itemId = idParam(id);
   const item = useItem(Number.isFinite(itemId) ? itemId : null);
   // Playing through a playlist or collection (`?queue=&qi=`).
   const queueKey = params.get("queue");
@@ -55,7 +57,7 @@ export function PlayerPage() {
   if (!data) {
     return <PlayerMessage title="Can't play this item" message={errorMessage(item.error)} onBack={() => void navigate(-1)} />;
   }
-  if (data.kind !== "movie" && data.kind !== "episode") return <Navigate to={`/item/${data.id}`} replace />;
+  if (data.kind !== "movie" && data.kind !== "episode") return <Navigate to={itemUrl(data.id)} replace />;
   if (!data.files.length) {
     return <PlayerMessage title="Nothing to play" message="This item has no media files." onBack={() => void navigate(-1)} />;
   }
@@ -65,7 +67,7 @@ export function PlayerPage() {
       key={`${data.id}:${queue?.index ?? ""}`}
       item={data}
       startMs={num(params.get("t")) ?? 0}
-      fileId={num(params.get("file"))}
+      fileId={decodeId(params.get("file"))}
       audio={num(params.get("audio"))}
       sub={num(params.get("sub"))}
       queue={queue}

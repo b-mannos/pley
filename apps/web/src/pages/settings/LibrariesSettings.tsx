@@ -12,6 +12,7 @@ import { Button, EmptyState, IconButton, PageSpinner, ProgressBar } from "@/comp
 import { formatRelative, pluralize } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
 import { LibraryFormModal } from "./LibraryFormModal";
+import { libraryUrl } from "@/lib/urls";
 
 const KIND_NOUN: Record<Library["kind"], [string, string]> = {
   movies: ["movie", "movies"],
@@ -50,7 +51,7 @@ function LibraryRow({ lib, scan, onEdit, onDelete }: { lib: Library; scan?: Scan
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <Link to={`/library/${lib.id}`} className="truncate text-base font-semibold hover:text-accent">
+            <Link to={libraryUrl(lib.id)} className="truncate text-base font-semibold hover:text-accent">
               {lib.name}
             </Link>
             <span className="text-xs text-muted">

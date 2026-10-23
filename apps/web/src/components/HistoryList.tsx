@@ -10,6 +10,7 @@ import { Button, IconButton, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { episodeLabel, formatRelative, formatTimestamp } from "@/lib/format";
 import { posterCandidates } from "@/lib/images";
+import { itemUrl } from "@/lib/urls";
 
 function describe(entry: HistoryEntry): { title: string; subtitle: string } {
   const { item } = entry;
@@ -40,7 +41,7 @@ function HistoryRow({
   const { title, subtitle } = describe(entry);
   return (
     <li className="group flex items-center gap-3 px-3 py-2.5">
-      <Link to={`/item/${item.id}`} className="shrink-0" tabIndex={-1} aria-hidden>
+      <Link to={itemUrl(item.id)} className="shrink-0" tabIndex={-1} aria-hidden>
         <Artwork
           candidates={posterCandidates(item)}
           width={40}
@@ -51,7 +52,7 @@ function HistoryRow({
         />
       </Link>
       <div className="min-w-0 flex-1">
-        <Link to={`/item/${item.id}`} className="block truncate text-sm font-medium transition-colors hover:text-accent">
+        <Link to={itemUrl(item.id)} className="block truncate text-sm font-medium transition-colors hover:text-accent">
           {title}
         </Link>
         <div className="truncate text-xs text-subtle">

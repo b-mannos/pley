@@ -20,6 +20,7 @@ import { cn } from "@/lib/cn";
 import { pluralize } from "@/lib/format";
 import { smartFilterOf } from "@/lib/smartFilter";
 import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
+import { idParam } from "@/lib/ids";
 
 const SORT_LABELS: Record<LibrarySort, string> = {
   title: "Title",
@@ -50,7 +51,7 @@ function defaultOrder(sort: LibrarySort): SortOrder {
 
 export function LibraryPage() {
   const { id } = useParams();
-  const libId = Number(id);
+  const libId = idParam(id);
   const lib = useLibrary(libId);
   const [params, setParams] = useSearchParams();
   const rawTab = params.get("tab");

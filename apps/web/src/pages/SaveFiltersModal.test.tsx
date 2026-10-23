@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { type FakeRequest, LocationDisplay, mockApi, renderWithProviders } from "@/test/render";
 import { SaveFiltersModal } from "./SaveFiltersModal";
+import { collectionUrl, playlistUrl } from "@/lib/urls";
 
 const FILTER = "genre=Comedy&unwatched=1&sort=year%3Adesc";
 
@@ -38,7 +39,7 @@ describe("SaveFiltersModal", () => {
     await waitFor(() =>
       expect(lastPost(requests, "/api/playlists")?.body).toEqual({ title: "Comedies to watch", library_id: 3, smart_filter: FILTER }),
     );
-    expect(await screen.findByTestId("location")).toHaveTextContent("/playlists/9");
+    expect(await screen.findByTestId("location")).toHaveTextContent(playlistUrl(9));
   });
 
   it("lets administrators make a smart collection instead", async () => {
@@ -50,6 +51,6 @@ describe("SaveFiltersModal", () => {
     await waitFor(() =>
       expect(lastPost(requests, "/api/libraries/3/collections")?.body).toEqual({ title: "Comedies", smart_filter: FILTER }),
     );
-    expect(await screen.findByTestId("location")).toHaveTextContent("/collection/4");
+    expect(await screen.findByTestId("location")).toHaveTextContent(collectionUrl(4));
   });
 });

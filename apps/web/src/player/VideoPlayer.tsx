@@ -39,6 +39,7 @@ import { SeekBar } from "./SeekBar";
 import { METHOD_LABEL, SettingsPopover } from "./SettingsPopover";
 import { fileMarkers, SkipButton, useSkipMarkers } from "./SkipButton";
 import { UpNext } from "./UpNext";
+import { itemUrl } from "@/lib/urls";
 
 const PROGRESS_INTERVAL = 10_000;
 const HIDE_CONTROLS_AFTER = 3_000;
@@ -132,7 +133,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const at = next.user_state.watched ? 0 : next.user_state.position_ms;
     return queue ? queuePlayUrl(queue.queue, queue.index + 1, next.id, at) : playUrl(next.id, { startMs: at });
   };
-  const endUrl = queue?.queue.returnTo ?? `/item/${item.id}`;
+  const endUrl = queue?.queue.returnTo ?? itemUrl(item.id);
   const title = isEpisode ? (item.grandparent_title ?? item.title) : item.year ? `${item.title} (${item.year})` : item.title;
   const subtitle = isEpisode ? [episodeLabel(item), item.title].filter(Boolean).join(" — ") : null;
   useDocumentTitle(isEpisode ? `${title} ${episodeLabel(item)}` : item.title);
@@ -175,7 +176,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const goBack = useCallback(() => {
     const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
     if (idx > 0) void navigate(-1);
-    else void navigate(`/item/${item.id}`, { replace: true });
+    else void navigate(itemUrl(item.id), { replace: true });
   }, [navigate, item.id]);
 
   // Pause any music when a video starts.

@@ -21,10 +21,12 @@ import { describeSmartFilter } from "@/lib/smartFilter";
 import { MetaLine } from "../item/shared";
 import { PlaylistFormModal } from "./PlaylistFormModal";
 import { playlistMeta } from "./PlaylistsPage";
+import { itemUrl, playlistUrl } from "@/lib/urls";
+import { idParam } from "@/lib/ids";
 
 export function PlaylistPage() {
   const { id } = useParams();
-  const playlistId = Number(id);
+  const playlistId = idParam(id);
   const playlist = usePlaylist(playlistId);
   useDocumentTitle(playlist.data?.title);
 
@@ -61,7 +63,7 @@ function PlaylistView({ playlist: p }: { playlist: PlaylistDetail }) {
 
   const playFrom = (index: number, shuffle = false) => {
     if (!items.length) return;
-    if (video) startQueue(items, { startIndex: index, shuffle, returnTo: `/playlists/${p.id}` });
+    if (video) startQueue(items, { startIndex: index, shuffle, returnTo: playlistUrl(p.id) });
     else audio.playQueue(items, index, { shuffle });
   };
   const move = (from: number, to: number) => {
@@ -157,7 +159,7 @@ function PlaylistView({ playlist: p }: { playlist: PlaylistDetail }) {
                   </button>
                   <div className="min-w-0 flex-1">
                     <Link
-                      to={`/item/${item.id}`}
+                      to={itemUrl(item.id)}
                       draggable={false}
                       className={cn("block truncate text-sm font-medium transition-colors hover:text-accent", current ? "text-accent" : "text-fg")}
                     >

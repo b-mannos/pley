@@ -22,12 +22,14 @@ import { useVideoQueue } from "@/lib/videoQueue";
 import { NotFoundPage } from "../NotFoundPage";
 import { MetaLine, Summary } from "../item/shared";
 import { CollectionFormModal } from "./CollectionFormModal";
+import { collectionUrl, itemUrl, libraryUrl } from "@/lib/urls";
+import { idParam } from "@/lib/ids";
 
 const SORT_NOTE = { release: "By release date", title: "By title", custom: "Custom order" } as const;
 
 export function CollectionPage() {
   const { id } = useParams();
-  const collectionId = Number(id);
+  const collectionId = idParam(id);
   const collection = useCollection(collectionId);
   useDocumentTitle(collection.data?.title);
 
@@ -60,7 +62,7 @@ function CollectionView({ collection: c }: { collection: CollectionDetail }) {
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [managing, setManaging] = useState(false);
-  const returnTo = `/collection/${c.id}`;
+  const returnTo = collectionUrl(c.id);
   const movies = c.items.some((i) => i.kind === "movie");
 
   const onPlay = (shuffle: boolean) => {
@@ -109,7 +111,7 @@ function CollectionView({ collection: c }: { collection: CollectionDetail }) {
               parts={[
                 pluralize(c.item_count, noun[0], noun[1]),
                 lib ? (
-                  <Link key="lib" to={`/library/${lib.id}?tab=collections`} className="transition-colors hover:text-fg">
+                  <Link key="lib" to={libraryUrl(lib.id, "tab=collections")} className="transition-colors hover:text-fg">
                     {lib.name}
                   </Link>
                 ) : null,
@@ -206,7 +208,7 @@ function CollectionView({ collection: c }: { collection: CollectionDetail }) {
               remove.mutate(c, {
                 onSuccess: () => {
                   toast.success("Collection deleted");
-                  void navigate(`/library/${c.library_id}?tab=collections`, { replace: true });
+                  void navigate(libraryUrl(c.library_id, "tab=collections"), { replace: true });
                 },
                 onError: (err) => toast.error(errorMessage(err)),
               })
@@ -271,7 +273,7 @@ function ManageItems({ collection: c }: { collection: CollectionDetail }) {
               <span className="w-6 shrink-0 text-right text-sm tabular-nums text-subtle">{i + 1}</span>
               <Artwork candidates={posterCandidates(item)} width={40} alt="" title={item.title} className="aspect-[2/3] w-10 shrink-0 rounded" />
               <div className="min-w-0 flex-1">
-                <Link to={`/item/${item.id}`} draggable={false} className="block truncate text-sm font-medium text-fg hover:text-accent">
+                <Link to={itemUrl(item.id)} draggable={false} className="block truncate text-sm font-medium text-fg hover:text-accent">
                   {item.title}
                 </Link>
                 <div className="text-xs text-muted">{item.year ?? ""}</div>

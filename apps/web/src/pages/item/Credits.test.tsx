@@ -4,6 +4,7 @@ import type { Credit } from "@/api/types";
 import { makeCredit } from "@/test/fixtures";
 import { renderWithProviders } from "@/test/render";
 import { CastRow, CrewRows, hasCrew } from "./Credits";
+import { personUrl } from "@/lib/urls";
 
 describe("hasCrew", () => {
   it("counts creators, directors and writers", () => {
@@ -33,7 +34,7 @@ describe("CrewRows", () => {
 
     const terms = screen.getAllByRole("term").map((t) => t.textContent);
     expect(terms).toEqual(["Directors", "Writer"]);
-    expect(screen.getByRole("link", { name: "Lilly Wachowski" })).toHaveAttribute("href", "/person/2");
+    expect(screen.getByRole("link", { name: "Lilly Wachowski" })).toHaveAttribute("href", personUrl(2));
     expect(screen.queryByText("A Producer")).not.toBeInTheDocument();
   });
 
@@ -52,7 +53,7 @@ describe("CastRow", () => {
     );
     expect(screen.getByRole("heading", { name: "Cast" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Keanu Reeves/ })).toHaveTextContent("Neo");
-    expect(screen.getByRole("link", { name: /Carrie-Anne Moss/ })).toHaveAttribute("href", "/person/2");
+    expect(screen.getByRole("link", { name: /Carrie-Anne Moss/ })).toHaveAttribute("href", personUrl(2));
   });
 
   it("renders nothing without a cast", () => {

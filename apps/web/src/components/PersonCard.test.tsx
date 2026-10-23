@@ -2,12 +2,13 @@ import { fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import { PersonCard } from "./PersonCard";
+import { personUrl } from "@/lib/urls";
 
 describe("PersonCard", () => {
   it("links to the person, with the part they play", () => {
     renderWithProviders(<PersonCard person={{ id: 5, name: "Keanu Reeves" }} subtitle="Neo" width={120} />);
     const link = screen.getByRole("link");
-    expect(link).toHaveAttribute("href", "/person/5");
+    expect(link).toHaveAttribute("href", personUrl(5));
     expect(link).toHaveTextContent("Keanu Reeves");
     expect(screen.getByText("Neo")).toBeInTheDocument();
   });

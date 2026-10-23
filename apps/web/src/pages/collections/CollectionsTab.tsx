@@ -11,6 +11,7 @@ import { Button, EmptyState } from "@/components/ui";
 import { pluralize } from "@/lib/format";
 import { useElementWidth } from "@/lib/hooks";
 import { CollectionFormModal } from "./CollectionFormModal";
+import { collectionUrl } from "@/lib/urls";
 
 const CARD_WIDTH = 160;
 
@@ -77,7 +78,7 @@ export function CollectionsTab({ libraryId, kind }: { libraryId: Id; kind: Libra
           open={creating}
           onClose={() => setCreating(false)}
           libraryId={libraryId}
-          onCreated={(c) => void navigate(`/collection/${c.id}`)}
+          onCreated={(c) => void navigate(collectionUrl(c.id))}
         />
       ) : null}
     </div>

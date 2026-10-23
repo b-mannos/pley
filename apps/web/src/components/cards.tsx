@@ -9,6 +9,7 @@ import { usePlayItem } from "@/lib/usePlayItem";
 import { Artwork } from "./Artwork";
 import { useListMenu } from "./lists/ListMenu";
 import { Skeleton } from "./ui";
+import { itemUrl } from "@/lib/urls";
 
 export type CardAspect = "poster" | "square" | "thumb";
 
@@ -96,7 +97,7 @@ export const MediaCard = memo(function MediaCard({
   const defaults = defaultCardTitles(item, continueStyle);
   const t = title ?? defaults.title;
   const st = subtitle ?? defaults.subtitle;
-  const to = href ?? `/item/${item.id}`;
+  const to = href ?? itemUrl(item.id);
   const candidates = aspect === "thumb" ? thumbCandidates(item) : posterCandidates(item);
   const progress = item.user_state.watched ? 0 : progressFraction(item);
   const isContainer = item.kind === "show" || item.kind === "season";

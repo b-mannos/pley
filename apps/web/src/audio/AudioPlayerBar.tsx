@@ -21,6 +21,7 @@ import { formatClock, formatDuration } from "@/lib/format";
 import { useDismiss } from "@/lib/hooks";
 import { posterCandidates } from "@/lib/images";
 import { useAudioPlayer, useAudioTime } from "./AudioPlayer";
+import { itemUrl } from "@/lib/urls";
 
 function QueuePopover() {
   const player = useAudioPlayer();
@@ -66,7 +67,7 @@ export function AudioPlayerBar() {
   if (!track) return null;
 
   const VolumeIcon = player.muted || player.volume === 0 ? VolumeX : player.volume < 0.5 ? Volume1 : Volume2;
-  const albumHref = track.parent_id ? `/item/${track.parent_id}` : `/item/${track.id}`;
+  const albumHref = track.parent_id ? itemUrl(track.parent_id) : itemUrl(track.id);
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface/95 backdrop-blur-md lg:left-60">

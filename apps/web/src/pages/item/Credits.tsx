@@ -4,6 +4,7 @@ import type { Credit, CreditRole } from "@/api/types";
 import { ArrowButton, useFittedRow } from "@/components/HubRow";
 import { PersonCard } from "@/components/PersonCard";
 import { SectionTitle } from "@/components/ui";
+import { personUrl } from "@/lib/urls";
 
 const CREW_LABELS: Record<Exclude<CreditRole, "actor">, [string, string]> = {
   creator: ["Created by", "Created by"],
@@ -71,7 +72,7 @@ function PeopleLinks({ people, max = 4 }: { people: Credit[]; max?: number }) {
       {people.slice(0, max).map((p, i) => (
         <Fragment key={p.id}>
           {i > 0 ? ", " : null}
-          <Link to={`/person/${p.id}`} className="transition-colors hover:text-accent">
+          <Link to={personUrl(p.id)} className="transition-colors hover:text-accent">
             {p.name}
           </Link>
         </Fragment>

@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import { Layers } from "lucide-react";
 import { collectable, useItemCollections } from "@/api/lists";
 import type { ItemSummary } from "@/api/types";
+import { collectionUrl } from "@/lib/urls";
 
 /** "Part of …" links to the collections a movie or show belongs to. */
 export function PartOfCollections({ item }: { item: ItemSummary }) {
@@ -14,7 +15,7 @@ export function PartOfCollections({ item }: { item: ItemSummary }) {
       <span>Part of</span>
       {list.map((c, i) => (
         <span key={c.id}>
-          <Link to={`/collection/${c.id}`} className="font-medium text-fg transition-colors hover:text-accent">
+          <Link to={collectionUrl(c.id)} className="font-medium text-fg transition-colors hover:text-accent">
             {c.title}
           </Link>
           {i < list.length - 1 ? "," : null}

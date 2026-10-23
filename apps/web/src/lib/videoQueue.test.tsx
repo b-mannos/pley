@@ -5,6 +5,7 @@ import type { ItemSummary } from "@/api/types";
 import { makeItem } from "@/test/fixtures";
 import { LocationDisplay, mockApi, TestProviders, testQueryClient } from "@/test/render";
 import { loadQueue, nextInQueue, queuePlayUrl, useVideoQueue } from "./videoQueue";
+import { encodeId } from "./ids";
 
 function wrapper({ children }: { children: ReactNode }) {
   return (
@@ -34,8 +35,8 @@ describe("queue storage", () => {
 
   it("names the queue and position in player urls", () => {
     const queue = { key: "k 1", ids: [4, 5] };
-    expect(queuePlayUrl(queue, 1, 5)).toBe("/play/5?queue=k%201&qi=1");
-    expect(queuePlayUrl(queue, 0, 4, 90_000)).toBe("/play/4?t=90000&queue=k%201&qi=0");
+    expect(queuePlayUrl(queue, 1, 5)).toBe(`/play/${encodeId(5)}?queue=k%201&qi=1`);
+    expect(queuePlayUrl(queue, 0, 4, 90_000)).toBe(`/play/${encodeId(4)}?t=90000&queue=k%201&qi=0`);
   });
 });
 
@@ -65,7 +66,7 @@ describe("useVideoQueue", () => {
     start([show, started, watchedMovie], { startIndex: 1, returnTo: "/collection/9" });
 
     const location = new URL(screen.getByTestId("location").textContent ?? "", "http://pley.test");
-    expect(location.pathname).toBe("/play/3");
+    expect(location.pathname).toBe(`/play/${encodeId(3)}`);
     expect(location.searchParams.get("t")).toBe("60000");
     expect(location.searchParams.get("qi")).toBe("0");
     expect(loadQueue(location.searchParams.get("queue"))).toMatchObject({ ids: [3, 2], returnTo: "/collection/9" });
@@ -73,7 +74,7 @@ describe("useVideoQueue", () => {
 
   it("starts watched videos over", () => {
     start([watchedMovie, started]);
-    expect(screen.getByTestId("location")).toHaveTextContent(/^\/play\/2\?queue=/);
+    expect(screen.getByTestId("location").textContent?.startsWith(`/play/${encodeId(2)}?queue=`)).toBe(true);
   });
 
   it("keeps one queue per tab", () => {

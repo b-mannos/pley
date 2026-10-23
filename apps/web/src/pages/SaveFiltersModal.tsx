@@ -9,6 +9,7 @@ import { useToast } from "@/components/Toast";
 import { Button, Field, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { describeSmartFilter } from "@/lib/smartFilter";
+import { collectionUrl, playlistUrl } from "@/lib/urls";
 
 type Target = "playlist" | "collection";
 
@@ -46,12 +47,12 @@ export function SaveFiltersModal({
     if (target === "collection") {
       collection.mutate(
         { libraryId, title: name, smart_filter: filter },
-        { onSuccess: (c) => (onClose(), void navigate(`/collection/${c.id}`)), onError },
+        { onSuccess: (c) => (onClose(), void navigate(collectionUrl(c.id))), onError },
       );
     } else {
       playlist.mutate(
         { title: name, library_id: libraryId, smart_filter: filter },
-        { onSuccess: (p) => (onClose(), void navigate(`/playlists/${p.id}`)), onError },
+        { onSuccess: (p) => (onClose(), void navigate(playlistUrl(p.id))), onError },
       );
     }
   };

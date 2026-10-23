@@ -8,6 +8,7 @@ import { PersonPhoto } from "@/components/PersonCard";
 import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
 import { pluralize } from "@/lib/format";
 import { useDocumentTitle, useElementWidth } from "@/lib/hooks";
+import { idParam } from "@/lib/ids";
 
 const ROLE_NAMES: Record<CreditRole, string> = {
   actor: "Actor",
@@ -57,7 +58,7 @@ function CreditGrid({ title, credits }: { title: string; credits: PersonCredit[]
 /** An actor's or director's page: what they are in, in this server's libraries. */
 export function PersonPage() {
   const params = useParams();
-  const person = usePerson(Number(params.id));
+  const person = usePerson(idParam(params.id));
   useDocumentTitle(person.data?.name ?? "Cast & crew");
 
   if (person.isPending) {
