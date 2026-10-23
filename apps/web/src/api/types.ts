@@ -167,6 +167,20 @@ export interface ItemSummary {
   release_date?: string | null;
   /** Bonus material: "trailer", "featurette", "behind_the_scenes", … */
   extra_type?: string | null;
+  /** What the title's files are like: in listings sorted by bitrate. */
+  media?: MediaSummary | null;
+}
+
+/** A title's best file (a show's files on average). */
+export interface MediaSummary {
+  /** Bits per second. */
+  bitrate: number | null;
+  /** Bytes (a show's: all its episodes'). */
+  size: number | null;
+  width: number | null;
+  height: number | null;
+  video_codec: string | null;
+  dynamic_range: DynamicRange | null;
 }
 
 export interface ItemDetail extends ItemSummary {
@@ -466,6 +480,8 @@ export interface TranscodeInfo {
   audio_in: string | null;
   audio_out: string | null;
   encoder: string | null;
+  /** The software encoder's preset now. */
+  preset?: string | null;
   decoder: string | null;
   /** Where frames are processed: zero-copy on one GPU, mixed, CPU only, or stream copy. */
   pipeline?: TranscodePipeline | null;
@@ -517,7 +533,8 @@ export type ServerEvent =
   | { type: "sessions_changed" };
 
 export type HwAccel = "auto" | "none" | "nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox";
-export type TranscodePreset = "ultrafast" | "superfast" | "veryfast" | "faster" | "fast" | "medium";
+/** `auto`: the transcoder picks one from its load and how far ahead of the player it is, and changes it as they change. */
+export type TranscodePreset = "auto" | "ultrafast" | "superfast" | "veryfast" | "faster" | "fast" | "medium";
 export type ToneMapping = "auto" | "libplacebo" | "opencl" | "zscale" | "none";
 /** Where TV show metadata comes from; "auto" is TMDB, else TheTVDB (when they have a key), else TVmaze. */
 export type TvMetadata = "auto" | "tmdb" | "tvdb" | "tvmaze";
@@ -672,7 +689,16 @@ export interface FsListing {
   entries: FsEntry[];
 }
 
-export type LibrarySort = "title" | "year" | "added" | "rating" | "release" | "duration" | "last_played" | "user_rating";
+export type LibrarySort =
+  | "title"
+  | "year"
+  | "added"
+  | "rating"
+  | "release"
+  | "duration"
+  | "last_played"
+  | "user_rating"
+  | "bitrate";
 export type SortOrder = "asc" | "desc";
 
 export interface LibraryItemsQuery {

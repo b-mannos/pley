@@ -27,7 +27,15 @@ const TONEMAP: { value: ToneMapping; label: string }[] = [
   { value: "none", label: "Disabled (HDR may look washed out)" },
 ];
 
-const PRESETS: TranscodePreset[] = ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium"];
+const PRESETS: { value: TranscodePreset; label: string }[] = [
+  { value: "auto", label: "Automatic (adapts to load)" },
+  { value: "ultrafast", label: "ultrafast" },
+  { value: "superfast", label: "superfast" },
+  { value: "veryfast", label: "veryfast" },
+  { value: "faster", label: "faster" },
+  { value: "fast", label: "fast" },
+  { value: "medium", label: "medium" },
+];
 
 const LANGUAGES = [
   "en-US",
@@ -496,7 +504,11 @@ ${form.tvdb_pin}`}
             ))}
           </Select>
         </Row>
-        <Row label="Software encoder preset" htmlFor="preset" hint="Faster presets use less CPU but produce larger files (libx264 only).">
+        <Row
+          label="Software encoder preset"
+          htmlFor="preset"
+          hint="Faster presets use less CPU for larger files (libx264 and libx265). Automatic starts as slow as this computer allows for the transcodes running, speeds up when a player is about to wait, and slows back down for better pictures once it is well ahead."
+        >
           <Select
             id="preset"
             value={form.transcode_preset}
@@ -504,8 +516,8 @@ ${form.tvdb_pin}`}
             className="w-full"
           >
             {PRESETS.map((p) => (
-              <option key={p} value={p}>
-                {p}
+              <option key={p.value} value={p.value}>
+                {p.label}
               </option>
             ))}
           </Select>

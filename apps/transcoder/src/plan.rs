@@ -9,6 +9,7 @@
 //! the segment muxer's `-segment_times`; when transcoding, keyframes are forced
 //! on the same grid, when remuxing the grid *is* the source keyframes.
 
+use crate::adaptive::AUTO;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -284,7 +285,7 @@ impl Plan {
                             .options
                             .preset
                             .clone()
-                            .filter(|p| is_x264_preset(p))
+                            .filter(|p| is_x264_preset(p) || p == AUTO)
                             .unwrap_or_else(|| "veryfast".into()),
                         encoder: Some(encoder),
                     })
@@ -505,7 +506,7 @@ impl Plan {
                 let graph = self.filter_graph(v, encoder, pipeline, start_ms);
                 a.push_all(["-filter_complex", &graph, "-map", "[vout]"]);
                 if let Some(enc) = encoder {
-                    a.extend(encoder_args(enc, v));
+                    a.extend(encoder_args(enc, v, ctx.preset));
                 }
                 let keyint = format!("expr:gte(t,n_forced*{})", trim_float(self.segment_seconds));
                 a.push_all(["-force_key_frames", &keyint]);
@@ -680,6 +681,8 @@ pub struct ArgsContext<'a> {
     /// Overrides the planned encoder (software fallback when hardware sessions run out).
     pub encoder: Option<&'a EncoderInfo>,
     pub relative_split_times: bool,
+    /// The software encoder's preset for this process (see [`crate::adaptive`]).
+    pub preset: Option<&'a str>,
 }
 
 #[derive(Default)]
@@ -700,8 +703,10 @@ impl Args {
     }
 }
 
-fn encoder_args(enc: &EncoderInfo, v: &VideoOut) -> Vec<String> {
+fn encoder_args(enc: &EncoderInfo, v: &VideoOut, preset: Option<&str>) -> Vec<String> {
     let br = v.bitrate_kbps;
+    // `auto` is the transcoder's to choose; one it didn't is a plain default.
+    let preset = preset.unwrap_or(if v.preset == AUTO { "veryfast" } else { &v.preset }).to_owned();
     let rate = |s: &mut Vec<String>| {
         s.extend([
             "-b:v".into(),
@@ -751,13 +756,13 @@ fn encoder_args(enc: &EncoderInfo, v: &VideoOut) -> Vec<String> {
         }
         HwAccel::None | HwAccel::Auto => {
             if h264 {
-                s.extend(["-preset".into(), v.preset.clone(), "-crf".into(), "21".into()]);
+                s.extend(["-preset".into(), preset, "-crf".into(), "21".into()]);
                 s.extend(["-maxrate".into(), format!("{br}k"), "-bufsize".into(), format!("{}k", br * 2)]);
                 s.extend(
                     ["-profile:v", "high", "-sc_threshold", "0", "-forced-idr", "1", "-g", "9999"].map(String::from),
                 );
             } else {
-                s.extend(["-preset".into(), v.preset.clone(), "-crf".into(), "24".into()]);
+                s.extend(["-preset".into(), preset, "-crf".into(), "24".into()]);
                 s.extend(["-maxrate".into(), format!("{br}k"), "-bufsize".into(), format!("{}k", br * 2)]);
                 s.extend(["-x265-params", "log-level=error:scenecut=0:open-gop=0:keyint=9999"].map(String::from));
             }
@@ -1011,7 +1016,12 @@ mod tests {
     }
 
     fn args_string(plan: &Plan, start: u32, end: u32) -> String {
-        let ctx = ArgsContext { input: Path::new("/media/movie.mkv"), encoder: None, relative_split_times: true };
+        let ctx = ArgsContext {
+            input: Path::new("/media/movie.mkv"),
+            encoder: None,
+            relative_split_times: true,
+            preset: None,
+        };
         plan.ffmpeg_args(&ctx, start, end)
             .iter()
             .map(|a| a.to_string_lossy().into_owned())
@@ -1179,6 +1189,7 @@ mod tests {
             input: Path::new("/media/movie.mkv"),
             encoder: Some(&ff.caps.encoders[1]),
             relative_split_times: true,
+            preset: None,
         };
         let args: Vec<String> = plan.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect();
         let args = args.join(" ");

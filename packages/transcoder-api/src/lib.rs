@@ -480,7 +480,9 @@ pub struct TranscodeOptions {
     pub hardware_decoding: bool,
     #[serde(default)]
     pub tonemap: TonemapMode,
-    /// x264 preset for software encodes (`veryfast` by default).
+    /// x264 preset for software encodes (`veryfast` by default), or `auto`:
+    /// chosen by the transcoder from its load and how far ahead of the player
+    /// it is, and changed as they change.
     #[serde(default)]
     pub preset: Option<String>,
     /// Limit ffmpeg to ~2× realtime once a buffer has been built.
@@ -614,6 +616,10 @@ pub struct ProcessStatus {
     pub dup_frames: Option<u64>,
     pub drop_frames: Option<u64>,
     pub hardware: bool,
+    /// The software encoder's preset (`veryfast`…), when the video is
+    /// encoded in software.
+    #[serde(default)]
+    pub preset: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

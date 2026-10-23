@@ -17,12 +17,13 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use pley_transcoder_api::{
-    EncoderInfo, JobCreated, JobRequest, JobState, JobStatus, Limits, MediaInfo, ProcessStatus, VideoMode,
+    EncoderInfo, JobCreated, JobRequest, JobState, JobStatus, Limits, MediaInfo, ProcessStatus, VideoCodec, VideoMode,
 };
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdout};
 use tokio::sync::{Notify, oneshot, watch};
 
+use crate::adaptive;
 use crate::error::{ApiError, ApiResult};
 use crate::extract::Extractor;
 use crate::ffmpeg::Ffmpeg;
@@ -138,6 +139,9 @@ struct Runtime {
     warnings: Vec<String>,
     encoder_override: Option<EncoderInfo>,
     failures: HashMap<u32, u32>,
+    /// The automatic preset of the running process (index in
+    /// [`adaptive::LADDER`]), and when it started or moved.
+    preset: Option<(usize, Instant)>,
 }
 
 struct Proc {
@@ -365,11 +369,73 @@ impl JobManager {
         if let Some(old) = guard.take() {
             old.stop().await;
         }
-        *guard = Some(self.spawn(job, n)?);
+        *guard = Some(self.spawn(job, n, None)?);
         Ok(())
     }
 
-    fn spawn(self: &Arc<Self>, job: &Arc<Job>, start: u32) -> ApiResult<Proc> {
+    /// Software encodes running now.
+    fn software_encodes(&self) -> u32 {
+        self.list().iter().filter(|job| job.encodes_in_software()).count() as u32
+    }
+
+    /// What the automatic preset depends on for `job` now, counting it.
+    fn load_for(&self, job: &Job) -> adaptive::Load {
+        let (pixels, hevc) = job
+            .plan
+            .video
+            .as_ref()
+            .map_or((0, false), |v| (v.width.max(0) as u64 * v.height.max(0) as u64, v.codec == VideoCodec::Hevc));
+        let others = self.list().iter().filter(|j| j.id != job.id && j.encodes_in_software()).count() as u32;
+        adaptive::Load {
+            software_jobs: others + 1,
+            cores: std::thread::available_parallelism().map_or(4, |n| n.get() as u32),
+            pixels,
+            hevc,
+        }
+    }
+
+    /// Moves jobs on the automatic preset a step faster or slower when their
+    /// lead over the player and their speed call for it (see
+    /// [`crate::adaptive`]), restarting ffmpeg where it was.
+    async fn adapt(self: &Arc<Self>) {
+        if self.software_encodes() == 0 {
+            return;
+        }
+        for job in self.list() {
+            let Some((current, moved_at)) = job.runtime.lock().preset else { continue };
+            let Ok(mut guard) = job.process.try_lock() else { continue };
+            let Some(next) = guard.as_ref().filter(|p| p.running()).map(|p| p.next.load(Relaxed)) else { continue };
+            if guard.as_ref().is_some_and(|p| next >= p.end) {
+                continue;
+            }
+            let speed = job.runtime.lock().process.as_ref().and_then(|p| p.speed);
+            let lead = job.lead_secs(next);
+            let target = adaptive::target(self.load_for(&job));
+            let to = match adaptive::decide(current, target, lead, speed, moved_at.elapsed()) {
+                adaptive::Move::Faster => current - 1,
+                adaptive::Move::Slower => current + 1,
+                adaptive::Move::Stay => continue,
+            };
+            tracing::info!(
+                job = %job.id,
+                "preset {} → {} ({lead:.0} s ahead of the player at {}× real time)",
+                adaptive::LADDER[current],
+                adaptive::LADDER[to],
+                speed.map_or("?".into(), |s| format!("{s:.1}"))
+            );
+            if let Some(old) = guard.take() {
+                old.stop().await;
+            }
+            match self.spawn(&job, next, Some(to)) {
+                Ok(process) => *guard = Some(process),
+                Err(err) => tracing::warn!(job = %job.id, "could not restart at a new preset: {err:?}"),
+            }
+            drop(guard);
+            job.notify.notify_waiters();
+        }
+    }
+
+    fn spawn(self: &Arc<Self>, job: &Arc<Job>, start: u32, preset: Option<usize>) -> ApiResult<Proc> {
         let plan = &job.plan;
         // Stop before the first segment that is already on disk: ffmpeg would
         // truncate and rewrite it while it may be being served.
@@ -395,8 +461,24 @@ impl JobManager {
             None
         };
 
-        let ctx =
-            ArgsContext { input: &job.input, encoder: fallback, relative_split_times: self.ff.segment_times_relative };
+        // The software encoder's preset: the planned one, or the automatic
+        // one, which starts a step faster when nothing is ready ahead.
+        let software = planned.is_some() && (!want_hw || fallback.is_some());
+        let auto = job.plan.video.as_ref().is_some_and(|v| v.preset == adaptive::AUTO);
+        let chosen = (software && auto).then(|| {
+            preset.unwrap_or_else(|| adaptive::start(adaptive::target(self.load_for(job)), job.lead_secs(start)))
+        });
+        let preset_name = match chosen {
+            Some(i) => Some(adaptive::LADDER[i].to_owned()),
+            None if software => job.plan.video.as_ref().map(|v| v.preset.clone()),
+            None => None,
+        };
+        let ctx = ArgsContext {
+            input: &job.input,
+            encoder: fallback,
+            relative_split_times: self.ff.segment_times_relative,
+            preset: preset_name.as_deref(),
+        };
         let args = plan.ffmpeg_args(&ctx, start, end);
         tracing::debug!(job = %job.id, "ffmpeg {}", args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "));
         let mut cmd = self.ff.command();
@@ -423,12 +505,14 @@ impl JobManager {
             rt.started_any = true;
             rt.state = JobState::Running;
             rt.encoder_override = fallback.cloned();
+            rt.preset = chosen.map(|i| (i, Instant::now()));
             rt.process = Some(ProcessStatus {
                 pid: child.id(),
                 start_segment: start,
                 started_at_ms: now_ms(),
                 out_time_ms: start_ms,
                 hardware: hw,
+                preset: preset_name.clone(),
                 ..Default::default()
             });
         }
@@ -490,7 +574,8 @@ impl JobManager {
         });
     }
 
-    async fn reap(&self) {
+    async fn reap(self: &Arc<Self>) {
+        self.adapt().await;
         let now = now_ms();
         for job in self.list() {
             let idle = now - job.last_access_ms.load(Relaxed);
@@ -547,6 +632,21 @@ impl Drop for Waiting<'_> {
 impl Job {
     pub fn touch(&self) {
         self.last_access_ms.store(now_ms(), Relaxed);
+    }
+
+    /// Whether a process of this job is encoding video in software now.
+    fn encodes_in_software(&self) -> bool {
+        let rt = self.runtime.lock();
+        rt.state == JobState::Running
+            && rt.process.as_ref().is_some_and(|p| !p.hardware)
+            && self.plan.video.as_ref().is_some_and(|v| !v.copy)
+    }
+
+    /// Seconds of video ready past the segment the player asked for last,
+    /// with `next` the first segment not ready (negative: it is waiting).
+    fn lead_secs(&self, next: u32) -> f64 {
+        let asked = self.last_requested.load(Relaxed);
+        (f64::from(next) - f64::from(asked) - 1.0) * self.plan.segment_seconds
     }
 
     pub fn segment_path(&self, n: u32) -> PathBuf {

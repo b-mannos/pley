@@ -88,7 +88,8 @@ impl Default for Settings {
             hardware_decoding: true,
             tonemapping: TonemapMode::Auto,
             max_transcodes: 4,
-            transcode_preset: "veryfast".into(),
+            // Chosen by the transcoder from its load and lead (crate::transcoder).
+            transcode_preset: "auto".into(),
             throttle_transcodes: true,
             scan_interval_minutes: 360,
             watch_libraries: true,
@@ -243,7 +244,7 @@ impl SettingsStore {
             next.max_transcodes = v;
         }
         if let Some(v) = patch.transcode_preset {
-            if !matches!(v.as_str(), "ultrafast" | "superfast" | "veryfast" | "faster" | "fast" | "medium") {
+            if !matches!(v.as_str(), "auto" | "ultrafast" | "superfast" | "veryfast" | "faster" | "fast" | "medium") {
                 return Err(AppError::bad_request("unknown transcode preset"));
             }
             next.transcode_preset = v;
@@ -410,6 +411,7 @@ mod tests {
         assert_eq!(s.metadata_language, "fr-FR");
         assert_eq!((s.max_transcodes, s.transcode_preset.as_str()), (64, "medium"));
         assert_eq!(s.scan_interval_minutes, 7 * 24 * 60, "at most a week");
+        assert_eq!(Settings::default().transcode_preset, "auto", "the transcoder chooses by default");
         assert!(!s.seek_previews);
         // Fields left out keep their values.
         let s = store.update(&db, patch(serde_json::json!({"watch_libraries": false}))).await.unwrap();

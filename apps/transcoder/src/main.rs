@@ -6,6 +6,7 @@
 //! Standalone transcoding service. It is the only pley component that runs
 //! FFmpeg; the media server talks to it over HTTP (docs/TRANSCODER.md).
 
+mod adaptive;
 mod cache;
 mod error;
 mod extract;

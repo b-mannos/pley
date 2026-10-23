@@ -617,6 +617,8 @@ pub struct TranscodeInfo {
     pub audio_in: Option<String>,
     pub audio_out: Option<String>,
     pub encoder: Option<String>,
+    /// The software encoder's preset now (the automatic one changes).
+    pub preset: Option<String>,
     pub decoder: Option<String>,
     /// `gpu` (decode → filters → encode on one GPU), `hybrid`, `cpu` or `copy`.
     pub pipeline: Option<String>,
@@ -699,6 +701,7 @@ pub fn transcode_info(job: &JobStatus) -> TranscodeInfo {
         audio_in,
         audio_out,
         encoder: video.and_then(|v| v.encoder.clone()),
+        preset: process.and_then(|p| p.preset.clone()),
         decoder: video.and_then(|v| v.decoder.clone()),
         pipeline: video.and_then(|v| v.pipeline.clone()),
         tonemap: video.and_then(|v| v.tonemap).map(|t| t.as_str().to_owned()),

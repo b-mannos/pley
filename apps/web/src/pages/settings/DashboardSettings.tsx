@@ -269,6 +269,7 @@ function JobsTable({ jobs }: { jobs: TranscoderJob[] }) {
                     {i.encoder ?? (i.video === "copy" ? "copy" : "—")}
                     <PipelineBadge pipeline={i.pipeline} className="font-sans" />
                   </div>
+                  {i.preset ? <div className="text-subtle">preset {i.preset}</div> : null}
                   <div className="text-subtle">{i.decoder ?? ""}</div>
                 </td>
                 <td className="px-3 py-2 font-mono text-fg/80">{i.tonemap ?? "—"}</td>
