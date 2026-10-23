@@ -169,9 +169,17 @@ following status codes:
   source's keyframes.
   - Matroska and WebM: the keyframe index is read instantly from the file's
     Cues element, so remuxing works on the first play.
+  - MP4, MOV and M4V: the index is read just as quickly from the video
+    track's sample tables (`stss`, `stts`, `ctts`) and edit list, or from the
+    movie fragments' sample flags in fragmented files (CMAF, OBS
+    recordings). Times match FFmpeg's packet timestamps, edit lists included.
+    Files with structures this doesn't model (several edits, sync points in
+    sample groups, inconsistent tables) are left to the packet scan below,
+    as are fragmented files whose fragments take more than 2 s to walk.
   - Other containers: the index is built in the background (one file at a
     time, by reading packet headers) after `POST /v1/keyframes`, which the
     server sends when an item page is opened. Until it exists, jobs transcode.
+  - Formats are recognised by content, not by file name.
 - **Subtitle extraction.** Every text track of a file is converted to WebVTT in
   a single pass over the file and cached. External files are converted with
   charset detection (UTF-8, UTF-16 BOM, or Windows-1252 as a fallback).

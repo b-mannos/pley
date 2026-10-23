@@ -229,7 +229,7 @@ impl JobManager {
             None => self.prober.probe(&input).await.map_err(|e| ApiError::Failed(format!("probe failed: {e:#}")))?,
         };
         let keyframes = if wants_copy {
-            let index = self.keyframes.get_or_cues(&input).await;
+            let index = self.keyframes.get_or_read(&input).await;
             if index.is_none() {
                 self.keyframes.request(&input);
             }

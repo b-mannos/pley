@@ -15,6 +15,7 @@ mod job;
 mod keyframes;
 mod matroska;
 mod metrics;
+mod mp4;
 mod plan;
 mod probe;
 mod trickplay;

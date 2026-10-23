@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: LicenseRef-Restricted
 //! Keyframe index used to segment stream-copied (remuxed) video exactly on
-//! keyframes. Building an index reads the whole file, so it runs in the
-//! background one file at a time and is cached on disk; jobs fall back to
-//! transcoding until the index exists.
+//! keyframes, cached on disk per file version.
+//!
+//! Matroska and MP4/MOV files carry an index of their own (Cues; sample
+//! tables and fragment headers), read in milliseconds when a job is created.
+//! Other files, or ones whose index can't be trusted, need every packet
+//! header read: that runs in the background one file at a time, and jobs
+//! transcode until it is done.
 
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
 use parking_lot::Mutex;
@@ -19,6 +25,10 @@ use crate::metrics::Metrics;
 use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg};
 
 const MEMORY_ENTRIES: usize = 256;
+/// How long creating a job may spend reading a file's own index (only walking
+/// thousands of movie fragments on slow storage comes near it); beyond that
+/// the job transcodes and the index is finished in the background.
+const READ_BUDGET: Duration = Duration::from_secs(2);
 
 pub struct KeyframeStore {
     dir: PathBuf,
@@ -37,13 +47,13 @@ impl KeyframeStore {
             while let Some((key, path)) = rx.recv().await {
                 let Some(store) = worker.upgrade() else { break };
                 Metrics::inc(&metrics.keyframe_scans);
-                let started = std::time::Instant::now();
-                let cues = {
+                let started = Instant::now();
+                let own = {
                     let path = path.clone();
-                    tokio::task::spawn_blocking(move || crate::matroska::cue_keyframes(&path)).await.ok().flatten()
+                    tokio::task::spawn_blocking(move || container_index(&path, None)).await.ok().flatten()
                 };
-                let result = match cues {
-                    Some(times) => Ok(times),
+                let result = match own {
+                    Some((times, _)) => Ok(times),
                     None => scan(&ff, &path).await,
                 };
                 match result {
@@ -80,20 +90,25 @@ impl KeyframeStore {
         Some(times)
     }
 
-    /// Like [`get`](Self::get), but for Matroska files without a cached index
-    /// first tries the file's Cues element, which takes milliseconds.
-    pub async fn get_or_cues(&self, path: &Path) -> Option<Arc<Vec<i64>>> {
+    /// Like [`get`](Self::get), but without a cached index first reads the
+    /// file's own (Matroska cues, MP4 sample tables), which takes
+    /// milliseconds.
+    pub async fn get_or_read(&self, path: &Path) -> Option<Arc<Vec<i64>>> {
         if let Some(hit) = self.get(path) {
             return Some(hit);
         }
-        let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-        if !matches!(ext.as_str(), "mkv" | "webm" | "mk3d") {
-            return None;
-        }
         let key = file_key(path).ok()?;
         let file = path.to_path_buf();
-        let times = tokio::task::spawn_blocking(move || crate::matroska::cue_keyframes(&file)).await.ok().flatten()?;
-        tracing::debug!("keyframe index for {} read from Matroska cues ({} keyframes)", path.display(), times.len());
+        let deadline = Instant::now() + READ_BUDGET;
+        let started = Instant::now();
+        let (times, source) =
+            tokio::task::spawn_blocking(move || container_index(&file, Some(deadline))).await.ok().flatten()?;
+        tracing::debug!(
+            "keyframe index for {} read from {source} ({} keyframes, {:.0} ms)",
+            path.display(),
+            times.len(),
+            started.elapsed().as_secs_f64() * 1000.0
+        );
         self.save(&key, times.clone());
         Some(Arc::new(times))
     }
@@ -114,9 +129,11 @@ impl KeyframeStore {
             return;
         }
         let text: String = times.iter().map(|t| format!("{t}\n")).collect();
-        let tmp = self.dir.join(format!("{key}.tmp"));
-        if std::fs::write(&tmp, text).is_ok() {
-            let _ = std::fs::rename(&tmp, self.dir.join(format!("{key}.txt")));
+        // A name of its own: a job and the background worker may save the
+        // same index at once, and readers must never see half of one.
+        let tmp = self.dir.join(format!("{key}.{}.tmp", uuid::Uuid::new_v4().simple()));
+        if std::fs::write(&tmp, text).is_err() || std::fs::rename(&tmp, self.dir.join(format!("{key}.txt"))).is_err() {
+            let _ = std::fs::remove_file(&tmp);
         }
         self.remember(key.to_owned(), Arc::new(times));
     }
@@ -128,6 +145,27 @@ impl KeyframeStore {
         }
         memory.insert(key, times);
     }
+}
+
+/// Keyframe times from the file's own index, recognised by content rather
+/// than by name: Matroska cues or MP4/MOV sample tables. `None` when it has
+/// none that can be trusted (the caller scans packets instead). Blocking.
+fn container_index(path: &Path, deadline: Option<Instant>) -> Option<(Vec<i64>, &'static str)> {
+    let mut head = Vec::with_capacity(12);
+    std::fs::File::open(path).ok()?.take(12).read_to_end(&mut head).ok()?;
+    if head.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
+        return crate::matroska::cue_keyframes(path).map(|times| (times, "Matroska cues"));
+    }
+    if crate::mp4::sniff(&head) {
+        return match crate::mp4::keyframes(path, deadline) {
+            Ok(times) => Some((times, "MP4 sample tables")),
+            Err(why) => {
+                tracing::debug!("no keyframe index in {}: {why}", path.display());
+                None
+            }
+        };
+    }
+    None
 }
 
 /// Read every video packet header and collect keyframe timestamps.
@@ -158,7 +196,7 @@ async fn scan(ff: &Ffmpeg, path: &Path) -> anyhow::Result<Vec<i64>> {
 }
 
 /// `"12.345000,K__"` → `Some(12345)` for keyframes.
-fn parse_packet_line(line: &str) -> Option<i64> {
+pub(crate) fn parse_packet_line(line: &str) -> Option<i64> {
     let (pts, flags) = line.split_once(',')?;
     if !flags.starts_with('K') {
         return None;
@@ -211,7 +249,57 @@ mod tests {
         assert!(restarted.get(&movie).is_none());
         restarted.save(&file_key(&movie).unwrap(), vec![]);
         assert!(restarted.get(&movie).is_none());
-        // Only Matroska files have cues to read; others wait for a scan.
-        assert!(restarted.get_or_cues(&movie).await.is_none());
+        // Neither Matroska nor MP4 inside: it waits for a scan.
+        assert!(restarted.get_or_read(&movie).await.is_none());
+        // Nothing half-written is left behind.
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path().join("keyframes"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "tmp"))
+            .collect();
+        assert!(leftovers.is_empty());
+    }
+
+    /// The smallest MP4 with a video track of three keyframes, 1 s apart.
+    fn tiny_mp4() -> Vec<u8> {
+        fn bx(kind: &[u8; 4], parts: &[&[u8]]) -> Vec<u8> {
+            let payload = parts.concat();
+            [&((payload.len() + 8) as u32).to_be_bytes()[..], kind, &payload].concat()
+        }
+        fn full(kind: &[u8; 4], words: &[u32]) -> Vec<u8> {
+            let payload: Vec<u8> = [0u32].iter().chain(words).flat_map(|w| w.to_be_bytes()).collect();
+            bx(kind, &[&payload])
+        }
+        let stbl = bx(
+            b"stbl",
+            &[
+                &full(b"stsd", &[1, 16, u32::from_be_bytes(*b"avc1"), 0]),
+                &full(b"stts", &[1, 3, 1000]),
+                &full(b"stsc", &[1, 1, 1, 1]),
+                &full(b"stsz", &[0, 3]),
+                &full(b"stco", &[3]),
+            ],
+        );
+        let hdlr = full(b"hdlr", &[0, u32::from_be_bytes(*b"vide"), 0, 0, 0]);
+        let mdia = bx(b"mdia", &[&full(b"mdhd", &[0, 0, 1000, 3000, 0]), &hdlr, &bx(b"minf", &[&stbl])]);
+        let trak = bx(b"trak", &[&full(b"tkhd", &[0, 0, 1, 0, 0]), &mdia]);
+        let moov = bx(b"moov", &[&full(b"mvhd", &[0, 0, 1000, 3000]), &trak]);
+        [bx(b"ftyp", &[b"isom"]), moov, bx(b"mdat", &[&[0; 8]])].concat()
+    }
+
+    #[tokio::test]
+    async fn mp4_indexes_are_read_on_the_spot() {
+        let dir = tempfile::tempdir().unwrap();
+        // Recognised by its content, whatever its name.
+        let movie = dir.path().join("movie.m4v.part");
+        std::fs::write(&movie, tiny_mp4()).unwrap();
+        let keyframes = store(dir.path());
+        assert_eq!(keyframes.get_or_read(&movie).await.as_deref(), Some(&vec![0, 1_000, 2_000]));
+        // Saved: a restarted transcoder has it without reading the file.
+        assert_eq!(store(dir.path()).get(&movie).as_deref(), Some(&vec![0, 1_000, 2_000]));
+        // A damaged one is left to the background scan.
+        let broken = dir.path().join("broken.mp4");
+        std::fs::write(&broken, &tiny_mp4()[..60]).unwrap();
+        assert!(keyframes.get_or_read(&broken).await.is_none());
     }
 }
