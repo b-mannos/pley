@@ -14,6 +14,7 @@ mod lists;
 mod meta;
 mod notifications;
 mod playback;
+mod queues;
 mod server;
 mod xml;
 
@@ -217,6 +218,13 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/_/scrobble", any(playback::scrobble))
         .route("/_/unscrobble", any(playback::unscrobble))
         .route("/_/rate", any(playback::rate))
+        .route("/playQueues", post(queues::create))
+        .route("/playQueues/{id}", get(queues::get).put(queues::add))
+        .route("/playQueues/{id}/items", delete(queues::clear))
+        .route("/playQueues/{id}/items/{entry}", delete(queues::remove))
+        .route("/playQueues/{id}/items/{entry}/move", put(queues::move_item))
+        .route("/playQueues/{id}/shuffle", put(queues::shuffled))
+        .route("/playQueues/{id}/unshuffle", put(queues::unshuffled))
         .route("/status/sessions", get(playback::sessions))
         .route("/_/websockets/notifications", get(notifications::socket))
         .route("/status/sessions/history/all", get(server::history))

@@ -313,7 +313,7 @@ pub async fn collection_delete(
 
 /// Item ids in a Plex `uri` (`server://…/library/metadata/1,2,3`,
 /// `library://…/item/%2Flibrary%2Fmetadata%2F1`).
-fn uri_items(uri: &str) -> Vec<i64> {
+pub(super) fn uri_items(uri: &str) -> Vec<i64> {
     let Some(start) = uri.find("/library/metadata/") else { return Vec::new() };
     let rest = &uri[start + "/library/metadata/".len()..];
     let ids = rest.split(['/', '?', '&']).next().unwrap_or_default();
