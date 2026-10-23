@@ -469,11 +469,19 @@ export type ServerEvent =
 export type HwAccel = "auto" | "none" | "nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox";
 export type TranscodePreset = "ultrafast" | "superfast" | "veryfast" | "faster" | "fast" | "medium";
 export type ToneMapping = "auto" | "libplacebo" | "opencl" | "zscale" | "none";
+/** Where TV show metadata comes from; "auto" is TMDB, else TheTVDB (when they have a key), else TVmaze. */
+export type TvMetadata = "auto" | "tmdb" | "tvdb" | "tvmaze";
 
 export interface Settings {
   server_name: string;
   tmdb_api_key: string;
   metadata_language: string;
+  tv_metadata: TvMetadata;
+  tvdb_api_key: string;
+  /** Subscriber PIN, for TheTVDB keys that need one. */
+  tvdb_pin: string;
+  /** Artists and albums from MusicBrainz, covers from the Cover Art Archive. */
+  music_metadata: boolean;
   hwaccel: HwAccel;
   hardware_decoding: boolean;
   tonemapping: ToneMapping;

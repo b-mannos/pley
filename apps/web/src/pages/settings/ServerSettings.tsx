@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Eye, EyeOff, Save } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useSaveSettings, useSettings, useSystemInfo } from "@/api/hooks";
-import type { HwAccel, Settings, ToneMapping, TranscodePreset } from "@/api/types";
+import type { HwAccel, Settings, ToneMapping, TranscodePreset, TvMetadata } from "@/api/types";
 import { useToast } from "@/components/Toast";
 import { Button, Card, EmptyState, IconButton, PageSpinner, Select, TextInput, Toggle } from "@/components/ui";
+import { cn } from "@/lib/cn";
 import { useDocumentTitle } from "@/lib/hooks";
 
 const HWACCEL: { value: HwAccel; label: string }[] = [
@@ -68,6 +69,57 @@ function Group({ title, description, children }: { title: string; description?: 
   );
 }
 
+const TV_SOURCES: Record<Exclude<TvMetadata, "auto">, string> = { tmdb: "TMDB", tvdb: "TheTVDB", tvmaze: "TVmaze" };
+
+/** The TV source "Automatic" stands for with these keys (the server decides the same way). */
+function automaticTvSource(form: Settings): Exclude<TvMetadata, "auto"> {
+  if (form.tmdb_api_key.trim()) return "tmdb";
+  if (form.tvdb_api_key.trim()) return "tvdb";
+  return "tvmaze";
+}
+
+function Link({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+      {children}
+    </a>
+  );
+}
+
+/** A key or PIN: hidden unless asked for. */
+function SecretInput({
+  id,
+  value,
+  onChange,
+  what,
+  className,
+}: {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  what: string;
+  className?: string;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="flex gap-2">
+      <TextInput
+        id={id}
+        type={visible ? "text" : "password"}
+        autoComplete="off"
+        spellCheck={false}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Not set"
+        className={cn("font-mono text-xs", className)}
+      />
+      <IconButton label={`${visible ? "Hide" : "Show"} ${what}`} onClick={() => setVisible((s) => !s)} className="rounded-md bg-surface-2">
+        {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+      </IconButton>
+    </div>
+  );
+}
+
 function Row({ label, hint, children, htmlFor }: { label: string; hint?: ReactNode; children: ReactNode; htmlFor?: string }) {
   return (
     <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] sm:items-center sm:gap-6">
@@ -89,7 +141,6 @@ export function ServerSettings() {
   const save = useSaveSettings();
   const toast = useToast();
   const [form, setForm] = useState<Settings | null>(null);
-  const [showKey, setShowKey] = useState(false);
 
   useEffect(() => {
     if (settings.data) setForm(settings.data);
@@ -104,6 +155,16 @@ export function ServerSettings() {
   if (settings.isError || !form) return <EmptyState title="Couldn't load settings" description={errorMessage(settings.error)} />;
 
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => setForm((f) => (f ? { ...f, [key]: value } : f));
+  // A source can't stay chosen once its key is gone.
+  const setKey = (key: "tmdb_api_key" | "tvdb_api_key", value: string) =>
+    setForm((f) => {
+      if (!f) return f;
+      const source: TvMetadata = key === "tmdb_api_key" ? "tmdb" : "tvdb";
+      const orphaned = !value.trim() && f.tv_metadata === source;
+      return { ...f, [key]: value, ...(orphaned ? { tv_metadata: "auto" as const } : {}) };
+    });
+  const hasTmdb = form.tmdb_api_key.trim() !== "";
+  const hasTvdb = form.tvdb_api_key.trim() !== "";
   const tc = system.data?.transcoder;
 
   const onSave = () => {
@@ -137,37 +198,67 @@ export function ServerSettings() {
         </Row>
       </Group>
 
-      <Group title="Metadata" description="Posters, summaries, ratings and episode titles.">
+      <Group title="Metadata" description="Posters, summaries, ratings, cast and episode titles.">
         <Row
           label="TMDB API key"
           htmlFor="tmdb-key"
           hint={
             <>
-              Free key from{" "}
-              <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer" className="text-accent hover:underline">
-                themoviedb.org/settings/api
-              </a>
-              . Leave empty to use file names and local artwork only.
+              Movies, collections and Fix Match use TMDB. Free key from{" "}
+              <Link href="https://www.themoviedb.org/settings/api">themoviedb.org/settings/api</Link>. Without one, movies keep their file
+              names and local artwork.
             </>
           }
         >
-          <div className="flex gap-2">
-            <TextInput
-              id="tmdb-key"
-              type={showKey ? "text" : "password"}
-              autoComplete="off"
-              spellCheck={false}
-              value={form.tmdb_api_key}
-              onChange={(e) => set("tmdb_api_key", e.target.value)}
-              placeholder="Not set"
-              className="font-mono text-xs"
-            />
-            <IconButton label={showKey ? "Hide key" : "Show key"} onClick={() => setShowKey((s) => !s)} className="rounded-md bg-surface-2">
-              {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            </IconButton>
-          </div>
+          <SecretInput id="tmdb-key" what="key" value={form.tmdb_api_key} onChange={(v) => setKey("tmdb_api_key", v)} />
         </Row>
-        <Row label="Metadata language" htmlFor="meta-lang">
+        <Row
+          label="TV shows"
+          htmlFor="tv-source"
+          hint={
+            <>
+              Automatic uses TMDB when it has a key, then TheTVDB when it has one, else <Link href="https://www.tvmaze.com">TVmaze</Link>,
+              which needs none. Changing the source fetches every show again.
+            </>
+          }
+        >
+          <Select id="tv-source" value={form.tv_metadata} onChange={(e) => set("tv_metadata", e.target.value as TvMetadata)} className="w-full">
+            <option value="auto">Automatic ({TV_SOURCES[automaticTvSource(form)]})</option>
+            <option value="tmdb" disabled={!hasTmdb}>
+              TMDB{hasTmdb ? "" : " (needs an API key)"}
+            </option>
+            <option value="tvdb" disabled={!hasTvdb}>
+              TheTVDB{hasTvdb ? "" : " (needs an API key)"}
+            </option>
+            <option value="tvmaze">TVmaze (no key needed)</option>
+          </Select>
+        </Row>
+        <Row
+          label="TheTVDB API key"
+          htmlFor="tvdb-key"
+          hint={
+            <>
+              Only needed to use TheTVDB for TV shows. Get one at <Link href="https://thetvdb.com/api-information">thetvdb.com/api-information</Link>.
+            </>
+          }
+        >
+          <SecretInput id="tvdb-key" what="key" value={form.tvdb_api_key} onChange={(v) => setKey("tvdb_api_key", v)} />
+        </Row>
+        <Row label="TheTVDB PIN" htmlFor="tvdb-pin" hint="User-supported keys also need your subscriber PIN. Leave empty for other keys.">
+          <SecretInput id="tvdb-pin" what="PIN" value={form.tvdb_pin} onChange={(v) => set("tvdb_pin", v)} />
+        </Row>
+        <Row
+          label="Music metadata"
+          hint={
+            <>
+              Genres and release dates from <Link href="https://musicbrainz.org">MusicBrainz</Link>, and covers from the Cover Art Archive for
+              albums that have none. Tags in the files win. No key needed; the first look-up takes about a second per album.
+            </>
+          }
+        >
+          <Toggle checked={form.music_metadata} onChange={(v) => set("music_metadata", v)} label="Music metadata from MusicBrainz" />
+        </Row>
+        <Row label="Metadata language" htmlFor="meta-lang" hint="For TMDB and TheTVDB. TVmaze is in English.">
           <Select id="meta-lang" value={form.metadata_language} onChange={(e) => set("metadata_language", e.target.value)} className="w-full">
             {(LANGUAGES.includes(form.metadata_language) ? LANGUAGES : [form.metadata_language, ...LANGUAGES]).map((l) => (
               <option key={l} value={l}>
@@ -176,6 +267,10 @@ export function ServerSettings() {
             ))}
           </Select>
         </Row>
+        <p className="text-xs text-subtle">
+          TV data from TVmaze is licensed <Link href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA</Link>, music data from
+          MusicBrainz is public domain. This product uses the TMDB API but is not endorsed or certified by TMDB.
+        </p>
       </Group>
 
       <Group
