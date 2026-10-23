@@ -98,8 +98,17 @@ fn spaces(s: &str) -> String {
 
 /// Final tidy-up of a title fragment.
 pub fn clean_title(s: &str) -> String {
+    let separator = |c: char| c.is_whitespace() || matches!(c, '-' | '–' | '(' | '[' | ',' | '_' | ':');
     let s = spaces(s);
-    let s = s.trim_matches(|c: char| c.is_whitespace() || matches!(c, '-' | '–' | '(' | '[' | '.' | ',' | '_' | ':'));
+    let mut s = s.trim_start_matches(|c: char| separator(c) || c == '.').trim_end_matches(separator);
+    // A final dot after a letter is part of the title ("Sherlock Jr.",
+    // "Crazy, Stupid, Love."); a stray one is not.
+    while let Some(rest) = s.strip_suffix('.') {
+        if rest.ends_with(char::is_alphanumeric) {
+            break;
+        }
+        s = rest.trim_end_matches(separator);
+    }
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -402,6 +411,13 @@ mod tests {
         assert_eq!((m.title.as_str(), m.year), ("Untitled Home Video", None));
         let m = movie("[Group] Movie Name 2020 [1080p].mkv");
         assert_eq!((m.title.as_str(), m.year), ("Movie Name", Some(2020)));
+        // A final dot after a word belongs to the title; stray ones don't.
+        let m = movie("Sherlock Jr. (1924)/Sherlock Jr. (1924).mkv");
+        assert_eq!((m.title.as_str(), m.year), ("Sherlock Jr.", Some(1924)));
+        let m = movie("Crazy, Stupid, Love. (2011).mkv");
+        assert_eq!((m.title.as_str(), m.year), ("Crazy, Stupid, Love.", Some(2011)));
+        let m = movie("Some Title . - (2005).mkv");
+        assert_eq!((m.title.as_str(), m.year), ("Some Title", Some(2005)));
     }
 
     #[test]

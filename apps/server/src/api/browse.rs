@@ -8,7 +8,7 @@ use super::libraries::{Hub, Hubs};
 use crate::auth::AuthUser;
 use crate::catalog::{self, ItemSummary};
 use crate::error::ApiResult;
-use crate::library::{LibraryKind, list_libraries};
+use crate::library::list_libraries;
 use crate::people::{self, PersonSummary};
 use crate::state::AppState;
 
@@ -23,13 +23,10 @@ pub async fn home(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
     });
     for lib in list_libraries(&state.db).await? {
         let rows = catalog::recently_added(&state.db, user.id, lib.id, lib.kind().as_str(), 20).await?;
-        let title = match lib.kind() {
-            LibraryKind::Music => format!("Recently Added in {}", lib.name),
-            _ => format!("Recently Added {}", lib.name),
-        };
         hubs.push(Hub {
             key: format!("recently_added:{}", lib.id),
-            title,
+            // "in" reads right whatever the library is called.
+            title: format!("Recently Added in {}", lib.name),
             library_id: Some(lib.id),
             items: rows.iter().map(|r| r.to_summary()).collect(),
         });
