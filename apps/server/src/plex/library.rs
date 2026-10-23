@@ -524,11 +524,14 @@ impl Filter {
         match self.op {
             Op::Greater => value > target,
             Op::Less => value < target,
-            Op::Not | Op::NotExactly => (value - target).abs() >= 86_400,
-            _ => (value - target).abs() < 86_400,
+            Op::Not | Op::NotExactly => value.abs_diff(target) >= DAY.unsigned_abs(),
+            _ => value.abs_diff(target) < DAY.unsigned_abs(),
         }
     }
 }
+
+/// A day in seconds: `=` and `!=` on dates mean the same day or not.
+const DAY: i64 = 86_400;
 
 fn parse_date(value: &str, now: i64) -> Option<i64> {
     let value = value.trim();
@@ -540,18 +543,22 @@ fn parse_date(value: &str, now: i64) -> Option<i64> {
     }
     let relative = value.trim_start_matches('-');
     let (number, unit) = relative.split_at(relative.find(|c: char| !c.is_ascii_digit())?);
-    let n: i64 = number.parse().ok()?;
+    if number.is_empty() {
+        return None;
+    }
     let unit_secs = match unit {
         "s" => 1,
         "m" => 60,
         "h" => 3_600,
-        "d" => 86_400,
-        "w" => 7 * 86_400,
-        "mon" => 30 * 86_400,
-        "y" => 365 * 86_400,
+        "d" => DAY,
+        "w" => 7 * DAY,
+        "mon" => 30 * DAY,
+        "y" => 365 * DAY,
         _ => return None,
     };
-    Some(now - n * unit_secs)
+    // Further back than an i64 reaches is the earliest time there is.
+    let back = number.parse::<i64>().ok().and_then(|n| n.checked_mul(unit_secs));
+    Some(back.map_or(i64::MIN, |back| now.saturating_sub(back)))
 }
 
 /// `YYYY-MM-DD` → unix seconds (UTC midnight).
@@ -1866,5 +1873,35 @@ mod tests {
         assert_eq!(date_secs("2024-00-10"), None);
         assert_eq!(date_secs("2024-5-1"), None);
         assert_eq!(date_secs(""), None);
+    }
+
+    #[test]
+    fn dates_out_of_range_neither_overflow_nor_filter_wrongly() {
+        let now = 1_000_000_000;
+        // Further back than an i64 reaches is the earliest time there is.
+        assert_eq!(parse_date("-9999999999999y", now), Some(i64::MIN));
+        assert_eq!(parse_date("-99999999999999999999d", now), Some(i64::MIN));
+        assert_eq!(parse_date("-0d", now), Some(now));
+        assert_eq!(parse_date("-d", now), None);
+        assert_eq!(parse_date("-99999999999999999999x", now), None, "the unit is checked first");
+
+        let mut old = row(1, "movie", "Old");
+        old.added_at = -5_000_000_000;
+        let mut new = row(2, "movie", "New");
+        new.added_at = now;
+        let rows = vec![old, new];
+        let none = HashMap::new();
+        let titles = |pairs: &[(&str, &str)]| matching(&rows, "movie", pairs, &none, now);
+        let nothing = Vec::<String>::new();
+        assert_eq!(titles(&[("addedAt>>", "-9999999999999y")]), ["Old", "New"], "everything is newer than that");
+        assert_eq!(titles(&[("addedAt<<", "-9999999999999y")]), nothing);
+        // Same day or not, however far apart the times are.
+        assert_eq!(titles(&[("addedAt", "-9999999999999y")]), nothing);
+        assert_eq!(titles(&[("addedAt!", "-9999999999999y")]), ["Old", "New"]);
+        let (max, min) = (i64::MAX.to_string(), i64::MIN.to_string());
+        assert_eq!(titles(&[("addedAt", max.as_str())]), nothing);
+        assert_eq!(titles(&[("addedAt", min.as_str())]), nothing);
+        assert_eq!(titles(&[("addedAt!", min.as_str())]), ["Old", "New"]);
+        assert_eq!(titles(&[("addedAt>>", min.as_str())]), ["Old", "New"]);
     }
 }
