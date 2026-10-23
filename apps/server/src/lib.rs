@@ -26,6 +26,7 @@ pub mod people;
 pub mod playback;
 pub mod playlists;
 pub mod plex;
+pub mod providers;
 pub mod ratings;
 pub mod related;
 pub mod settings;

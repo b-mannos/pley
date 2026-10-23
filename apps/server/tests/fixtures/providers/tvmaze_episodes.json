@@ -1,0 +1,107 @@
+[
+  {
+    "id": 3001,
+    "url": "https://www.tvmaze.com/episodes/3001/harbour-lights-1x01-the-wreck",
+    "name": "The Wreck",
+    "season": 1,
+    "number": 1,
+    "type": "regular",
+    "airdate": "2015-09-14",
+    "airtime": "21:00",
+    "airstamp": "2015-09-14T20:00:00+00:00",
+    "runtime": 60,
+    "rating": { "average": 8.1 },
+    "image": {
+      "medium": "https://static.tvmaze.com/uploads/images/medium_landscape/1/1101.jpg",
+      "original": "https://static.tvmaze.com/uploads/images/original_untouched/1/1101.jpg"
+    },
+    "summary": "<p>A boat runs aground in the fog.</p>",
+    "_links": { "self": { "href": "https://api.tvmaze.com/episodes/3001" } }
+  },
+  {
+    "id": 3002,
+    "url": "https://www.tvmaze.com/episodes/3002/harbour-lights-1x02-undertow",
+    "name": "Undertow",
+    "season": 1,
+    "number": 2,
+    "type": "regular",
+    "airdate": "2015-09-21",
+    "airtime": "21:00",
+    "airstamp": "2015-09-21T20:00:00+00:00",
+    "runtime": 60,
+    "rating": { "average": null },
+    "image": null,
+    "summary": "<p>Tom lies to the inspector.</p>",
+    "_links": { "self": { "href": "https://api.tvmaze.com/episodes/3002" } }
+  },
+  {
+    "id": 3003,
+    "url": "https://www.tvmaze.com/episodes/3003/harbour-lights-1x03-lantern",
+    "name": "Lantern",
+    "season": 1,
+    "number": 3,
+    "type": "regular",
+    "airdate": "2015-09-28",
+    "airtime": "21:00",
+    "airstamp": "2015-09-28T20:00:00+00:00",
+    "runtime": 60,
+    "rating": { "average": 7.7 },
+    "image": {
+      "medium": "https://static.tvmaze.com/uploads/images/medium_landscape/1/1103.jpg",
+      "original": "https://static.tvmaze.com/uploads/images/original_untouched/1/1103.jpg"
+    },
+    "summary": null,
+    "_links": { "self": { "href": "https://api.tvmaze.com/episodes/3003" } }
+  },
+  {
+    "id": 3006,
+    "url": "https://www.tvmaze.com/episodes/3006/harbour-lights-behind-the-lights",
+    "name": "Behind the Lights",
+    "season": 2,
+    "number": null,
+    "type": "insignificant_special",
+    "airdate": "2016-09-25",
+    "airtime": "20:00",
+    "airstamp": "2016-09-25T19:00:00+00:00",
+    "runtime": 30,
+    "rating": { "average": null },
+    "image": null,
+    "summary": "<p>The cast looks back.</p>",
+    "_links": { "self": { "href": "https://api.tvmaze.com/episodes/3006" } }
+  },
+  {
+    "id": 3005,
+    "url": "https://www.tvmaze.com/episodes/3005/harbour-lights-a-harbour-christmas",
+    "name": "A Harbour Christmas",
+    "season": 1,
+    "number": null,
+    "type": "significant_special",
+    "airdate": "2015-12-25",
+    "airtime": "21:00",
+    "airstamp": "2015-12-25T21:00:00+00:00",
+    "runtime": 70,
+    "rating": { "average": 7.5 },
+    "image": {
+      "medium": "https://static.tvmaze.com/uploads/images/medium_landscape/1/1105.jpg",
+      "original": "https://static.tvmaze.com/uploads/images/original_untouched/1/1105.jpg"
+    },
+    "summary": "<p>A storm on Christmas Eve.</p>",
+    "_links": { "self": { "href": "https://api.tvmaze.com/episodes/3005" } }
+  },
+  {
+    "id": 3004,
+    "url": "https://www.tvmaze.com/episodes/3004/harbour-lights-2x01-homecoming",
+    "name": "Homecoming",
+    "season": 2,
+    "number": 1,
+    "type": "regular",
+    "airdate": "",
+    "airtime": "",
+    "airstamp": null,
+    "runtime": null,
+    "rating": { "average": null },
+    "image": null,
+    "summary": "",
+    "_links": { "self": { "href": "https://api.tvmaze.com/episodes/3004" } }
+  }
+]

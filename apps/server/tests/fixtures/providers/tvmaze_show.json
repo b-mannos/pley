@@ -1,0 +1,284 @@
+{
+  "id": 4242,
+  "url": "https://www.tvmaze.com/shows/4242/harbour-lights",
+  "name": "Harbour Lights",
+  "type": "Scripted",
+  "language": "English",
+  "genres": ["Drama", "Mystery"],
+  "status": "Ended",
+  "runtime": 60,
+  "averageRuntime": 60,
+  "premiered": "2015-09-14",
+  "ended": "2016-11-20",
+  "officialSite": null,
+  "schedule": { "time": "21:00", "days": ["Monday"] },
+  "rating": { "average": 7.9 },
+  "weight": 71,
+  "network": {
+    "id": 12,
+    "name": "BBC One",
+    "country": { "name": "United Kingdom", "code": "GB", "timezone": "Europe/London" },
+    "officialSite": null
+  },
+  "webChannel": null,
+  "dvdCountry": null,
+  "externals": { "tvrage": null, "thetvdb": 290001, "imdb": "tt4000001" },
+  "image": {
+    "medium": "https://static.tvmaze.com/uploads/images/medium_portrait/1/1001.jpg",
+    "original": "https://static.tvmaze.com/uploads/images/original_untouched/1/1001.jpg"
+  },
+  "summary": "<p><b>Harbour Lights</b> follows coastguard Nell Ward &amp; her brother as storms bring old secrets ashore.</p><p>Filmed in Cornwall.</p>",
+  "updated": 1760000000,
+  "_links": { "self": { "href": "https://api.tvmaze.com/shows/4242" } },
+  "_embedded": {
+    "seasons": [
+      {
+        "id": 9001,
+        "url": "https://www.tvmaze.com/seasons/9001/harbour-lights-season-1",
+        "number": 1,
+        "name": "",
+        "episodeOrder": 3,
+        "premiereDate": "2015-09-14",
+        "endDate": "2015-09-28",
+        "network": { "id": 12, "name": "BBC One", "country": null, "officialSite": null },
+        "webChannel": null,
+        "image": {
+          "medium": "https://static.tvmaze.com/uploads/images/medium_portrait/1/1002.jpg",
+          "original": "https://static.tvmaze.com/uploads/images/original_untouched/1/1002.jpg"
+        },
+        "summary": "<p>Nell comes home.</p>",
+        "_links": { "self": { "href": "https://api.tvmaze.com/seasons/9001" } }
+      },
+      {
+        "id": 9002,
+        "url": "https://www.tvmaze.com/seasons/9002/harbour-lights-season-2",
+        "number": 2,
+        "name": "The Return",
+        "episodeOrder": 1,
+        "premiereDate": "2016-10-02",
+        "endDate": "2016-11-20",
+        "network": { "id": 12, "name": "BBC One", "country": null, "officialSite": null },
+        "webChannel": null,
+        "image": null,
+        "summary": null,
+        "_links": { "self": { "href": "https://api.tvmaze.com/seasons/9002" } }
+      }
+    ],
+    "episodes": [
+      {
+        "id": 3001,
+        "url": "https://www.tvmaze.com/episodes/3001/harbour-lights-1x01-the-wreck",
+        "name": "The Wreck",
+        "season": 1,
+        "number": 1,
+        "type": "regular",
+        "airdate": "2015-09-14",
+        "airtime": "21:00",
+        "airstamp": "2015-09-14T20:00:00+00:00",
+        "runtime": 60,
+        "rating": { "average": 8.1 },
+        "image": {
+          "medium": "https://static.tvmaze.com/uploads/images/medium_landscape/1/1101.jpg",
+          "original": "https://static.tvmaze.com/uploads/images/original_untouched/1/1101.jpg"
+        },
+        "summary": "<p>A boat runs aground in the fog.</p>",
+        "_links": { "self": { "href": "https://api.tvmaze.com/episodes/3001" } }
+      },
+      {
+        "id": 3002,
+        "url": "https://www.tvmaze.com/episodes/3002/harbour-lights-1x02-undertow",
+        "name": "Undertow",
+        "season": 1,
+        "number": 2,
+        "type": "regular",
+        "airdate": "2015-09-21",
+        "airtime": "21:00",
+        "airstamp": "2015-09-21T20:00:00+00:00",
+        "runtime": 60,
+        "rating": { "average": null },
+        "image": null,
+        "summary": "<p>Tom lies to the inspector.</p>",
+        "_links": { "self": { "href": "https://api.tvmaze.com/episodes/3002" } }
+      },
+      {
+        "id": 3003,
+        "url": "https://www.tvmaze.com/episodes/3003/harbour-lights-1x03-lantern",
+        "name": "Lantern",
+        "season": 1,
+        "number": 3,
+        "type": "regular",
+        "airdate": "2015-09-28",
+        "airtime": "21:00",
+        "airstamp": "2015-09-28T20:00:00+00:00",
+        "runtime": 60,
+        "rating": { "average": 7.7 },
+        "image": {
+          "medium": "https://static.tvmaze.com/uploads/images/medium_landscape/1/1103.jpg",
+          "original": "https://static.tvmaze.com/uploads/images/original_untouched/1/1103.jpg"
+        },
+        "summary": null,
+        "_links": { "self": { "href": "https://api.tvmaze.com/episodes/3003" } }
+      },
+      {
+        "id": 3004,
+        "url": "https://www.tvmaze.com/episodes/3004/harbour-lights-2x01-homecoming",
+        "name": "Homecoming",
+        "season": 2,
+        "number": 1,
+        "type": "regular",
+        "airdate": "",
+        "airtime": "",
+        "airstamp": null,
+        "runtime": null,
+        "rating": { "average": null },
+        "image": null,
+        "summary": "",
+        "_links": { "self": { "href": "https://api.tvmaze.com/episodes/3004" } }
+      }
+    ],
+    "cast": [
+      {
+        "person": {
+          "id": 501,
+          "url": "https://www.tvmaze.com/people/501/mara-quinn",
+          "name": "Mara Quinn",
+          "country": { "name": "United Kingdom", "code": "GB", "timezone": "Europe/London" },
+          "birthday": "1984-02-11",
+          "deathday": null,
+          "gender": "Female",
+          "image": {
+            "medium": "https://static.tvmaze.com/uploads/images/medium_portrait/2/2001.jpg",
+            "original": "https://static.tvmaze.com/uploads/images/original_untouched/2/2001.jpg"
+          },
+          "updated": 1760000000,
+          "_links": { "self": { "href": "https://api.tvmaze.com/people/501" } }
+        },
+        "character": {
+          "id": 601,
+          "url": "https://www.tvmaze.com/characters/601/harbour-lights-nell-ward",
+          "name": "Nell Ward",
+          "image": null,
+          "_links": { "self": { "href": "https://api.tvmaze.com/characters/601" } }
+        },
+        "self": false,
+        "voice": false
+      },
+      {
+        "person": {
+          "id": 502,
+          "url": "https://www.tvmaze.com/people/502/daniel-rees",
+          "name": "Daniel Rees",
+          "country": null,
+          "birthday": null,
+          "deathday": null,
+          "gender": "Male",
+          "image": {
+            "medium": "https://static.tvmaze.com/uploads/images/medium_portrait/2/2002.jpg",
+            "original": "https://static.tvmaze.com/uploads/images/original_untouched/2/2002.jpg"
+          },
+          "updated": 1760000000,
+          "_links": { "self": { "href": "https://api.tvmaze.com/people/502" } }
+        },
+        "character": {
+          "id": 602,
+          "url": "https://www.tvmaze.com/characters/602/harbour-lights-tom-ward",
+          "name": "Tom Ward",
+          "image": null,
+          "_links": { "self": { "href": "https://api.tvmaze.com/characters/602" } }
+        },
+        "self": false,
+        "voice": false
+      },
+      {
+        "person": {
+          "id": 503,
+          "url": "https://www.tvmaze.com/people/503/ivo-pell",
+          "name": "Ivo Pell",
+          "country": null,
+          "birthday": null,
+          "deathday": null,
+          "gender": null,
+          "image": null,
+          "updated": 1760000000,
+          "_links": { "self": { "href": "https://api.tvmaze.com/people/503" } }
+        },
+        "character": {
+          "id": 603,
+          "url": "https://www.tvmaze.com/characters/603/harbour-lights-the-lighthouse",
+          "name": "The Lighthouse",
+          "image": null,
+          "_links": { "self": { "href": "https://api.tvmaze.com/characters/603" } }
+        },
+        "self": false,
+        "voice": true
+      }
+    ],
+    "crew": [
+      {
+        "type": "Executive Producer",
+        "person": {
+          "id": 511,
+          "url": "https://www.tvmaze.com/people/511/ruth-hale",
+          "name": "Ruth Hale",
+          "country": null,
+          "birthday": null,
+          "deathday": null,
+          "gender": null,
+          "image": null,
+          "updated": 1760000000,
+          "_links": { "self": { "href": "https://api.tvmaze.com/people/511" } }
+        }
+      },
+      {
+        "type": "Creator",
+        "person": {
+          "id": 510,
+          "url": "https://www.tvmaze.com/people/510/owen-tregarthen",
+          "name": "Owen Tregarthen",
+          "country": null,
+          "birthday": null,
+          "deathday": null,
+          "gender": "Male",
+          "image": null,
+          "updated": 1760000000,
+          "_links": { "self": { "href": "https://api.tvmaze.com/people/510" } }
+        }
+      }
+    ],
+    "images": [
+      {
+        "id": 1001,
+        "type": "poster",
+        "main": true,
+        "resolutions": {
+          "original": { "url": "https://static.tvmaze.com/uploads/images/original_untouched/1/1001.jpg", "width": 680, "height": 1000 },
+          "medium": { "url": "https://static.tvmaze.com/uploads/images/medium_portrait/1/1001.jpg", "width": 210, "height": 295 }
+        }
+      },
+      {
+        "id": 1003,
+        "type": "background",
+        "main": false,
+        "resolutions": {
+          "original": { "url": "https://static.tvmaze.com/uploads/images/original_untouched/1/1003.jpg", "width": 1280, "height": 720 }
+        }
+      },
+      {
+        "id": 1004,
+        "type": "background",
+        "main": false,
+        "resolutions": {
+          "original": { "url": "https://static.tvmaze.com/uploads/images/original_untouched/1/1004.jpg", "width": 1920, "height": 1080 }
+        }
+      },
+      {
+        "id": 1005,
+        "type": "banner",
+        "main": true,
+        "resolutions": {
+          "original": { "url": "https://static.tvmaze.com/uploads/images/original_untouched/1/1005.jpg", "width": 758, "height": 140 }
+        }
+      }
+    ]
+  }
+}

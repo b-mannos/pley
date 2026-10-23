@@ -1,0 +1,95 @@
+{
+  "created": "2026-10-23T00:28:02.384Z",
+  "count": 3,
+  "offset": 0,
+  "artists": [
+    {
+      "id": "056e4f3e-d505-4dad-8ec1-d04f521cbb56",
+      "type": "Group",
+      "score": 100,
+      "name": "Daft Punk",
+      "sort-name": "Daft Punk",
+      "country": "FR",
+      "disambiguation": "French electronic duo",
+      "aliases": [
+        {
+          "sort-name": "DaftPunk",
+          "name": "DaftPunk",
+          "locale": null,
+          "type": "Search hint",
+          "primary": null
+        },
+        {
+          "sort-name": "Daft Punk",
+          "name": "daft punk",
+          "locale": null,
+          "type": "Artist name",
+          "primary": null
+        },
+        {
+          "sort-name": "Duft Punk",
+          "name": "Duft Punk",
+          "locale": null,
+          "type": "Search hint",
+          "primary": null
+        }
+      ],
+      "tags": [
+        {
+          "count": 42,
+          "name": "electronic"
+        },
+        {
+          "count": 22,
+          "name": "house"
+        },
+        {
+          "count": 20,
+          "name": "french house"
+        },
+        {
+          "count": 8,
+          "name": "french"
+        },
+        {
+          "count": 6,
+          "name": "dance"
+        },
+        {
+          "count": 4,
+          "name": "disco"
+        },
+        {
+          "count": 3,
+          "name": "electro"
+        },
+        {
+          "count": 3,
+          "name": "electronica"
+        }
+      ]
+    },
+    {
+      "id": "80846e42-6bba-4fed-9d08-f095b15f28ec",
+      "type": null,
+      "score": 66,
+      "name": "Daft Punk NFT",
+      "sort-name": "Daft Punk NFT",
+      "country": null,
+      "disambiguation": null,
+      "aliases": [],
+      "tags": []
+    },
+    {
+      "id": "72bc4e51-d672-4cd8-9bf3-a8d08b477932",
+      "type": null,
+      "score": 58,
+      "name": "Indo Silver Club (Daft Punk)",
+      "sort-name": "Daft Punk alias used in the 1996",
+      "country": null,
+      "disambiguation": null,
+      "aliases": [],
+      "tags": []
+    }
+  ]
+}

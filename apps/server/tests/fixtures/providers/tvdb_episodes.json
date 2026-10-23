@@ -1,0 +1,108 @@
+{
+  "status": "success",
+  "data": {
+    "series": {
+      "id": 290001,
+      "name": "Harbour Lights",
+      "slug": "harbour-lights",
+      "image": "https://artworks.thetvdb.com/banners/v4/series/290001/posters/main.jpg",
+      "firstAired": "2015-09-14",
+      "originalLanguage": "eng",
+      "defaultSeasonType": 1,
+      "year": "2015"
+    },
+    "episodes": [
+      {
+        "id": 3005,
+        "seriesId": 290001,
+        "name": "A Harbour Christmas",
+        "aired": "2015-12-25",
+        "runtime": 70,
+        "nameTranslations": ["eng"],
+        "overview": "A storm on Christmas Eve.",
+        "overviewTranslations": ["eng"],
+        "image": "https://artworks.thetvdb.com/banners/episodes/290001/3005.jpg",
+        "imageType": 11,
+        "isMovie": 0,
+        "seasons": null,
+        "number": 1,
+        "absoluteNumber": 0,
+        "seasonNumber": 0,
+        "lastUpdated": "2025-01-01 10:00:00",
+        "finaleType": null,
+        "year": "2015"
+      },
+      {
+        "id": 3001,
+        "seriesId": 290001,
+        "name": "The Wreck",
+        "aired": "2015-09-14",
+        "runtime": 60,
+        "nameTranslations": ["eng", "fra"],
+        "overview": "A boat runs aground in the fog.",
+        "overviewTranslations": ["eng", "fra"],
+        "image": "/banners/episodes/290001/3001.jpg",
+        "imageType": 11,
+        "isMovie": 0,
+        "number": 1,
+        "absoluteNumber": 1,
+        "seasonNumber": 1,
+        "finaleType": null,
+        "year": "2015"
+      },
+      {
+        "id": 3002,
+        "seriesId": 290001,
+        "name": "Undertow",
+        "aired": "2015-09-21",
+        "runtime": 60,
+        "nameTranslations": ["eng"],
+        "overview": "Tom lies to the inspector.",
+        "overviewTranslations": ["eng"],
+        "image": null,
+        "imageType": null,
+        "isMovie": 0,
+        "number": 2,
+        "absoluteNumber": 2,
+        "seasonNumber": 1,
+        "finaleType": null,
+        "year": "2015"
+      },
+      {
+        "id": 3003,
+        "seriesId": 290001,
+        "name": "Lantern",
+        "aired": "2015-09-28",
+        "runtime": 60,
+        "overview": null,
+        "image": "https://artworks.thetvdb.com/banners/episodes/290001/3003.jpg",
+        "number": 3,
+        "absoluteNumber": 3,
+        "seasonNumber": 1,
+        "finaleType": "season",
+        "year": "2015"
+      },
+      {
+        "id": 3004,
+        "seriesId": 290001,
+        "name": "Homecoming",
+        "aired": null,
+        "runtime": null,
+        "overview": "",
+        "image": "",
+        "number": 1,
+        "absoluteNumber": 4,
+        "seasonNumber": 2,
+        "finaleType": null,
+        "year": null
+      }
+    ]
+  },
+  "links": {
+    "prev": null,
+    "self": "https://api4.thetvdb.com/v4/series/290001/episodes/default?page=0",
+    "next": null,
+    "total_items": 5,
+    "page_size": 500
+  }
+}

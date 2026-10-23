@@ -1,0 +1,63 @@
+{
+  "id": "056e4f3e-d505-4dad-8ec1-d04f521cbb56",
+  "name": "Daft Punk",
+  "sort-name": "Daft Punk",
+  "type": "Group",
+  "country": "FR",
+  "disambiguation": "French electronic duo",
+  "life-span": {
+    "begin": "1993",
+    "end": "2021-02-22",
+    "ended": true
+  },
+  "genres": [
+    {
+      "count": 42,
+      "disambiguation": "",
+      "id": "89255676-1f14-4dd8-bbad-fca839d6aff4",
+      "name": "electronic"
+    },
+    {
+      "count": 22,
+      "disambiguation": "",
+      "id": "a2782cb6-1cd0-477c-a61d-b3f8b42dd1b3",
+      "name": "house"
+    },
+    {
+      "count": 20,
+      "disambiguation": "",
+      "id": "5acda04e-995d-4f79-9a66-5fe6a977ce15",
+      "name": "french house"
+    },
+    {
+      "count": 6,
+      "disambiguation": "",
+      "id": "e5bba957-8c91-496a-a675-c6d0c6b51c33",
+      "name": "dance"
+    },
+    {
+      "count": 4,
+      "disambiguation": "",
+      "id": "a04d680b-b5c5-4f6a-87a3-f9f1ff98e3ea",
+      "name": "disco"
+    },
+    {
+      "count": 3,
+      "disambiguation": "",
+      "id": "60f00d05-df4d-496e-8f5a-c45c03a56ad4",
+      "name": "electro"
+    },
+    {
+      "count": 3,
+      "disambiguation": "",
+      "id": "53a3cea3-17af-4421-a07a-5824b540aeb5",
+      "name": "electronica"
+    },
+    {
+      "count": 2,
+      "disambiguation": "",
+      "id": "bab69b07-8bb9-4415-b666-c37609cef80b",
+      "name": "club"
+    }
+  ]
+}

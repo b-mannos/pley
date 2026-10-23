@@ -1,0 +1,96 @@
+{
+  "id": "8d28a4da-8077-4cae-a0a1-2d16c4923775",
+  "title": "Discovery",
+  "status": "Official",
+  "date": "2024-10-08",
+  "country": "XW",
+  "release-group": {
+    "id": "48117b90-a16e-34ca-a514-19c702df1158",
+    "title": "Discovery",
+    "first-release-date": "2001-02-26",
+    "primary-type": "Album",
+    "secondary-types": [],
+    "genres": [
+      {
+        "count": 20,
+        "disambiguation": "",
+        "id": "a2782cb6-1cd0-477c-a61d-b3f8b42dd1b3",
+        "name": "house"
+      },
+      {
+        "count": 14,
+        "disambiguation": "",
+        "id": "89255676-1f14-4dd8-bbad-fca839d6aff4",
+        "name": "electronic"
+      },
+      {
+        "count": 8,
+        "disambiguation": "",
+        "id": "5acda04e-995d-4f79-9a66-5fe6a977ce15",
+        "name": "french house"
+      },
+      {
+        "count": 4,
+        "disambiguation": "",
+        "id": "70adb285-e1f7-458a-823f-5cbda5e291c4",
+        "name": "progressive house"
+      },
+      {
+        "count": 3,
+        "disambiguation": "",
+        "id": "e5bba957-8c91-496a-a675-c6d0c6b51c33",
+        "name": "dance"
+      },
+      {
+        "count": 3,
+        "disambiguation": "",
+        "id": "60f00d05-df4d-496e-8f5a-c45c03a56ad4",
+        "name": "electro"
+      },
+      {
+        "count": 2,
+        "disambiguation": "",
+        "id": "b739a895-85ed-4ad3-8717-4e9ef5387dd8",
+        "name": "dance-pop"
+      },
+      {
+        "count": 2,
+        "disambiguation": "",
+        "id": "53a3cea3-17af-4421-a07a-5824b540aeb5",
+        "name": "electronica"
+      }
+    ]
+  },
+  "genres": [
+    {
+      "count": 1,
+      "disambiguation": "",
+      "id": "10fd28e3-51aa-4110-a3dd-032d8a141f99",
+      "name": "boogie"
+    },
+    {
+      "count": 1,
+      "disambiguation": "",
+      "id": "e5bba957-8c91-496a-a675-c6d0c6b51c33",
+      "name": "dance"
+    },
+    {
+      "count": 1,
+      "disambiguation": "",
+      "id": "a04d680b-b5c5-4f6a-87a3-f9f1ff98e3ea",
+      "name": "disco"
+    },
+    {
+      "count": 1,
+      "disambiguation": "",
+      "id": "60f00d05-df4d-496e-8f5a-c45c03a56ad4",
+      "name": "electro"
+    },
+    {
+      "count": 1,
+      "disambiguation": "",
+      "id": "89255676-1f14-4dd8-bbad-fca839d6aff4",
+      "name": "electronic"
+    }
+  ]
+}

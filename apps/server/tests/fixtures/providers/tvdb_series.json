@@ -1,0 +1,310 @@
+{
+  "status": "success",
+  "data": {
+    "id": 290001,
+    "name": "Harbour Lights",
+    "slug": "harbour-lights",
+    "image": "https://artworks.thetvdb.com/banners/v4/series/290001/posters/main.jpg",
+    "nameTranslations": ["eng", "fra"],
+    "overviewTranslations": ["eng", "fra"],
+    "aliases": [{ "language": "eng", "name": "Harbor Lights" }],
+    "firstAired": "2015-09-14",
+    "lastAired": "2016-11-20",
+    "nextAired": "",
+    "score": 1234,
+    "status": { "id": 2, "name": "Ended", "recordType": "series", "keepUpdated": false },
+    "originalCountry": "gbr",
+    "originalLanguage": "eng",
+    "defaultSeasonType": 1,
+    "isOrderRandomized": false,
+    "lastUpdated": "2025-01-01 10:00:00",
+    "averageRuntime": 60,
+    "episodes": null,
+    "overview": "Coastguard Nell Ward comes home.",
+    "year": "2015",
+    "artworks": [
+      {
+        "id": 70001,
+        "image": "https://artworks.thetvdb.com/banners/v4/series/290001/posters/eng.jpg",
+        "thumbnail": "https://artworks.thetvdb.com/banners/v4/series/290001/posters/eng_t.jpg",
+        "language": "eng",
+        "type": 2,
+        "score": 100,
+        "width": 680,
+        "height": 1000,
+        "includesText": true,
+        "thumbnailWidth": 340,
+        "thumbnailHeight": 500,
+        "updatedAt": 1700000000,
+        "status": { "id": 1, "name": null },
+        "tagOptions": null
+      },
+      {
+        "id": 70002,
+        "image": "https://artworks.thetvdb.com/banners/v4/series/290001/posters/fra.jpg",
+        "thumbnail": "https://artworks.thetvdb.com/banners/v4/series/290001/posters/fra_t.jpg",
+        "language": "fra",
+        "type": 2,
+        "score": 50,
+        "width": 680,
+        "height": 1000,
+        "includesText": true
+      },
+      {
+        "id": 70003,
+        "image": "https://artworks.thetvdb.com/banners/v4/series/290001/posters/textless.jpg",
+        "language": null,
+        "type": 2,
+        "score": 80,
+        "width": 680,
+        "height": 1000,
+        "includesText": false
+      },
+      {
+        "id": 70004,
+        "image": "https://artworks.thetvdb.com/banners/v4/series/290001/backgrounds/eng.jpg",
+        "language": "eng",
+        "type": 3,
+        "score": 90,
+        "width": 1920,
+        "height": 1080,
+        "includesText": true
+      },
+      {
+        "id": 70005,
+        "image": "https://artworks.thetvdb.com/banners/v4/series/290001/backgrounds/textless.jpg",
+        "language": null,
+        "type": 3,
+        "score": 70,
+        "width": 1920,
+        "height": 1080,
+        "includesText": false
+      },
+      {
+        "id": 70006,
+        "image": "https://artworks.thetvdb.com/banners/v4/series/290001/banners/eng.jpg",
+        "language": "eng",
+        "type": 1,
+        "score": 200,
+        "width": 758,
+        "height": 140
+      }
+    ],
+    "companies": [
+      {
+        "id": 12,
+        "name": "BBC One",
+        "slug": "bbc-one",
+        "nameTranslations": null,
+        "overviewTranslations": null,
+        "aliases": null,
+        "country": "gbr",
+        "primaryCompanyType": 1,
+        "activeDate": null,
+        "inactiveDate": null,
+        "companyType": { "companyTypeId": 1, "companyTypeName": "Network" },
+        "parentCompany": { "id": null, "name": null, "relation": { "id": null, "typeName": null } },
+        "tagOptions": null
+      }
+    ],
+    "originalNetwork": { "id": 12, "name": "BBC One", "slug": "bbc-one", "country": "gbr", "primaryCompanyType": 1 },
+    "latestNetwork": { "id": 12, "name": "BBC One", "slug": "bbc-one", "country": "gbr", "primaryCompanyType": 1 },
+    "genres": [
+      { "id": 1, "name": "Drama", "slug": "drama" },
+      { "id": 7, "name": "Mystery", "slug": "mystery" }
+    ],
+    "trailers": [],
+    "lists": null,
+    "remoteIds": [
+      { "id": "tt4000001", "type": 2, "sourceName": "IMDB" },
+      { "id": "4242", "type": 18, "sourceName": "TV Maze" }
+    ],
+    "characters": [
+      {
+        "id": 8002,
+        "name": "Tom Ward",
+        "peopleId": 502,
+        "seriesId": 290001,
+        "series": null,
+        "movie": null,
+        "movieId": null,
+        "episodeId": null,
+        "type": 3,
+        "image": "https://artworks.thetvdb.com/banners/v4/character/602.jpg",
+        "sort": 2,
+        "isFeatured": true,
+        "url": "https://thetvdb.com/people/502-daniel-rees",
+        "nameTranslations": null,
+        "overviewTranslations": null,
+        "aliases": null,
+        "peopleType": "Actor",
+        "personName": "Daniel Rees",
+        "tagOptions": null,
+        "personImgURL": null
+      },
+      {
+        "id": 8001,
+        "name": "Nell Ward",
+        "peopleId": 501,
+        "seriesId": 290001,
+        "episodeId": null,
+        "type": 3,
+        "image": "https://artworks.thetvdb.com/banners/v4/character/601.jpg",
+        "sort": 1,
+        "isFeatured": true,
+        "peopleType": "Actor",
+        "personName": "Mara Quinn",
+        "personImgURL": "https://artworks.thetvdb.com/banners/v4/person/501/photo.jpg"
+      },
+      {
+        "id": 8003,
+        "name": "The Lighthouse",
+        "peopleId": 503,
+        "seriesId": 290001,
+        "episodeId": null,
+        "type": 3,
+        "image": null,
+        "sort": 0,
+        "isFeatured": false,
+        "peopleType": "Actor",
+        "personName": "Ivo Pell",
+        "personImgURL": null
+      },
+      {
+        "id": 8004,
+        "name": "Harbour Master",
+        "peopleId": 520,
+        "seriesId": null,
+        "episodeId": 3002,
+        "type": 4,
+        "image": null,
+        "sort": 0,
+        "isFeatured": false,
+        "peopleType": "Guest Star",
+        "personName": "Gwen Polgrain",
+        "personImgURL": null
+      },
+      {
+        "id": 8005,
+        "name": null,
+        "peopleId": 510,
+        "seriesId": 290001,
+        "episodeId": null,
+        "type": 6,
+        "image": null,
+        "sort": 0,
+        "isFeatured": false,
+        "peopleType": "Creator",
+        "personName": "Owen Tregarthen",
+        "personImgURL": null
+      },
+      {
+        "id": 8006,
+        "name": null,
+        "peopleId": 511,
+        "seriesId": 290001,
+        "episodeId": null,
+        "type": 11,
+        "image": null,
+        "sort": 0,
+        "isFeatured": false,
+        "peopleType": "Executive Producer",
+        "personName": "Ruth Hale",
+        "personImgURL": null
+      }
+    ],
+    "airsDays": {
+      "sunday": false,
+      "monday": true,
+      "tuesday": false,
+      "wednesday": false,
+      "thursday": false,
+      "friday": false,
+      "saturday": false
+    },
+    "airsTime": "21:00",
+    "seasons": [
+      {
+        "id": 1000,
+        "seriesId": 290001,
+        "type": { "id": 1, "name": "Aired Order", "type": "official", "alternateName": null },
+        "number": 0,
+        "name": null,
+        "image": null,
+        "imageType": null,
+        "lastUpdated": "2025-01-01 10:00:00",
+        "nameTranslations": null,
+        "overviewTranslations": null,
+        "companies": { "studio": null, "network": null, "production": null, "distributor": null, "special_effects": null },
+        "year": "2015"
+      },
+      {
+        "id": 1001,
+        "seriesId": 290001,
+        "type": { "id": 1, "name": "Aired Order", "type": "official", "alternateName": null },
+        "number": 1,
+        "name": "Season 1",
+        "image": "https://artworks.thetvdb.com/banners/v4/season/1001/posters/s1.jpg",
+        "imageType": 7,
+        "year": "2015"
+      },
+      {
+        "id": 1002,
+        "seriesId": 290001,
+        "type": { "id": 1, "name": "Aired Order", "type": "official", "alternateName": null },
+        "number": 2,
+        "name": null,
+        "image": null,
+        "imageType": null,
+        "year": "2016"
+      },
+      {
+        "id": 1010,
+        "seriesId": 290001,
+        "type": { "id": 2, "name": "DVD Order", "type": "dvd", "alternateName": null },
+        "number": 1,
+        "name": "Season 1 (DVD)",
+        "image": "https://artworks.thetvdb.com/banners/v4/season/1010/posters/dvd.jpg",
+        "imageType": 7,
+        "year": "2015"
+      }
+    ],
+    "tags": null,
+    "contentRatings": [
+      {
+        "id": 5,
+        "name": "TV-14",
+        "description": "",
+        "country": "usa",
+        "contentType": "episode",
+        "order": 0,
+        "fullName": null
+      },
+      {
+        "id": 31,
+        "name": "12",
+        "description": "",
+        "country": "gbr",
+        "contentType": "episode",
+        "order": 0,
+        "fullName": null
+      }
+    ],
+    "seasonTypes": [
+      { "id": 1, "name": "Aired Order", "type": "official", "alternateName": null },
+      { "id": 2, "name": "DVD Order", "type": "dvd", "alternateName": null }
+    ],
+    "translations": {
+      "nameTranslations": [
+        { "name": "Harbour Lights", "language": "eng", "isPrimary": true, "isAlias": false, "aliases": null },
+        { "name": "Harbor Lights", "language": "eng", "isPrimary": false, "isAlias": true },
+        { "name": "Les Feux du port", "language": "fra", "isPrimary": false, "isAlias": false }
+      ],
+      "overviewTranslations": [
+        { "overview": "Coastguard Nell Ward comes home to Cornwall.", "language": "eng", "isPrimary": true },
+        { "overview": "La garde-côte Nell Ward rentre en Cornouailles.", "language": "fra", "isPrimary": false }
+      ],
+      "alias": ["Harbor Lights"]
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "status": "success",
+  "data": {
+    "series": {
+      "id": 290001,
+      "name": "Les Feux du port",
+      "originalLanguage": "eng",
+      "defaultSeasonType": 1
+    },
+    "episodes": [
+      {
+        "id": 3001,
+        "seriesId": 290001,
+        "name": "L'Épave",
+        "aired": "2015-09-14",
+        "overview": "Un bateau s'échoue dans le brouillard.",
+        "image": "/banners/episodes/290001/3001.jpg",
+        "number": 1,
+        "seasonNumber": 1
+      },
+      {
+        "id": 3002,
+        "seriesId": 290001,
+        "name": null,
+        "aired": "2015-09-21",
+        "overview": null,
+        "image": null,
+        "number": 2,
+        "seasonNumber": 1
+      }
+    ]
+  },
+  "links": {
+    "prev": null,
+    "self": "https://api4.thetvdb.com/v4/series/290001/episodes/default/fra?page=0",
+    "next": null,
+    "total_items": 2,
+    "page_size": 500
+  }
+}

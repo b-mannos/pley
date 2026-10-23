@@ -1,0 +1,166 @@
+{
+  "created": "2026-10-23T00:28:04.658Z",
+  "count": 8,
+  "offset": 0,
+  "release-groups": [
+    {
+      "id": "48117b90-a16e-34ca-a514-19c702df1158",
+      "score": 100,
+      "count": 24,
+      "title": "Discovery",
+      "first-release-date": "2001-02-26",
+      "primary-type": "Album",
+      "secondary-types": [],
+      "artist-credit": [
+        {
+          "name": "Daft Punk",
+          "artist": {
+            "id": "056e4f3e-d505-4dad-8ec1-d04f521cbb56",
+            "name": "Daft Punk",
+            "sort-name": "Daft Punk",
+            "disambiguation": "French electronic duo"
+          }
+        }
+      ],
+      "tags": [
+        {
+          "count": 20,
+          "name": "house"
+        },
+        {
+          "count": 14,
+          "name": "electronic"
+        },
+        {
+          "count": 8,
+          "name": "french house"
+        },
+        {
+          "count": 4,
+          "name": "progressive house"
+        },
+        {
+          "count": 4,
+          "name": "club/dance"
+        },
+        {
+          "count": 3,
+          "name": "dance"
+        },
+        {
+          "count": 3,
+          "name": "electro"
+        },
+        {
+          "count": 2,
+          "name": "electronica"
+        },
+        {
+          "count": 2,
+          "name": "dance-pop"
+        },
+        {
+          "count": 2,
+          "name": "funky house"
+        },
+        {
+          "count": 2,
+          "name": "euro house"
+        },
+        {
+          "count": 2,
+          "name": "synth funk"
+        }
+      ]
+    },
+    {
+      "id": "be3df8a5-39cb-4a8c-bb17-a079b13faf74",
+      "score": 94,
+      "count": 1,
+      "title": "Re-Discovery",
+      "first-release-date": "2011-08-05",
+      "primary-type": "Album",
+      "secondary-types": [
+        "Remix"
+      ],
+      "artist-credit": [
+        {
+          "name": "Daft Punk",
+          "artist": {
+            "id": "056e4f3e-d505-4dad-8ec1-d04f521cbb56",
+            "name": "Daft Punk",
+            "sort-name": "Daft Punk",
+            "disambiguation": "French electronic duo"
+          }
+        }
+      ],
+      "tags": []
+    },
+    {
+      "id": "2292c05e-299a-4c03-8688-3bf3d0a01277",
+      "score": 94,
+      "count": 1,
+      "title": "Discovery Remixed",
+      "first-release-date": "2012-03-10",
+      "primary-type": "Album",
+      "secondary-types": [
+        "Remix",
+        "Mixtape/Street"
+      ],
+      "artist-credit": [
+        {
+          "name": "Daft Punk",
+          "artist": {
+            "id": "056e4f3e-d505-4dad-8ec1-d04f521cbb56",
+            "name": "Daft Punk",
+            "sort-name": "Daft Punk",
+            "disambiguation": "French electronic duo"
+          }
+        }
+      ],
+      "tags": [
+        {
+          "count": 1,
+          "name": "trance"
+        },
+        {
+          "count": 1,
+          "name": "electronic"
+        },
+        {
+          "count": 1,
+          "name": "house"
+        },
+        {
+          "count": 1,
+          "name": "electro"
+        },
+        {
+          "count": 1,
+          "name": "techno"
+        }
+      ]
+    },
+    {
+      "id": "84216190-e46f-4cf1-8a28-76910183be38",
+      "score": 90,
+      "count": 1,
+      "title": "Discovery (Beta Version)",
+      "first-release-date": "2001",
+      "primary-type": "Album",
+      "secondary-types": [],
+      "artist-credit": [
+        {
+          "name": "Daft Punk",
+          "artist": {
+            "id": "056e4f3e-d505-4dad-8ec1-d04f521cbb56",
+            "name": "Daft Punk",
+            "sort-name": "Daft Punk",
+            "disambiguation": "French electronic duo"
+          }
+        }
+      ],
+      "tags": []
+    }
+  ]
+}

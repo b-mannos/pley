@@ -1,0 +1,62 @@
+[
+  {
+    "score": 1.2,
+    "show": {
+      "id": 4242,
+      "url": "https://www.tvmaze.com/shows/4242/harbour-lights",
+      "name": "Harbour Lights",
+      "type": "Scripted",
+      "language": "English",
+      "genres": ["Drama", "Mystery"],
+      "status": "Ended",
+      "premiered": "2015-09-14",
+      "rating": { "average": 7.9 },
+      "weight": 71,
+      "network": { "id": 12, "name": "BBC One", "country": null, "officialSite": null },
+      "webChannel": null,
+      "externals": { "tvrage": null, "thetvdb": 290001, "imdb": "tt4000001" },
+      "image": null,
+      "summary": "<p>A coastguard comes home.</p>"
+    }
+  },
+  {
+    "score": 1.1,
+    "show": {
+      "id": 777,
+      "url": "https://www.tvmaze.com/shows/777/harbour-lights",
+      "name": "Harbour Lights",
+      "type": "Scripted",
+      "language": "English",
+      "genres": ["Drama"],
+      "status": "Ended",
+      "premiered": "1998-01-04",
+      "rating": { "average": null },
+      "weight": 20,
+      "network": { "id": 12, "name": "BBC One", "country": null, "officialSite": null },
+      "webChannel": null,
+      "externals": { "tvrage": 9001, "thetvdb": 70001, "imdb": null },
+      "image": null,
+      "summary": null
+    }
+  },
+  {
+    "score": 0.7,
+    "show": {
+      "id": 888,
+      "url": "https://www.tvmaze.com/shows/888/harbour-lights-after-dark",
+      "name": "Harbour Lights After Dark",
+      "type": "Talk Show",
+      "language": "English",
+      "genres": [],
+      "status": "Ended",
+      "premiered": "2015-02-01",
+      "rating": { "average": null },
+      "weight": 5,
+      "network": null,
+      "webChannel": { "id": 3, "name": "BBC iPlayer", "country": null, "officialSite": null },
+      "externals": { "tvrage": null, "thetvdb": null, "imdb": null },
+      "image": null,
+      "summary": null
+    }
+  }
+]

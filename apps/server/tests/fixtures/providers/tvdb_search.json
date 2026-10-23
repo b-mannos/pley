@@ -1,0 +1,48 @@
+{
+  "status": "success",
+  "data": [
+    {
+      "objectID": "series-290001",
+      "aliases": ["Harbor Lights"],
+      "country": "gbr",
+      "id": "series-290001",
+      "image_url": "https://artworks.thetvdb.com/banners/v4/series/290001/posters/main.jpg",
+      "name": "Harbour Lights",
+      "first_air_time": "2015-09-14",
+      "overview": "Coastguard Nell Ward comes home.",
+      "primary_language": "eng",
+      "primary_type": "series",
+      "status": "Ended",
+      "type": "series",
+      "tvdb_id": "290001",
+      "year": "2015",
+      "slug": "harbour-lights",
+      "overviews": { "eng": "Coastguard Nell Ward comes home." },
+      "translations": { "eng": "Harbour Lights", "fra": "Les Feux du port" },
+      "network": "BBC One",
+      "remote_ids": [{ "id": "tt4000001", "type": 2, "sourceName": "IMDB" }],
+      "thumbnail": "https://artworks.thetvdb.com/banners/v4/series/290001/posters/main_t.jpg"
+    },
+    {
+      "objectID": "series-70001",
+      "aliases": null,
+      "country": "gbr",
+      "id": "series-70001",
+      "name": "Harbour Lights",
+      "first_air_time": "1998-01-04",
+      "primary_language": "eng",
+      "type": "series",
+      "tvdb_id": "70001",
+      "year": "1998",
+      "translations": { "eng": "Harbour Lights" }
+    },
+    {
+      "objectID": "person-501",
+      "id": "person-501",
+      "name": "Harbour Lights Cast",
+      "type": "person",
+      "tvdb_id": "501"
+    }
+  ],
+  "links": { "prev": null, "self": "https://api4.thetvdb.com/v4/search?query=Harbour%20Lights&page=0", "next": null, "total_items": 3, "page_size": 50 }
+}
