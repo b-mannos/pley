@@ -897,15 +897,21 @@ pub async fn filter_choices(
             decades.iter().map(i64::to_string).collect()
         }
         field if people_role(field).is_some() => {
-            // Keyed by person id, so the filter is exact.
+            // Keyed by person id, so the filter is exact. People only appear
+            // through titles the user may see.
             let role = people_role(field).map(people::Role::as_str).unwrap_or_default();
-            let credited: Vec<(i64, String)> = sqlx::query_as(
-                "SELECT DISTINCT pe.id, pe.name FROM item_people ip
+            let credited: Vec<(i64, String)> = sqlx::query_as(&format!(
+                "{} SELECT DISTINCT pe.id, pe.name FROM item_people ip
                  JOIN people pe ON pe.id = ip.person_id
                  JOIN items i ON i.id = ip.item_id
-                 WHERE i.library_id = ? AND i.kind = ? AND ip.role = ?
+                 LEFT JOIN items p ON p.id = i.parent_id
+                 LEFT JOIN items gp ON gp.id = i.grandparent_id
+                 WHERE {} AND i.library_id = ? AND i.kind = ? AND ip.role = ?
                  ORDER BY pe.name COLLATE NOCASE",
-            )
+                catalog::ME_CTE,
+                catalog::VISIBLE,
+            ))
+            .bind(user.id)
             .bind(lib.id)
             .bind(kind)
             .bind(role)

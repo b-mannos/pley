@@ -11,7 +11,6 @@ use super::library::{item_nodes, list_container, visible_libraries};
 use super::meta::{Detail, Sections, section_type};
 use super::{Node, PLEX_VERSION, Page, Params, PlexError, PlexInfo, PlexResult, PlexUser};
 use crate::history;
-use crate::library::list_libraries;
 use crate::state::AppState;
 
 fn platform() -> &'static str {
@@ -217,15 +216,16 @@ pub async fn prefs(
         .child(setting("MachineIdentifier", "Machine identifier", info.machine_id.clone()))
 }
 
-/// `/media/providers`: the library provider with per-section totals.
-pub async fn media_providers(State(state): State<AppState>, PlexUser(_user): PlexUser) -> PlexResult<Node> {
+/// `/media/providers`: the library provider with per-section totals (the
+/// sections this user may open).
+pub async fn media_providers(State(state): State<AppState>, PlexUser(user): PlexUser) -> PlexResult<Node> {
     let totals: Vec<(i64, i64, i64)> = sqlx::query_as(
         "SELECT library_id, COALESCE(SUM(duration_ms), 0), COALESCE(SUM(size), 0) FROM media_files GROUP BY library_id",
     )
     .fetch_all(&state.db.read)
     .await?;
     let mut content = Node::new("Feature").attr("key", "/library/sections").attr("type", "content");
-    for lib in list_libraries(&state.db).await? {
+    for lib in visible_libraries(&state, &user).await? {
         let (duration, storage) =
             totals.iter().find(|(id, ..)| *id == lib.id).map(|(_, d, s)| (*d, *s)).unwrap_or_default();
         // The pivots matter beyond looks: python-plexapi treats elements
