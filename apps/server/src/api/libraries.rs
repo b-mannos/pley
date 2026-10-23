@@ -260,7 +260,12 @@ pub async fn items(
         Some("asc") => false,
         _ => matches!(
             sort,
-            SortKey::Added | SortKey::Rating | SortKey::Release | SortKey::LastPlayed | SortKey::UserRating
+            SortKey::Added
+                | SortKey::Rating
+                | SortKey::Release
+                | SortKey::LastPlayed
+                | SortKey::UserRating
+                | SortKey::Bitrate
         ),
     };
     let year = query.get("year").and_then(|y| y.parse().ok());
@@ -277,8 +282,15 @@ pub async fn items(
     };
     let (rows, total) = catalog::library_items(&state.db, user.id, &q).await?;
     // Library grids show posters: the other pictures are left out.
-    let items =
+    let mut items: Vec<ItemSummary> =
         rows.iter().map(|r| catalog::ItemSummary { backdrop_url: None, thumb_url: None, ..r.to_summary() }).collect();
+    // Sorted by bitrate, the posters say what the files are like.
+    if sort == SortKey::Bitrate {
+        let mut media = catalog::media_summaries(&state.db, &items).await?;
+        for item in &mut items {
+            item.media = media.remove(&item.id);
+        }
+    }
     Ok((cache, Json(ItemsPage { total, items })).into_response())
 }
 

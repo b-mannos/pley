@@ -841,3 +841,56 @@ async fn editions_are_versions_of_one_movie_with_their_names() {
     let edition = plex["Metadata"][0]["editionTitle"].as_str().unwrap().to_owned();
     assert!(editions.contains(&edition), "{edition}");
 }
+
+#[tokio::test]
+async fn libraries_sort_by_bitrate_and_say_what_the_files_are_like() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Alien (1979).mkv", 1024);
+    app.media_file("movies/Brazil (1985).mkv", 1024);
+    app.media_file("movies/Casablanca (1942).mkv", 1024);
+    let lib = app.library(&admin, "Movies", "movies", "movies").await;
+    // What a probe would have found (no transcoder runs in tests).
+    let probed = [
+        ("Alien", Some(8_000_000), 1920, 1080, "h264", "sdr"),
+        ("Brazil", Some(42_000_000), 3840, 2160, "hevc", "dolby_vision"),
+        ("Casablanca", None, 720, 480, "mpeg2video", "sdr"),
+    ];
+    for (title, bitrate, width, height, codec, range) in probed {
+        let info = json!({"streams": [{"index": 0, "kind": "video", "codec": codec, "dynamic_range": range}]});
+        sqlx::query(
+            "UPDATE media_files SET bitrate = ?, width = ?, height = ?, video_codec = ?, media_info = ?
+             WHERE path LIKE '%' || ? || '%'",
+        )
+        .bind(bitrate)
+        .bind(width)
+        .bind(height)
+        .bind(codec)
+        .bind(info.to_string())
+        .bind(title)
+        .execute(&app.state.db.write)
+        .await
+        .unwrap();
+    }
+
+    let sorted = app.get(&format!("/api/libraries/{lib}/items?sort=bitrate"), &admin).await;
+    assert_eq!(sorted.status, StatusCode::OK, "{}", sorted.text());
+    let items = sorted.body["items"].as_array().unwrap();
+    let names: Vec<&str> = items.iter().map(|i| i["title"].as_str().unwrap()).collect();
+    assert_eq!(names, ["Brazil", "Alien", "Casablanca"], "highest first, unknown last");
+    assert_eq!(
+        items[0]["media"],
+        json!({"bitrate": 42_000_000, "size": 1024, "width": 3840, "height": 2160,
+               "video_codec": "hevc", "dynamic_range": "dolby_vision"})
+    );
+    assert_eq!(items[2]["media"]["bitrate"], Value::Null);
+    let lowest = app.get(&format!("/api/libraries/{lib}/items?sort=bitrate&order=asc"), &admin).await;
+    assert_eq!(lowest.body["items"][0]["title"], "Alien", "unknown stays last going up too");
+    // Other sorts keep listings lean.
+    let by_title = app.get(&format!("/api/libraries/{lib}/items?sort=title"), &admin).await;
+    assert!(by_title.body["items"][0].get("media").is_none());
+    // The Plex-compatible API (and smart collections) sort the same way.
+    let plex = app.plex_json(&format!("/library/sections/{lib}/all?sort=mediaBitrate:desc"), &admin).await;
+    let titles: Vec<&str> = plex["Metadata"].as_array().unwrap().iter().map(|m| m["title"].as_str().unwrap()).collect();
+    assert_eq!(titles, ["Brazil", "Alien", "Casablanca"]);
+}

@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { Check, Play } from "lucide-react";
 import type { ItemSummary } from "@/api/types";
 import { cn } from "@/lib/cn";
-import { cardSubtitle, episodeLabel, formatRemaining, progressFraction, seasonTitle, unwatchedCount } from "@/lib/format";
+import { cardSubtitle, episodeLabel, formatRemaining, mediaBadges, mediaLine, progressFraction, seasonTitle, unwatchedCount } from "@/lib/format";
 import { posterCandidates, thumbCandidates } from "@/lib/images";
 import { usePlayItem } from "@/lib/usePlayItem";
 import { Artwork } from "./Artwork";
@@ -53,6 +53,8 @@ export interface MediaCardProps {
   playable?: boolean;
   /** Continue-watching style titles (show name first, remaining time). */
   continueStyle?: boolean;
+  /** Say what the files are like (bitrate, size, resolution…): sorted by bitrate. */
+  media?: boolean;
   className?: string;
 }
 
@@ -90,13 +92,15 @@ export const MediaCard = memo(function MediaCard({
   href,
   playable = item.kind !== "track",
   continueStyle,
+  media,
   className,
 }: MediaCardProps) {
   const play = usePlayItem();
   const lists = useListMenu();
   const defaults = defaultCardTitles(item, continueStyle);
   const t = title ?? defaults.title;
-  const st = subtitle ?? defaults.subtitle;
+  const st = subtitle ?? (media ? mediaLine(item.media) : defaults.subtitle);
+  const badges = media ? mediaBadges(item.media) : [];
   const to = href ?? itemUrl(item.id);
   const candidates = aspect === "thumb" ? thumbCandidates(item) : posterCandidates(item);
   const progress = item.user_state.watched ? 0 : progressFraction(item);
@@ -145,6 +149,18 @@ export const MediaCard = memo(function MediaCard({
           {unwatched > 0 ? (
             <span className="absolute right-1.5 top-1.5 min-w-6 rounded bg-accent px-1.5 py-0.5 text-center text-xs font-bold text-accent-fg shadow">
               {unwatched}
+            </span>
+          ) : null}
+          {badges.length ? (
+            <span className="absolute bottom-2 left-1.5 flex flex-wrap gap-1">
+              {badges.map((b) => (
+                <span
+                  key={b}
+                  className="rounded bg-black/80 px-1.5 py-0.5 text-[10px] font-semibold leading-tight tracking-wide text-white shadow"
+                >
+                  {b}
+                </span>
+              ))}
             </span>
           ) : null}
           {progress > 0 ? (

@@ -31,11 +31,12 @@ const SORT_LABELS: Record<LibrarySort, string> = {
   duration: "Duration",
   last_played: "Last played",
   user_rating: "Your rating",
+  bitrate: "Bitrate",
 };
 
 const SORTS_BY_KIND: Record<LibraryKind, LibrarySort[]> = {
-  movies: ["title", "year", "added", "rating", "user_rating", "release", "duration", "last_played"],
-  shows: ["title", "year", "added", "rating", "user_rating", "release", "last_played"],
+  movies: ["title", "year", "added", "rating", "user_rating", "release", "duration", "last_played", "bitrate"],
+  shows: ["title", "year", "added", "rating", "user_rating", "release", "last_played", "bitrate"],
   music: ["title", "added", "user_rating", "last_played"],
 };
 
@@ -315,7 +316,14 @@ function LibraryTab({
             />
           )
         ) : (
-          <ItemGrid items={items.data.items} total={items.data.total} aspect={aspect} cardWidth={cardWidth} jumpBar={sort === "title"} />
+          <ItemGrid
+            items={items.data.items}
+            total={items.data.total}
+            aspect={aspect}
+            cardWidth={cardWidth}
+            jumpBar={sort === "title"}
+            media={sort === "bitrate"}
+          />
         )}
       </div>
     </>

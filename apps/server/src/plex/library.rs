@@ -619,6 +619,28 @@ enum SortField {
     Index,
     Id,
     Updated,
+    /// The best file's bitrate (a show's: its episodes' on average).
+    Bitrate,
+}
+
+/// A title's bitrate as [`SortField::Bitrate`] sorts it.
+const BITRATE_SQL: &str = "(CASE WHEN i.kind = 'show'
+    THEN (SELECT AVG(f.bitrate) FROM items e JOIN media_files f ON f.item_id = e.id WHERE e.grandparent_id = i.id)
+    ELSE (SELECT MAX(f.bitrate) FROM media_files f WHERE f.item_id = i.id) END)";
+
+/// The bitrates of `rows` when `spec` sorts by them (rows don't carry them).
+async fn bitrates_for(db: &Db, rows: &[ItemRow], spec: &[(SortField, bool)]) -> sqlx::Result<HashMap<i64, f64>> {
+    if !spec.iter().any(|(field, _)| *field == SortField::Bitrate) {
+        return Ok(HashMap::new());
+    }
+    let ids = serde_json::to_string(&rows.iter().map(|r| r.id).collect::<Vec<_>>()).unwrap_or_else(|_| "[]".into());
+    let found: Vec<(i64, Option<f64>)> = sqlx::query_as(&format!(
+        "SELECT i.id, CAST({BITRATE_SQL} AS REAL) FROM items i WHERE i.id IN (SELECT value FROM json_each(?))"
+    ))
+    .bind(ids)
+    .fetch_all(&db.read)
+    .await?;
+    Ok(found.into_iter().filter_map(|(id, bitrate)| bitrate.map(|b| (id, b))).collect())
 }
 
 /// `sort=movie.addedAt:desc,titleSort` → fields with direction (descending?).
@@ -644,6 +666,7 @@ fn parse_sort(value: Option<&str>) -> Vec<(SortField, bool)> {
             "index" => SortField::Index,
             "id" => SortField::Id,
             "updatedAt" => SortField::Updated,
+            "mediaBitrate" => SortField::Bitrate,
             _ => continue,
         };
         out.push((field, dir == "desc"));
@@ -654,7 +677,8 @@ fn parse_sort(value: Option<&str>) -> Vec<(SortField, bool)> {
     out
 }
 
-fn sort_rows(rows: &mut [ItemRow], spec: &[(SortField, bool)]) {
+/// Sorts `rows` as `spec` says, with `bitrates` from [`bitrates_for`].
+fn sort_rows(rows: &mut [ItemRow], spec: &[(SortField, bool)], bitrates: &HashMap<i64, f64>) {
     fn cmp_opt<T: PartialOrd>(a: Option<T>, b: Option<T>, desc: bool) -> Ordering {
         match (a, b) {
             (Some(a), Some(b)) => {
@@ -682,6 +706,7 @@ fn sort_rows(rows: &mut [ItemRow], spec: &[(SortField, bool)]) {
                 SortField::Index => cmp_opt(a.idx, b.idx, desc),
                 SortField::Id => cmp_opt(Some(a.id), Some(b.id), desc),
                 SortField::Updated => cmp_opt(Some(a.updated_at), Some(b.updated_at), desc),
+                SortField::Bitrate => cmp_opt(bitrates.get(&a.id), bitrates.get(&b.id), desc),
             };
             if o != Ordering::Equal {
                 return o;
@@ -993,6 +1018,7 @@ impl SortField {
             SortField::Index => ("i.idx", true),
             SortField::Id => ("i.id", false),
             SortField::Updated => ("i.updated_at", false),
+            SortField::Bitrate => (BITRATE_SQL, true),
         }
     }
 }
@@ -1125,7 +1151,8 @@ impl<'a> SectionQuery<'a> {
         if !self.filters.is_empty() {
             rows.retain(|r| self.filters.iter().all(|f| f.matches(r, extras.get(&r.id), self.now)));
         }
-        sort_rows(&mut rows, &self.sort);
+        let bitrates = bitrates_for(db, &rows, &self.sort).await?;
+        sort_rows(&mut rows, &self.sort, &bitrates);
         if let Some(cap) = self.cap {
             rows.truncate(cap);
         }
@@ -1248,7 +1275,9 @@ pub async fn library_all(
             total += count;
         }
     }
-    sort_rows(&mut rows, &parse_sort(params.get("sort")));
+    let sort = parse_sort(params.get("sort"));
+    let bitrates = bitrates_for(&state.db, &rows, &sort).await?;
+    sort_rows(&mut rows, &sort, &bitrates);
     let rows: Vec<ItemRow> = rows.into_iter().skip(page.start).take(page.size.unwrap_or(usize::MAX)).collect();
     let nodes = item_nodes(&state, &rows, &Sections::new(&libraries), listing_detail(&params)).await?;
     Ok(list_container(None, &info, nodes, total, &page))
@@ -2421,7 +2450,7 @@ mod tests {
         }
         let sorted = |spec: &str| {
             let mut rows = rows.clone();
-            sort_rows(&mut rows, &parse_sort(Some(spec)));
+            sort_rows(&mut rows, &parse_sort(Some(spec)), &HashMap::new());
             rows.iter().map(|r| r.title.clone()).collect::<Vec<_>>()
         };
         assert_eq!(sorted("year"), ["Charlie", "Alpha", "Delta", "Bravo"], "ties by title, missing last");

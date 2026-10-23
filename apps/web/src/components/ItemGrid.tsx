@@ -25,10 +25,12 @@ export interface ItemGridProps {
   jumpBar?: boolean;
   /** Extra offset for sticky headers when jumping (px). */
   stickyOffset?: number;
+  /** Cards say what the files are like (sorted by bitrate). */
+  media?: boolean;
 }
 
 /** Window-scrolled, row-virtualized responsive grid of media cards. */
-export function ItemGrid({ items, total = items.length, aspect, cardWidth, jumpBar, stickyOffset = 136 }: ItemGridProps) {
+export function ItemGrid({ items, total = items.length, aspect, cardWidth, jumpBar, stickyOffset = 136, media }: ItemGridProps) {
   const [ref, width] = useElementWidth<HTMLDivElement>();
   const [scrollMargin, setScrollMargin] = useState(0);
   const gap = width < 640 ? 12 : 18;
@@ -98,7 +100,7 @@ export function ItemGrid({ items, total = items.length, aspect, cardWidth, jumpB
                   }}
                 >
                   {rowItems.map((item) => (
-                    <MediaCard key={item.id} item={item} aspect={aspect} width={colWidth} />
+                    <MediaCard key={item.id} item={item} aspect={aspect} width={colWidth} media={media} />
                   ))}
                   {Array.from({ length: placeholders }, (_, i) => (
                     <CardSkeleton key={`p${i}`} aspect={aspect} />

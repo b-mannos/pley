@@ -166,6 +166,63 @@ pub struct ItemSummary {
     pub release_date: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extra_type: Option<String>,
+    /// What the title's files are like, in listings sorted by bitrate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media: Option<MediaSummary>,
+}
+
+/// A title's best file (a show's files on average), for listings sorted by
+/// bitrate: what the posters say then.
+#[derive(Debug, Clone, PartialEq, Serialize, FromRow)]
+pub struct MediaSummary {
+    /// Bits per second.
+    pub bitrate: Option<i64>,
+    /// Bytes (a show's: all its episodes').
+    pub size: Option<i64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub video_codec: Option<String>,
+    /// `sdr`, `hdr10`, `hdr10plus`, `hlg` or `dolby_vision`.
+    pub dynamic_range: Option<String>,
+}
+
+/// The media summaries of `items` (one listing page), by item id.
+pub async fn media_summaries(db: &Db, items: &[ItemSummary]) -> sqlx::Result<HashMap<i64, MediaSummary>> {
+    let ids = |shows: bool| {
+        serde_json::to_string(&items.iter().filter(|i| (i.kind == "show") == shows).map(|i| i.id).collect::<Vec<_>>())
+            .unwrap_or_else(|_| "[]".into())
+    };
+    #[derive(FromRow)]
+    struct Row {
+        item_id: i64,
+        #[sqlx(flatten)]
+        media: MediaSummary,
+    }
+    // The file with the highest bitrate of each title comes first.
+    let files: Vec<Row> = sqlx::query_as(
+        "SELECT f.item_id, f.bitrate, f.size, f.width, f.height, f.video_codec,
+                (SELECT json_extract(s.value, '$.dynamic_range') FROM json_each(f.media_info, '$.streams') s
+                 WHERE json_extract(s.value, '$.kind') = 'video' LIMIT 1) AS dynamic_range
+         FROM media_files f WHERE f.item_id IN (SELECT value FROM json_each(?))
+         ORDER BY f.item_id, f.bitrate IS NULL, f.bitrate DESC",
+    )
+    .bind(ids(false))
+    .fetch_all(&db.read)
+    .await?;
+    let shows: Vec<Row> = sqlx::query_as(
+        "SELECT e.grandparent_id AS item_id, CAST(AVG(f.bitrate) AS INTEGER) AS bitrate, SUM(f.size) AS size,
+                MAX(f.width) AS width, MAX(f.height) AS height, NULL AS video_codec, NULL AS dynamic_range
+         FROM items e JOIN media_files f ON f.item_id = e.id
+         WHERE e.grandparent_id IN (SELECT value FROM json_each(?)) GROUP BY e.grandparent_id",
+    )
+    .bind(ids(true))
+    .fetch_all(&db.read)
+    .await?;
+    let mut out = HashMap::new();
+    for row in files.into_iter().chain(shows) {
+        out.entry(row.item_id).or_insert(row.media);
+    }
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -298,6 +355,7 @@ impl ItemRow {
             summary: if self.kind == "episode" { self.summary.clone() } else { None },
             release_date: self.release_date.clone(),
             extra_type: self.extra_type.clone(),
+            media: None,
         }
     }
 }
@@ -455,6 +513,8 @@ pub enum SortKey {
     Duration,
     LastPlayed,
     UserRating,
+    /// The best file's bitrate (a show's: its episodes' on average).
+    Bitrate,
 }
 
 impl SortKey {
@@ -468,6 +528,7 @@ impl SortKey {
             "duration" => SortKey::Duration,
             "last_played" => SortKey::LastPlayed,
             "user_rating" => SortKey::UserRating,
+            "bitrate" => SortKey::Bitrate,
             _ => return None,
         })
     }
@@ -492,6 +553,11 @@ impl SortKey {
             ),
             SortKey::LastPlayed => ("s.last_played_at", true),
             SortKey::UserRating => ("s.rating", true),
+            SortKey::Bitrate if show => (
+                "(SELECT AVG(f.bitrate) FROM items e JOIN media_files f ON f.item_id = e.id WHERE e.grandparent_id = i.id)",
+                true,
+            ),
+            SortKey::Bitrate => ("(SELECT MAX(f.bitrate) FROM media_files f WHERE f.item_id = i.id)", true),
         }
     }
 

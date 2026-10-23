@@ -12,6 +12,7 @@ const PLEX_SORT: Record<LibrarySort, string> = {
   release: "originallyAvailableAt",
   duration: "duration",
   last_played: "lastViewedAt",
+  bitrate: "mediaBitrate",
 };
 
 /** The library page's filters and order as a smart collection filter. */

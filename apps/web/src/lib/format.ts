@@ -1,4 +1,4 @@
-import type { ItemSummary, MediaFile, MediaStream, TranscodeInfo } from "@/api/types";
+import type { DynamicRange, ItemSummary, MediaFile, MediaStream, MediaSummary, TranscodeInfo } from "@/api/types";
 import { languageName } from "./languages";
 
 /** 6720000 → "1h 52m", 2700000 → "45m", 29000 → "29s" (rounded to whole minutes from 30s up). */
@@ -40,6 +40,23 @@ export function formatBytes(bytes: number | null | undefined): string {
     i++;
   }
   return `${v >= 100 || i === 0 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
+}
+
+/** What a title's files are like, for its poster: `["4K", "DV", "HEVC"]`. */
+export function mediaBadges(media: MediaSummary | null | undefined): string[] {
+  if (!media) return [];
+  const range: Partial<Record<DynamicRange, string>> = { dolby_vision: "DV", hdr10plus: "HDR10+", hdr10: "HDR10", hlg: "HLG" };
+  return [
+    resolutionLabel(media.width, media.height),
+    media.dynamic_range ? (range[media.dynamic_range] ?? null) : null,
+    media.video_codec ? codecLabel(media.video_codec) : null,
+  ].filter((b): b is string => !!b);
+}
+
+/** The line under a title's poster: `"42 Mbps · 23.4 GB"`. */
+export function mediaLine(media: MediaSummary | null | undefined): string {
+  if (!media) return "";
+  return [formatBitrate(media.bitrate), formatBytes(media.size)].filter(Boolean).join(" · ") || "Bitrate unknown";
 }
 
 /** Bits per second → "8.2 Mbps" / "320 kbps". */
