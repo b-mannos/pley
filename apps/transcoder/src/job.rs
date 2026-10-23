@@ -28,7 +28,7 @@ use crate::extract::Extractor;
 use crate::ffmpeg::Ffmpeg;
 use crate::keyframes::KeyframeStore;
 use crate::metrics::Metrics;
-use crate::plan::{ArgsContext, Burn, PROCESS_WINDOW, Plan};
+use crate::plan::{ArgsContext, Burn, MAX_DURATION_MS, PROCESS_WINDOW, Plan};
 use crate::probe::Prober;
 use crate::util::now_ms;
 
@@ -219,10 +219,12 @@ impl JobManager {
         let wants_copy = req.video.as_ref().is_some_and(|v| v.mode == VideoMode::Copy);
         // Remuxing needs the container start time (keyframe times are absolute,
         // seeking is relative to it); media info from older servers lacks it.
+        // An implausible duration (stored from an older transcoder's probe) is
+        // probed again: the probe now looks past it.
         let media = match req
             .media
             .clone()
-            .filter(|m| m.duration_ms.is_some_and(|d| d > 0) && !m.streams.is_empty())
+            .filter(|m| m.duration_ms.is_some_and(|d| d > 0 && d <= MAX_DURATION_MS) && !m.streams.is_empty())
             .filter(|m| !wants_copy || m.start_ms.is_some())
         {
             Some(media) => Arc::new(media),
@@ -893,6 +895,56 @@ mod tests {
             served_segments: AtomicU64::new(0),
             served_bytes: AtomicU64::new(0),
         }
+    }
+
+    /// A manager whose FFmpeg "works" but whose binaries are missing.
+    fn manager(dir: &Path) -> Arc<JobManager> {
+        let ff = Arc::new(Ffmpeg {
+            ffmpeg: dir.join("no-ffmpeg"),
+            ffprobe: dir.join("no-ffprobe"),
+            caps: pley_transcoder_api::Capabilities { ffmpeg_available: true, ..Default::default() },
+            segment_times_relative: true,
+        });
+        let metrics = Arc::new(Metrics::default());
+        let prober = Arc::new(Prober::new(ff.clone(), metrics.clone(), 1));
+        let keyframes = KeyframeStore::new(ff.clone(), metrics.clone(), dir.join("keyframes"));
+        let extractor = Arc::new(Extractor::new(ff.clone(), prober.clone(), metrics.clone(), dir.join("subtitles"), 1));
+        let limits = Limits { max_jobs: 2, max_hw_jobs: 0 };
+        JobManager::new(ff, prober, keyframes, extractor, metrics, dir.join("jobs"), limits)
+    }
+
+    #[tokio::test]
+    async fn implausible_durations_from_the_server_are_probed_again() {
+        use pley_transcoder_api::{AudioRequest, MediaStream, StreamKind};
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("song.flac");
+        std::fs::write(&input, b"not really audio").unwrap();
+        let jobs = manager(dir.path());
+        let request = |duration_ms: i64| JobRequest {
+            input: input.to_string_lossy().into_owned(),
+            media: Some(MediaInfo {
+                duration_ms: Some(duration_ms),
+                streams: vec![MediaStream {
+                    index: 0,
+                    kind: StreamKind::Audio,
+                    codec: "flac".into(),
+                    sample_rate: Some(44_100),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            audio: Some(AudioRequest::default()),
+            ..Default::default()
+        };
+        // A believable duration is used as it is (nothing is produced without
+        // ffmpeg, but the job exists).
+        let created = jobs.create(request(60_000)).await.unwrap();
+        assert_eq!(created.segment_count, 15);
+        // 1e12 s would be 250 billion segments: never trusted, the file is
+        // probed again (and ffprobe is missing too).
+        let err = jobs.create(request(1_000_000_000_000_000)).await.unwrap_err();
+        assert!(matches!(&err, ApiError::Failed(m) if m.contains("probe failed")), "{err:?}");
+        assert_eq!(jobs.list().len(), 1);
     }
 
     #[test]

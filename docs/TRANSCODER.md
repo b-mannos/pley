@@ -96,6 +96,14 @@ following status codes:
 
    The layout is deterministic. If the transcoder restarts, the server
    recreates the job and the same segment numbers still line up.
+
+   A job has at most 200 000 segments, so a damaged or crafted file can't
+   claim a length that costs gigabytes of memory. Durations beyond about 9
+   days are not believed: the probe then uses the streams' own durations
+   (Matroska `DURATION` tags included) or the file size over the streams'
+   bitrates, and a file with nothing plausible is refused. Media info sent
+   with a job is probed again when its duration is implausible. Files long
+   enough to need it get segments longer than requested instead of more.
 2. **Segments on demand.** A segment request is answered from disk if that
    segment already exists. If it doesn't:
    - When a running ffmpeg process is about to produce it (at most three

@@ -21,6 +21,13 @@ use crate::ffmpeg::{Ffmpeg, VAAPI_DEVICE};
 use crate::util::{MEDIA_INPUT_OPTIONS, input_arg, secs};
 
 pub const DEFAULT_SEGMENT_SECONDS: f64 = 4.0;
+/// Most segments a job may have. Its layout, segment states and playlist grow
+/// with the count, so a file claiming an absurd length (damaged or crafted)
+/// must not turn into gigabytes of memory.
+pub const MAX_SEGMENTS: i64 = 200_000;
+/// Longest media the transcoder believes: 200 000 segments of 4 s, about 9
+/// days. Anything longer comes from a damaged or crafted file.
+pub const MAX_DURATION_MS: i64 = MAX_SEGMENTS * 4_000;
 /// Maximum segments per ffmpeg process (keeps command lines short on Windows).
 pub const PROCESS_WINDOW: u32 = 1200;
 /// Throttling: read at 2× realtime after a 60 s burst.
@@ -138,8 +145,14 @@ impl Plan {
 
     pub fn build(req: &JobRequest, media: &MediaInfo, ff: &Ffmpeg, keyframes: Option<&[i64]>) -> Result<Plan, String> {
         let duration_ms = media.duration_ms.filter(|d| *d > 0).ok_or("media duration is unknown")?;
-        let segment_seconds = req.segment_seconds.unwrap_or(DEFAULT_SEGMENT_SECONDS).clamp(1.0, 10.0);
-        let target_ms = (segment_seconds * 1000.0).round() as i64;
+        if duration_ms > MAX_DURATION_MS {
+            return Err(format!("a media duration of {} days is not plausible", duration_ms / 86_400_000));
+        }
+        let requested =
+            req.segment_seconds.filter(|s| s.is_finite()).unwrap_or(DEFAULT_SEGMENT_SECONDS).clamp(1.0, 10.0);
+        // Very long files get longer segments rather than more of them.
+        let target_ms = ((requested * 1000.0).round() as i64).max((duration_ms + MAX_SEGMENTS - 1) / MAX_SEGMENTS);
+        let segment_seconds = target_ms as f64 / 1000.0;
         let mut warnings = Vec::new();
 
         // ---- subtitle burn-in ----
@@ -285,7 +298,7 @@ impl Plan {
                 // timeline count from the container's start time (often far
                 // from zero in MPEG-TS).
                 let offset = media.start_ms.unwrap_or(0);
-                let relative: Vec<i64> = kf.iter().map(|t| t - offset).collect();
+                let relative: Vec<i64> = kf.iter().map(|t| t.saturating_sub(offset)).collect();
                 keyframe_layout(&relative, duration_ms, target_ms)
             }
             _ => uniform_layout(duration_ms, target_ms),
@@ -991,6 +1004,31 @@ mod tests {
         let kf = vec![0, 9_000, 18_000];
         let (b, _) = keyframe_layout(&kf, 20_000, 4_000);
         assert_eq!(b, vec![0, 9_000, 18_000, 20_000]);
+    }
+
+    #[test]
+    fn segment_counts_are_bounded() {
+        let ff = ffmpeg_with(vec![x264()], vec![]);
+        let mut m = media(DynamicRange::Sdr, None);
+        // Damaged or crafted files: 31 years, 31 700 years.
+        for secs in [1_000_000_000i64, 1_000_000_000_000] {
+            m.duration_ms = Some(secs * 1000);
+            let err = Plan::build(&request(), &m, &ff, None).unwrap_err();
+            assert!(err.contains("not plausible"), "{err}");
+        }
+        // Nine days in 1 s segments would be 800 000 of them: segments get
+        // longer instead.
+        m.duration_ms = Some(MAX_DURATION_MS);
+        let mut req = request();
+        req.segment_seconds = Some(1.0);
+        let plan = Plan::build(&req, &m, &ff, None).unwrap();
+        assert_eq!(i64::from(plan.segment_count()), MAX_SEGMENTS);
+        assert_eq!(plan.segment_seconds, 4.0);
+        assert!(args_string(&plan, 0, 2).contains("-force_key_frames expr:gte(t,n_forced*4)"));
+        // Ordinary lengths keep the segments they asked for.
+        m.duration_ms = Some(3 * 3_600_000);
+        let plan = Plan::build(&req, &m, &ff, None).unwrap();
+        assert_eq!((plan.segment_seconds, plan.segment_count()), (1.0, 10_800));
     }
 
     #[test]

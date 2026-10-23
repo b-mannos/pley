@@ -16,7 +16,7 @@ use tokio::sync::Semaphore;
 use crate::error::{ApiError, ApiResult};
 use crate::ffmpeg::Ffmpeg;
 use crate::metrics::Metrics;
-use crate::plan::{TextSource, ZSCALE_TONEMAP};
+use crate::plan::{MAX_DURATION_MS, TextSource, ZSCALE_TONEMAP};
 use crate::probe::Prober;
 use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg, secs};
 
@@ -55,7 +55,7 @@ impl Extractor {
 
     pub async fn thumbnail(&self, req: &ThumbnailRequest) -> ApiResult<Image> {
         let path = existing(&req.path)?;
-        let duration = match req.duration_ms {
+        let duration = match req.duration_ms.filter(|d| (1..=MAX_DURATION_MS).contains(d)) {
             Some(d) => Some(d),
             None if req.time_ms.is_none() => self.prober.probe(&path).await.ok().and_then(|m| m.duration_ms),
             None => None,

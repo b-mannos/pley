@@ -16,6 +16,7 @@ use tokio::sync::Semaphore;
 
 use crate::ffmpeg::Ffmpeg;
 use crate::metrics::Metrics;
+use crate::plan::MAX_DURATION_MS;
 use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg};
 
 const CACHE_ENTRIES: usize = 4096;
@@ -122,6 +123,7 @@ struct RawFormat {
     duration: Option<String>,
     start_time: Option<String>,
     bit_rate: Option<String>,
+    size: Option<String>,
     #[serde(default)]
     tags: HashMap<String, String>,
 }
@@ -186,9 +188,13 @@ pub fn parse_ffprobe_json(json: &[u8], path: &Path) -> anyhow::Result<MediaInfo>
         }
         let tags = lowercase_tags(&s.tags);
         let codec = s.codec_name.clone().unwrap_or_else(|| "unknown".into());
-        if let Some(d) = s.duration.as_deref().and_then(parse_secs_ms) {
-            stream_durations.push(d);
-        }
+        // Matroska tracks carry theirs as a DURATION tag (mkvmerge, FFmpeg).
+        let duration = s
+            .duration
+            .as_deref()
+            .and_then(parse_secs_ms)
+            .or_else(|| tags.get("duration").and_then(|d| parse_clock_ms(d)));
+        stream_durations.extend(duration);
         let mut stream = MediaStream {
             index: s.index,
             kind,
@@ -262,10 +268,22 @@ pub fn parse_ffprobe_json(json: &[u8], path: &Path) -> anyhow::Result<MediaInfo>
         streams.push(stream);
     }
 
-    let duration_ms = format
-        .and_then(|f| f.duration.as_deref())
-        .and_then(parse_secs_ms)
-        .or_else(|| stream_durations.into_iter().max());
+    // A damaged or crafted file can claim any length, and jobs are laid out
+    // per segment of it: beyond what is plausible, the streams' own durations
+    // or the size over the streams' bitrates are believed instead.
+    let plausible = |ms: &i64| (1..=MAX_DURATION_MS).contains(ms);
+    let format_duration = format.and_then(|f| f.duration.as_deref()).and_then(parse_secs_ms);
+    let duration_ms = format_duration
+        .filter(plausible)
+        .or_else(|| stream_durations.iter().copied().filter(plausible).max())
+        .or_else(|| size_over_bitrate(format, &streams).filter(plausible));
+    if let Some(claimed) = format_duration.filter(|d| !plausible(d) && *d > 0) {
+        tracing::warn!(
+            "{}: ignoring an implausible duration of {claimed} ms, using {}",
+            path.display(),
+            duration_ms.map_or("none".into(), |d| format!("{d} ms"))
+        );
+    }
     let bitrate = format.and_then(|f| f.bit_rate.as_deref()).and_then(|b| b.parse().ok());
     let tags: BTreeMap<String, String> =
         format.map(|f| lowercase_tags(&f.tags)).unwrap_or_default().into_iter().collect();
@@ -284,7 +302,7 @@ pub fn parse_ffprobe_json(json: &[u8], path: &Path) -> anyhow::Result<MediaInfo>
     let start_ms = format
         .and_then(|f| f.start_time.as_deref())
         .and_then(|v| v.trim().parse::<f64>().ok())
-        .filter(|v| v.is_finite())
+        .filter(|v| v.is_finite() && v.abs() * 1000.0 <= MAX_DURATION_MS as f64)
         .map(|v| (v * 1000.0).round() as i64);
 
     Ok(MediaInfo {
@@ -311,6 +329,27 @@ fn is_image_codec(codec: Option<&str>) -> bool {
 fn parse_secs_ms(value: &str) -> Option<i64> {
     let secs: f64 = value.trim().parse().ok()?;
     (secs.is_finite() && secs >= 0.0).then(|| (secs * 1000.0).round() as i64)
+}
+
+/// `"01:02:03.500000000"` (a Matroska `DURATION` tag) → `Some(3_723_500)`.
+fn parse_clock_ms(value: &str) -> Option<i64> {
+    let mut parts = value.trim().split(':');
+    let (h, m, s) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() {
+        return None;
+    }
+    let secs = h.parse::<f64>().ok()? * 3600.0 + m.parse::<f64>().ok()? * 60.0 + s.parse::<f64>().ok()?;
+    (secs.is_finite() && secs >= 0.0).then(|| (secs * 1000.0).round() as i64)
+}
+
+/// How long the file lasts at its streams' declared bitrates.
+fn size_over_bitrate(format: Option<&RawFormat>, streams: &[MediaStream]) -> Option<i64> {
+    let size: i64 = format?.size.as_deref()?.trim().parse().ok()?;
+    let bitrate: i128 = streams.iter().filter_map(|s| s.bitrate).filter(|b| *b > 0).map(i128::from).sum();
+    if size <= 0 || bitrate <= 0 {
+        return None;
+    }
+    i64::try_from(i128::from(size) * 8_000 / bitrate).ok()
 }
 
 fn parse_rate(value: Option<&str>) -> Option<f64> {
@@ -538,6 +577,39 @@ mod tests {
         assert_eq!(info.chapters.len(), 1, "a chapter without an end is dropped");
         assert_eq!(info.chapters[0].title.as_deref(), Some("Part 1"));
         assert!(parse_ffprobe_json(b"not json", Path::new("a.mkv")).is_err());
+    }
+
+    #[test]
+    fn implausible_durations_fall_back_to_the_streams() {
+        let parse = |json: &str| parse_ffprobe_json(json.as_bytes(), Path::new("a.mkv")).unwrap();
+        // A Matroska Duration patched to 1e12 s (what ffprobe reports for
+        // it): the tracks' DURATION tags tell the truth.
+        let crafted = r#"{"streams":[
+            {"index":0,"codec_type":"video","codec_name":"h264","tags":{"DURATION":"00:00:04.000000000"}},
+            {"index":1,"codec_type":"audio","codec_name":"aac","tags":{"DURATION":"00:00:04.023000000"}}],
+          "format":{"format_name":"matroska,webm","duration":"1000000000000.000000","size":"60953","start_time":"1e300"}}"#;
+        let info = parse(crafted);
+        assert_eq!(info.duration_ms, Some(4_023));
+        assert_eq!(info.start_ms, None, "nor is such a start time believed");
+        // No stream durations: the size over the streams' bitrates (1 GB at 8 Mbit/s).
+        let sized = r#"{"streams":[
+            {"index":0,"codec_type":"video","codec_name":"h264","bit_rate":"7000000"},
+            {"index":1,"codec_type":"audio","codec_name":"aac","tags":{"BPS":"1000000"}}],
+          "format":{"format_name":"matroska,webm","duration":"1e15","size":"1000000000"}}"#;
+        assert_eq!(parse(sized).duration_ms, Some(1_000_000));
+        // Nothing believable: unknown (jobs refuse the file).
+        let hopeless = r#"{"streams":[{"index":0,"codec_type":"video","codec_name":"h264"}],
+          "format":{"format_name":"matroska,webm","duration":"1e15"}}"#;
+        assert_eq!(parse(hopeless).duration_ms, None);
+        // Long but possible: a nine-day recording is believed, and a zero
+        // format duration doesn't hide the streams' one.
+        let long = r#"{"streams":[],"format":{"format_name":"mpegts","duration":"777600.0"}}"#;
+        assert_eq!(parse(long).duration_ms, Some(777_600_000));
+        let zero = r#"{"streams":[{"index":0,"codec_type":"audio","codec_name":"mp3","duration":"95.5"}],
+          "format":{"format_name":"mp3","duration":"0.000000"}}"#;
+        assert_eq!(parse(zero).duration_ms, Some(95_500));
+        assert_eq!(parse_clock_ms("01:02:03.500000000"), Some(3_723_500));
+        assert_eq!(parse_clock_ms("03.5"), None);
     }
 
     #[test]
