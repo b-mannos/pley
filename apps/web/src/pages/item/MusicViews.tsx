@@ -95,21 +95,23 @@ export function AlbumView({ item, highlightId }: { item: ItemDetail; highlightId
         item={item}
         kindLabel="Album"
         meta={
-          <MetaLine
-            parts={[
-              item.parent_id ? (
-                <Link key="artist" to={`/item/${item.parent_id}`} className="font-semibold text-fg hover:text-accent">
-                  {item.parent_title ?? "Artist"}
-                </Link>
-              ) : (
-                item.parent_title
-              ),
-              item.year,
-              list.length ? pluralize(list.length, "track") : null,
-              totalMs ? formatDuration(totalMs) : null,
-              <StarRating key="mine" item={item} />,
-            ]}
-          />
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <MetaLine
+              parts={[
+                item.parent_id ? (
+                  <Link key="artist" to={`/item/${item.parent_id}`} className="font-semibold text-fg hover:text-accent">
+                    {item.parent_title ?? "Artist"}
+                  </Link>
+                ) : (
+                  item.parent_title
+                ),
+                item.year,
+                list.length ? pluralize(list.length, "track") : null,
+                totalMs ? formatDuration(totalMs) : null,
+              ]}
+            />
+            <StarRating item={item} />
+          </div>
         }
         actions={
           <>

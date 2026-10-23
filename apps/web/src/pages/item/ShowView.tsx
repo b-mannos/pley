@@ -42,17 +42,19 @@ export function ShowView({ item }: { item: ItemDetail }) {
         </div>
         <div className="min-w-0 flex-1 space-y-4">
           <h1 className="text-3xl font-bold leading-tight tracking-tight text-balance sm:text-4xl">{item.title}</h1>
-          <MetaLine
-            parts={[
-              item.year,
-              item.child_count ? pluralize(item.child_count, "season") : null,
-              item.leaf_count ? pluralize(item.leaf_count, "episode") : null,
-              item.content_rating ? <ContentRating key="cr" value={item.content_rating} /> : null,
-              item.rating != null && item.rating > 0 ? <RatingBadge key="r" rating={item.rating} /> : null,
-              item.studio,
-              <StarRating key="mine" item={item} />,
-            ]}
-          />
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <MetaLine
+              parts={[
+                item.year,
+                item.child_count ? pluralize(item.child_count, "season") : null,
+                item.leaf_count ? pluralize(item.leaf_count, "episode") : null,
+                item.content_rating ? <ContentRating key="cr" value={item.content_rating} /> : null,
+                item.rating != null && item.rating > 0 ? <RatingBadge key="r" rating={item.rating} /> : null,
+                item.studio,
+              ]}
+            />
+            <StarRating item={item} />
+          </div>
           <Genres genres={item.genres} />
           <PartOfCollections item={item} />
           <div className="flex flex-wrap items-center gap-2.5 pt-1">

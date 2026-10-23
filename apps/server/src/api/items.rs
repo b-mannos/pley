@@ -327,7 +327,13 @@ async fn resolve_artwork(state: &AppState, id: i64, kind: &str) -> ApiResult<Pat
             return Ok(path);
         }
         match (kind, row.kind.as_str()) {
-            ("thumb", "movie" | "episode") => return generate_thumb(state, current).await,
+            // A frame grab; a missing or unreadable file just has no picture.
+            ("thumb", "movie" | "episode") => {
+                return generate_thumb(state, current).await.map_err(|err| {
+                    tracing::debug!("frame grab of item {current}: {err}");
+                    AppError::not_found("no artwork")
+                });
+            }
             ("poster", "album") => {
                 if let Some(path) = extract_cover(state, current).await? {
                     return Ok(path);

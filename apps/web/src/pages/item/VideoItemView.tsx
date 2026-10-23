@@ -119,16 +119,18 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
 
           <h1 className="text-3xl font-bold leading-tight tracking-tight text-balance sm:text-4xl">{item.title}</h1>
 
-          <MetaLine
-            parts={[
-              isEpisode ? formatDate(item.release_date) : item.year,
-              formatDuration(item.duration_ms),
-              item.content_rating ? <ContentRating key="cr" value={item.content_rating} /> : null,
-              item.rating != null && item.rating > 0 ? <RatingBadge key="r" rating={item.rating} /> : null,
-              qualityBadgeLabels(item).length ? <QualityBadges key="q" item={item} /> : null,
-              <StarRating key="mine" item={item} />,
-            ]}
-          />
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <MetaLine
+              parts={[
+                isEpisode ? formatDate(item.release_date) : item.year,
+                formatDuration(item.duration_ms),
+                item.content_rating ? <ContentRating key="cr" value={item.content_rating} /> : null,
+                item.rating != null && item.rating > 0 ? <RatingBadge key="r" rating={item.rating} /> : null,
+                qualityBadgeLabels(item).length ? <QualityBadges key="q" item={item} /> : null,
+              ]}
+            />
+            <StarRating item={item} />
+          </div>
 
           <Genres genres={item.genres} />
           <PartOfCollections item={item} />
