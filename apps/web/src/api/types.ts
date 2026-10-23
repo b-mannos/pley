@@ -80,6 +80,8 @@ export interface ServerStatus {
   name: string;
   version: string;
   setup_required: boolean;
+  /** From outside the server's local network, setting up takes the code in its log. */
+  setup_code_required?: boolean;
 }
 
 export interface LoginResponse {

@@ -53,7 +53,7 @@ async fn pley_always_keeps_an_enabled_administrator() {
 
     // Once it is enabled again, the first one may step down, right away.
     app.patch(&format!("/api/users/{second_id}"), &admin, json!({"disabled": false})).await;
-    let second = app.login("second", "password1").await;
+    let second = app.login("second", "test-pass-1").await;
     let demote = app.patch(&format!("/api/users/{admin_id}"), &admin, json!({"is_admin": false})).await;
     assert_eq!(demote.status, StatusCode::OK, "{:?}", demote.body);
     assert_eq!(app.get("/api/users", &admin).await.status, StatusCode::FORBIDDEN);
@@ -84,7 +84,7 @@ async fn a_rejected_user_update_changes_nothing() {
         app.patch(&format!("/api/users/{bob_id}"), &admin, json!({"password": "brand-new", "pin": "12"})).await;
     assert_eq!(bad_pin.status, StatusCode::BAD_REQUEST);
     assert_eq!(app.get("/api/auth/me", &bob).await.status, StatusCode::OK, "bob is still signed in");
-    assert_eq!(app.try_login("bob", "password1").await.status, StatusCode::OK, "with his old password");
+    assert_eq!(app.try_login("bob", "test-pass-1").await.status, StatusCode::OK, "with his old password");
 
     let admin_id = app.get("/api/auth/me", &admin).await.body["id"].as_i64().unwrap();
     let last =
@@ -98,14 +98,14 @@ async fn a_new_password_from_an_administrator_signs_the_user_out() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;
     let (laptop, bob_id) = app.user(&admin, "bob", json!({})).await;
-    let phone = app.login("bob", "password1").await;
+    let phone = app.login("bob", "test-pass-1").await;
 
     let reset = app.patch(&format!("/api/users/{bob_id}"), &admin, json!({"password": "fresh-start"})).await;
     assert_eq!(reset.status, StatusCode::OK, "{:?}", reset.body);
     for token in [&laptop, &phone] {
         assert_eq!(app.get("/api/auth/me", token).await.status, StatusCode::UNAUTHORIZED);
     }
-    assert_eq!(app.try_login("bob", "password1").await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(app.try_login("bob", "test-pass-1").await.status, StatusCode::UNAUTHORIZED);
     assert_eq!(app.try_login("bob", "fresh-start").await.status, StatusCode::OK);
 
     // A managed profile given a password becomes a regular account.
@@ -118,7 +118,7 @@ async fn a_new_password_from_an_administrator_signs_the_user_out() {
 
     // Administrators resetting their own password stay signed in.
     let admin_id = app.get("/api/auth/me", &admin).await.body["id"].as_i64().unwrap();
-    app.patch(&format!("/api/users/{admin_id}"), &admin, json!({"password": "secret2"})).await;
+    app.patch(&format!("/api/users/{admin_id}"), &admin, json!({"password": "secret-two"})).await;
     assert_eq!(app.get("/api/auth/me", &admin).await.status, StatusCode::OK);
 }
 
@@ -130,15 +130,15 @@ async fn new_users_are_checked() {
     let movies = app.library(&admin, "Movies", "movies", "movies").await;
 
     let create = |body: Value| app.post("/api/users", &admin, body);
-    assert_eq!(create(json!({"username": "ADMIN", "password": "password1"})).await.status, StatusCode::CONFLICT);
+    assert_eq!(create(json!({"username": "ADMIN", "password": "test-pass-1"})).await.status, StatusCode::CONFLICT);
     for body in [
-        json!({"username": "bad name", "password": "password1"}),
-        json!({"username": "", "password": "password1"}),
+        json!({"username": "bad name", "password": "test-pass-1"}),
+        json!({"username": "", "password": "test-pass-1"}),
         json!({"username": "nopass"}),
         json!({"username": "short", "password": "abc"}),
-        json!({"username": "old", "password": "password1", "max_age": 22}),
-        json!({"username": "young", "password": "password1", "max_age": -1}),
-        json!({"username": "pin", "password": "password1", "pin": "12"}),
+        json!({"username": "old", "password": "test-pass-1", "max_age": 22}),
+        json!({"username": "young", "password": "test-pass-1", "max_age": -1}),
+        json!({"username": "pin", "password": "test-pass-1", "pin": "12"}),
     ] {
         let reply = create(body.clone()).await;
         assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{body}: {:?}", reply.body);
@@ -146,7 +146,7 @@ async fn new_users_are_checked() {
 
     let created = create(json!({
         "username": "  carol  ",
-        "password": "password1",
+        "password": "test-pass-1",
         "display_name": "   ",
         "all_libraries": false,
         "library_ids": [movies, 999],
@@ -160,7 +160,7 @@ async fn new_users_are_checked() {
     assert_eq!((created.body["max_age"].clone(), created.body["home"].clone()), (json!(0), json!(true)));
 
     // None of this is open to other users.
-    let carol = app.login("carol", "password1").await;
+    let carol = app.login("carol", "test-pass-1").await;
     let carol_id = created.body["id"].as_i64().unwrap();
     assert_eq!(app.get("/api/users", &carol).await.status, StatusCode::FORBIDDEN);
     assert_eq!(create_as(&app, &carol).await, StatusCode::FORBIDDEN);
@@ -171,7 +171,7 @@ async fn new_users_are_checked() {
 }
 
 async fn create_as(app: &TestApp, token: &str) -> StatusCode {
-    app.post("/api/users", token, json!({"username": "eve", "password": "password1", "is_admin": true})).await.status
+    app.post("/api/users", token, json!({"username": "eve", "password": "test-pass-1", "is_admin": true})).await.status
 }
 
 #[tokio::test]
@@ -199,7 +199,7 @@ async fn deleting_a_user_signs_them_out_and_removes_their_picture() {
     assert_eq!(app.delete("/api/users/999", &admin).await.status, StatusCode::NOT_FOUND);
     assert_eq!(app.delete(&format!("/api/users/{bob_id}"), &admin).await.status, StatusCode::NO_CONTENT);
     assert_eq!(app.get("/api/auth/me", &bob).await.status, StatusCode::UNAUTHORIZED);
-    assert_eq!(app.try_login("bob", "password1").await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(app.try_login("bob", "test-pass-1").await.status, StatusCode::UNAUTHORIZED);
     assert_eq!(std::fs::read_dir(&avatars).unwrap().count(), 0, "the picture is gone too");
     assert_eq!(app.get(&format!("/api/users/{bob_id}/avatar"), &admin).await.status, StatusCode::NOT_FOUND);
 }
@@ -213,8 +213,8 @@ async fn your_own_pin_needs_your_password() {
     let set_pin = |body: Value| app.put("/api/me/pin", &parent, body);
     assert_eq!(set_pin(json!({"pin": "4321"})).await.status, StatusCode::BAD_REQUEST, "no password");
     assert_eq!(set_pin(json!({"pin": "4321", "password": "nope"})).await.status, StatusCode::BAD_REQUEST);
-    assert_eq!(set_pin(json!({"pin": "12", "password": "password1"})).await.status, StatusCode::BAD_REQUEST);
-    assert_eq!(set_pin(json!({"pin": "4321", "password": "password1"})).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(set_pin(json!({"pin": "12", "password": "test-pass-1"})).await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(set_pin(json!({"pin": "4321", "password": "test-pass-1"})).await.status, StatusCode::NO_CONTENT);
     assert_eq!(app.get("/api/auth/me", &parent).await.body["has_pin"], json!(true));
 
     // Switching to the profile now takes the PIN, even for an administrator.
@@ -223,12 +223,13 @@ async fn your_own_pin_needs_your_password() {
     let with = app.post("/api/auth/switch", &admin, json!({"user_id": parent_id, "pin": "4321"})).await;
     assert_eq!(with.status, StatusCode::OK, "{:?}", with.body);
 
-    assert_eq!(set_pin(json!({"pin": null, "password": "password1"})).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(set_pin(json!({"pin": null, "password": "test-pass-1"})).await.status, StatusCode::NO_CONTENT);
     assert_eq!(app.get("/api/auth/me", &parent).await.body["has_pin"], json!(false));
 
     // Managed profiles have no password: an administrator sets their PIN.
-    let kid =
-        app.post("/api/users", &app.login("admin", "secret1").await, json!({"username": "kid", "managed": true})).await;
+    let kid = app
+        .post("/api/users", &app.login("admin", "secret-one").await, json!({"username": "kid", "managed": true}))
+        .await;
     let kid_id = kid.body["id"].as_i64().unwrap();
     let kid = app.post("/api/auth/switch", &parent, json!({"user_id": kid_id})).await.body["token"]
         .as_str()
@@ -258,7 +259,7 @@ async fn who_can_switch_to_whom() {
     let names: Vec<&str> = profiles.body.as_array().unwrap().iter().map(|u| u["username"].as_str().unwrap()).collect();
     assert_eq!(names, ["admin", "kid", "teen"]);
     assert_eq!(switch(&app, &admin, json!({"user_id": friend_id})).await.status, StatusCode::FORBIDDEN);
-    let to_admin = switch(&app, &friend, json!({"user_id": admin_id, "password": "secret1"})).await;
+    let to_admin = switch(&app, &friend, json!({"user_id": admin_id, "password": "secret-one"})).await;
     assert_eq!(to_admin.status, StatusCode::FORBIDDEN, "friends can't switch at all");
     assert_eq!(switch(&app, &admin, json!({"user_id": away})).await.status, StatusCode::FORBIDDEN);
     assert_eq!(switch(&app, &admin, json!({"user_id": 999})).await.status, StatusCode::NOT_FOUND);
@@ -276,9 +277,9 @@ async fn who_can_switch_to_whom() {
     let teen_token = again.body["token"].as_str().unwrap().to_owned();
 
     // An administrator with a PIN asks for the PIN, not the password.
-    let admin = app.login("admin", "secret1").await;
+    let admin = app.login("admin", "secret-one").await;
     app.patch(&format!("/api/users/{admin_id}"), &admin, json!({"pin": "2468"})).await;
-    let by_password = switch(&app, &teen_token, json!({"user_id": admin_id, "password": "secret1"})).await;
+    let by_password = switch(&app, &teen_token, json!({"user_id": admin_id, "password": "secret-one"})).await;
     assert_eq!(by_password.status, StatusCode::FORBIDDEN);
     let by_pin = switch(&app, &teen_token, json!({"user_id": admin_id, "pin": "2468"})).await;
     assert_eq!(by_pin.status, StatusCode::OK, "{:?}", by_pin.body);
@@ -311,13 +312,14 @@ async fn invitations() {
     assert_eq!(check.status, StatusCode::OK);
 
     // Refused sign-ups don't use the invitation up.
-    let bad = accept(&app, &code, json!({"username": "bad name", "password": "password1"})).await;
+    let bad = accept(&app, &code, json!({"username": "bad name", "password": "test-pass-1"})).await;
     assert_eq!(bad.status, StatusCode::BAD_REQUEST);
-    let taken = accept(&app, &code, json!({"username": "Admin", "password": "password1"})).await;
+    let taken = accept(&app, &code, json!({"username": "Admin", "password": "test-pass-1"})).await;
     assert_eq!(taken.status, StatusCode::CONFLICT);
     assert_eq!(uses_left(&app, &admin, &code).await, Some(json!(2)));
 
-    let first = accept(&app, &code, json!({"username": "ann", "password": "password1", "display_name": " Ann "})).await;
+    let first =
+        accept(&app, &code, json!({"username": "ann", "password": "test-pass-1", "display_name": " Ann "})).await;
     assert_eq!(first.status, StatusCode::OK, "{:?}", first.body);
     let user = &first.body["user"];
     assert_eq!(
@@ -326,9 +328,9 @@ async fn invitations() {
     );
     assert_eq!(user["library_ids"], json!([movies]));
     assert!(first.headers[header::SET_COOKIE].to_str().unwrap().starts_with("pley_token="));
-    let second = accept(&app, &code, json!({"username": "ben", "password": "password1"})).await;
+    let second = accept(&app, &code, json!({"username": "ben", "password": "test-pass-1"})).await;
     assert_eq!(second.status, StatusCode::OK);
-    let third = accept(&app, &code, json!({"username": "cid", "password": "password1"})).await;
+    let third = accept(&app, &code, json!({"username": "cid", "password": "test-pass-1"})).await;
     assert_eq!(third.status, StatusCode::NOT_FOUND);
     let check = app.call(Method::GET, &format!("/api/invites/{code}"), None, None, &[]).await;
     assert_eq!(check.status, StatusCode::NOT_FOUND, "used up");
@@ -340,15 +342,15 @@ async fn invitations() {
         .execute(&app.state.db.write)
         .await
         .unwrap();
-    let late = accept(&app, &week, json!({"username": "dan", "password": "password1"})).await;
+    let late = accept(&app, &week, json!({"username": "dan", "password": "test-pass-1"})).await;
     assert_eq!(late.status, StatusCode::NOT_FOUND);
     let gone = invite(json!({})).await.body["code"].as_str().unwrap().to_owned();
     assert_eq!(app.delete(&format!("/api/invites/{gone}"), &admin).await.status, StatusCode::NO_CONTENT);
-    let deleted = accept(&app, &gone, json!({"username": "eve", "password": "password1"})).await;
+    let deleted = accept(&app, &gone, json!({"username": "eve", "password": "test-pass-1"})).await;
     assert_eq!(deleted.status, StatusCode::NOT_FOUND);
 
     // Only administrators manage invitations.
-    let ann = app.login("ann", "password1").await;
+    let ann = app.login("ann", "test-pass-1").await;
     assert_eq!(app.get("/api/invites", &ann).await.status, StatusCode::FORBIDDEN);
     assert_eq!(app.post("/api/invites", &ann, json!({})).await.status, StatusCode::FORBIDDEN);
     assert_eq!(app.delete(&format!("/api/invites/{week}"), &ann).await.status, StatusCode::FORBIDDEN);
@@ -390,11 +392,11 @@ async fn login_attempts_are_throttled_per_username() {
     for _ in 0..5 {
         assert_eq!(app.try_login("bob", "wrong").await.status, StatusCode::UNAUTHORIZED);
     }
-    let locked = app.try_login("bob", "password1").await;
+    let locked = app.try_login("bob", "test-pass-1").await;
     assert_eq!(locked.status, StatusCode::TOO_MANY_REQUESTS, "even with the right password");
     assert_eq!(locked.body["code"], json!("too_many_requests"));
-    assert_eq!(app.try_login(" BOB ", "password1").await.status, StatusCode::TOO_MANY_REQUESTS, "same account");
-    assert_eq!(app.try_login("carol", "password1").await.status, StatusCode::OK, "others are not affected");
+    assert_eq!(app.try_login(" BOB ", "test-pass-1").await.status, StatusCode::TOO_MANY_REQUESTS, "same account");
+    assert_eq!(app.try_login("carol", "test-pass-1").await.status, StatusCode::OK, "others are not affected");
 
     // Unknown names are throttled the same way, so they look like real ones.
     for _ in 0..5 {
@@ -406,11 +408,11 @@ async fn login_attempts_are_throttled_per_username() {
     for _ in 0..4 {
         app.try_login("carol", "wrong").await;
     }
-    assert_eq!(app.try_login("carol", "password1").await.status, StatusCode::OK);
+    assert_eq!(app.try_login("carol", "test-pass-1").await.status, StatusCode::OK);
     for _ in 0..4 {
         app.try_login("carol", "wrong").await;
     }
-    assert_eq!(app.try_login("carol", "password1").await.status, StatusCode::OK);
+    assert_eq!(app.try_login("carol", "test-pass-1").await.status, StatusCode::OK);
 }
 
 #[tokio::test]
@@ -418,11 +420,11 @@ async fn changing_your_password() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;
     let (bob, _) = app.user(&admin, "bob", json!({})).await;
-    let short = change_password(&app, &bob, "password1", "abc").await;
+    let short = change_password(&app, &bob, "test-pass-1", "abc").await;
     assert_eq!(short.status, StatusCode::BAD_REQUEST, "too short");
     assert_eq!(change_password(&app, &bob, "wrong", "password2").await.status, StatusCode::BAD_REQUEST);
-    assert_eq!(change_password(&app, &bob, "password1", "password2").await.status, StatusCode::NO_CONTENT);
-    assert_eq!(app.try_login("bob", "password1").await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(change_password(&app, &bob, "test-pass-1", "password2").await.status, StatusCode::NO_CONTENT);
+    assert_eq!(app.try_login("bob", "test-pass-1").await.status, StatusCode::UNAUTHORIZED);
     assert_eq!(app.try_login("bob", "password2").await.status, StatusCode::OK);
 
     let kid = app.post("/api/users", &admin, json!({"username": "kid", "managed": true})).await.body["id"].clone();
@@ -432,14 +434,107 @@ async fn changing_your_password() {
     assert!(managed.body["message"].as_str().unwrap().contains("managed"));
 }
 
+/// `POST /api/setup` (or `GET /api/server` without a body) from `peer`,
+/// with extra headers.
+async fn from(
+    app: &TestApp,
+    peer: &str,
+    method: Method,
+    uri: &str,
+    body: Option<Value>,
+    headers: &[(&str, &str)],
+) -> Reply {
+    let mut req = axum::http::Request::builder().method(method).uri(uri);
+    for (k, v) in headers {
+        req = req.header(*k, *v);
+    }
+    let addr: std::net::SocketAddr = peer.parse().unwrap();
+    let req = req.extension(axum::extract::ConnectInfo(addr));
+    let req = match body {
+        Some(b) => req.header(header::CONTENT_TYPE, "application/json").body(axum::body::Body::from(b.to_string())),
+        None => req.body(axum::body::Body::empty()),
+    }
+    .unwrap();
+    let resp = tower::ServiceExt::oneshot(app.api.clone(), req).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap().to_vec();
+    Reply { status, headers: Default::default(), body: serde_json::from_slice(&bytes).unwrap_or(Value::Null), bytes }
+}
+
+#[tokio::test]
+async fn setting_up_from_elsewhere_takes_the_code_in_the_log() {
+    let app = TestApp::new().await;
+    let account = json!({"username": "owner", "password": "correct horse"});
+    let with_code = |code: &str| {
+        let mut body = account.clone();
+        body["setup_code"] = json!(code);
+        body
+    };
+    let server = |peer: &'static str, headers: &'static [(&'static str, &'static str)]| {
+        let app = &app;
+        async move { from(app, peer, Method::GET, "/api/server", None, headers).await.body["setup_code_required"].clone() }
+    };
+    // This computer and the local network need no code; the internet and
+    // anything behind a proxy do.
+    assert_eq!(server("127.0.0.1:50000", &[]).await, json!(false));
+    assert_eq!(server("192.168.1.20:50000", &[]).await, json!(false));
+    assert_eq!(server("203.0.113.9:50000", &[]).await, json!(true));
+    assert_eq!(server("127.0.0.1:50000", &[("x-forwarded-for", "203.0.113.9")]).await, json!(true));
+
+    let remote = "203.0.113.9:50000";
+    let setup = |body: Value, peer: &'static str, headers: &'static [(&'static str, &'static str)]| {
+        let app = &app;
+        async move { from(app, peer, Method::POST, "/api/setup", Some(body), headers).await }
+    };
+    let refused = setup(account.clone(), remote, &[]).await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN, "{:?}", refused.body);
+    assert!(refused.body["message"].as_str().unwrap().contains("setup code"));
+    let proxied = setup(account.clone(), "127.0.0.1:50000", &[("forwarded", "for=203.0.113.9")]).await;
+    assert_eq!(proxied.status, StatusCode::FORBIDDEN, "a proxy on this computer forwards the internet");
+    assert_eq!(setup(with_code("AAAA-AAAA"), remote, &[]).await.status, StatusCode::FORBIDDEN);
+
+    // The code works in any case, with or without its dash, and only once.
+    let code = app.state.auth.setup.shown().unwrap();
+    let done = setup(with_code(&code.replace('-', "").to_lowercase()), remote, &[]).await;
+    assert_eq!(done.status, StatusCode::OK, "{:?}", done.body);
+    assert_eq!(app.state.auth.setup.shown(), None);
+    let again = setup(with_code(&code), remote, &[]).await;
+    assert_eq!(again.status, StatusCode::CONFLICT, "already set up, whoever asks");
+    assert_eq!(server(remote, &[]).await, json!(false));
+}
+
+#[tokio::test]
+async fn setup_codes_cant_be_guessed() {
+    let app = TestApp::new().await;
+    let guess = || {
+        let app = &app;
+        async move {
+            let body = json!({"username": "owner", "password": "correct horse", "setup_code": "AAAA-AAAA"});
+            from(app, "203.0.113.9:50000", Method::POST, "/api/setup", Some(body), &[]).await.status
+        }
+    };
+    for _ in 0..5 {
+        assert_eq!(guess().await, StatusCode::FORBIDDEN);
+    }
+    assert_eq!(guess().await, StatusCode::TOO_MANY_REQUESTS);
+    // From this computer it still works.
+    let body = json!({"username": "owner", "password": "correct horse"});
+    let local = from(&app, "127.0.0.1:50000", Method::POST, "/api/setup", Some(body), &[]).await;
+    assert_eq!(local.status, StatusCode::OK, "{:?}", local.body);
+}
+
 #[tokio::test]
 async fn setup_checks_the_first_account_and_logout_clears_the_cookie() {
     let app = TestApp::new().await;
-    for body in
-        [json!({"username": "bad name", "password": "secret1"}), json!({"username": "admin", "password": "abc"})]
-    {
+    let code = app.state.auth.setup.shown();
+    for body in [
+        json!({"username": "bad name", "password": "secret-one", "setup_code": code}),
+        json!({"username": "admin", "password": "abc", "setup_code": code}),
+        json!({"username": "admin", "password": "password123", "setup_code": code}),
+        json!({"username": "admin", "password": "Admin", "setup_code": code}),
+    ] {
         let reply = app.call(Method::POST, "/api/setup", None, Some(body), &[]).await;
-        assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{:?}", reply.body);
     }
     let server = app.call(Method::GET, "/api/server", None, None, &[]).await;
     assert_eq!(server.body["setup_required"], json!(true));

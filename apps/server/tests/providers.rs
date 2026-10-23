@@ -227,7 +227,14 @@ impl TestApp {
 
     async fn setup_admin(&self) -> String {
         let (status, body) = self
-            .call(Method::POST, "/api/setup", None, Some(json!({"username": "admin", "password": "secret1"})))
+            .call(
+                Method::POST,
+                "/api/setup",
+                None,
+                Some(
+                    json!({"username": "admin", "password": "secret-one", "setup_code": self.state.auth.setup.shown()}),
+                ),
+            )
             .await;
         assert_eq!(status, StatusCode::OK, "{body}");
         body["token"].as_str().unwrap().to_owned()

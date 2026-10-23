@@ -110,7 +110,7 @@ export function useLogin() {
 export function useSetup() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { username: string; password: string }) =>
+    mutationFn: (body: { username: string; password: string; setup_code?: string }) =>
       api.post<LoginResponse>("/api/setup", body, { noAuthRedirect: true }),
     onSuccess: (res) => {
       qc.setQueryData(keys.me, res.user);

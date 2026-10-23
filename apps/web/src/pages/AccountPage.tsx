@@ -36,6 +36,7 @@ import { cn } from "@/lib/cn";
 import { formatDay, formatRelative } from "@/lib/format";
 import { LANGUAGES } from "@/lib/languages";
 import { useDocumentTitle } from "@/lib/hooks";
+import { passwordProblem } from "@/lib/passwords";
 
 const MAX_AVATAR_BYTES = 10 * 1024 * 1024;
 
@@ -392,7 +393,8 @@ function PasswordCard() {
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (next.length < 4) return setError("Use at least 4 characters for the new password.");
+    const problem = passwordProblem(next);
+    if (problem) return setError(problem);
     if (next !== confirm) return setError("Passwords don't match.");
     change.mutate(
       { current_password: current, new_password: next },
@@ -403,12 +405,8 @@ function PasswordCard() {
           setNext("");
           setConfirm("");
         },
-        onError: (err) =>
-          setError(
-            isApiError(err, 401) || isApiError(err, 403) || isApiError(err, 400)
-              ? "Your current password is incorrect."
-              : errorMessage(err),
-          ),
+        // The server says which: the current password, or the new one.
+        onError: (err) => setError(errorMessage(err)),
       },
     );
   };

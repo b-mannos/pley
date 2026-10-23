@@ -154,7 +154,15 @@ impl TestApp {
 
     pub async fn setup_admin(&self) -> String {
         let r = self
-            .call(Method::POST, "/api/setup", None, Some(json!({"username": "admin", "password": "secret1"})), &[])
+            .call(
+                Method::POST,
+                "/api/setup",
+                None,
+                Some(
+                    json!({"username": "admin", "password": "secret-one", "setup_code": self.state.auth.setup.shown()}),
+                ),
+                &[],
+            )
             .await;
         assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
         r.body["token"].as_str().unwrap().to_owned()
@@ -171,14 +179,14 @@ impl TestApp {
         r.body["token"].as_str().unwrap().to_owned()
     }
 
-    /// A user with the password `password1` and the given fields, signed in:
+    /// A user with the password `test-pass-1` and the given fields, signed in:
     /// `(token, id)`.
     pub async fn user(&self, admin: &str, username: &str, mut fields: Value) -> (String, i64) {
         fields["username"] = json!(username);
-        fields["password"] = json!("password1");
+        fields["password"] = json!("test-pass-1");
         let created = self.post("/api/users", admin, fields).await;
         assert_eq!(created.status, StatusCode::CREATED, "{:?}", created.body);
-        (self.login(username, "password1").await, created.body["id"].as_i64().unwrap())
+        (self.login(username, "test-pass-1").await, created.body["id"].as_i64().unwrap())
     }
 
     pub async fn wait_for_scans(&self) {

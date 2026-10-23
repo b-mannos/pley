@@ -106,7 +106,14 @@ impl TestApp {
 
     async fn setup_admin(&self) -> String {
         let r = self
-            .call(Method::POST, "/api/setup", None, Some(json!({"username": "admin", "password": "secret1"})))
+            .call(
+                Method::POST,
+                "/api/setup",
+                None,
+                Some(
+                    json!({"username": "admin", "password": "secret-one", "setup_code": self.state.auth.setup.shown()}),
+                ),
+            )
             .await;
         assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
         r.body["token"].as_str().unwrap().to_owned()
@@ -115,11 +122,11 @@ impl TestApp {
     /// A user with a password and the given restrictions: `(token, id)`.
     async fn user(&self, admin: &str, username: &str, mut fields: Value) -> (String, i64) {
         fields["username"] = json!(username);
-        fields["password"] = json!("password1");
+        fields["password"] = json!("test-pass-1");
         let created = self.post("/api/users", admin, fields).await;
         assert_eq!(created.status, StatusCode::CREATED, "{:?}", created.body);
         let login = self
-            .call(Method::POST, "/api/auth/login", None, Some(json!({"username": username, "password": "password1"})))
+            .call(Method::POST, "/api/auth/login", None, Some(json!({"username": username, "password": "test-pass-1"})))
             .await;
         assert_eq!(login.status, StatusCode::OK, "{:?}", login.body);
         (login.body["token"].as_str().unwrap().to_owned(), created.body["id"].as_i64().unwrap())

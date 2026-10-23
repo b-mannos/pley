@@ -86,7 +86,7 @@ pub async fn create_user(
     let password_hash = match (&body.password, body.managed) {
         (_, true) => NO_PASSWORD.to_owned(),
         (Some(password), false) => {
-            validate_password(password)?;
+            validate_password(password, &username)?;
             hash_password(password.clone()).await?
         }
         (None, false) => return Err(AppError::bad_request("a password is required (or create a managed profile)")),
@@ -161,7 +161,7 @@ pub async fn update_user(
     let current = accounts::user(&state.db, id).await?.ok_or_else(|| AppError::not_found("user not found"))?;
     // Check everything first: a refused update changes nothing.
     if let Some(password) = &body.password {
-        validate_password(password)?;
+        validate_password(password, &current.username)?;
     }
     if let Some(is_admin) = body.is_admin {
         if !is_admin && current.is_admin && admins_left_after(&state, id).await? == 0 {
@@ -673,7 +673,7 @@ pub async fn accept_invite(
 ) -> ApiResult<Response> {
     let username = body.username.trim().to_owned();
     validate_username(&username)?;
-    validate_password(&body.password)?;
+    validate_password(&body.password, &username)?;
     let invite = valid_invite(&state, &code).await?;
     let hash = hash_password(body.password).await?;
     let mut tx = state.db.write.begin().await?;

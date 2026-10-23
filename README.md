@@ -174,8 +174,13 @@ cargo build                                      # builds pley + pley-transcoder
 .\target\debug\pley.exe --data-dir .\data        # http://localhost:7539
 ```
 
-On first launch the UI asks you to create the administrator account and then
-add a library: pick a type and one or more folders.
+On first launch, open pley on the computer it runs on (or on your home
+network) and create the administrator account, then add a library: pick a
+type and one or more folders. From anywhere else, for example a server
+reached over the internet or through a reverse proxy, setting up also asks
+for the one-time code pley prints in its log when it starts, so nobody else
+can claim a new server. Passwords need at least 8 characters and can't be
+common ones.
 
 To recover a lost password, use
 `pley reset-password <user> <new-password> [--admin]`.

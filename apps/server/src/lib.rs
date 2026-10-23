@@ -32,6 +32,7 @@ pub mod providers;
 pub mod ratings;
 pub mod related;
 pub mod settings;
+pub mod setup;
 pub mod state;
 pub mod store;
 pub mod streams;
@@ -146,6 +147,13 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     state.start_background_tasks();
     let app = api::router(state.clone());
     tracing::info!("pley {} listening on http://{}", env!("CARGO_PKG_VERSION"), display_addr(addr));
+    if let Some(code) = state.auth.setup.shown() {
+        tracing::warn!(
+            "pley isn't set up yet: open http://{} on this computer to create the administrator account. \
+             From outside the local network, setting up also takes the setup code {code}.",
+            display_addr(addr)
+        );
+    }
     let tray = tray.and_then(|launch| launch(desktop::TrayContext::new(&state, addr)));
 
     let stopping = state.stopping.clone();
@@ -187,6 +195,7 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
 
 /// `pley reset-password <user> <password>`: recovery path for a lost admin password.
 pub async fn reset_password(config: Config, username: &str, password: &str, admin: bool) -> anyhow::Result<()> {
+    auth::validate_password(password, username).map_err(|e| anyhow::anyhow!("{e}"))?;
     std::fs::create_dir_all(&config.data_dir)?;
     let db = db::Db::open(&config.db_path()).await?;
     let hash = auth::hash_password(password.to_owned()).await?;

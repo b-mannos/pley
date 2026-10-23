@@ -38,7 +38,7 @@ async fn request_shutdown_ends_the_event_stream() {
     assert!(ready, "pley did not start");
     let setup: Value = http
         .post(format!("{base}/api/setup"))
-        .json(&json!({"username": "admin", "password": "secret1"}))
+        .json(&json!({"username": "admin", "password": "secret-one"}))
         .send()
         .await
         .unwrap()

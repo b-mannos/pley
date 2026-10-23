@@ -195,7 +195,7 @@ async fn music_is_exempt_and_administrators_are_never_limited() {
         .execute(&app.state.db.write)
         .await
         .unwrap();
-    let admin = app.login("admin", "secret1").await;
+    let admin = app.login("admin", "secret-one").await;
     assert_eq!(app.get("/api/libraries", &admin).await.body.as_array().unwrap().len(), 4);
     let all = app.get(&format!("/api/libraries/{}/items", w.movies), &admin).await;
     assert_eq!(titles(&all.body["items"]), ["Adult Film", "Family Film", "Home Video"]);

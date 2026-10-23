@@ -69,8 +69,8 @@ describe("UsersSettings", () => {
     await user.type(within(dialog).getByLabelText("Username"), " guest ");
     await user.type(within(dialog).getByLabelText("Password"), "abc");
     await user.click(add);
-    expect(within(dialog).getByText("Use at least 4 characters for the password.")).toBeInTheDocument();
-    await user.type(within(dialog).getByLabelText("Password"), "d");
+    expect(within(dialog).getByText("Use at least 8 characters for the password.")).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText("Password"), "-defgh");
     await user.type(within(dialog).getByLabelText("Profile PIN"), "1a2");
     await user.click(add);
     expect(within(dialog).getByText("The PIN must be 4 to 8 digits.")).toBeInTheDocument();
@@ -80,7 +80,7 @@ describe("UsersSettings", () => {
     expect(await screen.findByText("Added guest")).toBeInTheDocument();
     expect(requests.find((r) => r.method === "POST")?.body).toEqual({
       username: "guest",
-      password: "abcd",
+      password: "abc-defgh",
       is_admin: false,
       managed: false,
       home: true,

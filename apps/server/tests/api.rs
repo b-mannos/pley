@@ -102,7 +102,15 @@ impl TestApp {
 
     async fn setup_admin(&self) -> String {
         let r = self
-            .call(Method::POST, "/api/setup", None, Some(json!({"username": "admin", "password": "secret1"})), &[])
+            .call(
+                Method::POST,
+                "/api/setup",
+                None,
+                Some(
+                    json!({"username": "admin", "password": "secret-one", "setup_code": self.state.auth.setup.shown()}),
+                ),
+                &[],
+            )
             .await;
         assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
         r.body["token"].as_str().unwrap().to_owned()
@@ -140,8 +148,9 @@ async fn setup_login_and_permissions() {
     assert_eq!(status.body["setup_required"], json!(true));
 
     let admin = app.setup_admin().await;
-    let again =
-        app.call(Method::POST, "/api/setup", None, Some(json!({"username": "x", "password": "yyyyyy"})), &[]).await;
+    let again = app
+        .call(Method::POST, "/api/setup", None, Some(json!({"username": "x", "password": "another-password"})), &[])
+        .await;
     assert_eq!(again.status, StatusCode::CONFLICT);
     assert_eq!(app.call(Method::GET, "/api/server", None, None, &[]).await.body["setup_required"], json!(false));
 
@@ -154,7 +163,7 @@ async fn setup_login_and_permissions() {
 
     // Login sets an HttpOnly cookie that authenticates too.
     let login = app
-        .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "ADMIN", "password": "secret1"})), &[])
+        .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "ADMIN", "password": "secret-one"})), &[])
         .await;
     assert_eq!(login.status, StatusCode::OK);
     let cookie = login.headers[header::SET_COOKIE].to_str().unwrap().to_owned();
@@ -166,10 +175,10 @@ async fn setup_login_and_permissions() {
 
     // A regular user cannot use admin endpoints.
     let created =
-        app.post("/api/users", &admin, json!({"username": "bob", "password": "bobpass", "is_admin": false})).await;
+        app.post("/api/users", &admin, json!({"username": "bob", "password": "bob-password", "is_admin": false})).await;
     assert_eq!(created.status, StatusCode::CREATED);
     let bob = app
-        .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "bob", "password": "bobpass"})), &[])
+        .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "bob", "password": "bob-password"})), &[])
         .await;
     let bob = bob.body["token"].as_str().unwrap().to_owned();
     assert_eq!(app.get("/api/users", &bob).await.status, StatusCode::FORBIDDEN);
@@ -183,7 +192,7 @@ async fn setup_login_and_permissions() {
             Method::PUT,
             "/api/auth/password",
             Some(&bob),
-            Some(json!({"current_password": "x", "new_password": "newpass"})),
+            Some(json!({"current_password": "x", "new_password": "new-password"})),
             &[],
         )
         .await;
@@ -571,7 +580,7 @@ async fn library_access_and_age_limits() {
     let kid = switched.body["token"].as_str().unwrap().to_owned();
     // Switching signed the admin out on this "device".
     let admin = app
-        .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "admin", "password": "secret1"})), &[])
+        .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "admin", "password": "secret-one"})), &[])
         .await
         .body["token"]
         .as_str()
@@ -647,7 +656,7 @@ async fn profiles_switch_with_pins() {
     // Back to the administrator: its password is needed (it has no PIN).
     let denied = app.post("/api/auth/switch", &kid, json!({"user_id": admin_id})).await;
     assert_eq!(denied.status, StatusCode::FORBIDDEN);
-    let back = app.post("/api/auth/switch", &kid, json!({"user_id": admin_id, "password": "secret1"})).await;
+    let back = app.post("/api/auth/switch", &kid, json!({"user_id": admin_id, "password": "secret-one"})).await;
     assert_eq!(back.status, StatusCode::OK, "{:?}", back.body);
     let admin = back.body["token"].as_str().unwrap().to_owned();
 
@@ -832,8 +841,8 @@ async fn metadata_edits_survive_rescans() {
     assert_eq!(unlocked.body["locked_fields"], json!(["content_rating", "genres", "summary"]));
 
     // Non-admins can't edit.
-    app.post("/api/users", &admin, json!({"username": "viewer", "password": "viewer1"})).await;
-    let viewer = login_as(&app, "viewer", "viewer1", "test").await;
+    app.post("/api/users", &admin, json!({"username": "viewer", "password": "viewer-pass"})).await;
+    let viewer = login_as(&app, "viewer", "viewer-pass", "test").await;
     let denied =
         app.call(Method::PATCH, &format!("/api/items/{id}"), Some(&viewer), Some(json!({"title": "x"})), &[]).await;
     assert_eq!(denied.status, StatusCode::FORBIDDEN);

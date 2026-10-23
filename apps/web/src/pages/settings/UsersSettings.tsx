@@ -20,6 +20,7 @@ import { useToast } from "@/components/Toast";
 import { Badge, Button, EmptyState, Field, PageSpinner, TextInput, Toggle } from "@/components/ui";
 import { ageBadge, librariesLabel } from "@/lib/access";
 import { cn } from "@/lib/cn";
+import { passwordProblem } from "@/lib/passwords";
 import { formatRelative } from "@/lib/format";
 import { useDocumentTitle, useOnChange } from "@/lib/hooks";
 
@@ -156,8 +157,14 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
 
   const validate = (): string | null => {
     if (isNew && !username.trim()) return "Enter a username.";
-    if (isNew && kind === "regular" && password.length < 4) return "Use at least 4 characters for the password.";
-    if (!isNew && password && password.length < 4) return "Use at least 4 characters for the new password.";
+    if (isNew && kind === "regular") {
+      const problem = passwordProblem(password, username);
+      if (problem) return problem;
+    }
+    if (!isNew && password) {
+      const problem = passwordProblem(password, user?.username);
+      if (problem) return problem;
+    }
     if (pin && !PIN_RE.test(pin)) return "The PIN must be 4 to 8 digits.";
     if (!access.all_libraries && access.library_ids.length === 0) return "Pick at least one library, or allow all of them.";
     return null;

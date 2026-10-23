@@ -126,12 +126,153 @@ pub fn validate_username(name: &str) -> Result<(), AppError> {
     if ok { Ok(()) } else { Err(AppError::bad_request("username must be 1-64 letters, digits or _ - . @")) }
 }
 
-pub fn validate_password(password: &str) -> Result<(), AppError> {
-    if password.chars().count() < 4 {
-        return Err(AppError::bad_request("password must be at least 4 characters"));
+/// Shortest password accepted (NIST SP 800-63B's minimum).
+pub const MIN_PASSWORD_CHARS: usize = 8;
+const MAX_PASSWORD_CHARS: usize = 256;
+
+/// Whether `password` may become the password of `username`: long enough,
+/// not the username, not one character over and over, and not one of the
+/// passwords tried first by anyone guessing.
+pub fn validate_password(password: &str, username: &str) -> Result<(), AppError> {
+    let chars = password.chars().count();
+    if chars < MIN_PASSWORD_CHARS {
+        return Err(AppError::bad_request(format!("use at least {MIN_PASSWORD_CHARS} characters for the password")));
+    }
+    if chars > MAX_PASSWORD_CHARS {
+        return Err(AppError::bad_request(format!("use at most {MAX_PASSWORD_CHARS} characters for the password")));
+    }
+    let lower = password.to_lowercase();
+    if lower == username.trim().to_lowercase() {
+        return Err(AppError::bad_request("the password can't be the username"));
+    }
+    let mut letters = lower.chars();
+    let first = letters.next();
+    if letters.all(|c| Some(c) == first) || COMMON_PASSWORDS.contains(&lower.as_str()) {
+        return Err(AppError::bad_request(
+            "that password is too easy to guess: try a few words that don't go together",
+        ));
     }
     Ok(())
 }
+
+/// Very common passwords of 8 characters or more (shorter ones are refused
+/// anyway), lowercase.
+const COMMON_PASSWORDS: &[&str] = &[
+    "password",
+    "password1",
+    "password12",
+    "password123",
+    "password1234",
+    "password!",
+    "passw0rd",
+    "p@ssw0rd",
+    "p@ssword",
+    "mypassword",
+    "12345678",
+    "123456789",
+    "1234567890",
+    "12345678910",
+    "87654321",
+    "987654321",
+    "0987654321",
+    "12341234",
+    "11223344",
+    "12121212",
+    "123123123",
+    "123321123",
+    "1234qwer",
+    "qwer1234",
+    "1q2w3e4r",
+    "1q2w3e4r5t",
+    "1q2w3e4r5t6y",
+    "q1w2e3r4",
+    "q1w2e3r4t5",
+    "1qaz2wsx",
+    "1qazxsw2",
+    "zaq12wsx",
+    "qazwsxedc",
+    "123qweasd",
+    "qwertyui",
+    "qwertyuiop",
+    "qwerty12",
+    "qwerty123",
+    "qwerty1234",
+    "asdfghjk",
+    "asdfghjkl",
+    "asdf1234",
+    "asdfasdf",
+    "zxcvbnm1",
+    "zxcvbnm123",
+    "abcd1234",
+    "1234abcd",
+    "abc12345",
+    "abcdefgh",
+    "abcdefg1",
+    "aa123456",
+    "a1234567",
+    "a12345678",
+    "123456789a",
+    "12345678a",
+    "a123456789",
+    "iloveyou",
+    "iloveyou1",
+    "iloveyou2",
+    "loveyou1",
+    "sunshine",
+    "sunshine1",
+    "princess",
+    "princess1",
+    "football",
+    "football1",
+    "baseball",
+    "basketball",
+    "superman",
+    "batman123",
+    "trustno1",
+    "welcome1",
+    "welcome123",
+    "letmein1",
+    "letmein123",
+    "starwars",
+    "whatever",
+    "dragon123",
+    "master123",
+    "computer",
+    "michelle",
+    "jennifer",
+    "charlie1",
+    "jordan23",
+    "shadow12",
+    "monkey123",
+    "mustang1",
+    "liverpool",
+    "chelsea1",
+    "arsenal1",
+    "manchester",
+    "internet",
+    "samsung1",
+    "google123",
+    "freedom1",
+    "pokemon1",
+    "minecraft",
+    "fortnite",
+    "butterfly",
+    "chocolate",
+    "babygirl1",
+    "admin123",
+    "admin1234",
+    "administrator",
+    "changeme",
+    "changeme1",
+    "default1",
+    "secret123",
+    "pley1234",
+    "pleypley",
+    "plexpass",
+    "plex1234",
+    "jellyfin",
+    "mediaserver",
+];
 
 struct CachedSession {
     user: AuthUser,
@@ -145,11 +286,13 @@ pub struct AuthService {
     cache: DashMap<String, CachedSession>,
     /// Failed password and PIN attempts.
     pub throttle: crate::accounts::Throttle,
+    /// The code that sets up a server without accounts from elsewhere.
+    pub setup: crate::setup::SetupCode,
 }
 
 impl AuthService {
     pub fn new(db: Db) -> Self {
-        Self { db, cache: DashMap::new(), throttle: Default::default() }
+        Self { db, cache: DashMap::new(), throttle: Default::default(), setup: Default::default() }
     }
 
     pub async fn create_session(
@@ -388,11 +531,20 @@ mod tests {
     }
 
     #[test]
-    fn passwords_need_four_characters() {
-        assert!(validate_password("abcd").is_ok());
-        assert!(validate_password("abc").is_err());
-        assert!(validate_password("日本語").is_err(), "characters, not bytes");
-        assert!(validate_password("日本語x").is_ok());
+    fn passwords_are_long_and_hard_to_guess() {
+        assert!(validate_password("correct horse", "bob").is_ok());
+        assert!(validate_password("seven77", "bob").is_err(), "too short");
+        assert!(validate_password("日本語の言葉です", "bob").is_ok(), "characters, not bytes");
+        assert!(validate_password("日本語の言葉", "bob").is_err());
+        assert!(validate_password(&"x".repeat(257), "bob").is_err());
+        assert!(validate_password("Password1", "bob").is_err(), "a common one, in any case");
+        assert!(validate_password("qwertyuiop", "bob").is_err());
+        assert!(validate_password("zzzzzzzzzz", "bob").is_err(), "one character over and over");
+        assert!(validate_password("Bob.Smith", "bob.smith").is_err(), "the username");
+        for common in COMMON_PASSWORDS {
+            assert!(common.chars().count() >= MIN_PASSWORD_CHARS, "{common} is refused for its length anyway");
+            assert_eq!(*common, common.to_lowercase());
+        }
     }
 
     fn token_of(builder: axum::http::request::Builder) -> Option<String> {

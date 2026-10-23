@@ -90,8 +90,16 @@ impl TestApp {
     }
 
     async fn setup(&self) -> String {
-        let r =
-            self.api(Method::POST, "/api/setup", None, Some(json!({"username": "admin", "password": "secret1"}))).await;
+        let r = self
+            .api(
+                Method::POST,
+                "/api/setup",
+                None,
+                Some(
+                    json!({"username": "admin", "password": "secret-one", "setup_code": self.state.auth.setup.shown()}),
+                ),
+            )
+            .await;
         r["token"].as_str().unwrap().to_owned()
     }
 

@@ -4,9 +4,11 @@ import { TicketX } from "lucide-react";
 import { errorMessage, isApiError } from "@/api/client";
 import { useAcceptInvite, useInviteCheck, useLogout, useMe } from "@/api/hooks";
 import { Splash } from "@/auth";
+import { PasswordInput } from "@/components/PasswordInput";
 import { Button, Field, TextInput } from "@/components/ui";
 import { formatRelative } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
+import { MIN_PASSWORD_LENGTH, passwordProblem } from "@/lib/passwords";
 import { AuthLayout } from "./AuthLayout";
 
 /** `/invite/:code`: create an account with an invitation link. */
@@ -21,7 +23,6 @@ export function InvitePage() {
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
 
   if (check.isPending) return <Splash />;
@@ -75,8 +76,8 @@ export function InvitePage() {
     e.preventDefault();
     setLocalError(null);
     if (!username.trim()) return setLocalError("Choose a username.");
-    if (password.length < 4) return setLocalError("Use at least 4 characters for the password.");
-    if (password !== confirm) return setLocalError("Passwords don't match.");
+    const problem = passwordProblem(password, username);
+    if (problem) return setLocalError(problem);
     accept.mutate(
       { username: username.trim(), password, display_name: displayName.trim() || undefined },
       { onSuccess: () => void navigate("/", { replace: true }) },
@@ -108,25 +109,8 @@ export function InvitePage() {
         <Field label="Your name" htmlFor="invite-name" hint="Optional: how pley greets you.">
           <TextInput id="invite-name" autoComplete="name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         </Field>
-        <Field label="Password" htmlFor="invite-password">
-          <TextInput
-            id="invite-password"
-            type="password"
-            autoComplete="new-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </Field>
-        <Field label="Confirm password" htmlFor="invite-confirm">
-          <TextInput
-            id="invite-confirm"
-            type="password"
-            autoComplete="new-password"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            required
-          />
+        <Field label="Password" htmlFor="invite-password" hint={`At least ${MIN_PASSWORD_LENGTH} characters.`}>
+          <PasswordInput id="invite-password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </Field>
         {error ? (
           <p role="alert" className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">

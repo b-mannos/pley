@@ -250,8 +250,8 @@ interface PlaybackInfo {
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/api/health` | – | `{ "status": "ok" }` |
-| GET | `/api/server` | – | `{ name: string, version: string, setup_required: boolean }` |
-| POST | `/api/setup` | `{ username, password }` | `{ user: User, token: string }` — creates the first (admin) account and logs in. `409` once a user exists. |
+| GET | `/api/server` | – | `{ name: string, version: string, setup_required: boolean, setup_code_required: boolean }`. `setup_code_required`: this request comes from outside the local network (or through a proxy), so setup needs the code from the server's log |
+| POST | `/api/setup` | `{ username, password, setup_code? }` | `{ user: User, token: string }` — creates the first (admin) account and logs in. `409` once a user exists. From outside the local network, `403` without the right `setup_code` (5 tries per 15 minutes, then `429`) |
 | POST | `/api/auth/login` | `{ username, password }` | `{ user: User, token: string }` (`401` on bad credentials) |
 
 ## Auth

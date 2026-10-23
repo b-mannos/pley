@@ -10,6 +10,7 @@ use crate::auth::{
     session_cookie, token_from_parts, validate_password, validate_username, verify_password,
 };
 use crate::error::{ApiResult, AppError};
+use crate::setup::LocalRequest;
 use crate::state::AppState;
 use crate::util::now;
 
@@ -25,12 +26,17 @@ pub struct Credentials {
     password: String,
 }
 
-pub async fn server_status(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
+pub async fn server_status(
+    State(state): State<AppState>,
+    LocalRequest(local): LocalRequest,
+) -> ApiResult<Json<serde_json::Value>> {
     let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&state.db.read).await?;
     Ok(Json(serde_json::json!({
         "name": state.settings.get().server_name,
         "version": env!("CARGO_PKG_VERSION"),
         "setup_required": users == 0,
+        // From outside the local network, setting up takes the code in the log.
+        "setup_code_required": users == 0 && !local,
     })))
 }
 
@@ -47,14 +53,41 @@ pub(crate) async fn login_response(
     Ok(([(header::SET_COOKIE, cookie)], Json(LoginResponse { user, token })).into_response())
 }
 
+#[derive(Deserialize)]
+pub struct SetupRequest {
+    username: String,
+    password: String,
+    /// The code in the server's log: needed from outside the local network.
+    #[serde(default)]
+    setup_code: Option<String>,
+}
+
+/// Create the first account, an administrator (see [`crate::setup`]).
 pub async fn setup(
     State(state): State<AppState>,
     headers: HeaderMap,
+    LocalRequest(local): LocalRequest,
     ClientIp(ip): ClientIp,
-    Json(body): Json<Credentials>,
+    Json(body): Json<SetupRequest>,
 ) -> ApiResult<Response> {
-    validate_username(body.username.trim())?;
-    validate_password(&body.password)?;
+    let set_up: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users)").fetch_one(&state.db.read).await?;
+    if set_up {
+        return Err(AppError::conflict("pley is already set up"));
+    }
+    if !local {
+        // Guessing gets 5 tries every 15 minutes, from all addresses together.
+        let attempt = state.auth.throttle.begin("setup-code")?;
+        if !state.auth.setup.matches(body.setup_code.as_deref().unwrap_or_default()) {
+            attempt.failed();
+            return Err(AppError::forbidden(
+                "enter the setup code from the server's log (or set pley up from the computer it runs on)",
+            ));
+        }
+        attempt.succeeded();
+    }
+    let username = body.username.trim();
+    validate_username(username)?;
+    validate_password(&body.password, username)?;
     let hash = hash_password(body.password).await?;
     // Insert only when there are no users yet (atomic with the write pool).
     let created: Option<i64> = sqlx::query_scalar(
@@ -68,6 +101,7 @@ pub async fn setup(
     .fetch_optional(&state.db.write)
     .await?;
     let id = created.ok_or_else(|| AppError::conflict("pley is already set up"))?;
+    state.auth.setup.clear();
     tracing::info!("created administrator account '{}'", body.username.trim());
     login_response(&state, id, &headers, ip.as_deref()).await
 }
@@ -126,7 +160,7 @@ pub async fn change_password(
     user: AuthUser,
     Json(body): Json<PasswordChange>,
 ) -> ApiResult<StatusCode> {
-    validate_password(&body.new_password)?;
+    validate_password(&body.new_password, &user.username)?;
     let hash: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?")
         .bind(user.id)
         .fetch_one(&state.db.read)

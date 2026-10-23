@@ -105,9 +105,14 @@ impl AppState {
             store.clone(),
             config.cache_dir().join("trickplay"),
         );
+        let auth = AuthService::new(db.clone());
+        let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&db.read).await?;
+        if users == 0 {
+            auth.setup.issue();
+        }
         Ok(Self {
             inner: Arc::new(Inner {
-                auth: AuthService::new(db.clone()),
+                auth,
                 sessions,
                 markers,
                 trickplay,

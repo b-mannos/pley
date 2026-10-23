@@ -141,14 +141,14 @@ async fn reset_password_works_next_to_a_running_server() {
     let (addr, ctx, server) = start(config(data.path())).await;
 
     let run =
-        pley_exe().args(["reset-password", "admin", "password1", "--admin", "--data-dir"]).arg(data.path()).output();
+        pley_exe().args(["reset-password", "admin", "test-pass-1", "--admin", "--data-dir"]).arg(data.path()).output();
     let output = tokio::time::timeout(Duration::from_secs(60), run).await.expect("pley exits").unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert!(String::from_utf8_lossy(&output.stdout).contains("created user 'admin' (admin)"));
     let http = reqwest::Client::builder().no_proxy().build().unwrap();
     let login = http
         .post(format!("http://{addr}/api/auth/login"))
-        .json(&json!({"username": "admin", "password": "password1"}))
+        .json(&json!({"username": "admin", "password": "test-pass-1"}))
         .send()
         .await
         .unwrap();
