@@ -41,7 +41,7 @@ const SUMMARY_SELECT: &str = concat!(
 SELECT i.id, i.library_id, i.kind, i.title, i.sort_title, i.year, i.idx, i.disc,
        i.parent_id, p.title AS parent_title, p.idx AS parent_idx,
        i.grandparent_id, gp.title AS grandparent_title,
-       i.duration_ms, i.rating, i.added_at, i.updated_at, i.summary, i.release_date,
+       i.duration_ms, i.rating, i.added_at, i.updated_at, i.summary, i.release_date, i.extra_type,
        i.poster IS NOT NULL AS has_poster, i.backdrop IS NOT NULL AS has_backdrop, i.thumb IS NOT NULL AS has_thumb,
        COALESCE(p.poster IS NOT NULL, 0) AS parent_has_poster, COALESCE(p.backdrop IS NOT NULL, 0) AS parent_has_backdrop,
        p.updated_at AS parent_updated_at,
@@ -84,6 +84,8 @@ pub struct ItemRow {
     pub updated_at: i64,
     pub summary: Option<String>,
     pub release_date: Option<String>,
+    /// Bonus material: `trailer`, `featurette`, … (see `library::walk::ExtraKind`).
+    pub extra_type: Option<String>,
     pub has_poster: bool,
     pub has_backdrop: bool,
     pub has_thumb: bool,
@@ -160,6 +162,8 @@ pub struct ItemSummary {
     pub summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub release_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -208,6 +212,8 @@ pub struct ItemDetail {
     pub markers: Vec<crate::markers::Marker>,
     /// Fields edited by hand (kept on refresh), see [`crate::overrides`].
     pub locked_fields: Vec<String>,
+    /// Trailers, featurettes and other bonus material (movies and shows).
+    pub extras: Vec<ItemSummary>,
     /// Actors in billing order; for episodes, the guest stars.
     pub cast: Vec<crate::people::Credit>,
     /// Creators, directors, writers and producers.
@@ -246,7 +252,7 @@ impl ItemRow {
         } else {
             None
         };
-        let thumb_url = matches!(self.kind.as_str(), "movie" | "episode").then(|| own("thumb"));
+        let thumb_url = matches!(self.kind.as_str(), "movie" | "episode" | "extra").then(|| own("thumb"));
         let watched = match self.kind.as_str() {
             "show" | "season" => {
                 let leaves = self.leaf_count.unwrap_or(0);
@@ -287,6 +293,7 @@ impl ItemRow {
             // movie library's listing several times larger.
             summary: if self.kind == "episode" { self.summary.clone() } else { None },
             release_date: self.release_date.clone(),
+            extra_type: self.extra_type.clone(),
         }
     }
 }
@@ -405,10 +412,23 @@ pub async fn items_by_ids(db: &Db, user_id: i64, ids: &[i64]) -> sqlx::Result<Ve
     Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
 }
 
+/// Seasons, episodes, albums or tracks under an item (not its extras).
 pub async fn children(db: &Db, user_id: i64, parent_id: i64) -> sqlx::Result<Vec<ItemRow>> {
     sqlx::query_as(&format!(
-        "{SUMMARY_SELECT} WHERE {VISIBLE} AND i.parent_id = ?
+        "{SUMMARY_SELECT} WHERE {VISIBLE} AND i.parent_id = ? AND i.kind != 'extra'
          ORDER BY CASE WHEN i.kind = 'season' AND i.idx = 0 THEN 1 ELSE 0 END, i.disc, i.idx, i.sort_title"
+    ))
+    .bind(user_id)
+    .bind(parent_id)
+    .fetch_all(&db.read)
+    .await
+}
+
+/// Bonus material of a movie or show: trailers first, then by kind and title.
+pub async fn extras(db: &Db, user_id: i64, parent_id: i64) -> sqlx::Result<Vec<ItemRow>> {
+    sqlx::query_as(&format!(
+        "{SUMMARY_SELECT} WHERE {VISIBLE} AND i.parent_id = ? AND i.kind = 'extra'
+         ORDER BY i.extra_type != 'trailer', i.extra_type, i.sort_title"
     ))
     .bind(user_id)
     .bind(parent_id)
@@ -634,6 +654,7 @@ pub async fn item_detail(db: &Db, row: ItemRow) -> sqlx::Result<ItemDetail> {
         files: files.iter().map(FileRow::to_dto).collect(),
         markers,
         locked_fields: Vec::new(),
+        extras: Vec::new(),
         cast,
         crew,
     })
@@ -1015,6 +1036,8 @@ pub async fn search(db: &Db, user_id: i64, input: &str, limit: i64) -> sqlx::Res
             }
         };
     let mut rows = items_by_ids(db, user_id, &ids).await?;
+    // Bonus material is found through its movie or show.
+    rows.retain(|r| r.kind != "extra");
     // Keep relevance order but surface top-level items first.
     let priority = |kind: &str| match kind {
         "movie" | "show" | "artist" => 0,

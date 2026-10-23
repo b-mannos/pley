@@ -1050,6 +1050,23 @@ pub async fn children(
     Ok(hierarchy_container(lib, &info, &parent, nodes, total, &page).attr("viewGroup", view_group))
 }
 
+/// `/library/metadata/{id}/extras`: trailers and other bonus material.
+pub async fn extras(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    Extension(info): Extension<Arc<PlexInfo>>,
+    Path(id): Path<i64>,
+    params: Params,
+    page: Page,
+) -> PlexResult<Node> {
+    let parent = catalog::item(&state.db, user.id, id).await?.ok_or(PlexError::NotFound)?;
+    let libraries = visible_libraries(&state, &user).await?;
+    let rows = catalog::extras(&state.db, user.id, parent.id).await?;
+    let (rows, total) = page.apply(rows);
+    let nodes = item_nodes(&state, &rows, &Sections::new(&libraries), listing_detail(&params)).await?;
+    Ok(list_container(None, &info, nodes, total, &page))
+}
+
 fn hierarchy_container(
     lib: &LibraryRow,
     info: &PlexInfo,

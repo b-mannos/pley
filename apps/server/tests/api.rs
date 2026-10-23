@@ -1210,3 +1210,68 @@ async fn more_like_this() {
     assert_eq!(related.status, StatusCode::OK, "{:?}", related.body);
     assert_eq!(titles(&related.body["items"]), vec!["Aliens", "Brazil"], "Casablanca shares nothing");
 }
+
+#[tokio::test]
+async fn trailers_and_other_extras() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Alien (1979)/Alien (1979).mkv", 4096);
+    app.media_file("movies/Alien (1979)/Trailers/Teaser.mkv", 1024);
+    app.media_file("movies/Alien (1979)/Behind The Scenes/Making.Of.Alien.mkv", 1024);
+    app.media_file("movies/Brazil (1985)/Brazil (1985).mkv", 4096);
+    app.media_file("movies/Brazil (1985)/Brazil (1985)-trailer.mkv", 1024);
+    // Bonus material without its movie is left out.
+    app.media_file("movies/Lost Extras/Trailers/Nothing.mkv", 1024);
+    let lib = app.library(&admin, "Movies", "movies", "movies").await;
+
+    let page = app.get(&format!("/api/libraries/{lib}/items"), &admin).await;
+    assert_eq!(titles(&page.body["items"]), vec!["Alien", "Brazil"], "extras are not movies");
+    let id_of = |title: &str| {
+        page.body["items"].as_array().unwrap().iter().find(|i| i["title"] == title).unwrap()["id"].as_i64().unwrap()
+    };
+    let alien = app.get(&format!("/api/items/{}", id_of("Alien")), &admin).await;
+    let extras = alien.body["extras"].as_array().unwrap().clone();
+    assert_eq!(titles(&json!(extras)), vec!["Teaser", "Making Of Alien"], "trailers first");
+    assert_eq!(extras[0]["extra_type"], json!("trailer"));
+    assert_eq!(extras[1]["extra_type"], json!("behind_the_scenes"));
+    let brazil = app.get(&format!("/api/items/{}", id_of("Brazil")), &admin).await;
+    assert_eq!(titles(&brazil.body["extras"]), vec!["Trailer"]);
+
+    // An extra plays like a movie and is found through its movie only.
+    let trailer = extras[0]["id"].as_i64().unwrap();
+    let detail = app.get(&format!("/api/items/{trailer}"), &admin).await;
+    assert_eq!(detail.body["kind"], json!("extra"));
+    assert_eq!(detail.body["files"].as_array().unwrap().len(), 1);
+    let progress = app
+        .post(&format!("/api/items/{trailer}/progress"), &admin, json!({"position_ms": 30_000, "duration_ms": 120_000}))
+        .await;
+    assert_eq!(progress.status, StatusCode::NO_CONTENT, "{:?}", progress.body);
+    assert_eq!(app.get("/api/search?q=teaser", &admin).await.body["items"], json!([]));
+
+    // Removing the movie removes its extras.
+    std::fs::remove_file(app.media.path().join("movies/Brazil (1985)/Brazil (1985).mkv")).unwrap();
+    app.post(&format!("/api/libraries/{lib}/scan"), &admin, json!({"force": false})).await;
+    app.wait_for_scans().await;
+    let page = app.get(&format!("/api/libraries/{lib}/items"), &admin).await;
+    assert_eq!(titles(&page.body["items"]), vec!["Alien"]);
+    let files: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM media_files").fetch_one(&app.state.db.read).await.unwrap();
+    assert_eq!(files, 3, "Alien, its two extras");
+}
+
+#[tokio::test]
+async fn show_extras_stay_out_of_seasons() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("tv/Lost (2004)/Season 1/Lost - S01E01.mkv", 2048);
+    app.media_file("tv/Lost (2004)/Featurettes/On.Location.mkv", 1024);
+    let lib = app.library(&admin, "TV", "shows", "tv").await;
+    let page = app.get(&format!("/api/libraries/{lib}/items"), &admin).await;
+    let show = page.body["items"][0]["id"].as_i64().unwrap();
+    assert_eq!(page.body["items"][0]["child_count"], json!(1));
+    let detail = app.get(&format!("/api/items/{show}"), &admin).await;
+    assert_eq!(titles(&detail.body["extras"]), vec!["On Location"]);
+    assert_eq!(detail.body["extras"][0]["extra_type"], json!("featurette"));
+    let children = app.get(&format!("/api/items/{show}/children"), &admin).await;
+    assert_eq!(titles(&children.body["items"]), vec!["Season 1"]);
+}

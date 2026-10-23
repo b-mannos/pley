@@ -461,8 +461,9 @@ impl Store {
     }
 }
 
-/// Escapes `LIKE` wildcards with `^` (backslashes are common in Windows paths).
-fn like_escape(value: &str) -> String {
+/// Escapes `LIKE` wildcards with `^` (backslashes are common in Windows
+/// paths): use with `ESCAPE '^'`.
+pub(crate) fn like_escape(value: &str) -> String {
     value.replace('^', "^^").replace('%', "^%").replace('_', "^_")
 }
 

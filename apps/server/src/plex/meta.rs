@@ -23,7 +23,22 @@ pub fn plex_type(kind: &str) -> &'static str {
         "episode" => "episode",
         "artist" => "artist",
         "album" => "album",
+        "extra" => "clip",
         _ => "track",
+    }
+}
+
+/// Plex's `extraType` number and `subtype` of pley's extra types.
+fn plex_extra(extra_type: &str) -> (i64, &'static str) {
+    match extra_type {
+        "trailer" => (1, "trailer"),
+        "deleted_scene" => (2, "deletedScene"),
+        "interview" => (3, "interview"),
+        "behind_the_scenes" => (5, "behindTheScenes"),
+        "scene" => (6, "sceneOrSample"),
+        "featurette" => (10, "featurette"),
+        "short" => (11, "short"),
+        _ => (12, "other"),
     }
 }
 
@@ -73,7 +88,7 @@ pub fn kinds_of(lib: &LibraryRow) -> &'static [&'static str] {
 }
 
 pub fn is_leaf(kind: &str) -> bool {
-    matches!(kind, "movie" | "episode" | "track")
+    matches!(kind, "movie" | "episode" | "track" | "extra")
 }
 
 pub fn item_key(row: &ItemRow) -> String {
@@ -241,7 +256,7 @@ pub fn item_node(
 ) -> Node {
     let kind = row.kind.as_str();
     let tag = match kind {
-        "movie" | "episode" => "Video",
+        "movie" | "episode" | "extra" => "Video",
         "track" => "Track",
         _ => "Directory",
     };
@@ -257,6 +272,10 @@ pub fn item_node(
         .attr("librarySectionID", row.library_id)
         .attr("librarySectionTitle", section_title)
         .attr("librarySectionKey", format!("/library/sections/{}", row.library_id));
+    if let Some(extra_type) = row.extra_type.as_deref() {
+        let (number, subtype) = plex_extra(extra_type);
+        node = node.attr("extraType", number).attr("subtype", subtype);
+    }
 
     if let Some(extras) = extras {
         node = node

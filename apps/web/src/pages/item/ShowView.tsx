@@ -9,6 +9,7 @@ import { episodeLabel, pluralize } from "@/lib/format";
 import { useElementWidth } from "@/lib/hooks";
 import { usePlayItem } from "@/lib/usePlayItem";
 import { CastRow, CrewRows, hasCrew } from "./Credits";
+import { ExtrasRow } from "./Extras";
 import { MoreLikeThis } from "./MoreLikeThis";
 import {
   ContentRating,
@@ -94,6 +95,7 @@ export function ShowView({ item }: { item: ItemDetail }) {
         </div>
         {seasons.data && seasons.data.length === 0 ? <p className="text-sm text-muted">No seasons found.</p> : null}
       </section>
+      <ExtrasRow extras={item.extras} />
       <CastRow title="Cast" credits={item.cast} />
       <MoreLikeThis item={item} />
     </ItemPageShell>

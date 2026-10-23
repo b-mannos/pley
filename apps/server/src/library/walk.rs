@@ -1,5 +1,8 @@
 //! Directory walking: finds media files plus the sidecar files (artwork,
-//! subtitles) next to them, skipping system folders, extras and samples.
+//! subtitles) next to them, skipping system folders and samples. Bonus
+//! material (trailers, featurettes, …) is found with Plex's conventions:
+//! folders such as `Trailers` or `Behind The Scenes` next to the movie or in
+//! the show folder, or a suffix such as `Movie (2020)-trailer.mkv`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -28,22 +31,87 @@ const SKIP_DIRS: &[&str] = &[
     "#snapshot",
     ".grab",
 ];
-/// Bonus-material folders (not imported as library items yet).
-const EXTRAS_DIRS: &[&str] = &[
-    "extras",
-    "featurettes",
-    "behind the scenes",
-    "deleted scenes",
-    "interviews",
-    "scenes",
-    "shorts",
-    "trailers",
-    "other",
-    "sample",
-    "samples",
-    "bonus",
-    "specials features",
-];
+/// Release samples: never imported.
+const SAMPLE_DIRS: &[&str] = &["sample", "samples"];
+
+/// Kinds of bonus material (Plex's extra types).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExtraKind {
+    Trailer,
+    BehindTheScenes,
+    DeletedScene,
+    Featurette,
+    Interview,
+    Scene,
+    Short,
+    Other,
+}
+
+impl ExtraKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ExtraKind::Trailer => "trailer",
+            ExtraKind::BehindTheScenes => "behind_the_scenes",
+            ExtraKind::DeletedScene => "deleted_scene",
+            ExtraKind::Featurette => "featurette",
+            ExtraKind::Interview => "interview",
+            ExtraKind::Scene => "scene",
+            ExtraKind::Short => "short",
+            ExtraKind::Other => "other",
+        }
+    }
+
+    /// A bonus-material folder name (lowercase).
+    fn from_dir(name: &str) -> Option<Self> {
+        Some(match name {
+            "trailers" => ExtraKind::Trailer,
+            "behind the scenes" => ExtraKind::BehindTheScenes,
+            "deleted scenes" => ExtraKind::DeletedScene,
+            "featurettes" => ExtraKind::Featurette,
+            "interviews" => ExtraKind::Interview,
+            "scenes" => ExtraKind::Scene,
+            "shorts" => ExtraKind::Short,
+            "extras" | "other" | "bonus" | "special features" | "specials features" => ExtraKind::Other,
+            _ => return None,
+        })
+    }
+
+    /// A file named with a bonus-material suffix (`…-trailer`), and its stem
+    /// without the suffix. Only `trailer` is matched in any case and after
+    /// `.` or `_` too; the others must be Plex's lowercase `-suffix`, so that
+    /// release groups (`…x264-SCENE`) are not mistaken for extras.
+    fn from_stem(stem: &str) -> Option<(Self, &str)> {
+        const SUFFIXES: &[(&str, ExtraKind)] = &[
+            ("-behindthescenes", ExtraKind::BehindTheScenes),
+            ("-deleted", ExtraKind::DeletedScene),
+            ("-featurette", ExtraKind::Featurette),
+            ("-interview", ExtraKind::Interview),
+            ("-scene", ExtraKind::Scene),
+            ("-short", ExtraKind::Short),
+            ("-other", ExtraKind::Other),
+        ];
+        let lower = stem.to_ascii_lowercase();
+        for tail in ["-trailer", ".trailer", "_trailer"] {
+            if lower.ends_with(tail) {
+                return Some((ExtraKind::Trailer, &stem[..stem.len() - tail.len()]));
+            }
+        }
+        SUFFIXES
+            .iter()
+            .find(|(tail, _)| stem.ends_with(tail))
+            .map(|(tail, kind)| (*kind, &stem[..stem.len() - tail.len()]))
+    }
+}
+
+/// Bonus material and what it belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Extra {
+    pub kind: ExtraKind,
+    /// The movie's or show's folder (folder extras), or the file's own folder.
+    pub owner_dir: PathBuf,
+    /// For `Movie (2020)-trailer.mkv`: `Movie (2020)`, the owner's file stem.
+    pub owner_stem: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct FoundFile {
@@ -51,6 +119,32 @@ pub struct FoundFile {
     pub root: PathBuf,
     pub size: i64,
     pub mtime: i64,
+    /// Set for bonus material (trailers, featurettes, …).
+    pub extra: Option<Extra>,
+}
+
+/// Whether `path` is bonus material: inside a bonus folder below `root`, or
+/// named with a bonus suffix.
+pub fn extra_of(path: &Path, root: &Path) -> Option<Extra> {
+    let relative = path.strip_prefix(root).ok()?;
+    let mut dir = root.to_path_buf();
+    let components: Vec<_> = relative.components().collect();
+    // Folders between the root and the file, nearest last.
+    let mut found = None;
+    for component in components.iter().take(components.len().saturating_sub(1)) {
+        let name = component.as_os_str().to_string_lossy().to_ascii_lowercase();
+        if let Some(kind) = ExtraKind::from_dir(&name) {
+            found = Some(Extra { kind, owner_dir: dir.clone(), owner_stem: None });
+            break;
+        }
+        dir.push(component);
+    }
+    if found.is_some() {
+        return found;
+    }
+    let stem = path.file_stem()?.to_string_lossy();
+    let (kind, owner) = ExtraKind::from_stem(&stem)?;
+    Some(Extra { kind, owner_dir: path.parent()?.to_path_buf(), owner_stem: Some(owner.to_owned()) })
 }
 
 #[derive(Debug, Default)]
@@ -87,13 +181,10 @@ pub fn is_media_file(path: &Path, kind: LibraryKind) -> bool {
     }
 }
 
-/// Release samples and trailers: `sample.mkv`, `sample-movie.mkv`,
-/// `movie-sample.mkv`, `movie.trailer.mkv` (small files only for samples).
+/// Release samples: `sample.mkv`, `sample-movie.mkv`, `movie-sample.mkv`
+/// (small files only).
 fn is_sample(path: &Path, size: u64) -> bool {
     let stem = path.file_stem().map(|s| s.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    if ["-trailer", ".trailer", "_trailer"].iter().any(|s| stem.ends_with(s)) {
-        return true;
-    }
     let sample_name = stem == "sample"
         || ["sample-", "sample.", "sample_"].iter().any(|p| stem.starts_with(p))
         || ["-sample", ".sample", "_sample"].iter().any(|s| stem.ends_with(s));
@@ -120,7 +211,7 @@ pub fn walk(roots: &[PathBuf], kind: LibraryKind) -> Walked {
                 if SKIP_DIRS.contains(&name.as_str()) {
                     return false;
                 }
-                if kind != LibraryKind::Music && EXTRAS_DIRS.contains(&name.as_str()) {
+                if kind != LibraryKind::Music && SAMPLE_DIRS.contains(&name.as_str()) {
                     return false;
                 }
             }
@@ -164,6 +255,7 @@ pub fn walk(roots: &[PathBuf], kind: LibraryKind) -> Walked {
                 root: root.clone(),
                 size: meta.len() as i64,
                 mtime: meta.modified().map(system_time_secs).unwrap_or(0),
+                extra: if kind == LibraryKind::Music { None } else { extra_of(path, root) },
             });
         }
     }
@@ -203,7 +295,7 @@ mod tests {
         assert!(is_sample(Path::new("/m/x/sample.mkv"), small));
         assert!(is_sample(Path::new("/m/x/movie.2019.1080p-sample.mkv"), small));
         assert!(is_sample(Path::new("/m/x/sample-movie.mkv"), small));
-        assert!(is_sample(Path::new("/m/x/Movie-trailer.mp4"), 4_000_000_000));
+        assert!(!is_sample(Path::new("/m/x/Movie-trailer.mp4"), 4_000_000_000), "trailers are extras now");
         assert!(!is_sample(Path::new("/m/x/HDR Sample (2023).mkv"), small));
         assert!(!is_sample(Path::new("/m/x/Free Samples (2012).mkv"), small));
         assert!(!is_sample(Path::new("/m/x/movie-sample.mkv"), 2_000_000_000));
@@ -224,8 +316,13 @@ mod tests {
         std::fs::write(root.join("notes.txt"), b"x").unwrap();
 
         let walked = walk(&[root.to_path_buf(), root.join("missing")], LibraryKind::Movies);
-        assert_eq!(walked.media.len(), 1);
-        assert!(walked.media[0].path.ends_with("Movie (2020).mkv"));
+        let mut media: Vec<_> = walked.media.iter().collect();
+        media.sort_by_key(|f| f.extra.is_some());
+        assert_eq!(media.len(), 2);
+        assert!(media[0].path.ends_with("Movie (2020).mkv"));
+        assert!(media[0].extra.is_none());
+        let extra = media[1].extra.as_ref().unwrap();
+        assert_eq!((extra.kind, extra.owner_dir.clone()), (ExtraKind::Other, root.join("Movie (2020)")));
         let sidecars = &walked.sidecars[&root.join("Movie (2020)")];
         assert_eq!(sidecars.len(), 2);
         assert_eq!(walked.offline_roots, vec![root.join("missing")]);
@@ -239,5 +336,21 @@ mod tests {
         assert!(walked.maybe_unavailable(Path::new("/m/nas-link/Movie (2020)/Movie.mkv")));
         assert!(walked.maybe_unavailable(Path::new("/m/nas-link")));
         assert!(!walked.maybe_unavailable(Path::new("/m/other/Movie.mkv")));
+    }
+
+    #[test]
+    fn finds_extras() {
+        let root = Path::new("/m");
+        let e = extra_of(Path::new("/m/Movie (2020)/Trailers/Teaser.mkv"), root).unwrap();
+        assert_eq!((e.kind, e.owner_dir, e.owner_stem), (ExtraKind::Trailer, PathBuf::from("/m/Movie (2020)"), None));
+        let e = extra_of(Path::new("/m/Movie (2020)/Movie (2020)-behindthescenes.mkv"), root).unwrap();
+        assert_eq!((e.kind, e.owner_stem.as_deref()), (ExtraKind::BehindTheScenes, Some("Movie (2020)")));
+        let e = extra_of(Path::new("/m/Movie (2020)/Movie (2020).Trailer.mp4"), root).unwrap();
+        assert_eq!(e.kind, ExtraKind::Trailer);
+        let e = extra_of(Path::new("/m/Show (2010)/Featurettes/Making Of.mkv"), root).unwrap();
+        assert_eq!((e.kind, e.owner_dir), (ExtraKind::Featurette, PathBuf::from("/m/Show (2010)")));
+        assert_eq!(extra_of(Path::new("/m/Show (2010)/Season 1/Show - S01E01.mkv"), root), None);
+        assert_eq!(extra_of(Path::new("/m/Movie.2019.1080p.x264-SCENE.mkv"), root), None, "a release group");
+        assert_eq!(extra_of(Path::new("/m/Crime Scene (2001)/Crime Scene (2001).mkv"), root), None);
     }
 }

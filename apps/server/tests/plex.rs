@@ -509,3 +509,24 @@ async fn preview_indexes_and_chapter_thumbs() {
     let frame = app.plex(&format!("/library/parts/{file_id}/indexes/sd/45000?X-Plex-Token={token}"), &[]).await;
     assert_eq!(frame.status, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn extras_as_clips() {
+    let app = TestApp::new().await;
+    let token = app.setup().await;
+    app.media_file("movies/Alpha (2001)/Alpha (2001).mp4");
+    app.media_file("movies/Alpha (2001)/Alpha (2001)-trailer.mp4");
+    app.media_file("movies/Alpha (2001)/Deleted Scenes/Cut.mp4");
+    let lib = app.library(&token, "Movies", "movies", "movies").await;
+    let all = app.plex_json(&format!("/library/sections/{lib}/all"), &token).await;
+    assert_eq!(titles(&all), vec!["Alpha"]);
+    let id = metadata(&all)[0]["ratingKey"].as_str().unwrap().to_owned();
+    let extras = app.plex_json(&format!("/library/metadata/{id}/extras"), &token).await;
+    let clips = metadata(&extras);
+    assert_eq!(clips.len(), 2);
+    assert_eq!(clips[0]["type"], "clip");
+    assert_eq!(clips[0]["subtype"], "trailer");
+    assert_eq!(clips[0]["extraType"], 1);
+    assert_eq!(clips[1]["subtype"], "deletedScene");
+    assert!(clips[0]["Media"][0]["Part"][0]["key"].as_str().is_some(), "playable");
+}

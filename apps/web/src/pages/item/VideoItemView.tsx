@@ -10,6 +10,7 @@ import { codecLabel, formatBytes, formatDate, formatDuration, resolutionLabel, s
 import { saveStreamChoice } from "@/lib/progress";
 import { usePlayItem } from "@/lib/usePlayItem";
 import { CastRow, CrewRows } from "./Credits";
+import { ExtrasRow } from "./Extras";
 import { MediaInfo } from "./MediaInfo";
 import { MoreLikeThis } from "./MoreLikeThis";
 import {
@@ -239,6 +240,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
           <MediaInfo files={item.files} />
         </div>
       </div>
+      <ExtrasRow extras={item.extras} />
       <CastRow title={isEpisode ? "Guest Stars" : "Cast"} credits={item.cast} />
       {isEpisode ? null : <MoreLikeThis item={item} />}
     </ItemPageShell>

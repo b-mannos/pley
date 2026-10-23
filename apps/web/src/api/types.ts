@@ -117,6 +117,8 @@ export interface ItemSummary {
   child_count?: number | null;
   summary?: string | null;
   release_date?: string | null;
+  /** Bonus material: "trailer", "featurette", "behind_the_scenes", … */
+  extra_type?: string | null;
 }
 
 export interface ItemDetail extends ItemSummary {
@@ -132,6 +134,8 @@ export interface ItemDetail extends ItemSummary {
   locked_fields?: string[];
   /** Intro and credits of the files (absent on servers without detection). */
   markers?: Marker[];
+  /** Trailers and other bonus material (movies and shows). */
+  extras?: ItemSummary[];
   /** Actors in billing order; for episodes, the guest stars. */
   cast?: Credit[];
   /** Creators, directors, writers and producers. */

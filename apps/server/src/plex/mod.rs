@@ -180,6 +180,7 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/library/recentlyAdded", get(library::recently_added))
         .route("/library/metadata/{id}", get(library::metadata))
         .route("/library/metadata/{id}/children", get(library::children))
+        .route("/library/metadata/{id}/extras", get(library::extras))
         .route("/library/metadata/{id}/allLeaves", get(library::all_leaves))
         .route("/library/metadata/{id}/grandchildren", get(library::all_leaves))
         .route("/library/metadata/{id}/similar", get(server::empty))

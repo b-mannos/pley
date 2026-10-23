@@ -21,7 +21,7 @@ use tokio::sync::mpsc;
 
 use super::parse::{parse_episode, parse_movie, parse_track};
 use super::sidecar::{ExternalSub, external_subtitles};
-use super::walk::{FoundFile, find_image, walk};
+use super::walk::{Extra, ExtraKind, FoundFile, find_image, walk};
 use super::{LibraryKind, LibraryRow, get_library, list_libraries};
 use crate::config::Config;
 use crate::db::Db;
@@ -242,40 +242,45 @@ impl Scanner {
         let mut last_emit = Instant::now();
         let mut last_flush = Instant::now();
         let transcoder = self.transcoder.clone();
-        let mut results = futures::stream::iter(to_process.into_iter().map(|file| {
-            let transcoder = transcoder.clone();
-            async move {
-                let outcome = match transcoder.probe(&path_str(&file.path)).await {
-                    Ok(info) => ProbeOutcome::Ok(Box::new(info)),
-                    // ffprobe ran and cannot read the file: don't retry every scan.
-                    Err(TranscoderError::Api { code, message, .. }) if code == "ffmpeg_failed" => {
-                        tracing::warn!("could not probe {}: {message}", file.path.display());
-                        ProbeOutcome::Failed
-                    }
-                    // Unreachable transcoder, timeout (sleeping NAS), …: try again next scan.
-                    Err(err) => {
-                        tracing::debug!("probe of {} postponed: {err}", file.path.display());
-                        ProbeOutcome::Unavailable
-                    }
-                };
-                (file, outcome)
-            }
-        }))
-        .buffer_unordered(PROBE_CONCURRENCY);
+        // Bonus material goes in after the movies and shows it belongs to.
+        let (extras, regular): (Vec<FoundFile>, Vec<FoundFile>) =
+            to_process.into_iter().partition(|f| f.extra.is_some());
+        for files in [regular, extras] {
+            let mut results = futures::stream::iter(files.into_iter().map(|file| {
+                let transcoder = transcoder.clone();
+                async move {
+                    let outcome = match transcoder.probe(&path_str(&file.path)).await {
+                        Ok(info) => ProbeOutcome::Ok(Box::new(info)),
+                        // ffprobe ran and cannot read the file: don't retry every scan.
+                        Err(TranscoderError::Api { code, message, .. }) if code == "ffmpeg_failed" => {
+                            tracing::warn!("could not probe {}: {message}", file.path.display());
+                            ProbeOutcome::Failed
+                        }
+                        // Unreachable transcoder, timeout (sleeping NAS), …: try again next scan.
+                        Err(err) => {
+                            tracing::debug!("probe of {} postponed: {err}", file.path.display());
+                            ProbeOutcome::Unavailable
+                        }
+                    };
+                    (file, outcome)
+                }
+            }))
+            .buffer_unordered(PROBE_CONCURRENCY);
 
-        while let Some(result) = results.next().await {
-            batch.push(result);
-            processed += 1;
-            if batch.len() >= WRITE_BATCH || last_flush.elapsed() > Duration::from_millis(750) {
-                self.flush(&mut writer, &mut batch, &existing_by_path, &mut totals).await?;
-                last_flush = Instant::now();
+            while let Some(result) = results.next().await {
+                batch.push(result);
+                processed += 1;
+                if batch.len() >= WRITE_BATCH || last_flush.elapsed() > Duration::from_millis(750) {
+                    self.flush(&mut writer, &mut batch, &existing_by_path, &mut totals).await?;
+                    last_flush = Instant::now();
+                }
+                if last_emit.elapsed() > Duration::from_millis(400) {
+                    self.set_status(&lib, ScanPhase::Probing, processed, total);
+                    last_emit = Instant::now();
+                }
             }
-            if last_emit.elapsed() > Duration::from_millis(400) {
-                self.set_status(&lib, ScanPhase::Probing, processed, total);
-                last_emit = Instant::now();
-            }
+            self.flush(&mut writer, &mut batch, &existing_by_path, &mut totals).await?;
         }
-        self.flush(&mut writer, &mut batch, &existing_by_path, &mut totals).await?;
         self.set_status(&lib, ScanPhase::Probing, processed, total);
 
         let mut conn = self.db.write.acquire().await?;
@@ -444,10 +449,15 @@ impl<'a> Writer<'a> {
             ProbeOutcome::Failed => (None, true),
         };
         let duration = info.as_ref().and_then(|i| i.duration_ms);
-        let item_id = match self.kind {
-            LibraryKind::Movies => self.write_movie(conn, file, duration).await?,
-            LibraryKind::Shows => self.write_episode(conn, file, duration).await?,
-            LibraryKind::Music => self.write_track(conn, file, info.as_ref(), duration).await?,
+        let item_id = match (&file.extra, self.kind) {
+            (Some(extra), _) => match self.write_extra(conn, file, extra, duration).await? {
+                Some(id) => id,
+                // Its movie or show is not in the library (yet): next scan.
+                None => return Ok(()),
+            },
+            (None, LibraryKind::Movies) => self.write_movie(conn, file, duration).await?,
+            (None, LibraryKind::Shows) => self.write_episode(conn, file, duration).await?,
+            (None, LibraryKind::Music) => self.write_track(conn, file, info.as_ref(), duration).await?,
         };
         let subs =
             if self.kind == LibraryKind::Music { Vec::new() } else { external_subtitles(&file.path, self.sidecars) };
@@ -462,6 +472,76 @@ impl<'a> Writer<'a> {
         let id = upsert_item(conn, self.library_id, &item).await?;
         self.containers.insert(key, id);
         Ok(id)
+    }
+
+    /// Bonus material, as an item under its movie or show.
+    async fn write_extra(
+        &mut self,
+        conn: &mut SqliteConnection,
+        file: &FoundFile,
+        extra: &Extra,
+        duration: Option<i64>,
+    ) -> anyhow::Result<Option<i64>> {
+        let Some(owner) = self.extra_owner(conn, extra).await? else {
+            tracing::debug!("no movie or show for the extra {}", file.path.display());
+            return Ok(None);
+        };
+        let stem = file.path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut item = NewItem::new("extra", format!("extra:{}", path_str(&file.path)), extra_title(&stem, extra));
+        item.parent_id = Some(owner);
+        item.duration_ms = duration;
+        let id = upsert_item(conn, self.library_id, &item).await?;
+        sqlx::query("UPDATE items SET extra_type = ? WHERE id = ?")
+            .bind(extra.kind.as_str())
+            .bind(id)
+            .execute(&mut *conn)
+            .await?;
+        Ok(Some(id))
+    }
+
+    /// The movie or show bonus material belongs to: the movie whose file is
+    /// in the owner folder (by name for `…-trailer` files, or the folder's
+    /// only movie), or the show of that folder (or of that season folder).
+    async fn extra_owner(&self, conn: &mut SqliteConnection, extra: &Extra) -> sqlx::Result<Option<i64>> {
+        let dir = path_str(&extra.owner_dir);
+        match self.kind {
+            LibraryKind::Movies => {
+                let candidates: Vec<(i64, String)> = sqlx::query_as(
+                    "SELECT f.item_id, f.path FROM media_files f JOIN items i ON i.id = f.item_id
+                     WHERE f.library_id = ? AND i.kind = 'movie' AND f.path LIKE ? ESCAPE '^'",
+                )
+                .bind(self.library_id)
+                .bind(format!("{}%", crate::store::like_escape(&dir)))
+                .fetch_all(&mut *conn)
+                .await?;
+                let direct: Vec<(i64, String)> = candidates
+                    .into_iter()
+                    .filter(|(_, path)| Path::new(path).parent() == Some(extra.owner_dir.as_path()))
+                    .collect();
+                if let Some(stem) = &extra.owner_stem {
+                    let named = direct.iter().find(|(_, path)| {
+                        Path::new(path).file_stem().is_some_and(|s| s.to_string_lossy().eq_ignore_ascii_case(stem))
+                    });
+                    if let Some((id, _)) = named {
+                        return Ok(Some(*id));
+                    }
+                }
+                let movies: HashSet<i64> = direct.iter().map(|(id, _)| *id).collect();
+                Ok(if movies.len() == 1 { movies.into_iter().next() } else { None })
+            }
+            LibraryKind::Shows => {
+                let row: Option<(i64, String, Option<i64>)> = sqlx::query_as(
+                    "SELECT id, kind, parent_id FROM items
+                     WHERE library_id = ? AND kind IN ('show', 'season') AND path = ? ORDER BY kind = 'season' LIMIT 1",
+                )
+                .bind(self.library_id)
+                .bind(&dir)
+                .fetch_optional(&mut *conn)
+                .await?;
+                Ok(row.map(|(id, kind, parent)| if kind == "season" { parent.unwrap_or(id) } else { id }))
+            }
+            LibraryKind::Music => Ok(None),
+        }
     }
 
     async fn write_movie(
@@ -660,7 +740,7 @@ async fn upsert_file(
 
 async fn cleanup_orphans(conn: &mut SqliteConnection, library_id: i64) -> sqlx::Result<()> {
     sqlx::query(
-        "DELETE FROM items WHERE library_id = ? AND kind IN ('movie', 'episode', 'track')
+        "DELETE FROM items WHERE library_id = ? AND kind IN ('movie', 'episode', 'track', 'extra')
          AND NOT EXISTS (SELECT 1 FROM media_files f WHERE f.item_id = items.id)",
     )
     .bind(library_id)
@@ -669,7 +749,7 @@ async fn cleanup_orphans(conn: &mut SqliteConnection, library_id: i64) -> sqlx::
     for kinds in ["('season', 'album')", "('show', 'artist')"] {
         sqlx::query(&format!(
             "DELETE FROM items WHERE library_id = ? AND kind IN {kinds}
-             AND NOT EXISTS (SELECT 1 FROM items c WHERE c.parent_id = items.id)"
+             AND NOT EXISTS (SELECT 1 FROM items c WHERE c.parent_id = items.id AND c.kind != 'extra')"
         ))
         .bind(library_id)
         .execute(&mut *conn)
@@ -682,7 +762,7 @@ async fn update_counts(conn: &mut SqliteConnection, library_id: i64) -> sqlx::Re
     let statements = [
         "UPDATE items SET
             leaf_count = (SELECT COUNT(*) FROM items e WHERE e.grandparent_id = items.id AND e.kind = 'episode'),
-            child_count = (SELECT COUNT(*) FROM items s WHERE s.parent_id = items.id)
+            child_count = (SELECT COUNT(*) FROM items s WHERE s.parent_id = items.id AND s.kind = 'season')
          WHERE library_id = ? AND kind = 'show'",
         "UPDATE items SET leaf_count = (SELECT COUNT(*) FROM items e WHERE e.parent_id = items.id)
          WHERE library_id = ? AND kind = 'season'",
@@ -866,4 +946,25 @@ pub fn remux_candidate(container: Option<&str>, streams: &[pley_transcoder_api::
     let video = streams.iter().find(|s| s.kind == StreamKind::Video);
     video.is_some_and(|v| v.codec == "h264" && v.bit_depth.unwrap_or(8) <= 8 && !v.dynamic_range().is_hdr())
         && !matches!(container, Some("mp4" | "m4v" | "mov" | "webm"))
+}
+
+/// The title of bonus material: `Teaser.Final.mkv` → "Teaser Final"; a
+/// `Movie (2020)-trailer.mkv` file is just "Trailer".
+fn extra_title(stem: &str, extra: &Extra) -> String {
+    if extra.owner_stem.is_some() {
+        return match extra.kind {
+            ExtraKind::Trailer => "Trailer",
+            ExtraKind::BehindTheScenes => "Behind the Scenes",
+            ExtraKind::DeletedScene => "Deleted Scene",
+            ExtraKind::Featurette => "Featurette",
+            ExtraKind::Interview => "Interview",
+            ExtraKind::Scene => "Scene",
+            ExtraKind::Short => "Short",
+            ExtraKind::Other => "Extra",
+        }
+        .to_owned();
+    }
+    let cleaned: String = stem.chars().map(|c| if c == '.' || c == '_' { ' ' } else { c }).collect();
+    let cleaned = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if cleaned.is_empty() { stem.to_owned() } else { cleaned }
 }

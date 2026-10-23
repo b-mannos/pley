@@ -26,6 +26,9 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i
     let scope = streams::scope(&row);
     let mut detail = catalog::item_detail(&state.db, row).await?;
     detail.locked_fields = crate::overrides::locked_fields(&state.db, id).await?;
+    if matches!(detail.summary.kind.as_str(), "movie" | "show") {
+        detail.extras = catalog::extras(&state.db, user.id, id).await?.iter().map(ItemRow::to_summary).collect();
+    }
     if !detail.files.is_empty() {
         let pref = streams::load(&state.db, user.id, scope).await?;
         for file in &mut detail.files {
@@ -165,7 +168,7 @@ pub async fn progress(
     Json(body): Json<Progress>,
 ) -> ApiResult<StatusCode> {
     let row = item_or_404(&state, user.id, id).await?;
-    if !matches!(row.kind.as_str(), "movie" | "episode" | "track") {
+    if !matches!(row.kind.as_str(), "movie" | "episode" | "track" | "extra") {
         return Err(AppError::bad_request("progress can only be recorded for playable items"));
     }
     if !matches!(body.state.as_str(), "playing" | "paused" | "stopped" | "buffering") {
@@ -328,7 +331,7 @@ async fn resolve_artwork(state: &AppState, id: i64, kind: &str) -> ApiResult<Pat
         }
         match (kind, row.kind.as_str()) {
             // A frame grab; a missing or unreadable file just has no picture.
-            ("thumb", "movie" | "episode") => {
+            ("thumb", "movie" | "episode" | "extra") => {
                 return generate_thumb(state, current).await.map_err(|err| {
                     tracing::debug!("frame grab of item {current}: {err}");
                     AppError::not_found("no artwork")
@@ -340,7 +343,7 @@ async fn resolve_artwork(state: &AppState, id: i64, kind: &str) -> ApiResult<Pat
                 }
                 return Err(AppError::not_found("no artwork"));
             }
-            ("poster", "season" | "episode" | "track") | ("backdrop", _) => match row.parent_id {
+            ("poster", "season" | "episode" | "track" | "extra") | ("backdrop", _) => match row.parent_id {
                 Some(parent) => current = parent,
                 None => break,
             },

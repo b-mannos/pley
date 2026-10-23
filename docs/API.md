@@ -103,6 +103,7 @@ interface ItemSummary {
   child_count?: number;             // show: #seasons, artist: #albums
   summary?: string;                 // in lists only for episodes; always in ItemDetail
   release_date?: string;            // "YYYY-MM-DD"
+  extra_type?: string;              // kind "extra": trailer | featurette | behind_the_scenes | deleted_scene | interview | scene | short | other
 }
 
 interface ItemDetail extends ItemSummary {
@@ -115,6 +116,7 @@ interface ItemDetail extends ItemSummary {
   imdb_id: string | null;
   files: MediaFile[];               // empty for containers (show/season/artist/album)
   markers: Marker[];                // intro and credits of the files (Skip Intro / Skip Credits)
+  extras: ItemSummary[];            // movies and shows: trailers and other bonus material (kind "extra"), trailers first
   cast: Credit[];                   // actors in billing order; episodes: guest stars; seasons: the show's
   crew: Credit[];                   // creators, directors, writers, producers
 }

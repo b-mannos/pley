@@ -20,6 +20,9 @@ HLG and Dolby Vision.
   - Episodes: `S01E02`, `1x02`, multi-episode files, season folders, specials,
     date-based shows and anime numbering.
   - Music: tags first, then folders.
+  - Extras: trailers, featurettes, behind-the-scenes and the rest with Plex's
+    conventions (`Trailers/`, `Behind The Scenes/`, … folders or
+    `Movie (2020)-trailer.mkv`), shown on the movie or show and playable.
 - **Metadata.**
   - TMDB agent for posters, backdrops, summaries, ratings, certifications,
     genres, studios, and season and episode details. It's optional and needs an
