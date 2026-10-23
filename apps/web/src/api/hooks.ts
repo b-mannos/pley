@@ -3,6 +3,9 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClie
 import { api, qs, request } from "./client";
 import type {
   Activity,
+  Backup,
+  Backups,
+  CleanReport,
   Device,
   FsListing,
   HistoryPage,
@@ -22,6 +25,7 @@ import type {
   SearchResults,
   ServerStatus,
   Settings,
+  StorageUsage,
   SystemInfo,
   TranscoderStatus,
   Trickplay,
@@ -53,6 +57,8 @@ export const keys = {
   invite: (code: string) => ["invite", code] as const,
   settings: ["settings"] as const,
   system: ["system"] as const,
+  storage: ["system", "storage"] as const,
+  backups: ["system", "backups"] as const,
   transcoder: ["transcoder"] as const,
   fs: (path: string | null) => ["fs", path ?? ""] as const,
 };
@@ -713,6 +719,30 @@ export function useSaveSettings() {
       qc.invalidateQueries({ queryKey: keys.system });
       qc.invalidateQueries({ queryKey: keys.server });
     },
+  });
+}
+
+export function useStorageUsage() {
+  return useQuery({ queryKey: keys.storage, queryFn: () => api.get<StorageUsage>("/api/system/storage"), staleTime: 30_000 });
+}
+
+export function useCleanStorage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<CleanReport>("/api/system/storage/clean"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.storage }),
+  });
+}
+
+export function useBackups() {
+  return useQuery({ queryKey: keys.backups, queryFn: () => api.get<Backups>("/api/system/backups") });
+}
+
+export function useCreateBackup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<Backup>("/api/system/backups"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.backups }),
   });
 }
 

@@ -194,6 +194,39 @@ export interface HistoryPage {
   entries: HistoryEntry[];
 }
 
+/** Space used by what pley stores (`GET /api/system/storage`). */
+export interface StorageUsage {
+  blobs: number;
+  blob_bytes: number;
+  media_folders: number;
+  media_bytes: number;
+  cache_bytes: number;
+}
+
+export interface CleanReport {
+  blobs_removed: number;
+  media_folders_removed: number;
+  bytes_freed: number;
+}
+
+export interface DatabaseHealth {
+  ok: boolean | null;
+  problem?: string;
+  checked_at: Timestamp | null;
+}
+
+export interface Backup {
+  name: string;
+  path: string;
+  bytes: number;
+  created_at: Timestamp;
+}
+
+export interface Backups {
+  health: DatabaseHealth;
+  backups: Backup[];
+}
+
 export interface SearchResults {
   items: ItemSummary[];
   people?: PersonSummary[];

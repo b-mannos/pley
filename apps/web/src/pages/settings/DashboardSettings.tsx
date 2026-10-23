@@ -15,6 +15,7 @@ import type {
 } from "@/api/types";
 import { Artwork } from "@/components/Artwork";
 import { HistoryList } from "@/components/HistoryList";
+import { StorageSection } from "./StorageSection";
 import { Badge, Card, EmptyState, ProgressBar, SectionTitle, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatBytes, formatClock, formatUptime, fullTitle, transcodeSummary } from "@/lib/format";
@@ -462,6 +463,8 @@ export function DashboardSettings() {
           </div>
         )}
       </section>
+
+      <StorageSection />
     </div>
   );
 }
