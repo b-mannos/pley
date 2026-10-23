@@ -1,5 +1,6 @@
 # docker compose -f deploy/docker/compose.yaml up -d
-# Then open http://localhost:7539 and create the admin account.
+# Then `docker logs pley` shows a link with the setup code
+# (http://localhost:7539/setup#code=…): open it to create the admin account.
 services:
   pley:
     build:
@@ -12,7 +13,15 @@ services:
     # transcoder and closes the database: give it room (Docker's default
     # is 10 s before it kills the container).
     stop_grace_period: 30s
+    # pley needs no privileges of its own (it runs as uid 1000).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     ports:
+      # Published on every address of the host: Docker's port rules go
+      # around host firewalls such as ufw. Behind a reverse proxy on this
+      # host, publish it on 127.0.0.1 only: "127.0.0.1:7539:7539".
       - "7539:7539"
     volumes:
       # Database, artwork, caches and transcode segments. Must be writable by
