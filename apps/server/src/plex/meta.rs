@@ -113,6 +113,10 @@ pub struct Extras {
     pub content_rating: Option<String>,
     pub tmdb_id: Option<i64>,
     pub imdb_id: Option<String>,
+    /// Shows: the TheTVDB series (`tvdb://` guid).
+    pub tvdb_id: Option<i64>,
+    /// Artists and albums: the MusicBrainz artist or release group (`mbid://`).
+    pub musicbrainz_id: Option<String>,
     pub path: Option<String>,
     /// Cast and crew, loaded only for full details and people filters.
     pub people: Vec<Credit>,
@@ -131,6 +135,8 @@ struct ExtrasRow {
     content_rating: Option<String>,
     tmdb_id: Option<i64>,
     imdb_id: Option<String>,
+    tvdb_id: Option<i64>,
+    musicbrainz_id: Option<String>,
     path: Option<String>,
 }
 
@@ -140,7 +146,8 @@ pub async fn load_extras(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Extr
     let mut out = HashMap::with_capacity(ids.len());
     for chunk in ids.chunks(500) {
         let sql = format!(
-            "SELECT id, original_title, tagline, genres, studio, content_rating, tmdb_id, imdb_id, path
+            "SELECT id, original_title, tagline, genres, studio, content_rating, tmdb_id, imdb_id, tvdb_id,
+                    musicbrainz_id, path
              FROM items WHERE id IN ({})",
             vec!["?"; chunk.len()].join(",")
         );
@@ -159,6 +166,8 @@ pub async fn load_extras(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Extr
                     content_rating: row.content_rating,
                     tmdb_id: row.tmdb_id,
                     imdb_id: row.imdb_id,
+                    tvdb_id: row.tvdb_id,
+                    musicbrainz_id: row.musicbrainz_id,
                     path: row.path,
                     people: Vec::new(),
                     previews: Vec::new(),
@@ -452,6 +461,13 @@ pub fn item_node(
             }
             if let Some(tmdb) = extras.tmdb_id.filter(|_| matches!(kind, "movie" | "show")) {
                 node.push(Node::new("Guid").attr("id", format!("tmdb://{tmdb}")));
+            }
+            // What Plex reports too (Overseerr and Kometa match shows by it).
+            if let Some(tvdb) = extras.tvdb_id.filter(|_| kind == "show") {
+                node.push(Node::new("Guid").attr("id", format!("tvdb://{tvdb}")));
+            }
+            if let Some(mbid) = extras.musicbrainz_id.as_deref().filter(|_| matches!(kind, "artist" | "album")) {
+                node.push(Node::new("Guid").attr("id", format!("mbid://{mbid}")));
             }
         }
         if detail.full && !is_leaf(kind) {

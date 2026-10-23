@@ -469,7 +469,14 @@ impl Filter {
                 let own = meta::guid(&row.kind, row.id);
                 let imdb = extras.and_then(|e| e.imdb_id.clone()).map(|i| format!("imdb://{i}"));
                 let tmdb = extras.and_then(|e| e.tmdb_id).map(|t| format!("tmdb://{t}"));
-                Some(self.values.iter().any(|v| *v == own || Some(v) == imdb.as_ref() || Some(v) == tmdb.as_ref()))
+                // Only where the details list them.
+                let tvdb = extras.and_then(|e| e.tvdb_id).filter(|_| row.kind == "show").map(|t| format!("tvdb://{t}"));
+                let mbid = extras
+                    .and_then(|e| e.musicbrainz_id.clone())
+                    .filter(|_| matches!(row.kind.as_str(), "artist" | "album"))
+                    .map(|m| format!("mbid://{m}"));
+                let known = [imdb, tmdb, tvdb, mbid];
+                Some(self.values.iter().any(|v| *v == own || known.iter().any(|g| g.as_ref() == Some(v))))
             }
             _ => None,
         };
@@ -907,8 +914,8 @@ impl Filter {
         }
     }
 
-    /// `plex://`, `imdb://` and `tmdb://` guids (whatever the operator, like
-    /// [`Filter::matches`]).
+    /// `plex://`, `imdb://`, `tmdb://`, `tvdb://` (shows) and `mbid://`
+    /// (artists, albums) guids, whatever the operator, like [`Filter::matches`].
     fn guid_sql(&self, kind: &str) -> Condition {
         let mut tests = Vec::new();
         let mut args = Vec::new();
@@ -930,6 +937,15 @@ impl Filter {
             if let Some(tmdb) = tmdb.filter(|t| format!("tmdb://{t}") == *value) {
                 tests.push("i.tmdb_id = ?".to_owned());
                 args.push(SqlArg::Int(tmdb));
+            }
+            let tvdb = value.strip_prefix("tvdb://").and_then(|t| t.parse::<i64>().ok());
+            if let Some(tvdb) = tvdb.filter(|t| kind == "show" && format!("tvdb://{t}") == *value) {
+                tests.push("i.tvdb_id = ?".to_owned());
+                args.push(SqlArg::Int(tvdb));
+            }
+            if let Some(mbid) = value.strip_prefix("mbid://").filter(|_| matches!(kind, "artist" | "album")) {
+                tests.push("i.musicbrainz_id = ?".to_owned());
+                args.push(SqlArg::Text(mbid.to_owned()));
             }
         }
         if tests.is_empty() {
@@ -2138,6 +2154,16 @@ mod tests {
         assert_eq!(titles(&[("guid", "tmdb://348")]), ["Alien"]);
         let own = meta::guid("movie", 2);
         assert_eq!(titles(&[("guid", own.as_str())]), ["Airplane"]);
+
+        // TheTVDB ids are shows', MusicBrainz ids artists' and albums'.
+        let others = vec![row(3, "show", "Lost"), row(4, "album", "Kid A"), row(5, "movie", "Heat")];
+        extras.insert(3, Extras { tvdb_id: Some(73739), ..Default::default() });
+        extras.insert(4, Extras { musicbrainz_id: Some("b8048f24".into()), ..Default::default() });
+        extras.insert(5, Extras { tvdb_id: Some(1), musicbrainz_id: Some("x".into()), ..Default::default() });
+        let found = |kind: &str, guid: &str| matching(&others, kind, &[("guid", guid)], &extras, 0);
+        assert_eq!(found("show", "tvdb://73739"), ["Lost"]);
+        assert_eq!(found("album", "mbid://b8048f24"), ["Kid A"]);
+        assert!(found("movie", "tvdb://1").is_empty() && found("movie", "mbid://x").is_empty());
     }
 
     #[test]
@@ -2354,6 +2380,7 @@ mod tests {
         updated: i64,
         imdb: Option<&'static str>,
         tmdb: Option<i64>,
+        tvdb: Option<i64>,
         leaves: Option<i64>,
     }
 
@@ -2534,6 +2561,7 @@ mod tests {
                 age: Some(14),
                 added: 5_000,
                 updated: 5_000,
+                tvdb: Some(73739),
                 leaves: Some(4),
                 ..movie(100, "Lost", "lost")
             },
@@ -2603,8 +2631,8 @@ mod tests {
             sqlx::query(
                 "INSERT INTO items (id, library_id, kind, key, title, sort_title, parent_id, grandparent_id, idx,
                     year, rating, genres, content_rating, rating_age, studio, release_date, duration_ms,
-                    added_at, updated_at, imdb_id, tmdb_id, leaf_count)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    added_at, updated_at, imdb_id, tmdb_id, tvdb_id, leaf_count)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(item.id)
             .bind(item.library)
@@ -2627,6 +2655,7 @@ mod tests {
             .bind(item.updated)
             .bind(item.imdb)
             .bind(item.tmdb)
+            .bind(item.tvdb)
             .bind(item.leaves)
             .execute(&db.write)
             .await
@@ -2828,6 +2857,7 @@ mod tests {
             vec![("guid", show_guid.as_str())],
             vec![("guid!", "imdb://tt0003,tmdb://3")],
             vec![("guid", "imdb://")],
+            vec![("guid", "tvdb://73739")],
             vec![("resolution", "4k")],
             vec![("show.title", "x")],
             vec![("genre", "horror"), ("unwatched", "1")],
@@ -2858,6 +2888,9 @@ mod tests {
             vec![("genre", "drama")],
             vec![("actor", "Ann Actor")],
             vec![("lastViewedAt>>", "1")],
+            vec![("guid", "tvdb://73739")],
+            vec![("guid", "tvdb://073739")],
+            vec![("guid", "tvdb://73739,tvdb://1")],
         ];
         let season_filters: Vec<Vec<(&str, &str)>> = vec![
             vec![],

@@ -66,8 +66,10 @@ parameters; containers report `size`, `totalSize` and `offset`.
   and albums are `Directory` elements, and tracks are `Track` elements, with
   Plex's `type` values.
 - **GUIDs.** Every item gets a `plex://<type>/<id>` guid. With
-  `includeGuids=1`, and always in details, `Guid` children carry `imdb://` and
-  `tmdb://` ids when metadata is known.
+  `includeGuids=1`, and always in details, `Guid` children carry the ids
+  metadata found, as Plex reports them: `imdb://`, `tmdb://` (movies and
+  shows), `tvdb://` (shows) and `mbid://` (artists and albums). The `guid`
+  filter finds items by any of them.
 - **Watch state.** `viewCount` is the play count of watched items and 0 once an
   item is marked unplayed. `viewOffset` is the resume position.
   `/:/scrobble`, `/:/unscrobble`, `/:/progress` and `/:/timeline` use the same

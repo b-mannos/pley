@@ -42,6 +42,16 @@ async fn world() -> (TestApp, String, i64, i64, i64) {
     (app, admin, movies, tv, music)
 }
 
+/// The `Guid` ids of an item's details.
+async fn guids(app: &TestApp, token: &str, id: i64) -> Vec<String> {
+    let details = app.plex_json(&format!("/library/metadata/{id}"), token).await;
+    let item = details["Metadata"].as_array().and_then(|m| m.first()).or_else(|| details["Directory"].get(0)).unwrap();
+    item["Guid"]
+        .as_array()
+        .map(|g| g.iter().map(|g| g["id"].as_str().unwrap().to_owned()).collect())
+        .unwrap_or_default()
+}
+
 fn directory_titles(container: &Value) -> Vec<String> {
     container["Directory"]
         .as_array()
@@ -87,6 +97,35 @@ async fn server_endpoints() {
     let bad = app.plex(Method::GET, "/:/timeline?state=playing", &admin, &[]).await;
     assert_eq!(bad.status, StatusCode::BAD_REQUEST);
     assert!(bad.text().contains("ratingKey or key is required"));
+}
+
+#[tokio::test]
+async fn provider_guids_as_plex_reports_them() {
+    let (app, admin, _, tv, music) = world().await;
+    let show = app.ids(tv, &admin).await["Show"];
+    let artist = app.ids(music, &admin).await["Band"];
+    let album = app.children(artist, &admin).await["Record"];
+    for (id, column, value) in [
+        (show, "tvdb_id", json!(73739)),
+        (show, "imdb_id", json!("tt0411008")),
+        (album, "musicbrainz_id", json!("b8048f24-c026-3398-b23a-b5e50716cbc7")),
+        (artist, "musicbrainz_id", json!("a74b1b7f-71a5-4011-9441-d0b5e4122711")),
+    ] {
+        sqlx::query(&format!("UPDATE items SET {column} = ? WHERE id = ?"))
+            .bind(value.as_i64().map(|n| n.to_string()).unwrap_or_else(|| value.as_str().unwrap().to_owned()))
+            .bind(id)
+            .execute(&app.state.db.write)
+            .await
+            .unwrap();
+    }
+    assert_eq!(guids(&app, &admin, show).await, ["imdb://tt0411008", "tvdb://73739"]);
+    assert_eq!(guids(&app, &admin, album).await, ["mbid://b8048f24-c026-3398-b23a-b5e50716cbc7"]);
+    assert_eq!(guids(&app, &admin, artist).await, ["mbid://a74b1b7f-71a5-4011-9441-d0b5e4122711"]);
+    // Found by them, as Overseerr and Kometa look shows up.
+    let found = app.plex_json(&format!("/library/sections/{tv}/all?guid=tvdb://73739"), &admin).await;
+    assert_eq!(plex_titles(&found), ["Show"]);
+    let found = app.plex_json(&format!("/library/sections/{music}/all?type=9&guid=mbid://nothing"), &admin).await;
+    assert!(plex_titles(&found).is_empty());
 }
 
 #[tokio::test]
