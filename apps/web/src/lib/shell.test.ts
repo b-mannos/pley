@@ -10,6 +10,16 @@ describe("appShell", () => {
     expect(appShell(CHROME)).toBeNull();
     expect(appShell("notpleyDesktop/1")).toBeNull();
   });
+
+  it("knows the desktop app by the global it sets", () => {
+    (window as unknown as { __PLEY_APP__?: string }).__PLEY_APP__ = "desktop";
+    try {
+      expect(appShell(CHROME)).toBe("desktop");
+    } finally {
+      delete (window as unknown as { __PLEY_APP__?: string }).__PLEY_APP__;
+    }
+    expect(appShell(CHROME)).toBeNull();
+  });
 });
 
 describe("androidPlayer", () => {

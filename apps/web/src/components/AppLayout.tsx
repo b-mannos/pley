@@ -1,8 +1,11 @@
-import { Suspense, useCallback, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { Outlet, ScrollRestoration } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { invalidateWatchState } from "@/api/hooks";
 import { AudioPlayerBar } from "@/audio/AudioPlayerBar";
 import { useAudioPlayer } from "@/audio/AudioPlayer";
 import { cn } from "@/lib/cn";
+import { APP_RESUMED } from "@/lib/shell";
 import { ListMenuProvider } from "./lists/ListMenu";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -12,6 +15,14 @@ export function AppLayout() {
   const [drawer, setDrawer] = useState(false);
   const closeDrawer = useCallback(() => setDrawer(false), []);
   const audio = useAudioPlayer();
+  const qc = useQueryClient();
+
+  // The Android app says so when its own player closes: progress and watched marks changed.
+  useEffect(() => {
+    const refresh = () => invalidateWatchState(qc);
+    window.addEventListener(APP_RESUMED, refresh);
+    return () => window.removeEventListener(APP_RESUMED, refresh);
+  }, [qc]);
 
   return (
     <div className="min-h-screen">
