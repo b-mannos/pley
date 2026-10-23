@@ -54,6 +54,10 @@ impl From<TranscoderError> for AppError {
             TranscoderError::Api { status: 400, message, .. } => AppError::BadRequest(message),
             TranscoderError::Api { status: 503, message, .. } => AppError::Unavailable(message),
             TranscoderError::Api { status: 504, message, .. } => AppError::Unavailable(message),
+            // Not running, or not answering: a moment's trouble, not a bug.
+            TranscoderError::Http(e) if e.is_connect() || e.is_timeout() => {
+                AppError::Unavailable("the transcoder is not reachable".into())
+            }
             other => AppError::Internal(anyhow::anyhow!(other.to_string())),
         }
     }
@@ -570,6 +574,22 @@ async fn api_error(resp: reqwest::Response) -> TranscoderError {
         Ok(body) => TranscoderError::Api { status, code: body.code, message: body.message },
         Err(_) => {
             TranscoderError::Api { status, code: "http".into(), message: format!("transcoder returned HTTP {status}") }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn an_unreachable_transcoder_is_unavailable_not_an_internal_error() {
+        // Nothing listens on a port just freed.
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let err = reqwest::get(format!("http://127.0.0.1:{port}/v1/jobs")).await.unwrap_err();
+        match AppError::from(TranscoderError::Http(err)) {
+            AppError::Unavailable(message) => assert!(!message.contains("127.0.0.1"), "{message}"),
+            other => panic!("{other:?}"),
         }
     }
 }
