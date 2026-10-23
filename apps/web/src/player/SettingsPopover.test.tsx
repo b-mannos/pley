@@ -10,8 +10,6 @@ function renderPopover(overrides: Partial<SettingsPopoverProps> = {}) {
   const props: SettingsPopoverProps = {
     open: true,
     setOpen: vi.fn(),
-    info: null,
-    reason: null,
     qualities: qualitiesFor({ bitrate: 9_000_000, height: 1080 }),
     quality: "original",
     originalHint: "1080p · 9.0 Mbps",

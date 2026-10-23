@@ -27,6 +27,7 @@ import type {
   ProfilePatch,
   SearchResults,
   ServerStatus,
+  SessionStatus,
   ServiceTest,
   ServiceTestResult,
   Settings,
@@ -885,6 +886,18 @@ export function useCreateBackup() {
 
 export function useSystemInfo() {
   return useQuery(queries.system());
+}
+
+/** How a playing session plays, with its transcode's live numbers: every 2 s while `enabled`. */
+export function usePlaybackStatus(sessionId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["playback", sessionId],
+    queryFn: () => api.get<SessionStatus>(`/api/playback/${encodeURIComponent(sessionId ?? "")}`),
+    enabled: enabled && !!sessionId,
+    refetchInterval: 2_000,
+    refetchIntervalInBackground: false,
+    retry: false,
+  });
 }
 
 export function useTranscoderStatus(pollMs: number | false = 2_500) {

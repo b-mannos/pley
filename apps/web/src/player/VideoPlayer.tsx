@@ -35,10 +35,11 @@ import { nextInQueue, queuePlayUrl, type QueuePosition } from "@/lib/videoQueue"
 import { modeFor, qualitiesFor, qualityById } from "./quality";
 import { ChaptersMenu } from "./ChaptersMenu";
 import { SeekBar } from "./SeekBar";
-import { METHOD_LABEL, SettingsPopover } from "./SettingsPopover";
+import { METHOD_LABEL, PlaybackDetails } from "./PlaybackDetails";
+import { SettingsPopover } from "./SettingsPopover";
 import { fileMarkers, SkipButton, useSkipMarkers } from "./SkipButton";
 import { SubtitleOverlay } from "./SubtitleOverlay";
-import { activeCues, DEFAULT_SUBTITLE_STYLE, subtitleStyle, type SubtitleCue, type SubtitleStyle } from "./subtitles";
+import { activeCues, DEFAULT_SUBTITLE_STYLE, parseVtt, subtitleStyle, type SubtitleCue, type SubtitleStyle } from "./subtitles";
 import { UpNext } from "./UpNext";
 import { itemUrl } from "@/lib/urls";
 
@@ -72,6 +73,19 @@ const SPINNER_DELAY_MS = 400;
 /** How long playback may stand still, wanting to play, before it counts as stalled. */
 const STALL_MS = 12_000;
 const STALL_CHECK_MS = 2_000;
+/** Seconds of playback after which recoveries start over: the trouble is over. */
+const RECOVERED_AFTER_S = 5;
+
+/** The text track pley gives subtitle cues to, one per video element. */
+const pleyTracks = new WeakMap<HTMLVideoElement, TextTrack>();
+function pleyTrack(video: HTMLVideoElement): TextTrack {
+  let track = pleyTracks.get(video);
+  if (!track) {
+    track = video.addTextTrack("subtitles", "pley");
+    pleyTracks.set(video, track);
+  }
+  return track;
+}
 
 /** Seconds of media buffered past the playhead. */
 function bufferedAhead(v: HTMLMediaElement): number {
@@ -96,8 +110,19 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const positionRef = useRef(startMs / 1000);
   /** Mode used instead of the preference after direct play failed to decode (this player only). */
   const fallbackModeRef = useRef<PlaybackMode | null>(null);
-  /** `network`/`media` count per session; `recreate` (new sessions) is reset once media loads again. */
-  const recoveries = useRef({ network: 0, media: 0, recreate: 0 });
+  /**
+   * Recoveries tried: `network`/`media` per session; `recreate` (new
+   * sessions) and `stuck` (new sessions for media that arrives but doesn't
+   * play) across them. All start over once playback moves on again.
+   */
+  const recoveries = useRef({ network: 0, media: 0, recreate: 0, stuck: 0 });
+  /** Where playback was when it last (re)started showing media: moving on from there resets `recoveries`. */
+  const playedFrom = useRef<number | null>(null);
+  /**
+   * The element shows the session's media (not the reset element's 0 while
+   * a session starts or hls.js reattaches): only then is its time the playhead.
+   */
+  const mediaShown = useRef(false);
   /** POST /api/playback of the previous run, which ends its own session if that run was cancelled. */
   const pendingStartRef = useRef<Promise<void>>(Promise.resolve());
 
@@ -181,7 +206,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   /** The playhead in seconds: the element's time once it shows the session's media, else the last known one. */
   const livePosition = () => {
     const v = videoRef.current;
-    return v && sessionRef.current && v.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA ? v.currentTime : positionRef.current;
+    return v && sessionRef.current && mediaShown.current && v.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+      ? v.currentTime
+      : positionRef.current;
   };
   const currentMs = () => Math.round(livePosition() * 1000);
 
@@ -232,6 +259,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const requestMode = fallbackModeRef.current ?? mode;
     recoveries.current.network = 0;
     recoveries.current.media = 0;
+    playedFrom.current = null;
+    mediaShown.current = false;
     // A new session gets the full grace before it counts as stalled.
     lastAdvance.current = { at: performance.now(), time: -1 };
     lastData.current = performance.now();
@@ -362,10 +391,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                 setError(`Playback failed (${data.details}).`);
               });
               hls.on(Hls.Events.FRAG_LOADED, () => {
-                // Media flows again: the next incident (e.g. the session expiring
-                // during a long pause) gets a fresh retry budget.
-                recoveries.current.recreate = 0;
-                recoveries.current.network = 0;
+                // Media that arrives isn't media that plays: budgets start over
+                // when playback moves on (`onTime`).
                 lastData.current = performance.now();
               });
               hls.loadSource(pinfo.url);
@@ -509,6 +536,17 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       hls.recoverMediaError();
       return;
     }
+    if (!starving) {
+      // Media that arrives and doesn't play: one new session, in case the
+      // last one went wrong; the same again would only loop.
+      if (r.stuck < 1) {
+        r.stuck += 1;
+        restartAt(livePosition());
+        return;
+      }
+      setError("This video doesn't play in this browser: it stops at the same spot each time.");
+      return;
+    }
     if (starving && hls && r.network < 4) {
       r.network += 1;
       hls.startLoad(livePosition());
@@ -543,8 +581,17 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const showsMedia = () => !!sessionRef.current && v.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
     const onTime = () => {
       if (!showsMedia()) return;
+      mediaShown.current = true;
       positionRef.current = v.currentTime;
       setCurrent(v.currentTime);
+      const from = playedFrom.current;
+      if (from === null || v.currentTime < from) {
+        playedFrom.current = v.currentTime;
+      } else if (v.currentTime - from >= RECOVERED_AFTER_S) {
+        // Playing on again: the next incident gets every recovery again.
+        Object.assign(recoveries.current, { network: 0, media: 0, recreate: 0, stuck: 0 });
+        playedFrom.current = v.currentTime;
+      }
     };
     const onProgress = () => {
       lastData.current = performance.now();
@@ -563,17 +610,14 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       setBuffering(false);
     };
     const onWaiting = startWaiting;
-    const onPlaying = () => {
-      stopWaiting();
-      // hls.js resets the budget per loaded fragment; direct play once it plays again.
-      if (!hlsRef.current) recoveries.current.recreate = 0;
-    };
+    const onPlaying = stopWaiting;
     const onCanPlay = stopWaiting;
     const onSeeked = () => {
       // The frame at the new time can arrive before anything to play on
       // from it (a transcode starting there): playing again ends the wait.
       if (v.paused || v.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) stopWaiting();
-      if (!sessionRef.current) return;
+      // hls.js's own seeks while it (re)attaches are not the playhead.
+      if (!sessionRef.current || !mediaShown.current) return;
       positionRef.current = v.currentTime;
       report(v.paused ? "paused" : "playing");
     };
@@ -585,9 +629,16 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     // Wherever a seek comes from, its target is where playback is meant to
     // be, also while it loads (a restart after a stall resumes there).
     const onSeeking = () => {
-      if (sessionRef.current) positionRef.current = v.currentTime;
+      if (sessionRef.current && mediaShown.current) positionRef.current = v.currentTime;
+      // Progress counts from where it lands.
+      playedFrom.current = null;
       // Paused, a seek far away waits too (browsers only say so when playing).
       startWaiting();
+    };
+    // Reset (a new session, hls.js reattaching): its time means nothing until it shows media again.
+    const onEmptied = () => {
+      mediaShown.current = false;
+      playedFrom.current = null;
     };
 
     v.addEventListener("play", onPlay);
@@ -599,6 +650,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     v.addEventListener("playing", onPlaying);
     v.addEventListener("canplay", onCanPlay);
     v.addEventListener("seeking", onSeeking);
+    v.addEventListener("emptied", onEmptied);
     v.addEventListener("seeked", onSeeked);
     v.addEventListener("ended", onEnded);
     v.addEventListener("error", onError);
@@ -612,6 +664,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       v.removeEventListener("playing", onPlaying);
       v.removeEventListener("canplay", onCanPlay);
       v.removeEventListener("seeking", onSeeking);
+      v.removeEventListener("emptied", onEmptied);
       v.removeEventListener("seeked", onSeeked);
       v.removeEventListener("ended", onEnded);
       v.removeEventListener("error", onError);
@@ -635,36 +688,52 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     v.muted = muted;
   }, [volume, muted]);
 
-  // Text subtitles from <track> elements: the browser reads them ("hidden")
-  // and pley draws the lines showing now (SubtitleOverlay), except in the
-  // iPhone's own fullscreen player, where the browser has to draw them.
-  const textTracks = useMemo(() => (info?.subtitles ?? []).filter((s) => s.text_based && s.url), [info]);
+  // Text subtitles: pley fetches the WebVTT itself and gives its cues to a
+  // track of its own, which times them; pley draws the lines showing now
+  // (SubtitleOverlay), except in the iPhone's own fullscreen player, where
+  // the browser has to. (A <track src> would hold playback until its file
+  // arrives, and pulling subtitles out of a big file can take minutes.)
+  const shownTextUrl = (info?.subtitles ?? []).find((s) => s.index === shownTextIndex && s.text_based)?.url ?? null;
+  const [loadedCues, setLoadedCues] = useState<{ url: string; cues: VTTCue[] } | null>(null);
+  const [subtitlesSlow, setSubtitlesSlow] = useState(false);
+  useEffect(() => {
+    if (!shownTextUrl || typeof VTTCue === "undefined") return;
+    const abort = new AbortController();
+    // Said on screen only when it takes a while.
+    const slow = window.setTimeout(() => setSubtitlesSlow(true), 1500);
+    fetch(shownTextUrl, { credentials: "same-origin", signal: abort.signal })
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((text) => setLoadedCues({ url: shownTextUrl, cues: parseVtt(text, VTTCue) }))
+      .catch(() => {
+        if (!abort.signal.aborted) toast.error("These subtitles couldn't be loaded.");
+      })
+      .finally(() => {
+        window.clearTimeout(slow);
+        if (!abort.signal.aborted) setSubtitlesSlow(false);
+      });
+    return () => {
+      abort.abort();
+      window.clearTimeout(slow);
+      setSubtitlesSlow(false);
+    };
+  }, [shownTextUrl, toast]);
+  const shownCues = loadedCues && loadedCues.url === shownTextUrl ? loadedCues.cues : null;
   useEffect(() => {
     const v = videoRef.current;
-    if (!v) return;
-    let shown: TextTrack | null = null;
-    const update = () => setCues(shown && shown.mode === "hidden" ? activeCues(shown) : []);
-    const apply = () => {
-      for (const t of Array.from(v.textTracks)) {
-        const want = shownTextIndex != null && t.id === `sub-${shownTextIndex}`;
-        const mode: TextTrackMode = want ? (nativeFullscreen ? "showing" : "hidden") : "disabled";
-        if (t.mode !== mode) t.mode = mode;
-        if (want && shown !== t) {
-          shown?.removeEventListener("cuechange", update);
-          shown = t;
-          t.addEventListener("cuechange", update);
-        }
-      }
-      update();
-    };
-    apply();
-    v.textTracks.addEventListener("addtrack", apply);
+    if (!v || typeof v.addTextTrack !== "function") return;
+    // One track for the element's life: tracks added by script can't be removed.
+    const track = pleyTrack(v);
+    for (const cue of Array.from(track.cues ?? [])) track.removeCue(cue);
+    for (const cue of shownCues ?? []) track.addCue(cue);
+    track.mode = shownCues?.length ? (nativeFullscreen ? "showing" : "hidden") : "disabled";
+    const update = () => setCues(track.mode === "hidden" ? activeCues(track) : []);
+    track.addEventListener("cuechange", update);
+    update();
     return () => {
-      v.textTracks.removeEventListener("addtrack", apply);
-      shown?.removeEventListener("cuechange", update);
+      track.removeEventListener("cuechange", update);
       setCues([]);
     };
-  }, [textTracks, shownTextIndex, nativeFullscreen]);
+  }, [shownCues, nativeFullscreen]);
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -821,6 +890,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const retry = () => {
     setError(null);
     recoveries.current.recreate = 0;
+    recoveries.current.stuck = 0;
     // Without a session (its start failed) the element knows nothing: use the intended start.
     restartAt(sessionRef.current ? livePosition() : startMsRef.current / 1000);
   };
@@ -912,13 +982,12 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
   // After a failed direct play the server only knows that a transcode was requested.
-  const methodReason = fellBack
+  const fallbackNote = fellBack
     ? stalled
-      ? "The original didn't play smoothly in this browser"
-      : "This browser couldn't play the original file"
-    : (info?.reason ?? null);
-  const subtitleLabel = (s: PlaybackInfo["subtitles"][number]) =>
-    streamLabel({ index: s.index, kind: "subtitle", codec: s.codec, language: s.language, title: s.title, default: s.default, forced: s.forced, external: s.external, text_based: s.text_based });
+      ? "The original didn't play smoothly in this browser."
+      : "This browser couldn't play the original file."
+    : null;
+  const methodReason = fallbackNote ?? info?.reason ?? null;
 
   return (
     <div
@@ -939,20 +1008,13 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         onClick={onSurfaceClick}
         onDoubleClick={onSurfaceDoubleClick}
       >
-        {info
-          ? textTracks.map((s) => (
-              <track
-                key={`${info.session_id}-${s.index}`}
-                id={`sub-${s.index}`}
-                kind="subtitles"
-                src={s.url ?? undefined}
-                srcLang={s.language ?? undefined}
-                label={subtitleLabel(s)}
-              />
-            ))
-          : null}
       </video>
       <SubtitleOverlay cues={cues} lifted={showControls} style={subStyle} />
+      {subtitlesSlow && !error ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-28 flex justify-center">
+          <span className="rounded-full bg-black/60 px-3 py-1 text-xs text-white/80">Loading subtitles…</span>
+        </div>
+      ) : null}
 
       <div
         aria-hidden
@@ -1122,8 +1184,16 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           <SettingsPopover
             open={settingsOpen}
             setOpen={setSettingsOpen}
-            info={info}
-            reason={methodReason}
+            details={
+              <PlaybackDetails
+                info={info}
+                file={file}
+                audioIndex={audioIndex}
+                note={fallbackNote}
+                positionMs={current * 1000}
+                open={settingsOpen}
+              />
+            }
             qualities={qualities}
             quality={selectedQuality.id}
             originalHint={[fileResolution(file), formatBitrate(file?.bitrate)].filter(Boolean).join(" · ") || null}

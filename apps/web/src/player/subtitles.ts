@@ -66,6 +66,48 @@ export function cueAtTop(cue: SubtitleCue): boolean {
   return cue.snapToLines === false ? line < 50 : line >= 0 && line < 4;
 }
 
+/** `"01:02:03.456"` (or `"02:03,456"`) → seconds. */
+function cueSeconds(time: string): number {
+  return time
+    .replace(",", ".")
+    .split(":")
+    .reduce((total, part) => total * 60 + Number(part), 0);
+}
+
+const TIMING = /^\s*((?:\d+:)?\d{1,2}:\d{2}[.,]\d{1,3})\s+-->\s+((?:\d+:)?\d{1,2}:\d{2}[.,]\d{1,3})(.*)$/;
+
+/**
+ * The cues of a WebVTT file (`VTTCue`s in browsers; `Cue` stands in for
+ * them in tests). Only what pley uses is read: the times, the text and the
+ * line a cue is placed on.
+ */
+export function parseVtt<C extends Pick<VTTCue, "line" | "snapToLines">>(
+  text: string,
+  Cue: new (start: number, end: number, text: string) => C,
+): C[] {
+  const cues: C[] = [];
+  for (const block of text.replace(/\r\n?/g, "\n").split(/\n{2,}/)) {
+    const lines = block.split("\n");
+    const at = lines.findIndex((l) => l.includes("-->"));
+    const timing = at >= 0 ? TIMING.exec(lines[at] ?? "") : null;
+    if (!timing) continue;
+    const body = lines.slice(at + 1).join("\n").trim();
+    if (!body) continue;
+    const [, from = "", to = "", settings = ""] = timing;
+    const start = cueSeconds(from);
+    const end = cueSeconds(to);
+    if (!(end > start)) continue;
+    const cue = new Cue(start, end, body);
+    const line = /(?:^|\s)line:(-?\d+(?:\.\d+)?)(%)?/.exec(settings);
+    if (line) {
+      cue.snapToLines = !line[2];
+      cue.line = Number(line[1] ?? "");
+    }
+    cues.push(cue);
+  }
+  return cues;
+}
+
 /** The cues of `track` showing now. */
 export function activeCues(track: TextTrack): SubtitleCue[] {
   const list = track.activeCues;

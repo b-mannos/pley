@@ -443,7 +443,17 @@ export interface PlaybackInfo {
   subtitle_index: number | null;
   burn_subtitles: boolean;
   subtitles: SubtitleTrack[];
+  /** Why the file isn't played as it is, one short sentence each. */
+  reasons?: string[];
+  /** The same, in one line. */
   reason: string | null;
+}
+
+/** `GET /api/playback/{session}`: how a session plays, with its transcode's live numbers. */
+export interface SessionStatus {
+  session_id: string;
+  method: PlaybackMethod;
+  transcode: TranscodeInfo | null;
 }
 
 export interface ClientCaps {
@@ -519,6 +529,8 @@ export interface TranscodeInfo {
   transcoded_ms: number;
   segments_ready: number;
   segments_total: number;
+  /** What the transcode aims for, video and audio together (bits per second). */
+  bitrate_out?: number | null;
   last_error: string | null;
 }
 

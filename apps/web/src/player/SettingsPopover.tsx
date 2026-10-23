@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { Check, ChevronLeft, ChevronRight, Settings2 } from "lucide-react";
-import type { MediaStream, PlaybackInfo } from "@/api/types";
+import type { MediaStream } from "@/api/types";
 import { cn } from "@/lib/cn";
 import { streamLabel } from "@/lib/format";
 import { useDismiss } from "@/lib/hooks";
@@ -20,12 +20,6 @@ const PANEL_TITLE: Record<Exclude<Panel, "root">, string> = {
 function GroupLabel({ children }: { children: ReactNode }) {
   return <div className="px-4 pb-1 pt-2 text-xs font-medium text-white/50">{children}</div>;
 }
-
-export const METHOD_LABEL: Record<PlaybackInfo["method"], string> = {
-  direct: "Direct play",
-  remux: "Remux",
-  transcode: "Transcode",
-};
 
 function Option({
   selected,
@@ -72,9 +66,8 @@ function Nav({ label, value, onClick }: { label: string; value: string; onClick:
 export interface SettingsPopoverProps {
   open: boolean;
   setOpen: (open: boolean) => void;
-  info: PlaybackInfo | null;
-  /** Why the current method was chosen (server reason or a client-side note). */
-  reason: string | null;
+  /** How the video plays now, at the top of the menu ([`PlaybackDetails`]). */
+  details?: ReactNode;
   /** The qualities offered for this file, the original first. */
   qualities: QualityOption[];
   quality: string;
@@ -96,7 +89,7 @@ export interface SettingsPopoverProps {
 }
 
 export function SettingsPopover(props: SettingsPopoverProps) {
-  const { open, setOpen, info, reason, qualities, quality, originalHint, onQuality } = props;
+  const { open, setOpen, details, qualities, quality, originalHint, onQuality } = props;
   const { audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle, autoSkip, onAutoSkip } = props;
   const { subtitleStyle, onSubtitleStyle } = props;
   const [panel, setPanel] = useState<Panel>("root");
@@ -139,13 +132,12 @@ export function SettingsPopover(props: SettingsPopoverProps) {
         >
           {panel === "root" ? (
             <>
-              {info ? (
-                <div className="px-4 pb-2 pt-1">
-                  <div className="text-xs font-semibold text-accent">{METHOD_LABEL[info.method]}</div>
-                  {reason ? <div className="mt-0.5 line-clamp-3 text-xs text-white/60" title={reason}>{reason}</div> : null}
-                </div>
+              {details ? (
+                <>
+                  {details}
+                  <div className="my-1 h-px bg-white/10" />
+                </>
               ) : null}
-              <div className="my-1 h-px bg-white/10" />
               <Nav label="Quality" value={qualityLabel} onClick={() => setPanel("quality")} />
               {audioStreams.length > 1 ? (
                 <Nav label="Audio" value={currentAudio ? streamLabel(currentAudio) : "Default"} onClick={() => setPanel("audio")} />
