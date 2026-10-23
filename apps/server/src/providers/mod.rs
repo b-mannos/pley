@@ -45,6 +45,8 @@ pub struct Endpoints {
     pub tvdb: String,
     pub musicbrainz: String,
     pub cover_art: String,
+    /// TMDB's API (used once a TMDB key is set).
+    pub tmdb: String,
 }
 
 impl Default for Endpoints {
@@ -54,6 +56,7 @@ impl Default for Endpoints {
             tvdb: tvdb::API.into(),
             musicbrainz: musicbrainz::API.into(),
             cover_art: musicbrainz::COVER_ART.into(),
+            tmdb: crate::metadata::API.into(),
         }
     }
 }

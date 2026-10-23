@@ -159,6 +159,7 @@ impl TestApp {
             tvdb: format!("{base}/tvdb"),
             musicbrainz: format!("{base}/mb"),
             cover_art: format!("{base}/caa"),
+            tmdb: format!("{base}/tmdb"),
         })
         .await
     }

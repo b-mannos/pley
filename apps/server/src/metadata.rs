@@ -19,13 +19,15 @@ use crate::settings::SettingsStore;
 use crate::store::{self, Store};
 use crate::util::{normalize_key, now, sort_title};
 
-const API: &str = "https://api.themoviedb.org/3";
+pub(crate) const API: &str = "https://api.themoviedb.org/3";
 const IMAGES: &str = "https://image.tmdb.org/t/p";
 
 pub struct MetadataAgent {
     db: Db,
     settings: Arc<SettingsStore>,
     http: reqwest::Client,
+    /// TMDB's API base URL ([`Endpoints::tmdb`]).
+    api: String,
     store: Arc<Store>,
     /// One credits backfill at a time (startup and scans can both start one).
     backfill: tokio::sync::Mutex<()>,
@@ -276,8 +278,9 @@ impl MetadataAgent {
             .timeout(Duration::from_secs(20))
             .build()
             .expect("http client");
+        let api = endpoints.as_ref().map_or_else(|| API.to_owned(), |e| e.tmdb.clone());
         let providers = Providers::new(db.clone(), settings.clone(), store.clone(), endpoints);
-        Arc::new(Self { db, settings, http, store, backfill: tokio::sync::Mutex::new(()), providers })
+        Arc::new(Self { db, settings, http, api, store, backfill: tokio::sync::Mutex::new(()), providers })
     }
 
     /// Whether any metadata source is in use (TMDB, a TV source or MusicBrainz).
@@ -344,7 +347,18 @@ impl MetadataAgent {
         let mut done = 0u64;
         let mut stream = futures::stream::iter(items.into_iter().map(|item| async move {
             let id = item.id;
-            (id, self.refresh_candidate(item).await)
+            let result = self.refresh_candidate(item).await;
+            // Written here rather than in the loop below: while the loop
+            // waits, the stream is not polled, and another refresh in it may
+            // hold the (single) write connection.
+            if matches!(result, Err(TmdbError::NotFound)) {
+                let _ = sqlx::query("UPDATE items SET metadata_at = ? WHERE id = ?")
+                    .bind(-now())
+                    .bind(id)
+                    .execute(&self.db.write)
+                    .await;
+            }
+            (id, result)
         }))
         .buffer_unordered(4);
         while let Some((id, result)) = stream.next().await {
@@ -357,14 +371,7 @@ impl MetadataAgent {
                     tracing::error!("{source} rejected the API key; check Settings → Server");
                     bail!("invalid {source} API key");
                 }
-                Err(TmdbError::NotFound) => {
-                    tracing::debug!("no metadata match for item {id}");
-                    let _ = sqlx::query("UPDATE items SET metadata_at = ? WHERE id = ?")
-                        .bind(-now())
-                        .bind(id)
-                        .execute(&self.db.write)
-                        .await;
-                }
+                Err(TmdbError::NotFound) => tracing::debug!("no metadata match for item {id}"),
                 Err(TmdbError::Other(err)) => tracing::warn!("metadata for item {id} failed: {err:#}"),
             }
             if done % 5 == 0 || done == total {
@@ -410,17 +417,18 @@ impl MetadataAgent {
             } else {
                 self.show_credits(id, tmdb_id).await
             };
+            // Nothing to fetch: don't ask again. Written here, not in the
+            // loop below (see `refresh_library`).
+            if matches!(result, Err(TmdbError::NotFound)) {
+                let _ = people::replace(&self.db, id, &[]).await;
+            }
             (id, result)
         }))
         .buffer_unordered(4);
         while let Some((id, result)) = stream.next().await {
             match result {
-                Ok(()) => {}
+                Ok(()) | Err(TmdbError::NotFound) => {}
                 Err(TmdbError::Unauthorized) => return,
-                // Nothing to fetch: don't ask again.
-                Err(TmdbError::NotFound) => {
-                    let _ = people::replace(&self.db, id, &[]).await;
-                }
                 Err(TmdbError::Other(err)) => tracing::debug!("cast and crew of item {id} failed: {err:#}"),
             }
         }
@@ -676,7 +684,7 @@ impl MetadataAgent {
         }
         let mut req = self
             .http
-            .get(format!("{API}{path}"))
+            .get(format!("{}{path}", self.api))
             .query(query)
             .query(&[("language", settings.metadata_language.as_str())]);
         req = if key.starts_with("eyJ") { req.bearer_auth(key) } else { req.query(&[("api_key", key)]) };
