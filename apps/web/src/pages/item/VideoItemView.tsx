@@ -11,6 +11,7 @@ import { saveStreamChoice } from "@/lib/progress";
 import { usePlayItem } from "@/lib/usePlayItem";
 import { CastRow, CrewRows } from "./Credits";
 import { MediaInfo } from "./MediaInfo";
+import { MoreLikeThis } from "./MoreLikeThis";
 import {
   ContentRating,
   Genres,
@@ -237,6 +238,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
         </div>
       </div>
       <CastRow title={isEpisode ? "Guest Stars" : "Cast"} credits={item.cast} />
+      {isEpisode ? null : <MoreLikeThis item={item} />}
     </ItemPageShell>
   );
 }

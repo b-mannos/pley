@@ -27,6 +27,7 @@ pub mod playback;
 pub mod playlists;
 pub mod plex;
 pub mod ratings;
+pub mod related;
 pub mod settings;
 pub mod state;
 pub mod store;

@@ -71,7 +71,8 @@ function useFittedCards(aspect: CardAspect) {
   return useFittedRow(MIN_WIDTHS[aspect]);
 }
 
-export function HubRow({ hub }: { hub: Hub }) {
+/** `inset`: inside a page that already has the side margin (item pages). */
+export function HubRow({ hub, inset }: { hub: Hub; inset?: boolean }) {
   const aspect = hubAspect(hub);
   const { ref: scroller, width, perPage, gap } = useFittedCards(aspect);
   const [canLeft, setCanLeft] = useState(false);
@@ -99,7 +100,7 @@ export function HubRow({ hub }: { hub: Hub }) {
 
   return (
     <section>
-      <div className="mb-2 flex items-center justify-between gap-4 px-4 sm:px-8">
+      <div className={cn("mb-2 flex items-center justify-between gap-4", !inset && "px-4 sm:px-8")}>
         <h2 className="truncate text-lg font-semibold tracking-tight">
           {link ? (
             <Link to={link} className="transition-colors hover:text-accent">
@@ -126,7 +127,7 @@ export function HubRow({ hub }: { hub: Hub }) {
       {/* The page margin sits outside the scroll box (a scroll box shows content
           in its own padding, which would reveal a sliver of the next card); the
           4px inset only keeps hover outlines from being clipped. */}
-      <div className="px-4 sm:px-8">
+      <div className={inset ? undefined : "px-4 sm:px-8"}>
         <div
           ref={scroller}
           onScroll={update}

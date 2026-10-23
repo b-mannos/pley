@@ -102,6 +102,22 @@ pub async fn children(State(state): State<AppState>, user: AuthUser, Path(id): P
     Ok(Json(ItemList { items: rows.iter().map(ItemRow::to_summary).collect() }))
 }
 
+/// "More Like This" for movies and shows (`limit`, default 20).
+pub async fn related(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<i64>,
+    Query(query): Query<HashMap<String, String>>,
+) -> ApiResult<Json<ItemList>> {
+    let row = item_or_404(&state, user.id, id).await?;
+    if !matches!(row.kind.as_str(), "movie" | "show") {
+        return Ok(Json(ItemList { items: Vec::new() }));
+    }
+    let limit = query.get("limit").and_then(|l| l.parse::<usize>().ok()).unwrap_or(20).clamp(1, 60);
+    let rows = crate::related::related(&state.db, user.id, id, limit).await?;
+    Ok(Json(ItemList { items: rows.iter().map(ItemRow::to_summary).collect() }))
+}
+
 #[derive(Serialize)]
 pub struct MaybeItem {
     item: Option<ItemSummary>,

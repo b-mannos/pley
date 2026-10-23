@@ -47,6 +47,7 @@ export const keys = {
   next: (id: Id) => ["item", id, "next"] as const,
   search: (q: string, limit: number) => ["search", q, limit] as const,
   person: (id: Id) => ["person", id] as const,
+  related: (id: Id) => ["item", id, "related"] as const,
   history: (scope: HistoryScope, pageSize: number) => ["history", scope, pageSize] as const,
   activity: ["activity"] as const,
   users: ["users"] as const,
@@ -541,6 +542,17 @@ export function useDeleteHistory() {
   return useMutation({
     mutationFn: (id: Id) => api.del<void>(`/api/history/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["history"] }),
+  });
+}
+
+/** "More Like This" for a movie or show. */
+export function useRelated(id: Id, enabled = true) {
+  return useQuery({
+    queryKey: keys.related(id),
+    queryFn: ({ signal }) => api.get<{ items: ItemSummary[] }>(`/api/items/${id}/related`, { signal }),
+    select: (d) => d.items,
+    enabled,
+    staleTime: 5 * 60_000,
   });
 }
 

@@ -59,6 +59,8 @@ HLG and Dolby Vision.
   - Per-user progress, watched flags and play counts.
   - Watch history per user (with the device), and everyone's recent plays on
     the dashboard.
+  - Star ratings (half stars) per user, and "More Like This" on movies and
+    shows (shared collections, directors, cast, genres and period).
   - Continue Watching and Next Up, plus Recently Added, Recently Released and
     Top Rated hubs.
   - Full-text search.

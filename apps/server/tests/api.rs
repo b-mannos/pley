@@ -1174,3 +1174,39 @@ async fn pictures_are_stored_by_content_and_cleaned_up() {
         sqlx::query_scalar("SELECT fingerprint FROM media_files").fetch_all(&db.read).await.unwrap();
     assert!(fingerprints.iter().all(|f| f.as_ref().is_some_and(|f| f.len() == 16)), "{fingerprints:?}");
 }
+
+#[tokio::test]
+async fn more_like_this() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    for name in ["Alien (1979)", "Aliens (1986)", "Brazil (1985)", "Casablanca (1942)"] {
+        app.media_file(&format!("movies/{name}.mkv"), 1024);
+    }
+    let lib = app.library(&admin, "Movies", "movies", "movies").await;
+    let page = app.get(&format!("/api/libraries/{lib}/items"), &admin).await;
+    let id_of = |title: &str| {
+        page.body["items"].as_array().unwrap().iter().find(|i| i["title"] == title).unwrap()["id"].as_i64().unwrap()
+    };
+    let db = &app.state.db;
+    for (title, genres) in [
+        ("Alien", r#"["Horror","Science Fiction"]"#),
+        ("Aliens", r#"["Action","Science Fiction"]"#),
+        ("Brazil", r#"["Science Fiction","Comedy"]"#),
+        ("Casablanca", r#"["Drama","Romance"]"#),
+    ] {
+        sqlx::query("UPDATE items SET genres = ? WHERE id = ?")
+            .bind(genres)
+            .bind(id_of(title))
+            .execute(&db.write)
+            .await
+            .unwrap();
+    }
+    // Aliens shares a director with Alien in this test; Brazil only a genre.
+    let director = credit(578, "Ridley Scott", Role::Director, None, None);
+    people::replace(db, id_of("Alien"), std::slice::from_ref(&director)).await.unwrap();
+    people::replace(db, id_of("Aliens"), &[director]).await.unwrap();
+
+    let related = app.get(&format!("/api/items/{}/related", id_of("Alien")), &admin).await;
+    assert_eq!(related.status, StatusCode::OK, "{:?}", related.body);
+    assert_eq!(titles(&related.body["items"]), vec!["Aliens", "Brazil"], "Casablanca shares nothing");
+}

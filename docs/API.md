@@ -301,6 +301,7 @@ hubs, search, artwork, streams and the Plex-compatible API.
 | GET | `/api/items/{id}` | – | `ItemDetail` |
 | GET | `/api/items/{id}/children` | – | `{ items: ItemSummary[] }` (seasons of a show, episodes of a season, albums of an artist, tracks of an album), ordered by index |
 | GET | `/api/items/{id}/on-deck` | – | `{ item: ItemSummary \| null }` – for show/season: the episode to play when pressing *Play* (in progress, else next unwatched, else first) |
+| GET | `/api/items/{id}/related` | `limit` (default 20, max 60) | `{ items: ItemSummary[] }` – "More Like This" for movies and shows: the same library's titles sharing collections, directors, creators and top-billed cast, genres and a period, best first (empty for other kinds) |
 | GET | `/api/items/{id}/next` | – | `{ item: ItemSummary \| null }` – episode/track following this one (for autoplay) |
 | POST | `/api/items/{id}/progress` | `{ position_ms, duration_ms?, state: "playing"\|"paused"\|"stopped", session_id? }` | `204`. ≥ 90 % marks the item watched and clears the resume point. |
 | POST | `/api/items/{id}/watched` | – | `204` (containers: all leaves) |
