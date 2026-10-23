@@ -1,4 +1,4 @@
-import type { PlaybackMode } from "@/api/types";
+import type { MediaFile, PlaybackMode } from "@/api/types";
 
 export interface QualityOption {
   id: string;
@@ -23,21 +23,23 @@ export function qualityById(id: string | null | undefined): QualityOption {
   return QUALITIES.find((q) => q.id === id) ?? ORIGINAL;
 }
 
-export interface ModeOption {
-  id: PlaybackMode;
-  label: string;
-  hint: string;
+/**
+ * The qualities worth offering for a file: the original, then those that
+ * make it smaller (every one when its bitrate and size are unknown).
+ */
+export function qualitiesFor(file: Pick<MediaFile, "bitrate" | "height"> | null): QualityOption[] {
+  const kbps = file?.bitrate ? file.bitrate / 1000 : null;
+  const height = file?.height ?? null;
+  if (kbps == null && height == null) return QUALITIES;
+  return QUALITIES.filter(
+    (q) => q === ORIGINAL || (kbps != null && (q.maxBitrate ?? 0) < kbps) || (height != null && (q.maxHeight ?? 0) < height),
+  );
 }
 
-const AUTO: ModeOption = { id: "auto", label: "Auto", hint: "Best method for this browser" };
-
-export const PLAYBACK_MODES: ModeOption[] = [
-  AUTO,
-  { id: "direct", label: "Direct Play", hint: "The original file, unchanged" },
-  { id: "remux", label: "Remux", hint: "Repackaged, original video" },
-  { id: "transcode", label: "Transcode", hint: "Converted video, most compatible" },
-];
-
-export function modeById(id: string | null | undefined): ModeOption {
-  return PLAYBACK_MODES.find((m) => m.id === id) ?? AUTO;
+/**
+ * How a quality is asked for: the original lets the server choose (direct
+ * play when the browser can); any other quality is a transcode.
+ */
+export function modeFor(quality: QualityOption): PlaybackMode {
+  return quality.id === ORIGINAL.id ? "auto" : "transcode";
 }

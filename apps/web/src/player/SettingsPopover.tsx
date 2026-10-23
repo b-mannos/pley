@@ -1,17 +1,16 @@
 import { useRef, useState, type ReactNode } from "react";
 import { Check, ChevronLeft, ChevronRight, Settings2 } from "lucide-react";
-import type { MediaStream, PlaybackInfo, PlaybackMode } from "@/api/types";
+import type { MediaStream, PlaybackInfo } from "@/api/types";
 import { cn } from "@/lib/cn";
 import { streamLabel } from "@/lib/format";
 import { useDismiss } from "@/lib/hooks";
 import { Toggle } from "@/components/ui";
-import { modeById, PLAYBACK_MODES, QUALITIES } from "./quality";
+import type { QualityOption } from "./quality";
 
-type Panel = "root" | "quality" | "mode" | "audio" | "subtitles";
+type Panel = "root" | "quality" | "audio" | "subtitles";
 
 const PANEL_TITLE: Record<Exclude<Panel, "root">, string> = {
   quality: "Quality",
-  mode: "Playback",
   audio: "Audio",
   subtitles: "Subtitles",
 };
@@ -70,10 +69,12 @@ export interface SettingsPopoverProps {
   info: PlaybackInfo | null;
   /** Why the current method was chosen (server reason or a client-side note). */
   reason: string | null;
+  /** The qualities offered for this file, the original first. */
+  qualities: QualityOption[];
   quality: string;
+  /** What the original is ("1080p · 8.2 Mbps"). */
+  originalHint: string | null;
   onQuality: (id: string) => void;
-  mode: PlaybackMode;
-  onMode: (mode: PlaybackMode) => void;
   audioStreams: MediaStream[];
   audioIndex: number | null;
   onAudio: (index: number) => void;
@@ -86,7 +87,7 @@ export interface SettingsPopoverProps {
 }
 
 export function SettingsPopover(props: SettingsPopoverProps) {
-  const { open, setOpen, info, reason, quality, onQuality, mode, onMode } = props;
+  const { open, setOpen, info, reason, qualities, quality, originalHint, onQuality } = props;
   const { audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle, autoSkip, onAutoSkip } = props;
   const [panel, setPanel] = useState<Panel>("root");
   const ref = useRef<HTMLDivElement>(null);
@@ -97,7 +98,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
 
   const currentAudio = audioStreams.find((s) => s.index === audioIndex) ?? audioStreams.find((s) => s.default) ?? audioStreams[0];
   const currentSub = subtitleStreams.find((s) => s.index === subtitleIndex);
-  const qualityLabel = QUALITIES.find((q) => q.id === quality)?.label ?? "Original";
+  const qualityLabel = qualities.find((q) => q.id === quality)?.label ?? "Original";
 
   const close = () => {
     setOpen(false);
@@ -136,7 +137,6 @@ export function SettingsPopover(props: SettingsPopoverProps) {
               ) : null}
               <div className="my-1 h-px bg-white/10" />
               <Nav label="Quality" value={qualityLabel} onClick={() => setPanel("quality")} />
-              <Nav label="Playback" value={modeById(mode).label} onClick={() => setPanel("mode")} />
               {audioStreams.length > 1 ? (
                 <Nav label="Audio" value={currentAudio ? streamLabel(currentAudio) : "Default"} onClick={() => setPanel("audio")} />
               ) : null}
@@ -163,31 +163,17 @@ export function SettingsPopover(props: SettingsPopoverProps) {
               </button>
               <div className="my-1 h-px bg-white/10" />
               {panel === "quality"
-                ? QUALITIES.map((q) => (
+                ? qualities.map((q, i) => (
                     <Option
                       key={q.id}
                       selected={q.id === quality}
+                      hint={i === 0 ? (originalHint ?? undefined) : "Converted"}
                       onClick={() => {
                         onQuality(q.id);
                         close();
                       }}
                     >
                       {q.label}
-                    </Option>
-                  ))
-                : null}
-              {panel === "mode"
-                ? PLAYBACK_MODES.map((m) => (
-                    <Option
-                      key={m.id}
-                      selected={m.id === mode}
-                      hint={m.hint}
-                      onClick={() => {
-                        onMode(m.id);
-                        close();
-                      }}
-                    >
-                      {m.label}
                     </Option>
                   ))
                 : null}

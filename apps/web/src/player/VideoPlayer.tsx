@@ -27,13 +27,13 @@ import { Slider } from "@/components/Slider";
 import { useToast } from "@/components/Toast";
 import { canPlayNativeHls, videoCaps } from "@/lib/caps";
 import { cn } from "@/lib/cn";
-import { episodeLabel, formatClock, streamLabel } from "@/lib/format";
+import { episodeLabel, fileResolution, formatBitrate, formatClock, streamLabel } from "@/lib/format";
 import { loadHls } from "@/lib/hls";
 import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
 import { endSession, reportProgress, saveStreamChoice, startPlayback, stopSession } from "@/lib/progress";
 import { playUrl } from "@/lib/usePlayItem";
 import { nextInQueue, queuePlayUrl, type QueuePosition } from "@/lib/videoQueue";
-import { modeById, qualityById } from "./quality";
+import { modeFor, qualitiesFor, qualityById } from "./quality";
 import { ChaptersMenu } from "./ChaptersMenu";
 import { SeekBar } from "./SeekBar";
 import { METHOD_LABEL, SettingsPopover } from "./SettingsPopover";
@@ -90,8 +90,12 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const [audioIndex, setAudioIndex] = useState<number | null>(initialAudio ?? file?.selected_audio ?? null);
   const [subIndex, setSubIndex] = useState<number | null>(initialSub ?? file?.selected_subtitle ?? null);
   const [quality, setQuality] = useLocalStorage<string>("pley.quality", "original");
-  const [storedMode, setStoredMode] = useLocalStorage<PlaybackMode>("pley.playbackMode", "auto");
-  const mode = modeById(storedMode).id;
+  // One menu: the original plays the best way the browser can, every other
+  // quality is a transcode. A remembered quality this file doesn't need (an
+  // 8 Mbps cap on a 5 Mbps file) plays the original.
+  const qualities = useMemo(() => qualitiesFor(file), [file]);
+  const selectedQuality = qualities.find((q) => q.id === quality) ?? qualityById("original");
+  const mode = modeFor(selectedQuality);
   const [loadToken, setLoadToken] = useState(0);
 
   const selectedSub = subStreams.find((s) => s.index === subIndex) ?? null;
@@ -187,7 +191,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const video = videoRef.current;
     if (!video || !file) return;
     let cancelled = false;
-    const q = qualityById(quality);
+    const q = selectedQuality;
     const startSec = startMsRef.current / 1000;
     const requestMode = fallbackModeRef.current ?? mode;
     recoveries.current.network = 0;
@@ -348,7 +352,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item.id, file?.id, audioIndex, burnIndex, quality, mode, loadToken]);
+  }, [item.id, file?.id, audioIndex, burnIndex, selectedQuality.id, loadToken]);
 
   // Final teardown on unmount: report "stopped" and release the transcode.
   useEffect(() => {
@@ -607,16 +611,10 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     rememberTracks(index, subIndex);
   };
   const changeQuality = (id: string) => {
-    if (id === quality) return;
+    if (id === selectedQuality.id) return;
     startMsRef.current = currentMs();
     fallbackModeRef.current = null;
     setQuality(id);
-  };
-  const changeMode = (next: PlaybackMode) => {
-    if (next === mode) return;
-    startMsRef.current = currentMs();
-    fallbackModeRef.current = null;
-    setStoredMode(next);
   };
   const changeSubtitle = (index: number | null) => {
     const s = subStreams.find((x) => x.index === index);
@@ -982,10 +980,10 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             setOpen={setSettingsOpen}
             info={info}
             reason={methodReason}
-            quality={quality}
+            qualities={qualities}
+            quality={selectedQuality.id}
+            originalHint={[fileResolution(file), formatBitrate(file?.bitrate)].filter(Boolean).join(" · ") || null}
             onQuality={changeQuality}
-            mode={mode}
-            onMode={changeMode}
             audioStreams={audioStreams}
             audioIndex={audioIndex ?? info?.audio_index ?? null}
             onAudio={changeAudio}
