@@ -3,8 +3,10 @@ use std::path::PathBuf;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::truthy;
 use crate::access;
@@ -204,13 +206,50 @@ pub struct ItemsPage {
     items: Vec<ItemSummary>,
 }
 
+/// A tag for a library listing as `user` sees it, from what it depends on:
+/// the versions of the library's items and of the user's watch state (bumped
+/// by triggers on every change), the user's age limit, the query, and this
+/// server process (a newer version may answer differently).
+async fn listing_etag(state: &AppState, user: &AuthUser, library_id: i64, query: &str) -> ApiResult<String> {
+    let versions: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT scope, version FROM listing_versions
+         WHERE (scope = 'library' AND id = ?) OR (scope = 'user' AND id = ?) ORDER BY scope",
+    )
+    .bind(library_id)
+    .bind(user.id)
+    .fetch_all(&state.db.read)
+    .await?;
+    let mut hash = Sha256::new();
+    hash.update(format!(
+        "{}|{}|{library_id}|{query}|{versions:?}|{}|{:?}",
+        env!("CARGO_PKG_VERSION"),
+        crate::util::process_epoch(),
+        user.id,
+        (user.is_admin, user.max_age),
+    ));
+    Ok(format!("W/\"{}\"", hex::encode(&hash.finalize()[..12])))
+}
+
 pub async fn items(
     State(state): State<AppState>,
     user: AuthUser,
     Path(id): Path<i64>,
     Query(query): Query<HashMap<String, String>>,
-) -> ApiResult<Json<ItemsPage>> {
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+) -> ApiResult<Response> {
     let lib = visible_library(&state, &user, id).await?;
+    // Unchanged since the browser's copy: say so instead of sending it again
+    // (a whole library is several MB of JSON).
+    let etag = listing_etag(&state, &user, lib.id, uri.query().unwrap_or_default()).await?;
+    let cache = [(header::ETAG, etag.clone()), (header::CACHE_CONTROL, "private, no-cache".to_owned())];
+    let fresh = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|tags| tags.split(',').any(|tag| tag.trim() == etag));
+    if fresh {
+        return Ok((StatusCode::NOT_MODIFIED, cache).into_response());
+    }
     let sort = query
         .get("sort")
         .map(|s| SortKey::parse(s).ok_or_else(|| AppError::bad_request(format!("unknown sort '{s}'"))))
@@ -237,8 +276,10 @@ pub async fn items(
         limit: query.get("limit").and_then(|l| l.parse().ok()),
     };
     let (rows, total) = catalog::library_items(&state.db, user.id, &q).await?;
-    let items = rows.iter().map(|r| r.to_summary()).collect();
-    Ok(Json(ItemsPage { total, items }))
+    // Library grids show posters: the other pictures are left out.
+    let items =
+        rows.iter().map(|r| catalog::ItemSummary { backdrop_url: None, thumb_url: None, ..r.to_summary() }).collect();
+    Ok((cache, Json(ItemsPage { total, items })).into_response())
 }
 
 pub async fn filters(
@@ -267,46 +308,34 @@ pub struct Hubs {
 pub async fn hubs(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<Json<Hubs>> {
     let lib = visible_library(&state, &user, id).await?;
     let kind = lib.kind();
-    let mut hubs = Vec::new();
-    let summarize = |rows: Vec<catalog::ItemRow>| rows.iter().map(|r| r.to_summary()).collect::<Vec<_>>();
-    if kind != LibraryKind::Music {
-        let rows = catalog::continue_watching(&state.db, user.id, Some(lib.id), 20).await?;
-        hubs.push(Hub {
-            key: format!("continue_watching:{id}"),
-            title: "Continue Watching".into(),
-            library_id: Some(id),
-            items: summarize(rows),
-        });
-    }
-    let rows = catalog::recently_added(&state.db, user.id, lib.id, kind.as_str(), 30).await?;
-    let title = match kind {
+    let video = kind != LibraryKind::Music;
+    let top = kind.top_level_kind();
+    let db = &state.db;
+    // The hubs don't depend on each other: fetched at the same time.
+    let (continuing, added, released, rated) = tokio::try_join!(
+        // Video-only hubs are empty for music.
+        async { if video { catalog::continue_watching(db, user.id, Some(lib.id), 20).await } else { Ok(Vec::new()) } },
+        catalog::recently_added(db, user.id, lib.id, kind.as_str(), 30),
+        async { if video { catalog::recently_released(db, user.id, lib.id, top, 30).await } else { Ok(Vec::new()) } },
+        async { if video { catalog::top_rated(db, user.id, lib.id, top, 30).await } else { Ok(Vec::new()) } },
+    )?;
+    let added_title = match kind {
         LibraryKind::Music => "Recently Added Albums",
         LibraryKind::Shows => "Recently Added Shows",
         LibraryKind::Movies => "Recently Added",
     };
-    hubs.push(Hub {
-        key: format!("recently_added:{id}"),
+    let hub = |key: &str, title: &str, rows: Vec<catalog::ItemRow>| Hub {
+        key: format!("{key}:{id}"),
         title: title.into(),
         library_id: Some(id),
-        items: summarize(rows),
-    });
-    if kind != LibraryKind::Music {
-        let top = kind.top_level_kind();
-        let rows = catalog::recently_released(&state.db, user.id, lib.id, top, 30).await?;
-        hubs.push(Hub {
-            key: format!("recently_released:{id}"),
-            title: "Recently Released".into(),
-            library_id: Some(id),
-            items: summarize(rows),
-        });
-        let rows = catalog::top_rated(&state.db, user.id, lib.id, top, 30).await?;
-        hubs.push(Hub {
-            key: format!("top_rated:{id}"),
-            title: "Top Rated".into(),
-            library_id: Some(id),
-            items: summarize(rows),
-        });
-    }
+        items: rows.iter().map(|r| r.to_summary()).collect(),
+    };
+    let mut hubs = vec![
+        hub("continue_watching", "Continue Watching", continuing),
+        hub("recently_added", added_title, added),
+        hub("recently_released", "Recently Released", released),
+        hub("top_rated", "Top Rated", rated),
+    ];
     hubs.retain(|h| !h.items.is_empty());
     Ok(Json(Hubs { hubs }))
 }

@@ -567,3 +567,45 @@ async fn administration_endpoints() {
     assert_eq!(missing.status, StatusCode::BAD_REQUEST);
     assert_eq!(app.get("/api/fs?path=relative", &admin).await.status, StatusCode::BAD_REQUEST);
 }
+
+/// A conditional GET of `uri` with the tag of an earlier answer.
+async fn revalidate(app: &TestApp, uri: &str, token: &str, etag: &str) -> common::Reply {
+    app.call(Method::GET, uri, Some(token), None, &[("if-none-match", etag)]).await
+}
+
+#[tokio::test]
+async fn library_listings_answer_304_while_nothing_changed() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (bob, _) = app.user(&admin, "bob", json!({})).await;
+    app.media_file("movies/Alien (1979).mkv", 1024);
+    app.media_file("movies/Brazil (1985).mkv", 1024);
+    let lib = app.library(&admin, "Movies", "movies", "movies").await;
+    let uri = format!("/api/libraries/{lib}/items?sort=title");
+    let alien = app.ids(lib, &admin).await["Alien"];
+
+    let first = app.get(&uri, &admin).await;
+    assert_eq!(first.status, StatusCode::OK);
+    assert_eq!(first.headers["cache-control"], "private, no-cache");
+    // Grids show posters: the other pictures stay out of the listing.
+    assert!(first.body["items"][0].get("backdrop_url").is_none() && first.body["items"][0].get("thumb_url").is_none());
+    let etag = first.headers["etag"].to_str().unwrap().to_owned();
+    assert_eq!(revalidate(&app, &uri, &admin, &etag).await.status, StatusCode::NOT_MODIFIED);
+
+    // Someone else's watch state changes nothing for the admin...
+    app.post(&format!("/api/items/{alien}/watched"), &bob, json!({})).await;
+    assert_eq!(revalidate(&app, &uri, &admin, &etag).await.status, StatusCode::NOT_MODIFIED);
+    // ...their own does, and so does an edit of the library's items (even
+    // within the same second).
+    app.post(&format!("/api/items/{alien}/watched"), &admin, json!({})).await;
+    let changed = revalidate(&app, &uri, &admin, &etag).await;
+    assert_eq!(changed.status, StatusCode::OK);
+    assert_eq!(changed.body["items"][0]["user_state"]["watched"], json!(true));
+    let etag = changed.headers["etag"].to_str().unwrap().to_owned();
+    app.patch(&format!("/api/items/{alien}"), &admin, json!({"title": "Alien (Director's Cut)"})).await;
+    assert_eq!(revalidate(&app, &uri, &admin, &etag).await.status, StatusCode::OK);
+    // A different query is a different listing.
+    let other =
+        app.call(Method::GET, &format!("{uri}&order=desc"), Some(&admin), None, &[("if-none-match", &etag)]).await;
+    assert_eq!(other.status, StatusCode::OK);
+}

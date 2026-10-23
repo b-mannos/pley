@@ -120,11 +120,16 @@ impl TrickplayService {
         if !self.settings.get().seek_previews || file.video_codec.is_none() || self.index(file).is_some() {
             return;
         }
-        if file.fingerprint.is_some() && self.failed.lock().get(&file.id) == file.fingerprint.as_ref() {
+        self.enqueue(file.id, file.fingerprint.as_deref());
+    }
+
+    /// Queue a file without previews unless it is queued or failed.
+    fn enqueue(&self, file_id: i64, fingerprint: Option<&str>) {
+        if fingerprint.is_some() && self.failed.lock().get(&file_id).map(String::as_str) == fingerprint {
             return;
         }
-        if self.pending.lock().insert(file.id) {
-            let _ = self.queue.send(file.id);
+        if self.pending.lock().insert(file_id) {
+            let _ = self.queue.send(file_id);
         }
     }
 
@@ -135,16 +140,26 @@ impl TrickplayService {
         if !settings.seek_previews || !settings.previews_in_background {
             return;
         }
-        let files = match catalog::video_files(&self.db).await {
+        let files = match catalog::video_file_ids(&self.db).await {
             Ok(files) => files,
             Err(err) => {
                 tracing::warn!("listing files for seek previews: {err}");
                 return;
             }
         };
+        // Which ones have previews is a question for the disk (one look per
+        // file): asked off the async workers.
+        let store = self.store.clone();
+        let missing = tokio::task::spawn_blocking(move || {
+            let done =
+                |fp: &str| store.media_dir(fp).is_some_and(|dir| dir.join("trickplay").join("index.json").is_file());
+            files.into_iter().filter(|(_, fp)| !fp.as_deref().is_some_and(done)).collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_default();
         let before = self.pending();
-        for file in &files {
-            self.request(file);
+        for (id, fingerprint) in &missing {
+            self.enqueue(*id, fingerprint.as_deref());
         }
         let queued = self.pending().saturating_sub(before);
         if queued > 0 {

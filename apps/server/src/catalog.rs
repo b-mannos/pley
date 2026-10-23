@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+use futures::TryStreamExt;
 use pley_transcoder_api::{MediaInfo, MediaStream};
 use serde::Serialize;
 use sqlx::FromRow;
@@ -389,28 +390,32 @@ pub async fn item(db: &Db, user_id: i64, item_id: i64) -> sqlx::Result<Option<It
 
 /// Rows for `ids`, in the order given.
 /// Files of movies and episodes, newest first.
-pub async fn video_files(db: &Db) -> sqlx::Result<Vec<FileRow>> {
-    sqlx::query_as(&format!(
-        "{FILE_SELECT} WHERE video_codec IS NOT NULL
-         AND item_id IN (SELECT id FROM items WHERE kind IN ('movie', 'episode')) ORDER BY added_at DESC"
-    ))
+/// Movie and episode files with video, newest first: id and fingerprint
+/// (not the probe data of every file).
+pub async fn video_file_ids(db: &Db) -> sqlx::Result<Vec<(i64, Option<String>)>> {
+    sqlx::query_as(
+        "SELECT id, fingerprint FROM media_files WHERE video_codec IS NOT NULL
+         AND item_id IN (SELECT id FROM items WHERE kind IN ('movie', 'episode')) ORDER BY added_at DESC",
+    )
     .fetch_all(&db.read)
     .await
 }
 
 pub async fn items_by_ids(db: &Db, user_id: i64, ids: &[i64]) -> sqlx::Result<Vec<ItemRow>> {
-    if ids.is_empty() {
-        return Ok(Vec::new());
+    // SQLite takes at most 32766 parameters per statement.
+    const CHUNK: usize = 4096;
+    let mut by_id: HashMap<i64, ItemRow> = HashMap::with_capacity(ids.len());
+    for chunk in ids.chunks(CHUNK) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let sql = format!("{SUMMARY_SELECT} WHERE {VISIBLE} AND i.id IN ({placeholders})");
+        let mut query = sqlx::query_as::<_, ItemRow>(&sql).bind(user_id);
+        for id in chunk {
+            query = query.bind(id);
+        }
+        by_id.extend(query.fetch_all(&db.read).await?.into_iter().map(|r| (r.id, r)));
     }
-    let placeholders = vec!["?"; ids.len()].join(",");
-    let sql = format!("{SUMMARY_SELECT} WHERE {VISIBLE} AND i.id IN ({placeholders})");
-    let mut query = sqlx::query_as::<_, ItemRow>(&sql).bind(user_id);
-    for id in ids {
-        query = query.bind(id);
-    }
-    let rows = query.fetch_all(&db.read).await?;
-    let mut by_id: HashMap<i64, ItemRow> = rows.into_iter().map(|r| (r.id, r)).collect();
-    Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
+    // In the order asked for, repeats included (a playlist can hold an item twice).
+    Ok(ids.iter().filter_map(|id| by_id.get(id).cloned()).collect())
 }
 
 /// Seasons, episodes, albums or tracks under an item (not its extras).
@@ -488,14 +493,16 @@ impl SortKey {
     }
 
     /// `ORDER BY` clause: NULLs last in both directions, title as tiebreaker.
-    /// Plain non-null columns stay bare so SQLite can walk an index instead of
-    /// sorting the whole library.
+    /// Columns stay bare where possible so SQLite can walk an index instead
+    /// of sorting the whole library: it already puts NULLs last going down,
+    /// so only ascending sorts of nullable columns need telling.
     fn order_by(self, kind: &str, descending: bool) -> String {
         let dir = if descending { "DESC" } else { "ASC" };
         match self.column(kind) {
             ("i.sort_title", _) => format!("i.sort_title {dir}"),
             (col, false) => format!("{col} {dir}, i.sort_title ASC"),
-            (col, true) => format!("({col}) IS NULL, {col} {dir}, i.sort_title ASC"),
+            (col, true) if descending => format!("{col} DESC, i.sort_title ASC"),
+            (col, true) => format!("({col}) IS NULL, {col} ASC, i.sort_title ASC"),
         }
     }
 }
@@ -535,7 +542,10 @@ impl<'a> LibraryQuery<'a> {
 pub async fn library_items(db: &Db, user_id: i64, q: &LibraryQuery<'_>) -> sqlx::Result<(Vec<ItemRow>, i64)> {
     let mut filter = String::from(" AND i.library_id = ? AND i.kind = ?");
     if q.genre.is_some() {
-        filter.push_str(" AND EXISTS (SELECT 1 FROM json_each(i.genres) g WHERE g.value = ?)");
+        filter.push_str(
+            " AND EXISTS (SELECT 1 FROM item_genres g
+                          WHERE g.genre = ? AND g.library_id = i.library_id AND g.kind = i.kind AND g.item_id = i.id)",
+        );
     }
     if q.year.is_some() {
         filter.push_str(" AND i.year = ?");
@@ -600,8 +610,9 @@ pub async fn library_filters(
     kind: &str,
 ) -> sqlx::Result<(Vec<String>, Vec<i64>)> {
     let genres: Vec<String> = sqlx::query_scalar(&format!(
-        "{ME_CTE} SELECT DISTINCT g.value FROM {VISIBLE_ITEMS} JOIN json_each(i.genres) g
-         WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? AND i.genres IS NOT NULL ORDER BY g.value COLLATE NOCASE"
+        "{ME_CTE} SELECT DISTINCT g.genre FROM item_genres g JOIN items i ON i.id = g.item_id
+             LEFT JOIN items p ON p.id = i.parent_id LEFT JOIN items gp ON gp.id = i.grandparent_id
+         WHERE g.library_id = ? AND g.kind = ? AND {VISIBLE} ORDER BY g.genre COLLATE NOCASE"
     ))
     .bind(user_id)
     .bind(library_id)
@@ -860,27 +871,65 @@ fn next_after_last_watched(episodes: &[EpisodeState]) -> Option<i64> {
     episodes[last + 1..].iter().find(|e| !e.watched).filter(|e| e.position_ms == 0).map(|e| e.id)
 }
 
+/// Episodes of several shows (as [`show_episodes`]), in one query.
+async fn shows_episodes(db: &Db, user_id: i64, show_ids: &[i64]) -> sqlx::Result<HashMap<i64, Vec<EpisodeState>>> {
+    let mut out: HashMap<i64, Vec<EpisodeState>> = HashMap::new();
+    if show_ids.is_empty() {
+        return Ok(out);
+    }
+    let placeholders = vec!["?"; show_ids.len()].join(",");
+    let sql = format!(
+        "SELECT e.grandparent_id, e.id, COALESCE(s.watched, 0), COALESCE(s.position_ms, 0), s.last_played_at
+         FROM items e JOIN items se ON se.id = e.parent_id
+         LEFT JOIN user_item_state s ON s.item_id = e.id AND s.user_id = ?
+         WHERE e.grandparent_id IN ({placeholders}) AND e.kind = 'episode'
+         ORDER BY e.grandparent_id, se.idx = 0, se.idx, e.idx"
+    );
+    let mut query = sqlx::query_as::<_, (i64, i64, bool, i64, Option<i64>)>(&sql).bind(user_id);
+    for id in show_ids {
+        query = query.bind(id);
+    }
+    for (show, id, watched, position_ms, last_played_at) in query.fetch_all(&db.read).await? {
+        out.entry(show).or_default().push(EpisodeState { id, watched, position_ms, last_played_at });
+    }
+    Ok(out)
+}
+
 /// "Next up" episodes for shows with recent activity: (episode id, activity time).
 pub async fn next_up(db: &Db, user_id: i64, library_id: Option<i64>, limit: i64) -> sqlx::Result<Vec<(i64, i64)>> {
+    // The user's plays newest first (an index), down to enough shows: a
+    // show's first sighting is its latest activity.
     let scope = if library_id.is_some() { "AND e.library_id = ?" } else { "" };
     let sql = format!(
-        "SELECT e.grandparent_id, MAX(s.last_played_at) FROM user_item_state s JOIN items e ON e.id = s.item_id
-         WHERE s.user_id = ? AND e.kind = 'episode' AND s.last_played_at IS NOT NULL {scope}
-         GROUP BY e.grandparent_id ORDER BY 2 DESC LIMIT ?"
+        "SELECT e.grandparent_id, s.last_played_at FROM user_item_state s JOIN items e ON e.id = s.item_id
+         WHERE s.user_id = ? AND s.last_played_at IS NOT NULL AND e.kind = 'episode'
+           AND e.grandparent_id IS NOT NULL {scope}
+         ORDER BY s.last_played_at DESC"
     );
     let mut q = sqlx::query_as::<_, (i64, i64)>(&sql).bind(user_id);
     if let Some(lib) = library_id {
         q = q.bind(lib);
     }
-    let shows = q.bind(limit * 2).fetch_all(&db.read).await?;
+    let mut shows: Vec<(i64, i64)> = Vec::new();
+    let mut plays = q.fetch(&db.read);
+    while let Some((show, at)) = plays.try_next().await? {
+        if !shows.iter().any(|(s, _)| *s == show) {
+            shows.push((show, at));
+            if shows.len() as i64 >= limit * 2 {
+                break;
+            }
+        }
+    }
+    drop(plays);
+    let ids: Vec<i64> = shows.iter().map(|(show, _)| *show).collect();
+    let episodes = shows_episodes(db, user_id, &ids).await?;
     let mut out = Vec::new();
     for (show_id, activity) in shows {
-        let episodes = show_episodes(db, user_id, show_id).await?;
-        if let Some(next) = next_after_last_watched(&episodes) {
+        if let Some(next) = episodes.get(&show_id).and_then(|e| next_after_last_watched(e)) {
             out.push((next, activity));
-        }
-        if out.len() as i64 >= limit {
-            break;
+            if out.len() as i64 >= limit {
+                break;
+            }
         }
     }
     Ok(out)
@@ -964,14 +1013,24 @@ pub async fn recently_added(
 ) -> sqlx::Result<Vec<ItemRow>> {
     match library_kind {
         "shows" => {
-            let ids: Vec<i64> = sqlx::query_scalar(
-                "SELECT grandparent_id FROM items WHERE library_id = ? AND kind = 'episode' AND grandparent_id IS NOT NULL
-                 GROUP BY grandparent_id ORDER BY MAX(added_at) DESC LIMIT ?",
+            // Newest episodes first (an index), down to enough shows: a
+            // show's first sighting is its newest episode.
+            let mut episodes = sqlx::query_scalar::<_, i64>(
+                "SELECT grandparent_id FROM items
+                 WHERE library_id = ? AND kind = 'episode' AND grandparent_id IS NOT NULL ORDER BY added_at DESC",
             )
             .bind(library_id)
-            .bind(limit)
-            .fetch_all(&db.read)
-            .await?;
+            .fetch(&db.read);
+            let mut ids: Vec<i64> = Vec::new();
+            while let Some(show) = episodes.try_next().await? {
+                if !ids.contains(&show) {
+                    ids.push(show);
+                    if ids.len() as i64 >= limit {
+                        break;
+                    }
+                }
+            }
+            drop(episodes);
             items_by_ids(db, user_id, &ids).await
         }
         kind => {

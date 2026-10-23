@@ -5,6 +5,7 @@
 use std::io::{BufRead, Cursor, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use dashmap::DashMap;
@@ -45,7 +46,13 @@ pub struct Images {
     limiter: Semaphore,
     /// Per-item locks so concurrent requests don't generate the same artwork twice.
     generating: DashMap<i64, Arc<tokio::sync::Mutex<()>>>,
+    /// Frame grabs that failed lately, by file and version: not run again
+    /// on every request for the picture.
+    failed_grabs: DashMap<(i64, String), Instant>,
 }
+
+/// How long a failed frame grab is not tried again.
+const GRAB_RETRY: Duration = Duration::from_secs(60 * 60);
 
 pub struct ImageBytes {
     pub bytes: Bytes,
@@ -56,7 +63,19 @@ pub struct ImageBytes {
 impl Images {
     pub fn new(cache_dir: PathBuf) -> Self {
         let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(2, 8);
-        Self { cache_dir, limiter: Semaphore::new(workers), generating: DashMap::new() }
+        Self { cache_dir, limiter: Semaphore::new(workers), generating: DashMap::new(), failed_grabs: DashMap::new() }
+    }
+
+    /// Whether the frame grab of this file version failed within the hour.
+    pub fn grab_failed_lately(&self, file_id: i64, fingerprint: &str) -> bool {
+        self.failed_grabs.get(&(file_id, fingerprint.to_owned())).is_some_and(|at| at.elapsed() < GRAB_RETRY)
+    }
+
+    pub fn grab_failed(&self, file_id: i64, fingerprint: &str) {
+        if self.failed_grabs.len() > 10_000 {
+            self.failed_grabs.retain(|_, at| at.elapsed() < GRAB_RETRY);
+        }
+        self.failed_grabs.insert((file_id, fingerprint.to_owned()), Instant::now());
     }
 
     pub fn generation_lock(&self, item_id: i64) -> Arc<tokio::sync::Mutex<()>> {

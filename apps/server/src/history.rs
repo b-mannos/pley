@@ -123,7 +123,14 @@ pub async fn list(db: &Db, viewer_id: i64, filter: &Filter) -> sqlx::Result<(Vec
     let total = if filter.offset == 0 && (rows.len() as i64) < filter.limit {
         rows.len() as i64
     } else {
-        let sql = format!("{} SELECT COUNT(*) {from}", catalog::ME_CTE);
+        // Without the users join, which made SQLite read every play first.
+        let sql = format!(
+            "{} SELECT COUNT(*) FROM play_history h JOIN items i ON i.id = h.item_id
+                 LEFT JOIN items p ON p.id = i.parent_id LEFT JOIN items gp ON gp.id = i.grandparent_id
+             WHERE {}{conditions}",
+            catalog::ME_CTE,
+            catalog::VISIBLE
+        );
         bind_filter!(sqlx::query_scalar::<_, i64>(&sql)).fetch_one(&db.read).await?
     };
 

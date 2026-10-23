@@ -370,28 +370,47 @@ async fn generate_thumb(state: &AppState, item_id: i64) -> ApiResult<PathBuf> {
     if target.is_file() {
         return Ok(target);
     }
-    let lock = state.images.generation_lock(file.id);
-    let _guard = lock.lock().await;
-    if target.is_file() {
-        return Ok(target);
+    // A file that can't be grabbed isn't run through ffmpeg on every request.
+    if state.images.grab_failed_lately(file.id, &fingerprint) {
+        return Err(AppError::not_found("no frame grab"));
     }
-    let hdr = file.media_info().and_then(|m| m.video().map(|v| v.dynamic_range().is_hdr())).unwrap_or(false);
-    let bytes = state
-        .transcoder
-        .thumbnail(&ThumbnailRequest {
-            path: file.path.clone(),
-            time_ms: None,
-            width: Some(640),
-            duration_ms: file.duration_ms,
-            hdr,
-        })
-        .await?;
-    tokio::fs::create_dir_all(&dir).await?;
-    let tmp = dir.join("thumb.jpg.tmp");
-    tokio::fs::write(&tmp, &bytes).await?;
-    tokio::fs::rename(&tmp, &target).await?;
+    let lock = state.images.generation_lock(file.id);
+    let made: ApiResult<()> = async {
+        let _guard = lock.lock().await;
+        if target.is_file() {
+            return Ok(());
+        }
+        let hdr = file.media_info().and_then(|m| m.video().map(|v| v.dynamic_range().is_hdr())).unwrap_or(false);
+        let bytes = state
+            .transcoder
+            .thumbnail(&ThumbnailRequest {
+                path: file.path.clone(),
+                time_ms: None,
+                width: Some(640),
+                duration_ms: file.duration_ms,
+                hdr,
+            })
+            .await?;
+        tokio::fs::create_dir_all(&dir).await?;
+        let tmp = dir.join("thumb.jpg.tmp");
+        tokio::fs::write(&tmp, &bytes).await?;
+        tokio::fs::rename(&tmp, &target).await?;
+        Ok(())
+    }
+    .await;
+    // Our handle goes first: the lock is dropped from the map once unused.
+    drop(lock);
     state.images.release_generation_lock(file.id);
-    Ok(target)
+    match made {
+        Ok(()) => Ok(target),
+        Err(err) => {
+            // Not when the transcoder is down: that isn't the file's fault.
+            if state.transcoder.is_available() {
+                state.images.grab_failed(file.id, &fingerprint);
+            }
+            Err(err)
+        }
+    }
 }
 
 /// The cover embedded in an album's tracks, stored as the album's poster.

@@ -769,7 +769,8 @@ fn write_cached(dir: &Path, path: &Path, file_id: i64, fp: &Fp) {
         return;
     }
     let keep: &str = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-    let version_prefix = keep.splitn(4, '_').take(3).collect::<Vec<_>>().join("_");
+    // "{file}_{size}_{mtime}_": the separator keeps mtime 55 from matching 555.
+    let version_prefix = format!("{}_", keep.splitn(4, '_').take(3).collect::<Vec<_>>().join("_"));
     let file_prefix = format!("{file_id}_");
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {

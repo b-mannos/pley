@@ -14,6 +14,11 @@ use serde::de::DeserializeOwned;
 use crate::db::Db;
 use crate::library::{LibraryKind, LibraryRow};
 use crate::overrides::RATING_LOCKED;
+
+/// Items looked up at the same time. Each lookup makes a few requests (and
+/// may fetch two pictures); TMDB allows about 40 a second and 429 answers
+/// are retried with a pause.
+const LOOKUPS: usize = 8;
 use crate::people;
 use crate::providers::{Endpoints, ProviderError, Providers, TvSource};
 use crate::settings::SettingsStore;
@@ -361,7 +366,7 @@ impl MetadataAgent {
             }
             (id, result)
         }))
-        .buffer_unordered(4);
+        .buffer_unordered(LOOKUPS);
         while let Some((id, result)) = stream.next().await {
             done += 1;
             match result {
@@ -425,7 +430,7 @@ impl MetadataAgent {
             }
             (id, result)
         }))
-        .buffer_unordered(4);
+        .buffer_unordered(LOOKUPS);
         while let Some((id, result)) = stream.next().await {
             match result {
                 Ok(()) | Err(TmdbError::NotFound) => {}
@@ -966,10 +971,14 @@ fn year_of(date: &str) -> Option<i64> {
 /// Pick the result whose title and year match best (popularity breaks ties).
 fn best_match(results: &[SearchResult], title: &str, year: Option<i64>) -> Option<i64> {
     let wanted = normalize_key(title);
+    if wanted.is_empty() {
+        return None;
+    }
     results
         .iter()
         .take(10)
-        .map(|r| {
+        .enumerate()
+        .filter_map(|(rank, r)| {
             let titles = [r.title.as_deref(), r.original_title.as_deref()];
             let title_score = titles
                 .iter()
@@ -991,7 +1000,10 @@ fn best_match(results: &[SearchResult], title: &str, year: Option<i64>) -> Optio
                 (Some(_), Some(_)) => -1.0,
                 _ => 0.0,
             };
-            (r.id, title_score + year_score + r.popularity.min(100.0) / 1000.0)
+            // A result needs a title that matches, or to be TMDB's first
+            // answer for the right year (its title may be in another language).
+            let plausible = title_score > 0.0 || (rank == 0 && year_score >= 2.0);
+            plausible.then(|| (r.id, title_score + year_score + r.popularity.min(100.0) / 1000.0))
         })
         .max_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(id, _)| id)
@@ -1023,5 +1035,17 @@ mod tests {
         assert_eq!(best_match(&results, "The Thing", Some(1982)), Some(2));
         assert_eq!(best_match(&results, "The Thing", None), Some(1));
         assert_eq!(best_match(&[], "x", None), None);
+    }
+
+    #[test]
+    fn refuses_results_that_do_not_match() {
+        let results = vec![result(7, "Something Else Entirely", "2019-03-01", 90.0)];
+        // No title in common and no year to go by: no match (not the most popular).
+        assert_eq!(best_match(&results, "Family Trip", None), None);
+        assert_eq!(best_match(&results, "Family Trip", Some(2015)), None);
+        // TMDB's first answer for the exact year is trusted (localized titles).
+        assert_eq!(best_match(&results, "Family Trip", Some(2019)), Some(7));
+        // A title made only of symbols matches nothing.
+        assert_eq!(best_match(&[result(8, "Anything", "2001-01-01", 1.0)], "!!!", None), None);
     }
 }

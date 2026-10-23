@@ -2,6 +2,13 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Current unix time in seconds.
+/// When this server process started (unix ms): part of tags that a newer
+/// version may answer differently.
+pub fn process_epoch() -> i64 {
+    static EPOCH: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    *EPOCH.get_or_init(now_ms)
+}
+
 pub fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or_default()
 }

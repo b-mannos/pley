@@ -1,6 +1,7 @@
 //! "More Like This": movies or shows of the same library that share
-//! collections (sequels), directors, creators and top-billed cast, genres,
-//! and a period with an item. Scored in one query; access rules apply.
+//! collections (sequels), directors, creators and top-billed cast, genres
+//! (the `item_genres` table), and a period with an item. Scored in one
+//! query; access rules apply.
 
 use crate::catalog::{self, ItemRow};
 use crate::db::Db;
@@ -11,13 +12,13 @@ const CANDIDATES: i64 = 120;
 /// Items like `item_id`, best first.
 pub async fn related(db: &Db, user_id: i64, item_id: i64, limit: usize) -> sqlx::Result<Vec<ItemRow>> {
     let ids: Vec<i64> = sqlx::query_scalar(
-        "WITH target AS (SELECT id, library_id, kind, year, genres FROM items WHERE id = ?1),
+        "WITH target AS (SELECT id, library_id, kind, year FROM items WHERE id = ?1),
          genres AS (
-             SELECT i.id, COUNT(*) * 2.0 AS score
-             FROM items i, json_each(i.genres) g, target t
-             WHERE i.library_id = t.library_id AND i.kind = t.kind AND i.id != t.id
-               AND g.value IN (SELECT value FROM json_each(t.genres))
-             GROUP BY i.id),
+             SELECT g.item_id AS id, COUNT(*) * 2.0 AS score
+             FROM item_genres tg JOIN item_genres g
+               ON g.genre = tg.genre AND g.library_id = tg.library_id AND g.kind = tg.kind AND g.item_id != tg.item_id
+             WHERE tg.item_id = ?1
+             GROUP BY g.item_id),
          people AS (
              SELECT b.item_id AS id,
                     SUM(CASE WHEN a.role IN ('director', 'creator') THEN 3.0 ELSE 1.5 END) AS score
@@ -34,7 +35,9 @@ pub async fn related(db: &Db, user_id: i64, item_id: i64, limit: usize) -> sqlx:
              SELECT id, SUM(score) AS score
              FROM (SELECT * FROM genres UNION ALL SELECT * FROM people UNION ALL SELECT * FROM collections)
              GROUP BY id)
-         SELECT s.id FROM scores s JOIN items i ON i.id = s.id, target t
+         -- CROSS JOIN fixes the order: look up the scored items, rather than
+         -- walk the whole library and probe the scores.
+         SELECT s.id FROM scores s CROSS JOIN target t CROSS JOIN items i ON i.id = s.id
          WHERE i.library_id = t.library_id AND i.kind = t.kind
          ORDER BY s.score + CASE WHEN i.year IS NULL OR t.year IS NULL THEN 0
                                  ELSE MAX(0.0, 2.0 - ABS(i.year - t.year) / 5.0) END DESC,

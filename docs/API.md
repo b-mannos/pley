@@ -25,7 +25,9 @@ Non-2xx responses carry:
 ```
 
 `code` is one of `bad_request`, `unauthorized`, `forbidden`, `not_found`,
-`conflict`, `unavailable`, `internal`.
+`conflict`, `too_many_requests` (sign-in, PIN and password attempts:
+after 5 failures in 15 minutes, counting attempts still being checked),
+`unavailable`, `internal`.
 
 ---
 
@@ -292,7 +294,7 @@ hubs, search, artwork, streams and the Plex-compatible API.
 | DELETE | `/api/libraries/{id}` *(admin)* | – | `204` |
 | POST | `/api/libraries/{id}/scan` *(admin)* | `{ force?: boolean }` (force = re-probe files and refresh metadata) | `202` |
 | POST | `/api/libraries/scan` *(admin)* | – | `202` (scan all) |
-| GET | `/api/libraries/{id}/items` | query: `sort=title\|year\|added\|rating\|user_rating\|release\|duration\|last_played` (default `title`), `order=asc\|desc`, `watched=true\|false`, `genre=<name>`, `year=<yyyy>`, `offset`, `limit` | `{ total: number, items: ItemSummary[] }` — top-level items only; `total` counts every match, not just the page; `watched=true` matches shows whose every episode is watched |
+| GET | `/api/libraries/{id}/items` | query: `sort=title\|year\|added\|rating\|user_rating\|release\|duration\|last_played` (default `title`), `order=asc\|desc`, `watched=true\|false`, `genre=<name>`, `year=<yyyy>`, `offset`, `limit` | `{ total: number, items: ItemSummary[] }` — top-level items only; `total` counts every match, not just the page; `watched=true` matches shows whose every episode is watched. Items leave out `backdrop_url` and `thumb_url` (grids show posters). Answers carry an `ETag` and `Cache-Control: private, no-cache`; `If-None-Match` with the same tag answers `304` while the library, the user's watch state and their access are unchanged |
 | GET | `/api/libraries/{id}/filters` | – | `{ genres: string[], years: number[] }` |
 | GET | `/api/libraries/{id}/hubs` | – | `{ hubs: Hub[] }` (continue watching, recently added, recently released, top rated – empty hubs omitted) |
 
