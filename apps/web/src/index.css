@@ -139,12 +139,54 @@
   animation: var(--animate-shimmer);
 }
 
-/* Subtitles rendered by the browser for <track> elements. */
-video::cue {
-  background-color: rgba(0, 0, 0, 0.62);
+/*
+ * Subtitles as pley draws them (player/SubtitleOverlay.tsx), as Plex does:
+ * white, a little heavy, a dark outline all around and a soft shadow, no box
+ * unless asked for. Sizes are shares of the player's height.
+ */
+.subtitle-overlay {
+  container-type: size;
+}
+
+.subtitle-cue {
+  display: block;
+  max-width: 100%;
+  padding: 0.04em 0.28em;
+  border-radius: 0.12em;
   color: #fff;
   font-family: var(--font-sans);
-  font-size: clamp(16px, 2.4vw, 34px);
-  line-height: 1.3;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  font-weight: 600;
+  line-height: 1.22;
+  text-align: center;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  text-shadow:
+    0.05em 0 0 #000,
+    -0.05em 0 0 #000,
+    0 0.05em 0 #000,
+    0 -0.05em 0 #000,
+    0.036em 0.036em 0 #000,
+    -0.036em 0.036em 0 #000,
+    0.036em -0.036em 0 #000,
+    -0.036em -0.036em 0 #000,
+    0 0.06em 0.3em rgb(0 0 0 / 0.75);
+}
+
+.subtitle-cue[data-background="box"] {
+  background: rgb(0 0 0 / 0.66);
+  text-shadow: 0 0.04em 0.12em rgb(0 0 0 / 0.8);
+}
+
+/* The browser's own drawing, where it still draws them (iPhone fullscreen). */
+video::cue {
+  background-color: transparent;
+  color: #fff;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  text-shadow:
+    0.05em 0 0 #000,
+    -0.05em 0 0 #000,
+    0 0.05em 0 #000,
+    0 -0.05em 0 #000,
+    0 0.06em 0.3em rgb(0 0 0 / 0.75);
 }

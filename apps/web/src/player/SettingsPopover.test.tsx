@@ -1,8 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { MediaStream } from "@/api/types";
 import { qualitiesFor } from "./quality";
 import { SettingsPopover, type SettingsPopoverProps } from "./SettingsPopover";
+import { DEFAULT_SUBTITLE_STYLE } from "./subtitles";
 
 function renderPopover(overrides: Partial<SettingsPopoverProps> = {}) {
   const props: SettingsPopoverProps = {
@@ -20,6 +22,8 @@ function renderPopover(overrides: Partial<SettingsPopoverProps> = {}) {
     subtitleStreams: [],
     subtitleIndex: null,
     onSubtitle: vi.fn(),
+    subtitleStyle: DEFAULT_SUBTITLE_STYLE,
+    onSubtitleStyle: vi.fn(),
     autoSkip: false,
     onAutoSkip: vi.fn(),
     ...overrides,
@@ -51,5 +55,31 @@ describe("SettingsPopover", () => {
     await user.click(screen.getByRole("menuitemradio", { name: /4 Mbps/ }));
     expect(props.onQuality).toHaveBeenCalledWith("4m");
     expect(props.setOpen).toHaveBeenCalledWith(false);
+  });
+
+  const english: MediaStream = {
+    index: 3,
+    kind: "subtitle",
+    codec: "subrip",
+    language: "eng",
+    title: null,
+    default: false,
+    forced: false,
+    text_based: true,
+  };
+
+  it("styles text subtitles: their size and background", async () => {
+    const user = userEvent.setup();
+    const props = renderPopover({ subtitleStreams: [english], subtitleIndex: 3 });
+    await user.click(screen.getByRole("button", { name: /Subtitle style\s*Normal/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Large" }));
+    expect(props.onSubtitleStyle).toHaveBeenCalledWith({ size: "large", background: "none" });
+    await user.click(screen.getByRole("menuitemradio", { name: "Dark box" }));
+    expect(props.onSubtitleStyle).toHaveBeenCalledWith({ size: "normal", background: "box" });
+  });
+
+  it("has no style to choose without text subtitles", () => {
+    renderPopover({ subtitleStreams: [{ ...english, codec: "hdmv_pgs_subtitle", text_based: false }] });
+    expect(screen.queryByRole("button", { name: /Subtitle style/ })).not.toBeInTheDocument();
   });
 });

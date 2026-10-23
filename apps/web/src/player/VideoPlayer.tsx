@@ -38,6 +38,8 @@ import { ChaptersMenu } from "./ChaptersMenu";
 import { SeekBar } from "./SeekBar";
 import { METHOD_LABEL, SettingsPopover } from "./SettingsPopover";
 import { fileMarkers, SkipButton, useSkipMarkers } from "./SkipButton";
+import { SubtitleOverlay } from "./SubtitleOverlay";
+import { activeCues, DEFAULT_SUBTITLE_STYLE, subtitleStyle, type SubtitleCue, type SubtitleStyle } from "./subtitles";
 import { UpNext } from "./UpNext";
 import { itemUrl } from "@/lib/urls";
 
@@ -117,6 +119,13 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const [muted, setMuted] = useLocalStorage<boolean>("pley.muted", false);
   const [fullscreen, setFullscreen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // How subtitles look, chosen on each device (as Plex keeps it per player).
+  const [storedSubtitleStyle, setSubtitleStyle] = useLocalStorage<SubtitleStyle>("pley.subtitleStyle", DEFAULT_SUBTITLE_STYLE);
+  const subStyle = subtitleStyle(storedSubtitleStyle);
+  /** The subtitles showing now (drawn by SubtitleOverlay). */
+  const [cues, setCues] = useState<SubtitleCue[]>([]);
+  /** The video in the iPhone's own fullscreen player, which only draws subtitles itself. */
+  const [nativeFullscreen, setNativeFullscreen] = useState(false);
   const [chaptersOpen, setChaptersOpen] = useState(false);
   const [active, setActive] = useState(true);
   const [hoveringControls, setHoveringControls] = useState(false);
@@ -517,22 +526,48 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     v.muted = muted;
   }, [volume, muted]);
 
-  // Text subtitles rendered by the browser from <track> elements.
+  // Text subtitles from <track> elements: the browser reads them ("hidden")
+  // and pley draws the lines showing now (SubtitleOverlay), except in the
+  // iPhone's own fullscreen player, where the browser has to draw them.
   const textTracks = useMemo(() => (info?.subtitles ?? []).filter((s) => s.text_based && s.url), [info]);
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
+    let shown: TextTrack | null = null;
+    const update = () => setCues(shown && shown.mode === "hidden" ? activeCues(shown) : []);
     const apply = () => {
       for (const t of Array.from(v.textTracks)) {
         const want = shownTextIndex != null && t.id === `sub-${shownTextIndex}`;
-        const mode: TextTrackMode = want ? "showing" : "disabled";
+        const mode: TextTrackMode = want ? (nativeFullscreen ? "showing" : "hidden") : "disabled";
         if (t.mode !== mode) t.mode = mode;
+        if (want && shown !== t) {
+          shown?.removeEventListener("cuechange", update);
+          shown = t;
+          t.addEventListener("cuechange", update);
+        }
       }
+      update();
     };
     apply();
     v.textTracks.addEventListener("addtrack", apply);
-    return () => v.textTracks.removeEventListener("addtrack", apply);
-  }, [textTracks, shownTextIndex]);
+    return () => {
+      v.textTracks.removeEventListener("addtrack", apply);
+      shown?.removeEventListener("cuechange", update);
+      setCues([]);
+    };
+  }, [textTracks, shownTextIndex, nativeFullscreen]);
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const begin = () => setNativeFullscreen(true);
+    const end = () => setNativeFullscreen(false);
+    v.addEventListener("webkitbeginfullscreen", begin);
+    v.addEventListener("webkitendfullscreen", end);
+    return () => {
+      v.removeEventListener("webkitbeginfullscreen", begin);
+      v.removeEventListener("webkitendfullscreen", end);
+    };
+  }, []);
 
   // Fullscreen state.
   useEffect(() => {
@@ -802,6 +837,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             ))
           : null}
       </video>
+      <SubtitleOverlay cues={cues} lifted={showControls} style={subStyle} />
 
       {(loading || buffering) && !error && !needsGesture ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -993,6 +1029,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             subtitleStreams={subStreams}
             subtitleIndex={subIndex}
             onSubtitle={changeSubtitle}
+            subtitleStyle={subStyle}
+            onSubtitleStyle={setSubtitleStyle}
             autoSkip={autoSkip}
             onAutoSkip={setAutoSkip}
           />

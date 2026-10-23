@@ -6,14 +6,20 @@ import { streamLabel } from "@/lib/format";
 import { useDismiss } from "@/lib/hooks";
 import { Toggle } from "@/components/ui";
 import type { QualityOption } from "./quality";
+import { SUBTITLE_BACKGROUNDS, SUBTITLE_SIZES, type SubtitleStyle } from "./subtitles";
 
-type Panel = "root" | "quality" | "audio" | "subtitles";
+type Panel = "root" | "quality" | "audio" | "subtitles" | "style";
 
 const PANEL_TITLE: Record<Exclude<Panel, "root">, string> = {
   quality: "Quality",
   audio: "Audio",
   subtitles: "Subtitles",
+  style: "Subtitle style",
 };
+
+function GroupLabel({ children }: { children: ReactNode }) {
+  return <div className="px-4 pb-1 pt-2 text-xs font-medium text-white/50">{children}</div>;
+}
 
 export const METHOD_LABEL: Record<PlaybackInfo["method"], string> = {
   direct: "Direct play",
@@ -81,6 +87,9 @@ export interface SettingsPopoverProps {
   subtitleStreams: MediaStream[];
   subtitleIndex: number | null;
   onSubtitle: (index: number | null) => void;
+  /** How text subtitles look on this device. */
+  subtitleStyle: SubtitleStyle;
+  onSubtitleStyle: (style: SubtitleStyle) => void;
   /** Skip intros without waiting for a click. */
   autoSkip: boolean;
   onAutoSkip: (on: boolean) => void;
@@ -89,6 +98,7 @@ export interface SettingsPopoverProps {
 export function SettingsPopover(props: SettingsPopoverProps) {
   const { open, setOpen, info, reason, qualities, quality, originalHint, onQuality } = props;
   const { audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle, autoSkip, onAutoSkip } = props;
+  const { subtitleStyle, onSubtitleStyle } = props;
   const [panel, setPanel] = useState<Panel>("root");
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(ref, open, () => {
@@ -145,6 +155,13 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                 value={currentSub ? streamLabel(currentSub) : subtitleStreams.length ? "Off" : "None"}
                 onClick={() => setPanel("subtitles")}
               />
+              {subtitleStreams.some((s) => s.text_based !== false) ? (
+                <Nav
+                  label="Subtitle style"
+                  value={SUBTITLE_SIZES.find((s) => s.id === subtitleStyle.size)?.label ?? "Normal"}
+                  onClick={() => setPanel("style")}
+                />
+              ) : null}
               <div className="my-1 h-px bg-white/10" />
               <div className="flex items-center gap-3 px-4 py-2.5 text-sm">
                 <span className="flex-1">Skip intros automatically</span>
@@ -191,6 +208,30 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                     </Option>
                   ))
                 : null}
+              {panel === "style" ? (
+                <>
+                  <GroupLabel>Size</GroupLabel>
+                  {SUBTITLE_SIZES.map((s) => (
+                    <Option
+                      key={s.id}
+                      selected={s.id === subtitleStyle.size}
+                      onClick={() => onSubtitleStyle({ ...subtitleStyle, size: s.id })}
+                    >
+                      {s.label}
+                    </Option>
+                  ))}
+                  <GroupLabel>Background</GroupLabel>
+                  {SUBTITLE_BACKGROUNDS.map((b) => (
+                    <Option
+                      key={b.id}
+                      selected={b.id === subtitleStyle.background}
+                      onClick={() => onSubtitleStyle({ ...subtitleStyle, background: b.id })}
+                    >
+                      {b.label}
+                    </Option>
+                  ))}
+                </>
+              ) : null}
               {panel === "subtitles" ? (
                 <>
                   <Option
