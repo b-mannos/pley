@@ -2,7 +2,6 @@ import { useState, type FormEvent } from "react";
 import { ListMusic, ListVideo } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useCreatePlaylist, useRenamePlaylist, type Playlist, type PlaylistDetail, type PlaylistKind } from "@/api/lists";
-import type { Id } from "@/api/types";
 import { Modal } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
 import { Button, Field, TextInput } from "@/components/ui";
@@ -13,15 +12,12 @@ export function PlaylistFormModal({
   open,
   onClose,
   playlist,
-  smart,
   onCreated,
 }: {
   open: boolean;
   onClose: () => void;
   /** The playlist to rename; a new one is created without it. */
   playlist?: Playlist;
-  /** A new smart playlist: its library and filter. */
-  smart?: { libraryId: Id; filter: string };
   onCreated?: (created: PlaylistDetail) => void;
 }) {
   const create = useCreatePlaylist();
@@ -40,7 +36,7 @@ export function PlaylistFormModal({
       rename.mutate({ id: playlist.id, title: name }, { onSuccess: onClose, onError });
     } else {
       create.mutate(
-        smart ? { title: name, library_id: smart.libraryId, smart_filter: smart.filter } : { title: name, kind },
+        { title: name, kind },
         {
           onSuccess: (created) => {
             onClose();
@@ -56,7 +52,7 @@ export function PlaylistFormModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={playlist ? "Rename playlist" : smart ? "New smart playlist" : "New playlist"}
+      title={playlist ? "Rename playlist" : "New playlist"}
       size="sm"
       locked={busy}
       footer={
@@ -74,7 +70,7 @@ export function PlaylistFormModal({
         <Field label="Title" htmlFor="playlist-title">
           <TextInput id="playlist-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} required />
         </Field>
-        {playlist || smart ? null : (
+        {playlist ? null : (
           <div className="space-y-1.5">
             <span className="block text-sm font-medium text-fg">For</span>
             <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Playlist kind">
