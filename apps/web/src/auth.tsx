@@ -55,7 +55,9 @@ export function RequireAuth() {
   const location = useLocation();
   const server = useServer();
   const setupRequired = server.data?.setup_required ?? false;
-  const me = useMe(server.isSuccess && !setupRequired);
+  // Asked for together with the server status (not after it): one round trip
+  // less before the first page. Its answer is only used once setup is done.
+  const me = useMe(!setupRequired);
   useServerEvents(!!me.data);
 
   if (server.isPending) return <Splash />;

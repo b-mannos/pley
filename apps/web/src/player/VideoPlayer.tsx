@@ -221,6 +221,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       video.addEventListener("loadedmetadata", onMeta, { once: true });
     };
 
+    // Most plays end up on hls.js: fetch it while the server prepares the stream.
+    loadHls().catch(() => undefined);
+
     // The new session is recorded as soon as it exists, so the next run (or
     // unmount) ends it; a run cancelled before that ends it here instead.
     const acquired = (async (): Promise<PlaybackInfo | null> => {

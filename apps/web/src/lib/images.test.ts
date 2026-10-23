@@ -63,7 +63,8 @@ describe("artwork fallbacks", () => {
     const movie = makeItem({ poster_url: "/p", backdrop_url: "/b", thumb_url: "/t" });
     expect(posterCandidates(movie)).toEqual(["/p"]);
     expect(backdropCandidates(movie)).toEqual(["/b"]);
-    expect(thumbCandidates(movie)).toEqual(["/t", "/b"]);
+    // A movie's thumb is a frame grab: its backdrop comes first.
+    expect(thumbCandidates(movie)).toEqual(["/b", "/t"]);
     expect(thumbCandidates(makeItem({ backdrop_url: "/b" }))).toEqual(["/b"]);
   });
 

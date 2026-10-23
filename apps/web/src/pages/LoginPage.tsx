@@ -16,7 +16,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const server = useServer();
-  const me = useMe(server.isSuccess && !server.data.setup_required);
+  const me = useMe(!server.data?.setup_required);
   const login = useLogin();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");

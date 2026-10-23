@@ -41,11 +41,15 @@ export function posterCandidates(item: ItemSummary): string[] {
   return out;
 }
 
-/** Ordered list of candidate urls for a 16:9 thumb: own thumb → own backdrop → show backdrop. */
+/**
+ * Ordered list of candidate urls for a 16:9 thumb: a movie's backdrop first
+ * (its thumb is a frame grab, made on demand), otherwise the own thumb, then
+ * the show's backdrop.
+ */
 export function thumbCandidates(item: ItemSummary): string[] {
   const out: string[] = [];
-  if (item.thumb_url) out.push(item.thumb_url);
   if (item.kind === "movie" && item.backdrop_url) out.push(item.backdrop_url);
+  if (item.thumb_url) out.push(item.thumb_url);
   if (item.kind === "episode" && item.grandparent_id) out.push(itemImageUrl(item.grandparent_id, "backdrop"));
   if (item.kind !== "episode" && item.backdrop_url && !out.includes(item.backdrop_url)) out.push(item.backdrop_url);
   return out;
