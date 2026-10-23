@@ -2,7 +2,7 @@ import { Play } from "lucide-react";
 import { useChildren, useOnDeck } from "@/api/hooks";
 import type { ItemDetail } from "@/api/types";
 import { CardSkeleton, MediaCard } from "@/components/cards";
-import { ListButtons, PartOfCollections } from "@/components/lists/ListButtons";
+import { PartOfCollections } from "@/components/lists/PartOfCollections";
 import { StarRating } from "@/components/StarRating";
 import { Button, SectionTitle } from "@/components/ui";
 import { episodeLabel, pluralize } from "@/lib/format";
@@ -11,6 +11,7 @@ import { usePlayItem } from "@/lib/usePlayItem";
 import { CastRow, CrewRows, hasCrew } from "./Credits";
 import { ExtrasRow } from "./Extras";
 import { MoreLikeThis } from "./MoreLikeThis";
+import { MoreActions } from "./ItemActions";
 import {
   ContentRating,
   Genres,
@@ -18,7 +19,6 @@ import {
   ItemPageShell,
   MetaLine,
   RatingBadge,
-  RefreshButton,
   Summary,
   WatchedButton,
 } from "./shared";
@@ -69,8 +69,7 @@ export function ShowView({ item }: { item: ItemDetail }) {
               {playLabel}
             </Button>
             <WatchedButton item={item} />
-            <ListButtons item={item} />
-            <RefreshButton item={item} />
+            <MoreActions item={item} />
           </div>
           {item.tagline ? <p className="text-base italic text-fg/75">{item.tagline}</p> : null}
           <Summary text={item.summary} />

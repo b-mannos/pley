@@ -933,7 +933,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             <span
               title={methodReason ?? undefined}
               className={cn(
-                "mr-1 hidden rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide md:inline",
+                "mr-1 hidden rounded px-2 py-0.5 text-xs font-semibold md:inline",
                 info.method === "direct" ? "bg-success/20 text-success" : info.method === "remux" ? "bg-info/20 text-info" : "bg-accent/20 text-accent",
               )}
             >

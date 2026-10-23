@@ -6,6 +6,7 @@ import { useLibrary, useLibraryFilters, useLibraryHubs, useLibraryItems, useScan
 import type { LibraryKind, LibrarySort, SortOrder } from "@/api/types";
 import { useAuth } from "@/auth";
 import { HubRow, HubRowSkeleton } from "@/components/HubRow";
+import { TmdbKeyNotice } from "@/components/MetadataNotice";
 import { ItemGrid, ItemGridSkeleton } from "@/components/ItemGrid";
 import { CollectionsRow } from "@/components/lists/CollectionCard";
 import { LibraryIcon } from "@/components/Sidebar";
@@ -98,6 +99,7 @@ export function LibraryPage() {
         </div>
       </div>
 
+      {kind === "movies" ? <TmdbKeyNotice className="mx-4 mt-4 sm:mx-8" /> : null}
       {tab === "recommended" ? (
         <RecommendedTab libraryId={libId} kind={kind} />
       ) : tab === "collections" && kind !== "music" ? (
@@ -174,7 +176,7 @@ function LibraryTab({
   return (
     <>
       <div className="sticky top-16 z-10 mt-3 border-b border-white/[0.04] bg-bg/85 px-4 py-2.5 backdrop-blur-md sm:px-8">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="scrollbar-none -mx-4 flex items-center gap-2 overflow-x-auto px-4 sm:mx-0 sm:px-0 [&>*]:shrink-0">
           <Select
             aria-label="Sort by"
             value={sort}
@@ -206,7 +208,7 @@ function LibraryTab({
                 setParam({ watched: v === "all" ? null : v === "watched" ? "true" : "false" });
               }}
             >
-              <option value="all">All</option>
+              <option value="all">All {noun[1]}</option>
               <option value="unwatched">Unwatched</option>
               <option value="watched">Watched</option>
             </Select>
@@ -222,7 +224,7 @@ function LibraryTab({
             </Select>
           ) : null}
           {kind !== "music" && filters.data && filters.data.years.length > 0 ? (
-            <Select aria-label="Year" value={year ?? ""} onChange={(e) => setParam({ year: e.target.value || null })} className="hidden sm:block">
+            <Select aria-label="Year" value={year ?? ""} onChange={(e) => setParam({ year: e.target.value || null })}>
               <option value="">All years</option>
               {filters.data.years.map((y) => (
                 <option key={y} value={y}>

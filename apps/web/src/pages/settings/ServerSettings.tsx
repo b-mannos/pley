@@ -1,4 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useLocation } from "react-router";
 import { Eye, EyeOff, Save } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useSaveSettings, useSettings, useSystemInfo } from "@/api/hooks";
@@ -141,6 +142,13 @@ export function ServerSettings() {
   const save = useSaveSettings();
   const toast = useToast();
   const [form, setForm] = useState<Settings | null>(null);
+
+  // A link to one field (`#tmdb-key`) focuses it once the form is there.
+  const { hash } = useLocation();
+  const loaded = form !== null;
+  useEffect(() => {
+    if (loaded && hash) document.getElementById(decodeURIComponent(hash.slice(1)))?.focus();
+  }, [loaded, hash]);
 
   // The form starts from (and returns to, after saving) the saved settings.
   useOnChange(settings.data, (data) => {

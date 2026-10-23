@@ -8,7 +8,7 @@ import { formatBytes, formatRelative, formatTimestamp } from "@/lib/format";
 function Usage({ label, bytes, sub }: { label: string; bytes: number; sub: string }) {
   return (
     <div className="rounded-lg border border-border bg-surface px-4 py-3">
-      <div className="text-xs font-medium uppercase tracking-wider text-subtle">{label}</div>
+      <div className="text-xs font-medium text-subtle">{label}</div>
       <div className="mt-1 text-xl font-semibold tabular-nums">{formatBytes(bytes)}</div>
       <div className="text-xs text-muted">{sub}</div>
     </div>

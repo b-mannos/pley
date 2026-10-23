@@ -89,7 +89,7 @@ export function SearchPage() {
     <div className="space-y-10 px-4 py-8 sm:px-8">
       <div className="flex items-center gap-3">
         <h1 className="text-xl font-semibold tracking-tight">
-          Results for <span className="text-accent">“{q}”</span>
+          Results for “{q}”
         </h1>
         {search.isFetching ? <Spinner className="size-4" /> : null}
       </div>

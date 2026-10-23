@@ -5,14 +5,14 @@ import { useChildren, type ChildItem } from "@/api/hooks";
 import type { ItemDetail } from "@/api/types";
 import { useAudioPlayer } from "@/audio/AudioPlayer";
 import { CardSkeleton, MediaCard } from "@/components/cards";
-import { ListButtons } from "@/components/lists/ListButtons";
 import { StarRating } from "@/components/StarRating";
 import { Button, SectionTitle, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatClock, formatDuration, pluralize } from "@/lib/format";
 import { useElementWidth } from "@/lib/hooks";
 import { usePlayItem } from "@/lib/usePlayItem";
-import { Genres, ItemArt, MetaLine, RefreshButton, Summary } from "./shared";
+import { MoreActions } from "./ItemActions";
+import { Genres, ItemArt, MetaLine, Summary } from "./shared";
 
 function MusicHeader({ item, kindLabel, meta, actions }: { item: ItemDetail; kindLabel: string; meta: React.ReactNode; actions: React.ReactNode }) {
   return (
@@ -21,7 +21,7 @@ function MusicHeader({ item, kindLabel, meta, actions }: { item: ItemDetail; kin
         <ItemArt item={item} aspect="square" width={240} />
       </div>
       <div className="min-w-0 flex-1 space-y-3">
-        <div className="text-xs font-semibold uppercase tracking-wider text-subtle">{kindLabel}</div>
+        <div className="text-sm font-medium text-muted">{kindLabel}</div>
         <h1 className="text-3xl font-bold leading-tight tracking-tight text-balance sm:text-5xl">{item.title}</h1>
         {meta}
         <Genres genres={item.genres} />
@@ -57,8 +57,7 @@ export function ArtistView({ item }: { item: ItemDetail }) {
             <Button size="lg" icon={<Shuffle className="size-4" />} onClick={() => void play(item, { shuffle: true })}>
               Shuffle
             </Button>
-            <ListButtons item={item} />
-            <RefreshButton item={item} />
+            <MoreActions item={item} />
           </>
         }
       />
@@ -132,8 +131,7 @@ export function AlbumView({ item, highlightId }: { item: ItemDetail; highlightId
             >
               Shuffle
             </Button>
-            <ListButtons item={item} />
-            <RefreshButton item={item} />
+            <MoreActions item={item} />
           </>
         }
       />
@@ -148,7 +146,7 @@ export function AlbumView({ item, highlightId }: { item: ItemDetail; highlightId
           </div>
         ) : (
           <div role="table" aria-label="Tracks" className="text-sm">
-            <div role="row" className="grid grid-cols-[2.5rem_1fr_4rem] gap-3 border-b border-border px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-subtle">
+            <div role="row" className="grid grid-cols-[2.5rem_1fr_4rem] gap-3 border-b border-border px-3 pb-2 text-xs font-medium text-subtle">
               <span role="columnheader" className="text-right">#</span>
               <span role="columnheader">Title</span>
               <span role="columnheader" className="text-right">Time</span>
@@ -197,7 +195,7 @@ function TrackRow({
   return (
     <>
       {disc != null ? (
-        <div className="px-3 pb-1 pt-4 text-xs font-semibold uppercase tracking-wider text-subtle">Disc {disc}</div>
+        <div className="px-3 pb-1 pt-4 text-xs font-medium text-subtle">Disc {disc}</div>
       ) : null}
       <div
         role="row"

@@ -3,12 +3,12 @@ import { ChevronRight, Play } from "lucide-react";
 import { useChildren, useOnDeck, type ChildItem } from "@/api/hooks";
 import type { ItemDetail } from "@/api/types";
 import { Artwork } from "@/components/Artwork";
-import { ListButtons } from "@/components/lists/ListButtons";
 import { Button, SectionTitle, Skeleton } from "@/components/ui";
 import { episodeLabel, formatDate, formatDuration, pluralize, progressFraction, seasonTitle } from "@/lib/format";
 import { thumbCandidates } from "@/lib/images";
 import { usePlayItem } from "@/lib/usePlayItem";
-import { ItemArt, ItemPageShell, MetaLine, RefreshButton, Summary, WatchedButton } from "./shared";
+import { MoreActions } from "./ItemActions";
+import { ItemArt, ItemPageShell, MetaLine, Summary, WatchedButton } from "./shared";
 import { CastRow } from "./Credits";
 
 function EpisodeRow({ ep }: { ep: ChildItem }) {
@@ -95,8 +95,7 @@ export function SeasonView({ item }: { item: ItemDetail }) {
               {ep ? `${resuming ? "Resume" : "Play"} ${episodeLabel(ep)}` : "Play"}
             </Button>
             <WatchedButton item={item} />
-            <ListButtons item={item} />
-            <RefreshButton item={item} />
+            <MoreActions item={item} />
           </div>
           <Summary text={item.summary} />
         </div>

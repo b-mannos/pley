@@ -2,12 +2,11 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ImageUp, Lock, LockOpen, Pencil, RotateCcw, Search } from "lucide-react";
 import { api, errorMessage } from "@/api/client";
-import type { ItemDetail, ItemSummary } from "@/api/types";
+import type { ItemDetail } from "@/api/types";
 import { useAuth } from "@/auth";
-import { Menu, MenuItem } from "@/components/Menu";
 import { Modal } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
-import { Button, Field, IconButton, Spinner, TextInput } from "@/components/ui";
+import { Button, Field, Spinner, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
 type ArtworkKind = "poster" | "backdrop" | "thumb";
@@ -30,14 +29,15 @@ interface ArtworkCandidate {
   votes: number;
 }
 
-type Dialog = "details" | "match" | ArtworkKind | null;
+/** One of the editing dialogs of an item page. */
+export type EditDialog = "details" | "match" | ArtworkKind;
 
-/** Admin menu on item pages: edit details, fix the match, choose artwork. */
-export function EditMenu({ item }: { item: ItemDetail | ItemSummary }) {
-  const user = useAuth();
-  const [dialog, setDialog] = useState<Dialog>(null);
-  if (!user.is_admin || !("files" in item)) return null;
-  const matchable = item.kind === "movie" || item.kind === "show";
+/** What an administrator can edit on `item`: details, the match, artwork. */
+export function editActions(item: ItemDetail): { dialog: EditDialog; label: string; icon: ReactNode }[] {
+  const actions: { dialog: EditDialog; label: string; icon: ReactNode }[] = [
+    { dialog: "details", label: "Edit details…", icon: <Pencil /> },
+  ];
+  if (item.kind === "movie" || item.kind === "show") actions.push({ dialog: "match", label: "Fix match…", icon: <Search /> });
   const artwork: [ArtworkKind, string][] =
     item.kind === "episode"
       ? [["thumb", "Choose thumbnail…"]]
@@ -47,40 +47,17 @@ export function EditMenu({ item }: { item: ItemDetail | ItemSummary }) {
             ["poster", "Choose poster…"],
             ["backdrop", "Choose background…"],
           ];
-  return (
-    <>
-      <Menu
-        trigger={({ toggle }) => (
-          <IconButton label="Edit" size="lg" className="bg-surface-3/80 hover:bg-border" onClick={toggle}>
-            <Pencil className="size-5" />
-          </IconButton>
-        )}
-      >
-        {(close) => (
-          <>
-            <MenuItem icon={<Pencil className="size-4" />} onClick={() => (close(), setDialog("details"))}>
-              Edit details…
-            </MenuItem>
-            {matchable ? (
-              <MenuItem icon={<Search className="size-4" />} onClick={() => (close(), setDialog("match"))}>
-                Fix match…
-              </MenuItem>
-            ) : null}
-            {artwork.map(([kind, label]) => (
-              <MenuItem key={kind} icon={<ImageUp className="size-4" />} onClick={() => (close(), setDialog(kind))}>
-                {label}
-              </MenuItem>
-            ))}
-          </>
-        )}
-      </Menu>
-      {dialog === "details" ? <EditDetailsDialog item={item} onClose={() => setDialog(null)} /> : null}
-      {dialog === "match" ? <FixMatchDialog item={item} onClose={() => setDialog(null)} /> : null}
-      {dialog === "poster" || dialog === "backdrop" || dialog === "thumb" ? (
-        <ArtworkDialog item={item} kind={dialog} onClose={() => setDialog(null)} />
-      ) : null}
-    </>
-  );
+  for (const [kind, label] of artwork) actions.push({ dialog: kind, label, icon: <ImageUp /> });
+  return actions;
+}
+
+/** The open editing dialog, if any (administrators only). */
+export function EditDialogs({ item, dialog, onClose }: { item: ItemDetail; dialog: EditDialog | null; onClose: () => void }) {
+  const user = useAuth();
+  if (!user.is_admin || dialog === null) return null;
+  if (dialog === "details") return <EditDetailsDialog item={item} onClose={onClose} />;
+  if (dialog === "match") return <FixMatchDialog item={item} onClose={onClose} />;
+  return <ArtworkDialog item={item} kind={dialog} onClose={onClose} />;
 }
 
 function useItemRefresh(id: number) {

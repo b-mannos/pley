@@ -53,7 +53,7 @@ function StreamTable({ streams }: { streams: MediaStream[] }) {
     <div className="mt-3 overflow-x-auto">
       <table className="w-full min-w-[520px] text-left text-sm">
         <thead>
-          <tr className="text-xs uppercase tracking-wider text-subtle">
+          <tr className="text-xs text-subtle">
             <th className="py-1.5 pr-4 font-semibold">Type</th>
             <th className="py-1.5 pr-4 font-semibold">Codec</th>
             <th className="py-1.5 pr-4 font-semibold">Language</th>

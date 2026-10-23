@@ -34,7 +34,7 @@ function QueuePopover() {
       </IconButton>
       {open ? (
         <div className="absolute bottom-full right-0 mb-3 max-h-96 w-80 animate-pop-in overflow-y-auto rounded-lg border border-border bg-surface-2 py-2 shadow-2xl shadow-black/60">
-          <div className="px-4 pb-2 text-xs font-semibold uppercase tracking-wider text-subtle">Up next</div>
+          <div className="px-4 pb-2 text-xs font-medium text-subtle">Up next</div>
           {player.queue.map((t, i) => (
             <button
               key={`${t.id}-${i}`}

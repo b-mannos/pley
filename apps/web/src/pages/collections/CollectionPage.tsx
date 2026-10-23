@@ -98,9 +98,9 @@ function CollectionView({ collection: c }: { collection: CollectionDetail }) {
             />
           </div>
           <div className="min-w-0 flex-1 space-y-4">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-subtle">
+            <div className="flex items-center gap-2 text-sm font-medium text-muted">
               <Layers className="size-3.5" /> Collection
-              {c.automatic ? <Badge className="normal-case">TMDB</Badge> : null}
+              {c.automatic ? <Badge>TMDB</Badge> : null}
             </div>
             <h1 className="text-3xl font-bold leading-tight tracking-tight text-balance sm:text-4xl">{c.title}</h1>
             <MetaLine

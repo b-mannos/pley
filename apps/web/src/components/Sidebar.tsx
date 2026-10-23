@@ -63,7 +63,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
         </NavItem>
       </div>
 
-      <div className="mb-1.5 mt-6 px-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Libraries</div>
+      <div className="mb-1.5 mt-6 px-3 text-xs font-medium text-subtle">Libraries</div>
       <div className="space-y-0.5">
         {libs.isPending
           ? Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="mx-3 my-2.5 h-5" />)
@@ -117,7 +117,7 @@ function PlaylistsSection() {
   const shown = playlists.data?.slice(0, 8) ?? [];
   return (
     <>
-      <div className="mb-1.5 mt-6 px-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Playlists</div>
+      <div className="mb-1.5 mt-6 px-3 text-xs font-medium text-subtle">Playlists</div>
       <div className="space-y-0.5">
         {shown.map((p) => (
           <NavItem

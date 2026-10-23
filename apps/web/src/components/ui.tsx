@@ -176,7 +176,7 @@ export function Badge({ children, className, tone = "neutral" }: { children: Rea
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide",
+        "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold",
         tone === "neutral" && "bg-white/10 text-fg/90",
         tone === "accent" && "bg-accent/15 text-accent",
         tone === "success" && "bg-success/15 text-success",

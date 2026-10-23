@@ -20,7 +20,7 @@ import { useToast } from "@/components/Toast";
 import { HistoryList } from "@/components/HistoryList";
 import { Badge, Button, Card, Field, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { formatRelative, formatTimestamp } from "@/lib/format";
+import { formatDay, formatRelative } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
 
 const MAX_AVATAR_BYTES = 10 * 1024 * 1024;
@@ -129,7 +129,7 @@ function ProfileCard() {
               )}
             </div>
             <div className="text-sm text-muted">
-              @{user.username} · member since {formatTimestamp(user.created_at)}
+              @{user.username} · member since {formatDay(user.created_at)}
             </div>
           </div>
 

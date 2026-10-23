@@ -83,6 +83,12 @@ export function formatDate(date: string | null | undefined): string {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
+/** Unix seconds → localized date ("Oct 23, 2026"). */
+export function formatDay(ts: number | null | undefined): string {
+  if (!ts) return "";
+  return new Date(ts * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
 export function formatTimestamp(ts: number | null | undefined): string {
   if (!ts) return "";
   return new Date(ts * 1000).toLocaleString(undefined, {

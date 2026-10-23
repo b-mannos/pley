@@ -27,7 +27,7 @@ const hubs: Hub[] = [
       makeItem({ id: 7, kind: "episode", title: "Pilot", grandparent_title: "Lost", parent_index: 1, index: 1 }),
     ],
   },
-  { key: "recently_added_1", title: "Recently Added Movies", library_id: 1, items: [makeItem({ id: 8, title: "Heat", year: 1995 })] },
+  { key: "recently_added_1", title: "Recently Added in Movies", library_id: 1, items: [makeItem({ id: 8, title: "Heat", year: 1995 })] },
   { key: "top_rated_1", title: "Top Rated", library_id: 1, items: [] },
 ];
 
@@ -47,7 +47,7 @@ describe("HomePage", () => {
     // Movies say how much is left; episodes which one is next.
     expect(within(continueRow).getByText("34m left")).toBeInTheDocument();
     expect(within(continueRow).getByText("S1 · E1 · Pilot")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Recently Added Movies" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Recently Added in Movies" })).toHaveAttribute(
       "href",
       "/library/1?tab=library&sort=added&order=desc",
     );

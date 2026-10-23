@@ -45,6 +45,14 @@ function PipelineBadge({ pipeline, className }: { pipeline: TranscodePipeline | 
   );
 }
 
+const JOB_LABEL: Record<TranscodeJobState, string> = {
+  starting: "Starting",
+  running: "Running",
+  idle: "Idle",
+  finished: "Finished",
+  failed: "Failed",
+};
+
 const JOB_TONE: Record<TranscodeJobState, "success" | "info" | "accent" | "danger" | "neutral"> = {
   starting: "info",
   running: "success",
@@ -128,7 +136,7 @@ function SessionCard({ s }: { s: SessionInfo }) {
 function Stat({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
   return (
     <div className="rounded-lg border border-border bg-surface px-4 py-3">
-      <div className="text-xs font-medium uppercase tracking-wider text-subtle">{label}</div>
+      <div className="text-xs font-medium text-subtle">{label}</div>
       <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
       {sub ? <div className="text-xs text-muted">{sub}</div> : null}
     </div>
@@ -215,7 +223,7 @@ function JobsTable({ jobs }: { jobs: TranscoderJob[] }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full min-w-[960px] text-left text-xs">
-        <thead className="bg-surface-2 uppercase tracking-wider text-subtle">
+        <thead className="bg-surface-2 text-subtle">
           <tr>
             <th className="px-3 py-2 font-semibold">Job</th>
             <th className="px-3 py-2 font-semibold">State</th>
@@ -246,7 +254,7 @@ function JobsTable({ jobs }: { jobs: TranscoderJob[] }) {
                   {j.warnings.length ? <div className="mt-1 text-accent">{j.warnings.join("; ")}</div> : null}
                 </td>
                 <td className="px-3 py-2">
-                  <Badge tone={JOB_TONE[j.state]}>{j.state}</Badge>
+                  <Badge tone={JOB_TONE[j.state]}>{JOB_LABEL[j.state]}</Badge>
                   {i.subtitle_burn ? <div className="mt-1 text-subtle">burn-in subs</div> : null}
                 </td>
                 <td className="px-3 py-2 text-fg/85">

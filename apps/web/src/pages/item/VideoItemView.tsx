@@ -3,7 +3,8 @@ import { Link } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Play, RotateCcw } from "lucide-react";
 import type { ItemDetail, MediaFile } from "@/api/types";
-import { ListButtons, PartOfCollections } from "@/components/lists/ListButtons";
+import { PartOfCollections } from "@/components/lists/PartOfCollections";
+import { UnmatchedNotice } from "@/components/MetadataNotice";
 import { StarRating } from "@/components/StarRating";
 import { Button, Select } from "@/components/ui";
 import { codecLabel, formatBytes, formatDate, formatDuration, resolutionLabel, seasonTitle, streamLabel } from "@/lib/format";
@@ -13,6 +14,8 @@ import { CastRow, CrewRows } from "./Credits";
 import { ExtrasRow } from "./Extras";
 import { MediaInfo } from "./MediaInfo";
 import { MoreLikeThis } from "./MoreLikeThis";
+import { EditDialogs, type EditDialog } from "./EditMenu";
+import { MoreActions } from "./ItemActions";
 import {
   ContentRating,
   Genres,
@@ -22,7 +25,6 @@ import {
   QualityBadges,
   qualityBadgeLabels,
   RatingBadge,
-  RefreshButton,
   ResumeProgress,
   Summary,
   WatchedButton,
@@ -36,7 +38,7 @@ function versionLabel(f: MediaFile, i: number): string {
 function LabeledSelect({ label, children, value, onChange }: { label: string; children: ReactNode; value: string; onChange: (v: string) => void }) {
   return (
     <label className="flex min-w-0 flex-col gap-1">
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-subtle">{label}</span>
+      <span className="text-xs font-medium text-subtle">{label}</span>
       <Select value={value} onChange={(e) => onChange(e.target.value)} className="max-w-[20rem] bg-surface-2/80 backdrop-blur">
         {children}
       </Select>
@@ -47,6 +49,7 @@ function LabeledSelect({ label, children, value, onChange }: { label: string; ch
 export function VideoItemView({ item }: { item: ItemDetail }) {
   const play = usePlayItem();
   const isEpisode = item.kind === "episode";
+  const [edit, setEdit] = useState<EditDialog | null>(null);
 
   const [fileId, setFileId] = useState<number | null>(item.files[0]?.id ?? null);
   const file = item.files.find((f) => f.id === fileId) ?? item.files[0];
@@ -152,9 +155,11 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
               </Button>
             ) : null}
             <WatchedButton item={item} />
-            <ListButtons item={item} />
-            <RefreshButton item={item} />
+            <MoreActions item={item} />
           </div>
+
+          {item.kind === "movie" && item.tmdb_id == null ? <UnmatchedNotice onFixMatch={() => setEdit("match")} className="max-w-3xl" /> : null}
+          <EditDialogs item={item} dialog={edit} onClose={() => setEdit(null)} />
 
           <ResumeProgress item={item} />
 

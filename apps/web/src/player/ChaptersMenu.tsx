@@ -90,7 +90,7 @@ export function ChaptersMenu({
             pictures ? "w-[min(24rem,calc(100vw-2rem))]" : "w-72",
           )}
         >
-          <div className="px-2.5 pb-1.5 pt-1 text-xs font-semibold uppercase tracking-wide text-white/50">Chapters</div>
+          <div className="px-2.5 pb-1.5 pt-1 text-xs font-medium text-white/60">Chapters</div>
           {chapters.map((chapter, i) => (
             <button
               key={`${chapter.start_ms}-${i}`}

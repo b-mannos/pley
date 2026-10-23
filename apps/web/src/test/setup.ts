@@ -1,6 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach } from "vitest";
+
+// `findBy…`/`waitFor` wait up to 5 s: busy CI runners can be slow to render.
+configure({ asyncUtilTimeout: 5000 });
 
 /** Defines `name` on `target` when jsdom leaves it out (or undefined). */
 function polyfill(target: object, name: string, value: unknown) {

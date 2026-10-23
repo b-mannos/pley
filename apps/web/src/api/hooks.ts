@@ -726,8 +726,9 @@ export function useAcceptInvite(code: string) {
 // System (admin)
 // ---------------------------------------------------------------------------
 
-export function useSettings() {
-  return useQuery({ queryKey: keys.settings, queryFn: () => api.get<Settings>("/api/settings") });
+/** Server settings (administrators only). */
+export function useSettings(enabled = true) {
+  return useQuery({ queryKey: keys.settings, queryFn: () => api.get<Settings>("/api/settings"), enabled });
 }
 
 export function useSaveSettings() {

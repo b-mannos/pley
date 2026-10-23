@@ -1,9 +1,8 @@
 import { useState, type ReactNode } from "react";
-import { Check, Eye, EyeOff, RefreshCw, Star } from "lucide-react";
+import { Check, Eye, EyeOff, Star } from "lucide-react";
 import { errorMessage } from "@/api/client";
-import { useRefreshItem, useSetWatched } from "@/api/hooks";
+import { useSetWatched } from "@/api/hooks";
 import type { ItemDetail, ItemSummary } from "@/api/types";
-import { useAuth } from "@/auth";
 import { Artwork } from "@/components/Artwork";
 import { ASPECT_CLASS, type CardAspect } from "@/components/cards";
 import { useToast } from "@/components/Toast";
@@ -11,8 +10,6 @@ import { Badge, Button, IconButton, ProgressBar } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { dynamicRangeBadge, formatRemaining, progressFraction } from "@/lib/format";
 import { backdropCandidates, posterCandidates, thumbCandidates } from "@/lib/images";
-import { AnalyzeMarkersButton } from "./AnalyzeMarkersButton";
-import { EditMenu } from "./EditMenu";
 
 /** Full-bleed backdrop behind the item header. */
 export function Backdrop({ item }: { item: ItemSummary }) {
@@ -176,33 +173,6 @@ export function WatchedButton({ item, compact }: { item: ItemSummary; compact?: 
     >
       <span className="hidden sm:inline">{watched ? "Unwatched" : "Watched"}</span>
     </Button>
-  );
-}
-
-export function RefreshButton({ item }: { item: ItemDetail | ItemSummary }) {
-  const user = useAuth();
-  const refresh = useRefreshItem();
-  const toast = useToast();
-  if (!user.is_admin) return null;
-  return (
-    <>
-      <IconButton
-        label="Refresh metadata"
-        size="lg"
-        className="bg-surface-3/80 hover:bg-border"
-        disabled={refresh.isPending}
-        onClick={() =>
-          refresh.mutate(item.id, {
-            onSuccess: () => toast.success("Refreshing metadata…"),
-            onError: (e) => toast.error(errorMessage(e)),
-          })
-        }
-      >
-        <RefreshCw className={cn("size-5", refresh.isPending && "animate-spin")} />
-      </IconButton>
-      <AnalyzeMarkersButton item={item} />
-      <EditMenu item={item} />
-    </>
   );
 }
 

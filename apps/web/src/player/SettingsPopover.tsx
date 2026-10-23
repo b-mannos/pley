@@ -17,7 +17,7 @@ const PANEL_TITLE: Record<Exclude<Panel, "root">, string> = {
 };
 
 export const METHOD_LABEL: Record<PlaybackInfo["method"], string> = {
-  direct: "Direct Play",
+  direct: "Direct play",
   remux: "Remux",
   transcode: "Transcode",
 };
@@ -130,7 +130,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
             <>
               {info ? (
                 <div className="px-4 pb-2 pt-1">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-accent">{METHOD_LABEL[info.method]}</div>
+                  <div className="text-xs font-semibold text-accent">{METHOD_LABEL[info.method]}</div>
                   {reason ? <div className="mt-0.5 line-clamp-3 text-xs text-white/60" title={reason}>{reason}</div> : null}
                 </div>
               ) : null}

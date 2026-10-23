@@ -75,7 +75,7 @@ function PlaylistView({ playlist: p }: { playlist: PlaylistDetail }) {
       <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:gap-8">
         <PlaylistArt playlist={p} width={240} className="w-44 shrink-0 shadow-2xl shadow-black/60 sm:w-52 lg:w-60" />
         <div className="min-w-0 flex-1 space-y-3">
-          <div className="text-xs font-semibold uppercase tracking-wider text-subtle">{video ? "Video playlist" : "Music playlist"}</div>
+          <div className="text-sm font-medium text-muted">{video ? "Video playlist" : "Music playlist"}</div>
           <h1 className="text-3xl font-bold leading-tight tracking-tight text-balance sm:text-5xl">{p.title}</h1>
           <MetaLine parts={[playlistMeta(p)]} />
           <div className="flex flex-wrap items-center gap-2.5 pt-1">
