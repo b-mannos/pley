@@ -158,14 +158,7 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
             display_addr(addr)
         );
     }
-    let tray = tray.and_then(|launch| {
-        let tray = desktop::TrayContext::new(&state, addr);
-        // A new server on a desktop: straight to setting it up, code and all.
-        if state.auth.setup.shown().is_some() {
-            tray.open_web_ui();
-        }
-        launch(tray)
-    });
+    let tray = tray.and_then(|launch| launch(desktop::TrayContext::new(&state, addr)));
 
     let stopping = state.stopping.clone();
     let web = http::serve(listener, app, stopping.clone().cancelled_owned());

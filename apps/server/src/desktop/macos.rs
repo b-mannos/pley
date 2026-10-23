@@ -17,6 +17,7 @@ pub fn serve(runtime: tokio::runtime::Runtime, config: Config) -> anyhow::Result
     let (ctx_tx, ctx_rx) = mpsc::channel();
     let server = std::thread::Builder::new().name("pley-server".into()).spawn(move || {
         let launcher: super::TrayLauncher = Box::new(move |ctx| {
+            ctx.open_setup_if_new();
             let _ = ctx_tx.send(ctx);
             None
         });

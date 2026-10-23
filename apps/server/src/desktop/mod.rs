@@ -123,6 +123,16 @@ impl TrayContext {
         }
     }
 
+    /// A new server on a desktop: straight to setting it up, code and all.
+    /// Only the real trays call this, so servers started by tests don't
+    /// open the browser.
+    #[cfg_attr(not(feature = "tray"), allow(dead_code))]
+    fn open_setup_if_new(&self) {
+        if self.state.auth.setup.shown().is_some() {
+            self.open_web_ui();
+        }
+    }
+
     #[cfg_attr(not(feature = "tray"), allow(dead_code))]
     fn open_logs(&self) {
         open(&self.logs_dir);
@@ -144,6 +154,7 @@ impl TrayContext {
 /// Start the tray for this platform (Windows, Linux). macOS runs its menu bar
 /// item on the main thread instead, see [`macos::serve`].
 pub fn start_tray(ctx: TrayContext) -> Option<TrayGuard> {
+    ctx.open_setup_if_new();
     #[cfg(all(feature = "tray", windows))]
     return windows::start(ctx);
     #[cfg(all(feature = "tray", target_os = "linux"))]
