@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, qs, request } from "./client";
+import { reordered } from "./lists";
 import type {
   MySingleSignOn,
   Activity,
@@ -475,6 +476,41 @@ export function useDeleteLibrary() {
       void qc.invalidateQueries({ queryKey: keys.libraries });
       void qc.invalidateQueries({ queryKey: ["hubs"] });
       void qc.invalidateQueries({ queryKey: ["search"] });
+    },
+  });
+}
+
+const libraryOrderKey = ["libraries", "order"];
+
+/**
+ * The order libraries are listed in, for everyone (`ids`: all of them).
+ * Shows it at once, the sidebar too, and puts the old order back if it
+ * isn't saved. Moves are saved one at a time, in the order they were made.
+ */
+export function useReorderLibraries() {
+  const qc = useQueryClient();
+  // Whether the move being settled is the last one still on its way.
+  const last = () => qc.isMutating({ mutationKey: libraryOrderKey }) <= 1;
+  return useMutation({
+    mutationKey: libraryOrderKey,
+    scope: { id: "library-order" },
+    mutationFn: (ids: Id[]) => api.put<Library[]>("/api/libraries/order", { ids }),
+    onMutate: async (ids) => {
+      await qc.cancelQueries({ queryKey: keys.libraries, exact: true });
+      const previous = qc.getQueryData<Library[]>(keys.libraries);
+      qc.setQueryData<Library[]>(keys.libraries, (old) => old && reordered(old, ids, (l) => l.id));
+      return { previous };
+    },
+    onSuccess: (data) => {
+      if (last()) qc.setQueryData(keys.libraries, data);
+      // The home page has a row for each library, in this order.
+      void qc.invalidateQueries({ queryKey: keys.homeHubs });
+    },
+    onError: (_err, _ids, context) => {
+      if (!last()) return;
+      if (context?.previous) qc.setQueryData(keys.libraries, context.previous);
+      // It may have been refused because libraries came or went meanwhile.
+      void qc.invalidateQueries({ queryKey: keys.libraries, exact: true });
     },
   });
 }

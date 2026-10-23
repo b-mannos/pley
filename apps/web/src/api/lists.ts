@@ -290,7 +290,7 @@ export function useReorderPlaylist() {
 }
 
 /** `list` in the order of `ids` (unlisted ones keep their order after them). */
-function reordered<T>(list: T[], ids: Id[], idOf: (t: T) => Id): T[] {
+export function reordered<T>(list: T[], ids: Id[], idOf: (t: T) => Id): T[] {
   const byId = new Map(list.map((t) => [idOf(t), t]));
   const first = ids.map((id) => byId.get(id)).filter((t): t is T => t !== undefined);
   const listed = new Set(ids);

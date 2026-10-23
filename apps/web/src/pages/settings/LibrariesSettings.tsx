@@ -1,14 +1,16 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { EllipsisVertical, FolderPlus, Pencil, Plus, RefreshCw, ScanSearch, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, EllipsisVertical, FolderPlus, GripVertical, Pencil, Plus, RefreshCw, ScanSearch, Trash2 } from "lucide-react";
 import { errorMessage } from "@/api/client";
-import { useActivity, useDeleteLibrary, useLibraries, useScanAll, useScanLibrary } from "@/api/hooks";
-import type { Library, ScanStatus } from "@/api/types";
+import { useActivity, useDeleteLibrary, useLibraries, useReorderLibraries, useScanAll, useScanLibrary } from "@/api/hooks";
+import type { Id, Library, ScanStatus } from "@/api/types";
+import { moved, useDragReorder } from "@/components/lists/reorder";
 import { Menu, MenuItem, MenuSeparator } from "@/components/Menu";
 import { ConfirmModal } from "@/components/Modal";
 import { LibraryIcon } from "@/components/Sidebar";
 import { useToast } from "@/components/Toast";
 import { Button, EmptyState, IconButton, PageSpinner, ProgressBar } from "@/components/ui";
+import { cn } from "@/lib/cn";
 import { formatRelative, pluralize } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
 import { LibraryFormModal } from "./LibraryFormModal";
@@ -28,7 +30,29 @@ const PHASE_LABEL: Record<ScanStatus["phase"], string> = {
   done: "Finished",
 };
 
-function LibraryRow({ lib, scan, onEdit, onDelete }: { lib: Library; scan?: ScanStatus; onEdit: () => void; onDelete: () => void }) {
+type Direction = "up" | "down";
+
+/** Where a library is in the list, and moving it one place from its row. */
+interface Place {
+  index: number;
+  count: number;
+  move: (direction: Direction) => void;
+}
+
+function LibraryRow({
+  lib,
+  scan,
+  place,
+  onEdit,
+  onDelete,
+}: {
+  lib: Library;
+  scan?: ScanStatus;
+  /** Without it (a single library), nothing to move. */
+  place?: Place;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const toast = useToast();
   const scanMut = useScanLibrary();
   const running = lib.scanning || (scan && scan.phase !== "done");
@@ -44,14 +68,15 @@ function LibraryRow({ lib, scan, onEdit, onDelete }: { lib: Library; scan?: Scan
     );
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-4">
+    <div className="group/library rounded-lg border border-border bg-surface p-4">
       <div className="flex items-start gap-4">
+        {place ? <GripVertical className="-ml-1 -mr-2 mt-3.5 hidden size-4 shrink-0 cursor-grab text-subtle sm:block" aria-hidden /> : null}
         <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-surface-3 text-accent">
           <LibraryIcon kind={lib.kind} className="size-5" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <Link to={libraryUrl(lib.id)} className="truncate text-base font-semibold hover:text-accent">
+            <Link to={libraryUrl(lib.id)} draggable={false} className="truncate text-base font-semibold hover:text-accent">
               {lib.name}
             </Link>
             <span className="text-xs text-muted">
@@ -87,6 +112,28 @@ function LibraryRow({ lib, scan, onEdit, onDelete }: { lib: Library; scan?: Scan
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {place ? (
+            <div className="flex items-center transition-opacity sm:opacity-0 sm:group-focus-within/library:opacity-100 sm:group-hover/library:opacity-100">
+              <IconButton
+                label={`Move ${lib.name} up`}
+                size="sm"
+                data-move="up"
+                disabled={place.index === 0}
+                onClick={() => place.move("up")}
+              >
+                <ChevronUp className="size-4" />
+              </IconButton>
+              <IconButton
+                label={`Move ${lib.name} down`}
+                size="sm"
+                data-move="down"
+                disabled={place.index === place.count - 1}
+                onClick={() => place.move("down")}
+              >
+                <ChevronDown className="size-4" />
+              </IconButton>
+            </div>
+          ) : null}
           <Button size="sm" icon={<ScanSearch className="size-4" />} onClick={() => startScan(false)} loading={scanMut.isPending} disabled={!!running}>
             <span className="hidden sm:inline">Scan</span>
           </Button>
@@ -144,10 +191,54 @@ export function LibrariesSettings() {
   const toast = useToast();
   const scanAll = useScanAll();
   const del = useDeleteLibrary();
+  const reorder = useReorderLibraries();
   const [params, setParams] = useSearchParams();
   const adding = params.get("add") === "1";
   const [editing, setEditing] = useState<Library | null>(null);
   const [deleting, setDeleting] = useState<Library | null>(null);
+  // Read out to screen readers after each move.
+  const [moveNote, setMoveNote] = useState("");
+  const listRef = useRef<HTMLOListElement>(null);
+  // The library last moved with its buttons, and which one.
+  const movedWith = useRef<{ id: Id; direction: Direction } | null>(null);
+
+  const libraries = libs.data ?? [];
+  const reorderable = libraries.length > 1;
+  const move = (from: number, to: number) => {
+    const lib = libraries[from];
+    if (!lib || to < 0 || to >= libraries.length || to === from) return;
+    setMoveNote(`${lib.name} moved to position ${to + 1} of ${libraries.length}`);
+    reorder.mutate(moved(libraries.map((l) => l.id), from, to), { onError: (e) => toast.error(errorMessage(e)) });
+  };
+  const drag = useDragReorder((from, to) => {
+    movedWith.current = null;
+    move(from, to);
+  });
+  const moveBy = (index: number, direction: Direction) => {
+    const lib = libraries[index];
+    if (!lib) return;
+    movedWith.current = { id: lib.id, direction };
+    move(index, direction === "up" ? index - 1 : index + 1);
+  };
+
+  // Moving a row in the page takes the focus from the button that moved it,
+  // and at either end of the list that button stops working: the focus goes
+  // back to it, or to the row's other one. Kept up until the move is saved,
+  // since a move that fails is undone, which moves the row again.
+  const order = libraries.map((l) => l.id).join();
+  const saving = reorder.isPending;
+  useLayoutEffect(() => {
+    const target = movedWith.current;
+    const row = target && listRef.current?.querySelector(`[data-library="${target.id}"]`);
+    if (target && row) {
+      const buttons = Array.from(row.querySelectorAll<HTMLButtonElement>("[data-move]")).filter((b) => !b.disabled);
+      const button = buttons.find((b) => b.dataset.move === target.direction) ?? buttons[0];
+      const focused = document.activeElement;
+      const lost = !focused || focused === document.body || (row.contains(focused) && focused.matches(":disabled"));
+      if (button && lost) button.focus();
+    }
+    if (!saving) movedWith.current = null;
+  }, [order, saving]);
 
   const openAdd = () => {
     const next = new URLSearchParams(params);
@@ -169,7 +260,9 @@ export function LibrariesSettings() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">Libraries</h2>
-          <p className="text-sm text-muted">Folders pley watches for movies, shows and music.</p>
+          <p className="text-sm text-muted">
+            Folders pley watches for movies, shows and music.{reorderable ? " Everyone sees them in this order." : null}
+          </p>
         </div>
         <div className="flex gap-2">
           {libs.data && libs.data.length > 0 ? (
@@ -208,17 +301,39 @@ export function LibrariesSettings() {
           />
         </div>
       ) : (
-        <div className="space-y-3">
-          {libs.data.map((lib) => (
-            <LibraryRow
-              key={lib.id}
-              lib={lib}
-              scan={scans.find((s) => s.library_id === lib.id)}
-              onEdit={() => setEditing(lib)}
-              onDelete={() => setDeleting(lib)}
-            />
-          ))}
-        </div>
+        <>
+          <ol ref={listRef} aria-label="Libraries" className="space-y-3">
+            {libs.data.map((lib, i) => {
+              const mark = drag.dropMark(i);
+              return (
+                <li
+                  key={lib.id}
+                  data-library={lib.id}
+                  {...(reorderable ? drag.rowProps(i) : {})}
+                  className={cn("relative transition-opacity", drag.dragging === i && "opacity-40")}
+                >
+                  {/* Where a dragged library would land: a line in the gap. */}
+                  {mark ? (
+                    <span
+                      aria-hidden
+                      className={cn("absolute inset-x-0 h-0.5 rounded-full bg-accent", mark === "before" ? "-top-1.75" : "-bottom-1.75")}
+                    />
+                  ) : null}
+                  <LibraryRow
+                    lib={lib}
+                    scan={scans.find((s) => s.library_id === lib.id)}
+                    place={reorderable ? { index: i, count: libs.data.length, move: (direction) => moveBy(i, direction) } : undefined}
+                    onEdit={() => setEditing(lib)}
+                    onDelete={() => setDeleting(lib)}
+                  />
+                </li>
+              );
+            })}
+          </ol>
+          <p role="status" className="sr-only">
+            {moveNote}
+          </p>
+        </>
       )}
 
       <LibraryFormModal open={adding} onClose={closeAdd} />
