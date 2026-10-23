@@ -18,7 +18,7 @@ use crate::ffmpeg::Ffmpeg;
 use crate::metrics::Metrics;
 use crate::plan::{MAX_DURATION_MS, TextSource, ZSCALE_TONEMAP, untagged_hdr_fix};
 use crate::probe::Prober;
-use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg, secs};
+use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg, secs, write_atomically};
 
 pub struct Extractor {
     ff: Arc<Ffmpeg>,
@@ -155,8 +155,10 @@ impl Extractor {
             }
         }
         let key = file_key(path)?;
-        let cached = self.subs_dir.join(format!("{key}_file.vtt"));
-        if let Ok(text) = tokio::fs::read_to_string(&cached).await {
+        // Not `_file.vtt`: earlier versions wrote those in place, so a crash
+        // or a full disk may have left them truncated.
+        let cached = self.subs_dir.join(format!("{key}_sidecar.vtt"));
+        if let Some(text) = cached_vtt(&cached).await {
             return Ok(text);
         }
         let mut cmd = self.ff.command();
@@ -174,19 +176,24 @@ impl Extractor {
         if !text.starts_with("WEBVTT") {
             return Err(ApiError::Failed("subtitle conversion produced no output".into()));
         }
-        let _ = tokio::fs::write(&cached, &text).await;
+        // Cached whole or not at all: a half-written file would keep being served.
+        let data = text.clone().into_bytes();
+        let write = tokio::task::spawn_blocking(move || write_atomically(&cached, &data)).await;
+        if let Ok(Err(err)) = write {
+            tracing::debug!("could not cache converted subtitles of {}: {err}", path.display());
+        }
         Ok(text)
     }
 
     async fn embedded(&self, path: &Path, index: i64) -> ApiResult<String> {
         let key = file_key(path)?;
         let target = self.subs_dir.join(format!("{key}_{index}.vtt"));
-        if let Ok(text) = tokio::fs::read_to_string(&target).await {
+        if let Some(text) = cached_vtt(&target).await {
             return Ok(text);
         }
         let entry = FileLock::acquire(&self.file_locks, &key);
         let _guard = entry.lock.lock().await;
-        if let Ok(text) = tokio::fs::read_to_string(&target).await {
+        if let Some(text) = cached_vtt(&target).await {
             return Ok(text);
         }
 
@@ -217,7 +224,8 @@ impl Extractor {
         }
         let result = run_capture(cmd, Duration::from_secs(20 * 60)).await;
         for (part, done) in &outputs {
-            if result.is_ok() {
+            // Only complete files, flushed to disk, get their final name.
+            if result.is_ok() && flush(part).await.is_ok() {
                 let _ = tokio::fs::rename(part, done).await;
             } else {
                 let _ = tokio::fs::remove_file(part).await;
@@ -290,6 +298,19 @@ impl Picture {
         }
         Self::plain(width)
     }
+}
+
+/// A cached WebVTT file, unless it can't be read or doesn't even start like
+/// one (then it is extracted again).
+async fn cached_vtt(path: &Path) -> Option<String> {
+    let text = tokio::fs::read_to_string(path).await.ok()?;
+    text.starts_with("WEBVTT").then_some(text)
+}
+
+/// Make sure a file another process wrote is on disk.
+async fn flush(path: &Path) -> std::io::Result<()> {
+    // (Windows needs write access to flush.)
+    tokio::fs::OpenOptions::new().write(true).open(path).await?.sync_all().await
 }
 
 fn existing(path: &str) -> ApiResult<PathBuf> {
@@ -413,6 +434,35 @@ mod tests {
         // Unknown video (the probe failed) or no tone mapper.
         assert_eq!(Picture::hdr(640, None, &[Tonemapper::Libplacebo]).init, VULKAN_DEVICE.as_slice());
         assert_eq!(Picture::hdr(640, Some(&p5), &[Tonemapper::Opencl]), Picture::plain(640));
+    }
+
+    #[tokio::test]
+    async fn subtitle_caches_are_whole_or_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let ff = Arc::new(Ffmpeg {
+            ffmpeg: dir.path().join("no-ffmpeg"),
+            ffprobe: dir.path().join("no-ffprobe"),
+            caps: Default::default(),
+            segment_times_relative: true,
+        });
+        let metrics = Arc::new(Metrics::default());
+        let prober = Arc::new(Prober::new(ff.clone(), metrics.clone(), 1));
+        let subs = dir.path().join("subtitles");
+        let extractor = Extractor::new(ff, prober, metrics, subs.clone(), 1);
+        let srt = dir.path().join("movie.en.srt");
+        std::fs::write(&srt, "1\n00:00:01,000 --> 00:00:02,000\nHello\n").unwrap();
+        let name = srt.to_string_lossy().into_owned();
+
+        // The conversion fails (no ffmpeg here): nothing is cached.
+        assert!(extractor.subtitle(&name, None).await.is_err());
+        assert_eq!(std::fs::read_dir(&subs).unwrap().count(), 0);
+        // A cache entry cut short (a crash, a full disk) is not served…
+        let cached = subs.join(format!("{}_sidecar.vtt", file_key(&srt).unwrap()));
+        std::fs::write(&cached, "WEB").unwrap();
+        assert!(extractor.subtitle(&name, None).await.is_err());
+        // …a whole one is.
+        std::fs::write(&cached, "WEBVTT\n\n00:01.000 --> 00:02.000\nHello\n").unwrap();
+        assert!(extractor.subtitle(&name, None).await.unwrap().contains("Hello"));
     }
 
     #[test]

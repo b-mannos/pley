@@ -22,7 +22,7 @@ use tokio::sync::mpsc;
 
 use crate::ffmpeg::Ffmpeg;
 use crate::metrics::Metrics;
-use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg};
+use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg, write_atomically};
 
 const MEMORY_ENTRIES: usize = 256;
 /// How long creating a job may spend reading a file's own index (only walking
@@ -64,7 +64,7 @@ impl KeyframeStore {
                             times.len(),
                             started.elapsed().as_secs_f32()
                         );
-                        store.save(&key, times);
+                        store.save(&key, times).await;
                     }
                     Err(err) => tracing::warn!("keyframe scan failed for {}: {err:#}", path.display()),
                 }
@@ -109,7 +109,7 @@ impl KeyframeStore {
             times.len(),
             started.elapsed().as_secs_f64() * 1000.0
         );
-        self.save(&key, times.clone());
+        self.save(&key, times.clone()).await;
         Some(Arc::new(times))
     }
 
@@ -124,17 +124,16 @@ impl KeyframeStore {
         }
     }
 
-    fn save(&self, key: &str, times: Vec<i64>) {
+    async fn save(&self, key: &str, times: Vec<i64>) {
         if times.is_empty() {
             return;
         }
         let text: String = times.iter().map(|t| format!("{t}\n")).collect();
-        // A name of its own: a job and the background worker may save the
-        // same index at once, and readers must never see half of one.
-        let tmp = self.dir.join(format!("{key}.{}.tmp", uuid::Uuid::new_v4().simple()));
-        if std::fs::write(&tmp, text).is_err() || std::fs::rename(&tmp, self.dir.join(format!("{key}.txt"))).is_err() {
-            let _ = std::fs::remove_file(&tmp);
-        }
+        // Whole or not at all (a truncated index would misplace segment
+        // boundaries), even when a job and the background worker save the
+        // same one at once.
+        let path = self.dir.join(format!("{key}.txt"));
+        let _ = tokio::task::spawn_blocking(move || write_atomically(&path, text.as_bytes())).await;
         self.remember(key.to_owned(), Arc::new(times));
     }
 
@@ -236,7 +235,7 @@ mod tests {
         std::fs::write(&movie, b"frames").unwrap();
         let keyframes = store(dir.path());
         assert!(keyframes.get(&movie).is_none());
-        keyframes.save(&file_key(&movie).unwrap(), vec![0, 2_002, 4_004]);
+        keyframes.save(&file_key(&movie).unwrap(), vec![0, 2_002, 4_004]).await;
         assert_eq!(keyframes.get(&movie).as_deref(), Some(&vec![0, 2_002, 4_004]));
         // On disk too: a new store (a restarted transcoder) finds it.
         let restarted = store(dir.path());
@@ -247,7 +246,7 @@ mod tests {
         // A replaced file needs a new index; empty ones are never stored.
         std::fs::write(&movie, b"other frames").unwrap();
         assert!(restarted.get(&movie).is_none());
-        restarted.save(&file_key(&movie).unwrap(), vec![]);
+        restarted.save(&file_key(&movie).unwrap(), vec![]).await;
         assert!(restarted.get(&movie).is_none());
         // Neither Matroska nor MP4 inside: it waits for a scan.
         assert!(restarted.get_or_read(&movie).await.is_none());

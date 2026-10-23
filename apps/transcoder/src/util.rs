@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Restricted
 use std::ffi::OsString;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -19,6 +20,26 @@ pub fn file_key(path: &Path) -> std::io::Result<String> {
     hasher.update(meta.len().to_le_bytes());
     hasher.update(mtime.to_le_bytes());
     Ok(hex::encode(&hasher.finalize()[..16]))
+}
+
+/// Write `data` to `target` through a temporary file of its own in the same
+/// folder, flushed to disk before it is renamed into place: a crash or a full
+/// disk never leaves a truncated file under the final name, and concurrent
+/// writers never mix. Blocking.
+pub fn write_atomically(target: &Path, data: &[u8]) -> std::io::Result<()> {
+    let mut name = target.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
+    let tmp = target.with_file_name(name);
+    let result = std::fs::File::create(&tmp)
+        .and_then(|mut file| {
+            file.write_all(data)?;
+            file.sync_all()
+        })
+        .and_then(|()| std::fs::rename(&tmp, target));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 /// Seconds with millisecond precision, the way ffmpeg expects time arguments.
@@ -231,6 +252,23 @@ mod tests {
         std::fs::write(&a, b"longer").unwrap();
         assert_ne!(file_key(&a).unwrap(), key, "a replaced file");
         assert!(file_key(&dir.path().join("missing.mkv")).is_err());
+    }
+
+    #[test]
+    fn files_are_replaced_whole_or_not_at_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("a.vtt");
+        write_atomically(&target, b"WEBVTT\n\nfirst").unwrap();
+        write_atomically(&target, b"WEBVTT\n\nsecond").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"WEBVTT\n\nsecond");
+        // A failure leaves nothing behind, under either name.
+        let blocked = dir.path().join("blocked");
+        std::fs::create_dir(&blocked).unwrap();
+        assert!(write_atomically(&blocked, b"WEBVTT").is_err(), "a folder is in the way");
+        assert!(write_atomically(&dir.path().join("missing").join("b.vtt"), b"WEBVTT").is_err());
+        let mut names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name()).collect();
+        names.sort();
+        assert_eq!(names, vec![OsString::from("a.vtt"), OsString::from("blocked")]);
     }
 
     #[test]
