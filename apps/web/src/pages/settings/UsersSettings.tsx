@@ -6,6 +6,7 @@ import {
   useDeleteUser,
   useLibraries,
   useSignOutEverywhere,
+  useUnlinkUserSso,
   useUpdateUser,
   useUserDevices,
   useUsers,
@@ -47,6 +48,37 @@ function SwitchRow({
       </div>
       <Toggle checked={checked} onChange={onChange} label={label} disabled={disabled} />
     </div>
+  );
+}
+
+/** A user's identity at the single sign-on provider, which an administrator can unlink (an account lost or taken over there). */
+function SingleSignOnLink({ user }: { user: User }) {
+  const unlink = useUnlinkUserSso();
+  const toast = useToast();
+  return (
+    <section className="flex items-center justify-between gap-3">
+      <div>
+        <h3 className="text-sm font-medium">Single sign-on</h3>
+        <p className="text-xs text-subtle">
+          {user.has_password ? "Also signs in with a password." : "No password: signs in only with the provider."}
+        </p>
+      </div>
+      <Button
+        size="sm"
+        variant="ghost"
+        loading={unlink.isPending}
+        disabled={!user.has_password}
+        title={user.has_password ? undefined : "Give the account a password first, or it can't sign in"}
+        onClick={() =>
+          unlink.mutate(user.id, {
+            onSuccess: () => toast.success(`${user.name} no longer signs in with single sign-on`),
+            onError: (e) => toast.error(errorMessage(e)),
+          })
+        }
+      >
+        Unlink
+      </Button>
+    </section>
   );
 }
 
@@ -384,6 +416,7 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
           </div>
         </Field>
 
+        {!isNew && user?.sso ? <SingleSignOnLink user={user} /> : null}
         {!isNew && user ? <UserDevices user={user} self={self} /> : null}
 
         {error ? <p className="text-sm text-danger">{error}</p> : null}
@@ -421,6 +454,7 @@ function UserRow({ user, self, libraries, onOpen }: { user: User; self: boolean;
                 <Lock className="size-3" /> PIN
               </Badge>
             ) : null}
+            {user.sso ? <Badge tone="info">Single sign-on</Badge> : null}
           </div>
         </div>
         <ChevronRight className="size-4 shrink-0 text-subtle" />

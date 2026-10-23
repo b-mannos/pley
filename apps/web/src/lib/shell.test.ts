@@ -28,13 +28,21 @@ describe("androidPlayer", () => {
     delete (window as unknown as { PleyAndroid?: unknown }).PleyAndroid;
   });
 
+  const request = { item_id: 7, start_ms: 90_000, file_id: null, audio: 2, sub: null, title: "Heat" };
+
   it("hands the request to the Android app as JSON", () => {
+    vi.stubGlobal("navigator", { userAgent: `${CHROME} pleyAndroid/0.1.0` });
+    const postMessage = vi.fn<(request: string) => void>();
+    (window as unknown as { PleyAndroid: unknown }).PleyAndroid = { postMessage };
+    expect(androidPlayer()?.(request)).toBe(true);
+    expect(JSON.parse(postMessage.mock.calls[0]?.[0] ?? "null")).toEqual(request);
+  });
+
+  it("still talks to older versions of the app", () => {
     vi.stubGlobal("navigator", { userAgent: `${CHROME} pleyAndroid/0.1.0` });
     const play = vi.fn<(request: string) => boolean>(() => true);
     (window as unknown as { PleyAndroid: unknown }).PleyAndroid = { play };
-    const player = androidPlayer();
-    const request = { item_id: 7, start_ms: 90_000, file_id: null, audio: 2, sub: null, title: "Heat" };
-    expect(player?.(request)).toBe(true);
+    expect(androidPlayer()?.(request)).toBe(true);
     expect(JSON.parse(play.mock.calls[0]?.[0] ?? "null")).toEqual(request);
   });
 

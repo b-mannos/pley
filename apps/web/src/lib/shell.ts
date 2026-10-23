@@ -30,15 +30,27 @@ export interface NativePlayRequest {
   title: string;
 }
 
-/** The Android app's bridge (`addJavascriptInterface`): its own player, which plays more files as they are. */
+/**
+ * The Android app's bridge to its own player, which plays more files as
+ * they are. The app offers it to the server's own pages only.
+ */
 interface AndroidBridge {
-  /** Starts the native player; `false` when it can't play this. */
-  play(request: string): boolean;
+  /** Hands the request to the native player (a message listener). */
+  postMessage?: (request: string) => void;
+  /** The same in older versions of the app; `false` when it can't play this. */
+  play?: (request: string) => boolean;
 }
 
 export function androidPlayer(): ((request: NativePlayRequest) => boolean) | null {
   if (typeof window === "undefined" || appShell() !== "android") return null;
   const bridge = (window as unknown as { PleyAndroid?: AndroidBridge }).PleyAndroid;
-  if (!bridge || typeof bridge.play !== "function") return null;
-  return (request) => bridge.play(JSON.stringify(request)) === true;
+  const { postMessage, play } = bridge ?? {};
+  if (typeof postMessage === "function") {
+    return (request) => {
+      postMessage.call(bridge, JSON.stringify(request));
+      return true;
+    };
+  }
+  if (typeof play === "function") return (request) => play.call(bridge, JSON.stringify(request)) === true;
+  return null;
 }

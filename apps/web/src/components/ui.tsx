@@ -19,6 +19,16 @@ const sizes: Record<Size, string> = {
   lg: "h-12 px-6 text-base gap-2",
 };
 
+/** A button's look, for links that take people to another page (a sign-in elsewhere). */
+export function buttonClass(variant: Variant = "secondary", size: Size = "md", className?: string): string {
+  return cn(
+    "inline-flex select-none items-center justify-center whitespace-nowrap rounded-md font-medium transition-colors duration-150",
+    variants[variant],
+    sizes[size],
+    className,
+  );
+}
+
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
   size?: Size;
@@ -35,12 +45,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       type={type}
       disabled={disabled || loading}
-      className={cn(
-        "inline-flex select-none items-center justify-center whitespace-nowrap rounded-md font-medium transition-colors duration-150 disabled:opacity-50",
-        variants[variant],
-        sizes[size],
-        className,
-      )}
+      className={buttonClass(variant, size, cn("disabled:opacity-50", className))}
       {...rest}
     >
       {loading ? <LoaderCircle className="size-4 animate-spin" aria-hidden /> : icon}

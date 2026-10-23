@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, qs, request } from "./client";
 import type {
+  MySingleSignOn,
   Activity,
   Backup,
   Backups,
@@ -60,6 +61,7 @@ export const keys = {
   invites: ["invites"] as const,
   invite: (code: string) => ["invite", code] as const,
   settings: ["settings"] as const,
+  mySso: ["me", "sso"] as const,
   system: ["system"] as const,
   storage: ["system", "storage"] as const,
   backups: ["system", "backups"] as const,
@@ -126,6 +128,38 @@ export function useLogout() {
     onSettled: () => {
       qc.clear();
     },
+  });
+}
+
+/** Single sign-on for the signed-in user: on or off, and the linked identity. */
+export function useMySso(enabled = true) {
+  return useQuery({ queryKey: keys.mySso, queryFn: () => api.get<MySingleSignOn>("/api/me/sso"), enabled });
+}
+
+/** Asks for the next sign-in at the provider to link to this account; the browser goes there next. */
+export function useRequestSsoLink() {
+  return useMutation({
+    mutationFn: (password: string) => api.post<void>("/api/auth/sso/link", { password }, { noAuthRedirect: true }),
+  });
+}
+
+export function useUnlinkSso() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (password: string) => request<void>("/api/me/sso", { method: "DELETE", body: { password }, noAuthRedirect: true }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.mySso });
+      void qc.invalidateQueries({ queryKey: keys.me });
+    },
+  });
+}
+
+/** An administrator unlinks a user's identity at the provider. */
+export function useUnlinkUserSso() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: Id) => api.del<void>(`/api/users/${id}/sso`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.users }),
   });
 }
 

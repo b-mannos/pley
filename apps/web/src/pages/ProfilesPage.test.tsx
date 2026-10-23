@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { User } from "@/api/types";
 import { apiError, type FakeRequest, LocationDisplay, mockApi, renderWithProviders, testUser } from "@/test/render";
-import { ProfilesPage } from "./ProfilesPage";
+import { challenge, ProfilesPage } from "./ProfilesPage";
 
 const me: User = { ...testUser, id: 1, name: "Sam", is_admin: false };
 const kid: User = { ...testUser, id: 2, name: "Kid", is_admin: false };
@@ -121,5 +121,30 @@ describe("ProfilesPage", () => {
     renderProfiles();
     await user.click(await screen.findByRole("button", { name: "Continue as Sam" }));
     expect(await screen.findByTestId("location")).toHaveTextContent("/library/2");
+  });
+});
+
+describe("challenge", () => {
+  const child: User = { ...testUser, id: 10, is_admin: false, managed: true, has_password: false, max_age: 12 };
+  const teen: User = { ...child, id: 11, max_age: 16 };
+  const parent: User = { ...testUser, id: 12, is_admin: false, max_age: null };
+
+  it("asks for nothing to switch down, or between equals", () => {
+    expect(challenge(child, parent)).toBe("none");
+    expect(challenge({ ...child, id: 13 }, child)).toBe("none");
+  });
+
+  it("asks for a password, or a PIN, to switch to a profile that can see more", () => {
+    expect(challenge(parent, child)).toBe("password");
+    expect(challenge({ ...teen, has_pin: true }, child)).toBe("pin");
+    // A managed profile has no password: it needs a PIN first.
+    expect(challenge(teen, child)).toBe("locked");
+  });
+
+  it("counts libraries too", () => {
+    const one: User = { ...parent, id: 14, all_libraries: false, library_ids: [1] };
+    const both: User = { ...parent, id: 15, all_libraries: false, library_ids: [1, 2] };
+    expect(challenge(both, one)).toBe("password");
+    expect(challenge(one, both)).toBe("none");
   });
 });

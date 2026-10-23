@@ -10,11 +10,12 @@ interface Server {
   setupRequired?: boolean;
   signedIn?: boolean;
   profiles?: User[];
+  sso?: { name: string; start: string };
 }
 
-function serve({ setupRequired = false, signedIn = false, profiles = [testUser] }: Server = {}) {
+function serve({ setupRequired = false, signedIn = false, profiles = [testUser], sso }: Server = {}) {
   return mockApi({
-    "GET /api/server": () => ({ name: "Living Room", version: "1.0.0", setup_required: setupRequired }),
+    "GET /api/server": () => ({ name: "Living Room", version: "1.0.0", setup_required: setupRequired, sso: sso ?? null }),
     "GET /api/auth/me": () => (signedIn ? testUser : apiError(401, "unauthorized", "not signed in")),
     "POST /api/auth/login": (req) => {
       const { password } = req.body as { password: string };
@@ -44,6 +45,26 @@ async function signIn(password: string) {
 }
 
 describe("LoginPage", () => {
+  it("offers single sign-on when the server has it, back to the page asked for", async () => {
+    serve({ sso: { name: "Authentik", start: "https://pley.example.com/api/auth/sso/start" } });
+    renderLogin();
+    const link = await screen.findByRole("link", { name: "Sign in with Authentik" });
+    expect(link).toHaveAttribute("href", "https://pley.example.com/api/auth/sso/start?next=%2Flibrary%2F2");
+  });
+
+  it("says why a single sign-on didn't sign in", async () => {
+    serve({ sso: { name: "Authentik", start: "https://pley.example.com/api/auth/sso/start" } });
+    renderLogin("/login?sso=unknown");
+    expect(await screen.findByRole("alert")).toHaveTextContent("No account here is linked to that Authentik account");
+  });
+
+  it("has no single sign-on button when the server has none", async () => {
+    serve();
+    renderLogin();
+    expect(await screen.findByText("to Living Room")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Sign in with/ })).not.toBeInTheDocument();
+  });
+
   it("signs in and goes where the user was headed", async () => {
     const requests = serve();
     renderLogin();

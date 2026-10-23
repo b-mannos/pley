@@ -26,6 +26,8 @@ export const testUser: User = {
   audio_language: null,
   subtitle_language: null,
   subtitle_mode: "forced",
+  has_password: true,
+  sso: false,
 };
 
 /** No retries (queries that ask for some get them right away) and no garbage collection. */

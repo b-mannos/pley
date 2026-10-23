@@ -30,11 +30,23 @@ export function safeNext(next: string | null): string {
   return path.startsWith("/login") || path.startsWith("/profiles") ? "/" : path;
 }
 
-/** What switching to `target` asks for. */
-function challenge(target: User, me: User): "none" | "pin" | "password" {
+/**
+ * Whether `target` can see more than `me`: an administrator, a higher age
+ * limit, or libraries `me` can't open. Switching up asks for a secret (the
+ * server decides the same way).
+ */
+export function freer(target: User, me: User): boolean {
+  if (me.is_admin) return false;
+  if (target.is_admin) return true;
+  if (me.max_age !== null && (target.max_age === null || target.max_age > me.max_age)) return true;
+  return !me.all_libraries && (target.all_libraries || target.library_ids.some((id) => !me.library_ids.includes(id)));
+}
+
+/** What switching to `target` asks for (`locked`: nothing would do, until it gets a PIN). */
+export function challenge(target: User, me: User): "none" | "pin" | "password" | "locked" {
   if (target.id === me.id) return "none";
   if (target.has_pin) return "pin";
-  if (target.is_admin && !me.is_admin) return "password";
+  if (freer(target, me)) return target.has_password ? "password" : "locked";
   return "none";
 }
 
@@ -157,7 +169,9 @@ function PasswordPrompt({
     <form onSubmit={submit} className="flex w-full max-w-xs flex-col items-center">
       <Avatar user={target} size="lg" />
       <div className="mt-3 text-lg font-semibold">{target.name}</div>
-      <p className="mt-1 text-center text-sm text-muted">This is an administrator profile. Enter its password to switch.</p>
+      <p className="mt-1 text-center text-sm text-muted">
+        {target.is_admin ? "This is an administrator profile." : "This profile can see more than yours."} Enter its password to switch.
+      </p>
       <TextInput
         autoFocus
         type="password"
@@ -217,7 +231,8 @@ export function ProfilesPage() {
     const needs = challenge(user, me);
     if (user.id === me.id) return navigate(next, { replace: true });
     setError(null);
-    if (needs === "none") doSwitch(user);
+    if (needs === "locked") setError(`${user.name} can see more than your profile: an administrator can give it a PIN to switch to it.`);
+    else if (needs === "none") doSwitch(user);
     else setTarget(user);
   };
 

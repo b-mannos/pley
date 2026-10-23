@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Navigate, useNavigate, useSearchParams } from "react-router";
+import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router";
 import { errorMessage } from "@/api/client";
 import { useServer, useSetup } from "@/api/hooks";
 import { ErrorScreen, Splash } from "@/auth";
@@ -9,6 +9,11 @@ import { useDocumentTitle } from "@/lib/hooks";
 import { MIN_PASSWORD_LENGTH, passwordProblem } from "@/lib/passwords";
 import { AuthLayout } from "./AuthLayout";
 
+/** The setup code in `#code=ABCD-EFGH`. */
+export function codeFromHash(hash: string): string | null {
+  return new URLSearchParams(hash.replace(/^#/, "")).get("code");
+}
+
 export function SetupPage() {
   useDocumentTitle("Welcome");
   const navigate = useNavigate();
@@ -17,8 +22,10 @@ export function SetupPage() {
   const setup = useSetup();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  // Links printed by the server carry the code.
-  const [code, setCode] = useState(params.get("code") ?? "");
+  // The links the server prints (and its tray icon opens) carry the code:
+  // after `#`, which browsers don't send anywhere.
+  const { hash } = useLocation();
+  const [code, setCode] = useState(() => codeFromHash(hash) ?? params.get("code") ?? "");
   const [localError, setLocalError] = useState<string | null>(null);
 
   if (server.isPending) return <Splash />;
@@ -26,7 +33,7 @@ export function SetupPage() {
     return <ErrorScreen title="Can't reach the pley server" message={errorMessage(server.error)} onRetry={() => void server.refetch()} />;
   }
   if (!server.data.setup_required && !setup.isSuccess) return <Navigate to="/login" replace />;
-  const needsCode = server.data.setup_code_required === true;
+  const needsCode = server.data.setup_code_required !== false;
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -68,7 +75,7 @@ export function SetupPage() {
           <Field
             label="Setup code"
             htmlFor="setup-code"
-            hint="You're not on the server's network, so pley asks for the code it printed in its log when it started (with Docker: docker logs pley)."
+            hint="pley printed it in its log when it started (with Docker: docker logs pley). Opening pley from its tray icon fills it in."
           >
             <TextInput
               id="setup-code"

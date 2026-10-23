@@ -24,11 +24,11 @@ function renderSetup(status: Partial<ServerStatus>, route = "/setup") {
 const setupPosts = (requests: ReturnType<typeof renderSetup>) => requests.filter((r) => r.method === "POST" && r.path === "/api/setup");
 
 describe("SetupPage", () => {
-  it("asks only for a username and a password on the local network", async () => {
+  it("takes the code from the link the server printed, and checks the password", async () => {
     const user = userEvent.setup();
-    const requests = renderSetup({ setup_code_required: false });
-    await user.type(await screen.findByLabelText("Username"), "owner");
-    expect(screen.queryByLabelText("Setup code")).not.toBeInTheDocument();
+    const requests = renderSetup({ setup_code_required: true }, "/setup#code=ABCD-EFGH");
+    expect(await screen.findByLabelText("Setup code")).toHaveValue("ABCD-EFGH");
+    await user.type(screen.getByLabelText("Username"), "owner");
     expect(screen.queryByLabelText(/Confirm/)).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Password"), "short");
@@ -41,11 +41,13 @@ describe("SetupPage", () => {
     expect(screen.getByLabelText("Password")).toHaveAttribute("type", "text");
     await user.type(screen.getByLabelText("Password"), " and sweet");
     await user.click(screen.getByRole("button", { name: "Create account" }));
-    await waitFor(() => expect(setupPosts(requests).at(-1)?.body).toEqual({ username: "owner", password: "short and sweet" }));
+    await waitFor(() =>
+      expect(setupPosts(requests).at(-1)?.body).toEqual({ username: "owner", password: "short and sweet", setup_code: "ABCD-EFGH" }),
+    );
     expect(await screen.findByTestId("location")).toHaveTextContent("/settings/libraries");
   });
 
-  it("asks for the code in the log from elsewhere, filled in from the link", async () => {
+  it("asks for the code in the log, also from older links", async () => {
     const user = userEvent.setup();
     const requests = renderSetup({ setup_code_required: true }, "/setup?code=ABCD-EFGH");
     expect(await screen.findByLabelText("Setup code")).toHaveValue("ABCD-EFGH");
