@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::accounts::{self, UserDto};
 use crate::auth::{
-    AuthUser, ClientIp, CurrentToken, clear_cookie, hash_password, session_cookie, token_from_parts, validate_password,
-    validate_username, verify_password,
+    AuthUser, ClientIp, CurrentToken, clear_cookie, dummy_password_hash, forwarded_https, hash_password,
+    session_cookie, token_from_parts, validate_password, validate_username, verify_password,
 };
 use crate::error::{ApiResult, AppError};
 use crate::state::AppState;
@@ -43,7 +43,7 @@ pub(crate) async fn login_response(
     let agent = headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok());
     let token = state.auth.create_session(user_id, agent, ip).await?;
     let user = accounts::user(&state.db, user_id).await?.ok_or(AppError::Unauthorized)?;
-    let cookie = session_cookie(&token);
+    let cookie = session_cookie(&token, forwarded_https(headers));
     Ok(([(header::SET_COOKIE, cookie)], Json(LoginResponse { user, token })).into_response())
 }
 
@@ -79,24 +79,24 @@ pub async fn login(
     Json(body): Json<Credentials>,
 ) -> ApiResult<Response> {
     let username = body.username.trim().to_owned();
-    let throttle_key = format!("login:{}", username.to_lowercase());
-    state.auth.throttle.check(&throttle_key)?;
+    let attempt = state.auth.throttle.begin(&format!("login:{}", username.to_lowercase()))?;
     let row: Option<(i64, String, bool)> =
         sqlx::query_as("SELECT id, password_hash, disabled FROM users WHERE username = ?")
             .bind(&username)
             .fetch_optional(&state.db.read)
             .await?;
     let Some((id, hash, disabled)) = row else {
-        // Spend comparable time so usernames can't be probed by timing.
-        let _ = verify_password(body.password, "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$Zm9v".into()).await;
-        state.auth.throttle.failed(&throttle_key);
+        // A real check against a stand-in hash takes as long as one against a
+        // user's, so usernames can't be probed by timing.
+        let _ = verify_password(body.password, dummy_password_hash().await).await;
+        attempt.failed();
         return Err(AppError::Unauthorized);
     };
     if !verify_password(body.password, hash).await {
-        state.auth.throttle.failed(&throttle_key);
+        attempt.failed();
         return Err(AppError::Unauthorized);
     }
-    state.auth.throttle.succeeded(&throttle_key);
+    attempt.succeeded();
     if disabled {
         return Err(AppError::forbidden("this account is disabled"));
     }
@@ -194,8 +194,7 @@ pub async fn switch(
         return Err(AppError::forbidden("you can't switch to this profile"));
     }
     if body.user_id != user.id {
-        let key = format!("profile:{}", body.user_id);
-        state.auth.throttle.check(&key)?;
+        let attempt = state.auth.throttle.begin(&format!("profile:{}", body.user_id))?;
         let ok = match (&pin_hash, target_admin && !user.is_admin) {
             (Some(pin_hash), _) => match &body.pin {
                 Some(pin) => verify_password(pin.clone(), pin_hash.clone()).await,
@@ -208,10 +207,10 @@ pub async fn switch(
             (None, false) => true,
         };
         if !ok {
-            state.auth.throttle.failed(&key);
+            attempt.failed();
             return Err(AppError::forbidden(if pin_hash.is_some() { "wrong PIN" } else { "wrong password" }));
         }
-        state.auth.throttle.succeeded(&key);
+        attempt.succeeded();
     }
     if let Some(token) = token {
         state.auth.revoke(&token).await;

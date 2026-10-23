@@ -29,7 +29,8 @@ pub(crate) const VISIBLE: &str = "((SELECT all_libs FROM me)
        OR i.library_id IN (SELECT library_id FROM user_libraries WHERE user_id = (SELECT uid FROM me)))
   AND ((SELECT max_age FROM me) IS NULL
        OR i.kind IN ('artist', 'album', 'track')
-       OR COALESCE(i.rating_age, p.rating_age, gp.rating_age) <= (SELECT max_age FROM me))";
+       OR NULLIF(MAX(COALESCE(i.rating_age, -1), COALESCE(p.rating_age, -1), COALESCE(gp.rating_age, -1)), -1)
+          <= (SELECT max_age FROM me))";
 
 /// Columns of [`ItemRow`]; callers add `WHERE {VISIBLE} AND …`.
 /// The `me` CTE that [`VISIBLE`] reads (binds the user id).
@@ -586,18 +587,32 @@ pub async fn library_items(db: &Db, user_id: i64, q: &LibraryQuery<'_>) -> sqlx:
     Ok((rows, total))
 }
 
-pub async fn library_filters(db: &Db, library_id: i64, kind: &str) -> sqlx::Result<(Vec<String>, Vec<i64>)> {
-    let genres: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT g.value FROM items i, json_each(i.genres) g
-         WHERE i.library_id = ? AND i.kind = ? AND i.genres IS NOT NULL ORDER BY g.value COLLATE NOCASE",
-    )
+/// `FROM` clause for queries filtered by [`VISIBLE`] (it reads `p` and `gp`).
+pub(crate) const VISIBLE_ITEMS: &str =
+    "items i LEFT JOIN items p ON p.id = i.parent_id LEFT JOIN items gp ON gp.id = i.grandparent_id";
+
+/// Genres and years of the titles of a library that `user_id` can see (not
+/// of titles their age limit hides).
+pub async fn library_filters(
+    db: &Db,
+    user_id: i64,
+    library_id: i64,
+    kind: &str,
+) -> sqlx::Result<(Vec<String>, Vec<i64>)> {
+    let genres: Vec<String> = sqlx::query_scalar(&format!(
+        "{ME_CTE} SELECT DISTINCT g.value FROM {VISIBLE_ITEMS} JOIN json_each(i.genres) g
+         WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? AND i.genres IS NOT NULL ORDER BY g.value COLLATE NOCASE"
+    ))
+    .bind(user_id)
     .bind(library_id)
     .bind(kind)
     .fetch_all(&db.read)
     .await?;
-    let years: Vec<i64> = sqlx::query_scalar(
-        "SELECT DISTINCT year FROM items WHERE library_id = ? AND kind = ? AND year IS NOT NULL ORDER BY year DESC",
-    )
+    let years: Vec<i64> = sqlx::query_scalar(&format!(
+        "{ME_CTE} SELECT DISTINCT i.year FROM {VISIBLE_ITEMS}
+         WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? AND i.year IS NOT NULL ORDER BY i.year DESC"
+    ))
+    .bind(user_id)
     .bind(library_id)
     .bind(kind)
     .fetch_all(&db.read)

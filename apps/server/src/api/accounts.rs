@@ -448,6 +448,7 @@ pub async fn upload_avatar(State(state): State<AppState>, user: AuthUser, body: 
     if body.is_empty() || body.len() > AVATAR_MAX_BYTES {
         return Err(AppError::bad_request("pictures must be smaller than 10 MB"));
     }
+    let _decoding = crate::images::UPLOAD_DECODES.acquire().await.map_err(|e| AppError::Internal(e.into()))?;
     let jpeg = tokio::task::spawn_blocking(move || accounts::process_avatar(&body))
         .await
         .map_err(|e| AppError::Internal(e.into()))??;

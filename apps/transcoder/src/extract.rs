@@ -18,7 +18,7 @@ use crate::ffmpeg::Ffmpeg;
 use crate::metrics::Metrics;
 use crate::plan::{TextSource, ZSCALE_TONEMAP};
 use crate::probe::Prober;
-use crate::util::{file_key, input_arg, secs};
+use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg, secs};
 
 pub struct Extractor {
     ff: Arc<Ffmpeg>,
@@ -92,7 +92,8 @@ impl Extractor {
         if at_ms > 0 {
             cmd.args(["-ss", &secs(at_ms)]);
         }
-        cmd.arg("-i")
+        cmd.args(MEDIA_INPUT_OPTIONS)
+            .arg("-i")
             .arg(input_arg(path))
             .args(["-map", "0:V:0", "-frames:v", "1", "-an", "-sn", "-dn", "-vf", vf])
             .args(["-c:v", "mjpeg", "-q:v", "3", "-f", "image2pipe", "pipe:1"]);
@@ -103,7 +104,7 @@ impl Extractor {
     pub async fn cover(&self, path: &str) -> ApiResult<Image> {
         let path = existing(path)?;
         let mut cmd = self.ff.command();
-        cmd.args(["-loglevel", "error", "-i"]).arg(input_arg(&path)).args([
+        cmd.args(["-loglevel", "error"]).args(MEDIA_INPUT_OPTIONS).arg("-i").arg(input_arg(&path)).args([
             "-map",
             "0:v:0",
             "-c",
@@ -150,7 +151,10 @@ impl Extractor {
         if let Some(charset) = guess_charset(&raw) {
             cmd.args(["-sub_charenc", charset]);
         }
-        cmd.arg("-i").arg(input_arg(path)).args(["-map", "0:s:0", "-c:s", "webvtt", "-f", "webvtt", "pipe:1"]);
+        cmd.args(MEDIA_INPUT_OPTIONS)
+            .arg("-i")
+            .arg(input_arg(path))
+            .args(["-map", "0:s:0", "-c:s", "webvtt", "-f", "webvtt", "pipe:1"]);
         let _permit = self.limiter.acquire().await.map_err(|e| ApiError::Internal(e.into()))?;
         let (out, _) = run_capture(cmd, Duration::from_secs(60)).await?;
         let text = String::from_utf8_lossy(&out).into_owned();
@@ -191,7 +195,7 @@ impl Extractor {
 
     async fn extract_vtt(&self, path: &Path, key: &str, streams: &[i64]) -> ApiResult<()> {
         let mut cmd = self.ff.command();
-        cmd.args(["-loglevel", "error", "-y", "-i"]).arg(input_arg(path));
+        cmd.args(["-loglevel", "error", "-y"]).args(MEDIA_INPUT_OPTIONS).arg("-i").arg(input_arg(path));
         let mut outputs = Vec::new();
         for index in streams {
             let part = self.subs_dir.join(format!("{key}_{index}.vtt.part"));
@@ -215,7 +219,7 @@ impl Extractor {
         cmd.args(["-loglevel", "error", "-y"]);
         match source {
             TextSource::Embedded(index) => {
-                cmd.arg("-i").arg(input_arg(input)).args(["-map", &format!("0:{index}")]);
+                cmd.args(MEDIA_INPUT_OPTIONS).arg("-i").arg(input_arg(input)).args(["-map", &format!("0:{index}")]);
             }
             TextSource::File(path) => {
                 if let Ok(raw) = tokio::fs::read(path).await {
@@ -223,7 +227,7 @@ impl Extractor {
                         cmd.args(["-sub_charenc", charset]);
                     }
                 }
-                cmd.arg("-i").arg(input_arg(path)).args(["-map", "0:s:0"]);
+                cmd.args(MEDIA_INPUT_OPTIONS).arg("-i").arg(input_arg(path)).args(["-map", "0:s:0"]);
             }
         }
         cmd.args(["-c:s", "ass", "-f", "ass"]).arg(out);

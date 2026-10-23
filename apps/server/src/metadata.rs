@@ -13,6 +13,7 @@ use serde::de::DeserializeOwned;
 
 use crate::db::Db;
 use crate::library::{LibraryKind, LibraryRow};
+use crate::overrides::RATING_LOCKED;
 use crate::people;
 use crate::providers::{Endpoints, ProviderError, Providers, TvSource};
 use crate::settings::SettingsStore;
@@ -688,11 +689,16 @@ impl MetadataAgent {
             .query(query)
             .query(&[("language", settings.metadata_language.as_str())]);
         req = if key.starts_with("eyJ") { req.bearer_auth(key) } else { req.query(&[("api_key", key)]) };
+        // Errors leave the URL out: it carries the API key (logged otherwise).
         for attempt in 0..3 {
-            let resp =
-                req.try_clone().context("request clone")?.send().await.map_err(|e| TmdbError::Other(e.into()))?;
+            let resp = req
+                .try_clone()
+                .context("request clone")?
+                .send()
+                .await
+                .map_err(|e| TmdbError::Other(e.without_url().into()))?;
             match resp.status().as_u16() {
-                200 => return resp.json::<T>().await.map_err(|e| TmdbError::Other(e.into())),
+                200 => return resp.json::<T>().await.map_err(|e| TmdbError::Other(e.without_url().into())),
                 401 => return Err(TmdbError::Unauthorized),
                 404 => return Err(TmdbError::NotFound),
                 429 => tokio::time::sleep(Duration::from_millis(1000 * (attempt + 1))).await,
@@ -755,13 +761,15 @@ impl MetadataAgent {
         let title = details.title.clone().unwrap_or_else(|| item.title.clone());
         let genres: Vec<String> = details.genres.iter().map(|g| g.name.clone()).collect();
         let age = certification.as_deref().and_then(crate::ratings::rating_age);
-        sqlx::query(
+        sqlx::query(&format!(
             "UPDATE items SET title = ?, sort_title = ?, original_title = ?, year = COALESCE(?, year), summary = ?, tagline = ?,
-                rating = ?, content_rating = ?, rating_age = ?, genres = ?, studio = ?, release_date = ?, duration_ms = COALESCE(duration_ms, ?),
+                rating = ?, content_rating = CASE WHEN {RATING_LOCKED} THEN content_rating ELSE ? END,
+                rating_age = CASE WHEN {RATING_LOCKED} THEN rating_age ELSE ? END,
+                genres = ?, studio = ?, release_date = ?, duration_ms = COALESCE(duration_ms, ?),
                 tmdb_id = ?, imdb_id = COALESCE(?, imdb_id), poster = COALESCE(?, poster), backdrop = COALESCE(?, backdrop),
                 metadata_at = ?, updated_at = ?
-             WHERE id = ?",
-        )
+             WHERE id = ?"
+        ))
         .bind(&title)
         .bind(sort_title(&title))
         .bind(details.original_title.filter(|o| *o != title))
@@ -822,12 +830,14 @@ impl MetadataAgent {
         let title = details.name.clone().unwrap_or_else(|| item.title.clone());
         let genres: Vec<String> = details.genres.iter().map(|g| g.name.clone()).collect();
         let age = rating.as_deref().and_then(crate::ratings::rating_age);
-        sqlx::query(
+        sqlx::query(&format!(
             "UPDATE items SET title = ?, sort_title = ?, original_title = ?, year = COALESCE(?, year), summary = ?, tagline = ?,
-                rating = ?, content_rating = ?, rating_age = ?, genres = ?, studio = ?, release_date = ?, tmdb_id = ?, imdb_id = COALESCE(?, imdb_id),
+                rating = ?, content_rating = CASE WHEN {RATING_LOCKED} THEN content_rating ELSE ? END,
+                rating_age = CASE WHEN {RATING_LOCKED} THEN rating_age ELSE ? END,
+                genres = ?, studio = ?, release_date = ?, tmdb_id = ?, imdb_id = COALESCE(?, imdb_id),
                 poster = COALESCE(?, poster), backdrop = COALESCE(?, backdrop), metadata_at = ?, updated_at = ?
-             WHERE id = ?",
-        )
+             WHERE id = ?"
+        ))
         .bind(&title)
         .bind(sort_title(&title))
         .bind(details.original_name.filter(|o| *o != title))

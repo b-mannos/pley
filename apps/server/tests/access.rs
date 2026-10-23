@@ -365,3 +365,112 @@ async fn odd_plex_query_parameters_are_harmless() {
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.text());
     assert_eq!(plex_titles(&reply.body["MediaContainer"]), ["Family Film"]);
 }
+
+/// Titles of the `Directory` nodes of a Plex filter list.
+fn directory_titles(container: &Value) -> Vec<String> {
+    container["Directory"].as_array().unwrap().iter().map(|d| d["title"].as_str().unwrap().to_owned()).collect()
+}
+
+#[tokio::test]
+async fn filter_choices_only_come_from_titles_the_user_can_see() {
+    let w = world().await;
+    let (app, kid) = (&w.app, w.kid.as_str());
+    for (title, genres, studio) in
+        [("Adult Film", r#"["Horror"]"#, "Night Studio"), ("Family Film", r#"["Family"]"#, "Day Studio")]
+    {
+        sqlx::query("UPDATE items SET genres = ?, studio = ? WHERE title = ?")
+            .bind(genres)
+            .bind(studio)
+            .bind(title)
+            .execute(&app.state.db.write)
+            .await
+            .unwrap();
+    }
+
+    let filters = format!("/api/libraries/{}/filters", w.movies);
+    assert_eq!(app.get(&filters, kid).await.body, json!({"genres": ["Family"], "years": [2019]}));
+    assert_eq!(
+        app.get(&filters, &w.admin).await.body,
+        json!({"genres": ["Family", "Horror"], "years": [2020, 2019, 2015]})
+    );
+
+    for (filter, kid_sees, admin_sees) in [
+        ("genre", vec!["Family"], vec!["Family", "Horror"]),
+        ("year", vec!["2019"], vec!["2020", "2019", "2015"]),
+        ("contentRating", vec!["PG"], vec!["PG", "R"]),
+        ("studio", vec!["Day Studio"], vec!["Day Studio", "Night Studio"]),
+    ] {
+        let uri = format!("/library/sections/{}/{filter}", w.movies);
+        assert_eq!(directory_titles(&app.plex_json(&uri, kid).await), kid_sees, "{filter}");
+        assert_eq!(directory_titles(&app.plex_json(&uri, &w.admin).await), admin_sees, "{filter}");
+    }
+}
+
+#[tokio::test]
+async fn the_strictest_rating_of_an_episode_and_its_show_counts() {
+    let w = world().await;
+    let (app, kid) = (&w.app, w.kid.as_str());
+    let shows = app.ids(w.tv, &w.admin).await;
+    let kids_season = app.children(shows["Kids Show"], &w.admin).await["Season 1"];
+    let hello = app.children(kids_season, &w.admin).await["Hello"];
+    let grown_season = app.children(shows["Grown Show"], &w.admin).await["Season 1"];
+    let pilot = app.children(grown_season, &w.admin).await["Pilot"];
+
+    // An episode rated above its (allowed) show is hidden on its own...
+    assert_eq!(app.get(&format!("/api/items/{hello}"), kid).await.status, StatusCode::OK);
+    app.set_rating("Hello", Some("TV-MA")).await;
+    assert_eq!(app.get(&format!("/api/items/{hello}"), kid).await.status, StatusCode::NOT_FOUND);
+    // ...and a milder rating of its own doesn't open a hidden show's episode.
+    app.set_rating("Pilot", Some("TV-Y")).await;
+    assert_eq!(app.get(&format!("/api/items/{pilot}"), kid).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.get("/api/search?q=pilot", kid).await.body["items"], json!([]));
+    assert_eq!(app.get(&format!("/api/items/{pilot}"), &w.admin).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn the_plex_api_does_not_accept_the_web_cookie() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let status = |header: (&'static str, String)| {
+        let request = axum::http::Request::builder()
+            .uri("/library/sections")
+            .header(header.0, header.1)
+            .body(axum::body::Body::empty())
+            .unwrap();
+        async { tower::ServiceExt::oneshot(app.plex.clone(), request).await.unwrap().status() }
+    };
+    // Browsers send pley's cookie to the Plex port too, where several GET
+    // requests change things: it must not sign anyone in there.
+    assert_eq!(status(("cookie", format!("pley_token={admin}"))).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(status(("x-plex-token", admin.clone())).await, StatusCode::OK);
+    assert_eq!(status(("authorization", format!("Bearer {admin}"))).await, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn events_about_libraries_the_user_cannot_open_are_not_sent_to_them() {
+    use futures::StreamExt;
+    use pley::events::ServerEvent;
+
+    let w = world().await;
+    let request = axum::http::Request::builder()
+        .uri("/api/events")
+        .header("authorization", format!("Bearer {}", w.kid))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = tower::ServiceExt::oneshot(w.app.api.clone(), request).await.unwrap();
+    let mut stream = response.into_body().into_data_stream();
+    w.app.state.events.send(ServerEvent::LibraryChanged { library_id: w.private });
+    w.app.state.events.send(ServerEvent::LibraryChanged { library_id: w.movies });
+
+    let mut received = String::new();
+    let read = async {
+        while let Some(chunk) = stream.next().await {
+            received.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
+            if received.contains(&format!("\"library_id\":{}", w.movies)) {
+                return;
+            }
+        }
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), read).await.expect("the movies event");
+    assert!(!received.contains(&format!("\"library_id\":{}", w.private)), "{received}");
+}

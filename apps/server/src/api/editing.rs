@@ -183,9 +183,10 @@ pub async fn upload_artwork(
         return Err(AppError::bad_request("pictures must be smaller than 25 MB"));
     }
     // Re-encode: only real pictures get stored, and huge ones are scaled down.
+    let _decoding = crate::images::UPLOAD_DECODES.acquire().await.map_err(|e| AppError::Internal(e.into()))?;
     let jpeg = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, AppError> {
-        let img = image::load_from_memory(&body)
-            .map_err(|_| AppError::bad_request("that file is not a supported picture"))?;
+        let img =
+            crate::images::decode(&body).map_err(|_| AppError::bad_request("that file is not a supported picture"))?;
         let img = if img.width() > 3840 || img.height() > 3840 {
             img.resize(3840, 3840, image::imageops::FilterType::Lanczos3)
         } else {

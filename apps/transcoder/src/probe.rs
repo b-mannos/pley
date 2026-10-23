@@ -16,7 +16,7 @@ use tokio::sync::Semaphore;
 
 use crate::ffmpeg::Ffmpeg;
 use crate::metrics::Metrics;
-use crate::util::{file_key, input_arg};
+use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg};
 
 const CACHE_ENTRIES: usize = 4096;
 
@@ -77,6 +77,7 @@ impl Prober {
         }
         let mut cmd = self.ff.probe_command();
         cmd.args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams", "-show_chapters"])
+            .args(MEDIA_INPUT_OPTIONS)
             .arg(input_arg(path))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

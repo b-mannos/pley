@@ -27,6 +27,23 @@ pub fn secs(ms: i64) -> String {
     format!("{}.{:03}", ms / 1000, ms % 1000)
 }
 
+/// Demuxers allowed for files from the libraries: containers, audio and
+/// subtitle formats. Playlists and the like (hls, dash, imf, concat, image
+/// sequences, avisynth, network formats) are left out: a library file with
+/// one of those inside, whatever its name, would make FFmpeg open other
+/// files on the disk.
+pub const MEDIA_DEMUXERS: &str = concat!(
+    // Video containers and raw streams.
+    "matroska,mov,avi,asf,mpegts,mpegtsraw,mpeg,mpegvideo,flv,ogg,wtv,nut,mxf,rm,dv,ivf,obu,m4v,h264,hevc,vc1,",
+    // Audio.
+    "mp3,flac,wav,w64,aiff,caf,au,aac,loas,ac3,eac3,dts,dtshd,truehd,mlp,spdif,ape,wv,dsf,iff,tak,tta,mpc,mpc8,amr,",
+    // Subtitles.
+    "srt,ass,webvtt,microdvd,subviewer,subviewer1,mpsub,mpl2,sami,sup,vobsub,pjs,realtext,jacosub,aqtitle,stl,scc"
+);
+
+/// Input options for a library file: only [`MEDIA_DEMUXERS`] may open it.
+pub const MEDIA_INPUT_OPTIONS: [&str; 2] = ["-format_whitelist", MEDIA_DEMUXERS];
+
 /// `file:` prefixed path so ffmpeg never interprets it as a protocol or option.
 pub fn input_arg(path: &Path) -> OsString {
     let mut arg = OsString::from("file:");

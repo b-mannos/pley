@@ -2,17 +2,40 @@
 //! each size is only computed once) and generates missing artwork on demand
 //! through the transcoder (video frame grabs, embedded cover art).
 
+use std::io::{BufRead, Cursor, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bytes::Bytes;
 use dashmap::DashMap;
-use image::ImageReader;
 use image::codecs::jpeg::JpegEncoder;
+use image::{DynamicImage, ImageReader, ImageResult, Limits};
 use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
 
 use crate::error::AppError;
+
+/// Pictures come from users and the internet, and a small file can claim
+/// huge dimensions: decoding stops at these limits instead of allocating.
+const MAX_DIMENSION: u32 = 12_000;
+const MAX_DECODE_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Uploaded pictures decoded at the same time (each can take a few hundred MB).
+pub static UPLOAD_DECODES: Semaphore = Semaphore::const_new(2);
+
+fn limited<R: BufRead + Seek>(mut reader: ImageReader<R>) -> ImageResult<DynamicImage> {
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(MAX_DIMENSION);
+    limits.max_image_height = Some(MAX_DIMENSION);
+    limits.max_alloc = Some(MAX_DECODE_BYTES);
+    reader.limits(limits);
+    reader.decode()
+}
+
+/// Decode a picture (any supported format) within the size limits.
+pub fn decode(bytes: &[u8]) -> ImageResult<DynamicImage> {
+    limited(ImageReader::new(Cursor::new(bytes)).with_guessed_format()?)
+}
 
 const BUCKETS: [u32; 8] = [160, 240, 320, 480, 640, 960, 1280, 1920];
 const JPEG_QUALITY: u8 = 82;
@@ -91,7 +114,7 @@ fn resize_to_file(source: &Path, width: u32, out: &Path) -> anyhow::Result<Optio
     if w <= width {
         return Ok(None);
     }
-    let img = ImageReader::open(source)?.with_guessed_format()?.decode()?;
+    let img = limited(ImageReader::open(source)?.with_guessed_format()?)?;
     let height = ((h as f64) * (width as f64) / (w as f64)).round().max(1.0) as u32;
     let resized = img.resize_exact(width, height, image::imageops::FilterType::Triangle).to_rgb8();
     let mut buf = Vec::with_capacity((width * height / 4) as usize);

@@ -68,6 +68,19 @@ pub async fn hash_password(password: String) -> anyhow::Result<String> {
     .await?
 }
 
+/// A real Argon2 hash of a random password, made once: checking a login for
+/// an unknown user against it costs the same as checking a real one.
+pub async fn dummy_password_hash() -> String {
+    static HASH: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+    HASH.get_or_init(|| async {
+        let mut secret = [0u8; 16];
+        OsRng.fill_bytes(&mut secret);
+        hash_password(hex::encode(secret)).await.unwrap_or_default()
+    })
+    .await
+    .clone()
+}
+
 pub async fn verify_password(password: String, hash: String) -> bool {
     tokio::task::spawn_blocking(move || {
         PasswordHash::new(&hash)
@@ -87,8 +100,20 @@ pub fn hash_token(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
 }
 
-pub fn session_cookie(token: &str) -> String {
-    format!("{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECS}")
+/// The session cookie. `secure` (the site is reached over HTTPS, e.g. through
+/// a TLS proxy) keeps browsers from ever sending it over plain HTTP.
+pub fn session_cookie(token: &str, secure: bool) -> String {
+    let secure = if secure { "; Secure" } else { "" };
+    format!("{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECS}{secure}")
+}
+
+/// Whether the proxy in front of pley received the request over HTTPS.
+pub fn forwarded_https(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .is_some_and(|proto| proto.trim().eq_ignore_ascii_case("https"))
 }
 
 pub fn clear_cookie() -> String {
@@ -212,16 +237,27 @@ impl AuthService {
 
 /// Token from `Authorization: Bearer`, `X-Pley-Token`, the session cookie, or `?token=`.
 pub fn token_from_parts(parts: &Parts) -> Option<String> {
+    header_token(parts).or_else(|| cookie_token(parts)).or_else(|| query_token(parts))
+}
+
+/// A token the client sent on purpose (header or `?token=`), never the
+/// browser's cookie: what listeners without CSRF protection accept.
+pub fn token_without_cookie(parts: &Parts) -> Option<String> {
+    header_token(parts).or_else(|| query_token(parts))
+}
+
+fn header_token(parts: &Parts) -> Option<String> {
     let headers = &parts.headers;
     if let Some(v) = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()) {
         if let Some(token) = v.strip_prefix("Bearer ") {
             return Some(token.trim().to_owned());
         }
     }
-    if let Some(v) = headers.get("x-pley-token").and_then(|v| v.to_str().ok()) {
-        return Some(v.trim().to_owned());
-    }
-    for cookie_header in headers.get_all(header::COOKIE) {
+    headers.get("x-pley-token").and_then(|v| v.to_str().ok()).map(|v| v.trim().to_owned())
+}
+
+fn cookie_token(parts: &Parts) -> Option<String> {
+    for cookie_header in parts.headers.get_all(header::COOKIE) {
         let Ok(cookies) = cookie_header.to_str() else { continue };
         for pair in cookies.split(';') {
             if let Some((name, value)) = pair.trim().split_once('=') {
@@ -231,6 +267,10 @@ pub fn token_from_parts(parts: &Parts) -> Option<String> {
             }
         }
     }
+    None
+}
+
+fn query_token(parts: &Parts) -> Option<String> {
     parts.uri.query().and_then(|q| {
         q.split('&').find_map(|kv| kv.strip_prefix("token=").map(|t| t.to_owned())).filter(|t| !t.is_empty())
     })
@@ -389,10 +429,15 @@ mod tests {
 
     #[test]
     fn cookies_are_http_only_and_last_as_long_as_sessions() {
-        let cookie = session_cookie("tok");
+        let cookie = session_cookie("tok", false);
         assert!(cookie.starts_with("pley_token=tok;"));
         assert!(cookie.contains("HttpOnly") && cookie.contains("SameSite=Lax") && cookie.contains("Path=/"));
         assert!(cookie.contains(&format!("Max-Age={SESSION_TTL_SECS}")));
+        assert!(!cookie.contains("Secure") && session_cookie("tok", true).ends_with("; Secure"));
+        let mut headers = axum::http::HeaderMap::new();
+        assert!(!forwarded_https(&headers));
+        headers.insert("x-forwarded-proto", "https, http".parse().unwrap());
+        assert!(forwarded_https(&headers));
         assert!(clear_cookie().contains("pley_token=;") && clear_cookie().contains("Max-Age=0"));
     }
 

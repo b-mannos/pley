@@ -14,7 +14,7 @@ use tokio::sync::Semaphore;
 use crate::error::{ApiError, ApiResult};
 use crate::extract::run_capture;
 use crate::ffmpeg::Ffmpeg;
-use crate::util::{background_priority, input_arg, secs};
+use crate::util::{MEDIA_INPUT_OPTIONS, background_priority, input_arg, secs};
 
 /// Chromaprint's default algorithm works on 11025 Hz audio in frames that
 /// advance by 1365 samples: one value per 0.1238 s.
@@ -52,7 +52,7 @@ impl Fingerprinter {
         if start_ms > 0 {
             cmd.args(["-ss", &secs(start_ms)]);
         }
-        cmd.args(["-t", &secs(duration_ms)]).arg("-i").arg(input_arg(path));
+        cmd.args(["-t", &secs(duration_ms)]).args(MEDIA_INPUT_OPTIONS).arg("-i").arg(input_arg(path));
         // Mono 11025 Hz is what Chromaprint analyses anyway; resampling here
         // is cheaper than letting it resample a 48 kHz surround track.
         cmd.args(["-map", &map, "-vn", "-sn", "-dn", "-ac", "1", "-ar", "11025"]);

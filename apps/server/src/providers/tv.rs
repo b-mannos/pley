@@ -7,6 +7,7 @@ use futures::StreamExt;
 
 use super::{ProviderError, artwork};
 use crate::db::Db;
+use crate::overrides::RATING_LOCKED;
 use crate::people::{self, NewCredit};
 use crate::store::Store;
 use crate::util::{now, sort_title};
@@ -158,15 +159,16 @@ pub async fn write(db: &Db, store: &Store, show: &ShowRow, meta: &ShowMeta) -> R
     let genres = (!meta.genres.is_empty()).then(|| serde_json::to_string(&meta.genres).unwrap_or_default());
     let age = meta.content_rating.as_deref().and_then(crate::ratings::rating_age);
     let mut tx = db.write.begin().await?;
-    sqlx::query(
+    sqlx::query(&format!(
         "UPDATE items SET title = ?, sort_title = ?, original_title = COALESCE(?, original_title), year = COALESCE(?, year),
             summary = COALESCE(?, summary), rating = COALESCE(?, rating),
-            content_rating = CASE WHEN ? THEN ? ELSE content_rating END, rating_age = CASE WHEN ? THEN ? ELSE rating_age END,
+            content_rating = CASE WHEN ? AND NOT {RATING_LOCKED} THEN ? ELSE content_rating END,
+            rating_age = CASE WHEN ? AND NOT {RATING_LOCKED} THEN ? ELSE rating_age END,
             genres = COALESCE(?, genres), studio = COALESCE(?, studio), release_date = COALESCE(?, release_date),
             imdb_id = COALESCE(?, imdb_id), tvdb_id = COALESCE(?, tvdb_id), tvmaze_id = COALESCE(?, tvmaze_id),
             poster = COALESCE(?, poster), backdrop = COALESCE(?, backdrop), metadata_at = ?, updated_at = ?
-         WHERE id = ?",
-    )
+         WHERE id = ?"
+    ))
     .bind(title)
     .bind(sort_title(title))
     .bind(meta.original_title.as_deref().filter(|o| *o != title))

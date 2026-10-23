@@ -11,6 +11,7 @@ use serde::Serialize;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 
+use crate::access;
 use crate::auth::AuthUser;
 use crate::catalog::{self, ItemSummary};
 use crate::error::ApiResult;
@@ -73,15 +74,32 @@ pub async fn activity(State(state): State<AppState>, user: AuthUser) -> ApiResul
     }
     let analysis = if user.is_admin { state.markers.status() } else { None };
     let previews_pending = if user.is_admin { state.trickplay.pending() } else { 0 };
-    Ok(Json(Activity { scans: state.scanner.statuses(), sessions: out, analysis, previews_pending }))
+    // Scans of libraries the user can't open stay private (their names too).
+    let libraries = access::library_ids(&state.db, &user).await?;
+    let scans = state
+        .scanner
+        .statuses()
+        .into_iter()
+        .filter(|s| libraries.as_ref().is_none_or(|ids| ids.contains(&s.library_id)))
+        .collect();
+    Ok(Json(Activity { scans, sessions: out, analysis, previews_pending }))
 }
 
 pub async fn events(
     State(state): State<AppState>,
-    _user: AuthUser,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let stream = BroadcastStream::new(state.events.subscribe()).filter_map(|event| event.ok()).map(|event| {
-        Ok(Event::default().json_data(event).unwrap_or_else(|_| Event::default().comment("encode error")))
-    });
-    Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
+    user: AuthUser,
+) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    // Events about libraries the user can't open aren't theirs to see. The
+    // set is read once: access changes take effect on the next connection.
+    let libraries = access::library_ids(&state.db, &user).await?;
+    let stream = BroadcastStream::new(state.events.subscribe())
+        .filter_map(|event| event.ok())
+        .filter(move |event| match (event.library_id(), &libraries) {
+            (Some(id), Some(ids)) => ids.contains(&id),
+            _ => true,
+        })
+        .map(|event| {
+            Ok(Event::default().json_data(event).unwrap_or_else(|_| Event::default().comment("encode error")))
+        });
+    Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
 }

@@ -18,7 +18,7 @@ use pley_transcoder_api::{
 };
 
 use crate::ffmpeg::{Ffmpeg, VAAPI_DEVICE};
-use crate::util::{input_arg, secs};
+use crate::util::{MEDIA_INPUT_OPTIONS, input_arg, secs};
 
 pub const DEFAULT_SEGMENT_SECONDS: f64 = 4.0;
 /// Maximum segments per ffmpeg process (keeps command lines short on Windows).
@@ -434,6 +434,7 @@ impl Plan {
         if seek_ms > 0 {
             a.push_all(["-ss", &secs(seek_ms)]);
         }
+        a.push_all(MEDIA_INPUT_OPTIONS);
         a.push("-i");
         a.push_os(input_arg(ctx.input));
 
@@ -442,6 +443,7 @@ impl Plan {
             if seek_ms > 0 {
                 a.push_all(["-ss", &secs(seek_ms)]);
             }
+            a.push_all(MEDIA_INPUT_OPTIONS);
             a.push("-i");
             a.push_os(input_arg(path));
         }
@@ -879,6 +881,7 @@ pub fn keyframe_layout(keyframes: &[i64], duration_ms: i64, target_ms: i64) -> (
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::MEDIA_DEMUXERS;
     use pley_transcoder_api::{AudioRequest, Capabilities, SubtitleBurnRequest, TranscodeOptions, VideoRequest};
 
     fn ffmpeg_with(encoders: Vec<EncoderInfo>, tonemappers: Vec<Tonemapper>) -> Ffmpeg {
@@ -1034,7 +1037,11 @@ mod tests {
         let args = args_string(&plan, 3, 8);
         assert!(args.contains("-init_hw_device vulkan=vk -filter_hw_device vk"));
         assert!(args.contains("-hwaccel cuda"));
-        assert!(args.contains("-ss 12.000 -i file:/media/movie.mkv"));
+        // Only media demuxers may open the file (no playlists pointing elsewhere).
+        assert!(
+            args.contains(&format!("-ss 12.000 -format_whitelist {MEDIA_DEMUXERS} -i file:/media/movie.mkv")),
+            "{args}"
+        );
         assert!(args.contains("-output_ts_offset 12.000"));
         assert!(args.contains("libplacebo=w=1920:h=1080"));
         assert!(args.contains("-c:v h264_nvenc"));

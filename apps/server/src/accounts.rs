@@ -162,41 +162,98 @@ pub fn validate_color(color: &str) -> Result<(), AppError> {
 
 // ------------------------------------------------------------------ throttling
 
-/// Failed password / PIN attempts per key (username, profile id). After
+/// Password and PIN attempts per key (username, profile id). After
 /// `MAX_FAILURES` failures within the window, attempts are refused until it
 /// ends, which makes guessing a 4-digit PIN impractical.
+///
+/// An attempt is reserved before the secret is checked ([`Throttle::begin`])
+/// and attempts still being checked count towards the limit, so firing many
+/// at once doesn't get more guesses than firing them one by one.
 #[derive(Default)]
 pub struct Throttle {
-    failures: DashMap<String, (u32, Instant)>,
+    attempts: DashMap<String, Attempts>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Attempts {
+    failures: u32,
+    in_flight: u32,
+    /// When the current window started (its first attempt).
+    since: Instant,
 }
 
 const MAX_FAILURES: u32 = 5;
 const WINDOW: Duration = Duration::from_secs(15 * 60);
 
 impl Throttle {
-    /// `Err` with the remaining wait while `key` is locked out.
-    pub fn check(&self, key: &str) -> Result<(), AppError> {
-        if let Some(entry) = self.failures.get(key) {
-            let (count, since) = *entry;
-            let elapsed = since.elapsed();
-            if count >= MAX_FAILURES && elapsed < WINDOW {
-                let minutes = (WINDOW - elapsed).as_secs().div_ceil(60);
-                return Err(AppError::TooManyRequests(format!("too many attempts, try again in {minutes} min")));
-            }
+    /// Reserve an attempt for `key`, or `Err` with the remaining wait while
+    /// it is locked out (or the attempts left are all in flight).
+    pub fn begin(&self, key: &str) -> Result<Attempt<'_>, AppError> {
+        let mut entry = self.attempts.entry(key.to_owned()).or_insert(Attempts {
+            failures: 0,
+            in_flight: 0,
+            since: Instant::now(),
+        });
+        if entry.since.elapsed() >= WINDOW {
+            entry.failures = 0;
+            entry.since = Instant::now();
         }
-        Ok(())
+        if entry.failures + entry.in_flight >= MAX_FAILURES {
+            let minutes = WINDOW.saturating_sub(entry.since.elapsed()).as_secs().div_ceil(60).max(1);
+            return Err(AppError::TooManyRequests(format!("too many attempts, try again in {minutes} min")));
+        }
+        entry.in_flight += 1;
+        Ok(Attempt { throttle: self, key: key.to_owned(), settled: false })
     }
 
-    pub fn failed(&self, key: &str) {
-        let mut entry = self.failures.entry(key.to_owned()).or_insert((0, Instant::now()));
-        if entry.1.elapsed() >= WINDOW {
-            *entry = (0, Instant::now());
+    fn settle(&self, key: &str, outcome: Outcome) {
+        let Some(mut entry) = self.attempts.get_mut(key) else { return };
+        entry.in_flight = entry.in_flight.saturating_sub(1);
+        match outcome {
+            Outcome::Failed => entry.failures += 1,
+            Outcome::Succeeded => entry.failures = 0,
+            Outcome::Abandoned => {}
         }
-        entry.0 += 1;
+        let idle = entry.in_flight == 0 && entry.failures == 0;
+        drop(entry);
+        if idle {
+            self.attempts.remove_if(key, |_, a| a.in_flight == 0 && a.failures == 0);
+        }
+    }
+}
+
+enum Outcome {
+    Failed,
+    Succeeded,
+    Abandoned,
+}
+
+/// A reserved attempt: [`Attempt::failed`] counts it, [`Attempt::succeeded`]
+/// clears the failures. Dropping it unsettled (a request refused before any
+/// secret was checked) just gives the reservation back.
+pub struct Attempt<'a> {
+    throttle: &'a Throttle,
+    key: String,
+    settled: bool,
+}
+
+impl Attempt<'_> {
+    pub fn failed(mut self) {
+        self.settled = true;
+        self.throttle.settle(&self.key, Outcome::Failed);
     }
 
-    pub fn succeeded(&self, key: &str) {
-        self.failures.remove(key);
+    pub fn succeeded(mut self) {
+        self.settled = true;
+        self.throttle.settle(&self.key, Outcome::Succeeded);
+    }
+}
+
+impl Drop for Attempt<'_> {
+    fn drop(&mut self) {
+        if !self.settled {
+            self.throttle.settle(&self.key, Outcome::Abandoned);
+        }
     }
 }
 
@@ -251,7 +308,7 @@ pub fn avatars_dir(data_dir: &Path) -> PathBuf {
 /// Center-crop and scale an uploaded picture to a square JPEG.
 pub fn process_avatar(bytes: &[u8]) -> Result<Vec<u8>, AppError> {
     let img =
-        image::load_from_memory(bytes).map_err(|_| AppError::bad_request("that file is not a supported picture"))?;
+        crate::images::decode(bytes).map_err(|_| AppError::bad_request("that file is not a supported picture"))?;
     let side = img.width().min(img.height());
     let (x, y) = ((img.width() - side) / 2, (img.height() - side) / 2);
     let square = img.crop_imm(x, y, side, side);
@@ -293,13 +350,41 @@ mod tests {
     fn throttle_locks_after_repeated_failures() {
         let t = Throttle::default();
         for _ in 0..MAX_FAILURES {
-            assert!(t.check("pin:7").is_ok());
-            t.failed("pin:7");
+            t.begin("pin:7").expect("allowed").failed();
         }
-        assert!(t.check("pin:7").is_err());
-        assert!(t.check("pin:8").is_ok());
-        t.succeeded("pin:7");
-        assert!(t.check("pin:7").is_ok());
+        assert!(t.begin("pin:7").is_err());
+        assert!(t.begin("pin:8").is_ok());
+        // Failures within the limit are forgotten after a success.
+        let t = Throttle::default();
+        for _ in 1..MAX_FAILURES {
+            t.begin("pin:7").expect("allowed").failed();
+        }
+        t.begin("pin:7").expect("allowed").succeeded();
+        assert!(t.attempts.is_empty(), "nothing left to track");
+        assert!(t.begin("pin:7").is_ok());
+    }
+
+    #[test]
+    fn concurrent_attempts_count_against_the_limit() {
+        let t = Throttle::default();
+        // Attempts being checked at the same time hold their places...
+        let in_flight: Vec<_> = (0..MAX_FAILURES).map(|_| t.begin("pin:9").expect("allowed")).collect();
+        assert!(matches!(t.begin("pin:9").map(|_| ()), Err(AppError::TooManyRequests(_))));
+        // ...and once they all fail, the profile is locked out.
+        for attempt in in_flight {
+            attempt.failed();
+        }
+        assert!(t.begin("pin:9").is_err());
+    }
+
+    #[test]
+    fn unsettled_attempts_give_their_place_back() {
+        let t = Throttle::default();
+        for _ in 0..MAX_FAILURES * 2 {
+            drop(t.begin("login:amy").expect("allowed"));
+        }
+        assert!(t.begin("login:amy").is_ok());
+        assert!(t.attempts.get("login:amy").is_none_or(|a| a.failures == 0));
     }
 
     #[test]
@@ -386,15 +471,14 @@ mod tests {
         // `Instant` can't go back further than the machine's uptime.
         let Some(long_ago) = Instant::now().checked_sub(WINDOW + Duration::from_secs(1)) else { return };
         let t = Throttle::default();
-        t.failures.insert("login:bob".into(), (MAX_FAILURES, long_ago));
-        assert!(t.check("login:bob").is_ok(), "the lockout is over");
-        // The next failure starts a new count instead of adding to the old one.
-        t.failed("login:bob");
-        assert!(t.check("login:bob").is_ok());
+        t.attempts.insert("login:bob".into(), Attempts { failures: MAX_FAILURES, in_flight: 0, since: long_ago });
+        // The lockout is over, and the next failure starts a new count
+        // instead of adding to the old one.
+        t.begin("login:bob").expect("the lockout is over").failed();
         for _ in 1..MAX_FAILURES {
-            t.failed("login:bob");
+            t.begin("login:bob").expect("allowed").failed();
         }
-        match t.check("login:bob") {
+        match t.begin("login:bob").map(|_| ()) {
             Err(AppError::TooManyRequests(message)) => assert!(message.contains("15 min"), "{message}"),
             other => panic!("expected a lockout, got {other:?}"),
         }

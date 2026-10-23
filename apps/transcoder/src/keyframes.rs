@@ -16,7 +16,7 @@ use tokio::sync::mpsc;
 
 use crate::ffmpeg::Ffmpeg;
 use crate::metrics::Metrics;
-use crate::util::{file_key, input_arg};
+use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg};
 
 const MEMORY_ENTRIES: usize = 256;
 
@@ -134,6 +134,7 @@ impl KeyframeStore {
 async fn scan(ff: &Ffmpeg, path: &Path) -> anyhow::Result<Vec<i64>> {
     let mut cmd = ff.probe_command();
     cmd.args(["-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0"])
+        .args(MEDIA_INPUT_OPTIONS)
         .arg(input_arg(path))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

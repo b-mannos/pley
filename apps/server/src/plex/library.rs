@@ -13,7 +13,7 @@ use axum::response::Response;
 use super::meta::{self, Detail, Extras, Sections, kind_for_number, kinds_of, plex_type, section_type, type_number};
 use super::{Node, Page, Params, PlexAdmin, PlexError, PlexInfo, PlexResult, PlexUser};
 use crate::auth::AuthUser;
-use crate::catalog::{self, ItemRow, LibraryQuery};
+use crate::catalog::{self, ItemRow, LibraryQuery, ME_CTE, VISIBLE, VISIBLE_ITEMS};
 use crate::events::ServerEvent;
 use crate::library::LibraryRow;
 use crate::people;
@@ -887,7 +887,7 @@ pub async fn filter_choices(
 ) -> PlexResult<Node> {
     let (lib, _) = library_for(&state, &user, &id).await?;
     let kind = params.get("type").and_then(kind_for_number).unwrap_or(lib.kind().top_level_kind());
-    let (genres, years) = catalog::library_filters(&state.db, lib.id, kind).await?;
+    let (genres, years) = catalog::library_filters(&state.db, user.id, lib.id, kind).await?;
     let values: Vec<String> = match filter.as_str() {
         "genre" => genres,
         "year" => years.iter().map(i64::to_string).collect(),
@@ -938,9 +938,11 @@ pub async fn filter_choices(
         "contentRating" | "studio" => {
             let column = if filter == "studio" { "studio" } else { "content_rating" };
             sqlx::query_scalar(&format!(
-                "SELECT DISTINCT {column} FROM items WHERE library_id = ? AND kind = ? AND {column} IS NOT NULL
-                 ORDER BY {column} COLLATE NOCASE"
+                "{ME_CTE} SELECT DISTINCT i.{column} FROM {VISIBLE_ITEMS}
+                 WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? AND i.{column} IS NOT NULL
+                 ORDER BY i.{column} COLLATE NOCASE"
             ))
+            .bind(user.id)
             .bind(lib.id)
             .bind(kind)
             .fetch_all(&state.db.read)

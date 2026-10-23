@@ -2,8 +2,8 @@
 //!
 //! Administrators see everything. Other users see all libraries or a chosen
 //! set and, with an age limit, only movies and shows rated for that age:
-//! music is exempt, seasons and episodes go by their show's rating and
-//! unrated titles are hidden. Item queries apply the same rules in SQL (see
+//! music is exempt, seasons and episodes go by their show's rating (or their
+//! own, when that is stricter) and unrated titles are hidden. Item queries apply the same rules in SQL (see
 //! `catalog::VISIBLE`); this module answers them for whole libraries.
 
 use crate::auth::AuthUser;

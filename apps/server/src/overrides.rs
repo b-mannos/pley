@@ -141,6 +141,12 @@ pub async fn apply(db: &Db, item_ids: &[i64]) -> sqlx::Result<()> {
     tx.commit().await
 }
 
+/// SQL for `UPDATE items …`: whether the row's content rating was set by
+/// hand. Metadata refreshes leave it (and its age) alone instead of
+/// overwriting it until the hand edit is re-applied: age limits depend on it.
+pub const RATING_LOCKED: &str =
+    "EXISTS (SELECT 1 FROM item_overrides o WHERE o.item_id = items.id AND o.field = 'content_rating')";
+
 /// Re-apply overrides of every item in a library (after a scan).
 pub async fn apply_library(db: &Db, library_id: i64) -> sqlx::Result<()> {
     let ids: Vec<i64> = sqlx::query_scalar(

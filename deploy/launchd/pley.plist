@@ -6,7 +6,7 @@
     cp pley.plist ~/Library/LaunchAgents/pley.server.plist
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/pley.server.plist
   Stop with: launchctl bootout gui/$(id -u)/pley.server
-  Data lives in ~/Library/Application Support/pley.
+  Data and logs live in ~/Library/Application Support/pley.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -32,9 +32,8 @@
     </dict>
     <key>ExitTimeOut</key>
     <integer>45</integer>
-    <key>StandardOutPath</key>
-    <string>/tmp/pley.log</string>
-    <key>StandardErrorPath</key>
-    <string>/tmp/pley.log</string>
+    <!-- No StandardOutPath: pley writes its own log, readable only by you, to
+         ~/Library/Application Support/pley/logs/pley.log (a file in /tmp could
+         be read, or created beforehand, by other users). -->
 </dict>
 </plist>

@@ -33,7 +33,7 @@ use tower::util::{MapRequest, MapRequestLayer};
 use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
 use tower_http::compression::{CompressionLayer, CompressionLevel};
 
-use crate::auth::AuthUser;
+use crate::auth::{AuthUser, token_without_cookie};
 use crate::error::AppError;
 use crate::state::AppState;
 pub use xml::Node;
@@ -349,7 +349,11 @@ fn html_escape(value: &str) -> String {
 // ------------------------------------------------------------------ auth
 
 /// The caller, authenticated by `X-Plex-Token` (header or query) or by
-/// pley's own token, cookie or `Authorization: Bearer`.
+/// pley's own token in `Authorization: Bearer`, `X-Pley-Token` or `?token=`.
+///
+/// Never by the web UI's cookie: browsers send it to this port too (cookies
+/// aren't per port), and several Plex endpoints change things on a GET, so a
+/// page elsewhere could otherwise act for whoever is signed in to pley.
 #[derive(Debug, Clone)]
 pub struct PlexUser(pub AuthUser);
 
@@ -360,12 +364,10 @@ impl FromRequestParts<AppState> for PlexUser {
         if let Some(user) = parts.extensions.get::<AuthUser>() {
             return Ok(PlexUser(user.clone()));
         }
-        if let Some(token) = plex_token(parts) {
-            let user = state.auth.validate(&token).await.ok_or(PlexError::Unauthorized)?;
-            parts.extensions.insert(user.clone());
-            return Ok(PlexUser(user));
-        }
-        AuthUser::from_request_parts(parts, state).await.map(PlexUser).map_err(|_| PlexError::Unauthorized)
+        let token = plex_token(parts).or_else(|| token_without_cookie(parts)).ok_or(PlexError::Unauthorized)?;
+        let user = state.auth.validate(&token).await.ok_or(PlexError::Unauthorized)?;
+        parts.extensions.insert(user.clone());
+        Ok(PlexUser(user))
     }
 }
 

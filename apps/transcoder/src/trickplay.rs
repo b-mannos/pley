@@ -19,7 +19,7 @@ use crate::extract::run_capture;
 use crate::ffmpeg::Ffmpeg;
 use crate::plan::ZSCALE_TONEMAP;
 use crate::probe::Prober;
-use crate::util::{background_priority, file_key, input_arg};
+use crate::util::{MEDIA_INPUT_OPTIONS, background_priority, file_key, input_arg};
 
 const COLUMNS: u32 = 10;
 const ROWS: u32 = 10;
@@ -100,7 +100,7 @@ impl Trickplay {
             cmd.args(["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"]);
         }
         // Decoding keyframes only is what makes this cheap.
-        cmd.args(["-skip_frame", "nokey"]).arg("-i").arg(input_arg(path));
+        cmd.args(["-skip_frame", "nokey"]).args(MEDIA_INPUT_OPTIONS).arg("-i").arg(input_arg(path));
         cmd.args(["-map", &format!("0:{}", video.index), "-an", "-sn", "-dn", "-vf", &filter]);
         cmd.args(["-fps_mode", "passthrough", "-c:v", "mjpeg", "-q:v", "5", "-start_number", "0"]);
         cmd.arg(part.join("%d.jpg"));

@@ -247,7 +247,7 @@ pub async fn filters(
     Path(id): Path<i64>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let lib = visible_library(&state, &user, id).await?;
-    let (genres, years) = catalog::library_filters(&state.db, lib.id, lib.kind().top_level_kind()).await?;
+    let (genres, years) = catalog::library_filters(&state.db, user.id, lib.id, lib.kind().top_level_kind()).await?;
     Ok(Json(serde_json::json!({ "genres": genres, "years": years })))
 }
 

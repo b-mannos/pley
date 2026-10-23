@@ -24,6 +24,19 @@ pub enum ServerEvent {
     SessionsChanged,
 }
 
+impl ServerEvent {
+    /// The library the event is about, if it is about one.
+    pub fn library_id(&self) -> Option<i64> {
+        match self {
+            ServerEvent::ScanStarted { library_id }
+            | ServerEvent::ScanProgress { library_id, .. }
+            | ServerEvent::ScanFinished { library_id, .. }
+            | ServerEvent::LibraryChanged { library_id } => Some(*library_id),
+            ServerEvent::LibrariesChanged | ServerEvent::SessionsChanged => None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct EventBus {
     tx: broadcast::Sender<ServerEvent>,

@@ -134,9 +134,9 @@ pub fn router(state: AppState) -> Router {
         .nest("/api", api)
         .fallback(crate::web::static_handler)
         .layer(CompressionLayer::new().quality(CompressionLevel::Precise(4)).compress_when(compressible))
-        .layer(TraceLayer::new_for_http().make_span_with(
-            |req: &axum::http::Request<_>| tracing::debug_span!("http", method = %req.method(), uri = %req.uri()),
-        ))
+        .layer(TraceLayer::new_for_http().make_span_with(|req: &axum::http::Request<_>| {
+            tracing::debug_span!("http", method = %req.method(), uri = %loggable_uri(req.uri()))
+        }))
         .layer(tower_http::timeout::TimeoutLayer::with_status_code(
             axum::http::StatusCode::REQUEST_TIMEOUT,
             Duration::from_secs(60 * 30),
@@ -147,4 +147,32 @@ pub fn router(state: AppState) -> Router {
 /// Query string helper: `"true"`/`"1"` → true.
 pub(crate) fn truthy(value: &str) -> bool {
     matches!(value, "1" | "true" | "yes")
+}
+
+/// The request URI for logs, with credentials in the query (`token`,
+/// `X-Plex-Token`, `api_key`) left out.
+fn loggable_uri(uri: &axum::http::Uri) -> String {
+    let Some(query) = uri.query() else { return uri.path().to_owned() };
+    let query: Vec<String> = query
+        .split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some((key, _)) if matches!(key.to_ascii_lowercase().as_str(), "token" | "x-plex-token" | "api_key") => {
+                format!("{key}=…")
+            }
+            _ => pair.to_owned(),
+        })
+        .collect();
+    format!("{}?{}", uri.path(), query.join("&"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logs_leave_credentials_out() {
+        let uri: axum::http::Uri = "/api/files/3/stream?token=secret&t=10&X-Plex-Token=abc&api_key=k".parse().unwrap();
+        assert_eq!(loggable_uri(&uri), "/api/files/3/stream?token=…&t=10&X-Plex-Token=…&api_key=…");
+        assert_eq!(loggable_uri(&"/api/items/1".parse().unwrap()), "/api/items/1");
+    }
 }
