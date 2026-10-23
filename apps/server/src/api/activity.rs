@@ -47,7 +47,7 @@ pub struct Activity {
 
 pub async fn activity(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Activity>> {
     let sessions: Vec<_> =
-        state.sessions.list().into_iter().filter(|s| user.is_admin || s.user_id == user.id).collect();
+        state.sessions.active().into_iter().filter(|s| user.is_admin || s.user_id == user.id).collect();
     let jobs: HashMap<String, JobStatus> = if sessions.iter().any(|s| s.job_id().is_some()) {
         match state.transcoder.status().await {
             Ok(status) => status.jobs.into_iter().map(|j| (j.id.clone(), j)).collect(),

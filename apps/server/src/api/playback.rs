@@ -258,7 +258,9 @@ pub async fn hls_file(
     Path((id, file)): Path<(String, String)>,
 ) -> ApiResult<Response> {
     let session = owned_session(&state, &user, &id)?;
-    session.touch();
+    if session.touch() {
+        state.events.send(ServerEvent::SessionsChanged);
+    }
     if session.transcode.is_none() {
         return Err(AppError::not_found("not a transcode session"));
     }

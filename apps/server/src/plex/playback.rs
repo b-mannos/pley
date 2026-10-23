@@ -383,10 +383,9 @@ fn transcode_node(session: &Session, job: &JobStatus) -> Node {
 pub async fn sessions(State(state): State<AppState>, PlexUser(user): PlexUser) -> PlexResult<Node> {
     let all = state.sessions.list();
     forget_ended(&all);
-    let sessions: Vec<Arc<Session>> = all
-        .into_iter()
-        .filter(|s| (user.is_admin || s.user_id == user.id) && s.play.lock().state != "stopped")
-        .collect();
+    let now = crate::util::now();
+    let sessions: Vec<Arc<Session>> =
+        all.into_iter().filter(|s| (user.is_admin || s.user_id == user.id) && s.is_active(now)).collect();
     let jobs: HashMap<String, JobStatus> = if sessions.iter().any(|s| s.job_id().is_some()) {
         match state.transcoder.status().await {
             Ok(status) => status.jobs.into_iter().map(|j| (j.id.clone(), j)).collect(),
@@ -477,7 +476,7 @@ fn mark_decision(node: &mut Node, method: Method) {
 /// `/transcode/sessions`
 pub async fn transcode_sessions(State(state): State<AppState>, PlexUser(user): PlexUser) -> PlexResult<Node> {
     let sessions: Vec<Arc<Session>> =
-        state.sessions.list().into_iter().filter(|s| user.is_admin || s.user_id == user.id).collect();
+        state.sessions.active().into_iter().filter(|s| user.is_admin || s.user_id == user.id).collect();
     let jobs: HashMap<String, JobStatus> = match state.transcoder.status().await {
         Ok(status) => status.jobs.into_iter().map(|j| (j.id.clone(), j)).collect(),
         Err(_) => HashMap::new(),

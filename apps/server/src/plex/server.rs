@@ -30,7 +30,7 @@ pub async fn root(
     Extension(info): Extension<Arc<PlexInfo>>,
 ) -> PlexResult<Node> {
     let settings = state.settings.get();
-    let transcodes = state.sessions.list().iter().filter(|s| s.job_id().is_some()).count();
+    let transcodes = state.sessions.active_transcodes();
     let directories = [
         "activities",
         "butler",

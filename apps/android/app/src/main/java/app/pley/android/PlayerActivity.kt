@@ -191,7 +191,13 @@ class PlayerActivity : ComponentActivity() {
         reporter = lifecycleScope.launch {
             while (isActive) {
                 delay(REPORT_EVERY_MS)
-                if (player?.isPlaying == true) report("playing")
+                // Paused too: the server forgets players it hasn't heard from.
+                val p = player
+                if (p?.isPlaying == true) {
+                    report("playing")
+                } else if (p?.playbackState == Player.STATE_READY) {
+                    report("paused")
+                }
             }
         }
     }

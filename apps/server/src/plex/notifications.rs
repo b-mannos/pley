@@ -211,7 +211,7 @@ impl Listener {
     /// `playing` notifications for sessions that started, changed state or
     /// moved on since the last look, and `stopped` for those that ended.
     fn sessions_changed(&mut self) -> Vec<Value> {
-        let live = self.state.sessions.list();
+        let live = self.state.sessions.active();
         let mine: Vec<_> = live.iter().filter(|s| self.user.is_admin || s.user_id == self.user.id).collect();
         let mut notes = Vec::new();
         for session in &mine {
@@ -249,7 +249,8 @@ impl Listener {
                 }
             }
         }
-        playback::forget_ended(&live);
+        // Keys stay for quiet sessions, which may wake.
+        playback::forget_ended(&self.state.sessions.list());
         notes
     }
 

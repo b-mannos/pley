@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
@@ -393,6 +393,11 @@ pub struct Session {
     /// Serialises job re-creation when the transcoder lost the job.
     pub recreate: tokio::sync::Mutex<()>,
     last_transcoder_touch: AtomicI64,
+    /// Not heard from for [`ACTIVE_WINDOW_SECS`] (no report, heartbeat or
+    /// request for media): out of "Now playing", its transcode stopped. The
+    /// next sign of life wakes it, and a request for media makes a new
+    /// transcode (`api::playback::replacement_job`).
+    quiet: AtomicBool,
 }
 
 impl Session {
@@ -425,6 +430,7 @@ impl Session {
             play: Mutex::new(PlayState { position_ms: start_ms, state: "playing".into(), updated_at: now }),
             recreate: tokio::sync::Mutex::new(()),
             last_transcoder_touch: AtomicI64::new(now),
+            quiet: AtomicBool::new(false),
         }
     }
 
@@ -436,12 +442,16 @@ impl Session {
         self.play.lock().position_ms
     }
 
-    pub fn touch(&self) {
+    /// A request for its media; whether that woke it (it shows again in
+    /// "Now playing").
+    pub fn touch(&self) -> bool {
         self.play.lock().updated_at = now();
+        self.quiet.swap(false, Ordering::SeqCst)
     }
 
     /// Records a progress report; whether the play state (playing, paused,
-    /// stopped) changed, which the dashboard and Plex tools hear about at once.
+    /// stopped) changed or the session woke, which the dashboard and Plex
+    /// tools hear about at once.
     pub fn update(&self, position_ms: i64, state: &str) -> bool {
         let mut play = self.play.lock();
         let changed = play.state != state;
@@ -450,7 +460,16 @@ impl Session {
             play.state = state.to_owned();
         }
         play.updated_at = now();
-        changed
+        drop(play);
+        let woke = self.quiet.swap(false, Ordering::SeqCst);
+        changed || woke
+    }
+
+    /// Playing or paused, with a player that was heard from lately: what
+    /// "Now playing" lists.
+    pub fn is_active(&self, now: i64) -> bool {
+        let play = self.play.lock();
+        play.state != "stopped" && now - play.updated_at <= ACTIVE_WINDOW_SECS
     }
 
     /// Keep the transcoder job alive while the player reports progress (paused players).
@@ -487,9 +506,14 @@ impl Drop for TranscodeSlot<'_> {
     }
 }
 
+/// Quiet sessions are forgotten after this (a player that comes back later
+/// starts a new one).
 const SESSION_IDLE_SECS: i64 = 15 * 60;
 const STOPPED_LINGER_SECS: i64 = 60;
+/// Players report every 10 seconds while playing and every 30 while paused:
+/// a session not heard from for this long has lost its player.
 const ACTIVE_WINDOW_SECS: i64 = 90;
+const REAP_EVERY: Duration = Duration::from_secs(15);
 /// Direct plays a user has at most: the oldest go first. They cost only
 /// memory (transcodes have their own limit), but a client starting plays in
 /// a loop mustn't be able to grow it without end.
@@ -564,6 +588,33 @@ impl Sessions {
         list
     }
 
+    /// The sessions a player is still there for (see [`Session::is_active`]),
+    /// oldest first: "Now playing".
+    pub fn active(&self) -> Vec<Arc<Session>> {
+        let now = now();
+        self.list().into_iter().filter(|s| s.is_active(now)).collect()
+    }
+
+    /// One look at every session at `now`: those to forget (stopped a
+    /// while ago, or quiet for long) and those that just went quiet. Both
+    /// leave "Now playing"; their transcodes are the caller's to stop.
+    pub fn sweep(&self, now: i64) -> Sweep {
+        let mut sweep = Sweep::default();
+        for session in self.list() {
+            let (stopped, idle) = {
+                let play = session.play.lock();
+                (play.state == "stopped", now - play.updated_at)
+            };
+            if idle > SESSION_IDLE_SECS || (stopped && idle > STOPPED_LINGER_SECS) {
+                self.remove(&session.id);
+                sweep.forgotten.push(session);
+            } else if idle > ACTIVE_WINDOW_SECS && !session.quiet.swap(true, Ordering::SeqCst) {
+                sweep.quieted.push(session);
+            }
+        }
+        sweep
+    }
+
     /// Transcode sessions with recent activity (segment requests or progress
     /// reports). Abandoned sessions (closed tabs) stop counting quickly even
     /// though they are only reaped later.
@@ -571,30 +622,24 @@ impl Sessions {
         live_transcodes(&self.map.lock())
     }
 
+    /// Every [`REAP_EVERY`]: sessions whose player went quiet leave "Now
+    /// playing" and their transcodes stop (a closed tab, a phone gone
+    /// to sleep, a crashed app); sessions quiet for long are forgotten.
     pub fn spawn_reaper(self: &Arc<Self>, transcoder: Arc<Transcoder>, events: EventBus) {
         let sessions = Arc::downgrade(self);
         tokio::spawn(async move {
-            let mut tick = tokio::time::interval(Duration::from_secs(30));
+            let mut tick = tokio::time::interval(REAP_EVERY);
             loop {
                 tick.tick().await;
                 let Some(sessions) = sessions.upgrade() else { break };
-                let now = now();
-                let expired: Vec<Arc<Session>> = sessions
-                    .list()
-                    .into_iter()
-                    .filter(|s| {
-                        let play = s.play.lock();
-                        now - play.updated_at > SESSION_IDLE_SECS
-                            || (play.state == "stopped" && now - play.updated_at > STOPPED_LINGER_SECS)
-                    })
-                    .collect();
-                for session in &expired {
-                    sessions.remove(&session.id);
-                    if let Some(job) = session.job_id() {
-                        let _ = transcoder.delete_job(&job).await;
-                    }
+                let sweep = sessions.sweep(now());
+                // A quieted session's job is gone already when it is forgotten.
+                let stop =
+                    sweep.quieted.iter().chain(sweep.forgotten.iter().filter(|s| !s.quiet.load(Ordering::SeqCst)));
+                for job in stop.filter_map(|s| s.job_id()).collect::<Vec<_>>() {
+                    let _ = transcoder.delete_job(&job).await;
                 }
-                if !expired.is_empty() {
+                if !sweep.quieted.is_empty() || !sweep.forgotten.is_empty() {
                     events.send(ServerEvent::SessionsChanged);
                 }
             }
@@ -602,15 +647,17 @@ impl Sessions {
     }
 }
 
+/// What [`Sessions::sweep`] found.
+#[derive(Default)]
+pub struct Sweep {
+    pub forgotten: Vec<Arc<Session>>,
+    pub quieted: Vec<Arc<Session>>,
+}
+
 /// See [`Sessions::active_transcodes`].
 fn live_transcodes(map: &HashMap<String, Arc<Session>>) -> usize {
-    let cutoff = now() - ACTIVE_WINDOW_SECS;
-    map.values()
-        .filter(|s| {
-            let play = s.play.lock();
-            s.transcode.is_some() && play.state != "stopped" && play.updated_at >= cutoff
-        })
-        .count()
+    let now = now();
+    map.values().filter(|s| s.transcode.is_some() && s.is_active(now)).count()
 }
 
 // ------------------------------------------------------------------ status mapping
@@ -1155,6 +1202,49 @@ mod tests {
         assert_eq!(sessions.active_transcodes(), 1);
         live.update(1_000, "paused");
         assert_eq!(sessions.active_transcodes(), 1, "paused players keep their slot");
+    }
+
+    #[test]
+    fn sessions_whose_player_went_quiet_leave_now_playing_and_wake_again() {
+        let sessions = Sessions::default();
+        let playing = sessions.insert(session(1, None, true));
+        let paused = sessions.insert(session(1, None, false));
+        paused.update(5_000, "paused");
+        let stopped = sessions.insert(session(1, None, false));
+        stopped.update(9_000, "stopped");
+        let gone = sessions.insert(session(1, None, true));
+        gone.play.lock().updated_at = now() - ACTIVE_WINDOW_SECS - 1;
+        // Sorted: sessions started in the same second come in any order.
+        let ids = |list: Vec<Arc<Session>>| {
+            let mut ids = list.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+            ids.sort();
+            ids
+        };
+        assert_eq!(
+            ids(sessions.active()),
+            ids(vec![playing.clone(), paused.clone()]),
+            "stopped and quiet ones aren't playing"
+        );
+
+        let sweep = sessions.sweep(now());
+        assert_eq!(ids(sweep.quieted), std::slice::from_ref(&gone.id));
+        assert!(sweep.forgotten.is_empty(), "stopped a moment ago: kept a little");
+        assert!(sessions.sweep(now()).quieted.is_empty(), "quieted once");
+        assert!(sessions.get(&gone.id).is_some(), "kept, to wake");
+
+        // A sign of life wakes it.
+        assert!(gone.touch(), "a request for media");
+        assert!(!gone.touch());
+        assert!(ids(sessions.active()).contains(&gone.id));
+        gone.play.lock().updated_at = now() - ACTIVE_WINDOW_SECS - 1;
+        assert_eq!(sessions.sweep(now()).quieted.len(), 1);
+        assert!(gone.update(10_000, "playing"), "a progress report wakes it too");
+
+        // Later: stopped ones and long-quiet ones are forgotten.
+        let later = now() + SESSION_IDLE_SECS + 1;
+        let forgotten = ids(sessions.sweep(later).forgotten);
+        assert_eq!(forgotten.len(), 4);
+        assert!(sessions.list().is_empty());
     }
 
     #[test]

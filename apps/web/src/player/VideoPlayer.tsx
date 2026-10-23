@@ -44,6 +44,8 @@ import { UpNext } from "./UpNext";
 import { itemUrl } from "@/lib/urls";
 
 const PROGRESS_INTERVAL = 10_000;
+/** While paused: the server forgets players it hasn't heard from for 90 s. */
+const PAUSED_HEARTBEAT = 30_000;
 const HIDE_CONTROLS_AFTER = 3_000;
 
 type WebkitVideo = HTMLVideoElement & { webkitEnterFullscreen?: () => void };
@@ -673,12 +675,17 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     };
   }, [report]);
 
-  // Periodic progress while playing.
+  // Progress while playing; while paused, now and then, so the server knows
+  // the player is still there (it keeps the session in "Now playing" and
+  // its transcode going; a closed tab drops out within a minute or two).
   useEffect(() => {
-    if (!playing) return;
-    const timer = window.setInterval(() => report("playing"), PROGRESS_INTERVAL);
+    if (ended || error) return;
+    const timer = window.setInterval(
+      () => report(playing ? "playing" : "paused"),
+      playing ? PROGRESS_INTERVAL : PAUSED_HEARTBEAT,
+    );
     return () => window.clearInterval(timer);
-  }, [playing, report]);
+  }, [playing, report, ended, error]);
 
   // Volume.
   useEffect(() => {

@@ -190,7 +190,7 @@ fn status_line(state: &AppState) -> String {
     if state.stopping.is_cancelled() {
         return "shutting down".to_owned();
     }
-    let playing = state.sessions.list().iter().filter(|s| s.play.lock().state != "stopped").count();
+    let playing = state.sessions.active().len();
     let transcoding = state.sessions.active_transcodes();
     let mut parts = Vec::new();
     match playing {
