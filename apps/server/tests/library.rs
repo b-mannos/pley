@@ -837,6 +837,29 @@ async fn rescans_that_find_nothing_new_keep_listings_cached() {
     rescan(&app, &admin, tv).await;
     assert_eq!(revalidate(&app, &uri, &admin, &etag).await.status, StatusCode::NOT_MODIFIED);
 
+    // Every scan applies hand edits again: only what differs is written.
+    let show = first.body["items"][0]["id"].as_i64().unwrap();
+    let edited = app.patch(&format!("/api/items/{show}"), &admin, json!({"title": "The Show"})).await;
+    assert_eq!(edited.status, StatusCode::OK, "{}", edited.text());
+    let etag = app.get(&uri, &admin).await.headers["etag"].to_str().unwrap().to_owned();
+    rescan(&app, &admin, tv).await;
+    assert_eq!(
+        revalidate(&app, &uri, &admin, &etag).await.status,
+        StatusCode::NOT_MODIFIED,
+        "the edit is there already"
+    );
+
+    // One of an episode's files goes while the episode stays: listings show
+    // files (sizes, bitrates), so they change.
+    app.media_file("tv/Show (2015)/Season 01/Show - S01E01 - 1080p.mkv", 2048);
+    rescan(&app, &admin, tv).await;
+    let etag = app.get(&uri, &admin).await.headers["etag"].to_str().unwrap().to_owned();
+    std::fs::remove_file(app.media.path().join("tv/Show (2015)/Season 01/Show - S01E01 - 1080p.mkv")).unwrap();
+    rescan(&app, &admin, tv).await;
+    let after = revalidate(&app, &uri, &admin, &etag).await;
+    assert_eq!(after.status, StatusCode::OK, "a removed version changes the listing");
+    let etag = after.headers["etag"].to_str().unwrap().to_owned();
+
     // A new episode changes the counts, and the listing.
     app.media_file("tv/Show (2015)/Season 02/Show - S02E02.mkv", 1024);
     rescan(&app, &admin, tv).await;

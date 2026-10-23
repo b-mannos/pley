@@ -417,7 +417,17 @@ impl Scanner {
                 q = q.bind(id);
             }
             let mut tx = self.db.write.begin().await?;
-            q.execute(&mut *tx).await?;
+            if q.execute(&mut *tx).await?.rows_affected() > 0 {
+                // Listings show an item's files (sizes, bitrates): one that
+                // keeps its other files still lists differently.
+                sqlx::query(
+                    "INSERT INTO listing_versions (scope, id, version) VALUES ('library', ?, 1)
+                     ON CONFLICT (scope, id) DO UPDATE SET version = version + 1",
+                )
+                .bind(library_id)
+                .execute(&mut *tx)
+                .await?;
+            }
             tx.commit().await?;
         }
         let mut tx = self.db.write.begin().await?;

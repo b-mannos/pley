@@ -43,9 +43,9 @@ const SKIP_DIRS: &[&str] = &[
 const SAMPLE_DIRS: &[&str] = &["sample", "samples"];
 
 /// Folders listed at the same time. On a network share every listing is a
-/// round trip to the server, which serves many at once: a NAS share of 1,450
-/// folders took 6.5 s to walk one folder at a time and 1.2 s sixteen at a
-/// time. Local disks answer from memory either way.
+/// round trip to the server, which serves many at once: a NAS share of 1,444
+/// folders took 14 to 20 s to walk one folder at a time and 2 to 3 s sixteen
+/// at a time; a local disk was 2 to 5 times faster too.
 const WALK_THREADS: usize = 16;
 
 /// Kinds of bonus material (Plex's extra types).
@@ -492,10 +492,7 @@ impl<'a> Walker<'a> {
         // of what it leads to.
         let meta = match target.map_or_else(|| entry.metadata(), Ok) {
             Ok(meta) => meta,
-            Err(_) => {
-                found.unreadable.push(path);
-                return;
-            }
+            Err(err) => return found.cannot_read(path, &err),
         };
         if self.kind != LibraryKind::Music && is_sample(&path, meta.len()) {
             return;

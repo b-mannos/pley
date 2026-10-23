@@ -108,35 +108,55 @@ pub async fn apply(db: &Db, item_ids: &[i64]) -> sqlx::Result<()> {
     let mut tx = db.write.begin().await?;
     for (item, fields) in by_item {
         let has_sort = fields.iter().any(|(f, _)| f == "sort_title");
+        // Only what differs is written: a scan re-applies every hand edit,
+        // and a rescan that finds nothing new must leave listings cached.
+        let mut changed = false;
         for (field, value) in &fields {
             if !FIELDS.contains(&field.as_str()) {
                 continue;
             }
             // `field` is one of FIELDS, so formatting it into SQL is safe.
-            sqlx::query(&format!("UPDATE items SET {field} = ? WHERE id = ?"))
+            changed |= sqlx::query(&format!("UPDATE items SET {field} = ? WHERE id = ? AND {field} IS NOT ?"))
                 .bind(value)
                 .bind(item)
+                .bind(value)
                 .execute(&mut *tx)
-                .await?;
+                .await?
+                .rows_affected()
+                > 0;
             match field.as_str() {
                 "title" if !has_sort => {
-                    sqlx::query("UPDATE items SET sort_title = ? WHERE id = ?")
-                        .bind(value.as_deref().map(sort_title))
+                    let sort = value.as_deref().map(sort_title);
+                    changed |= sqlx::query("UPDATE items SET sort_title = ? WHERE id = ? AND sort_title IS NOT ?")
+                        .bind(&sort)
                         .bind(item)
+                        .bind(&sort)
                         .execute(&mut *tx)
-                        .await?;
+                        .await?
+                        .rows_affected()
+                        > 0;
                 }
                 "content_rating" => {
-                    sqlx::query("UPDATE items SET rating_age = ? WHERE id = ?")
-                        .bind(value.as_deref().and_then(crate::ratings::rating_age))
+                    let age = value.as_deref().and_then(crate::ratings::rating_age);
+                    changed |= sqlx::query("UPDATE items SET rating_age = ? WHERE id = ? AND rating_age IS NOT ?")
+                        .bind(age)
                         .bind(item)
+                        .bind(age)
                         .execute(&mut *tx)
-                        .await?;
+                        .await?
+                        .rows_affected()
+                        > 0;
                 }
                 _ => {}
             }
         }
-        sqlx::query("UPDATE items SET updated_at = ? WHERE id = ?").bind(now()).bind(item).execute(&mut *tx).await?;
+        if changed {
+            sqlx::query("UPDATE items SET updated_at = ? WHERE id = ?")
+                .bind(now())
+                .bind(item)
+                .execute(&mut *tx)
+                .await?;
+        }
     }
     tx.commit().await
 }
