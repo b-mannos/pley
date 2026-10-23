@@ -43,12 +43,13 @@ struct CollectionRow {
     poster: Option<String>,
     backdrop: Option<String>,
     sort: String,
+    smart_filter: Option<String>,
     created_at: i64,
     updated_at: i64,
 }
 
 const COLUMNS: &str =
-    "id, library_id, title, sort_title, summary, tmdb_id, poster, backdrop, sort, created_at, updated_at";
+    "id, library_id, title, sort_title, summary, tmdb_id, poster, backdrop, sort, smart_filter, created_at, updated_at";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CollectionDto {
@@ -64,6 +65,9 @@ pub struct CollectionDto {
     pub automatic: bool,
     /// `release`, `title` or `custom`.
     pub sort: String,
+    /// A smart collection's filter: the section listing query (Plex's syntax)
+    /// whose items it shows. `None` for collections that hold items.
+    pub smart_filter: Option<String>,
     /// Items this user can see.
     pub item_count: i64,
     /// The collection's own artwork, else its first visible item's.
@@ -85,6 +89,7 @@ impl CollectionRow {
             summary: self.summary,
             automatic: self.tmdb_id.is_some(),
             sort: self.sort,
+            smart_filter: self.smart_filter,
             item_count,
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -127,8 +132,18 @@ pub async fn list(db: &Db, user: &AuthUser, library_id: i64) -> sqlx::Result<Vec
     .bind(library_id)
     .fetch_all(&db.read)
     .await?;
-    let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
-    let counts = visible_counts(db, user.id, &ids).await?;
+    let ids: Vec<i64> = rows.iter().filter(|r| r.smart_filter.is_none()).map(|r| r.id).collect();
+    let mut counts = visible_counts(db, user.id, &ids).await?;
+    if rows.iter().any(|r| r.smart_filter.is_some()) {
+        if let Some(lib) = crate::library::get_library(db, library_id).await? {
+            for row in &rows {
+                if let Some(filter) = &row.smart_filter {
+                    let count = crate::plex::smart_count(db, user.id, &lib, filter).await?;
+                    counts.insert(row.id, i64::try_from(count).unwrap_or(i64::MAX));
+                }
+            }
+        }
+    }
     Ok(rows
         .into_iter()
         .filter_map(|r| {
@@ -167,8 +182,14 @@ pub async fn get(db: &Db, user: &AuthUser, id: i64) -> sqlx::Result<Option<(Coll
     if !crate::access::can_open_library(db, user, row.library_id).await? {
         return Ok(None);
     }
-    let ids = ordered_ids(db, id, &row.sort).await?;
-    let items = catalog::items_by_ids(db, user.id, &ids).await?;
+    let items = match &row.smart_filter {
+        // What the filter finds, in the filter's order.
+        Some(filter) => match crate::library::get_library(db, row.library_id).await? {
+            Some(lib) => crate::plex::smart_items(db, user.id, &lib, filter).await?,
+            None => Vec::new(),
+        },
+        None => catalog::items_by_ids(db, user.id, &ordered_ids(db, id, &row.sort).await?).await?,
+    };
     if items.is_empty() && !(user.is_admin && row.tmdb_id.is_none()) {
         return Ok(None);
     }
@@ -202,6 +223,33 @@ pub async fn for_item(db: &Db, user: &AuthUser, item_id: i64) -> sqlx::Result<Ve
 
 pub async fn library_of(db: &Db, id: i64) -> sqlx::Result<Option<i64>> {
     sqlx::query_scalar("SELECT library_id FROM collections WHERE id = ?").bind(id).fetch_optional(&db.read).await
+}
+
+/// A smart collection of `library_id`, filled by `filter` (see [`CollectionDto::smart_filter`]).
+pub async fn create_smart(db: &Db, library_id: i64, title: &str, filter: &str) -> sqlx::Result<i64> {
+    let id = create(db, library_id, title, None).await?;
+    set_smart_filter(db, id, filter).await?;
+    Ok(id)
+}
+
+pub async fn set_smart_filter(db: &Db, id: i64, filter: &str) -> sqlx::Result<()> {
+    sqlx::query("UPDATE collections SET smart_filter = ?, updated_at = ? WHERE id = ?")
+        .bind(filter)
+        .bind(now())
+        .bind(id)
+        .execute(&db.write)
+        .await?;
+    Ok(())
+}
+
+/// Whether the collection is a smart one (it holds no items of its own).
+pub async fn is_smart(db: &Db, id: i64) -> sqlx::Result<bool> {
+    Ok(sqlx::query_scalar::<_, Option<String>>("SELECT smart_filter FROM collections WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&db.read)
+        .await?
+        .flatten()
+        .is_some())
 }
 
 pub async fn create(db: &Db, library_id: i64, title: &str, summary: Option<&str>) -> sqlx::Result<i64> {

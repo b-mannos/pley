@@ -9,6 +9,7 @@
 
 mod edit;
 mod library;
+pub(crate) use library::{smart_count, smart_items, valid_smart_filter};
 mod lists;
 mod meta;
 mod notifications;
@@ -28,7 +29,7 @@ use axum::http::uri::PathAndQuery;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, delete, get, put};
+use axum::routing::{any, delete, get, post, put};
 use tower::Layer;
 use tower::util::{MapRequest, MapRequestLayer};
 use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
@@ -186,7 +187,10 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
                 .layer(axum::extract::DefaultBodyLimit::max(25 * 1024 * 1024)),
         )
         .route("/library/metadata/{id}/{image}/{version}", get(library::image_version))
-        .route("/library/collections/{id}", get(lists::collection))
+        .route("/library/collections", post(lists::create_collection))
+        .route("/library/collections/{id}", get(lists::collection).delete(lists::collection_delete))
+        .route("/library/collections/{id}/items", put(lists::collection_add))
+        .route("/library/collections/{id}/items/{item}", delete(lists::collection_remove))
         .route("/library/collections/{id}/children", get(lists::collection_children))
         .route(
             "/library/collections/{id}/{image}",

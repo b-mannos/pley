@@ -1,6 +1,6 @@
-import { useMemo } from "react";
-import { useParams, useSearchParams } from "react-router";
-import { ArrowDownWideNarrow, ArrowUpNarrowWide, FolderSearch, RefreshCw } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router";
+import { ArrowDownWideNarrow, ArrowUpNarrowWide, FolderSearch, RefreshCw, Sparkles } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useLibrary, useLibraryFilters, useLibraryHubs, useLibraryItems, useScanLibrary } from "@/api/hooks";
 import type { LibraryKind, LibrarySort, SortOrder } from "@/api/types";
@@ -13,10 +13,12 @@ import { LibraryIcon } from "@/components/Sidebar";
 import { useToast } from "@/components/Toast";
 import { Button, EmptyState, IconButton, Select } from "@/components/ui";
 import { NotFoundPage } from "./NotFoundPage";
+import { CollectionFormModal } from "./collections/CollectionFormModal";
 import { CollectionsTab } from "./collections/CollectionsTab";
 import type { CardAspect } from "@/components/cards";
 import { cn } from "@/lib/cn";
 import { pluralize } from "@/lib/format";
+import { smartFilterOf } from "@/lib/smartFilter";
 import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
 
 const SORT_LABELS: Record<LibrarySort, string> = {
@@ -153,7 +155,9 @@ function LibraryTab({
 }) {
   const user = useAuth();
   const toast = useToast();
+  const navigate = useNavigate();
   const scan = useScanLibrary();
+  const [savingSmart, setSavingSmart] = useState(false);
   const sorts = SORTS_BY_KIND[kind];
   const rawSort = params.get("sort") as LibrarySort | null;
   const sort: LibrarySort = rawSort && sorts.includes(rawSort) ? rawSort : "title";
@@ -237,6 +241,20 @@ function LibraryTab({
             <Button size="sm" variant="ghost" onClick={() => setParam({ watched: null, genre: null, year: null })}>
               Clear filters
             </Button>
+          ) : null}
+          {filtered && user.is_admin && kind !== "music" ? (
+            <Button size="sm" variant="ghost" icon={<Sparkles className="size-4" />} onClick={() => setSavingSmart(true)}>
+              Save as smart collection
+            </Button>
+          ) : null}
+          {savingSmart ? (
+            <CollectionFormModal
+              open
+              onClose={() => setSavingSmart(false)}
+              libraryId={libraryId}
+              smartFilter={smartFilterOf(query)}
+              onCreated={(created) => void navigate(`/collection/${created.id}`)}
+            />
           ) : null}
 
           <div className="ml-auto flex items-center gap-3">

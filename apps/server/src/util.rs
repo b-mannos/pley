@@ -1,7 +1,6 @@
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Current unix time in seconds.
 /// When this server process started (unix ms): part of tags that a newer
 /// version may answer differently.
 pub fn process_epoch() -> i64 {
@@ -9,6 +8,33 @@ pub fn process_epoch() -> i64 {
     *EPOCH.get_or_init(now_ms)
 }
 
+/// `%XX` escapes decoded (and `+` as a space when `plus`); anything else is
+/// kept as it is.
+pub fn percent_decode(s: &str, plus: bool) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16);
+        match (bytes[i], bytes.get(i + 1).copied().and_then(hex), bytes.get(i + 2).copied().and_then(hex)) {
+            (b'%', Some(hi), Some(lo)) => {
+                out.push((hi * 16 + lo) as u8);
+                i += 3;
+            }
+            (b'+', ..) if plus => {
+                out.push(b' ');
+                i += 1;
+            }
+            (b, ..) => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Current unix time in seconds.
 pub fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or_default()
 }

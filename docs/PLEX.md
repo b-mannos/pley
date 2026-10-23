@@ -156,6 +156,14 @@ Administrators edit metadata the way python-plexapi (and so Kometa) does:
   `titleSort`) and summary through their section (`type=18&id=…`, as
   python-plexapi edits them), their poster and background through
   `POST /library/collections/{id}/posters` (or `/arts`).
+- `POST /library/collections?type=1&title=…&sectionId=…&smart=0&uri=server://…/library/metadata/1,2`
+  makes a collection of those items; with `smart=1` and
+  `uri=server://…/library/sections/{id}/all?genre=…` a smart collection,
+  filled by that listing (any filter and sort of `…/all`), as each user may
+  see it. Collections report `smart` and, for smart ones, the listing as
+  `content`. `PUT /library/collections/{id}/items?uri=…` adds items (or
+  gives a smart collection a new listing), `DELETE …/items/{item}` removes
+  one and `DELETE /library/collections/{id}` deletes the collection.
 
 ## Searching and filtering
 
@@ -207,9 +215,8 @@ With python-plexapi 4.18 the following work against the test media:
 
 - plex.tv: sign-in, server claiming, sharing, remote access and the official
   Plex apps.
-- Smart collections and smart playlists, and play queues. Collections are
-  joined and left through items' `collection` tags; their order and mode
-  are set in pley. Playlists can be created and edited.
+- Smart playlists and play queues. Collections' order and mode are set in
+  pley. Playlists can be created and edited.
 - Editing episodes' and seasons' artwork from URLs other than TMDB images
   (upload the file instead), and per-item preferences (`/prefs`).
 - Filters on descendants (`episode.title` on shows) and on `resolution`, `hdr`,

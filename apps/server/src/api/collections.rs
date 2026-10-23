@@ -73,6 +73,19 @@ pub struct NewCollection {
     summary: Option<String>,
     #[serde(default)]
     item_ids: Vec<i64>,
+    /// A smart collection: the section listing query (Plex's filter syntax,
+    /// `genre=Comedy&unwatched=1&sort=year:desc`) whose items it shows.
+    #[serde(default)]
+    smart_filter: Option<String>,
+}
+
+/// A smart filter that names something to find in `lib`.
+fn smart_filter(lib: &crate::library::LibraryRow, filter: &str) -> ApiResult<String> {
+    let filter = filter.trim().trim_start_matches('?');
+    if filter.len() > 2000 || !crate::plex::valid_smart_filter(lib, filter) {
+        return Err(AppError::bad_request("smart_filter must be a library filter such as genre=Comedy&unwatched=1"));
+    }
+    Ok(filter.to_owned())
 }
 
 pub async fn create(
@@ -87,8 +100,19 @@ pub async fn create(
     }
     let title = clean_title(&body.title)?;
     let summary = body.summary.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
-    let id = collections::create(&state.db, library_id, &title, summary.as_deref()).await?;
-    collections::add_items(&state.db, id, library_id, &body.item_ids).await?;
+    let id = match &body.smart_filter {
+        Some(filter) => {
+            let filter = smart_filter(&lib, filter)?;
+            let id = collections::create_smart(&state.db, library_id, &title, &filter).await?;
+            collections::update(&state.db, id, None, Some(summary.as_deref()), None).await?;
+            id
+        }
+        None => {
+            let id = collections::create(&state.db, library_id, &title, summary.as_deref()).await?;
+            collections::add_items(&state.db, id, library_id, &body.item_ids).await?;
+            id
+        }
+    };
     state.events.send(ServerEvent::LibraryChanged { library_id });
     Ok((StatusCode::CREATED, Json(detail(&state, &admin, id).await?)))
 }
@@ -101,6 +125,9 @@ pub struct CollectionPatch {
     summary: Option<Option<String>>,
     #[serde(default)]
     sort: Option<String>,
+    /// A new filter for a smart collection.
+    #[serde(default)]
+    smart_filter: Option<String>,
 }
 
 async fn library_of(state: &AppState, id: i64) -> ApiResult<i64> {
@@ -123,6 +150,15 @@ pub async fn update(
         }
     }
     let summary = body.summary.map(|s| s.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()));
+    if let Some(filter) = &body.smart_filter {
+        if !collections::is_smart(&state.db, id).await? {
+            return Err(AppError::bad_request("only smart collections have a filter"));
+        }
+        let lib = crate::library::get_library(&state.db, library_id)
+            .await?
+            .ok_or_else(|| AppError::not_found("library not found"))?;
+        collections::set_smart_filter(&state.db, id, &smart_filter(&lib, filter)?).await?;
+    }
     collections::update(&state.db, id, title.as_deref(), summary.as_ref().map(|s| s.as_deref()), body.sort.as_deref())
         .await?;
     state.events.send(ServerEvent::LibraryChanged { library_id });
@@ -134,6 +170,15 @@ pub async fn delete(State(state): State<AppState>, _admin: AdminUser, Path(id): 
     collections::delete(&state.db, id).await?;
     state.events.send(ServerEvent::LibraryChanged { library_id });
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Smart collections fill themselves: their items aren't added, removed or
+/// ordered by hand.
+async fn refuse_smart(state: &AppState, id: i64) -> ApiResult<()> {
+    if collections::is_smart(&state.db, id).await? {
+        return Err(AppError::bad_request("a smart collection is filled by its filter"));
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -153,6 +198,7 @@ pub async fn add_items(
     Json(body): Json<ItemIds>,
 ) -> ApiResult<Json<Added>> {
     let library_id = library_of(&state, id).await?;
+    refuse_smart(&state, id).await?;
     if !body.item_ids.is_empty() && collections::eligible(&state.db, library_id, &body.item_ids).await? == 0 {
         return Err(AppError::bad_request("only movies and shows of the same library can be added"));
     }
@@ -167,6 +213,7 @@ pub async fn remove_item(
     Path((id, item_id)): Path<(i64, i64)>,
 ) -> ApiResult<StatusCode> {
     let library_id = library_of(&state, id).await?;
+    refuse_smart(&state, id).await?;
     if !collections::remove_item(&state.db, id, item_id).await? {
         return Err(AppError::not_found("the item is not in this collection"));
     }
@@ -181,6 +228,7 @@ pub async fn reorder(
     Json(body): Json<ItemIds>,
 ) -> ApiResult<StatusCode> {
     let library_id = library_of(&state, id).await?;
+    refuse_smart(&state, id).await?;
     collections::reorder(&state.db, id, &body.item_ids).await?;
     state.events.send(ServerEvent::LibraryChanged { library_id });
     Ok(StatusCode::NO_CONTENT)

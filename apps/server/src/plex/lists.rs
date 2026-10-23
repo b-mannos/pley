@@ -6,14 +6,14 @@ use std::sync::Arc;
 
 use axum::Extension;
 use axum::extract::{Path, State};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 
 use super::library::{
     base_container, item_nodes, library_for, list_container, listing_detail, serve_image, visible_libraries,
 };
 use super::meta::Sections;
-use super::{Node, Page, Params, PlexError, PlexInfo, PlexResult, PlexUser};
+use super::{Node, Page, Params, PlexAdmin, PlexError, PlexInfo, PlexResult, PlexUser};
 use crate::auth::AuthUser;
 use crate::catalog::ItemRow;
 use crate::collections::{self, CollectionDto};
@@ -51,7 +51,9 @@ fn collection_node(c: &CollectionDto, lib: &LibraryRow) -> Node {
         .attr("art", format!("/library/collections/{}/art/{}", c.id, c.updated_at))
         .attr("childCount", c.item_count)
         .attr("collectionSort", sort)
-        .attr("smart", false)
+        .attr("smart", c.smart_filter.is_some())
+        // A smart collection's filter, which python-plexapi reads back.
+        .opt("content", c.smart_filter.as_ref().map(|f| format!("/library/sections/{}/all?{f}", lib.id)))
         .attr("addedAt", c.created_at)
         .attr("updatedAt", c.updated_at)
 }
@@ -203,6 +205,105 @@ pub async fn list(State(state): State<AppState>, PlexUser(user): PlexUser, param
     let mut mc = base_container().attr("size", rows.len());
     mc.extend(rows.iter().map(playlist_node));
     Ok(mc)
+}
+
+/// The section and listing query of a Plex `uri` for a smart collection
+/// (`server://…/com.plexapp.plugins.library/library/sections/1/all?genre=…`).
+fn uri_filter(uri: &str) -> Option<(i64, String)> {
+    let start = uri.find("/library/sections/")? + "/library/sections/".len();
+    let (section, query) = uri[start..].split_once("/all?")?;
+    Some((section.parse().ok()?, query.to_owned()))
+}
+
+/// `POST /library/collections?type=1&title=…&smart=0|1&sectionId=…&uri=…`: a
+/// collection of the items in `uri`, or a smart one filled by its filter.
+pub async fn create_collection(
+    State(state): State<AppState>,
+    PlexAdmin(admin): PlexAdmin,
+    Extension(info): Extension<Arc<PlexInfo>>,
+    params: Params,
+) -> PlexResult<Node> {
+    let title = params.get("title").unwrap_or_default().trim().chars().take(200).collect::<String>();
+    if title.is_empty() {
+        return Err(PlexError::BadRequest("title is required".into()));
+    }
+    let section: i64 =
+        params.parse("sectionId").ok_or_else(|| PlexError::BadRequest("sectionId is required".into()))?;
+    let lib =
+        visible_libraries(&state, &admin).await?.into_iter().find(|l| l.id == section).ok_or(PlexError::NotFound)?;
+    if lib.kind() == LibraryKind::Music {
+        return Err(PlexError::BadRequest("collections are for movie and TV libraries".into()));
+    }
+    let uri = params.get("uri").unwrap_or_default();
+    let id = if params.flag("smart") {
+        let filter = uri_filter(uri)
+            .filter(|(s, f)| *s == section && crate::plex::valid_smart_filter(&lib, f))
+            .ok_or_else(|| PlexError::BadRequest("a smart collection needs a listing of its section as uri".into()))?
+            .1;
+        collections::create_smart(&state.db, section, &title, &filter).await?
+    } else {
+        let id = collections::create(&state.db, section, &title, None).await?;
+        collections::add_items(&state.db, id, section, &uri_items(uri)).await?;
+        id
+    };
+    state.events.send(crate::events::ServerEvent::LibraryChanged { library_id: section });
+    let (collection, _, lib, _) = collection_for(&state, &admin, id).await?;
+    Ok(list_container(Some(&lib), &info, vec![collection_node(&collection, &lib)], 1, &Page::default()))
+}
+
+/// `PUT /library/collections/{id}/items?uri=…`: a smart collection's new
+/// filter, or items for a collection that holds them.
+pub async fn collection_add(
+    State(state): State<AppState>,
+    PlexAdmin(admin): PlexAdmin,
+    Extension(info): Extension<Arc<PlexInfo>>,
+    Path(id): Path<i64>,
+    params: Params,
+) -> PlexResult<Node> {
+    let library_id = collections::library_of(&state.db, id).await?.ok_or(PlexError::NotFound)?;
+    let uri = params.get("uri").ok_or_else(|| PlexError::BadRequest("uri is required".into()))?;
+    if collections::is_smart(&state.db, id).await? {
+        let lib = crate::library::get_library(&state.db, library_id).await?.ok_or(PlexError::NotFound)?;
+        let filter = uri_filter(uri)
+            .filter(|(s, f)| *s == library_id && crate::plex::valid_smart_filter(&lib, f))
+            .ok_or_else(|| PlexError::BadRequest("a smart collection's filter is a listing of its section".into()))?
+            .1;
+        collections::set_smart_filter(&state.db, id, &filter).await?;
+    } else {
+        collections::add_items(&state.db, id, library_id, &uri_items(uri)).await?;
+    }
+    state.events.send(crate::events::ServerEvent::LibraryChanged { library_id });
+    let (collection, _, lib, _) = collection_for(&state, &admin, id).await?;
+    Ok(list_container(Some(&lib), &info, vec![collection_node(&collection, &lib)], 1, &Page::default()))
+}
+
+/// `DELETE /library/collections/{id}/items/{item}`
+pub async fn collection_remove(
+    State(state): State<AppState>,
+    PlexAdmin(_admin): PlexAdmin,
+    Path((id, item)): Path<(i64, i64)>,
+) -> PlexResult<StatusCode> {
+    let library_id = collections::library_of(&state.db, id).await?.ok_or(PlexError::NotFound)?;
+    if collections::is_smart(&state.db, id).await? {
+        return Err(PlexError::BadRequest("a smart collection is filled by its filter".into()));
+    }
+    if !collections::remove_item(&state.db, id, item).await? {
+        return Err(PlexError::NotFound);
+    }
+    state.events.send(crate::events::ServerEvent::LibraryChanged { library_id });
+    Ok(StatusCode::OK)
+}
+
+/// `DELETE /library/collections/{id}`
+pub async fn collection_delete(
+    State(state): State<AppState>,
+    PlexAdmin(_admin): PlexAdmin,
+    Path(id): Path<i64>,
+) -> PlexResult<StatusCode> {
+    let library_id = collections::library_of(&state.db, id).await?.ok_or(PlexError::NotFound)?;
+    collections::delete(&state.db, id).await?;
+    state.events.send(crate::events::ServerEvent::LibraryChanged { library_id });
+    Ok(StatusCode::OK)
 }
 
 /// Item ids in a Plex `uri` (`server://…/library/metadata/1,2,3`,

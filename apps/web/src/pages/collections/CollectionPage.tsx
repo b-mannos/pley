@@ -14,6 +14,7 @@ import { useToast } from "@/components/Toast";
 import { Badge, Button, EmptyState, IconButton, SectionTitle, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { pluralize } from "@/lib/format";
+import { describeSmartFilter } from "@/lib/smartFilter";
 import { useDocumentTitle, useElementWidth } from "@/lib/hooks";
 import { posterCandidates } from "@/lib/images";
 import { usePlayItem } from "@/lib/usePlayItem";
@@ -101,6 +102,7 @@ function CollectionView({ collection: c }: { collection: CollectionDetail }) {
             <div className="flex items-center gap-2 text-sm font-medium text-muted">
               <Layers className="size-3.5" /> Collection
               {c.automatic ? <Badge>TMDB</Badge> : null}
+              {c.smart_filter ? <Badge tone="accent">Smart</Badge> : null}
             </div>
             <h1 className="text-3xl font-bold leading-tight tracking-tight text-balance sm:text-4xl">{c.title}</h1>
             <MetaLine
@@ -111,7 +113,8 @@ function CollectionView({ collection: c }: { collection: CollectionDetail }) {
                     {lib.name}
                   </Link>
                 ) : null,
-                SORT_NOTE[c.sort],
+                // A smart collection shows what its filter finds, in its order.
+                ...(c.smart_filter ? describeSmartFilter(c.smart_filter) : [SORT_NOTE[c.sort]]),
               ]}
             />
             <div className="flex flex-wrap items-center gap-2.5 pt-1">
@@ -132,16 +135,18 @@ function CollectionView({ collection: c }: { collection: CollectionDetail }) {
                   <IconButton label="Edit collection" size="lg" className="bg-surface-3/80 hover:bg-border" onClick={() => setEditing(true)}>
                     <Pencil className="size-5" />
                   </IconButton>
-                  <IconButton
-                    label={managing ? "Done reordering" : "Reorder and remove"}
-                    size="lg"
-                    active={managing}
-                    className="bg-surface-3/80 hover:bg-border"
-                    onClick={() => setManaging((m) => !m)}
-                    disabled={!c.items.length}
-                  >
-                    <ArrowUpDown className="size-5" />
-                  </IconButton>
+                  {c.smart_filter ? null : (
+                    <IconButton
+                      label={managing ? "Done reordering" : "Reorder and remove"}
+                      size="lg"
+                      active={managing}
+                      className="bg-surface-3/80 hover:bg-border"
+                      onClick={() => setManaging((m) => !m)}
+                      disabled={!c.items.length}
+                    >
+                      <ArrowUpDown className="size-5" />
+                    </IconButton>
+                  )}
                   <IconButton label="Delete collection" size="lg" className="bg-surface-3/80 hover:bg-border hover:text-danger!" onClick={() => setDeleting(true)}>
                     <Trash2 className="size-5" />
                   </IconButton>

@@ -116,7 +116,7 @@ pub(super) async fn item_nodes(
 }
 
 /// Cast and crew of `ids` into their extras (seasons get their show's).
-async fn add_people(db: &Db, ids: &[i64], extras: &mut HashMap<i64, Extras>) -> PlexResult<()> {
+async fn add_people(db: &Db, ids: &[i64], extras: &mut HashMap<i64, Extras>) -> sqlx::Result<()> {
     for (id, credits) in people::for_items(db, ids).await? {
         extras.entry(id).or_default().people = credits;
     }
@@ -1052,7 +1052,7 @@ impl<'a> SectionQuery<'a> {
 
     /// The `page` of the items and how many there are: filtered, sorted and
     /// paged in SQL unless a filter can only be checked in memory.
-    async fn page(&self, db: &Db, user_id: i64, page: &Page) -> PlexResult<(Vec<ItemRow>, usize)> {
+    async fn page(&self, db: &Db, user_id: i64, page: &Page) -> sqlx::Result<(Vec<ItemRow>, usize)> {
         match self.sql_filters() {
             Some(filters) => self.page_in_sql(db, user_id, &filters, page).await,
             None => self.page_in_memory(db, user_id, page).await,
@@ -1081,7 +1081,7 @@ impl<'a> SectionQuery<'a> {
         user_id: i64,
         filters: &SqlFilters,
         page: &Page,
-    ) -> PlexResult<(Vec<ItemRow>, usize)> {
+    ) -> sqlx::Result<(Vec<ItemRow>, usize)> {
         let end = self.cap.unwrap_or(usize::MAX);
         let start = page.start.min(end);
         let size = page.size.unwrap_or(usize::MAX).min(end - start);
@@ -1110,7 +1110,7 @@ impl<'a> SectionQuery<'a> {
     }
 
     /// Everything loaded, then filtered and sorted here.
-    async fn page_in_memory(&self, db: &Db, user_id: i64, page: &Page) -> PlexResult<(Vec<ItemRow>, usize)> {
+    async fn page_in_memory(&self, db: &Db, user_id: i64, page: &Page) -> sqlx::Result<(Vec<ItemRow>, usize)> {
         let (mut rows, _) = catalog::library_items(db, user_id, &LibraryQuery::all(self.library_id, self.kind)).await?;
         // Titles tie by id, in SQL as here.
         rows.sort_by(|a, b| a.sort_title.cmp(&b.sort_title).then(a.id.cmp(&b.id)));
@@ -1131,6 +1131,52 @@ impl<'a> SectionQuery<'a> {
         }
         Ok(page.apply(rows))
     }
+}
+
+// ------------------------------------------------------------------ smart collections
+
+/// A section listing query (`type=1&genre=Comedy&sort=year:desc`) as
+/// parameters.
+fn filter_params(filter: &str) -> Params {
+    Params(
+        filter
+            .trim_start_matches('?')
+            .split('&')
+            .filter(|pair| !pair.is_empty())
+            .map(|pair| {
+                let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+                (crate::util::percent_decode(key, true), crate::util::percent_decode(value, true))
+            })
+            .collect(),
+    )
+}
+
+/// The kind a smart filter lists in `lib`, when the library has it.
+fn smart_kind(lib: &LibraryRow, params: &Params) -> Option<&'static str> {
+    let kind = params.get("type").and_then(kind_for_number).unwrap_or(lib.kind().top_level_kind());
+    kinds_of(lib).contains(&kind).then_some(kind)
+}
+
+/// Whether `filter` is a section listing query a smart collection can use.
+pub(crate) fn valid_smart_filter(lib: &LibraryRow, filter: &str) -> bool {
+    let params = filter_params(filter);
+    !params.0.is_empty() && smart_kind(lib, &params).is_some()
+}
+
+/// What a smart collection's filter finds in `lib`, as `user_id` may see it,
+/// in its order.
+pub(crate) async fn smart_items(db: &Db, user_id: i64, lib: &LibraryRow, filter: &str) -> sqlx::Result<Vec<ItemRow>> {
+    let params = filter_params(filter);
+    let Some(kind) = smart_kind(lib, &params) else { return Ok(Vec::new()) };
+    Ok(SectionQuery::new(lib.id, kind, &params).page(db, user_id, &Page::default()).await?.0)
+}
+
+/// How many items a smart collection's filter finds.
+pub(crate) async fn smart_count(db: &Db, user_id: i64, lib: &LibraryRow, filter: &str) -> sqlx::Result<usize> {
+    let params = filter_params(filter);
+    let Some(kind) = smart_kind(lib, &params) else { return Ok(0) };
+    let count = Page { start: 0, size: Some(0) };
+    Ok(SectionQuery::new(lib.id, kind, &params).page(db, user_id, &count).await?.1)
 }
 
 /// `/library/sections/{id}/all`

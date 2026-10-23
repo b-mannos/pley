@@ -86,7 +86,9 @@ impl Edit {
             if rest == ".locked" {
                 tags.locked = Some(value == "1");
             } else if rest.ends_with("].tag.tag-") {
-                tags.remove.extend(value.split(',').map(percent_decode).filter(|t| !t.trim().is_empty()));
+                tags.remove.extend(
+                    value.split(',').map(|t| crate::util::percent_decode(t, false)).filter(|t| !t.trim().is_empty()),
+                );
             } else if rest.ends_with("].tag.tag") && !value.trim().is_empty() {
                 tags.add.push(value.trim().to_owned());
             }
@@ -111,27 +113,6 @@ impl Edit {
             && self.labels.is_empty()
             && self.collections.is_empty()
     }
-}
-
-/// `%XX` escapes decoded; anything else is kept as it is.
-fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let hex = |b: u8| (b as char).to_digit(16);
-        match (bytes[i], bytes.get(i + 1).copied().and_then(hex), bytes.get(i + 2).copied().and_then(hex)) {
-            (b'%', Some(hi), Some(lo)) => {
-                out.push((hi * 16 + lo) as u8);
-                i += 3;
-            }
-            (b, ..) => {
-                out.push(b);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// `PUT /library/sections/{id}/all?type=…&id=1,2&…`
@@ -283,7 +264,9 @@ async fn apply(state: &AppState, section: Option<i64>, ids: &[i64], edit: &Edit)
 }
 
 async fn collection_named(state: &AppState, library_id: i64, title: &str) -> sqlx::Result<Option<i64>> {
-    sqlx::query_scalar("SELECT id FROM collections WHERE library_id = ? AND title = ? COLLATE NOCASE ORDER BY id")
+    sqlx::query_scalar(
+        "SELECT id FROM collections WHERE library_id = ? AND title = ? COLLATE NOCASE AND smart_filter IS NULL ORDER BY id",
+    )
         .bind(library_id)
         .bind(title.trim())
         .fetch_optional(&state.db.read)
@@ -398,6 +381,7 @@ mod tests {
         assert_eq!(edit.labels.remove, ["Old Overlay", "4K"]);
         assert_eq!(edit.collections.add, ["Alien Collection"]);
         assert!(Edit::parse(&params(&[("type", "1"), ("id", "7")])).is_empty());
-        assert_eq!(percent_decode("Sci%2DFi%zz%"), "Sci-Fi%zz%");
+        assert_eq!(crate::util::percent_decode("Sci%2DFi%zz%+", false), "Sci-Fi%zz%+");
+        assert_eq!(crate::util::percent_decode("a+b", true), "a b");
     }
 }

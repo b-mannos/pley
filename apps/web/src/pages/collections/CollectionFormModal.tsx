@@ -18,6 +18,7 @@ export function CollectionFormModal({
   onClose,
   libraryId,
   collection,
+  smartFilter,
   onCreated,
 }: {
   open: boolean;
@@ -25,6 +26,8 @@ export function CollectionFormModal({
   libraryId: Id;
   /** The collection to edit; a new one is created without it. */
   collection?: Collection;
+  /** A new smart collection's filter. */
+  smartFilter?: string;
   onCreated?: (created: CollectionDetail) => void;
 }) {
   const create = useCreateCollection();
@@ -59,7 +62,7 @@ export function CollectionFormModal({
       );
     } else {
       create.mutate(
-        { libraryId, title: name, summary: text },
+        { libraryId, title: name, summary: text, smart_filter: smartFilter },
         {
           onSuccess: (created) => {
             onClose();
@@ -75,7 +78,7 @@ export function CollectionFormModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={collection ? "Edit collection" : "New collection"}
+      title={collection ? "Edit collection" : smartFilter ? "New smart collection" : "New collection"}
       locked={busy}
       footer={
         <>
@@ -101,7 +104,7 @@ export function CollectionFormModal({
             className="w-full resize-y rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-fg placeholder:text-subtle transition-colors focus:border-accent focus:outline-none"
           />
         </Field>
-        {collection ? (
+        {collection && !collection.smart_filter ? (
           <Field
             label="Order"
             htmlFor="collection-sort"

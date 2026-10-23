@@ -14,6 +14,9 @@ export interface Collection {
   /** Filled from TMDB. */
   automatic: boolean;
   sort: CollectionSort;
+  /** A smart collection's filter (a library listing in Plex's syntax, see
+   * `lib/smartFilter`); it holds no items of its own. */
+  smart_filter: string | null;
   /** Items the user can see. */
   item_count: number;
   /** The collection's own artwork, else its first item's. */
@@ -113,7 +116,16 @@ function collectionChanged(qc: QueryClient, c: Pick<Collection, "id" | "library_
 export function useCreateCollection() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ libraryId, ...body }: { libraryId: Id; title: string; summary?: string | null; item_ids?: Id[] }) =>
+    mutationFn: ({
+      libraryId,
+      ...body
+    }: {
+      libraryId: Id;
+      title: string;
+      summary?: string | null;
+      item_ids?: Id[];
+      smart_filter?: string;
+    }) =>
       api.post<CollectionDetail>(`/api/libraries/${libraryId}/collections`, body),
     onSuccess: (data) => {
       qc.setQueryData(listKeys.collection(data.id), data);

@@ -74,11 +74,12 @@ export function AddToCollectionModal({ item, onClose }: { item: ItemSummary | nu
           </div>
         ) : collections.isError ? (
           <p className="text-sm text-danger">{errorMessage(collections.error)}</p>
-        ) : collections.data.length === 0 ? (
+        ) : collections.data.filter((c) => !c.smart_filter).length === 0 ? (
           <p className="py-2 text-sm text-muted">This library has no collections yet: name one above.</p>
         ) : (
           <ul className="-mx-2 max-h-80 overflow-y-auto">
-            {collections.data.map((c) => {
+            {/* Smart collections fill themselves. */}
+            {collections.data.filter((c) => !c.smart_filter).map((c) => {
               const member = inside.has(c.id);
               return (
                 <li key={c.id}>

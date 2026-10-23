@@ -379,6 +379,7 @@ interface Collection {
   summary: string | null;
   automatic: boolean;               // from TMDB
   sort: "release" | "title" | "custom";
+  smart_filter: string | null;      // smart collections: the library filter that fills them
   item_count: number;               // items this user can see
   poster_url: string;               // own artwork, else the first item's that has some
   backdrop_url: string;
@@ -390,15 +391,22 @@ interface Collection {
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/api/libraries/{id}/collections` | – | `{ collections: Collection[] }` by title |
-| POST | `/api/libraries/{id}/collections` *(admin)* | `{ title, summary?, item_ids?: Id[] }` | `201` `Collection & { items: ItemSummary[] }`; `400` for music libraries |
+| POST | `/api/libraries/{id}/collections` *(admin)* | `{ title, summary?, item_ids?: Id[], smart_filter? }` | `201` `Collection & { items: ItemSummary[] }`; `400` for music libraries |
 | GET | `/api/collections/{id}` | – | `Collection & { items: ItemSummary[] }` in the collection's order |
-| PATCH | `/api/collections/{id}` *(admin)* | `{ title?, summary? (null clears), sort? }` | `Collection & { items }` |
+| PATCH | `/api/collections/{id}` *(admin)* | `{ title?, summary? (null clears), sort?, smart_filter? }` | `Collection & { items }` |
 | DELETE | `/api/collections/{id}` *(admin)* | – | `204` (an automatic one comes back when its movies are refreshed) |
 | POST | `/api/collections/{id}/items` *(admin)* | `{ item_ids: Id[] }` | `{ added: number }`; only movies and shows of the same library, `400` if none could be added |
 | DELETE | `/api/collections/{id}/items/{item_id}` *(admin)* | – | `204` |
 | PUT | `/api/collections/{id}/order` *(admin)* | `{ item_ids: Id[] }` | `204`; these first in this order, the rest after; switches `sort` to `custom` |
 | GET | `/api/collections/{id}/images/{poster\|backdrop}` | `w`, `v` as for items | image bytes, or a `307` to the item artwork it falls back to |
 | GET | `/api/items/{id}/collections` | – | `{ collections: { id, title }[] }` the movie or show is in ("Part of …") |
+
+Smart collections hold no items: `smart_filter` is a library listing in the
+Plex-compatible API's syntax (the query string of
+`/library/sections/{id}/all`, such as `genre=Comedy&unwatched=1&sort=year:desc`;
+see docs/PLEX.md), and the collection shows what it finds, in its order, as
+each user may see it. Their items can't be added, removed or reordered
+(`400`); the filter is changed instead.
 
 ## Playlists
 
