@@ -158,8 +158,34 @@ pub async fn update_user(
     Json(body): Json<UserPatch>,
 ) -> ApiResult<Json<UserDto>> {
     let current = accounts::user(&state.db, id).await?.ok_or_else(|| AppError::not_found("user not found"))?;
+    // Check everything first: a refused update changes nothing.
+    if let Some(password) = &body.password {
+        validate_password(password)?;
+    }
+    if let Some(is_admin) = body.is_admin {
+        if !is_admin && current.is_admin && admins_left_after(&state, id).await? == 0 {
+            return Err(AppError::bad_request("pley needs at least one administrator"));
+        }
+        if is_admin && current.managed {
+            return Err(AppError::bad_request("a managed profile can't be an administrator"));
+        }
+    }
+    if body.disabled == Some(true) {
+        if id == admin.id {
+            return Err(AppError::bad_request("you can't disable your own account"));
+        }
+        if current.is_admin && admins_left_after(&state, id).await? == 0 {
+            return Err(AppError::bad_request("pley needs at least one administrator"));
+        }
+    }
+    if let Some(max_age) = body.max_age {
+        check_age(max_age)?;
+    }
+    if let Some(Some(pin)) = body.pin.as_ref().map(|p| p.as_deref().filter(|p| !p.is_empty())) {
+        accounts::validate_pin(pin)?;
+    }
+
     if let Some(password) = body.password {
-        validate_password(&password)?;
         let hash = hash_password(password).await?;
         sqlx::query("UPDATE users SET password_hash = ?, managed = 0 WHERE id = ?")
             .bind(hash)
@@ -180,12 +206,6 @@ pub async fn update_user(
             .await?;
     }
     if let Some(is_admin) = body.is_admin {
-        if !is_admin && current.is_admin && admins_left_after(&state, id).await? == 0 {
-            return Err(AppError::bad_request("pley needs at least one administrator"));
-        }
-        if is_admin && current.managed {
-            return Err(AppError::bad_request("a managed profile can't be an administrator"));
-        }
         sqlx::query("UPDATE users SET is_admin = ? WHERE id = ?")
             .bind(is_admin)
             .bind(id)
@@ -196,12 +216,6 @@ pub async fn update_user(
         sqlx::query("UPDATE users SET home = ? WHERE id = ?").bind(home).bind(id).execute(&state.db.write).await?;
     }
     if let Some(disabled) = body.disabled {
-        if disabled && id == admin.id {
-            return Err(AppError::bad_request("you can't disable your own account"));
-        }
-        if disabled && current.is_admin && admins_left_after(&state, id).await? == 0 {
-            return Err(AppError::bad_request("pley needs at least one administrator"));
-        }
         sqlx::query("UPDATE users SET disabled = ? WHERE id = ?")
             .bind(disabled)
             .bind(id)
@@ -219,7 +233,6 @@ pub async fn update_user(
         accounts::set_libraries(&state.db, id, ids).await?;
     }
     if let Some(max_age) = body.max_age {
-        check_age(max_age)?;
         sqlx::query("UPDATE users SET max_age = ? WHERE id = ?")
             .bind(max_age)
             .bind(id)
@@ -228,10 +241,7 @@ pub async fn update_user(
     }
     if let Some(pin) = body.pin {
         let hash = match pin.filter(|p| !p.is_empty()) {
-            Some(pin) => {
-                accounts::validate_pin(&pin)?;
-                Some(hash_password(pin).await?)
-            }
+            Some(pin) => Some(hash_password(pin).await?),
             None => None,
         };
         sqlx::query("UPDATE users SET pin_hash = ? WHERE id = ?").bind(hash).bind(id).execute(&state.db.write).await?;
