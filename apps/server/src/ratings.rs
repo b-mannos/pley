@@ -83,4 +83,75 @@ mod tests {
             assert_eq!(rating_age(rating), age, "{rating}");
         }
     }
+
+    #[test]
+    fn certifications_of_other_countries() {
+        for (rating, age) in [
+            // United Kingdom
+            ("U", Some(0)),
+            ("15", Some(15)),
+            ("18", Some(18)),
+            ("R18", Some(18)),
+            // Germany
+            ("FSK 0", Some(0)),
+            ("FSK18", Some(18)),
+            // France
+            ("-12", Some(12)),
+            ("-16", Some(16)),
+            ("TP", Some(0)),
+            // Australia
+            ("M", Some(15)),
+            ("MA 15+", Some(15)),
+            ("R 18+", Some(18)),
+            ("X 18+", Some(18)),
+            // Canada
+            ("14A", Some(14)),
+            ("18A", Some(18)),
+            ("C8", Some(8)),
+            // United States, other spellings
+            ("TV-Y7-FV", Some(7)),
+            ("NC17", Some(18)),
+            ("  pg-13 ", Some(13)),
+            ("rated r", Some(17)),
+            // Numbers outside any age are not ages.
+            ("21+", Some(21)),
+            ("99", None),
+            ("Not Rated", None),
+            ("N/A", None),
+            ("-", None),
+        ] {
+            assert_eq!(rating_age(rating), age, "{rating}");
+        }
+    }
+
+    #[tokio::test]
+    async fn backfill_fills_missing_ages_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("pley.db")).await.unwrap();
+        sqlx::query(
+            "INSERT INTO libraries (id, name, kind, paths, created_at) VALUES (1, 'Movies', 'movies', '[]', 0)",
+        )
+        .execute(&db.write)
+        .await
+        .unwrap();
+        for (id, rating, age) in
+            [(1, Some("PG-13"), None), (2, Some("R"), Some(3)), (3, Some("Unrated"), None), (4, None, None)]
+        {
+            sqlx::query(
+                "INSERT INTO items (id, library_id, kind, key, title, sort_title, content_rating, rating_age, added_at, updated_at)
+                 VALUES (?, 1, 'movie', ?, 't', 't', ?, ?, 0, 0)",
+            )
+            .bind(id)
+            .bind(id.to_string())
+            .bind(rating)
+            .bind(age)
+            .execute(&db.write)
+            .await
+            .unwrap();
+        }
+        backfill(&db).await.unwrap();
+        let ages: Vec<Option<i64>> =
+            sqlx::query_scalar("SELECT rating_age FROM items ORDER BY id").fetch_all(&db.read).await.unwrap();
+        assert_eq!(ages, [Some(13), Some(3), None, None], "existing ages are kept, unknown ratings stay unrated");
+    }
 }

@@ -340,5 +340,145 @@ mod tests {
         assert!(validate_username("bob.smith@home").is_ok());
         assert!(validate_username("").is_err());
         assert!(validate_username("bad name").is_err());
+        assert!(validate_username("Zoë").is_ok(), "letters of any script");
+        assert!(validate_username(&"a".repeat(64)).is_ok());
+        assert!(validate_username(&"a".repeat(65)).is_err());
+        assert!(validate_username("a/b").is_err());
+        assert!(validate_username("<script>").is_err());
+    }
+
+    #[test]
+    fn passwords_need_four_characters() {
+        assert!(validate_password("abcd").is_ok());
+        assert!(validate_password("abc").is_err());
+        assert!(validate_password("日本語").is_err(), "characters, not bytes");
+        assert!(validate_password("日本語x").is_ok());
+    }
+
+    fn token_of(builder: axum::http::request::Builder) -> Option<String> {
+        let (parts, _) = builder.body(()).unwrap().into_parts();
+        token_from_parts(&parts)
+    }
+
+    #[test]
+    fn token_sources_in_order_of_precedence() {
+        let all = axum::http::Request::builder()
+            .uri("/api/x?token=query")
+            .header("cookie", "pley_token=cookie")
+            .header("x-pley-token", "header")
+            .header("authorization", "Bearer bearer");
+        assert_eq!(token_of(all).as_deref(), Some("bearer"));
+        let no_bearer = axum::http::Request::builder()
+            .uri("/api/x?token=query")
+            .header("cookie", "pley_token=cookie")
+            .header("x-pley-token", " header ")
+            .header("authorization", "Basic dXNlcjpwYXNz");
+        assert_eq!(token_of(no_bearer).as_deref(), Some("header"), "other schemes are not tokens");
+        let cookies = axum::http::Request::builder()
+            .uri("/api/x?token=query")
+            .header("cookie", "theme=dark")
+            .header("cookie", "a=b;   pley_token=cookie; c=d");
+        assert_eq!(token_of(cookies).as_deref(), Some("cookie"), "any cookie header, any position");
+        let empty_cookie =
+            axum::http::Request::builder().uri("/api/x?a=1&token=query").header("cookie", "pley_token=; x=y");
+        assert_eq!(token_of(empty_cookie).as_deref(), Some("query"), "a cleared cookie is no token");
+        assert_eq!(token_of(axum::http::Request::builder().uri("/api/x?token=")), None);
+        assert_eq!(token_of(axum::http::Request::builder().uri("/api/x?mytoken=abc")), None);
+        assert_eq!(token_of(axum::http::Request::builder().uri("/api/x")), None);
+    }
+
+    #[test]
+    fn cookies_are_http_only_and_last_as_long_as_sessions() {
+        let cookie = session_cookie("tok");
+        assert!(cookie.starts_with("pley_token=tok;"));
+        assert!(cookie.contains("HttpOnly") && cookie.contains("SameSite=Lax") && cookie.contains("Path=/"));
+        assert!(cookie.contains(&format!("Max-Age={SESSION_TTL_SECS}")));
+        assert!(clear_cookie().contains("pley_token=;") && clear_cookie().contains("Max-Age=0"));
+    }
+
+    async fn service_with_user(dir: &std::path::Path) -> (Db, AuthService) {
+        let db = Db::open(&dir.join("pley.db")).await.unwrap();
+        sqlx::query(
+            "INSERT INTO users (id, username, password_hash, is_admin, all_libraries, max_age, created_at)
+             VALUES (1, 'kid', 'x', 0, 0, 12, 0), (2, 'admin', 'x', 1, 0, 12, 0)",
+        )
+        .execute(&db.write)
+        .await
+        .unwrap();
+        let service = AuthService::new(db.clone());
+        (db, service)
+    }
+
+    #[tokio::test]
+    async fn sessions_carry_the_users_restrictions() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_db, auth) = service_with_user(dir.path()).await;
+        let token = auth.create_session(1, Some("agent"), Some("10.0.0.2")).await.unwrap();
+        let user = auth.validate(&token).await.unwrap();
+        assert_eq!(
+            user,
+            AuthUser { id: 1, username: "kid".into(), is_admin: false, all_libraries: false, max_age: Some(12) }
+        );
+        let admin = auth.create_session(2, None, None).await.unwrap();
+        let admin = auth.validate(&admin).await.unwrap();
+        assert_eq!(admin.max_age, None, "administrators have no age limit");
+        assert!(auth.validate("not-a-token").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn expired_and_disabled_sessions_stop_working() {
+        let dir = tempfile::tempdir().unwrap();
+        let (db, auth) = service_with_user(dir.path()).await;
+        let expired = auth.create_session(1, None, None).await.unwrap();
+        sqlx::query("UPDATE sessions SET expires_at = ? WHERE token_hash = ?")
+            .bind(now() - 1)
+            .bind(hash_token(&expired))
+            .execute(&db.write)
+            .await
+            .unwrap();
+        assert!(auth.validate(&expired).await.is_none());
+        auth.purge_expired().await;
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions").fetch_one(&db.read).await.unwrap();
+        assert_eq!(left, 0, "expired sessions are purged");
+
+        // A cached session survives a change in the database until the
+        // user is forgotten (what the users API does on every change).
+        let token = auth.create_session(1, None, None).await.unwrap();
+        assert!(auth.validate(&token).await.is_some());
+        sqlx::query("UPDATE users SET disabled = 1 WHERE id = 1").execute(&db.write).await.unwrap();
+        assert!(auth.validate(&token).await.is_some(), "served from the cache");
+        auth.forget_user(1);
+        assert!(auth.validate(&token).await.is_none(), "disabled users are signed out");
+
+        // Revoking works whether or not the session is cached.
+        sqlx::query("UPDATE users SET disabled = 0 WHERE id = 1").execute(&db.write).await.unwrap();
+        let token = auth.create_session(1, None, None).await.unwrap();
+        assert!(auth.validate(&token).await.is_some());
+        auth.revoke(&token).await;
+        assert!(auth.validate(&token).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn sessions_in_use_are_extended() {
+        let dir = tempfile::tempdir().unwrap();
+        let (db, auth) = service_with_user(dir.path()).await;
+        let token = auth.create_session(1, None, None).await.unwrap();
+        let stale = now() - TOUCH_INTERVAL_SECS - 60;
+        sqlx::query("UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE token_hash = ?")
+            .bind(stale)
+            .bind(now() + 60)
+            .bind(hash_token(&token))
+            .execute(&db.write)
+            .await
+            .unwrap();
+        assert!(auth.validate(&token).await.is_some());
+        let (last_seen, expires): (i64, i64) =
+            sqlx::query_as("SELECT last_seen_at, expires_at FROM sessions WHERE token_hash = ?")
+                .bind(hash_token(&token))
+                .fetch_one(&db.read)
+                .await
+                .unwrap();
+        assert!(last_seen > stale);
+        assert!(expires >= now() + SESSION_TTL_SECS - 5, "a full lifetime again");
     }
 }

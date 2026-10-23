@@ -326,4 +326,108 @@ mod tests {
         assert_eq!((decoded.width(), decoded.height()), (AVATAR_SIZE, AVATAR_SIZE));
         assert!(process_avatar(b"not an image").is_err());
     }
+
+    #[test]
+    fn more_device_names() {
+        for (agent, name) in [
+            ("Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0", "Firefox on Linux"),
+            (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36 OPR/106.0",
+                "Opera on Windows",
+            ),
+            (
+                "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36",
+                "Chrome on Android",
+            ),
+            (
+                "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Version/17.5 Mobile/15E148 Safari/604.1",
+                "Safari on iPad",
+            ),
+            (
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 CriOS/126.0 Mobile/15E148 Safari/604.1",
+                "Chrome on iPhone",
+            ),
+            (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 Version/17.5 Safari/605.1.15",
+                "Safari on macOS",
+            ),
+            (
+                "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+                "Chrome on ChromeOS",
+            ),
+            ("Something Firefox/1.0", "Firefox"),
+            // A known system but no known browser: the client's own name.
+            ("Kodi/20.2 (Windows NT 10.0; Win64; x64) App_Bitness/64 Version/20.2", "Kodi/20.2"),
+            ("", "Unknown device"),
+        ] {
+            assert_eq!(device_name(Some(agent)), name, "{agent}");
+        }
+        assert_eq!(device_name(Some("x".repeat(100).as_str())).len(), 60, "raw agents are cut short");
+    }
+
+    #[test]
+    fn pin_and_color_rules() {
+        for pin in ["1234", "12345678", "0000"] {
+            assert!(validate_pin(pin).is_ok(), "{pin}");
+        }
+        for pin in ["", "123", "123456789", " 1234", "12 34", "１２３４", "-123"] {
+            assert!(validate_pin(pin).is_err(), "{pin:?}");
+        }
+        for color in ["#abc", "#ABCDEF", "#38bdf8"] {
+            assert!(validate_color(color).is_ok(), "{color}");
+        }
+        for color in ["38bdf8", "#38bdf", "#ggg", "#", "", "#38bdf8ff"] {
+            assert!(validate_color(color).is_err(), "{color:?}");
+        }
+    }
+
+    #[test]
+    fn throttle_forgets_failures_once_the_window_has_passed() {
+        // `Instant` can't go back further than the machine's uptime.
+        let Some(long_ago) = Instant::now().checked_sub(WINDOW + Duration::from_secs(1)) else { return };
+        let t = Throttle::default();
+        t.failures.insert("login:bob".into(), (MAX_FAILURES, long_ago));
+        assert!(t.check("login:bob").is_ok(), "the lockout is over");
+        // The next failure starts a new count instead of adding to the old one.
+        t.failed("login:bob");
+        assert!(t.check("login:bob").is_ok());
+        for _ in 1..MAX_FAILURES {
+            t.failed("login:bob");
+        }
+        match t.check("login:bob") {
+            Err(AppError::TooManyRequests(message)) => assert!(message.contains("15 min"), "{message}"),
+            other => panic!("expected a lockout, got {other:?}"),
+        }
+    }
+
+    fn user_row(is_admin: bool, display_name: Option<&str>) -> UserRow {
+        UserRow {
+            id: 7,
+            username: "kid".into(),
+            display_name: display_name.map(str::to_owned),
+            is_admin,
+            managed: false,
+            home: true,
+            has_pin: false,
+            avatar: Some("7-1734567890.jpg".into()),
+            avatar_color: None,
+            all_libraries: false,
+            max_age: Some(12),
+            disabled: false,
+            created_at: 0,
+        }
+    }
+
+    #[test]
+    fn users_as_the_api_shows_them() {
+        let dto = user_row(false, Some("  ")).into_dto(vec![3]);
+        assert_eq!(dto.name, "kid", "a blank display name shows the username");
+        assert_eq!((dto.all_libraries, dto.max_age, dto.library_ids), (false, Some(12), vec![3]));
+        assert_eq!(dto.avatar_url.as_deref(), Some("/api/users/7/avatar?v=1734567890"));
+        assert_eq!(user_row(false, Some("Kiddo")).into_dto(vec![]).name, "Kiddo");
+        // Administrators are never restricted, whatever is stored.
+        let admin = user_row(true, None).into_dto(vec![]);
+        assert_eq!((admin.all_libraries, admin.max_age), (true, None));
+        assert_eq!(avatar_url(1, None), None);
+    }
 }

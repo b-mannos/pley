@@ -836,6 +836,210 @@ mod tests {
     }
 
     #[test]
+    fn unprobed_files_play_directly_only_in_web_containers() {
+        let req = request();
+        let d = decide(&file("mp4", 0), None, &[], &req);
+        assert_eq!((d.method, d.reasons.len()), (Method::Direct, 0));
+        let d = decide(&file("mkv", 0), None, &[], &req);
+        assert_eq!(d.method, Method::Transcode);
+        assert_eq!(d.reasons, ["file has not been analyzed yet"]);
+        assert!(d.video.is_some() && d.audio.is_some());
+        // The player claims the container: trusted.
+        let mut req = request();
+        req.caps.containers.push("mkv".into());
+        assert_eq!(decide(&file("mkv", 0), None, &[], &req).method, Method::Direct);
+        req.mode = PlaybackMode::Remux;
+        assert_eq!(decide(&file("mp4", 0), None, &[], &req).method, Method::Transcode, "nothing is known to copy");
+    }
+
+    #[test]
+    fn ten_bit_and_interlaced_h264_are_re_encoded() {
+        let mut i = info("h264", &["aac"], DynamicRange::Sdr);
+        i.streams[0].bit_depth = Some(10);
+        let d = decide(&file("mp4", 5_000_000), Some(&i), &i.streams, &request());
+        assert_eq!(d.method, Method::Transcode);
+        assert!(d.reasons.iter().any(|r| r.contains("10-bit")), "{:?}", d.reasons);
+        assert_eq!(d.video.unwrap().mode, VideoMode::Transcode);
+
+        let mut i = info("h264", &["aac"], DynamicRange::Sdr);
+        i.streams[0].interlaced = Some(true);
+        let d = decide(&file("mkv", 5_000_000), Some(&i), &i.streams, &request());
+        assert_eq!(d.video.unwrap().mode, VideoMode::Transcode, "browsers can't deinterlace");
+    }
+
+    #[test]
+    fn resolution_and_bitrate_limits() {
+        let i = info("h264", &["aac"], DynamicRange::Sdr);
+        let mut req = request();
+        req.max_height = Some(1080);
+        assert_eq!(decide(&file("mp4", 5_000_000), Some(&i), &i.streams, &req).method, Method::Direct);
+        req.max_height = Some(720);
+        let d = decide(&file("mp4", 5_000_000), Some(&i), &i.streams, &req);
+        assert_eq!(d.method, Method::Transcode);
+        assert_eq!(d.video.as_ref().unwrap().max_height, Some(720));
+        // Very low limits keep a watchable floor; the file's bitrate exactly at the limit plays.
+        let mut req = request();
+        req.max_bitrate = Some(300);
+        let d = decide(&file("mp4", 5_000_000), Some(&i), &i.streams, &req);
+        assert_eq!(d.video.unwrap().max_bitrate_kbps, Some(500));
+        req.max_bitrate = Some(5_000);
+        assert_eq!(decide(&file("mp4", 5_000_000), Some(&i), &i.streams, &req).method, Method::Direct);
+    }
+
+    #[test]
+    fn hdr10_plays_directly_on_hdr_displays() {
+        let i = info("hevc", &["aac"], DynamicRange::Hdr10);
+        let mut req = request();
+        req.caps.video_codecs.push("hevc".into());
+        let d = decide(&file("mp4", 20_000_000), Some(&i), &i.streams, &req);
+        assert_eq!(d.method, Method::Transcode);
+        assert!(d.reasons.iter().any(|r| r.contains("tone-mapped")), "{:?}", d.reasons);
+        req.caps.hdr = true;
+        assert_eq!(decide(&file("mp4", 20_000_000), Some(&i), &i.streams, &req).method, Method::Direct);
+    }
+
+    fn track(codec: &str) -> MediaInfo {
+        MediaInfo {
+            duration_ms: Some(200_000),
+            streams: vec![MediaStream {
+                index: 0,
+                kind: StreamKind::Audio,
+                codec: codec.into(),
+                default: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn audio_only_files_remux_or_transcode_the_audio() {
+        let mut req = request();
+        req.caps.containers.push("flac".into());
+        let flac = track("flac");
+        let d = decide(&file("flac", 900_000), Some(&flac), &flac.streams, &req);
+        assert_eq!(d.method, Method::Transcode, "flac is not in the player's codecs");
+        assert!(d.video.is_none());
+        assert_eq!(d.audio.unwrap().mode, AudioMode::Transcode);
+
+        let mp3 = track("mp3");
+        let d = decide(&file("mka", 320_000), Some(&mp3), &mp3.streams, &request());
+        assert_eq!(d.method, Method::Remux, "the audio is copied into HLS");
+        assert_eq!(d.audio.unwrap().mode, AudioMode::Copy);
+    }
+
+    #[test]
+    fn external_image_subtitles_are_burned_from_their_file() {
+        let mut i = info("h264", &["aac"], DynamicRange::Sdr);
+        i.streams.push(MediaStream {
+            index: 5,
+            kind: StreamKind::Subtitle,
+            codec: "subrip".into(),
+            text_based: Some(true),
+            ..Default::default()
+        });
+        let mut f = file("mp4", 5_000_000);
+        f.media_info = Some(serde_json::to_string(&i).unwrap());
+        f.external_subs =
+            r#"[{"index":1000,"path":"/m/a.en.sup","language":"eng","codec":"hdmv_pgs_subtitle"}]"#.into();
+        let streams = f.streams();
+        let ext = streams.iter().find(|s| s.index == 1000).expect("the sidecar is a stream");
+        assert!(ext.external && ext.text_based == Some(false));
+        let mut req = request();
+        req.subtitle_index = Some(1000);
+        let d = decide(&f, Some(&i), &streams, &req);
+        assert_eq!(d.method, Method::Transcode);
+        assert_eq!(d.burn_index, Some(1000));
+        let burn = d.subtitle.unwrap();
+        assert_eq!((burn.stream_index, burn.external_path.as_deref()), (None, Some("/m/a.en.sup")));
+        // Text subtitles are shown by the player: nothing to burn.
+        let mut req = request();
+        req.subtitle_index = Some(5);
+        assert_eq!(decide(&f, Some(&i), &streams, &req).method, Method::Direct);
+    }
+
+    #[test]
+    fn transcode_status_labels() {
+        use pley_transcoder_api::{AudioPlan, JobState, ProcessStatus, VideoPlan};
+        let job = JobStatus {
+            id: "j".into(),
+            state: JobState::Running,
+            duration_ms: 60_000,
+            segment_seconds: 4.0,
+            segment_count: 15,
+            segments_ready: 3,
+            video: Some(VideoPlan {
+                mode: VideoMode::Transcode,
+                codec_in: "hevc".into(),
+                codec_out: "h264".into(),
+                width_in: Some(3840),
+                height_in: Some(2160),
+                width_out: Some(1920),
+                height_out: Some(1080),
+                dynamic_range_in: DynamicRange::DolbyVision,
+                dv_profile: Some(8),
+                dv_bl_compat: Some(1),
+                ..Default::default()
+            }),
+            audio: Some(AudioPlan {
+                mode: AudioMode::Transcode,
+                codec_in: "truehd".into(),
+                codec_out: "aac".into(),
+                channels_in: Some(8),
+                channels_out: Some(2),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let info = transcode_info(&job);
+        assert_eq!(info.video_in.as_deref(), Some("HEVC 3840×2160 Dolby Vision P8.1"));
+        assert_eq!(info.video_out.as_deref(), Some("H.264 1920×1080"));
+        assert_eq!((info.audio_in.as_deref(), info.audio_out.as_deref()), (Some("TrueHD 7.1"), Some("AAC 2.0")));
+        assert_eq!((info.video, info.audio), ("transcode", "transcode"));
+        assert_eq!(info.transcoded_ms, 12_000, "ready segments while no process reports a time");
+        let running =
+            JobStatus { process: Some(ProcessStatus { out_time_ms: 30_500, ..Default::default() }), ..job.clone() };
+        assert_eq!(transcode_info(&running).transcoded_ms, 30_500);
+        assert_eq!(transcode_info(&JobStatus { video: None, audio: None, ..job }).video, "none");
+        assert_eq!(channel_label(6), "5.1");
+        assert_eq!(channel_label(4), "4ch");
+    }
+
+    fn session(user_id: i64, client: Option<&str>, transcode: bool) -> Session {
+        let spec =
+            transcode.then(|| TranscodeSpec { request: JobRequest::default(), segment_count: 1, duration_ms: 1 });
+        Session::new(user_id, "u".into(), client.map(str::to_owned), 1, 1, Method::Transcode, 1, spec, None, 0)
+    }
+
+    #[test]
+    fn a_client_plays_one_thing_at_a_time() {
+        let sessions = Sessions::default();
+        let tab = sessions.insert(session(1, Some("tab"), true)).id.clone();
+        sessions.insert(session(1, Some("tv"), true));
+        sessions.insert(session(2, Some("tab"), true));
+        sessions.insert(session(1, None, false));
+        let taken = sessions.take_client_sessions(1, "tab");
+        assert_eq!(taken.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), [tab.as_str()]);
+        assert!(sessions.get(&tab).is_none());
+        assert_eq!(sessions.list().len(), 3, "other clients and users keep playing");
+        assert!(sessions.take_client_sessions(1, "tab").is_empty());
+    }
+
+    #[test]
+    fn only_live_transcodes_count_against_the_limit() {
+        let sessions = Sessions::default();
+        sessions.insert(session(1, None, false));
+        let live = sessions.insert(session(1, None, true));
+        let stopped = sessions.insert(session(1, None, true));
+        stopped.update(0, "stopped");
+        let abandoned = sessions.insert(session(1, None, true));
+        abandoned.play.lock().updated_at = now() - ACTIVE_WINDOW_SECS - 1;
+        assert_eq!(sessions.active_transcodes(), 1);
+        live.update(1_000, "paused");
+        assert_eq!(sessions.active_transcodes(), 1, "paused players keep their slot");
+    }
+
+    #[test]
     fn subtitle_tracks_have_urls_for_text() {
         let streams = vec![
             MediaStream {

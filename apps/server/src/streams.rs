@@ -302,6 +302,64 @@ mod tests {
     }
 
     #[test]
+    fn a_chosen_commentary_track_is_followed() {
+        let pref = from_selection(&episode(0), Some(3), None);
+        assert_eq!(pref.audio_title.as_deref(), Some("Director's Commentary"));
+        assert_eq!(resolve(Some(&pref), &episode(10)).audio, Some(13));
+    }
+
+    #[test]
+    fn missing_audio_languages_keep_the_default_track() {
+        let pref = StreamPreference { audio_language: Some("ger".into()), ..Default::default() };
+        assert_eq!(resolve(Some(&pref), &episode(0)), Selection::default());
+        // Indexes that are not audio (or don't exist) describe nothing.
+        let pref = from_selection(&episode(0), Some(4), Some(1));
+        assert_eq!(pref, StreamPreference::default());
+    }
+
+    #[test]
+    fn untagged_subtitles_are_found_again_by_title_only() {
+        let streams = |shift: i64| {
+            vec![
+                audio(1, "eng", None, true),
+                sub(2 + shift, None, Some("Commentary"), false, true),
+                sub(3 + shift, None, Some("Karaoke"), false, true),
+                sub(4 + shift, Some("eng"), Some("Karaoke"), false, true),
+            ]
+        };
+        let pref = from_selection(&streams(0), None, Some(3));
+        assert_eq!((pref.subtitle_language.as_deref(), pref.subtitle_title.as_deref()), (None, Some("Karaoke")));
+        assert_eq!(resolve(Some(&pref), &streams(10)).subtitle, Some(13), "the untagged track with that title");
+        // No untagged track with that title: subtitles stay off.
+        let pref = StreamPreference { subtitles: true, subtitle_title: Some("Signs".into()), ..Default::default() };
+        assert_eq!(resolve(Some(&pref), &streams(0)).subtitle, None);
+    }
+
+    #[test]
+    fn text_subtitles_win_over_images_and_sdh_is_recognized() {
+        let streams = vec![
+            audio(1, "eng", None, true),
+            sub(2, Some("eng"), None, false, false),
+            sub(3, Some("eng"), None, false, true),
+            sub(4, Some("eng"), Some("English [CC]"), false, true),
+        ];
+        let pref = StreamPreference { subtitles: true, subtitle_language: Some("eng".into()), ..Default::default() };
+        assert_eq!(resolve(Some(&pref), &streams).subtitle, Some(3), "text, no SDH, earliest");
+        let sdh = StreamPreference { subtitle_title: Some("SDH".into()), ..pref };
+        assert_eq!(resolve(Some(&sdh), &streams).subtitle, Some(4), "`CC` marks SDH too");
+        assert!(!is_sdh(Some("Accent")), "a word, not two letters inside one");
+    }
+
+    #[test]
+    fn choices_are_kept_per_show_or_movie() {
+        let mut episode = ItemRow::test_row(3, "episode", "Pilot");
+        (episode.parent_id, episode.grandparent_id) = (Some(2), Some(1));
+        assert_eq!(scope(&episode), 1);
+        assert_eq!(scope(&ItemRow::test_row(9, "movie", "Alien")), 9);
+        assert_eq!(scope(&ItemRow::test_row(8, "episode", "Orphan")), 8, "an episode without a show");
+    }
+
+    #[test]
     fn without_a_preference_only_matching_forced_subtitles_show() {
         let mut streams = episode(0);
         assert_eq!(resolve(None, &streams), Selection::default());

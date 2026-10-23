@@ -221,3 +221,118 @@ impl SettingsStore {
         Ok(next)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn store() -> (tempfile::TempDir, Db, SettingsStore) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("pley.db")).await.unwrap();
+        let store = SettingsStore::load(&db).await.unwrap();
+        (dir, db, store)
+    }
+
+    fn patch(json: serde_json::Value) -> SettingsPatch {
+        serde_json::from_value(json).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_rejected_patch_changes_nothing() {
+        let (_dir, db, store) = store().await;
+        let before = store.get();
+        let err = store
+            .update(
+                &db,
+                patch(serde_json::json!({"max_transcodes": 2, "server_name": "Den", "transcode_preset": "slow"})),
+            )
+            .await;
+        assert!(matches!(err, Err(AppError::BadRequest(_))));
+        assert_eq!(*store.get(), *before);
+        // Nor was anything saved.
+        assert_eq!(*SettingsStore::load(&db).await.unwrap().get(), *before);
+    }
+
+    #[tokio::test]
+    async fn values_are_checked_and_normalized() {
+        let (_dir, db, store) = store().await;
+        let bad = |json: serde_json::Value| {
+            let (db, store) = (&db, &store);
+            async move { store.update(db, patch(json)).await.is_err() }
+        };
+        assert!(bad(serde_json::json!({"server_name": "   "})).await);
+        assert!(bad(serde_json::json!({"server_name": "x".repeat(65)})).await);
+        assert!(bad(serde_json::json!({"metadata_language": "e"})).await);
+        assert!(bad(serde_json::json!({"metadata_language": "en-US-x-twelve"})).await);
+        assert!(bad(serde_json::json!({"max_transcodes": 0})).await);
+        assert!(bad(serde_json::json!({"max_transcodes": 65})).await);
+        assert!(bad(serde_json::json!({"transcode_preset": "placebo"})).await);
+
+        let s = store
+            .update(
+                &db,
+                patch(serde_json::json!({
+                    "server_name": "  Den  ",
+                    "tmdb_api_key": "  abc  ",
+                    "metadata_language": " fr-FR ",
+                    "max_transcodes": 64,
+                    "transcode_preset": "medium",
+                    "scan_interval_minutes": 1_000_000,
+                    "seek_previews": false,
+                })),
+            )
+            .await
+            .unwrap();
+        assert_eq!(s.server_name, "Den");
+        assert_eq!(s.tmdb_api_key, "abc");
+        assert_eq!(s.metadata_language, "fr-FR");
+        assert_eq!((s.max_transcodes, s.transcode_preset.as_str()), (64, "medium"));
+        assert_eq!(s.scan_interval_minutes, 7 * 24 * 60, "at most a week");
+        assert!(!s.seek_previews);
+        // Fields left out keep their values.
+        let s = store.update(&db, patch(serde_json::json!({"watch_libraries": false}))).await.unwrap();
+        assert_eq!((s.server_name.as_str(), s.max_transcodes), ("Den", 64));
+        assert!(!s.seek_previews && !s.watch_libraries);
+        // ...and survive a restart.
+        assert_eq!(*SettingsStore::load(&db).await.unwrap().get(), *s);
+    }
+
+    #[tokio::test]
+    async fn a_tv_source_needs_its_key() {
+        let (_dir, db, store) = store().await;
+        let set = |json: serde_json::Value| store.update(&db, patch(json));
+        assert!(set(serde_json::json!({"tv_metadata": "tmdb"})).await.is_err());
+        assert!(set(serde_json::json!({"tv_metadata": "tvdb"})).await.is_err());
+        assert_eq!(set(serde_json::json!({"tv_metadata": "tvmaze"})).await.unwrap().tv_metadata, TvMetadata::Tvmaze);
+        // A key and the source that needs it can come in one patch.
+        let s = set(serde_json::json!({"tv_metadata": "tvdb", "tvdb_api_key": "key", "tvdb_pin": " 1234 "})).await;
+        let s = s.unwrap();
+        assert_eq!((s.tv_metadata, s.tvdb_pin.as_str()), (TvMetadata::Tvdb, "1234"));
+        // Removing the key of the source in use is refused.
+        assert!(set(serde_json::json!({"tvdb_api_key": "  "})).await.is_err());
+        assert_eq!(store.get().tvdb_api_key, "key");
+        // Auto never needs a key.
+        let s = set(serde_json::json!({"tv_metadata": "auto", "tvdb_api_key": ""})).await.unwrap();
+        assert_eq!((s.tv_metadata, s.tvdb_api_key.as_str()), (TvMetadata::Auto, ""));
+    }
+
+    #[tokio::test]
+    async fn stored_settings_from_older_versions_get_defaults() {
+        let (_dir, db, _) = store().await;
+        // Saved before the TV sources and previews existed.
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('server', ?)")
+            .bind(r#"{"server_name":"Attic","max_transcodes":2,"hwaccel":"nvenc"}"#)
+            .execute(&db.write)
+            .await
+            .unwrap();
+        let s = SettingsStore::load(&db).await.unwrap().get();
+        assert_eq!((s.server_name.as_str(), s.max_transcodes, s.hwaccel), ("Attic", 2, HwAccel::Nvenc));
+        assert_eq!(s.tv_metadata, TvMetadata::Auto);
+        assert!(s.music_metadata && s.seek_previews && s.previews_in_background && s.detect_markers);
+
+        // Unreadable settings fall back to the defaults instead of failing start-up.
+        sqlx::query("UPDATE settings SET value = 'not json' WHERE key = 'server'").execute(&db.write).await.unwrap();
+        let s = SettingsStore::load(&db).await.unwrap().get();
+        assert_eq!(s.max_transcodes, Settings::default().max_transcodes);
+    }
+}
