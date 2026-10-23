@@ -54,28 +54,17 @@ export function TmdbKeyNotice({ className }: { className?: string }) {
   );
 }
 
-/** An administrator's view of a movie pley couldn't identify. */
-export function UnmatchedNotice({ onFixMatch, className }: { onFixMatch: () => void; className?: string }) {
+/** For administrators, on a movie without details: TMDB has none to give without a key. */
+export function MissingKeyNotice({ className }: { className?: string }) {
   const needsKey = useNeedsTmdbKey();
-  if (needsKey === undefined) return null;
+  if (!needsKey) return null;
   return (
     <Notice className={className}>
-      {needsKey ? (
-        <>
-          No details yet: movie details come from TMDB, which needs an API key.{" "}
-          <Link to={TMDB_KEY_SETTING} className="font-medium text-accent hover:underline">
-            Add a free key in Settings
-          </Link>
-          .
-        </>
-      ) : (
-        <>
-          pley couldn't find this movie on TMDB.{" "}
-          <button type="button" onClick={onFixMatch} className="font-medium text-accent hover:underline">
-            Fix match…
-          </button>
-        </>
-      )}
+      No details yet: movie details come from TMDB, which needs an API key.{" "}
+      <Link to={TMDB_KEY_SETTING} className="font-medium text-accent hover:underline">
+        Add a free key in Settings
+      </Link>
+      .
     </Notice>
   );
 }

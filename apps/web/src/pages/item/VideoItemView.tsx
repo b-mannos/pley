@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Play, RotateCcw } from "lucide-react";
 import type { ItemDetail, MediaFile } from "@/api/types";
 import { PartOfCollections } from "@/components/lists/PartOfCollections";
-import { UnmatchedNotice } from "@/components/MetadataNotice";
+import { MissingKeyNotice } from "@/components/MetadataNotice";
 import { StarRating } from "@/components/StarRating";
 import { Button, Select } from "@/components/ui";
 import { codecLabel, formatBytes, formatDate, formatDuration, resolutionLabel, seasonTitle, streamLabel } from "@/lib/format";
@@ -161,7 +161,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
             <MoreActions item={item} />
           </div>
 
-          {item.kind === "movie" && item.tmdb_id == null ? <UnmatchedNotice onFixMatch={() => setEdit("match")} className="max-w-3xl" /> : null}
+          {item.kind === "movie" && item.tmdb_id == null ? <MissingKeyNotice className="max-w-3xl" /> : null}
           <EditDialogs item={item} dialog={edit} onClose={() => setEdit(null)} />
 
           <ResumeProgress item={item} />
