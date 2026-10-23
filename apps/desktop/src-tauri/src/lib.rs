@@ -43,8 +43,15 @@ enum Navigation {
     Browser,
 }
 
+/// Whether `url` is one of the app's own pages: Tauri serves them from
+/// `tauri://localhost` (`http://tauri.localhost` on Windows), or from the
+/// dev server while developing.
+fn is_app_page(url: &Url) -> bool {
+    url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost")
+}
+
 fn navigation(url: &Url, picker: Option<&Url>, server: Option<&Url>) -> Navigation {
-    if picker.is_some_and(|p| same_origin(p, url)) {
+    if is_app_page(url) || picker.is_some_and(|p| same_origin(p, url)) {
         return Navigation::Allow;
     }
     match server {
@@ -104,6 +111,10 @@ pub fn run() {
             open_server
         ])
         .setup(|app| {
+            // While developing, the picker comes from Vite's dev server.
+            if cfg!(dev) {
+                *app.state::<Pages>().picker.lock().unwrap() = app.config().build.dev_url.clone();
+            }
             let handle = app.handle().clone();
             let opener = app.handle().clone();
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
@@ -162,8 +173,11 @@ mod tests {
         assert_eq!(at("https://www.themoviedb.org/movie/603"), Navigation::Browser);
         assert_eq!(at("http://192.168.1.20:8080/"), Navigation::Browser, "another port is another site");
         assert_eq!(at("about:blank"), Navigation::Allow);
-        // Before a server is open, only the picker is at home.
+        // Before a server is open, only the picker is at home, even before
+        // the app knows its address (the first page is loading).
         assert_eq!(navigation(&url("http://192.168.1.20:7539/"), Some(&picker), None), Navigation::Browser);
+        assert_eq!(navigation(&url("http://tauri.localhost/index.html"), None, None), Navigation::Allow);
+        assert_eq!(navigation(&url("tauri://localhost/index.html"), None, None), Navigation::Allow);
         assert_eq!(
             navigation(&url("http://192.168.1.20:7539/__app/servers"), Some(&picker), None),
             Navigation::Browser,
