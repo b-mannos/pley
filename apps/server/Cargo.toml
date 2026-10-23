@@ -49,6 +49,9 @@ ring = "0.17"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "stream"] }
 rust-embed = "8"
+# Which folder a link leads to, so that walks of library folders don't go
+# round in circles (already used by walkdir).
+same-file = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
