@@ -14,6 +14,7 @@ mod people;
 pub(crate) mod playback;
 mod playlists;
 mod sso;
+mod two_step;
 
 use std::time::Duration;
 
@@ -45,6 +46,9 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/sso/client", get(sso::client))
         .route("/auth/sso/link", post(sso::request_link))
         .route("/me/sso", get(sso::mine).delete(sso::unlink))
+        .route("/me/two-step", get(two_step::status).post(two_step::enable).delete(two_step::disable))
+        .route("/me/two-step/setup", post(two_step::setup))
+        .route("/me/two-step/recovery-codes", post(two_step::recovery_codes))
         .route("/me", patch(accounts::update_me))
         .route("/me/pin", put(accounts::set_my_pin))
         .route(
@@ -116,6 +120,7 @@ pub fn router(state: AppState) -> Router {
         .route("/users/{id}/avatar", get(accounts::avatar))
         .route("/users/{id}/devices", get(accounts::user_devices).delete(accounts::sign_out_everywhere))
         .route("/users/{id}/sso", delete(sso::unlink_user))
+        .route("/users/{id}/two-step", delete(two_step::reset_user))
         .route("/invites", get(accounts::list_invites).post(accounts::create_invite))
         .route("/invites/{code}", get(accounts::check_invite).delete(accounts::delete_invite))
         .route("/invites/{code}/accept", post(accounts::accept_invite))

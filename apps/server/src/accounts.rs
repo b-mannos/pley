@@ -38,6 +38,7 @@ struct UserRow {
     subtitle_mode: String,
     has_password: bool,
     sso: bool,
+    two_step: bool,
 }
 
 /// A user as the API shows it.
@@ -70,12 +71,15 @@ pub struct UserDto {
     pub has_password: bool,
     /// Linked to an identity at the single sign-on provider.
     pub sso: bool,
+    /// Signs in with a code from an authenticator app after the password.
+    pub two_step: bool,
 }
 
 const USER_COLUMNS: &str = "id, username, display_name, is_admin, managed, home, pin_hash IS NOT NULL AS has_pin,
     avatar, avatar_color, all_libraries, max_age, disabled, created_at, audio_language, subtitle_language,
     subtitle_mode, password_hash NOT LIKE '!%' AS has_password,
-    EXISTS (SELECT 1 FROM user_identities i WHERE i.user_id = users.id) AS sso";
+    EXISTS (SELECT 1 FROM user_identities i WHERE i.user_id = users.id) AS sso,
+    EXISTS (SELECT 1 FROM two_step t WHERE t.user_id = users.id) AS two_step";
 
 impl UserRow {
     fn into_dto(self, library_ids: Vec<i64>) -> UserDto {
@@ -100,6 +104,7 @@ impl UserRow {
             subtitle_mode: SubtitleMode::parse(&self.subtitle_mode),
             has_password: self.has_password,
             sso: self.sso,
+            two_step: self.two_step,
         }
     }
 }
@@ -164,6 +169,10 @@ pub async fn set_libraries(db: &Db, user_id: i64, library_ids: &[i64]) -> sqlx::
     }
     tx.commit().await
 }
+
+/// Wrong PINs in a row after which a profile's PIN stops working until it is
+/// set again (NIST SP 800-63B, 5.2.2: no more than 100).
+pub const MAX_PIN_FAILURES_IN_A_ROW: i64 = 100;
 
 pub fn validate_pin(pin: &str) -> Result<(), AppError> {
     if (4..=8).contains(&pin.len()) && pin.chars().all(|c| c.is_ascii_digit()) {
@@ -533,6 +542,7 @@ mod tests {
             subtitle_mode: "foreign".into(),
             has_password: true,
             sso: false,
+            two_step: false,
         }
     }
 

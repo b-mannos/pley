@@ -43,6 +43,7 @@ pub struct Inner {
     pub markers: Arc<MarkerService>,
     pub trickplay: Arc<TrickplayService>,
     pub sso: crate::sso::Sso,
+    pub two_step: crate::two_step::TwoStep,
     pub started_at: Instant,
     /// Cancelled when the server starts shutting down (the tray's Quit
     /// cancels it to ask for that). Responses that never end on their own,
@@ -114,6 +115,8 @@ impl AppState {
             config.cache_dir().join("trickplay"),
         );
         let auth = AuthService::new(db.clone());
+        let two_step = crate::two_step::TwoStep::new(db.clone(), &config.data_dir);
+        two_step.check_key().await;
         let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&db.read).await?;
         if users == 0 {
             auth.setup.issue();
@@ -125,6 +128,7 @@ impl AppState {
                 markers,
                 trickplay,
                 sso: crate::sso::Sso::new(),
+                two_step,
                 started_at: Instant::now(),
                 stopping: CancellationToken::new(),
                 config,

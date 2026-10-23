@@ -26,6 +26,10 @@ pub struct LoginResponse {
 pub struct Credentials {
     username: String,
     password: String,
+    /// A code from the authenticator app, or a recovery code, for accounts
+    /// with two-step sign-in (see [`crate::two_step`]).
+    #[serde(default)]
+    code: Option<String>,
 }
 
 pub async fn server_status(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
@@ -147,7 +151,33 @@ pub async fn login(
     if disabled {
         return Err(AppError::forbidden("this account is disabled"));
     }
+    state.two_step.check(&state.auth.throttle, id, body.code.as_deref()).await?;
     login_response(&state, id, &headers, ip.as_deref()).await
+}
+
+/// Checks that the signed-in user may change how their account signs in:
+/// not a managed profile, not an account without a password, and with its
+/// password (a session alone isn't enough).
+pub(crate) async fn confirm_password(state: &AppState, user: &AuthUser, password: Option<String>) -> ApiResult<()> {
+    let (hash, managed): (String, bool) = sqlx::query_as("SELECT password_hash, managed FROM users WHERE id = ?")
+        .bind(user.id)
+        .fetch_one(&state.db.read)
+        .await?;
+    if managed {
+        return Err(AppError::forbidden("managed profiles are signed in to through their household"));
+    }
+    if hash == crate::sso::NO_PASSWORD {
+        return Err(AppError::forbidden(
+            "this account signs in only with single sign-on: an administrator can give it a password first",
+        ));
+    }
+    let attempt = state.auth.throttle.begin(&format!("login:{}", user.username.to_lowercase()))?;
+    if !verify_password(password.unwrap_or_default(), hash).await? {
+        attempt.failed();
+        return Err(AppError::forbidden("the password is wrong"));
+    }
+    attempt.succeeded();
+    Ok(())
 }
 
 pub async fn logout(State(state): State<AppState>, request: axum::extract::Request) -> Response {
@@ -233,14 +263,18 @@ pub struct Switch {
     /// Needed to switch into a freer profile without a PIN (see [`switch`]).
     #[serde(default)]
     password: Option<String>,
+    /// With the password, for a profile with two-step sign-in.
+    #[serde(default)]
+    code: Option<String>,
 }
 
 /// Switch this device to another home profile. The target's PIN is required
-/// when it has one. A profile freer than the current one (an administrator,
-/// a higher age limit, libraries the current one can't see) without a PIN
-/// needs its password, so age limits and library choices hold: one that has
-/// neither can only be switched to from a profile at least as free, until it
-/// gets a PIN.
+/// when it has one (until 100 wrong ones in a row lock it). A profile freer
+/// than the current one (an administrator, a higher age limit, libraries the
+/// current one can't see) without a PIN needs its password, and its code
+/// with two-step sign-in, so age limits and library choices hold: one that
+/// has neither can only be switched to from a profile at least as free,
+/// until it gets a PIN.
 pub async fn switch(
     State(state): State<AppState>,
     user: AuthUser,
@@ -250,8 +284,9 @@ pub async fn switch(
     Json(body): Json<Switch>,
 ) -> ApiResult<Response> {
     #[allow(clippy::type_complexity)]
-    let row: Option<(bool, bool, bool, Option<String>, String, bool, Option<i64>, bool)> = sqlx::query_as(
-        "SELECT t.home AND me.home, t.disabled, t.is_admin, t.pin_hash, t.password_hash, t.all_libraries, t.max_age,
+    let row: Option<(bool, bool, bool, Option<String>, i64, String, bool, Option<i64>, bool)> = sqlx::query_as(
+        "SELECT t.home AND me.home, t.disabled, t.is_admin, t.pin_hash, t.pin_failures, t.password_hash,
+                t.all_libraries, t.max_age,
                 EXISTS (SELECT library_id FROM user_libraries WHERE user_id = t.id
                         EXCEPT SELECT library_id FROM user_libraries WHERE user_id = me.id)
          FROM users t, users me WHERE t.id = ? AND me.id = ?",
@@ -260,8 +295,17 @@ pub async fn switch(
     .bind(user.id)
     .fetch_optional(&state.db.read)
     .await?;
-    let Some((both_home, disabled, target_admin, pin_hash, password_hash, all_libraries, max_age, more_libraries)) =
-        row
+    let Some((
+        both_home,
+        disabled,
+        target_admin,
+        pin_hash,
+        pin_failures,
+        password_hash,
+        all_libraries,
+        max_age,
+        more_libraries,
+    )) = row
     else {
         return Err(AppError::not_found("profile not found"));
     };
@@ -277,7 +321,27 @@ pub async fn switch(
         let attempt = state.auth.throttle.begin(&format!("profile:{}", body.user_id))?;
         let ok = match (&pin_hash, freer) {
             (Some(pin_hash), _) => match &body.pin {
-                Some(pin) => verify_password(pin.clone(), pin_hash.clone()).await?,
+                // Throttled per profile, and capped in a row: guessing a
+                // 4-digit PIN over weeks doesn't get through either.
+                Some(_) if pin_failures >= accounts::MAX_PIN_FAILURES_IN_A_ROW => {
+                    return Err(AppError::forbidden(
+                        "this profile's PIN is locked after too many wrong tries: its owner can set it again in their \
+                         account, or an administrator can",
+                    ));
+                }
+                Some(pin) => {
+                    let right = verify_password(pin.clone(), pin_hash.clone()).await?;
+                    if !right || pin_failures > 0 {
+                        sqlx::query(
+                            "UPDATE users SET pin_failures = CASE WHEN ? THEN 0 ELSE pin_failures + 1 END WHERE id = ?",
+                        )
+                        .bind(right)
+                        .bind(body.user_id)
+                        .execute(&state.db.write)
+                        .await?;
+                    }
+                    right
+                }
                 None => return Err(AppError::forbidden("this profile is protected by a PIN")),
             },
             (None, true) if password_hash.starts_with('!') => {
@@ -294,6 +358,10 @@ pub async fn switch(
         if !ok {
             attempt.failed();
             return Err(AppError::forbidden(if pin_hash.is_some() { "wrong PIN" } else { "wrong password" }));
+        }
+        if pin_hash.is_none() && freer {
+            // Its password signs in to it: so does its second step.
+            state.two_step.check(&state.auth.throttle, body.user_id, body.code.as_deref()).await?;
         }
         attempt.succeeded();
     }

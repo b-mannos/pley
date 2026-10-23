@@ -41,6 +41,7 @@ pub mod store;
 pub mod streams;
 pub mod transcoder;
 pub mod trickplay;
+pub mod two_step;
 pub mod util;
 pub mod web;
 
@@ -218,7 +219,16 @@ pub async fn reset_password(config: Config, username: &str, password: &str, admi
                 .execute(&db.write)
                 .await?;
             sqlx::query("DELETE FROM sessions WHERE user_id = ?").bind(id).execute(&db.write).await?;
-            println!("password updated for '{username}'");
+            // Whoever runs this owns the server: an authenticator lost with
+            // the password doesn't keep them out.
+            let two_step = sqlx::query("DELETE FROM two_step WHERE user_id = ?")
+                .bind(id)
+                .execute(&db.write)
+                .await?
+                .rows_affected();
+            sqlx::query("DELETE FROM recovery_codes WHERE user_id = ?").bind(id).execute(&db.write).await?;
+            let off = if two_step > 0 { "; two-step sign-in is off" } else { "" };
+            println!("password updated for '{username}'{off}");
         }
         None => {
             sqlx::query("INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?)")

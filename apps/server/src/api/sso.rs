@@ -9,7 +9,8 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 
-use crate::auth::{AdminUser, AuthUser, ClientIp, forwarded_https, session_cookie, token_from_parts, verify_password};
+use super::auth::confirm_password;
+use crate::auth::{AdminUser, AuthUser, ClientIp, forwarded_https, session_cookie, token_from_parts};
 use crate::error::{ApiResult, AppError};
 use crate::settings::Settings;
 use crate::sso::{self, FLOW_COOKIE, FLOW_TTL, LINK_COOKIE, LINK_TTL, Sso};
@@ -218,30 +219,9 @@ pub struct Confirm {
     /// The account's password: a session alone can't change how it signs in.
     #[serde(default)]
     password: Option<String>,
-}
-
-/// Checks that the signed-in user may change how their account signs in:
-/// not a managed profile, and with their password.
-async fn confirm(state: &AppState, user: &AuthUser, password: Option<String>) -> ApiResult<()> {
-    let (hash, managed): (String, bool) = sqlx::query_as("SELECT password_hash, managed FROM users WHERE id = ?")
-        .bind(user.id)
-        .fetch_one(&state.db.read)
-        .await?;
-    if managed {
-        return Err(AppError::forbidden("managed profiles are signed in to through their household"));
-    }
-    if hash == sso::NO_PASSWORD {
-        return Err(AppError::forbidden(
-            "this account signs in only with single sign-on: an administrator can give it a password first",
-        ));
-    }
-    let attempt = state.auth.throttle.begin(&format!("login:{}", user.username.to_lowercase()))?;
-    if !verify_password(password.unwrap_or_default(), hash).await? {
-        attempt.failed();
-        return Err(AppError::forbidden("the password is wrong"));
-    }
-    attempt.succeeded();
-    Ok(())
+    /// Its second step, for linking an account with two-step sign-in.
+    #[serde(default)]
+    code: Option<String>,
 }
 
 /// Whether the browser is at pley's public address (`Origin`, which a
@@ -269,7 +249,9 @@ pub async fn request_link(
     if !at_public_origin(&headers, &settings.public_url) {
         return Err(AppError::conflict(format!("link your account at {}", settings.public_url)));
     }
-    confirm(&state, &user, body.password).await?;
+    confirm_password(&state, &user, body.password).await?;
+    // Signing in through the provider skips the second step: linking takes it.
+    state.two_step.check(&state.auth.throttle, user.id, body.code.as_deref()).await?;
     let cookie = sso::cookie(LINK_COOKIE, &state.sso.link_request(user.id), LINK_TTL, secure(&settings, &headers));
     Ok((StatusCode::NO_CONTENT, [(header::SET_COOKIE, cookie)]).into_response())
 }
@@ -301,7 +283,7 @@ pub async fn mine(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
 /// signs in with the provider.
 pub async fn unlink(State(state): State<AppState>, user: AuthUser, Json(body): Json<Confirm>) -> ApiResult<StatusCode> {
     let settings = state.settings.get();
-    confirm(&state, &user, body.password).await?;
+    confirm_password(&state, &user, body.password).await?;
     sso::unlink(&state.db, user.id, &settings.sso_issuer).await?;
     Ok(StatusCode::NO_CONTENT)
 }

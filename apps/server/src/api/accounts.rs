@@ -8,11 +8,10 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::auth::login_response;
+use super::auth::{confirm_password, login_response};
 use crate::accounts::{self, NO_PASSWORD, UserDto};
 use crate::auth::{
     AdminUser, AuthUser, ClientIp, CurrentToken, hash_password, hash_token, validate_password, validate_username,
-    verify_password,
 };
 use crate::error::{ApiResult, AppError};
 use crate::state::AppState;
@@ -245,7 +244,11 @@ pub async fn update_user(
             Some(pin) => Some(hash_password(pin).await?),
             None => None,
         };
-        sqlx::query("UPDATE users SET pin_hash = ? WHERE id = ?").bind(hash).bind(id).execute(&state.db.write).await?;
+        sqlx::query("UPDATE users SET pin_hash = ?, pin_failures = 0 WHERE id = ?")
+            .bind(hash)
+            .bind(id)
+            .execute(&state.db.write)
+            .await?;
     }
     state.auth.forget_user(id);
     Ok(Json(accounts::user(&state.db, id).await?.ok_or_else(|| AppError::not_found("user not found"))?))
@@ -445,18 +448,12 @@ pub async fn set_my_pin(
     user: AuthUser,
     Json(body): Json<PinChange>,
 ) -> ApiResult<StatusCode> {
-    let (password_hash, managed): (String, bool) =
-        sqlx::query_as("SELECT password_hash, managed FROM users WHERE id = ?")
-            .bind(user.id)
-            .fetch_one(&state.db.read)
-            .await?;
+    let managed: bool =
+        sqlx::query_scalar("SELECT managed FROM users WHERE id = ?").bind(user.id).fetch_one(&state.db.read).await?;
     if managed {
         return Err(AppError::forbidden("ask an administrator to change this profile's PIN"));
     }
-    let password = body.password.unwrap_or_default();
-    if !verify_password(password, password_hash).await? {
-        return Err(AppError::bad_request("the password is wrong"));
-    }
+    confirm_password(&state, &user, body.password).await?;
     let hash = match body.pin.filter(|p| !p.is_empty()) {
         Some(pin) => {
             accounts::validate_pin(&pin)?;
@@ -464,7 +461,11 @@ pub async fn set_my_pin(
         }
         None => None,
     };
-    sqlx::query("UPDATE users SET pin_hash = ? WHERE id = ?").bind(hash).bind(user.id).execute(&state.db.write).await?;
+    sqlx::query("UPDATE users SET pin_hash = ?, pin_failures = 0 WHERE id = ?")
+        .bind(hash)
+        .bind(user.id)
+        .execute(&state.db.write)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -21,6 +21,9 @@ pub enum AppError {
     Unavailable(String),
     #[error("{0}")]
     TooManyRequests(String),
+    /// The second step of a sign-in is missing or wrong (see `crate::two_step`).
+    #[error("{0}")]
+    TwoStep(String),
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
@@ -53,6 +56,7 @@ impl AppError {
             Self::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             Self::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable"),
             Self::TooManyRequests(_) => (StatusCode::TOO_MANY_REQUESTS, "too_many_requests"),
+            Self::TwoStep(_) => (StatusCode::UNAUTHORIZED, "two_step"),
             Self::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         }
     }
@@ -111,6 +115,7 @@ mod tests {
             (AppError::conflict("no"), 409, "conflict"),
             (AppError::TooManyRequests("no".into()), 429, "too_many_requests"),
             (AppError::Unavailable("no".into()), 503, "unavailable"),
+            (AppError::TwoStep("no".into()), 401, "two_step"),
         ] {
             let (got, body) = answer(err).await;
             assert_eq!((got, body["code"].as_str().unwrap()), (status, code));

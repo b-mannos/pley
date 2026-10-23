@@ -179,6 +179,19 @@ impl TestApp {
         r.body["token"].as_str().unwrap().to_owned()
     }
 
+    /// Turns on two-step sign-in for the user signed in with `token`: the
+    /// authenticator app's secret, and the recovery codes.
+    pub async fn turn_on_two_step(&self, token: &str, password: &str) -> (Vec<u8>, Vec<String>) {
+        let setup = self.post("/api/me/two-step/setup", token, json!({"password": password})).await;
+        assert_eq!(setup.status, StatusCode::OK, "{}", setup.text());
+        let secret = pley::two_step::base32_decode(setup.body["secret"].as_str().unwrap()).unwrap();
+        let code = pley::two_step::code_at(&secret, pley::util::now());
+        let on = self.post("/api/me/two-step", token, json!({"code": code})).await;
+        assert_eq!(on.status, StatusCode::OK, "{}", on.text());
+        let codes = on.body["recovery_codes"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_owned());
+        (secret, codes.collect())
+    }
+
     /// A user with the password `test-pass-1` and the given fields, signed in:
     /// `(token, id)`.
     pub async fn user(&self, admin: &str, username: &str, mut fields: Value) -> (String, i64) {

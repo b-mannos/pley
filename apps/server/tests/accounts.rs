@@ -211,8 +211,8 @@ async fn your_own_pin_needs_your_password() {
     let (parent, parent_id) = app.user(&admin, "parent", json!({})).await;
 
     let set_pin = |body: Value| app.put("/api/me/pin", &parent, body);
-    assert_eq!(set_pin(json!({"pin": "4321"})).await.status, StatusCode::BAD_REQUEST, "no password");
-    assert_eq!(set_pin(json!({"pin": "4321", "password": "nope"})).await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(set_pin(json!({"pin": "4321"})).await.status, StatusCode::FORBIDDEN, "no password");
+    assert_eq!(set_pin(json!({"pin": "4321", "password": "nope"})).await.status, StatusCode::FORBIDDEN);
     assert_eq!(set_pin(json!({"pin": "12", "password": "test-pass-1"})).await.status, StatusCode::BAD_REQUEST);
     assert_eq!(set_pin(json!({"pin": "4321", "password": "test-pass-1"})).await.status, StatusCode::NO_CONTENT);
     assert_eq!(app.get("/api/auth/me", &parent).await.body["has_pin"], json!(true));
@@ -237,6 +237,44 @@ async fn your_own_pin_needs_your_password() {
         .to_owned();
     let refused = app.put("/api/me/pin", &kid, json!({"pin": "1111", "password": ""})).await;
     assert_eq!(refused.status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_pin_stops_working_after_100_wrong_tries_in_a_row() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (_, kid_id) = app.user(&admin, "kid", json!({"pin": "1234", "max_age": 12})).await;
+    let pin_failures = || async {
+        sqlx::query_scalar::<_, i64>("SELECT pin_failures FROM users WHERE id = ?")
+            .bind(kid_id)
+            .fetch_one(&app.state.db.read)
+            .await
+            .unwrap()
+    };
+    let wrong = switch(&app, &admin, json!({"user_id": kid_id, "pin": "9999"})).await;
+    assert_eq!(wrong.status, StatusCode::FORBIDDEN);
+    assert_eq!(pin_failures().await, 1, "kept across restarts, unlike the throttle");
+    let admin = app.login("admin", "secret-one").await;
+    let right = switch(&app, &admin, json!({"user_id": kid_id, "pin": "1234"})).await;
+    assert_eq!(right.status, StatusCode::OK, "{}", right.text());
+    assert_eq!(pin_failures().await, 0, "the right PIN starts the count over");
+
+    // Guessing over weeks, 5 tries every 15 minutes: the 100th wrong PIN in
+    // a row locks it, the right one included.
+    sqlx::query("UPDATE users SET pin_failures = 99 WHERE id = ?")
+        .bind(kid_id)
+        .execute(&app.state.db.write)
+        .await
+        .unwrap();
+    let admin = app.login("admin", "secret-one").await;
+    assert_eq!(switch(&app, &admin, json!({"user_id": kid_id, "pin": "9999"})).await.status, StatusCode::FORBIDDEN);
+    let locked = switch(&app, &admin, json!({"user_id": kid_id, "pin": "1234"})).await;
+    assert_eq!(locked.status, StatusCode::FORBIDDEN);
+    assert!(locked.text().contains("locked"), "{}", locked.text());
+
+    // Setting it again opens it.
+    assert_eq!(app.patch(&format!("/api/users/{kid_id}"), &admin, json!({"pin": "4321"})).await.status, StatusCode::OK);
+    assert_eq!(switch(&app, &admin, json!({"user_id": kid_id, "pin": "4321"})).await.status, StatusCode::OK);
 }
 
 #[tokio::test]

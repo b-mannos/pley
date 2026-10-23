@@ -530,6 +530,22 @@ async fn linking_takes_the_password_and_the_public_address() {
 }
 
 #[tokio::test]
+async fn linking_an_account_with_two_step_sign_in_takes_its_code() {
+    // Signing in through the provider skips pley's second step.
+    let (app, _idp, _admin, ann, _) = world(false).await;
+    let (secret, _) = app.turn_on_two_step(&ann, "test-pass-1").await;
+    let asked = ask_to_link(&app, &ann, "test-pass-1", PUBLIC).await;
+    assert_eq!((asked.status, asked.body["code"].clone()), (StatusCode::UNAUTHORIZED, json!("two_step")));
+    assert!(set_cookie(&asked, "pley_sso_link").is_none());
+    let code = pley::two_step::code_at(&secret, pley::util::now() + 30);
+    let body = json!({"password": "test-pass-1", "code": code});
+    let headers = [("host", HOST), ("origin", PUBLIC)];
+    let asked = app.call(Method::POST, "/api/auth/sso/link", Some(&ann), Some(body), &headers).await;
+    assert_eq!(asked.status, StatusCode::NO_CONTENT, "{}", asked.text());
+    assert!(set_cookie(&asked, "pley_sso_link").is_some());
+}
+
+#[tokio::test]
 async fn sign_ins_move_to_the_public_address() {
     let (app, _idp, _admin, _ann, _) = world(false).await;
     // From the address on the local network, to the public one, once.
