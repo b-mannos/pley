@@ -1,10 +1,14 @@
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, LazyLock};
 
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use dashmap::DashMap;
+use futures::FutureExt;
+use futures::future::{BoxFuture, Shared};
 use pley_transcoder_api::{AudioMode, JobRequest, VideoMode};
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
@@ -15,7 +19,10 @@ use crate::catalog::{self, ItemRow};
 use crate::error::{ApiResult, AppError};
 use crate::events::ServerEvent;
 use crate::library::sidecar::EXTERNAL_INDEX_BASE;
-use crate::playback::{Method, PlaybackInfo, PlaybackRequest, Session, TranscodeSpec, decide, subtitle_tracks};
+use crate::playback::{
+    Method, PlaybackInfo, PlaybackRequest, Session, SessionStatus, TranscodeSpec, decide, sentence, subtitle_tracks,
+    transcode_info,
+};
 use crate::state::AppState;
 
 fn label(row: &ItemRow) -> String {
@@ -93,6 +100,7 @@ pub async fn start(
             subtitle_index: None,
             burn_subtitles: false,
             subtitles,
+            reasons: Vec::new(),
             reason: None,
         }));
     }
@@ -125,7 +133,7 @@ pub async fn start(
         (None, Some(a)) if a.mode == AudioMode::Copy => Method::Remux,
         _ => Method::Transcode,
     };
-    reasons.extend(created.warnings.iter().cloned());
+    reasons.extend(created.warnings.iter().map(|w| sentence(w)));
     let burn = decision.burn_index;
     // Pin the effective video mode: the segment layout depends on it.
     let mut request = job_request;
@@ -160,8 +168,25 @@ pub async fn start(
         subtitle_index: burn,
         burn_subtitles: burn.is_some(),
         subtitles,
-        reason: (!reasons.is_empty()).then(|| reasons.join("; ")),
+        reason: (!reasons.is_empty()).then(|| reasons.join(" ")),
+        reasons,
     }))
+}
+
+/// `GET /api/playback/{session}`: how the session plays now, with the live
+/// numbers of its transcode (what it converts to, on what, how fast), for
+/// the player's details.
+pub async fn status(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+) -> ApiResult<Json<SessionStatus>> {
+    let session = owned_session(&state, &user, &id)?;
+    let transcode = match session.job_id() {
+        Some(job) => state.transcoder.job_status(&job).await.ok().map(|status| transcode_info(&status)),
+        None => None,
+    };
+    Ok(Json(SessionStatus { session_id: session.id.clone(), method: session.method, transcode }))
 }
 
 fn owned_session(state: &AppState, user: &AuthUser, id: &str) -> ApiResult<Arc<Session>> {
@@ -391,12 +416,54 @@ pub async fn subtitles(
             return Ok(vtt(text));
         }
     }
-    let text = match &sidecar {
-        Some(path) => state.transcoder.subtitles(path, None).await?,
-        None => state.transcoder.subtitles(&file.path, Some(index)).await?,
+    let (path, stream) = match sidecar {
+        Some(path) => (path, None),
+        None => (file.path.clone(), Some(index)),
     };
-    cache_subtitles(&cache, &text).await;
-    Ok(vtt(text))
+    let text = extract_subtitles(&state, path, stream, cache).await?;
+    Ok(vtt((*text).clone()))
+}
+
+type Extraction = Shared<BoxFuture<'static, Result<Arc<String>, Arc<AppError>>>>;
+
+/// Subtitles being pulled out of their files, by cache file.
+static EXTRACTIONS: LazyLock<DashMap<PathBuf, Extraction>> = LazyLock::new(DashMap::new);
+
+/// The subtitles in stream `stream` of `path` (a sidecar file: `None`) as
+/// WebVTT, made once and cached at `cache`. Pulling them out of a big file
+/// on a network share reads all of it and can take minutes: requests for the
+/// same subtitles wait for one extraction, which goes on to the cache when
+/// nobody waits any more (a player that moved on, or restarted).
+async fn extract_subtitles(
+    state: &AppState,
+    path: String,
+    stream: Option<i64>,
+    cache: PathBuf,
+) -> ApiResult<Arc<String>> {
+    let extraction = EXTRACTIONS
+        .entry(cache.clone())
+        .or_insert_with(|| {
+            let state = state.clone();
+            let cache = cache.clone();
+            let task = tokio::spawn(async move {
+                let text = state.transcoder.subtitles(&path, stream).await?;
+                cache_subtitles(&cache, &text).await;
+                Ok::<_, AppError>(Arc::new(text))
+            });
+            async move {
+                match task.await {
+                    Ok(result) => result.map_err(Arc::new),
+                    Err(err) => Err(Arc::new(AppError::Internal(err.into()))),
+                }
+            }
+            .boxed()
+            .shared()
+        })
+        .clone();
+    let result = extraction.await;
+    // Done: the next request finds the cache (or tries again after a failure).
+    EXTRACTIONS.remove(&cache);
+    result.map_err(|err| err.again())
 }
 
 fn vtt(text: String) -> Response {

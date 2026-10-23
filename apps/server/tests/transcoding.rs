@@ -296,11 +296,15 @@ async fn start_fake() -> (Fake, String) {
         )
         .route(
             "/v1/subtitles",
-            // Stream 99 can't be converted.
+            // Stream 99 can't be converted; stream 5 takes a while (a big file).
             post(|State(fake): State<Fake>, Json(req): Json<SubtitleRequest>| async move {
                 let text = format!("WEBVTT\n\n00:00.000 --> 00:01.000\n{}#{:?}\n", req.path, req.stream_index);
                 let fails = req.stream_index == Some(99);
+                let slow = matches!(req.stream_index, Some(5 | 6));
                 fake.subtitles.lock().push(req);
+                if slow {
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                }
                 if fails {
                     return error(StatusCode::INTERNAL_SERVER_ERROR, "ffmpeg_failed");
                 }
@@ -464,8 +468,22 @@ async fn remux_sessions_stream_hls_from_the_transcoder() {
     assert_eq!((&info["method"], &info["hls"], &info["duration_ms"]), (&json!("remux"), &json!(true), &json!(60_000)));
     let session = info["session_id"].as_str().unwrap().to_owned();
     assert_eq!(info["url"], json!(format!("/api/playback/{session}/index.m3u8")));
-    let reason = info["reason"].as_str().unwrap();
-    assert!(reason.contains("mkv") && reason.contains("ac3"), "{reason}");
+    assert_eq!(
+        info["reasons"],
+        json!(["This player can't open MKV files.", "This player can't play AC3 audio."]),
+        "one plain sentence each"
+    );
+    assert_eq!(info["reason"], json!("This player can't open MKV files. This player can't play AC3 audio."));
+
+    // The player's details: the session's transcode, live.
+    let status = app.get(&format!("/api/playback/{session}"), admin).await;
+    assert_eq!(status.status, StatusCode::OK, "{}", status.text());
+    assert_eq!(status.body["method"], "remux");
+    let live = &status.body["transcode"];
+    assert_eq!((&live["video"], &live["audio"]), (&json!("copy"), &json!("transcode")));
+    assert_eq!((&live["audio_in"], &live["audio_out"]), (&json!("AC3 5.1"), &json!("AAC 2.0")));
+    let (other, _) = app.user(admin, "nosy", json!({})).await;
+    assert_eq!(app.get(&format!("/api/playback/{session}"), &other).await.status, StatusCode::FORBIDDEN);
     let subtitles = info["subtitles"].as_array().unwrap();
     let urls: Vec<&Value> = subtitles.iter().map(|s| &s["url"]).collect();
     assert_eq!(subtitles.len(), 3);
@@ -656,6 +674,27 @@ async fn subtitles_are_converted_once() {
         assert_eq!(reply.status, StatusCode::NOT_FOUND, "{missing}");
     }
     assert_eq!(w.fake.subtitles.lock().len(), 2);
+}
+
+#[tokio::test]
+async fn subtitles_are_pulled_out_once_however_many_ask_and_whoever_leaves() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let file = app.file_of(w.movies["Feature"]).await;
+    let asked = |stream: i64| w.fake.subtitles.lock().iter().filter(|r| r.stream_index == Some(stream)).count();
+
+    // Players asking at once (a restart, another tab) wait for one extraction.
+    let slow = format!("/api/files/{file}/subtitles/5.vtt");
+    let replies = futures::future::join_all((0..3).map(|_| app.get(&slow, admin))).await;
+    assert!(replies.iter().all(|r| r.status == StatusCode::OK && r.text() == replies[0].text()));
+    assert_eq!(asked(5), 1);
+
+    // A player that stops waiting doesn't stop it: what it asked for is cached.
+    let left = format!("/api/files/{file}/subtitles/6.vtt");
+    assert!(tokio::time::timeout(Duration::from_millis(100), app.get(&left, admin)).await.is_err());
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(app.get(&left, admin).await.status, StatusCode::OK);
+    assert_eq!(asked(6), 1, "served from the cache");
 }
 
 #[tokio::test]

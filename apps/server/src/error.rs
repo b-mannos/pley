@@ -47,6 +47,22 @@ impl AppError {
         Self::Forbidden(msg.into())
     }
 
+    /// The same error again, for each of several requests that waited on one
+    /// piece of work.
+    pub fn again(&self) -> Self {
+        match self {
+            Self::BadRequest(m) => Self::BadRequest(m.clone()),
+            Self::Unauthorized => Self::Unauthorized,
+            Self::Forbidden(m) => Self::Forbidden(m.clone()),
+            Self::NotFound(m) => Self::NotFound(m.clone()),
+            Self::Conflict(m) => Self::Conflict(m.clone()),
+            Self::Unavailable(m) => Self::Unavailable(m.clone()),
+            Self::TooManyRequests(m) => Self::TooManyRequests(m.clone()),
+            Self::TwoStep(m) => Self::TwoStep(m.clone()),
+            Self::Internal(err) => Self::Internal(anyhow::anyhow!("{err:#}")),
+        }
+    }
+
     fn status_and_code(&self) -> (StatusCode, &'static str) {
         match self {
             Self::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),

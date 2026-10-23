@@ -106,7 +106,7 @@ pub fn router(state: AppState) -> Router {
         .route("/hubs/home", get(browse::home))
         .route("/search", get(browse::search))
         .route("/playback", post(playback::start))
-        .route("/playback/{session}", delete(playback::stop))
+        .route("/playback/{session}", get(playback::status).delete(playback::stop))
         .route("/playback/{session}/{file}", get(playback::hls_file))
         .route("/files/{id}/stream", get(playback::stream_file))
         .route("/files/{id}/subtitles/{file}", get(playback::subtitles))

@@ -124,7 +124,19 @@ pub struct PlaybackInfo {
     pub subtitle_index: Option<i64>,
     pub burn_subtitles: bool,
     pub subtitles: Vec<SubtitleTrack>,
+    /// Why the file isn't played as it is, one short sentence each.
+    pub reasons: Vec<String>,
+    /// The same, in one line.
     pub reason: Option<String>,
+}
+
+/// `GET /api/playback/{session}`: how a session plays, with its transcode's
+/// live numbers.
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionStatus {
+    pub session_id: String,
+    pub method: Method,
+    pub transcode: Option<TranscodeInfo>,
 }
 
 #[derive(Debug, Clone)]
@@ -152,7 +164,7 @@ fn range_problem(v: &MediaStream, caps: &Caps) -> Option<String> {
         }
         if v.is_dolby_vision_only() {
             // No HDR10/SDR base layer: colours are wrong without DV processing.
-            return Some(format!("{label} needs a Dolby Vision decoder and is tone-mapped to SDR"));
+            return Some(format!("{label} needs a Dolby Vision screen: it's converted to SDR."));
         }
         // Profile 7/8: an HDR10 or HLG base layer plays as plain HDR.
         if caps.hdr {
@@ -161,7 +173,7 @@ fn range_problem(v: &MediaStream, caps: &Caps) -> Option<String> {
     } else if caps.hdr {
         return None;
     }
-    Some(format!("{label} video is tone-mapped to SDR"))
+    Some(format!("{label} is converted to SDR for this screen."))
 }
 
 /// Containers the browser can play natively (used when a file was never probed).
@@ -188,7 +200,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             subtitle: None,
             audio_index: None,
             burn_index: None,
-            reasons: if direct { vec![] } else { vec!["file has not been analyzed yet".into()] },
+            reasons: if direct { vec![] } else { vec!["This file hasn't been analyzed yet.".into()] },
         };
     };
 
@@ -200,19 +212,19 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         req.subtitle_index.and_then(|i| streams.iter().find(|s| s.index == i && s.kind == StreamKind::Subtitle));
     let burn = burn_stream.filter(|s| !s.text_based.unwrap_or(true) && video.is_some());
     if let Some(s) = burn {
-        reasons.push(format!("{} subtitles are images and must be burned in", s.codec));
+        reasons.push(format!("{} subtitles are pictures, drawn onto the video.", codec_label(&s.codec)));
     }
 
     let container_ok = caps.container(container);
     if !container_ok {
-        reasons.push(format!("the {container} container is not supported by this player"));
+        reasons.push(format!("This player can't open {} files.", container.to_uppercase()));
     }
     let video_ok = match video {
         None => true,
         Some(v) => {
             let mut ok = true;
             if !caps.video(&v.codec) {
-                reasons.push(format!("{} video is not supported by this player", v.codec));
+                reasons.push(format!("This player can't play {} video.", codec_label(&v.codec)));
                 ok = false;
             }
             if let Some(problem) = range_problem(v, caps) {
@@ -220,7 +232,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
                 ok = false;
             }
             if v.codec == "h264" && v.bit_depth.unwrap_or(8) > 8 {
-                reasons.push("10-bit H.264 is not supported by browsers".into());
+                reasons.push("Browsers can't play 10-bit H.264.".into());
                 ok = false;
             }
             ok
@@ -230,7 +242,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         None => true,
         Some(a) if caps.audio(&a.codec) => true,
         Some(a) => {
-            reasons.push(format!("{} audio is not supported by this player", a.codec));
+            reasons.push(format!("This player can't play {} audio.", codec_label(&a.codec)));
             false
         }
     };
@@ -239,15 +251,12 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         _ => true,
     };
     if !audio_is_default {
-        reasons.push("an alternate audio track was selected".into());
+        reasons.push("This player plays only a file's main audio track.".into());
     }
     let bitrate_ok = req.max_bitrate.is_none_or(|max| file.bitrate.unwrap_or(0) <= max as i64 * 1000);
-    if !bitrate_ok {
-        reasons.push("the file's bitrate is above the selected quality".into());
-    }
     let size_ok = req.max_height.is_none_or(|max| video.and_then(|v| v.height).unwrap_or(0) <= max as i64);
-    if !size_ok {
-        reasons.push("the video resolution is above the selected quality".into());
+    if !bitrate_ok || !size_ok {
+        reasons.push("You picked a lower quality.".into());
     }
 
     let audio_index = audio.map(|a| a.index);
@@ -272,8 +281,8 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     }
 
     match req.mode {
-        PlaybackMode::Remux if direct_ok => reasons.push("remuxing was requested".into()),
-        PlaybackMode::Transcode => reasons.push("transcoding was requested".into()),
+        PlaybackMode::Remux if direct_ok => reasons.push("The player asked for the file repackaged.".into()),
+        PlaybackMode::Transcode => reasons.push("The player asked for the file converted.".into()),
         _ => {}
     }
     let video_req = video.map(|v| {
@@ -629,19 +638,41 @@ pub struct TranscodeInfo {
     pub transcoded_ms: i64,
     pub segments_ready: u32,
     pub segments_total: u32,
+    /// What the transcode aims for, video and audio together (bits per second).
+    pub bitrate_out: Option<i64>,
     pub last_error: Option<String>,
 }
 
-fn codec_label(codec: &str) -> String {
+/// A codec as people know it: `"hevc"` → `"HEVC"`, `"hdmv_pgs_subtitle"` → `"PGS"`.
+pub fn codec_label(codec: &str) -> String {
     match codec {
         "h264" => "H.264".into(),
         "hevc" => "HEVC".into(),
         "av1" => "AV1".into(),
+        "vp9" => "VP9".into(),
+        "vc1" => "VC-1".into(),
         "mpeg2video" => "MPEG-2".into(),
         "mpeg4" => "MPEG-4".into(),
         "truehd" => "TrueHD".into(),
+        "eac3" => "E-AC3".into(),
+        "opus" => "Opus".into(),
+        "hdmv_pgs_subtitle" | "pgssub" => "PGS".into(),
+        "dvd_subtitle" | "dvdsub" => "VobSub".into(),
+        "dvb_subtitle" => "DVB".into(),
         other => other.to_uppercase(),
     }
+}
+
+/// A note from the transcoder as a sentence: `"no tone mapper available"` →
+/// `"No tone mapper available."`.
+pub fn sentence(note: &str) -> String {
+    let note = note.trim();
+    let mut chars = note.chars();
+    let mut out: String = chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default();
+    if !out.is_empty() && !out.ends_with(['.', '!', '?']) {
+        out.push('.');
+    }
+    out
 }
 
 pub fn channel_label(channels: i64) -> String {
@@ -711,6 +742,10 @@ pub fn transcode_info(job: &JobStatus) -> TranscodeInfo {
         transcoded_ms,
         segments_ready: job.segments_ready,
         segments_total: job.segment_count,
+        bitrate_out: video
+            .filter(|v| v.mode != VideoMode::Copy)
+            .and_then(|v| v.bitrate_kbps)
+            .map(|kbps| (i64::from(kbps) + audio.and_then(|a| a.bitrate_kbps).map_or(0, i64::from)) * 1000),
         last_error: job.last_error.clone(),
     }
 }
@@ -827,7 +862,7 @@ mod tests {
         assert_eq!(d.method, Method::Remux);
         assert_eq!(d.video.unwrap().mode, VideoMode::Copy);
         assert_eq!(d.audio.unwrap().mode, AudioMode::Transcode);
-        assert!(d.reasons.iter().any(|r| r.contains("mkv")));
+        assert!(d.reasons.iter().any(|r| r.contains("MKV")), "{:?}", d.reasons);
     }
 
     #[test]
@@ -925,7 +960,7 @@ mod tests {
         assert_eq!((d.method, d.reasons.len()), (Method::Direct, 0));
         let d = decide(&file("mkv", 0), None, &[], &req);
         assert_eq!(d.method, Method::Transcode);
-        assert_eq!(d.reasons, ["file has not been analyzed yet"]);
+        assert_eq!(d.reasons, ["This file hasn't been analyzed yet."]);
         assert!(d.video.is_some() && d.audio.is_some());
         // The player claims the container: trusted.
         let mut req = request();
@@ -976,7 +1011,7 @@ mod tests {
         req.caps.video_codecs.push("hevc".into());
         let d = decide(&file("mp4", 20_000_000), Some(&i), &i.streams, &req);
         assert_eq!(d.method, Method::Transcode);
-        assert!(d.reasons.iter().any(|r| r.contains("tone-mapped")), "{:?}", d.reasons);
+        assert!(d.reasons.iter().any(|r| r.contains("converted to SDR")), "{:?}", d.reasons);
         req.caps.hdr = true;
         assert_eq!(decide(&file("mp4", 20_000_000), Some(&i), &i.streams, &req).method, Method::Direct);
     }
