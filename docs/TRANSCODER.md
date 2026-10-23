@@ -164,7 +164,14 @@ following status codes:
   - `zscale` plus `tonemap` on the CPU.
 
   Profiles 7 and 8 have an HDR10- or HLG-compatible base layer and work with any
-  of these. Profile 5 without libplacebo produces a warning.
+  of these. Profile 5 without libplacebo produces a warning: its frames carry
+  no colour properties (they only come from the RPU), so they are tagged
+  BT.2020 PQ for zimg and OpenCL. The video plays, with off colours. The
+  same tagging fills in whatever an HDR stream leaves untagged.
+- **Frame grabs** (`/v1/thumbnail` with `hdr`) tone-map Dolby Vision profile 5
+  through libplacebo and other HDR through zimg. If tone mapping fails (a
+  Vulkan device that went away, say), the frame is grabbed as it is rather
+  than not at all.
 - **Subtitle burn-in.**
   - Bitmap subtitles (PGS, VobSub, DVB, `.sup` files) are overlaid at source
     resolution, after tone mapping and before scaling.

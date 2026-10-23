@@ -10,13 +10,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use pley_transcoder_api::{ThumbnailRequest, Tonemapper};
+use pley_transcoder_api::{MediaInfo, MediaStream, ThumbnailRequest, Tonemapper};
 use tokio::sync::Semaphore;
 
 use crate::error::{ApiError, ApiResult};
 use crate::ffmpeg::Ffmpeg;
 use crate::metrics::Metrics;
-use crate::plan::{MAX_DURATION_MS, TextSource, ZSCALE_TONEMAP};
+use crate::plan::{MAX_DURATION_MS, TextSource, ZSCALE_TONEMAP, untagged_hdr_fix};
 use crate::probe::Prober;
 use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg, secs};
 
@@ -55,30 +55,43 @@ impl Extractor {
 
     pub async fn thumbnail(&self, req: &ThumbnailRequest) -> ApiResult<Image> {
         let path = existing(&req.path)?;
-        let duration = match req.duration_ms.filter(|d| (1..=MAX_DURATION_MS).contains(d)) {
-            Some(d) => Some(d),
-            None if req.time_ms.is_none() => self.prober.probe(&path).await.ok().and_then(|m| m.duration_ms),
-            None => None,
+        let hint = req.duration_ms.filter(|d| (1..=MAX_DURATION_MS).contains(d));
+        // The probe (cached per file version) gives the default position, and
+        // the colours of HDR video.
+        let media = if req.hdr || (hint.is_none() && req.time_ms.is_none()) {
+            self.prober.probe(&path).await.ok()
+        } else {
+            None
         };
+        let duration = hint.or_else(|| media.as_ref().and_then(|m| m.duration_ms));
         let at = req.time_ms.unwrap_or_else(|| duration.map(|d| d / 5).unwrap_or(60_000));
         let at = match duration {
             Some(d) if d > 2_000 => at.clamp(0, d - 1_000),
             _ => at.max(0),
         };
         let width = req.width.unwrap_or(640).clamp(64, 1920);
-        let mut filters = Vec::new();
-        if req.hdr && self.ff.caps.tonemappers.contains(&Tonemapper::Zscale) {
-            filters.push(ZSCALE_TONEMAP.to_owned());
-        }
-        filters.push(format!("scale={width}:-2:flags=bicubic"));
-        let vf = filters.join(",");
+        let plain = Picture::plain(width);
+        let picture = if req.hdr {
+            Picture::hdr(width, media.as_deref().and_then(MediaInfo::video), &self.ff.caps.tonemappers)
+        } else {
+            plain.clone()
+        };
 
         let _permit = self.limiter.acquire().await.map_err(|e| ApiError::Internal(e.into()))?;
         Metrics::inc(&self.metrics.thumbnails);
-        let mut bytes = self.grab_frame(&path, at, &vf).await?;
+        let (picture, mut bytes) = match self.grab_frame(&path, at, &picture).await {
+            // Tone mapping can fail where a plain frame doesn't (no Vulkan
+            // device, colours it can't convert): HDR colours beat no picture.
+            Err(err) if picture.tone_mapped => {
+                tracing::warn!("tone-mapped frame grab of {} failed, taking it as it is: {err:?}", path.display());
+                let bytes = self.grab_frame(&path, at, &plain).await?;
+                (plain, bytes)
+            }
+            result => (picture, result?),
+        };
         if bytes.is_empty() && at > 0 {
             // Some files cannot seek precisely; fall back to the first frame.
-            bytes = self.grab_frame(&path, 0, &vf).await?;
+            bytes = self.grab_frame(&path, 0, &picture).await?;
         }
         if bytes.is_empty() {
             return Err(ApiError::Failed("no frame could be decoded".into()));
@@ -86,16 +99,16 @@ impl Extractor {
         Ok(Image { bytes, content_type: "image/jpeg" })
     }
 
-    async fn grab_frame(&self, path: &Path, at_ms: i64, vf: &str) -> ApiResult<Vec<u8>> {
+    async fn grab_frame(&self, path: &Path, at_ms: i64, picture: &Picture) -> ApiResult<Vec<u8>> {
         let mut cmd = self.ff.command();
-        cmd.args(["-loglevel", "error"]);
+        cmd.args(["-loglevel", "error"]).args(picture.init);
         if at_ms > 0 {
             cmd.args(["-ss", &secs(at_ms)]);
         }
         cmd.args(MEDIA_INPUT_OPTIONS)
             .arg("-i")
             .arg(input_arg(path))
-            .args(["-map", "0:V:0", "-frames:v", "1", "-an", "-sn", "-dn", "-vf", vf])
+            .args(["-map", "0:V:0", "-frames:v", "1", "-an", "-sn", "-dn", "-vf", &picture.vf])
             .args(["-c:v", "mjpeg", "-q:v", "3", "-f", "image2pipe", "pipe:1"]);
         run_capture(cmd, Duration::from_secs(60)).await.map(|(out, _)| out)
     }
@@ -235,6 +248,50 @@ impl Extractor {
     }
 }
 
+const VULKAN_DEVICE: [&str; 4] = ["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"];
+
+/// How a frame grab turns video into the picture: its filters, and the global
+/// options they need.
+#[derive(Debug, Clone, PartialEq)]
+struct Picture {
+    init: &'static [&'static str],
+    vf: String,
+    tone_mapped: bool,
+}
+
+impl Picture {
+    fn plain(width: u32) -> Self {
+        Self { init: &[], vf: format!("scale={width}:-2:flags=bicubic"), tone_mapped: false }
+    }
+
+    /// HDR tone-mapped to SDR the best way available. Dolby Vision without a
+    /// compatible base layer (profile 5) only gets its colours right through
+    /// libplacebo, which applies the RPU; other HDR is cheaper on the CPU with
+    /// zimg, given the colour properties it needs.
+    fn hdr(width: u32, video: Option<&MediaStream>, tonemappers: &[Tonemapper]) -> Self {
+        let placebo = tonemappers.contains(&Tonemapper::Libplacebo);
+        let zscale = tonemappers.contains(&Tonemapper::Zscale);
+        if placebo && (!zscale || video.is_some_and(MediaStream::is_dolby_vision_only)) {
+            return Self {
+                init: &VULKAN_DEVICE,
+                vf: format!(
+                    "libplacebo=w={width}:h=-2:format=yuv420p:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=auto"
+                ),
+                tone_mapped: true,
+            };
+        }
+        if zscale {
+            let filters: Vec<String> = video
+                .and_then(untagged_hdr_fix)
+                .into_iter()
+                .chain([ZSCALE_TONEMAP.to_owned(), format!("scale={width}:-2:flags=bicubic")])
+                .collect();
+            return Self { init: &[], vf: filters.join(","), tone_mapped: true };
+        }
+        Self::plain(width)
+    }
+}
+
 fn existing(path: &str) -> ApiResult<PathBuf> {
     let path = PathBuf::from(path);
     if path.is_file() { Ok(path) } else { Err(ApiError::NotFound(format!("file not found: {}", path.display()))) }
@@ -316,6 +373,46 @@ mod tests {
         assert_eq!(sniff_image(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("image/jpeg"));
         assert_eq!(sniff_image(b"\x89PNG\r\n"), Some("image/png"));
         assert_eq!(sniff_image(b"hello"), None);
+    }
+
+    #[test]
+    fn hdr_frame_grabs_use_a_tone_mapper_that_works() {
+        use pley_transcoder_api::{DynamicRange, StreamKind};
+        let p5 = MediaStream {
+            kind: StreamKind::Video,
+            dynamic_range: Some(DynamicRange::DolbyVision),
+            dv_profile: Some(5),
+            dv_bl_compat: Some(0),
+            ..Default::default()
+        };
+        let hdr10 = MediaStream {
+            kind: StreamKind::Video,
+            dynamic_range: Some(DynamicRange::Hdr10),
+            color_transfer: Some("smpte2084".into()),
+            color_primaries: Some("bt2020".into()),
+            color_space: Some("bt2020nc".into()),
+            ..Default::default()
+        };
+        let all = [Tonemapper::Libplacebo, Tonemapper::Opencl, Tonemapper::Zscale];
+        // Profile 5 went through zimg, which fails on its untagged frames
+        // ("Nothing was written into output file"): libplacebo applies its RPU.
+        let picture = Picture::hdr(640, Some(&p5), &all);
+        assert!(picture.vf.starts_with("libplacebo=w=640:h=-2:"), "{picture:?}");
+        assert_eq!(picture.init, VULKAN_DEVICE.as_slice());
+        // Other HDR stays on the CPU.
+        let picture = Picture::hdr(640, Some(&hdr10), &all);
+        assert_eq!(picture.vf, format!("{ZSCALE_TONEMAP},scale=640:-2:flags=bicubic"));
+        assert!(picture.init.is_empty() && picture.tone_mapped);
+        // Without libplacebo, profile 5 frames are tagged for zimg: off
+        // colours, but a picture.
+        let picture = Picture::hdr(640, Some(&p5), &[Tonemapper::Zscale]);
+        assert!(
+            picture.vf.starts_with("setparams=color_trc=smpte2084:color_primaries=bt2020:colorspace=bt2020nc,zscale="),
+            "{picture:?}"
+        );
+        // Unknown video (the probe failed) or no tone mapper.
+        assert_eq!(Picture::hdr(640, None, &[Tonemapper::Libplacebo]).init, VULKAN_DEVICE.as_slice());
+        assert_eq!(Picture::hdr(640, Some(&p5), &[Tonemapper::Opencl]), Picture::plain(640));
     }
 
     #[test]

@@ -38,6 +38,28 @@ const READRATE_BURST: &str = "60";
 pub const ZSCALE_TONEMAP: &str = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
 const OPENCL_TONEMAP: &str = "format=p010,hwupload,tonemap_opencl=tonemap=hable:desat=0:t=bt709:m=bt709:p=bt709:format=nv12,hwdownload,format=nv12";
 
+/// A `setparams` filter giving HDR frames the colour properties they lack
+/// (PQ, BT.2020), for the zimg and OpenCL tone mappers, which refuse to
+/// convert from unknown ones ("no path between colorspaces"). Dolby Vision
+/// profile 5 frames come out of the decoder untagged (their IPTPQc2 colours
+/// are only defined by the RPU, which libplacebo applies), and so do HDR
+/// streams that tag only some properties. For profile 5 the colours are then
+/// off, but there is a picture.
+pub fn untagged_hdr_fix(stream: &MediaStream) -> Option<String> {
+    let unknown =
+        |v: &Option<String>| v.as_deref().is_none_or(|v| matches!(v, "" | "unknown" | "unspecified" | "reserved"));
+    let params: Vec<&str> = [
+        (&stream.color_transfer, "color_trc=smpte2084"),
+        (&stream.color_primaries, "color_primaries=bt2020"),
+        (&stream.color_space, "colorspace=bt2020nc"),
+    ]
+    .into_iter()
+    .filter(|(value, _)| unknown(value))
+    .map(|(_, param)| param)
+    .collect();
+    (!params.is_empty()).then(|| format!("setparams={}", params.join(":")))
+}
+
 /// Where frames live between decode and encode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pipeline {
@@ -73,6 +95,9 @@ pub struct VideoOut {
     pub height: i64,
     pub bitrate_kbps: u32,
     pub tonemap: Option<Tonemapper>,
+    /// Tags the tone mapper's input when the source leaves colours unknown
+    /// ([`untagged_hdr_fix`]).
+    pub tonemap_input: Option<String>,
     pub hw_decode: Option<String>,
     pub deinterlace: bool,
     pub preset: String,
@@ -183,6 +208,7 @@ impl Plan {
                         height: src_height,
                         bitrate_kbps: 0,
                         tonemap: None,
+                        tonemap_input: None,
                         hw_decode: None,
                         deinterlace: false,
                         preset: String::new(),
@@ -206,6 +232,10 @@ impl Plan {
                         choice
                     } else {
                         None
+                    };
+                    let tonemap_input = match tonemap {
+                        Some(Tonemapper::Zscale | Tonemapper::Opencl) => untagged_hdr_fix(src),
+                        _ => None,
                     };
                     let deinterlace = src.interlaced == Some(true);
                     let key = decode_key(&src.codec, src.bit_depth);
@@ -246,6 +276,7 @@ impl Plan {
                         height,
                         bitrate_kbps: bitrate,
                         tonemap,
+                        tonemap_input,
                         hw_decode,
                         deinterlace,
                         pipeline,
@@ -588,12 +619,14 @@ impl Plan {
                 }
             }
             Some(Tonemapper::Opencl) => {
+                pre.extend(v.tonemap_input.clone());
                 pre.push(OPENCL_TONEMAP.into());
                 if scale_needed {
                     post.push(format!("scale={}:{}:flags=bicubic", v.width, v.height));
                 }
             }
             Some(Tonemapper::Zscale) => {
+                pre.extend(v.tonemap_input.clone());
                 pre.push(ZSCALE_TONEMAP.into());
                 if scale_needed {
                     post.push(format!("scale={}:{}:flags=bicubic", v.width, v.height));
@@ -1166,12 +1199,44 @@ mod tests {
         let plan = Plan::build(&request(), &media(DynamicRange::DolbyVision, Some(5)), &ff, None).unwrap();
         assert_eq!(plan.video.as_ref().unwrap().tonemap, Some(Tonemapper::Zscale));
         assert!(plan.warnings.iter().any(|w| w.contains("Dolby Vision")));
+        // Its frames are untagged, which zimg refuses: they are tagged PQ
+        // BT.2020 so the transcode works (with off colours, as warned).
+        let args = args_string(&plan, 0, 2);
+        assert!(
+            args.contains("setparams=color_trc=smpte2084:color_primaries=bt2020:colorspace=bt2020nc,zscale=t=linear"),
+            "{args}"
+        );
 
         let ff = ffmpeg_with(vec![x264()], vec![Tonemapper::Opencl, Tonemapper::Libplacebo]);
         let plan = Plan::build(&request(), &media(DynamicRange::DolbyVision, Some(5)), &ff, None).unwrap();
         assert_eq!(plan.video.as_ref().unwrap().tonemap, Some(Tonemapper::Libplacebo));
+        assert!(!args_string(&plan, 0, 2).contains("setparams"), "libplacebo reads the RPU");
         let plan = Plan::build(&request(), &media(DynamicRange::DolbyVision, Some(8)), &ff, None).unwrap();
         assert_eq!(plan.video.as_ref().unwrap().tonemap, Some(Tonemapper::Opencl));
+        assert!(args_string(&plan, 0, 2).contains("setparams=color_trc=smpte2084"));
+    }
+
+    #[test]
+    fn only_unknown_colour_properties_are_filled_in() {
+        let mut stream = MediaStream { kind: StreamKind::Video, ..Default::default() };
+        assert_eq!(
+            untagged_hdr_fix(&stream).as_deref(),
+            Some("setparams=color_trc=smpte2084:color_primaries=bt2020:colorspace=bt2020nc")
+        );
+        stream.color_transfer = Some("arib-std-b67".into());
+        stream.color_primaries = Some("bt2020".into());
+        stream.color_space = Some("unknown".into());
+        assert_eq!(untagged_hdr_fix(&stream).as_deref(), Some("setparams=colorspace=bt2020nc"));
+        stream.color_space = Some("bt2020nc".into());
+        assert_eq!(untagged_hdr_fix(&stream), None, "HLG keeps its transfer");
+        // Tagged HDR10 through zimg: nothing added.
+        let ff = ffmpeg_with(vec![x264()], vec![Tonemapper::Zscale]);
+        let mut m = media(DynamicRange::Hdr10, None);
+        m.streams[0].color_transfer = Some("smpte2084".into());
+        m.streams[0].color_primaries = Some("bt2020".into());
+        m.streams[0].color_space = Some("bt2020nc".into());
+        let plan = Plan::build(&request(), &m, &ff, None).unwrap();
+        assert!(!args_string(&plan, 0, 2).contains("setparams"));
     }
 
     #[test]

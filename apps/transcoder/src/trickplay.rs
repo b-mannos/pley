@@ -17,7 +17,7 @@ use tokio::sync::Semaphore;
 use crate::error::{ApiError, ApiResult};
 use crate::extract::run_capture;
 use crate::ffmpeg::Ffmpeg;
-use crate::plan::ZSCALE_TONEMAP;
+use crate::plan::{ZSCALE_TONEMAP, untagged_hdr_fix};
 use crate::probe::Prober;
 use crate::util::{MEDIA_INPUT_OPTIONS, background_priority, file_key, input_arg};
 
@@ -85,7 +85,9 @@ impl Trickplay {
                 "libplacebo=w={width}:h={height}:format=yuv420p:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=auto"
             )
         } else if range.is_hdr() && caps.tonemappers.contains(&Tonemapper::Zscale) {
-            format!("scale={width}:{height}:flags=bilinear,{ZSCALE_TONEMAP}")
+            // zimg needs colours: Dolby Vision profile 5 frames have none.
+            let tags = untagged_hdr_fix(video).map(|f| format!("{f},")).unwrap_or_default();
+            format!("{tags}scale={width}:{height}:flags=bilinear,{ZSCALE_TONEMAP}")
         } else {
             format!("scale={width}:{height}:flags=bilinear")
         };
