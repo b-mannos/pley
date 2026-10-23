@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
@@ -454,6 +454,22 @@ impl Session {
 #[derive(Default)]
 pub struct Sessions {
     map: Mutex<HashMap<String, Arc<Session>>>,
+    /// Transcode slots of play requests still creating their job (see
+    /// [`Sessions::reserve_transcode`]). Only raised while `map` is locked.
+    reserved: AtomicUsize,
+}
+
+/// A transcode slot, held while the job is created. It counts against the
+/// limit until the session takes it over ([`Sessions::insert_transcode`]) or
+/// it is dropped: the request failed, or the client went away.
+pub struct TranscodeSlot<'a> {
+    sessions: &'a Sessions,
+}
+
+impl Drop for TranscodeSlot<'_> {
+    fn drop(&mut self) {
+        self.sessions.reserved.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 const SESSION_IDLE_SECS: i64 = 15 * 60;
@@ -464,6 +480,30 @@ impl Sessions {
     pub fn insert(&self, session: Session) -> Arc<Session> {
         let session = Arc::new(session);
         self.map.lock().insert(session.id.clone(), session.clone());
+        session
+    }
+
+    /// Take one of `max` transcode slots, or `None` when live transcodes and
+    /// the play requests still creating their job use them all. Creating a
+    /// job takes seconds: checking and taking happen under one lock, so play
+    /// requests arriving together can't all pass the check before any of
+    /// them has a session.
+    pub fn reserve_transcode(&self, max: usize) -> Option<TranscodeSlot<'_>> {
+        let map = self.map.lock();
+        if live_transcodes(&map) + self.reserved.load(Ordering::SeqCst) >= max {
+            return None;
+        }
+        self.reserved.fetch_add(1, Ordering::SeqCst);
+        Some(TranscodeSlot { sessions: self })
+    }
+
+    /// Add a transcode session, which takes over the slot reserved for it.
+    pub fn insert_transcode(&self, session: Session, slot: TranscodeSlot<'_>) -> Arc<Session> {
+        let session = Arc::new(session);
+        let mut map = self.map.lock();
+        map.insert(session.id.clone(), session.clone());
+        // Under the same lock: the session counts as the slot stops counting.
+        drop(slot);
         session
     }
 
@@ -497,15 +537,7 @@ impl Sessions {
     /// reports). Abandoned sessions (closed tabs) stop counting quickly even
     /// though they are only reaped later.
     pub fn active_transcodes(&self) -> usize {
-        let cutoff = now() - ACTIVE_WINDOW_SECS;
-        self.map
-            .lock()
-            .values()
-            .filter(|s| {
-                let play = s.play.lock();
-                s.transcode.is_some() && play.state != "stopped" && play.updated_at >= cutoff
-            })
-            .count()
+        live_transcodes(&self.map.lock())
     }
 
     pub fn spawn_reaper(self: &Arc<Self>, transcoder: Arc<Transcoder>, events: EventBus) {
@@ -537,6 +569,17 @@ impl Sessions {
             }
         });
     }
+}
+
+/// See [`Sessions::active_transcodes`].
+fn live_transcodes(map: &HashMap<String, Arc<Session>>) -> usize {
+    let cutoff = now() - ACTIVE_WINDOW_SECS;
+    map.values()
+        .filter(|s| {
+            let play = s.play.lock();
+            s.transcode.is_some() && play.state != "stopped" && play.updated_at >= cutoff
+        })
+        .count()
 }
 
 // ------------------------------------------------------------------ status mapping
@@ -1037,6 +1080,22 @@ mod tests {
         assert_eq!(sessions.active_transcodes(), 1);
         live.update(1_000, "paused");
         assert_eq!(sessions.active_transcodes(), 1, "paused players keep their slot");
+    }
+
+    #[test]
+    fn transcode_slots_are_taken_before_the_job_exists() {
+        let sessions = Sessions::default();
+        let first = sessions.reserve_transcode(2).expect("a free slot");
+        let second = sessions.reserve_transcode(2).expect("another one");
+        assert!(sessions.reserve_transcode(2).is_none(), "both are taken while their jobs are created");
+        drop(second);
+        let third = sessions.reserve_transcode(2).expect("a failed request gives its slot back");
+        sessions.insert_transcode(session(1, None, true), first);
+        assert_eq!(sessions.active_transcodes(), 1);
+        assert!(sessions.reserve_transcode(2).is_none(), "the session keeps the slot it took over");
+        drop(third);
+        assert!(sessions.reserve_transcode(2).is_some());
+        assert!(sessions.reserve_transcode(1).is_none(), "a lower limit counts the live session");
     }
 
     #[test]

@@ -9,7 +9,7 @@ mod common;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::extract::{Path, State};
@@ -46,6 +46,10 @@ struct Fake {
     next_id: Arc<AtomicUsize>,
     /// Segment count of new jobs instead of one per 4 s.
     layout: Arc<Mutex<Option<u32>>>,
+    /// How long creating a job takes.
+    job_delay: Arc<Mutex<Duration>>,
+    /// Creating a job fails, as when ffmpeg can't read the file.
+    fail_jobs: Arc<AtomicBool>,
 }
 
 impl Fake {
@@ -217,6 +221,13 @@ async fn start_fake() -> (Fake, String) {
         .route(
             "/v1/jobs",
             post(|State(fake): State<Fake>, Json(req): Json<JobRequest>| async move {
+                let delay = *fake.job_delay.lock();
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
+                if fake.fail_jobs.load(Ordering::SeqCst) {
+                    return error(StatusCode::INTERNAL_SERVER_ERROR, "ffmpeg_failed");
+                }
                 let n = fake.next_id.fetch_add(1, Ordering::SeqCst) + 1;
                 let id = format!("job{n}");
                 let segments = fake.layout.lock().unwrap_or(15);
@@ -232,6 +243,7 @@ async fn start_fake() -> (Fake, String) {
                     audio: status.audio,
                     warnings: vec![],
                 })
+                .into_response()
             }),
         )
         .route(
@@ -559,6 +571,33 @@ async fn the_transcode_limit_counts_live_hls_sessions() {
     let stop = json!({"position_ms": 1_000, "state": "stopped", "session_id": session});
     app.post(&format!("/api/items/{feature}/progress"), admin, stop).await;
     assert_eq!(play(app, admin, start("tv")).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn simultaneous_play_requests_stay_within_the_transcode_limit() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    app.put("/api/settings", admin, json!({"max_transcodes": 1})).await;
+    let feature = w.movies["Feature"];
+    let start = |client: &str| json!({"item_id": feature, "caps": browser(), "client_id": client});
+
+    // Creating a job takes a while: all three requests are waiting at once.
+    *w.fake.job_delay.lock() = Duration::from_millis(300);
+    let (a, b, c) =
+        tokio::join!(play(app, admin, start("a")), play(app, admin, start("b")), play(app, admin, start("c")));
+    let started: Vec<_> = [&a, &b, &c].into_iter().filter(|r| r.status == StatusCode::OK).collect();
+    assert_eq!(started.len(), 1, "{:?}", [a.status, b.status, c.status]);
+    let refused = [&a, &b, &c].into_iter().filter(|r| r.status == StatusCode::SERVICE_UNAVAILABLE).count();
+    assert_eq!(refused, 2);
+    assert_eq!(w.fake.created(), 1, "only one job was asked for");
+
+    // A request whose job can't be created gives its slot back.
+    let session = started[0].body["session_id"].as_str().unwrap();
+    assert_eq!(app.delete(&format!("/api/playback/{session}"), admin).await.status, StatusCode::NO_CONTENT);
+    w.fake.fail_jobs.store(true, Ordering::SeqCst);
+    assert_eq!(play(app, admin, start("d")).await.status, StatusCode::INTERNAL_SERVER_ERROR);
+    w.fake.fail_jobs.store(false, Ordering::SeqCst);
+    assert_eq!(play(app, admin, start("e")).await.status, StatusCode::OK);
 }
 
 #[tokio::test]

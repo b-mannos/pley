@@ -98,12 +98,14 @@ pub async fn start(
     }
 
     let settings = state.settings.get();
-    if state.sessions.active_transcodes() >= settings.max_transcodes as usize {
+    // Taken before the job is created (that takes seconds) and handed to the
+    // session; given back if this request fails or the client goes away.
+    let Some(slot) = state.sessions.reserve_transcode(settings.max_transcodes as usize) else {
         return Err(AppError::Unavailable(format!(
             "the server is already running its maximum of {} transcodes",
             settings.max_transcodes
         )));
-    }
+    };
     let job_request = JobRequest {
         input: file.path.clone(),
         media: info,
@@ -131,18 +133,21 @@ pub async fn start(
         video.mode = plan.mode;
     }
     let spec = TranscodeSpec { request, segment_count: created.segment_count, duration_ms: created.duration_ms };
-    let session = state.sessions.insert(Session::new(
-        user.id,
-        user.username.clone(),
-        client_id,
-        row.id,
-        file.id,
-        method,
-        created.duration_ms,
-        Some(spec),
-        Some(created.id.clone()),
-        start_ms,
-    ));
+    let session = state.sessions.insert_transcode(
+        Session::new(
+            user.id,
+            user.username.clone(),
+            client_id,
+            row.id,
+            file.id,
+            method,
+            created.duration_ms,
+            Some(spec),
+            Some(created.id.clone()),
+            start_ms,
+        ),
+        slot,
+    );
     state.events.send(ServerEvent::SessionsChanged);
     Ok(Json(PlaybackInfo {
         session_id: session.id.clone(),
