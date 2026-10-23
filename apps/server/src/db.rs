@@ -1,6 +1,12 @@
 //! SQLite access. Writes go through a single-connection pool so they never
 //! contend for the write lock; reads use a separate read-only pool (WAL mode
 //! lets them run concurrently with the writer).
+//!
+//! Whoever holds the writer holds up every other write (progress reports,
+//! logins, settings), and those fail after the 60 s acquire timeout: work out
+//! what to write first (reading through `read`, computing in
+//! `spawn_blocking`), then write it in short transactions, as the scanner
+//! does.
 
 use std::path::Path;
 use std::str::FromStr;
