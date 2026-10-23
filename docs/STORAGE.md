@@ -17,7 +17,7 @@ artwork, which pley never moves or changes.
   avatars/                   profile pictures
   backups/pley-<date>.db     the last 3 daily database backups
   cache/                     resized images, subtitles, fingerprints; safe to delete
-  logs/
+  logs/pley.log              the server log, then pley.log.1 to .3 (10 MB each)
 ```
 
 ## Pictures (`metadata/blobs`)

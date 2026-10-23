@@ -200,7 +200,7 @@ impl Config {
         self.data_dir.join("pley.db")
     }
 
-    /// Server log (rotated at start-up when large).
+    /// Server log, rotated by size (see [`crate::logging`]).
     pub fn log_file(&self) -> PathBuf {
         log_file(&self.data_dir)
     }
