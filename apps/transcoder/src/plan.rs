@@ -243,10 +243,14 @@ impl Plan {
                     let pipeline = if !req.options.hardware_decoding || deinterlace {
                         Pipeline::Software
                     } else if tonemap == Some(Tonemapper::Libplacebo) && ff.caps.vulkan_decode.contains(&key) {
+                        // Encoding on Vulkan too only when asked for: browsers
+                        // don't play what h264_vulkan makes of 4K (and of
+                        // anything, with B-frames). The frames go to the
+                        // usual encoder after one download instead.
                         let encode_on_gpu = ff.caps.vulkan_encode
                             && burn.is_none()
                             && vreq.codec == VideoCodec::H264
-                            && req.options.hwaccel == HwAccel::Auto;
+                            && req.options.hwaccel == HwAccel::Vulkan;
                         Pipeline::Vulkan { encode_on_gpu }
                     } else if tonemap.is_none() && burn.is_none() {
                         ff.caps
@@ -752,7 +756,9 @@ fn encoder_args(enc: &EncoderInfo, v: &VideoOut, preset: Option<&str>) -> Vec<St
         HwAccel::Vulkan => {
             s.extend(["-rc_mode", "vbr", "-tune", "hq", "-usage", "transcode"].map(String::from));
             rate(&mut s);
-            s.extend(["-profile:v", "high", "-g", "9999"].map(String::from));
+            // No B-frames: Chrome's decoder never starts on h264_vulkan's
+            // (the first frame shows, then playback waits for good).
+            s.extend(["-profile:v", "high", "-bf", "0", "-g", "9999"].map(String::from));
         }
         HwAccel::None | HwAccel::Auto => {
             if h264 {
@@ -1140,13 +1146,26 @@ mod tests {
     }
 
     #[test]
-    fn hdr_uses_zero_copy_vulkan_pipeline_when_available() {
+    fn hdr_tone_maps_on_vulkan_and_encodes_with_the_usual_encoder() {
         let mut ff = ffmpeg_with(vec![nvenc(), x264()], vec![Tonemapper::Libplacebo]);
         ff.caps.vulkan_decode = vec!["hevc10".into()];
         ff.caps.vulkan_encode = true;
         let m = ten_bit(media(DynamicRange::DolbyVision, Some(5)));
 
+        // Automatic: decoded and tone mapped on Vulkan, encoded with NVENC
+        // after one download (browsers don't play h264_vulkan's 4K).
         let plan = Plan::build(&request(), &m, &ff, None).unwrap();
+        assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::Vulkan { encode_on_gpu: false });
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains("-hwaccel vulkan -hwaccel_device vk -hwaccel_output_format vulkan"), "{args}");
+        assert!(args.contains("tonemapping=auto,hwdownload,format=nv12[vout]"), "{args}");
+        assert!(args.contains("-c:v h264_nvenc"), "{args}");
+        assert_eq!(plan.video_plan(&m, None).unwrap().pipeline.as_deref(), Some("hybrid"));
+
+        // Asked for Vulkan: everything stays on it.
+        let mut req = request();
+        req.options.hwaccel = HwAccel::Vulkan;
+        let plan = Plan::build(&req, &m, &ff, None).unwrap();
         let v = plan.video.as_ref().unwrap();
         assert_eq!(v.pipeline, Pipeline::Vulkan { encode_on_gpu: true });
         assert_eq!(v.encoder.as_ref().unwrap().name, "h264_vulkan");
@@ -1155,6 +1174,7 @@ mod tests {
         assert!(args.contains("libplacebo=w=1920:h=1080:format=nv12"));
         assert!(!args.contains("hwdownload"));
         assert!(args.contains("-c:v h264_vulkan -rc_mode vbr"));
+        assert!(args.contains("-bf 0"), "browsers don't play its B-frames: {args}");
         assert_eq!(plan.video_plan(&m, None).unwrap().pipeline.as_deref(), Some("gpu"));
 
         // An explicit NVENC preference keeps NVENC: one download after tone mapping.
