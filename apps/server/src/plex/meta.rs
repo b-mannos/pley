@@ -126,6 +126,10 @@ pub struct Extras {
     pub previews: Vec<i64>,
     /// Intro and credits of the first version (`includeMarkers=1`).
     pub markers: Vec<Marker>,
+    /// Labels (see `crate::labels`).
+    pub labels: Vec<String>,
+    /// Collections the item is in: id and title (full details only).
+    pub collections: Vec<(i64, String)>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -175,8 +179,33 @@ pub async fn load_extras(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Extr
                     people: Vec::new(),
                     previews: Vec::new(),
                     markers: Vec::new(),
+                    labels: Vec::new(),
+                    collections: Vec::new(),
                 },
             );
+        }
+    }
+    for (id, labels) in crate::labels::for_items(db, ids).await? {
+        out.entry(id).or_default().labels = labels;
+    }
+    Ok(out)
+}
+
+/// Collections `ids` are in, by item: id and title.
+pub async fn load_collections(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Vec<(i64, String)>>> {
+    let mut out: HashMap<i64, Vec<(i64, String)>> = HashMap::new();
+    for chunk in ids.chunks(500) {
+        let sql = format!(
+            "SELECT ci.item_id, c.id, c.title FROM collection_items ci JOIN collections c ON c.id = ci.collection_id
+             WHERE ci.item_id IN ({}) ORDER BY c.sort_title",
+            vec!["?"; chunk.len()].join(",")
+        );
+        let mut query = sqlx::query_as::<_, (i64, i64, String)>(&sql);
+        for id in chunk {
+            query = query.bind(id);
+        }
+        for (item, id, title) in query.fetch_all(&db.read).await? {
+            out.entry(item).or_default().push((id, title));
         }
     }
     Ok(out)
@@ -527,6 +556,12 @@ pub fn item_node(
         if detail.full {
             for credit in &extras.people {
                 node.push(credit_node(credit));
+            }
+            for (id, title) in &extras.collections {
+                node.push(Node::new("Collection").attr("id", *id).attr("tag", title));
+            }
+            for label in &extras.labels {
+                node.push(Node::new("Label").attr("tag", label));
             }
         }
     }

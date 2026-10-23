@@ -179,10 +179,18 @@ pub async fn upload_artwork(
 ) -> ApiResult<Json<ItemDetail>> {
     let row = item_or_404(&state, user.id, id).await?;
     let kind = artwork_kind(&kind)?.to_owned();
+    let blob = store_picture(&state, body).await?;
+    overrides::set(&state.db, id, &[(kind, Some(blob))]).await?;
+    state.events.send(ServerEvent::LibraryChanged { library_id: row.library_id });
+    Ok(Json(detail(&state, user.id, id).await?))
+}
+
+/// Stores an uploaded picture, re-encoded as JPEG: only real pictures get
+/// stored, and huge ones are scaled down. Returns its reference.
+pub(crate) async fn store_picture(state: &AppState, body: Bytes) -> ApiResult<String> {
     if body.is_empty() || body.len() > UPLOAD_MAX_BYTES {
         return Err(AppError::bad_request("pictures must be smaller than 25 MB"));
     }
-    // Re-encode: only real pictures get stored, and huge ones are scaled down.
     let _decoding = crate::images::UPLOAD_DECODES.acquire().await.map_err(|e| AppError::Internal(e.into()))?;
     let jpeg = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, AppError> {
         let img =
@@ -200,10 +208,7 @@ pub async fn upload_artwork(
     })
     .await
     .map_err(|e| AppError::Internal(e.into()))??;
-    let blob = state.store.put(&jpeg, "jpg").await.map_err(|e| AppError::Internal(e.into()))?;
-    overrides::set(&state.db, id, &[(kind, Some(blob))]).await?;
-    state.events.send(ServerEvent::LibraryChanged { library_id: row.library_id });
-    Ok(Json(detail(&state, user.id, id).await?))
+    state.store.put(&jpeg, "jpg").await.map_err(|e| AppError::Internal(e.into()))
 }
 
 /// Go back to automatic artwork (local files or the metadata agent).

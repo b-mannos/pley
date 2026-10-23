@@ -6,7 +6,7 @@ mod admin;
 mod auth;
 mod browse;
 pub(crate) mod collections;
-mod editing;
+pub(crate) mod editing;
 mod history;
 pub(crate) mod items;
 mod libraries;

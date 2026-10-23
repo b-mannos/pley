@@ -76,6 +76,9 @@ pub(super) async fn item_nodes(
     let mut extras = meta::load_extras(&state.db, &ids).await?;
     if detail.full {
         add_people(&state.db, &ids, &mut extras).await?;
+        for (id, collections) in meta::load_collections(&state.db, &ids).await? {
+            extras.entry(id).or_default().collections = collections;
+        }
     }
     let leaves: Vec<i64> = rows.iter().filter(|r| meta::is_leaf(&r.kind)).map(|r| r.id).collect();
     let files =
@@ -406,7 +409,7 @@ impl Filter {
     }
 
     fn needs_extras(&self) -> bool {
-        matches!(self.field.as_str(), "genre" | "contentRating" | "studio" | "guid") || self.needs_people()
+        matches!(self.field.as_str(), "genre" | "label" | "contentRating" | "studio" | "guid") || self.needs_people()
     }
 
     fn needs_people(&self) -> bool {
@@ -453,6 +456,7 @@ impl Filter {
             "userRating" => Some(self.number(row.user_rating)),
             "leafCount" => Some(self.number(row.leaf_count.map(|l| l as f64))),
             "genre" => Some(self.tags(extras.map(|e| e.genres.as_slice()).unwrap_or(&[]))),
+            "label" => Some(self.tags(extras.map(|e| e.labels.as_slice()).unwrap_or(&[]))),
             "contentRating" => {
                 let rating: Vec<String> = extras.and_then(|e| e.content_rating.clone()).into_iter().collect();
                 Some(self.tags(&rating))
@@ -767,6 +771,9 @@ impl Filter {
                     "EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(i.genres) THEN i.genres END) g
                      WHERE g.value COLLATE NOCASE IN ({list}))"
                 )
+            }),
+            (Level::Own, "label") => self.tags_sql(|list| {
+                format!("EXISTS (SELECT 1 FROM item_labels l WHERE l.item_id = i.id AND l.label IN ({list}))")
             }),
             (Level::Own, "contentRating") => self.tags_sql(|list| {
                 format!("(i.content_rating IS NOT NULL AND i.content_rating COLLATE NOCASE IN ({list}))")
@@ -1374,6 +1381,17 @@ pub async fn filter_choices(
                 );
             }
             return Ok(mc);
+        }
+        "label" => {
+            sqlx::query_scalar(&format!(
+                "{ME_CTE} SELECT DISTINCT l.label FROM {VISIBLE_ITEMS} JOIN item_labels l ON l.item_id = i.id
+                 WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? ORDER BY l.label"
+            ))
+            .bind(user.id)
+            .bind(lib.id)
+            .bind(kind)
+            .fetch_all(&state.db.read)
+            .await?
         }
         "contentRating" | "studio" => {
             let column = if filter == "studio" { "studio" } else { "content_rating" };
@@ -2741,6 +2759,11 @@ mod tests {
         .await;
         exec(
             &db,
+            "INSERT INTO item_labels (item_id, label) VALUES (1, 'Overlay'), (3, 'overlay'), (5, '4K'), (100, 'Kids')",
+        )
+        .await;
+        exec(
+            &db,
             "INSERT INTO people (id, tmdb_id, name, updated_at)
              VALUES (1, 1, 'Ann Actor', 0), (2, 2, 'Dan Director', 0), (3, 3, 'ANN ACTOR', 0), (4, 4, '7', 0)",
         )
@@ -2924,6 +2947,10 @@ mod tests {
             vec![("guid!", "imdb://tt0003,tmdb://3")],
             vec![("guid", "imdb://")],
             vec![("guid", "tvdb://73739")],
+            vec![("label", "overlay")],
+            vec![("label", "OVERLAY,4k")],
+            vec![("label!", "overlay")],
+            vec![("label", "")],
             vec![("resolution", "4k")],
             vec![("show.title", "x")],
             vec![("genre", "horror"), ("unwatched", "1")],
@@ -2957,6 +2984,7 @@ mod tests {
             vec![("guid", "tvdb://73739")],
             vec![("guid", "tvdb://073739")],
             vec![("guid", "tvdb://73739,tvdb://1")],
+            vec![("label", "kids")],
         ];
         let season_filters: Vec<Vec<(&str, &str)>> = vec![
             vec![],

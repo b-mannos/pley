@@ -129,6 +129,28 @@ parameters; containers report `size`, `totalSize` and `offset`.
 | History | `/status/sessions/history/all` (`accountID`, `librarySectionID`, `metadataItemID`, `viewedAt>=`; administrators see every account, others their own), `DELETE /status/sessions/history/{id}` |
 | Images | `/photo/:/transcode` |
 
+## Editing
+
+Administrators edit metadata the way python-plexapi (and so Kometa) does:
+
+- `PUT /library/sections/{id}/all?type=1&id=1,2&title.value=…&title.locked=1`,
+  or `PUT /library/metadata/{id}?…`, for `title`, `titleSort`,
+  `originalTitle`, `year`, `summary`, `tagline`, `studio`, `contentRating`
+  and `originallyAvailableAt`. Edited fields are kept through refreshes
+  (pley's locked fields); `field.locked=1` alone keeps the current value,
+  `field.locked=0` gives the field back to the metadata agent.
+- Tags: `genre[0].tag.tag=Horror` adds a genre, `genre[].tag.tag-=Horror,Drama`
+  removes (each name percent-encoded once more, as python-plexapi sends
+  them). The same for `label`, which details list as `Label` and the
+  `label` filter and `/library/sections/{id}/label` find, and for
+  `collection`: the item joins or leaves the collection of that name in its
+  library, which is made when missing. Details list it as `Collection`.
+- Posters and backgrounds: `POST /library/metadata/{id}/posters` (or
+  `/arts`) with the picture as the body (25 MB at most, re-encoded), or
+  `?url=` and `PUT /library/metadata/{id}/poster?url=` (or `/art`) with a
+  TMDB image. Other URLs are refused: the server doesn't fetch arbitrary
+  addresses.
+
 ## Searching and filtering
 
 `/library/sections/{id}/all` accepts `type` (1 movie, 2 show, 3 season, 4
@@ -141,7 +163,7 @@ comma-separated), `limit` and Plex filters with their operators:
   is not, `<=` begins with, `>=` ends with;
 - numbers (`year`, `decade`, `viewCount`, `duration`, `rating`, `index`, `id`):
   is, `!=`, `>>=`, `<<=`;
-- tags (`genre`, `contentRating`), booleans (`unwatched`, `inProgress`), dates
+- tags (`genre`, `label`, `contentRating`), booleans (`unwatched`, `inProgress`), dates
   (`addedAt`, `lastViewedAt`, `originallyAvailableAt`, as unix time or relative
   like `-30d`) and `guid`;
 - people (`actor`, `director`, `writer`, `producer`): a person id (the tag `id`,
@@ -175,11 +197,12 @@ With python-plexapi 4.18 the following work against the test media:
 
 - plex.tv: sign-in, server claiming, sharing, remote access and the official
   Plex apps.
-- Smart collections and smart playlists, play queues, and creating or editing
-  collections through the Plex API (they are read-only here; manage them in
-  pley). Playlists can be created and edited.
-- Editing metadata, labels and posters through the Plex API: edit requests
-  fail. Edit in pley. (Ratings work: `/:/rate` sets the user's `userRating`.)
+- Smart collections and smart playlists, and play queues. Collections are
+  joined and left through items' `collection` tags; their own title,
+  summary, artwork and order are edited in pley. Playlists can be created
+  and edited.
+- Editing episodes' and seasons' artwork from URLs other than TMDB images
+  (upload the file instead), and per-item preferences (`/prefs`).
 - Filters on descendants (`episode.title` on shows) and on `resolution`, `hdr`,
   audio or subtitle language: ignored, so they don't narrow results.
 - Player remote control, photos and live TV.

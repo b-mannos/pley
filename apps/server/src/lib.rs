@@ -18,6 +18,7 @@ pub mod events;
 pub mod history;
 pub mod images;
 pub mod instance;
+pub mod labels;
 pub mod library;
 pub mod logging;
 pub mod markers;

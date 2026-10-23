@@ -133,6 +133,18 @@ impl TestApp {
         reply(self.plex.clone().oneshot(req.body(Body::empty()).unwrap()).await.unwrap()).await
     }
 
+    /// A Plex-compatible API request with `body` (an upload).
+    pub async fn plex_upload(&self, method: Method, uri: &str, token: &str, body: Vec<u8>) -> Reply {
+        let req = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("x-plex-token", token)
+            .header(header::ACCEPT, "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        reply(self.plex.clone().oneshot(req).await.unwrap()).await
+    }
+
     /// `MediaContainer` of a successful Plex request.
     pub async fn plex_json(&self, uri: &str, token: &str) -> Value {
         let reply = self.plex(Method::GET, uri, token, &[]).await;

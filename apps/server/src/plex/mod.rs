@@ -7,6 +7,7 @@
 //! with `Accept: application/json`. Everything goes through the same catalog,
 //! auth and playback code as pley's own API.
 
+mod edit;
 mod library;
 mod lists;
 mod meta;
@@ -155,7 +156,7 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/library/sections", get(library::sections))
         .route("/library/sections/all/refresh", any(library::refresh_all))
         .route("/library/sections/{id}", get(library::section))
-        .route("/library/sections/{id}/all", get(library::all))
+        .route("/library/sections/{id}/all", get(library::all).put(edit::section))
         .route("/library/sections/{id}/refresh", any(library::refresh))
         .route("/library/sections/{id}/collections", get(lists::section_collections))
         .route("/library/sections/{id}/albums", get(library::section_albums))
@@ -169,7 +170,7 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/library/all", get(library::library_all))
         .route("/library/onDeck", get(library::on_deck))
         .route("/library/recentlyAdded", get(library::recently_added))
-        .route("/library/metadata/{id}", get(library::metadata))
+        .route("/library/metadata/{id}", get(library::metadata).put(edit::item))
         .route("/library/metadata/{id}/children", get(library::children))
         .route("/library/metadata/{id}/extras", get(library::extras))
         .route("/library/metadata/{id}/allLeaves", get(library::all_leaves))
@@ -177,7 +178,13 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/library/metadata/{id}/similar", get(library::similar))
         .route("/library/metadata/{id}/related", get(library::related))
         .route("/library/metadata/{id}/refresh", any(library::refresh_item))
-        .route("/library/metadata/{id}/{image}", get(library::image))
+        .route(
+            "/library/metadata/{id}/{image}",
+            get(library::image)
+                .post(edit::upload_artwork)
+                .put(edit::choose_artwork)
+                .layer(axum::extract::DefaultBodyLimit::max(25 * 1024 * 1024)),
+        )
         .route("/library/metadata/{id}/{image}/{version}", get(library::image_version))
         .route("/library/collections/{id}", get(lists::collection))
         .route("/library/collections/{id}/children", get(lists::collection_children))
