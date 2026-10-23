@@ -1402,12 +1402,22 @@ pub async fn first_character(
 ) -> PlexResult<Node> {
     let (lib, _) = library_for(&state, &user, &id).await?;
     let kind = params.get("type").and_then(kind_for_number).unwrap_or(lib.kind().top_level_kind());
-    let (rows, _) = catalog::library_items(&state.db, user.id, &LibraryQuery::all(lib.id, kind)).await?;
+    // Counted by exact first character in SQL, then merged here into what
+    // Plex lists (SQLite's UPPER() only knows ASCII).
+    let firsts: Vec<(String, i64)> = sqlx::query_as(&format!(
+        "{ME_CTE} SELECT SUBSTR(i.sort_title, 1, 1), COUNT(*) FROM {VISIBLE_ITEMS}
+         WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? GROUP BY 1"
+    ))
+    .bind(user.id)
+    .bind(lib.id)
+    .bind(kind)
+    .fetch_all(&state.db.read)
+    .await?;
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for row in &rows {
-        let first = row.sort_title.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+    for (first, count) in firsts {
+        let first = first.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
         let key = if first.chars().all(char::is_alphabetic) && !first.is_empty() { first } else { "#".into() };
-        *counts.entry(key).or_default() += 1;
+        *counts.entry(key).or_default() += usize::try_from(count).unwrap_or(0);
     }
     let mut mc = base_container().attr("size", counts.len()).attr("title1", &lib.name);
     for (letter, size) in counts {
