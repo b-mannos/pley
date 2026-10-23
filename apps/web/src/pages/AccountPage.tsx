@@ -453,7 +453,7 @@ export function AccountPage() {
           loading={logout.isPending}
           onClick={() => {
             audio.close();
-            logout.mutate(undefined, { onSettled: () => navigate("/login", { replace: true }) });
+            logout.mutate(undefined, { onSettled: () => void navigate("/login", { replace: true }) });
           }}
         >
           Sign out

@@ -105,9 +105,9 @@ export function useItemCollections(itemId: Id, enabled = true) {
 }
 
 function collectionChanged(qc: QueryClient, c: Pick<Collection, "id" | "library_id">) {
-  qc.invalidateQueries({ queryKey: listKeys.collection(c.id) });
-  qc.invalidateQueries({ queryKey: listKeys.collections(c.library_id) });
-  qc.invalidateQueries({ queryKey: ["item"], predicate: (q) => q.queryKey[2] === "collections" });
+  void qc.invalidateQueries({ queryKey: listKeys.collection(c.id) });
+  void qc.invalidateQueries({ queryKey: listKeys.collections(c.library_id) });
+  void qc.invalidateQueries({ queryKey: ["item"], predicate: (q) => q.queryKey[2] === "collections" });
 }
 
 export function useCreateCollection() {
@@ -205,7 +205,7 @@ export function useCreatePlaylist() {
     mutationFn: (body: { title: string; kind?: PlaylistKind; item_ids?: Id[] }) => api.post<PlaylistDetail>("/api/playlists", body),
     onSuccess: (data) => {
       qc.setQueryData(listKeys.playlist(data.id), data);
-      qc.invalidateQueries({ queryKey: listKeys.playlists, exact: true });
+      void qc.invalidateQueries({ queryKey: listKeys.playlists, exact: true });
     },
   });
 }
@@ -216,7 +216,7 @@ export function useRenamePlaylist() {
     mutationFn: ({ id, title }: { id: Id; title: string }) => api.patch<PlaylistDetail>(`/api/playlists/${id}`, { title }),
     onSuccess: (data) => {
       qc.setQueryData(listKeys.playlist(data.id), data);
-      qc.invalidateQueries({ queryKey: listKeys.playlists, exact: true });
+      void qc.invalidateQueries({ queryKey: listKeys.playlists, exact: true });
     },
   });
 }
@@ -227,7 +227,7 @@ export function useDeletePlaylist() {
     mutationFn: (id: Id) => api.del<void>(`/api/playlists/${id}`),
     onSuccess: (_data, id) => {
       qc.removeQueries({ queryKey: listKeys.playlist(id) });
-      qc.invalidateQueries({ queryKey: listKeys.playlists, exact: true });
+      void qc.invalidateQueries({ queryKey: listKeys.playlists, exact: true });
     },
   });
 }

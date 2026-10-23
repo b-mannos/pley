@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ArrowUp, ChevronRight, Folder, HardDrive } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useFs } from "@/api/hooks";
 import { Modal } from "./Modal";
 import { Button, IconButton, Spinner, TextInput } from "./ui";
+import { useOnChange } from "@/lib/hooks";
 
 export function FolderPicker({
   open,
@@ -20,16 +21,16 @@ export function FolderPicker({
   const [input, setInput] = useState(initialPath ?? "");
   const fs = useFs(path, open);
 
-  useEffect(() => {
-    if (open) {
-      setPath(initialPath ?? null);
-      setInput(initialPath ?? "");
-    }
-  }, [open, initialPath]);
-
-  useEffect(() => {
-    if (fs.data) setInput(fs.data.path ?? "");
-  }, [fs.data]);
+  // Opening starts from `initialPath` again.
+  useOnChange(open, (isOpen) => {
+    if (!isOpen) return;
+    setPath(initialPath ?? null);
+    setInput(initialPath ?? "");
+  });
+  // The box shows the folder being browsed.
+  useOnChange(fs.data, (data) => {
+    if (data) setInput(data.path ?? "");
+  });
 
   const atRoots = path == null;
   const goUp = () => setPath(fs.data ? fs.data.parent : null);

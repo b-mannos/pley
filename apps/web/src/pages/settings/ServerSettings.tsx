@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Eye, EyeOff, Save } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useSaveSettings, useSettings, useSystemInfo } from "@/api/hooks";
@@ -6,7 +6,7 @@ import type { HwAccel, Settings, ToneMapping, TranscodePreset, TvMetadata } from
 import { useToast } from "@/components/Toast";
 import { Button, Card, EmptyState, IconButton, PageSpinner, Select, TextInput, Toggle } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { useDocumentTitle } from "@/lib/hooks";
+import { useDocumentTitle, useOnChange } from "@/lib/hooks";
 
 const HWACCEL: { value: HwAccel; label: string }[] = [
   { value: "auto", label: "Automatic (best available)" },
@@ -142,9 +142,10 @@ export function ServerSettings() {
   const toast = useToast();
   const [form, setForm] = useState<Settings | null>(null);
 
-  useEffect(() => {
-    if (settings.data) setForm(settings.data);
-  }, [settings.data]);
+  // The form starts from (and returns to, after saving) the saved settings.
+  useOnChange(settings.data, (data) => {
+    if (data) setForm(data);
+  });
 
   const dirty = useMemo(() => {
     if (!form || !settings.data) return false;

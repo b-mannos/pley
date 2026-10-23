@@ -6,7 +6,7 @@ export const IMAGE_BUCKETS = [160, 240, 320, 480, 640, 960, 1280, 1920] as const
 export function bucketFor(cssWidth: number): number {
   const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
   const need = Math.ceil(cssWidth * Math.min(dpr, 3));
-  return IMAGE_BUCKETS.find((b) => b >= need) ?? IMAGE_BUCKETS[IMAGE_BUCKETS.length - 1];
+  return IMAGE_BUCKETS.find((b) => b >= need) ?? Math.max(...IMAGE_BUCKETS);
 }
 
 /** Append `w=<bucket>` to an image url returned by the API (which already carries `?v=`). */

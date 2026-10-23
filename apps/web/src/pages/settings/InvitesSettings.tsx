@@ -199,6 +199,8 @@ export function InvitesSettings() {
   const toast = useToast();
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<Invite | null>(null);
+  // "expires" / "expired" is decided once per visit, not on every render.
+  const [now] = useState(() => Date.now());
   const [deleting, setDeleting] = useState<Invite | null>(null);
 
   if (invites.isPending) return <PageSpinner />;
@@ -241,7 +243,7 @@ export function InvitesSettings() {
                       invite.note,
                       st.label === "Active" ? `${pluralize(invite.uses_left, "sign-up")} left` : null,
                       invite.expires_at
-                        ? `${invite.expires_at * 1000 > Date.now() ? "expires" : "expired"} ${formatRelative(invite.expires_at)}`
+                        ? `${invite.expires_at * 1000 > now ? "expires" : "expired"} ${formatRelative(invite.expires_at)}`
                         : "never expires",
                       `created ${formatRelative(invite.created_at)}`,
                     ]

@@ -11,6 +11,11 @@ import { TriangleAlert } from "lucide-react";
 
 const AuthContext = createContext<User | null>(null);
 
+/** Provides the signed-in user (what `<RequireAuth>` does once it is known). */
+export function AuthUserProvider({ user, children }: { user: User; children: ReactNode }) {
+  return <AuthContext.Provider value={user}>{children}</AuthContext.Provider>;
+}
+
 export function useAuth(): User {
   const user = useContext(AuthContext);
   if (!user) throw new Error("useAuth must be used inside <RequireAuth>");

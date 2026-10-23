@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type HlsType from "hls.js";
@@ -126,7 +126,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const findNext = () => (queue ? nextInQueue(qc, queue) : fetchNext(qc, item.id));
   const nextUrl = (next: ItemSummary) => {
     const at = next.user_state.watched ? 0 : next.user_state.position_ms;
-    return queue ? queuePlayUrl(queue.queue, queue.index + 1, at) : playUrl(next.id, { startMs: at });
+    return queue ? queuePlayUrl(queue.queue, queue.index + 1, next.id, at) : playUrl(next.id, { startMs: at });
   };
   const endUrl = queue?.queue.returnTo ?? `/item/${item.id}`;
   const title = isEpisode ? (item.grandparent_title ?? item.title) : item.year ? `${item.title} (${item.year})` : item.title;
@@ -170,8 +170,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
   const goBack = useCallback(() => {
     const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
-    if (idx > 0) navigate(-1);
-    else navigate(`/item/${item.id}`, { replace: true });
+    if (idx > 0) void navigate(-1);
+    else void navigate(`/item/${item.id}`, { replace: true });
   }, [navigate, item.id]);
 
   // Pause any music when a video starts.
@@ -249,7 +249,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       () => undefined,
     );
 
-    (async () => {
+    void (async () => {
       try {
         const pinfo = await acquired;
         if (!pinfo || cancelled) return;
@@ -384,12 +384,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   // ---------------------------------------------------------------------
   // Media element events.
   // ---------------------------------------------------------------------
-  const handlers = useRef({
-    onEnded: () => {},
-    onMediaError: () => {},
-  });
-
-  handlers.current.onEnded = () => {
+  const onMediaEnded = useEffectEvent(() => {
     setEnded(true);
     setPlaying(false);
     const s = sessionRef.current;
@@ -406,12 +401,12 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     findNext()
       .then((next) => {
         if (next) setUpNext(next);
-        else navigate(endUrl, { replace: true });
+        else void navigate(endUrl, { replace: true });
       })
       .catch(() => navigate(endUrl, { replace: true }));
-  };
+  });
 
-  handlers.current.onMediaError = () => {
+  const onMediaError = useEffectEvent(() => {
     const v = videoRef.current;
     if (!v || !v.error || hlsRef.current) return; // hls.js reports its own errors
     const s = sessionRef.current;
@@ -431,7 +426,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       return;
     }
     setError(v.error.message || "This video can't be played in your browser.");
-  };
+  });
 
   useEffect(() => {
     const v = videoRef.current;
@@ -468,8 +463,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       positionRef.current = v.currentTime;
       report(v.paused ? "paused" : "playing");
     };
-    const onEnded = () => handlers.current.onEnded();
-    const onError = () => handlers.current.onMediaError();
+    const onEnded = () => onMediaEnded();
+    const onError = () => onMediaError();
 
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);
@@ -518,8 +513,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const v = videoRef.current;
     if (!v) return;
     const apply = () => {
-      for (let i = 0; i < v.textTracks.length; i++) {
-        const t = v.textTracks[i];
+      for (const t of Array.from(v.textTracks)) {
         const want = shownTextIndex != null && t.id === `sub-${shownTextIndex}`;
         const mode: TextTrackMode = want ? "showing" : "disabled";
         if (t.mode !== mode) t.mode = mode;
@@ -546,10 +540,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     window.clearTimeout(hideTimer.current);
     hideTimer.current = window.setTimeout(() => setActive(false), HIDE_CONTROLS_AFTER);
   }, []);
+  // Controls show at start and hide after a while (`active` starts true).
   useEffect(() => {
-    poke();
+    hideTimer.current = window.setTimeout(() => setActive(false), HIDE_CONTROLS_AFTER);
     return () => window.clearTimeout(hideTimer.current);
-  }, [poke]);
+  }, []);
 
   const showControls =
     active || hoveringControls || !playing || settingsOpen || chaptersOpen || loading || !!error || needsGesture || ended;
@@ -589,7 +584,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     if (!el) return;
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
     else if (el.requestFullscreen) void el.requestFullscreen().catch(() => undefined);
-    else (videoRef.current as WebkitVideo | null)?.webkitEnterFullscreen?.();
+    else {
+      // iOS Safari only has fullscreen on the video element itself.
+      const video: WebkitVideo | null = videoRef.current;
+      video?.webkitEnterFullscreen?.();
+    }
   };
 
   /** Store the choice so the next episode (or the next viewing) starts with the same tracks. */
@@ -639,7 +638,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         toast.info(queue ? "This is the last one" : "This is the last episode");
         return;
       }
-      navigate(nextUrl(next), { replace: true });
+      void navigate(nextUrl(next), { replace: true });
     } catch (err) {
       toast.error(errorMessage(err));
     }

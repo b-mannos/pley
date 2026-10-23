@@ -33,9 +33,12 @@ export function LoginPage() {
       { username: username.trim(), password },
       {
         // A household with several profiles picks one first.
-        onSuccess: async () => {
-          const profiles = await fetchProfiles(qc).catch(() => []);
-          navigate(profiles.length > 1 ? `/profiles?next=${encodeURIComponent(next)}` : next, { replace: true });
+        onSuccess: () => {
+          void fetchProfiles(qc)
+            .catch(() => [])
+            .then((profiles) =>
+              navigate(profiles.length > 1 ? `/profiles?next=${encodeURIComponent(next)}` : next, { replace: true }),
+            );
         },
         onError: () => setSigningIn(false),
       },

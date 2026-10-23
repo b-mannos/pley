@@ -11,9 +11,10 @@ export type ApiErrorCode =
 
 export class ApiError extends Error {
   readonly status: number;
-  readonly code: ApiErrorCode | string;
+  /** One of `ApiErrorCode`, or a code this client doesn't know yet. */
+  readonly code: ApiErrorCode | (string & {});
 
-  constructor(status: number, code: ApiErrorCode | string, message: string) {
+  constructor(status: number, code: ApiErrorCode | (string & {}), message: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;

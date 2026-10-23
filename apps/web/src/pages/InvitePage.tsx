@@ -63,7 +63,7 @@ export function InvitePage() {
           >
             Sign out and continue
           </Button>
-          <Button variant="ghost" className="w-full" onClick={() => navigate("/", { replace: true })}>
+          <Button variant="ghost" className="w-full" onClick={() => void navigate("/", { replace: true })}>
             Stay signed in
           </Button>
         </div>
@@ -79,7 +79,7 @@ export function InvitePage() {
     if (password !== confirm) return setLocalError("Passwords don't match.");
     accept.mutate(
       { username: username.trim(), password, display_name: displayName.trim() || undefined },
-      { onSuccess: () => navigate("/", { replace: true }) },
+      { onSuccess: () => void navigate("/", { replace: true }) },
     );
   };
 

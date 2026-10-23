@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ChevronRight, Laptop, Lock, LogOut, Plus, Smartphone, Trash2, UserPlus } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import {
@@ -21,7 +21,7 @@ import { Badge, Button, EmptyState, Field, PageSpinner, TextInput, Toggle } from
 import { ageBadge, librariesLabel } from "@/lib/access";
 import { cn } from "@/lib/cn";
 import { formatRelative } from "@/lib/format";
-import { useDocumentTitle } from "@/lib/hooks";
+import { useDocumentTitle, useOnChange } from "@/lib/hooks";
 
 const PIN_RE = /^\d{4,8}$/;
 
@@ -128,9 +128,10 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
   const [clearPin, setClearPin] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset the form whenever the dialog opens for someone else.
-  useEffect(() => {
-    if (!open) return;
+  // Reset the form whenever the dialog opens (for someone else); background
+  // refetches don't touch what is being edited.
+  useOnChange(open ? (user?.id ?? "new") : null, (key) => {
+    if (key === null) return;
     setKind(user?.managed ? "managed" : "regular");
     setUsername(user?.username ?? "");
     setDisplayName(user?.display_name ?? "");
@@ -146,9 +147,7 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
     setPin("");
     setClearPin(false);
     setError(null);
-    // Only when the dialog opens (or switches user), not on background refetches.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, user?.id]);
+  });
 
   const managed = isNew ? kind === "managed" : (user?.managed ?? false) && !password;
   const otherAdmins = (users.data ?? []).filter((u) => u.is_admin && !u.disabled && u.id !== user?.id).length;

@@ -7,6 +7,7 @@ import type { Id, ItemDetail, ItemSummary } from "@/api/types";
 import { useOptionalAudioPlayer } from "@/audio/AudioPlayer";
 import { useToast } from "@/components/Toast";
 import { isPlayableVideo } from "./format";
+import { shuffled } from "./shuffle";
 import { playUrl } from "./usePlayItem";
 
 /**
@@ -56,9 +57,9 @@ function saveQueue(queue: Omit<VideoQueue, "key">): VideoQueue {
   return { ...queue, key };
 }
 
-/** Player URL of entry `index` of the queue. */
-export function queuePlayUrl(queue: VideoQueue, index: number, startMs?: number): string {
-  const url = playUrl(queue.ids[index], { startMs });
+/** Player URL of entry `index` (item `id`) of the queue. */
+export function queuePlayUrl(queue: VideoQueue, index: number, id: Id, startMs?: number): string {
+  const url = playUrl(id, { startMs });
   return `${url}${url.includes("?") ? "&" : "?"}queue=${encodeURIComponent(queue.key)}&qi=${index}`;
 }
 
@@ -67,15 +68,6 @@ export async function nextInQueue(qc: QueryClient, position: QueuePosition): Pro
   const id = position.queue.ids[position.index + 1];
   if (id == null) return null;
   return qc.fetchQuery({ queryKey: keys.item(id), queryFn: () => api.get<ItemDetail>(`/api/items/${id}`), staleTime: 0 });
-}
-
-function shuffled<T>(list: T[]): T[] {
-  const a = list.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
 }
 
 /** Returns `start(items, opts)`: plays the movies and episodes of `items` in order. */
@@ -96,7 +88,7 @@ export function useVideoQueue() {
       }
       const queue = saveQueue({ ids: videos.map((v) => v.id), returnTo: opts.returnTo });
       audio?.pause();
-      navigate(queuePlayUrl(queue, 0, first.user_state.watched ? 0 : first.user_state.position_ms));
+      void navigate(queuePlayUrl(queue, 0, first.id, first.user_state.watched ? 0 : first.user_state.position_ms));
     },
     [audio, navigate, toast],
   );

@@ -39,7 +39,7 @@ export function languageName(code: string | null | undefined): string | null {
   if (!code) return null;
   const raw = code.trim();
   if (!raw) return null;
-  const [base, region] = raw.toLowerCase().split(/[-_]/);
+  const [base = "", region] = raw.toLowerCase().split(/[-_]/);
   const name = NAMES[base];
   if (!name) return raw.length <= 3 ? raw.toUpperCase() : raw;
   return region ? `${name} (${region.toUpperCase()})` : name;

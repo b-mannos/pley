@@ -8,8 +8,10 @@ export interface QualityOption {
   maxHeight: number | null;
 }
 
+const ORIGINAL: QualityOption = { id: "original", label: "Original", maxBitrate: null, maxHeight: null };
+
 export const QUALITIES: QualityOption[] = [
-  { id: "original", label: "Original", maxBitrate: null, maxHeight: null },
+  ORIGINAL,
   { id: "20m", label: "20 Mbps 1080p", maxBitrate: 20_000, maxHeight: 1080 },
   { id: "12m", label: "12 Mbps 1080p", maxBitrate: 12_000, maxHeight: 1080 },
   { id: "8m", label: "8 Mbps 1080p", maxBitrate: 8_000, maxHeight: 1080 },
@@ -18,7 +20,7 @@ export const QUALITIES: QualityOption[] = [
 ];
 
 export function qualityById(id: string | null | undefined): QualityOption {
-  return QUALITIES.find((q) => q.id === id) ?? QUALITIES[0];
+  return QUALITIES.find((q) => q.id === id) ?? ORIGINAL;
 }
 
 export interface ModeOption {
@@ -27,13 +29,15 @@ export interface ModeOption {
   hint: string;
 }
 
+const AUTO: ModeOption = { id: "auto", label: "Auto", hint: "Best method for this browser" };
+
 export const PLAYBACK_MODES: ModeOption[] = [
-  { id: "auto", label: "Auto", hint: "Best method for this browser" },
+  AUTO,
   { id: "direct", label: "Direct Play", hint: "The original file, unchanged" },
   { id: "remux", label: "Remux", hint: "Repackaged, original video" },
   { id: "transcode", label: "Transcode", hint: "Converted video, most compatible" },
 ];
 
 export function modeById(id: string | null | undefined): ModeOption {
-  return PLAYBACK_MODES.find((m) => m.id === id) ?? PLAYBACK_MODES[0];
+  return PLAYBACK_MODES.find((m) => m.id === id) ?? AUTO;
 }

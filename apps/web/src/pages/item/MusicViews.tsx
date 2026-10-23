@@ -154,7 +154,7 @@ export function AlbumView({ item, highlightId }: { item: ItemDetail; highlightId
               <span role="columnheader" className="text-right">Time</span>
             </div>
             {list.map((t, i) => {
-              const showDisc = multiDisc && (i === 0 || (list[i - 1].parent_index ?? 1) !== (t.parent_index ?? 1));
+              const showDisc = multiDisc && (i === 0 || (list[i - 1]?.parent_index ?? 1) !== (t.parent_index ?? 1));
               return (
                 <TrackRow
                   key={t.id}

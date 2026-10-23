@@ -12,11 +12,22 @@ import { Button, Spinner, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useDocumentTitle } from "@/lib/hooks";
 
+/**
+ * Where to go after signing in (`?next=`): a path on this site, but not the
+ * sign-in or profile screens. URL parsing decides what is another site: it
+ * reads "/\evil.com" and "/\t/evil.com" as "//evil.com".
+ */
 export function safeNext(next: string | null): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/login") || next.startsWith("/profiles")) {
+  if (!next?.startsWith("/")) return "/";
+  let url: URL;
+  try {
+    url = new URL(next, window.location.origin);
+  } catch {
     return "/";
   }
-  return next;
+  if (url.origin !== window.location.origin) return "/";
+  const path = `${url.pathname}${url.search}${url.hash}`;
+  return path.startsWith("/login") || path.startsWith("/profiles") ? "/" : path;
 }
 
 /** What switching to `target` asks for. */
@@ -38,15 +49,13 @@ function PinPad({
   target,
   busy,
   error,
-  failures,
   onSubmit,
   onCancel,
 }: {
   target: User;
   busy: boolean;
   error: string | null;
-  /** Increments on each rejected PIN. */
-  failures: number;
+  /** Called with the PIN once it has at least 4 digits. */
   onSubmit: (pin: string) => void;
   onCancel: () => void;
 }) {
@@ -58,11 +67,6 @@ function PinPad({
     pinRef.current = next;
     setPinState(next);
   }, []);
-
-  // Every failed attempt clears the dots.
-  useEffect(() => {
-    if (failures > 0) setPin("");
-  }, [failures, setPin]);
 
   const press = useCallback(
     (key: (typeof PAD)[number]) => {
@@ -199,7 +203,7 @@ export function ProfilesPage() {
       {
         onSuccess: () => {
           audio?.close();
-          navigate(next, { replace: true });
+          void navigate(next, { replace: true });
         },
         onError: (err) => {
           setError(switchError(err));
@@ -234,10 +238,11 @@ export function ProfilesPage() {
         <Logo className="mb-10 h-9" />
         {target && needs === "pin" ? (
           <PinPad
+            // Every failed attempt starts the pad over (clears the dots).
+            key={failures}
             target={target}
             busy={switchProfile.isPending}
             error={error}
-            failures={failures}
             onSubmit={(pin) => doSwitch(target, { pin })}
             onCancel={() => {
               setTarget(null);
@@ -266,7 +271,7 @@ export function ProfilesPage() {
                   <li key={p.id}>
                     <button
                       type="button"
-                      onClick={() => choose(p)}
+                      onClick={() => void choose(p)}
                       disabled={switchProfile.isPending}
                       className="group flex w-28 flex-col items-center gap-3 rounded-xl outline-none sm:w-32"
                     >
@@ -296,7 +301,7 @@ export function ProfilesPage() {
                 {error}
               </p>
             ) : null}
-            <Button variant="ghost" className="mt-10" onClick={() => navigate(next, { replace: true })}>
+            <Button variant="ghost" className="mt-10" onClick={() => void navigate(next, { replace: true })}>
               Continue as {me.name}
             </Button>
           </>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { FolderOpen, Plus, Trash2 } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useCreateLibrary, useUpdateLibrary } from "@/api/hooks";
@@ -9,6 +9,7 @@ import { LibraryIcon } from "@/components/Sidebar";
 import { useToast } from "@/components/Toast";
 import { Button, Field, IconButton, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { useOnChange } from "@/lib/hooks";
 
 const KINDS: { kind: LibraryKind; label: string; hint: string; defaultName: string }[] = [
   { kind: "movies", label: "Movies", hint: "Movie Name (Year)/Movie Name (Year).mkv", defaultName: "Movies" },
@@ -28,14 +29,16 @@ export function LibraryFormModal({ open, onClose, library }: { open: boolean; on
   const [picker, setPicker] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
+  // Opening (for another library) starts from its saved values; background
+  // refetches don't touch what is being edited.
+  useOnChange(open ? (library?.id ?? "new") : null, (key) => {
+    if (key === null) return;
     setName(library?.name ?? "");
     setKind(library?.kind ?? "movies");
     setPaths(library?.paths ?? []);
     setManual("");
     setError(null);
-  }, [open, library]);
+  });
 
   const kindInfo = KINDS.find((k) => k.kind === kind)!;
   const busy = create.isPending || update.isPending;

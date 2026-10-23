@@ -14,6 +14,7 @@ export function PlaylistArt({
   className?: string;
 }) {
   const art = playlist.artwork;
+  const cover = art[0];
   const Icon = playlist.kind === "audio" ? ListMusic : ListVideo;
   return (
     <div className={cn("relative aspect-square overflow-hidden rounded-md bg-surface-2 ring-1 ring-white/5", className)}>
@@ -23,8 +24,8 @@ export function PlaylistArt({
             <Artwork key={url} candidates={[url]} width={width / 2} alt="" title="" bare className="size-full" />
           ))}
         </div>
-      ) : art.length > 0 ? (
-        <Artwork candidates={[art[0]]} width={width} alt="" title={playlist.title} className="size-full" />
+      ) : cover ? (
+        <Artwork candidates={[cover]} width={width} alt="" title={playlist.title} className="size-full" />
       ) : (
         <div className="flex size-full items-center justify-center bg-linear-to-br from-surface-3 to-surface-2 text-subtle">
           <Icon className="size-1/3" strokeWidth={1.5} />

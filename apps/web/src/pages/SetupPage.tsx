@@ -36,7 +36,7 @@ export function SetupPage() {
     }
     setup.mutate(
       { username: username.trim(), password },
-      { onSuccess: () => navigate("/settings/libraries?add=1", { replace: true }) },
+      { onSuccess: () => void navigate("/settings/libraries?add=1", { replace: true }) },
     );
   };
 

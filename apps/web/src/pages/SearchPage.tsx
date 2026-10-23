@@ -20,7 +20,7 @@ const GROUPS: { kind: ItemKind; title: string }[] = [
 
 function ResultGroup({ title, items }: { title: string; items: ItemSummary[] }) {
   const [ref, width] = useElementWidth<HTMLDivElement>();
-  const aspect = aspectFor(items[0]);
+  const aspect = items[0] ? aspectFor(items[0]) : "poster";
   const target = aspect === "thumb" ? 260 : aspect === "square" ? 160 : 150;
   const gap = 18;
   const cols = width > 0 ? Math.max(2, Math.floor((width + gap) / (target + gap))) : 4;

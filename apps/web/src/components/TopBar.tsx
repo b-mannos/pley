@@ -6,7 +6,7 @@ import type { ScanPhase } from "@/api/types";
 import { useAudioPlayer } from "@/audio/AudioPlayer";
 import { useAuth } from "@/auth";
 import { cn } from "@/lib/cn";
-import { useDebouncedValue } from "@/lib/hooks";
+import { useDebouncedValue, useOnChange } from "@/lib/hooks";
 import { Avatar } from "./Avatar";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { IconButton } from "./ui";
@@ -28,16 +28,13 @@ function SearchBox({ className }: { className?: string }) {
   const debounced = useDebouncedValue(value, 250);
 
   // Leaving the search page clears the box; arriving syncs it with the URL.
-  useEffect(() => {
-    setValue(urlQuery);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onSearchPage]);
+  useOnChange(onSearchPage, () => setValue(urlQuery));
 
   useEffect(() => {
     const q = debounced.trim();
     if (q === urlQuery.trim()) return;
     if (!q && !onSearchPage) return;
-    navigate(q ? `/search?q=${encodeURIComponent(q)}` : "/search", { replace: onSearchPage });
+    void navigate(q ? `/search?q=${encodeURIComponent(q)}` : "/search", { replace: onSearchPage });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debounced]);
 
@@ -64,7 +61,7 @@ function SearchBox({ className }: { className?: string }) {
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             const q = value.trim();
-            if (q) navigate(`/search?q=${encodeURIComponent(q)}`, { replace: onSearchPage });
+            if (q) void navigate(`/search?q=${encodeURIComponent(q)}`, { replace: onSearchPage });
           }
           if (e.key === "Escape") {
             setValue("");
@@ -178,7 +175,7 @@ function UserMenu() {
               icon={<Users />}
               onClick={() => {
                 close();
-                navigate(`/profiles?next=${encodeURIComponent(location.pathname + location.search)}`);
+                void navigate(`/profiles?next=${encodeURIComponent(location.pathname + location.search)}`);
               }}
             >
               Switch profile
@@ -188,7 +185,7 @@ function UserMenu() {
             icon={<UserRound />}
             onClick={() => {
               close();
-              navigate("/account");
+              void navigate("/account");
             }}
           >
             Account
@@ -198,7 +195,7 @@ function UserMenu() {
               icon={<Settings />}
               onClick={() => {
                 close();
-                navigate("/settings");
+                void navigate("/settings");
               }}
             >
               Settings
@@ -210,7 +207,7 @@ function UserMenu() {
             onClick={() => {
               close();
               audio.close();
-              logout.mutate(undefined, { onSettled: () => navigate("/login", { replace: true }) });
+              logout.mutate(undefined, { onSettled: () => void navigate("/login", { replace: true }) });
             }}
           >
             Sign out

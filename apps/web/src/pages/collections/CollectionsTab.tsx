@@ -77,7 +77,7 @@ export function CollectionsTab({ libraryId, kind }: { libraryId: Id; kind: Libra
           open={creating}
           onClose={() => setCreating(false)}
           libraryId={libraryId}
-          onCreated={(c) => navigate(`/collection/${c.id}`)}
+          onCreated={(c) => void navigate(`/collection/${c.id}`)}
         />
       ) : null}
     </div>

@@ -172,8 +172,8 @@ export function useSwitchProfile() {
 
 function rememberMe(qc: QueryClient, user: User) {
   qc.setQueryData(keys.me, user);
-  qc.invalidateQueries({ queryKey: keys.users });
-  qc.invalidateQueries({ queryKey: keys.profiles });
+  void qc.invalidateQueries({ queryKey: keys.users });
+  void qc.invalidateQueries({ queryKey: keys.profiles });
 }
 
 export function useUpdateProfile() {
@@ -198,8 +198,8 @@ export function useDeleteAvatar() {
     mutationFn: () => api.del<void>("/api/me/avatar"),
     onSuccess: () => {
       qc.setQueryData<User | undefined>(keys.me, (u) => (u ? { ...u, avatar_url: null } : u));
-      qc.invalidateQueries({ queryKey: keys.users });
-      qc.invalidateQueries({ queryKey: keys.profiles });
+      void qc.invalidateQueries({ queryKey: keys.users });
+      void qc.invalidateQueries({ queryKey: keys.profiles });
     },
   });
 }
@@ -212,8 +212,8 @@ export function useSetPin() {
       api.put<void>("/api/me/pin", body, { noAuthRedirect: true }),
     onSuccess: (_data, body) => {
       qc.setQueryData<User | undefined>(keys.me, (u) => (u ? { ...u, has_pin: !!body.pin } : u));
-      qc.invalidateQueries({ queryKey: keys.profiles });
-      qc.invalidateQueries({ queryKey: keys.users });
+      void qc.invalidateQueries({ queryKey: keys.profiles });
+      void qc.invalidateQueries({ queryKey: keys.users });
     },
   });
 }
@@ -336,9 +336,9 @@ export function useCreateLibrary() {
   return useMutation({
     mutationFn: (body: LibraryInput) => api.post<Library>("/api/libraries", body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.libraries });
-      qc.invalidateQueries({ queryKey: keys.activity });
-      qc.invalidateQueries({ queryKey: ["hubs"] });
+      void qc.invalidateQueries({ queryKey: keys.libraries });
+      void qc.invalidateQueries({ queryKey: keys.activity });
+      void qc.invalidateQueries({ queryKey: ["hubs"] });
     },
   });
 }
@@ -349,7 +349,7 @@ export function useUpdateLibrary() {
     mutationFn: ({ id, ...body }: { id: Id; name?: string; paths?: string[] }) =>
       api.patch<Library>(`/api/libraries/${id}`, body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.libraries });
+      void qc.invalidateQueries({ queryKey: keys.libraries });
     },
   });
 }
@@ -360,9 +360,9 @@ export function useDeleteLibrary() {
     mutationFn: (id: Id) => api.del<void>(`/api/libraries/${id}`),
     onSuccess: (_data, id) => {
       qc.removeQueries({ queryKey: keys.library(id) });
-      qc.invalidateQueries({ queryKey: keys.libraries });
-      qc.invalidateQueries({ queryKey: ["hubs"] });
-      qc.invalidateQueries({ queryKey: ["search"] });
+      void qc.invalidateQueries({ queryKey: keys.libraries });
+      void qc.invalidateQueries({ queryKey: ["hubs"] });
+      void qc.invalidateQueries({ queryKey: ["search"] });
     },
   });
 }
@@ -373,8 +373,8 @@ export function useScanLibrary() {
     mutationFn: ({ id, force }: { id: Id; force?: boolean }) =>
       api.post<void>(`/api/libraries/${id}/scan`, { force: !!force }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.activity });
-      qc.invalidateQueries({ queryKey: keys.libraries });
+      void qc.invalidateQueries({ queryKey: keys.activity });
+      void qc.invalidateQueries({ queryKey: keys.libraries });
     },
   });
 }
@@ -384,8 +384,8 @@ export function useScanAll() {
   return useMutation({
     mutationFn: () => api.post<void>("/api/libraries/scan"),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.activity });
-      qc.invalidateQueries({ queryKey: keys.libraries });
+      void qc.invalidateQueries({ queryKey: keys.activity });
+      void qc.invalidateQueries({ queryKey: keys.libraries });
     },
   });
 }
@@ -464,10 +464,10 @@ export function fetchNext(qc: QueryClient, id: Id) {
 
 /** Invalidate everything that shows watch state. */
 export function invalidateWatchState(qc: QueryClient) {
-  qc.invalidateQueries({ queryKey: ["item"] });
-  qc.invalidateQueries({ queryKey: ["library"] });
-  qc.invalidateQueries({ queryKey: ["hubs"] });
-  qc.invalidateQueries({ queryKey: ["search"] });
+  void qc.invalidateQueries({ queryKey: ["item"] });
+  void qc.invalidateQueries({ queryKey: ["library"] });
+  void qc.invalidateQueries({ queryKey: ["hubs"] });
+  void qc.invalidateQueries({ queryKey: ["search"] });
 }
 
 export function useSetWatched() {
@@ -608,8 +608,8 @@ export function useCreateUser() {
   return useMutation({
     mutationFn: (body: NewUserInput) => api.post<User>("/api/users", body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.users });
-      qc.invalidateQueries({ queryKey: keys.profiles });
+      void qc.invalidateQueries({ queryKey: keys.users });
+      void qc.invalidateQueries({ queryKey: keys.profiles });
     },
   });
 }
@@ -632,8 +632,8 @@ export function useUpdateUser() {
   return useMutation({
     mutationFn: ({ id, ...body }: UserPatch & { id: Id }) => api.patch<User>(`/api/users/${id}`, body),
     onSuccess: (user) => {
-      qc.invalidateQueries({ queryKey: keys.users });
-      qc.invalidateQueries({ queryKey: keys.profiles });
+      void qc.invalidateQueries({ queryKey: keys.users });
+      void qc.invalidateQueries({ queryKey: keys.profiles });
       qc.setQueryData<User | undefined>(keys.me, (me) => (me && me.id === user.id ? user : me));
     },
   });
@@ -644,8 +644,8 @@ export function useDeleteUser() {
   return useMutation({
     mutationFn: (id: Id) => api.del<void>(`/api/users/${id}`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.users });
-      qc.invalidateQueries({ queryKey: keys.profiles });
+      void qc.invalidateQueries({ queryKey: keys.users });
+      void qc.invalidateQueries({ queryKey: keys.profiles });
     },
   });
 }
@@ -736,8 +736,8 @@ export function useSaveSettings() {
     mutationFn: (body: Partial<Settings>) => api.put<Settings>("/api/settings", body),
     onSuccess: (data) => {
       qc.setQueryData(keys.settings, data);
-      qc.invalidateQueries({ queryKey: keys.system });
-      qc.invalidateQueries({ queryKey: keys.server });
+      void qc.invalidateQueries({ queryKey: keys.system });
+      void qc.invalidateQueries({ queryKey: keys.server });
     },
   });
 }

@@ -20,16 +20,16 @@ export function avatarColor(user: Pick<User, "name" | "avatar_color">): string {
   if (user.avatar_color) return user.avatar_color;
   let hash = 0;
   for (const ch of user.name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
-  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length] ?? "#38bdf8";
 }
 
 /** Dark text on light colors, white on dark ones. */
-function textOn(hex: string): string {
-  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex);
-  if (!m) return "#ffffff";
-  const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join("") : m[1];
-  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
-  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+export function textOn(hex: string): string {
+  const digits = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex)?.[1];
+  if (!digits) return "#ffffff";
+  const full = digits.length === 3 ? [...digits].map((c) => c + c).join("") : digits;
+  const channel = (at: number) => parseInt(full.slice(at, at + 2), 16) / 255;
+  const lum = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
   return lum > 0.45 ? "#0b0d10" : "#ffffff";
 }
 

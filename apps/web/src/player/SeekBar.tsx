@@ -25,7 +25,8 @@ export interface SeekBarProps {
 function chapterAt(chapters: Chapter[], seconds: number): string {
   if (chapters.length < 2) return "";
   const i = chapterIndexAt(chapters, seconds * 1000);
-  return i < 0 ? "" : `${chapterTitle(chapters[i], i)} · `;
+  const chapter = chapters[i];
+  return chapter ? `${chapterTitle(chapter, i)} · ` : "";
 }
 
 /** Sprite-sheet tile showing the video at `seconds`. */
@@ -54,21 +55,21 @@ export function SeekBar({ current, duration, buffered, onSeek, onScrub, previews
   const ref = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ x: number; t: number } | null>(null);
   const [drag, setDrag] = useState<number | null>(null);
+  /** The bar's width at the last pointer event (to place the preview). */
+  const [barWidth, setBarWidth] = useState(0);
 
   const timeAt = (clientX: number) => {
     const el = ref.current;
-    if (!el || duration <= 0) return { x: 0, t: 0 };
+    if (!el || duration <= 0) return { x: 0, t: 0, width: 0 };
     const rect = el.getBoundingClientRect();
     const x = Math.min(Math.max(clientX - rect.left, 0), rect.width);
-    return { x, t: (x / rect.width) * duration };
+    return { x, t: (x / rect.width) * duration, width: rect.width };
   };
 
-  const barWidth = () => ref.current?.getBoundingClientRect().width ?? 0;
   /** Keep the preview inside the bar so it is never cut off at the edges. */
   const previewLeft = (x: number) => {
     const half = previews && previews.trickplay.count > 0 ? PREVIEW_WIDTH / 2 : 24;
-    const width = barWidth();
-    return `${width > half * 2 ? Math.min(Math.max(x, half), width - half) : x}px`;
+    return `${barWidth > half * 2 ? Math.min(Math.max(x, half), barWidth - half) : x}px`;
   };
 
   const shown = drag ?? current;
@@ -77,16 +78,18 @@ export function SeekBar({ current, duration, buffered, onSeek, onScrub, previews
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (duration <= 0 || e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    const { t } = timeAt(e.clientX);
+    const { t, width } = timeAt(e.clientX);
+    setBarWidth(width);
     setDrag(t);
     onScrub?.(t);
   };
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const pos = timeAt(e.clientX);
-    setHover(pos);
+    const { x, t, width } = timeAt(e.clientX);
+    setBarWidth(width);
+    setHover({ x, t });
     if (drag != null) {
-      setDrag(pos.t);
-      onScrub?.(pos.t);
+      setDrag(t);
+      onScrub?.(t);
     }
   };
   const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -168,7 +171,7 @@ export function SeekBar({ current, duration, buffered, onSeek, onScrub, previews
       {(hover || drag != null) && duration > 0 ? (
         <div
           className="pointer-events-none absolute bottom-full mb-2 flex -translate-x-1/2 flex-col items-center gap-1.5"
-          style={{ left: previewLeft(drag != null ? (pct / 100) * barWidth() : (hover?.x ?? 0)) }}
+          style={{ left: previewLeft(drag != null ? (pct / 100) * barWidth : (hover?.x ?? 0)) }}
         >
           {previews && previews.trickplay.count > 0 ? (
             <Preview fileId={previews.fileId} trickplay={previews.trickplay} seconds={drag ?? hover?.t ?? 0} />

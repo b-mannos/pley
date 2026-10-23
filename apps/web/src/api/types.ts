@@ -80,7 +80,7 @@ export interface Library {
   scanning: boolean;
 }
 
-export type ItemKind = "movie" | "show" | "season" | "episode" | "artist" | "album" | "track";
+export type ItemKind = "movie" | "show" | "season" | "episode" | "artist" | "album" | "track" | "extra";
 
 export interface UserState {
   position_ms: number;

@@ -9,6 +9,8 @@ import { audioCaps, canPlayNativeHls } from "@/lib/caps";
 import { loadHls } from "@/lib/hls";
 import { getStored, writeStorage } from "@/lib/hooks";
 import { endSession, reportProgress, startPlayback, stopSession } from "@/lib/progress";
+import { shuffled } from "@/lib/shuffle";
+import { useLatest } from "@/lib/hooks";
 
 export interface AudioPlayerApi {
   queue: ItemSummary[];
@@ -44,14 +46,6 @@ const AudioTimeContext = createContext<AudioTime>({ position: 0, duration: 0, bu
 
 const PROGRESS_INTERVAL = 10_000;
 
-function shuffled<T>(arr: T[]): T[] {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
 
 interface Session {
   sessionId: string;
@@ -94,10 +88,8 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
   const [muted, setMuted] = useState(() => getStored("pley.audio.muted", false));
   const [time, setTime] = useState<AudioTime>({ position: 0, duration: 0, buffered: 0 });
 
-  const queueRef = useRef(queue);
-  queueRef.current = queue;
-  const indexRef = useRef(index);
-  indexRef.current = index;
+  const queueRef = useLatest(queue);
+  const indexRef = useLatest(index);
 
   const current = queue[index] ?? null;
 
@@ -178,7 +170,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
 
     const position = () => (sessionRef.current?.positionMs ?? startMs) / 1000;
 
-    (async () => {
+    void (async () => {
       try {
         const info = await acquired;
         if (!info || cancelled) return;
@@ -334,7 +326,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("error", onError);
     };
-  }, [qc, goTo, restartAt]);
+  }, [qc, goTo, restartAt, indexRef, queueRef]);
 
   // Periodic progress while playing.
   useEffect(() => {
@@ -399,7 +391,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
     if (!audio || !queueRef.current.length) return;
     if (audio.paused) void audio.play().catch(() => undefined);
     else audio.pause();
-  }, []);
+  }, [queueRef]);
 
   const pause = useCallback(() => {
     audioRef.current?.pause();
@@ -408,7 +400,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
   const next = useCallback(() => {
     const i = indexRef.current;
     if (i + 1 < queueRef.current.length) goTo(i + 1);
-  }, [goTo]);
+  }, [goTo, indexRef, queueRef]);
 
   const prev = useCallback(() => {
     const audio = audioRef.current;
@@ -418,14 +410,14 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       return;
     }
     goTo(i - 1);
-  }, [goTo]);
+  }, [goTo, indexRef]);
 
   const jumpTo = useCallback(
     (i: number) => {
       if (i < 0 || i >= queueRef.current.length) return;
       goTo(i);
     },
-    [goTo],
+    [goTo, queueRef],
   );
 
   const seek = useCallback((seconds: number) => {
@@ -473,7 +465,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       setIndex(j >= 0 ? j : 0);
       setShuffle(false);
     }
-  }, [original, shuffle]);
+  }, [original, shuffle, indexRef, queueRef]);
 
   const close = useCallback(() => {
     const audio = audioRef.current;

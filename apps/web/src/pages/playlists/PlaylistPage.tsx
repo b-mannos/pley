@@ -194,7 +194,7 @@ function PlaylistView({ playlist: p }: { playlist: PlaylistDetail }) {
           deletePlaylist.mutate(p.id, {
             onSuccess: () => {
               toast.success("Playlist deleted");
-              navigate("/playlists", { replace: true });
+              void navigate("/playlists", { replace: true });
             },
             onError: (err) => toast.error(errorMessage(err)),
           })

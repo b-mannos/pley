@@ -1,9 +1,10 @@
 import { useState, type DragEvent } from "react";
 
-/** `ids` with the one at `from` moved to `to`. */
-export function moved<T>(ids: T[], from: number, to: number): T[] {
+/** `ids` with the one at `from` moved to `to` (unchanged when `from` is out of range). */
+export function moved<T>(ids: readonly T[], from: number, to: number): T[] {
   const next = ids.slice();
-  const [id] = next.splice(from, 1);
+  if (from < 0 || from >= next.length) return next;
+  const [id] = next.splice(from, 1) as [T];
   next.splice(to, 0, id);
   return next;
 }

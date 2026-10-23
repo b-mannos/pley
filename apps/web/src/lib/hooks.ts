@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 export function useDebouncedValue<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -76,17 +76,42 @@ export function useDocumentTitle(title: string | null | undefined) {
   }, [title]);
 }
 
+/**
+ * A ref to the latest `value`, for callbacks that run after render (event
+ * handlers, timers). It is updated after each commit, so reading it during
+ * render gives the previous value.
+ */
+export function useLatest<T>(value: T): RefObject<T> {
+  const ref = useRef(value);
+  useLayoutEffect(() => {
+    ref.current = value;
+  });
+  return ref;
+}
+
+/**
+ * Call `onChange` during render when `key` changes (React's "adjusting state
+ * when a prop changes"): use it to reset local state, instead of an effect
+ * that would render twice.
+ */
+export function useOnChange<K>(key: K, onChange: (key: K) => void) {
+  const [seen, setSeen] = useState(key);
+  if (!Object.is(seen, key)) {
+    setSeen(key);
+    onChange(key);
+  }
+}
+
 /** Close something when clicking outside of `ref` or pressing Escape. */
 export function useDismiss(ref: RefObject<HTMLElement | null>, open: boolean, onClose: () => void) {
-  const cb = useRef(onClose);
-  cb.current = onClose;
+  const close = useEffectEvent(onClose);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) cb.current();
+      if (ref.current && !ref.current.contains(e.target as Node)) close();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") cb.current();
+      if (e.key === "Escape") close();
     };
     document.addEventListener("pointerdown", onDown);
     document.addEventListener("keydown", onKey);

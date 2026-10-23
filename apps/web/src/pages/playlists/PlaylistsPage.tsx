@@ -98,7 +98,7 @@ export function PlaylistsPage() {
         key={creating ? "open" : "closed"}
         open={creating}
         onClose={() => setCreating(false)}
-        onCreated={(p) => navigate(`/playlists/${p.id}`)}
+        onCreated={(p) => void navigate(`/playlists/${p.id}`)}
       />
     </div>
   );

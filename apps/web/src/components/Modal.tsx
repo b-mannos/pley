@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -17,10 +17,13 @@ export interface ModalProps {
 
 export function Modal({ open, onClose, title, children, footer, size = "md", locked }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-  const lockedRef = useRef(locked);
-  lockedRef.current = locked;
+  const titleId = useId();
+  /** Escape closes the dialog unless it is locked (a request in flight). */
+  const onEscape = useEffectEvent((e: KeyboardEvent) => {
+    if (locked) return;
+    e.stopPropagation();
+    onClose();
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -28,18 +31,15 @@ export function Modal({ open, onClose, title, children, footer, size = "md", loc
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !lockedRef.current) {
-        e.stopPropagation();
-        closeRef.current();
-      }
+      if (e.key === "Escape") onEscape(e);
       if (e.key === "Tab" && panelRef.current) {
         // Minimal focus trap.
         const focusables = panelRef.current.querySelectorAll<HTMLElement>(
           'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
         );
-        if (focusables.length === 0) return;
         const first = focusables[0];
         const last = focusables[focusables.length - 1];
+        if (!first || !last) return;
         if (e.shiftKey && document.activeElement === first) {
           e.preventDefault();
           last.focus();
@@ -79,6 +79,7 @@ export function Modal({ open, onClose, title, children, footer, size = "md", loc
         ref={panelRef}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
         tabIndex={-1}
         className={cn(
           "relative flex max-h-[92vh] w-full animate-pop-in flex-col overflow-hidden rounded-t-xl border border-border bg-surface shadow-2xl shadow-black/60 outline-none sm:rounded-xl",
@@ -89,7 +90,9 @@ export function Modal({ open, onClose, title, children, footer, size = "md", loc
         )}
       >
         <div className="flex items-center justify-between gap-4 border-b border-border px-5 py-3.5">
-          <h2 className="truncate text-base font-semibold">{title}</h2>
+          <h2 id={titleId} className="truncate text-base font-semibold">
+            {title}
+          </h2>
           <IconButton label="Close" size="sm" onClick={onClose} disabled={locked}>
             <X className="size-4" />
           </IconButton>

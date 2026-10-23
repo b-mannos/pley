@@ -79,7 +79,7 @@ function StreamTable({ streams }: { streams: MediaStream[] }) {
 }
 
 function FileInfo({ file, title }: { file: MediaFile; title?: string }) {
-  const order: Record<string, number> = { video: 0, audio: 1, subtitle: 2 };
+  const order: Record<MediaFile["streams"][number]["kind"], number> = { video: 0, audio: 1, subtitle: 2 };
   const streams = [...file.streams].sort((a, b) => order[a.kind] - order[b.kind] || a.index - b.index);
   return (
     <div className="rounded-lg border border-border bg-surface/80 p-4 backdrop-blur">

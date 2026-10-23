@@ -1,7 +1,7 @@
 import type { ItemSummary, MediaFile, MediaStream, TranscodeInfo } from "@/api/types";
 import { languageName } from "./languages";
 
-/** 6720000 → "1h 52m", 2700000 → "45m", 59000 → "59s". */
+/** 6720000 → "1h 52m", 2700000 → "45m", 29000 → "29s" (rounded to whole minutes from 30s up). */
 export function formatDuration(ms: number | null | undefined): string {
   if (!ms || ms < 0) return "";
   const totalMin = Math.round(ms / 60000);
@@ -23,11 +23,11 @@ export function formatClock(seconds: number | null | undefined): string {
   return `${h > 0 ? `${h}:` : ""}${mm}:${String(sec).padStart(2, "0")}`;
 }
 
-/** Remaining time label like "34m left". */
+/** Remaining time label like "34m left" ("" once nothing is left). */
 export function formatRemaining(positionMs: number, durationMs: number | null | undefined): string {
   if (!durationMs) return "";
-  const left = Math.max(0, durationMs - positionMs);
-  return `${formatDuration(left)} left`;
+  const left = formatDuration(Math.max(0, durationMs - positionMs));
+  return left ? `${left} left` : "";
 }
 
 export function formatBytes(bytes: number | null | undefined): string {
@@ -56,27 +56,19 @@ export function formatRelative(ts: number | null | undefined): string {
   if (!ts) return "never";
   const diff = ts - Date.now() / 1000;
   const abs = Math.abs(diff);
-  const table: [number, Intl.RelativeTimeFormatUnit][] = [
-    [60, "second"],
-    [3600, "minute"],
-    [86400, "hour"],
-    [86400 * 7, "day"],
-    [86400 * 30, "week"],
-    [86400 * 365, "month"],
-    [Infinity, "year"],
+  // [below this many seconds, unit, seconds per unit]
+  const table: [number, Intl.RelativeTimeFormatUnit, number][] = [
+    [60, "second", 1],
+    [3600, "minute", 60],
+    [86400, "hour", 3600],
+    [86400 * 7, "day", 86400],
+    [86400 * 30, "week", 86400 * 7],
+    [86400 * 365, "month", 86400 * 30],
+    [Infinity, "year", 86400 * 365],
   ];
-  const divisors: Record<string, number> = {
-    second: 1,
-    minute: 60,
-    hour: 3600,
-    day: 86400,
-    week: 86400 * 7,
-    month: 86400 * 30,
-    year: 86400 * 365,
-  };
-  for (const [limit, unit] of table) {
+  for (const [limit, unit, seconds] of table) {
     if (abs < limit) {
-      const value = Math.round(diff / divisors[unit]);
+      const value = Math.round(diff / seconds);
       return rtf ? rtf.format(value, unit) : `${Math.abs(value)} ${unit}s ago`;
     }
   }
@@ -266,7 +258,7 @@ export function dynamicRangeLabel(
   }
 }
 
-/** Short badge text for a dynamic range ("DV", "HDR10+", "HDR10", "HLG", "HDR"). */
+/** Badge text for a dynamic range ("Dolby Vision P8", "HDR10+", "HDR10", "HLG", "HDR"), or null for SDR. */
 export function dynamicRangeBadge(s: Pick<MediaStream, "dynamic_range" | "dv_profile" | "hdr"> | null | undefined): string | null {
   if (!s) return null;
   switch (s.dynamic_range) {
@@ -358,6 +350,7 @@ export function unwatchedCount(item: ItemSummary): number {
   return Math.max(0, item.leaf_count - (item.viewed_leaf_count ?? 0));
 }
 
+/** A video the player plays (not a show, season or music). */
 export function isPlayableVideo(item: Pick<ItemSummary, "kind">): boolean {
-  return item.kind === "movie" || item.kind === "episode";
+  return item.kind === "movie" || item.kind === "episode" || item.kind === "extra";
 }

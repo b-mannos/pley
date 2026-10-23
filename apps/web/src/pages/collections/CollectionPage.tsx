@@ -63,8 +63,9 @@ function CollectionView({ collection: c }: { collection: CollectionDetail }) {
   const movies = c.items.some((i) => i.kind === "movie");
 
   const onPlay = (shuffle: boolean) => {
-    if (movies) startQueue(c.items, { shuffle, returnTo });
-    else if (c.items[0]) void play(shuffle ? c.items[Math.floor(Math.random() * c.items.length)] : c.items[0]);
+    if (movies) return startQueue(c.items, { shuffle, returnTo });
+    const pick = shuffle ? c.items[Math.floor(Math.random() * c.items.length)] : c.items[0];
+    if (pick) void play(pick);
   };
 
   return (
@@ -200,7 +201,7 @@ function CollectionView({ collection: c }: { collection: CollectionDetail }) {
               remove.mutate(c, {
                 onSuccess: () => {
                   toast.success("Collection deleted");
-                  navigate(`/library/${c.library_id}?tab=collections`, { replace: true });
+                  void navigate(`/library/${c.library_id}?tab=collections`, { replace: true });
                 },
                 onError: (err) => toast.error(errorMessage(err)),
               })

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useState } from "react";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import type { ItemSummary } from "@/api/types";
 import { cn } from "@/lib/cn";
@@ -39,13 +39,14 @@ export function ItemGrid({ items, total = items.length, aspect, cardWidth, jumpB
   const count = Math.max(total, items.length);
   const rowCount = cols > 0 ? Math.ceil(count / cols) : 0;
 
-  // Distance between the top of the document and the grid.
+  // Distance between the top of the document and the grid: measured again
+  // when the grid's width (the toolbar above may wrap) or size changes.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const top = Math.round(el.getBoundingClientRect().top + window.scrollY);
     if (top !== scrollMargin) setScrollMargin(top);
-  });
+  }, [ref, scrollMargin, width, count]);
 
   const virtualizer = useWindowVirtualizer({
     count: rowCount,
@@ -55,10 +56,9 @@ export function ItemGrid({ items, total = items.length, aspect, cardWidth, jumpB
     scrollPaddingStart: stickyOffset,
   });
 
-  const measureRef = useRef(virtualizer.measure);
-  measureRef.current = virtualizer.measure;
+  const remeasure = useEffectEvent(() => virtualizer.measure());
   useEffect(() => {
-    measureRef.current();
+    remeasure();
   }, [rowHeight, cols]);
 
   const letterIndex = useMemo(() => {

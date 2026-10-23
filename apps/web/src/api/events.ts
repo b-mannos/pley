@@ -25,27 +25,27 @@ export function useServerEvents(enabled: boolean) {
     // after a reconnect anything may have changed (e.g. a scan finished while
     // the server restarted), so refetch what events would have updated.
     const resync = () => {
-      qc.invalidateQueries({ queryKey: keys.libraries });
-      qc.invalidateQueries({ queryKey: keys.activity });
-      qc.invalidateQueries({ queryKey: ["hubs"] });
-      qc.invalidateQueries({ queryKey: ["library"] });
-      qc.invalidateQueries({ queryKey: ["item"] });
-      qc.invalidateQueries({ queryKey: ["search"] });
-      qc.invalidateQueries({ queryKey: ["history"] });
+      void qc.invalidateQueries({ queryKey: keys.libraries });
+      void qc.invalidateQueries({ queryKey: keys.activity });
+      void qc.invalidateQueries({ queryKey: ["hubs"] });
+      void qc.invalidateQueries({ queryKey: ["library"] });
+      void qc.invalidateQueries({ queryKey: ["item"] });
+      void qc.invalidateQueries({ queryKey: ["search"] });
+      void qc.invalidateQueries({ queryKey: ["history"] });
     };
 
     // Metadata refreshes can emit many `library_changed` events in a burst;
     // batch them so we refetch at most every ~1.5 s.
     const flush = () => {
       flushTimer = undefined;
-      for (const id of pendingLibraries) qc.invalidateQueries({ queryKey: keys.library(id) });
+      for (const id of pendingLibraries) void qc.invalidateQueries({ queryKey: keys.library(id) });
       pendingLibraries.clear();
-      qc.invalidateQueries({ queryKey: keys.libraries });
-      qc.invalidateQueries({ queryKey: ["hubs"] });
-      qc.invalidateQueries({ queryKey: ["item"] });
-      qc.invalidateQueries({ queryKey: ["search"] });
+      void qc.invalidateQueries({ queryKey: keys.libraries });
+      void qc.invalidateQueries({ queryKey: ["hubs"] });
+      void qc.invalidateQueries({ queryKey: ["item"] });
+      void qc.invalidateQueries({ queryKey: ["search"] });
       // Finishing something is a library change too.
-      qc.invalidateQueries({ queryKey: ["history"] });
+      void qc.invalidateQueries({ queryKey: ["history"] });
     };
     const scheduleLibrary = (id: Id) => {
       pendingLibraries.add(id);
@@ -62,7 +62,7 @@ export function useServerEvents(enabled: boolean) {
       switch (ev.type) {
         case "scan_started":
           setScanning(ev.library_id, true);
-          qc.invalidateQueries({ queryKey: keys.activity });
+          void qc.invalidateQueries({ queryKey: keys.activity });
           break;
         case "scan_progress": {
           setScanning(ev.library_id, ev.phase !== "done");
@@ -99,18 +99,18 @@ export function useServerEvents(enabled: boolean) {
         }
         case "scan_finished":
           setScanning(ev.library_id, false);
-          qc.invalidateQueries({ queryKey: keys.activity });
+          void qc.invalidateQueries({ queryKey: keys.activity });
           scheduleLibrary(ev.library_id);
           break;
         case "library_changed":
           scheduleLibrary(ev.library_id);
           break;
         case "libraries_changed":
-          qc.invalidateQueries({ queryKey: keys.libraries });
-          qc.invalidateQueries({ queryKey: ["hubs"] });
+          void qc.invalidateQueries({ queryKey: keys.libraries });
+          void qc.invalidateQueries({ queryKey: ["hubs"] });
           break;
         case "sessions_changed":
-          qc.invalidateQueries({ queryKey: keys.activity });
+          void qc.invalidateQueries({ queryKey: keys.activity });
           break;
       }
     };
@@ -126,7 +126,7 @@ export function useServerEvents(enabled: boolean) {
       };
       es.onmessage = (msg) => {
         try {
-          handle(JSON.parse(msg.data) as ServerEvent);
+          handle(JSON.parse(String(msg.data)) as ServerEvent);
         } catch {
           // ignore malformed events
         }

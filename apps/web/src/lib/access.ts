@@ -1,4 +1,5 @@
 import type { Id, Library, User } from "@/api/types";
+import { pluralize } from "./format";
 
 /** Age limits offered for users and invitations (see the server's rating table). */
 export const AGE_OPTIONS: { value: number | null; label: string }[] = [
@@ -33,7 +34,7 @@ export function librariesLabel(
     const name = libraries?.find((l) => l.id === ids[0])?.name;
     if (name) return name;
   }
-  return `${ids.length} libraries`;
+  return pluralize(ids.length, "library", "libraries");
 }
 
 /** Encode the age select's value (`""` = no limit). */

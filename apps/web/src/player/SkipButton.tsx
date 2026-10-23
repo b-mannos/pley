@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 import { ChevronsRight } from "lucide-react";
 import type { ItemDetail, Marker } from "@/api/types";
 import { cn } from "@/lib/cn";
@@ -47,15 +47,13 @@ export function useSkipMarkers({
   const marker = enabled ? activeMarker(markers, seconds) : null;
   const handled = useRef(new Set<string>());
   const key = marker ? `${marker.file_id}:${marker.kind}:${marker.start_ms}` : null;
-  const callbacks = useRef({ onAutoSkip, onCredits });
-  callbacks.current = { onAutoSkip, onCredits };
+  const reached = useEffectEvent((m: Marker) => (m.kind === "intro" ? onAutoSkip(m) : onCredits(m)));
 
   useEffect(() => {
     if (!marker || !key || handled.current.has(key)) return;
     if (marker.kind === "intro" && !autoSkip) return;
     handled.current.add(key);
-    if (marker.kind === "intro") callbacks.current.onAutoSkip(marker);
-    else callbacks.current.onCredits(marker);
+    reached(marker);
     // Runs when the playhead enters a different segment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, autoSkip]);

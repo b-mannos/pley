@@ -46,10 +46,11 @@ export function usePlayItem() {
       try {
         switch (item.kind) {
           case "movie":
-          case "episode": {
+          case "episode":
+          case "extra": {
             const startMs = opts.fromStart ? 0 : item.user_state.watched ? 0 : item.user_state.position_ms;
             audio?.pause();
-            navigate(playUrl(item.id, { startMs, fileId: opts.fileId, audio: opts.audio, sub: opts.sub }));
+            void navigate(playUrl(item.id, { startMs, fileId: opts.fileId, audio: opts.audio, sub: opts.sub }));
             return;
           }
           case "show":
@@ -60,7 +61,7 @@ export function usePlayItem() {
               return;
             }
             audio?.pause();
-            navigate(playUrl(ep.id, { startMs: opts.fromStart ? 0 : ep.user_state.position_ms }));
+            void navigate(playUrl(ep.id, { startMs: opts.fromStart ? 0 : ep.user_state.position_ms }));
             return;
           }
           case "album": {

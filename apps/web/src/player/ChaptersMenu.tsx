@@ -11,7 +11,10 @@ export function chapterTitle(chapter: Chapter, index: number): string {
 /** Index of the chapter playing at `ms` (chapters are sorted by start), or -1. */
 export function chapterIndexAt(chapters: Chapter[], ms: number): number {
   let found = -1;
-  for (let i = 0; i < chapters.length && chapters[i].start_ms <= ms; i++) found = i;
+  for (const [i, chapter] of chapters.entries()) {
+    if (chapter.start_ms > ms) break;
+    found = i;
+  }
   return found;
 }
 

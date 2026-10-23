@@ -114,7 +114,7 @@ function initialValue(item: ItemDetail, key: FieldKey): string {
     case "year":
       return item.year != null ? String(item.year) : "";
     default:
-      return (item[key] as string | null | undefined) ?? "";
+      return item[key] ?? "";
   }
 }
 
