@@ -33,5 +33,7 @@
 # transcoder_max_jobs = 8
 
 # External transcoder (e.g. a GPU machine). Media paths must be identical there.
+# It takes a token of at least 16 characters (the same one on both sides),
+# such as the output of `openssl rand -hex 32`.
 # transcoder_url = "http://gpu-box:7540"
-# transcoder_token = "change-me"
+# transcoder_token = "<the token>"

@@ -24,7 +24,7 @@ mod util;
 
 use std::future::IntoFuture;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -114,17 +114,74 @@ fn main() -> anyhow::Result<()> {
     tokio::runtime::Builder::new_multi_thread().enable_all().thread_name("transcoder").build()?.block_on(run(args))
 }
 
+/// Tokens from examples, which are no secret.
+const EXAMPLE_TOKENS: &[&str] = &["change-me", "changeme", "secret", "token", "password", "pley", "transcoder"];
+/// The shortest token the transcoder takes on the network.
+const MIN_TOKEN_CHARS: usize = 16;
+
+/// Whether the transcoder may listen on `listen` with `token`: on the
+/// network it reads any file it is asked to, so it takes a real secret.
+fn check_token(token: Option<&str>, listen: SocketAddr) -> anyhow::Result<()> {
+    if listen.ip().is_loopback() {
+        return Ok(());
+    }
+    let suggestion = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+    match token {
+        None => anyhow::bail!(
+            "listening on {listen} takes a token (--token or {TOKEN_ENV}, and the same in pley's transcoder_token): \
+             anyone who can reach this port could otherwise read any file it can. A random one: {suggestion}"
+        ),
+        Some(token)
+            if token.chars().count() < MIN_TOKEN_CHARS
+                || EXAMPLE_TOKENS.contains(&token.to_ascii_lowercase().as_str()) =>
+        {
+            anyhow::bail!(
+                "the token must be a secret of at least {MIN_TOKEN_CHARS} characters, not an example. A random one: {suggestion}"
+            )
+        }
+        Some(_) => Ok(()),
+    }
+}
+
+/// The work folder when none is given: in the user's own cache folder, not
+/// the temporary folder every user shares (where someone else could make it
+/// first, or read what is in it).
+fn default_work_dir() -> PathBuf {
+    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let cache = if cfg!(windows) {
+        var("LOCALAPPDATA")
+    } else if cfg!(target_os = "macos") {
+        var("HOME").map(|home| home.join("Library").join("Caches"))
+    } else {
+        var("XDG_CACHE_HOME").or_else(|| var("HOME").map(|home| home.join(".cache")))
+    };
+    cache.unwrap_or_else(std::env::temp_dir).join("pley-transcoder")
+}
+
+/// Keeps the work folder (decoded video, subtitles) to this account: on
+/// Unix, a folder another user made first can't be taken over.
+fn keep_private(dir: &Path) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(|err| {
+            anyhow::anyhow!("{} isn't this account's to use ({err}): choose a folder with --work-dir", dir.display())
+        })?;
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
+    Ok(())
+}
+
 async fn run(args: Args) -> anyhow::Result<()> {
     util::kill_children_on_exit();
-    let work_dir = args.work_dir.clone().unwrap_or_else(|| std::env::temp_dir().join("pley-transcoder"));
+    check_token(args.token.as_deref(), args.listen)?;
+    let work_dir = args.work_dir.clone().unwrap_or_else(default_work_dir);
     std::fs::create_dir_all(&work_dir)?;
+    keep_private(&work_dir)?;
     let jobs_dir = work_dir.join("jobs");
     let _ = std::fs::remove_dir_all(&jobs_dir);
     std::fs::create_dir_all(&jobs_dir)?;
-
-    if args.token.is_none() && !args.listen.ip().is_loopback() {
-        tracing::warn!("listening on {} without a token: anyone who can reach it can use this transcoder", args.listen);
-    }
 
     let ff = Arc::new(
         ffmpeg::Ffmpeg::detect(&args.ffmpeg, &args.ffprobe, &work_dir.join("capabilities.json"), args.redetect).await,
@@ -251,5 +308,32 @@ async fn shutdown_signal(exit_with_parent: bool) {
         _ = parent_gone => {}
         _ = ctrl_c => {}
         _ = terminate => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn on_the_network_only_with_a_real_secret() {
+        let local: SocketAddr = "127.0.0.1:7540".parse().unwrap();
+        let network: SocketAddr = "0.0.0.0:7540".parse().unwrap();
+        assert!(check_token(None, local).is_ok(), "pley's own, on this computer");
+        let refused = check_token(None, network).unwrap_err().to_string();
+        assert!(refused.contains("A random one: "), "{refused}");
+        assert!(check_token(Some("change-me"), network).is_err());
+        assert!(check_token(Some("CHANGE-ME"), network).is_err());
+        assert!(check_token(Some("short"), network).is_err());
+        assert!(check_token(Some("9f2c5a7e1b3d4c6a8e0f1a2b3c4d5e6f"), network).is_ok());
+    }
+
+    #[test]
+    fn the_work_folder_is_the_users_own() {
+        let dir = default_work_dir();
+        assert!(dir.ends_with("pley-transcoder"));
+        if std::env::var_os("HOME").is_some() || std::env::var_os("LOCALAPPDATA").is_some() {
+            assert!(!dir.starts_with(std::env::temp_dir()) || cfg!(windows), "{}", dir.display());
+        }
     }
 }

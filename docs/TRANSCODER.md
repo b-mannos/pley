@@ -20,8 +20,10 @@ live in the `pley-transcoder-api` crate.
 ```
 pley-transcoder [OPTIONS]
   --listen <ADDR>          default 127.0.0.1:7540 (port 0 = pick a free port)
-  --token <TOKEN>          shared secret; env PLEY_TRANSCODER_TOKEN
-  --work-dir <DIR>         segments, caches (default: <tmp>/pley-transcoder)
+  --token <TOKEN>          shared secret, at least 16 characters; env PLEY_TRANSCODER_TOKEN.
+                           Required unless --listen is a loopback address
+  --work-dir <DIR>         segments, caches (default: the user's cache folder,
+                           e.g. ~/.cache/pley-transcoder); kept private to the user
   --ffmpeg / --ffprobe     binaries (default: from PATH)
   --max-jobs <N>           concurrent ffmpeg transcodes (default 8)
   --max-hw-jobs <N>        concurrent hardware encoder sessions (default 8);
