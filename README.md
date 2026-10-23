@@ -16,7 +16,8 @@ HLG and Dolby Vision.
   - Unmounted drives are never mistaken for deleted files.
 - **Smart file name parsing.**
   - Movies: `Title (Year)` and release names (`Title.2019.1080p.BluRay…`), plus
-    `{tmdb-123}` hints.
+    `{tmdb-123}` hints. Editions (`{edition-Director's Cut}`) are versions of
+    one movie, named in the version menu.
   - Episodes: `S01E02`, `1x02`, multi-episode files, season folders, specials,
     date-based shows and anime numbering.
   - Music: tags first, then folders.
@@ -77,19 +78,38 @@ HLG and Dolby Vision.
     plus collections that administrators curate, with their own order.
   - Private playlists for video and music: add a film, an episode or a whole
     show, album or artist, reorder by dragging, play in order or shuffled.
-  - Both respect library access and age limits.
+  - Smart collections and smart playlists: a library's filters ("unwatched
+    comedies, newest first") saved once, which keep up with the library by
+    themselves.
+  - All of them respect library access and age limits.
+- **Accounts.**
+  - Administrators, users and managed profiles (no password, for children),
+    each with their own watch state, ratings, playlists and history.
+  - Library access and an age limit per user (by content rating).
+  - Home profiles with a profile switcher and optional PINs, display names,
+    pictures and colors.
+  - Invitation links with the access they grant, signed-in devices with
+    remote sign-out, password changes, disabled accounts, and login
+    throttling.
+  - Default audio language and subtitle mode per user (off, forced only,
+    with foreign audio, always), over which a title's own choice wins.
 - **Admin.**
   - Metadata editing with locked fields, Fix Match against TMDB, and
     choosing or uploading posters, backgrounds and thumbnails.
-  - Users and roles.
   - Library management with a folder browser.
   - Runtime settings.
   - A live dashboard: now playing with transcode details, transcoder metrics
     (fps, speed, hardware sessions, segments, disk), scans and system info.
   - Prometheus `/metrics` on the transcoder.
-- **Plex-compatible API** on port 32400 for Plex tools such as python-plexapi
-  and Tautulli: libraries, metadata, collections, playlists, watch state,
-  sessions, direct play and HLS streams. See [docs/PLEX.md](docs/PLEX.md).
+- **Plex-compatible API** on port 32400 for Plex tools such as python-plexapi,
+  Tautulli and Kometa: libraries with Plex's filters, sorts and paging,
+  metadata with provider guids, markers and "More Like This", editing
+  (fields and locks, genres, labels, collections, posters), collections and
+  playlists (smart ones too), play queues, watch state, sessions and the
+  notification socket, direct play and HLS streams. See
+  [docs/PLEX.md](docs/PLEX.md).
+- **Web app.** Works on phones, tablets and desktops, and installs as an app
+  from the browser.
 - **Storage.** Downloaded and uploaded pictures are stored once by content,
   files generated from media (frame grabs, previews, chapter pictures) follow
   their file through moves and renames, unused files are cleaned up, and the
