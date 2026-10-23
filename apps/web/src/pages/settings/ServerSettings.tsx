@@ -297,7 +297,10 @@ export function ServerSettings() {
   const system = useSystemInfo();
   const save = useSaveSettings();
   const toast = useToast();
-  const [form, setForm] = useState<Settings | null>(null);
+  // The form starts from the saved settings, which are already there when
+  // the page opens again (cached) or was opened by its route, and returns to
+  // them after saving.
+  const [form, setForm] = useState<Settings | null>(() => settings.data ?? null);
 
   // A link to one field (`#tmdb-key`) focuses it once the form is there.
   const { hash } = useLocation();
@@ -306,7 +309,6 @@ export function ServerSettings() {
     if (loaded && hash) document.getElementById(decodeURIComponent(hash.slice(1)))?.focus();
   }, [loaded, hash]);
 
-  // The form starts from (and returns to, after saving) the saved settings.
   useOnChange(settings.data, (data) => {
     if (data) setForm(data);
   });

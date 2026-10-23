@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, qs, request } from "./client";
 import type {
   MySingleSignOn,
@@ -271,12 +271,22 @@ export function useSignOutDevice() {
 // Libraries
 // ---------------------------------------------------------------------------
 
+/**
+ * What pages open with, as query options: their routes fetch it alongside
+ * their code (App.tsx), and the pages read it from the cache.
+ */
+export const queries = {
+  libraries: () =>
+    queryOptions({ queryKey: keys.libraries, queryFn: () => api.get<Library[]>("/api/libraries"), staleTime: 30_000 }),
+  users: () => queryOptions({ queryKey: keys.users, queryFn: () => api.get<User[]>("/api/users") }),
+  invites: () => queryOptions({ queryKey: keys.invites, queryFn: () => api.get<Invite[]>("/api/invites") }),
+  settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => api.get<Settings>("/api/settings") }),
+  system: () => queryOptions({ queryKey: keys.system, queryFn: () => api.get<SystemInfo>("/api/system"), staleTime: 10_000 }),
+  activity: () => queryOptions({ queryKey: keys.activity, queryFn: () => api.get<Activity>("/api/activity"), staleTime: 2_000 }),
+};
+
 export function useLibraries() {
-  return useQuery({
-    queryKey: keys.libraries,
-    queryFn: () => api.get<Library[]>("/api/libraries"),
-    staleTime: 30_000,
-  });
+  return useQuery(queries.libraries());
 }
 
 export function useLibrary(id: Id) {
@@ -607,15 +617,13 @@ export function usePerson(id: Id) {
 
 export function useActivity(opts: { poll?: number | false } = {}) {
   return useQuery({
-    queryKey: keys.activity,
-    queryFn: () => api.get<Activity>("/api/activity"),
+    ...queries.activity(),
     refetchInterval: (query) => {
       if (opts.poll) return opts.poll;
       const scans = query.state.data?.scans ?? [];
       return scans.some((s) => s.phase !== "done") ? 4_000 : false;
     },
     refetchIntervalInBackground: false,
-    staleTime: 2_000,
   });
 }
 
@@ -624,7 +632,7 @@ export function useActivity(opts: { poll?: number | false } = {}) {
 // ---------------------------------------------------------------------------
 
 export function useUsers() {
-  return useQuery({ queryKey: keys.users, queryFn: () => api.get<User[]>("/api/users") });
+  return useQuery(queries.users());
 }
 
 export interface NewUserInput {
@@ -708,7 +716,7 @@ export function useSignOutEverywhere() {
 // ---------------------------------------------------------------------------
 
 export function useInvites() {
-  return useQuery({ queryKey: keys.invites, queryFn: () => api.get<Invite[]>("/api/invites") });
+  return useQuery(queries.invites());
 }
 
 export interface NewInviteInput {
@@ -765,7 +773,7 @@ export function useAcceptInvite(code: string) {
 
 /** Server settings (administrators only). */
 export function useSettings(enabled = true) {
-  return useQuery({ queryKey: keys.settings, queryFn: () => api.get<Settings>("/api/settings"), enabled });
+  return useQuery({ ...queries.settings(), enabled });
 }
 
 export function useSaveSettings() {
@@ -812,7 +820,7 @@ export function useCreateBackup() {
 }
 
 export function useSystemInfo() {
-  return useQuery({ queryKey: keys.system, queryFn: () => api.get<SystemInfo>("/api/system"), staleTime: 10_000 });
+  return useQuery(queries.system());
 }
 
 export function useTranscoderStatus(pollMs: number | false = 2_500) {
