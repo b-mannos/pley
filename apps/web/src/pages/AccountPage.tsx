@@ -1,6 +1,19 @@
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router";
-import { Camera, Check, History, KeyRound, Laptop, Lock, LogOut, ShieldCheck, Smartphone, Trash2, UserRound } from "lucide-react";
+import {
+  Camera,
+  Check,
+  History,
+  KeyRound,
+  Languages,
+  Laptop,
+  Lock,
+  LogOut,
+  ShieldCheck,
+  Smartphone,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 import { errorMessage, isApiError } from "@/api/client";
 import {
   useChangePassword,
@@ -12,15 +25,16 @@ import {
   useUpdateProfile,
   useUploadAvatar,
 } from "@/api/hooks";
-import type { Device } from "@/api/types";
+import type { Device, ProfilePatch, SubtitleMode } from "@/api/types";
 import { useAudioPlayer } from "@/audio/AudioPlayer";
 import { useAuth } from "@/auth";
 import { Avatar, AVATAR_COLORS, avatarColor } from "@/components/Avatar";
 import { useToast } from "@/components/Toast";
 import { HistoryList } from "@/components/HistoryList";
-import { Badge, Button, Card, Field, TextInput } from "@/components/ui";
+import { Badge, Button, Card, Field, Select, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatDay, formatRelative } from "@/lib/format";
+import { LANGUAGES } from "@/lib/languages";
 import { useDocumentTitle } from "@/lib/hooks";
 
 const MAX_AVATAR_BYTES = 10 * 1024 * 1024;
@@ -178,6 +192,101 @@ function ProfileCard() {
             {user.avatar_url ? <p className="mt-1.5 text-xs text-subtle">Shown when your picture can't be.</p> : null}
           </div>
         </div>
+      </div>
+    </Card>
+  );
+}
+
+const SUBTITLE_MODES: Record<SubtitleMode, { label: string; hint: string }> = {
+  off: { label: "Off", hint: "Subtitles stay off until you turn them on." },
+  forced: {
+    label: "Only for foreign dialogue",
+    hint: "Forced subtitles come on: they translate the lines you're meant to read.",
+  },
+  foreign: {
+    label: "When the audio is in another language",
+    hint: "Full subtitles come on when the audio isn't in your subtitle language.",
+  },
+  always: { label: "Always", hint: "Subtitles in your language come on whenever there are some." },
+};
+const MODE_ORDER: SubtitleMode[] = ["off", "forced", "foreign", "always"];
+
+/** Default tracks: what a film or show starts with until you pick tracks for it. */
+export function PlaybackCard() {
+  const user = useAuth();
+  const toast = useToast();
+  const update = useUpdateProfile();
+  const mode = SUBTITLE_MODES[user.subtitle_mode];
+  const readsSubtitles = user.subtitle_mode === "foreign" || user.subtitle_mode === "always";
+
+  const save = (body: ProfilePatch, message: string) =>
+    update.mutate(body, { onSuccess: () => toast.success(message), onError: (err) => toast.error(errorMessage(err)) });
+
+  return (
+    <Card>
+      <CardTitle icon={<Languages />}>Audio and subtitles</CardTitle>
+      <p className="mb-4 text-sm text-muted">
+        What a film or show starts with until you pick tracks for it. The tracks you pick are remembered for each
+        title.
+      </p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Audio language" htmlFor="audio-language">
+          <Select
+            id="audio-language"
+            className="w-full"
+            value={user.audio_language ?? ""}
+            disabled={update.isPending}
+            onChange={(e) => save({ audio_language: e.target.value || null }, "Audio language saved")}
+          >
+            <option value="">The file's default</option>
+            {LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Subtitles" htmlFor="subtitle-mode" hint={mode.hint}>
+          <Select
+            id="subtitle-mode"
+            className="w-full"
+            value={user.subtitle_mode}
+            disabled={update.isPending}
+            onChange={(e) => save({ subtitle_mode: e.target.value as SubtitleMode }, "Subtitles saved")}
+          >
+            {MODE_ORDER.map((m) => (
+              <option key={m} value={m}>
+                {SUBTITLE_MODES[m].label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {readsSubtitles ? (
+          <Field
+            label="Subtitle language"
+            htmlFor="subtitle-language"
+            hint={
+              user.subtitle_language || user.audio_language
+                ? undefined
+                : "Choose the language you read: without one, only forced subtitles come on."
+            }
+          >
+            <Select
+              id="subtitle-language"
+              className="w-full"
+              value={user.subtitle_language ?? ""}
+              disabled={update.isPending}
+              onChange={(e) => save({ subtitle_language: e.target.value || null }, "Subtitle language saved")}
+            >
+              <option value="">Same as the audio language</option>
+              {LANGUAGES.map((l) => (
+                <option key={l.code} value={l.code}>
+                  {l.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
       </div>
     </Card>
   );
@@ -460,6 +569,7 @@ export function AccountPage() {
         </Button>
       </div>
       <ProfileCard key={user.id} />
+      <PlaybackCard />
       <PinCard />
       {user.managed ? null : <PasswordCard />}
       <HistoryCard />

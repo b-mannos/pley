@@ -22,6 +22,7 @@ import type {
   LibraryKind,
   LoginResponse,
   PersonDetail,
+  ProfilePatch,
   SearchResults,
   ServerStatus,
   Settings,
@@ -179,7 +180,7 @@ function rememberMe(qc: QueryClient, user: User) {
 export function useUpdateProfile() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { display_name?: string | null; avatar_color?: string | null }) => api.patch<User>("/api/me", body),
+    mutationFn: (body: ProfilePatch) => api.patch<User>("/api/me", body),
     onSuccess: (user) => rememberMe(qc, user),
   });
 }

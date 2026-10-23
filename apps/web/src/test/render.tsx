@@ -23,6 +23,9 @@ export const testUser: User = {
   max_age: null,
   disabled: false,
   created_at: 1_700_000_000,
+  audio_language: null,
+  subtitle_language: null,
+  subtitle_mode: "forced",
 };
 
 /** No retries (queries that ask for some get them right away) and no garbage collection. */

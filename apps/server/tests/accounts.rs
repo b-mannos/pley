@@ -454,3 +454,67 @@ async fn setup_checks_the_first_account_and_logout_clears_the_cookie() {
     // Signing out without a session is fine too.
     assert_eq!(app.call(Method::POST, "/api/auth/logout", None, None, &[]).await.status, StatusCode::NO_CONTENT);
 }
+
+#[tokio::test]
+async fn titles_start_with_the_users_default_tracks() {
+    let app = TestApp::new().await;
+    let token = app.setup_admin().await;
+    app.media_file("movies/Amelie (2001)/Amelie (2001).mkv", 1024);
+    app.media_file("movies/Amelie (2001)/Amelie (2001).en.srt", 64);
+    app.media_file("movies/Amelie (2001)/Amelie (2001).fr.srt", 64);
+    let lib = app.library(&token, "Movies", "movies", "movies").await;
+    let film = app.ids(lib, &token).await["Amelie"];
+    let selected = |detail: &Value| detail["files"][0]["selected_subtitle"].clone();
+    let french = |detail: &Value| -> Value {
+        detail["files"][0]["streams"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["kind"] == "subtitle" && s["language"] == "fre")
+            .unwrap()["index"]
+            .clone()
+    };
+
+    let me = app.get("/api/auth/me", &token).await.body;
+    assert_eq!((&me["audio_language"], &me["subtitle_mode"]), (&Value::Null, &json!("forced")), "{me}");
+    let detail = app.get(&format!("/api/items/{film}"), &token).await.body;
+    assert_eq!(selected(&detail), Value::Null, "no defaults: forced subtitles at most");
+
+    let saved = app.patch("/api/me", &token, json!({"subtitle_mode": "always", "subtitle_language": "fr"})).await;
+    assert_eq!(saved.status, StatusCode::OK, "{:?}", saved.body);
+    assert_eq!((&saved.body["subtitle_mode"], &saved.body["subtitle_language"]), (&json!("always"), &json!("fr")));
+    let detail = app.get(&format!("/api/items/{film}"), &token).await.body;
+    assert_eq!(selected(&detail), french(&detail), "French subtitles, always");
+
+    // Foreign mode needs to know the audio is foreign: an untagged track isn't.
+    app.patch("/api/me", &token, json!({"subtitle_mode": "foreign"})).await;
+    let detail = app.get(&format!("/api/items/{film}"), &token).await.body;
+    assert_eq!(selected(&detail), Value::Null);
+
+    for bad in
+        [json!({"audio_language": "English"}), json!({"subtitle_language": "EN"}), json!({"subtitle_mode": "loud"})]
+    {
+        let refused = app.patch("/api/me", &token, bad.clone()).await;
+        assert!(
+            refused.status == StatusCode::BAD_REQUEST || refused.status == StatusCode::UNPROCESSABLE_ENTITY,
+            "{bad}"
+        );
+    }
+    let cleared = app.patch("/api/me", &token, json!({"subtitle_language": null, "audio_language": "eng"})).await;
+    assert_eq!((&cleared.body["subtitle_language"], &cleared.body["audio_language"]), (&Value::Null, &json!("eng")));
+
+    // A choice made for the title wins over the defaults.
+    app.patch("/api/me", &token, json!({"subtitle_mode": "always", "subtitle_language": "fre"})).await;
+    let off = app
+        .call(
+            Method::PUT,
+            &format!("/api/items/{film}/streams"),
+            Some(&token),
+            Some(json!({"subtitle_index": null})),
+            &[],
+        )
+        .await;
+    assert_eq!(off.status, StatusCode::NO_CONTENT, "{:?}", off.body);
+    let detail = app.get(&format!("/api/items/{film}"), &token).await.body;
+    assert_eq!(selected(&detail), Value::Null);
+}

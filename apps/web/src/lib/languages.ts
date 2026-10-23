@@ -44,3 +44,15 @@ export function languageName(code: string | null | undefined): string | null {
   if (!name) return raw.length <= 3 ? raw.toUpperCase() : raw;
   return region ? `${name} (${region.toUpperCase()})` : name;
 }
+
+/**
+ * Languages offered as audio and subtitle defaults, by name. Codes are ISO
+ * 639-2/B, the form ffprobe reports; the server matches the other forms too.
+ */
+export const LANGUAGES: readonly { code: string; name: string }[] = [
+  "ara", "bul", "cat", "chi", "cze", "dan", "dut", "eng", "fin", "fre", "ger", "gre", "heb", "hin", "hrv", "hun",
+  "ind", "ita", "jpn", "kor", "nor", "per", "pol", "por", "rum", "rus", "slo", "spa", "srp", "swe", "tha", "tur",
+  "ukr", "vie",
+]
+  .map((code) => ({ code, name: languageName(code) ?? code }))
+  .sort((a, b) => a.name.localeCompare(b.name));

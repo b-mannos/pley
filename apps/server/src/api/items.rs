@@ -31,8 +31,9 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i
     }
     if !detail.files.is_empty() {
         let pref = streams::load(&state.db, user.id, scope).await?;
+        let defaults = streams::defaults(&state.db, user.id).await?;
         for file in &mut detail.files {
-            let selection = streams::resolve(pref.as_ref(), &file.streams);
+            let selection = streams::resolve(pref.as_ref(), &defaults, &file.streams);
             file.selected_audio = selection.audio;
             file.selected_subtitle = selection.subtitle;
         }

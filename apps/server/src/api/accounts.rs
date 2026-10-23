@@ -16,6 +16,7 @@ use crate::auth::{
 };
 use crate::error::{ApiResult, AppError};
 use crate::state::AppState;
+use crate::streams::{self, SubtitleMode};
 use crate::util::now;
 
 /// `Some(None)` for an explicit `null`, `None` when the field is absent.
@@ -376,6 +377,14 @@ pub struct ProfilePatch {
     display_name: Option<Option<String>>,
     #[serde(default, deserialize_with = "nullable")]
     avatar_color: Option<Option<String>>,
+    /// ISO 639 code; `null`: the file's default track.
+    #[serde(default, deserialize_with = "nullable")]
+    audio_language: Option<Option<String>>,
+    /// ISO 639 code; `null`: the audio language.
+    #[serde(default, deserialize_with = "nullable")]
+    subtitle_language: Option<Option<String>>,
+    #[serde(default)]
+    subtitle_mode: Option<SubtitleMode>,
 }
 
 pub async fn update_me(
@@ -397,6 +406,24 @@ pub async fn update_me(
         }
         sqlx::query("UPDATE users SET avatar_color = ? WHERE id = ?")
             .bind(color)
+            .bind(user.id)
+            .execute(&state.db.write)
+            .await?;
+    }
+    for (column, value) in [("audio_language", body.audio_language), ("subtitle_language", body.subtitle_language)] {
+        let Some(value) = value else { continue };
+        if value.as_deref().is_some_and(|code| !streams::valid_language(code)) {
+            return Err(AppError::bad_request(format!("{column} must be an ISO 639 code such as \"eng\"")));
+        }
+        sqlx::query(&format!("UPDATE users SET {column} = ? WHERE id = ?"))
+            .bind(value)
+            .bind(user.id)
+            .execute(&state.db.write)
+            .await?;
+    }
+    if let Some(mode) = body.subtitle_mode {
+        sqlx::query("UPDATE users SET subtitle_mode = ? WHERE id = ?")
+            .bind(mode.as_str())
             .bind(user.id)
             .execute(&state.db.write)
             .await?;

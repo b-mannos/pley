@@ -53,6 +53,10 @@ interface User {
   max_age: number | null;          // age limit for movies and shows; null = none
   disabled: boolean;
   created_at: Timestamp;
+  // Default tracks for titles without a remembered choice:
+  audio_language: string | null;    // ISO 639 code ("eng", "fr"); null = the file's default track
+  subtitle_language: string | null; // null = the audio language
+  subtitle_mode: "off" | "forced" | "foreign" | "always";
 }
 
 type LibraryKind = "movies" | "shows" | "music";
@@ -266,13 +270,22 @@ Disabled accounts get `403` at login and their sessions stop working.
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| PATCH | `/api/me` | `{ display_name?, avatar_color? }` (`null` clears) | `User` |
+| PATCH | `/api/me` | `{ display_name?, avatar_color?, audio_language?, subtitle_language?, subtitle_mode? }` (`null` clears) | `User` |
 | PUT | `/api/me/pin` | `{ pin: string \| null, password }` | `204`; 4–8 digits, `null` removes it |
 | PUT | `/api/me/avatar` | raw image bytes (JPEG, PNG, WebP, GIF, BMP; ≤ 10 MB) | `User`; stored as a 256 px square JPEG |
 | DELETE | `/api/me/avatar` | – | `204` |
 | GET | `/api/users/{id}/avatar` | – | `image/jpeg` (any signed-in user, for the profile switcher) |
 | GET | `/api/me/devices` | – | `Device[]`: `{ id, name, user_agent, ip, created_at, last_seen_at, current }` |
 | DELETE | `/api/me/devices/{id}` | – | `204`, signs that device out |
+
+Titles you haven't picked tracks for start with your defaults: the main
+audio track in `audio_language` (the file's default without one), and
+subtitles as `subtitle_mode` says: `off` never; `forced` (the default) only
+forced subtitles in the language of the audio, which translate foreign
+dialogue; `foreign` full subtitles in `subtitle_language` (or the audio
+language) when the audio is tagged with another language; `always` in that
+language whenever the file has them. Every mode but `off` falls back to the
+forced ones. A choice made for a show or a movie wins over these.
 
 ## Access rules
 

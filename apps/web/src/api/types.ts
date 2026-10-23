@@ -26,6 +26,26 @@ export interface User {
   max_age: number | null;
   disabled: boolean;
   created_at: Timestamp;
+  /** Default tracks for titles without a remembered choice. ISO 639 code; `null`: the file's default track. */
+  audio_language: string | null;
+  /** `null`: the audio language. */
+  subtitle_language: string | null;
+  subtitle_mode: SubtitleMode;
+}
+
+/**
+ * When subtitles come on by themselves: never, only forced ones (foreign
+ * dialogue), full ones when the audio is in another language, or always.
+ */
+export type SubtitleMode = "off" | "forced" | "foreign" | "always";
+
+/** The account settings `PATCH /api/me` takes. */
+export interface ProfilePatch {
+  display_name?: string | null;
+  avatar_color?: string | null;
+  audio_language?: string | null;
+  subtitle_language?: string | null;
+  subtitle_mode?: SubtitleMode;
 }
 
 /** A signed-in session (browser, app). */

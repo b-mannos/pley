@@ -12,6 +12,7 @@ use serde::Serialize;
 
 use crate::db::Db;
 use crate::error::AppError;
+use crate::streams::SubtitleMode;
 
 /// Stored instead of a password hash for managed profiles: never verifies.
 pub const NO_PASSWORD: &str = "!managed";
@@ -32,6 +33,9 @@ struct UserRow {
     max_age: Option<i64>,
     disabled: bool,
     created_at: i64,
+    audio_language: Option<String>,
+    subtitle_language: Option<String>,
+    subtitle_mode: String,
 }
 
 /// A user as the API shows it.
@@ -55,10 +59,15 @@ pub struct UserDto {
     pub max_age: Option<i64>,
     pub disabled: bool,
     pub created_at: i64,
+    /// Default tracks for titles without a choice (see `crate::streams`).
+    pub audio_language: Option<String>,
+    pub subtitle_language: Option<String>,
+    pub subtitle_mode: SubtitleMode,
 }
 
 const USER_COLUMNS: &str = "id, username, display_name, is_admin, managed, home, pin_hash IS NOT NULL AS has_pin,
-    avatar, avatar_color, all_libraries, max_age, disabled, created_at";
+    avatar, avatar_color, all_libraries, max_age, disabled, created_at, audio_language, subtitle_language,
+    subtitle_mode";
 
 impl UserRow {
     fn into_dto(self, library_ids: Vec<i64>) -> UserDto {
@@ -78,6 +87,9 @@ impl UserRow {
             max_age: if self.is_admin { None } else { self.max_age },
             disabled: self.disabled,
             created_at: self.created_at,
+            audio_language: self.audio_language,
+            subtitle_language: self.subtitle_language,
+            subtitle_mode: SubtitleMode::parse(&self.subtitle_mode),
         }
     }
 }
@@ -499,6 +511,9 @@ mod tests {
             max_age: Some(12),
             disabled: false,
             created_at: 0,
+            audio_language: None,
+            subtitle_language: Some("fre".into()),
+            subtitle_mode: "foreign".into(),
         }
     }
 
