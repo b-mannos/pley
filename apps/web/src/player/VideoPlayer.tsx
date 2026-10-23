@@ -702,12 +702,20 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   // arrives, and pulling subtitles out of a big file can take minutes.)
   const shownTextUrl = (info?.subtitles ?? []).find((s) => s.index === shownTextIndex && s.text_based)?.url ?? null;
   const [loadedCues, setLoadedCues] = useState<{ url: string; cues: VTTCue[] } | null>(null);
-  const [subtitlesSlow, setSubtitlesSlow] = useState(false);
+  /** Subtitles taking a while: said on screen for a moment, then they come when they come. */
+  const [subtitlesWait, setSubtitlesWait] = useState<"slow" | "slower" | null>(null);
   useEffect(() => {
     if (!shownTextUrl || typeof VTTCue === "undefined") return;
     const abort = new AbortController();
-    // Said on screen only when it takes a while.
-    const slow = window.setTimeout(() => setSubtitlesSlow(true), 1500);
+    const timers = [
+      window.setTimeout(() => setSubtitlesWait("slow"), 1_500),
+      window.setTimeout(() => setSubtitlesWait("slower"), 10_000),
+      window.setTimeout(() => setSubtitlesWait(null), 16_000),
+    ];
+    const done = () => {
+      timers.forEach((t) => window.clearTimeout(t));
+      setSubtitlesWait(null);
+    };
     fetch(shownTextUrl, { credentials: "same-origin", signal: abort.signal })
       .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((text) => setLoadedCues({ url: shownTextUrl, cues: parseVtt(text, VTTCue) }))
@@ -715,13 +723,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         if (!abort.signal.aborted) toast.error("These subtitles couldn't be loaded.");
       })
       .finally(() => {
-        window.clearTimeout(slow);
-        if (!abort.signal.aborted) setSubtitlesSlow(false);
+        if (!abort.signal.aborted) done();
       });
     return () => {
       abort.abort();
-      window.clearTimeout(slow);
-      setSubtitlesSlow(false);
+      done();
     };
   }, [shownTextUrl, toast]);
   const shownCues = loadedCues && loadedCues.url === shownTextUrl ? loadedCues.cues : null;
@@ -1017,9 +1023,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       >
       </video>
       <SubtitleOverlay cues={cues} lifted={showControls} style={subStyle} />
-      {subtitlesSlow && !error ? (
+      {subtitlesWait && !error ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-28 flex justify-center">
-          <span className="rounded-full bg-black/60 px-3 py-1 text-xs text-white/80">Loading subtitles…</span>
+          <span className="rounded-full bg-black/60 px-3 py-1 text-xs text-white/80">
+            {subtitlesWait === "slow" ? "Loading subtitles…" : "Subtitles are on their way: they'll show as soon as they're ready."}
+          </span>
         </div>
       ) : null}
 
