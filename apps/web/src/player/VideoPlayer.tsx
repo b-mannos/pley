@@ -64,6 +64,18 @@ export interface VideoPlayerProps {
   queue?: QueuePosition | null;
 }
 
+/** How long playback may stand still, wanting to play, before it counts as stalled. */
+const STALL_MS = 12_000;
+const STALL_CHECK_MS = 2_000;
+
+/** Seconds of media buffered past the playhead. */
+function bufferedAhead(v: HTMLMediaElement): number {
+  for (let i = 0; i < v.buffered.length; i++) {
+    if (v.buffered.start(i) <= v.currentTime + 0.25 && v.currentTime < v.buffered.end(i)) return v.buffered.end(i) - v.currentTime;
+  }
+  return 0;
+}
+
 export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: initialSub, queue }: VideoPlayerProps) {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -107,6 +119,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
   const [fellBack, setFellBack] = useState(false);
+  /** The fallback to a transcode came from a stall rather than an error. */
+  const [stalled, setStalled] = useState(false);
+  /** When playback last moved (and where to), and when media data last arrived (see `onStall`). */
+  const lastAdvance = useRef({ at: 0, time: -1 });
+  const lastData = useRef(0);
   const [loading, setLoading] = useState(true);
   const [buffering, setBuffering] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -208,6 +225,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const requestMode = fallbackModeRef.current ?? mode;
     recoveries.current.network = 0;
     recoveries.current.media = 0;
+    // A new session gets the full grace before it counts as stalled.
+    lastAdvance.current = { at: performance.now(), time: -1 };
+    lastData.current = performance.now();
     setLoading(true);
     setError(null);
     setNeedsGesture(false);
@@ -337,6 +357,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                 // during a long pause) gets a fresh retry budget.
                 recoveries.current.recreate = 0;
                 recoveries.current.network = 0;
+                lastData.current = performance.now();
               });
               hls.loadSource(pinfo.url);
               hls.attachMedia(video);
@@ -447,6 +468,55 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     setError(v.error.message || "This video can't be played in your browser.");
   });
 
+  // A stall without an error: the browser waits for data, or for a decoder
+  // that can't keep up, and its spinner would stay for good. When playback
+  // hasn't moved for STALL_MS although it should, recover as from an error:
+  // starving, load again (then start a new session); with data that doesn't
+  // play, transcode a direct play or reset the HLS decoder (then a new session).
+  const onStall = useEffectEvent(() => {
+    const v = videoRef.current;
+    const s = sessionRef.current;
+    const now = performance.now();
+    if (!v || !s || error || needsGesture || ended || v.paused || v.currentTime !== lastAdvance.current.time) {
+      // Moving, or not meant to be (paused, failed, finished).
+      lastAdvance.current = { at: now, time: v?.currentTime ?? -1 };
+      return;
+    }
+    if (now - lastAdvance.current.at < STALL_MS) return;
+    // The next check waits a full STALL_MS again.
+    lastAdvance.current = { at: now, time: v.currentTime };
+    const starving = now - lastData.current >= STALL_MS && bufferedAhead(v) < 1;
+    const r = recoveries.current;
+    const hls = hlsRef.current;
+    if (!starving && s.method === "direct" && !fallbackModeRef.current) {
+      // The browser said it plays this file, and doesn't keep up: transcode it.
+      fallbackModeRef.current = "transcode";
+      setStalled(true);
+      restartAt(livePosition());
+      return;
+    }
+    if (!starving && hls && r.media < 2) {
+      r.media += 1;
+      hls.recoverMediaError();
+      return;
+    }
+    if (starving && hls && r.network < 4) {
+      r.network += 1;
+      hls.startLoad(livePosition());
+      return;
+    }
+    if (r.recreate < 3) {
+      r.recreate += 1;
+      restartAt(livePosition());
+      return;
+    }
+    setError("Playback stopped and couldn't get going again.");
+  });
+  useEffect(() => {
+    const timer = window.setInterval(onStall, STALL_CHECK_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -467,7 +537,10 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       positionRef.current = v.currentTime;
       setCurrent(v.currentTime);
     };
-    const onProgress = () => setBuffered(rangesOf(v.buffered));
+    const onProgress = () => {
+      lastData.current = performance.now();
+      setBuffered(rangesOf(v.buffered));
+    };
     const onDuration = () => setMediaDuration(Number.isFinite(v.duration) ? v.duration : 0);
     const onWaiting = () => setBuffering(true);
     const onPlaying = () => {
@@ -484,6 +557,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     };
     const onEnded = () => onMediaEnded();
     const onError = () => onMediaError();
+    // Wherever a seek comes from, its target is where playback is meant to
+    // be, also while it loads (a restart after a stall resumes there).
+    const onSeeking = () => {
+      if (sessionRef.current) positionRef.current = v.currentTime;
+    };
 
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);
@@ -493,6 +571,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     v.addEventListener("waiting", onWaiting);
     v.addEventListener("playing", onPlaying);
     v.addEventListener("canplay", onCanPlay);
+    v.addEventListener("seeking", onSeeking);
     v.addEventListener("seeked", onSeeked);
     v.addEventListener("ended", onEnded);
     v.addEventListener("error", onError);
@@ -505,6 +584,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       v.removeEventListener("waiting", onWaiting);
       v.removeEventListener("playing", onPlaying);
       v.removeEventListener("canplay", onCanPlay);
+      v.removeEventListener("seeking", onSeeking);
       v.removeEventListener("seeked", onSeeked);
       v.removeEventListener("ended", onEnded);
       v.removeEventListener("error", onError);
@@ -652,6 +732,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     if (id === selectedQuality.id) return;
     startMsRef.current = currentMs();
     fallbackModeRef.current = null;
+    setStalled(false);
     setQuality(id);
   };
   const changeSubtitle = (index: number | null) => {
@@ -801,7 +882,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
   // After a failed direct play the server only knows that a transcode was requested.
-  const methodReason = fellBack ? "This browser couldn't play the original file" : (info?.reason ?? null);
+  const methodReason = fellBack
+    ? stalled
+      ? "The original didn't play smoothly in this browser"
+      : "This browser couldn't play the original file"
+    : (info?.reason ?? null);
   const subtitleLabel = (s: PlaybackInfo["subtitles"][number]) =>
     streamLabel({ index: s.index, kind: "subtitle", codec: s.codec, language: s.language, title: s.title, default: s.default, forced: s.forced, external: s.external, text_based: s.text_based });
 
