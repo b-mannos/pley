@@ -63,6 +63,8 @@ async fn fields_are_edited_and_locked() {
     assert_eq!((&item["title"], &item["summary"]), (&json!("Alien: Director's Cut"), &json!("In space")));
     let pley = w.app.get(&format!("/api/items/{}", w.alien), &w.admin).await.body;
     assert_eq!(pley["locked_fields"], json!(["summary", "title", "year"]), "kept through refreshes");
+    let locked: Vec<&str> = item["Field"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap()).collect();
+    assert_eq!(locked, ["summary", "title", "year"], "as Plex clients read locks");
 
     // Unlocked: the metadata agent may fill it again.
     assert_eq!(put(&w, &format!("/library/metadata/{}", w.alien), "summary.locked=0").await, StatusCode::OK);
@@ -72,6 +74,12 @@ async fn fields_are_edited_and_locked() {
     assert_eq!(put(&w, &format!("/library/metadata/{}", w.brazil), "title.locked=1").await, StatusCode::OK);
     let pley = w.app.get(&format!("/api/items/{}", w.brazil), &w.admin).await.body;
     assert_eq!((&pley["title"], &pley["locked_fields"]), (&json!("Brazil"), &json!(["title"])));
+
+    // A value sent unlocked: written, not kept.
+    let unlocked = format!("/library/metadata/{}", w.alien);
+    assert_eq!(put(&w, &unlocked, "title.value=Alien&title.locked=0").await, StatusCode::OK);
+    let pley = w.app.get(&format!("/api/items/{}", w.alien), &w.admin).await.body;
+    assert_eq!((&pley["title"], &pley["locked_fields"]), (&json!("Alien"), &json!(["year"])));
 
     assert_eq!(put(&w, &section, &format!("type=1&id={}&year.value=soon", w.alien)).await, StatusCode::BAD_REQUEST);
 }

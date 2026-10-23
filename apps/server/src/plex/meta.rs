@@ -130,6 +130,8 @@ pub struct Extras {
     pub labels: Vec<String>,
     /// Collections the item is in: id and title (full details only).
     pub collections: Vec<(i64, String)>,
+    /// Plex names of the fields kept as edited (full details only).
+    pub locked: Vec<&'static str>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -181,12 +183,56 @@ pub async fn load_extras(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Extr
                     markers: Vec::new(),
                     labels: Vec::new(),
                     collections: Vec::new(),
+                    locked: Vec::new(),
                 },
             );
         }
     }
     for (id, labels) in crate::labels::for_items(db, ids).await? {
         out.entry(id).or_default().labels = labels;
+    }
+    Ok(out)
+}
+
+/// Plex's name of a field pley keeps as edited (see `crate::overrides`).
+fn plex_field(field: &str) -> Option<&'static str> {
+    Some(match field {
+        "title" => "title",
+        "sort_title" => "titleSort",
+        "original_title" => "originalTitle",
+        "year" => "year",
+        "summary" => "summary",
+        "tagline" => "tagline",
+        "studio" => "studio",
+        "content_rating" => "contentRating",
+        "release_date" => "originallyAvailableAt",
+        "genres" => "genre",
+        "poster" | "thumb" => "thumb",
+        "backdrop" => "art",
+        _ => return None,
+    })
+}
+
+/// The locked fields of `ids` (Plex names), by item.
+pub async fn load_locked(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Vec<&'static str>>> {
+    let mut out: HashMap<i64, Vec<&'static str>> = HashMap::new();
+    for chunk in ids.chunks(500) {
+        let sql = format!(
+            "SELECT item_id, field FROM item_overrides WHERE item_id IN ({}) ORDER BY field",
+            vec!["?"; chunk.len()].join(",")
+        );
+        let mut query = sqlx::query_as::<_, (i64, String)>(&sql);
+        for id in chunk {
+            query = query.bind(id);
+        }
+        for (item, field) in query.fetch_all(&db.read).await? {
+            if let Some(name) = plex_field(&field) {
+                let locked = out.entry(item).or_default();
+                if !locked.contains(&name) {
+                    locked.push(name);
+                }
+            }
+        }
     }
     Ok(out)
 }
@@ -562,6 +608,9 @@ pub fn item_node(
             }
             for label in &extras.labels {
                 node.push(Node::new("Label").attr("tag", label));
+            }
+            for name in &extras.locked {
+                node.push(Node::new("Field").attr("locked", 1).attr("name", *name));
             }
         }
     }

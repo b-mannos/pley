@@ -214,6 +214,17 @@ async fn apply(state: &AppState, section: Option<i64>, ids: &[i64], edit: &Edit)
         if !changes.is_empty() {
             overrides::set(&state.db, id, &changes).await?;
         }
+        // A value sent unlocked is written but not kept: the next refresh may
+        // replace it, as with Plex.
+        let unlocked: Vec<(String, Option<String>)> = edit
+            .values
+            .iter()
+            .filter(|(field, _)| edit.locks.contains(&(*field, false)))
+            .map(|(field, _)| ((*field).to_owned(), None))
+            .collect();
+        if !unlocked.is_empty() {
+            overrides::set(&state.db, id, &unlocked).await?;
+        }
         if !edit.labels.add.is_empty() || !edit.labels.remove.is_empty() {
             labels::edit(&state.db, id, &edit.labels.add, &edit.labels.remove).await?;
         }

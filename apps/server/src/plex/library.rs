@@ -79,6 +79,9 @@ pub(super) async fn item_nodes(
         for (id, collections) in meta::load_collections(&state.db, &ids).await? {
             extras.entry(id).or_default().collections = collections;
         }
+        for (id, locked) in meta::load_locked(&state.db, &ids).await? {
+            extras.entry(id).or_default().locked = locked;
+        }
     }
     let leaves: Vec<i64> = rows.iter().filter(|r| meta::is_leaf(&r.kind)).map(|r| r.id).collect();
     let files =
@@ -1228,7 +1231,7 @@ fn filter_meta(lib: &LibraryRow) -> Node {
             .attr("type", plex_type(kind))
             .attr("title", plural(kind))
             .attr("active", i == 0);
-        let mut filters = vec![("genre", "Genre"), ("year", "Year"), ("decade", "Decade")];
+        let mut filters = vec![("genre", "Genre"), ("year", "Year"), ("decade", "Decade"), ("label", "Labels")];
         if matches!(*kind, "movie" | "show") {
             filters.push(("contentRating", "Content Rating"));
             filters.push(("studio", "Studio"));
@@ -1284,6 +1287,7 @@ fn filter_meta(lib: &LibraryRow) -> Node {
             ("year", "integer", "Year"),
             ("decade", "integer", "Decade"),
             ("genre", "tag", "Genre"),
+            ("label", "tag", "Labels"),
             ("contentRating", "tag", "Content Rating"),
             ("unwatched", "boolean", "Unplayed"),
             ("inProgress", "boolean", "In Progress"),

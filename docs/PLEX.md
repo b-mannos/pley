@@ -137,8 +137,10 @@ Administrators edit metadata the way python-plexapi (and so Kometa) does:
   or `PUT /library/metadata/{id}?…`, for `title`, `titleSort`,
   `originalTitle`, `year`, `summary`, `tagline`, `studio`, `contentRating`
   and `originallyAvailableAt`. Edited fields are kept through refreshes
-  (pley's locked fields); `field.locked=1` alone keeps the current value,
-  `field.locked=0` gives the field back to the metadata agent.
+  (pley's locked fields, listed in details as `Field` elements with
+  `locked="1"`); `field.locked=1` alone keeps the current value,
+  `field.locked=0` gives the field back to the metadata agent, and a value
+  sent with `field.locked=0` is written but not kept.
 - Tags: `genre[0].tag.tag=Horror` adds a genre, `genre[].tag.tag-=Horror,Drama`
   removes (each name percent-encoded once more, as python-plexapi sends
   them). The same for `label`, which details list as `Label` and the
@@ -191,7 +193,11 @@ With python-plexapi 4.18 the following work against the test media:
 - `getStreamURL()` with the playlist and segments it leads to, direct-play
   range requests, `sessions()` and `transcodeSessions()`;
 - a non-administrator only sees their own sessions and accounts and cannot
-  refresh libraries.
+  refresh libraries;
+- `editTitle()`, `editSummary()` and their `locked` argument, `fields`,
+  `addGenre()`/`removeGenre()`, `addLabel()`/`removeLabel()`,
+  `search(label=…)`, `listFilterChoices('label')`, `addCollection()`,
+  `collections()` and `uploadPoster()`.
 
 ## Not supported
 
