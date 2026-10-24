@@ -614,8 +614,11 @@ Markers come from two sources, best first:
    cache folder, so a new episode only needs its own.
 
 A background worker analyses one season at a time after library scans (and
-30 s after start-up), pauses while two or more transcodes run, and records the
-algorithm version so improvements re-run automatically. It is skipped when
+30 s after start-up), waits while anything plays, and records the algorithm
+version so improvements re-run automatically. A season that isn't analysed
+yet goes first as soon as one of its episodes plays, during playback: the
+episodes playing first, then the rest, each followed by a `library_changed`
+event so players pick up the markers. It is skipped when
 `detect_markers` is off or the transcoder's FFmpeg lacks Chromaprint (chapters
 are still used).
 

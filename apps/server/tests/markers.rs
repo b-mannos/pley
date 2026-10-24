@@ -240,3 +240,56 @@ async fn movies_use_their_chapters() {
     assert_eq!(plain.body["markers"], json!([]), "nothing to compare a movie with");
     assert_eq!(fingerprints.load(Ordering::SeqCst), 0, "movies are never fingerprinted");
 }
+
+/// The markers of an item, as soon as it has `count` of them.
+async fn markers_soon(app: &TestApp, admin: &str, id: i64, count: usize) -> Vec<Value> {
+    for _ in 0..500 {
+        let item = app.get(&format!("/api/items/{id}"), admin).await;
+        let markers = item.body["markers"].as_array().cloned().unwrap_or_default();
+        if markers.len() >= count {
+            return markers;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("item {id} did not get {count} markers");
+}
+
+#[tokio::test]
+async fn the_season_playing_goes_first() {
+    let (app, _, admin) = world().await;
+    for (s, e) in [(1, 1), (1, 2), (1, 3), (2, 1)] {
+        app.media_file(&format!("tv/Show (2020)/Season {s:02}/Show - S{s:02}E{e:02}.mkv"), 1024);
+    }
+    app.media_file("movies/Film (2020).mkv", 1024);
+    let tv = app.library(&admin, "TV", "shows", "tv").await;
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let show = app.ids(tv, &admin).await["Show"];
+    let film = app.ids(movies, &admin).await["Film"];
+    let seasons = app.children(show, &admin).await;
+    let first = app.children(seasons["Season 1"], &admin).await;
+    let second = app.children(seasons["Season 2"], &admin).await;
+    let play = |item: i64, client: &str| json!({"item_id": item, "caps": {}, "mode": "direct", "client_id": client});
+
+    // While something plays, background analysis waits.
+    let reply = app.post("/api/playback", &admin, play(film, "tv")).await;
+    assert_eq!(reply.status, axum::http::StatusCode::OK, "{:?}", reply.body);
+    app.post(&format!("/api/items/{}/analyze", seasons["Season 2"]), &admin, json!({})).await;
+    for _ in 0..500 {
+        if app.state.markers.status().is_some_and(|s| s.item_id == seasons["Season 2"]) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(app.state.markers.status().is_some(), "season 2 waits to be fingerprinted");
+
+    // An episode starts playing: its season goes first, playback or not.
+    let reply = app.post("/api/playback", &admin, play(first["Episode 1"], "phone")).await;
+    assert_eq!(reply.status, axum::http::StatusCode::OK, "{:?}", reply.body);
+    let e1 = markers_soon(&app, &admin, first["Episode 1"], 2).await;
+    assert_eq!(summary(&e1[0]).0, "intro");
+    assert_eq!(summary(&e1[1]).0, "credits");
+    markers_soon(&app, &admin, first["Episode 3"], 2).await;
+    // The season it pushed aside waits for quiet again.
+    let lone = app.get(&format!("/api/items/{}", second["Episode 1"]), &admin).await;
+    assert_eq!(lone.body["markers"], json!([]));
+}

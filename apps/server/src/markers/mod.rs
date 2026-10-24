@@ -11,12 +11,13 @@
 //!    episode added later is only compared against cached data.
 //!
 //! A single background worker analyses one season at a time after library
-//! scans (and on demand), at low priority and pausing while the server is
-//! busy transcoding.
+//! scans (and on demand), at low priority and pausing while anything plays.
+//! A season being watched goes first, during playback: the episodes playing
+//! before the rest of it, and their players are told when they have markers.
 
 pub mod matcher;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,7 +25,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use pley_transcoder_api::{Chapter, FingerprintRequest, MediaInfo};
 use serde::Serialize;
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 
 use crate::db::Db;
 use crate::events::{EventBus, ServerEvent};
@@ -122,6 +123,10 @@ pub struct MarkerService {
     queue: mpsc::UnboundedSender<Job>,
     receiver: Mutex<Option<mpsc::UnboundedReceiver<Job>>>,
     queued: Mutex<HashSet<Job>>,
+    /// Seasons being watched that aren't analysed yet: before any [`Job`].
+    watched: Mutex<VecDeque<i64>>,
+    /// Wakes the worker for a season in `watched`.
+    wake: Notify,
     status: Mutex<Option<AnalysisStatus>>,
 }
 
@@ -195,6 +200,8 @@ struct Fp {
 enum FpError {
     Retry(String),
     Unsupported,
+    /// A season being watched goes first: this one waits its turn again.
+    Preempted,
 }
 
 impl MarkerService {
@@ -217,6 +224,8 @@ impl MarkerService {
             queue,
             receiver: Mutex::new(Some(receiver)),
             queued: Mutex::default(),
+            watched: Mutex::default(),
+            wake: Notify::new(),
             status: Mutex::default(),
         })
     }
@@ -240,6 +249,54 @@ impl MarkerService {
                 }
             }
         });
+        let this = self.clone();
+        tokio::spawn(async move {
+            let mut events = this.events.subscribe();
+            loop {
+                match events.recv().await {
+                    Ok(ServerEvent::SessionsChanged) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        if let Err(err) = this.watch_playing().await {
+                            tracing::warn!("intro/credits detection of what plays: {err:#}");
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
+    /// Put the seasons of the episodes playing that aren't analysed yet
+    /// before everything else.
+    async fn watch_playing(&self) -> sqlx::Result<()> {
+        let files: Vec<i64> = self.sessions.active().iter().map(|s| s.file_id).collect();
+        if files.is_empty() || !self.settings.get().detect_markers {
+            return Ok(());
+        }
+        let sql = format!(
+            "SELECT DISTINCT e.parent_id FROM items e
+             JOIN media_files f ON f.item_id = e.id
+             LEFT JOIN marker_analysis a ON a.file_id = f.id
+             WHERE f.id IN ({}) AND e.kind = 'episode' AND e.parent_id IS NOT NULL AND f.duration_ms > 0
+               AND (a.file_id IS NULL OR a.version < ? OR a.size != f.size OR a.mtime != f.mtime
+                    OR (a.fingerprinted = 0 AND ?))",
+            vec!["?"; files.len()].join(", ")
+        );
+        let mut query = sqlx::query_scalar(&sql);
+        for id in &files {
+            query = query.bind(id);
+        }
+        let seasons: Vec<i64> = query.bind(ALGORITHM_VERSION).bind(self.chromaprint()).fetch_all(&self.db.read).await?;
+        let mut watched = self.watched.lock();
+        for id in seasons {
+            if !watched.contains(&id) {
+                watched.push_back(id);
+                // The worker, idle or waiting to fingerprint something else.
+                self.wake.notify_waiters();
+                self.wake.notify_one();
+            }
+        }
+        Ok(())
     }
 
     pub fn status(&self) -> Option<AnalysisStatus> {
@@ -296,14 +353,28 @@ impl MarkerService {
     }
 
     async fn worker(self: Arc<Self>, mut receiver: mpsc::UnboundedReceiver<Job>) {
-        while let Some(job) = receiver.recv().await {
-            self.queued.lock().remove(&job);
+        loop {
+            // A season being watched first.
+            let watched = self.watched.lock().pop_front();
+            let job = match watched {
+                Some(id) => Job::Season { id, force: false },
+                None => tokio::select! {
+                    job = receiver.recv() => match job {
+                        Some(job) => job,
+                        None => break,
+                    },
+                    () = self.wake.notified() => continue,
+                },
+            };
+            if watched.is_none() {
+                self.queued.lock().remove(&job);
+            }
             if !self.settings.get().detect_markers {
                 continue;
             }
             let result = match job {
                 Job::Library(id) => self.library(id).await,
-                Job::Season { id, force } => self.season(id, force).await,
+                Job::Season { id, force } => self.season(id, force, watched.is_some()).await,
                 Job::Movie(id) => self.movie(id).await,
             };
             *self.status.lock() = None;
@@ -381,7 +452,9 @@ impl MarkerService {
         self.save(&found, true).await
     }
 
-    async fn season(&self, season_id: i64, force: bool) -> anyhow::Result<()> {
+    /// Analyse a season. `watched`: it plays, so it runs during playback, the
+    /// episodes playing first, and players are told about new markers.
+    async fn season(&self, season_id: i64, force: bool, watched: bool) -> anyhow::Result<()> {
         let chromaprint = self.chromaprint();
         let season = self.episode_files("e.parent_id = ?", season_id, chromaprint).await?;
         if season.is_empty() || (!force && season.iter().all(|f| f.current)) {
@@ -414,62 +487,50 @@ impl MarkerService {
         // Recorded so files are fingerprinted once Chromaprint becomes available.
         let mut fingerprinted = chromaprint;
         if chromaprint && pool.len() >= 2 {
-            let wanted: Vec<(usize, MarkerKind)> = found
-                .iter()
-                .enumerate()
-                .flat_map(|(i, (_, markers))| {
-                    [MarkerKind::Intro, MarkerKind::Credits]
-                        .into_iter()
-                        .filter(|kind| !markers.iter().any(|m| m.kind == *kind))
-                        .map(move |kind| (i, kind))
-                })
-                .collect();
-            // Which fingerprints are needed: the targets and their neighbours.
-            let mut needed: Vec<(usize, MarkerKind)> = Vec::new();
-            let mut plans: Vec<(usize, MarkerKind, usize, Vec<usize>)> = Vec::new();
-            for &(i, kind) in &wanted {
-                let target = &found[i].0;
-                let Some(pos) = pool.iter().position(|p| p.file_id == target.file_id) else { continue };
-                let others = neighbours(pos, pool.len());
-                for &p in std::iter::once(&pos).chain(&others) {
-                    if !needed.contains(&(p, kind)) {
-                        needed.push((p, kind));
-                    }
-                }
-                plans.push((i, kind, pos, others));
-            }
-
             *self.status.lock() = Some(AnalysisStatus {
                 item_id: season_id,
                 title: title.clone().unwrap_or_default(),
                 done: 0,
-                total: needed.len() as u32,
+                total: 0,
             });
-            match self.fingerprints(&pool, &needed).await {
-                Ok(fps) => {
-                    for (i, kind, pos, others) in plans {
-                        let target = &found[i].0;
-                        let Some(own) = fps.get(&(pos, kind)) else { continue };
-                        let candidates: Vec<(i64, i64)> = others
-                            .iter()
-                            .filter_map(|o| fps.get(&(*o, kind)))
-                            .filter_map(|other| shared_segment(own, other, kind))
-                            .collect();
-                        if let Some(marker) = finalize(consensus(&candidates), kind, target.duration_ms) {
-                            found[i].1.push(marker);
-                        }
+            // The episodes playing first: their players get markers sooner.
+            let playing: HashSet<i64> =
+                if watched { self.sessions.active().iter().map(|s| s.file_id).collect() } else { HashSet::new() };
+            let (first, rest): (Vec<usize>, Vec<usize>) =
+                (0..found.len()).partition(|&i| playing.contains(&found[i].0.file_id));
+            for targets in [first, rest] {
+                if targets.is_empty() {
+                    continue;
+                }
+                match self.detect(&pool, &mut found, &targets, watched).await {
+                    Ok(()) => {}
+                    Err(FpError::Unsupported) => {
+                        fingerprinted = false;
+                        break;
+                    }
+                    Err(FpError::Retry(why)) => {
+                        // Keep the season queued for the next scan instead of
+                        // recording it as analysed without fingerprints.
+                        tracing::info!("intro/credits detection postponed: {why}");
+                        return Ok(());
+                    }
+                    Err(FpError::Preempted) => {
+                        // Fingerprints made so far are cached: nothing is lost.
+                        self.enqueue(Job::Season { id: season_id, force });
+                        return Ok(());
                     }
                 }
-                Err(FpError::Unsupported) => fingerprinted = false,
-                Err(FpError::Retry(why)) => {
-                    // Keep the season queued for the next scan instead of
-                    // recording it as analysed without fingerprints.
-                    tracing::info!("intro/credits detection postponed: {why}");
-                    return Ok(());
+                if watched && targets.len() < found.len() {
+                    let done: Vec<_> = targets.iter().map(|&i| found[i].clone()).collect();
+                    self.save(&done, fingerprinted).await?;
+                    self.announce(season_id).await?;
                 }
             }
         }
         self.save(&found, fingerprinted).await?;
+        if watched {
+            self.announce(season_id).await?;
+        }
         let intros = found.iter().filter(|(_, m)| m.iter().any(|m| m.kind == MarkerKind::Intro)).count();
         let credits = found.iter().filter(|(_, m)| m.iter().any(|m| m.kind == MarkerKind::Credits)).count();
         tracing::info!(
@@ -477,6 +538,71 @@ impl MarkerService {
             title.as_deref().unwrap_or("season"),
             n = found.len()
         );
+        Ok(())
+    }
+
+    /// Fingerprint matches for what chapters left the episodes `targets`
+    /// (indices in `found`) without.
+    async fn detect(
+        &self,
+        pool: &[EpisodeFile],
+        found: &mut [(EpisodeFile, Vec<Found>)],
+        targets: &[usize],
+        watched: bool,
+    ) -> Result<(), FpError> {
+        let wanted: Vec<(usize, MarkerKind)> = targets
+            .iter()
+            .flat_map(|&i| {
+                let markers = &found[i].1;
+                [MarkerKind::Intro, MarkerKind::Credits]
+                    .into_iter()
+                    .filter(|kind| !markers.iter().any(|m| m.kind == *kind))
+                    .map(move |kind| (i, kind))
+            })
+            .collect();
+        // Which fingerprints are needed: the targets and their neighbours.
+        let mut needed: Vec<(usize, MarkerKind)> = Vec::new();
+        let mut plans: Vec<(usize, MarkerKind, usize, Vec<usize>)> = Vec::new();
+        for &(i, kind) in &wanted {
+            let target = &found[i].0;
+            let Some(pos) = pool.iter().position(|p| p.file_id == target.file_id) else { continue };
+            let others = neighbours(pos, pool.len());
+            for &p in std::iter::once(&pos).chain(&others) {
+                if !needed.contains(&(p, kind)) {
+                    needed.push((p, kind));
+                }
+            }
+            plans.push((i, kind, pos, others));
+        }
+
+        if let Some(status) = self.status.lock().as_mut() {
+            status.total += needed.len() as u32;
+        }
+        let fps = self.fingerprints(pool, &needed, watched).await?;
+        for (i, kind, pos, others) in plans {
+            let target = &found[i].0;
+            let Some(own) = fps.get(&(pos, kind)) else { continue };
+            let candidates: Vec<(i64, i64)> = others
+                .iter()
+                .filter_map(|o| fps.get(&(*o, kind)))
+                .filter_map(|other| shared_segment(own, other, kind))
+                .collect();
+            if let Some(marker) = finalize(consensus(&candidates), kind, target.duration_ms) {
+                found[i].1.push(marker);
+            }
+        }
+        Ok(())
+    }
+
+    /// Players refetch the items of the season's library (new markers).
+    async fn announce(&self, season_id: i64) -> sqlx::Result<()> {
+        let library: Option<i64> = sqlx::query_scalar("SELECT library_id FROM items WHERE id = ?")
+            .bind(season_id)
+            .fetch_optional(&self.db.read)
+            .await?;
+        if let Some(library_id) = library {
+            self.events.send(ServerEvent::LibraryChanged { library_id });
+        }
         Ok(())
     }
 
@@ -496,13 +622,14 @@ impl MarkerService {
         &self,
         pool: &[EpisodeFile],
         needed: &[(usize, MarkerKind)],
+        watched: bool,
     ) -> Result<HashMap<(usize, MarkerKind), Fp>, FpError> {
         let mut out = HashMap::new();
         // Two at a time, like the transcoder's own limit.
         for chunk in needed.chunks(2) {
             let mut fetches = Vec::with_capacity(chunk.len());
             for &(i, kind) in chunk {
-                fetches.push(self.fingerprint(&pool[i], kind));
+                fetches.push(self.fingerprint(&pool[i], kind, watched));
             }
             let results = futures::future::join_all(fetches).await;
             for (&(i, kind), result) in chunk.iter().zip(results) {
@@ -517,7 +644,7 @@ impl MarkerService {
         Ok(out)
     }
 
-    async fn fingerprint(&self, file: &EpisodeFile, kind: MarkerKind) -> Result<Option<Fp>, FpError> {
+    async fn fingerprint(&self, file: &EpisodeFile, kind: MarkerKind, watched: bool) -> Result<Option<Fp>, FpError> {
         let (start_ms, duration_ms) = window(kind, file.duration_ms);
         let cache = self
             .cache_dir
@@ -525,9 +652,13 @@ impl MarkerService {
         if let Some(fp) = read_cached(&cache) {
             return Ok(Some(fp));
         }
-        // Background work: playback has the machine to itself.
-        while self.sessions.quiet_for() < QUIET_BEFORE_BACKGROUND_SECS {
-            tokio::time::sleep(Duration::from_secs(15)).await;
+        // Background work: playback has the machine to itself, except for
+        // the markers of what plays.
+        while !watched && self.sessions.quiet_for() < QUIET_BEFORE_BACKGROUND_SECS {
+            if !self.watched.lock().is_empty() {
+                return Err(FpError::Preempted);
+            }
+            let _ = tokio::time::timeout(Duration::from_secs(15), self.wake.notified()).await;
         }
         let req = FingerprintRequest { path: file.path.clone(), stream_index: file.audio_index, start_ms, duration_ms };
         match self.transcoder.fingerprint(&req).await {
