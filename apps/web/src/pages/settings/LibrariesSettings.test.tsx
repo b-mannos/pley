@@ -163,6 +163,31 @@ describe("LibrariesSettings", () => {
     expect(puts(requests)[0]?.body).toEqual({ ids: [2, 3, 1] });
   });
 
+  it("takes a drop just past the last library, and shows no line off the list", async () => {
+    const requests = serve();
+    renderWithProviders(<LibrariesSettings />);
+    const list = await screen.findByRole("list", { name: "Libraries" });
+    const lineUnder = (name: string) => rowOf(name).querySelector<HTMLElement>(":scope > [aria-hidden]:not([data-drag-handle])");
+
+    const drag = dataTransfer();
+    fireEvent.dragStart(gripOf("Movies"), { dataTransfer: drag });
+    fireEvent.dragOver(rowOf("Music"), { dataTransfer: drag });
+    const strip = lineUnder("Music");
+    expect(strip).not.toBeNull();
+    // Off the list: the line goes.
+    fireEvent.dragLeave(list, { dataTransfer: drag, relatedTarget: document.body });
+    expect(lineUnder("Music")).toBeNull();
+
+    // Back over Music, then just under its card, on the line's strip.
+    fireEvent.dragOver(rowOf("Music"), { dataTransfer: drag });
+    const under = lineUnder("Music");
+    if (!under) throw new Error("no line under Music");
+    expect(fireEvent.dragOver(under, { dataTransfer: drag })).toBe(false);
+    fireEvent.drop(under, { dataTransfer: drag });
+    await waitFor(() => expect(namesIn(list)).toEqual(["TV", "Music", "Movies"]));
+    await waitFor(() => expect(puts(requests)).toHaveLength(1));
+  });
+
   it("moves the library picked up when the list changes during the drag", async () => {
     const requests = serve();
     const { client } = renderWithProviders(<LibrariesSettings />);
@@ -272,6 +297,49 @@ describe("LibrariesSettings", () => {
     expect(screen.getByRole("button", { name: "Move Music up" })).toHaveFocus();
     await waitFor(() => expect(requests.filter((r) => r.path === "/api/libraries")).toHaveLength(2));
     refetched.answer(libraries);
+  });
+
+  it("keeps a saved move when a later one is refused", async () => {
+    const user = userEvent.setup();
+    const { answers, order } = heldBackOrders();
+    const refetched = heldBack();
+    serve({ order, refetch: refetched.reply });
+    renderWithProviders(<LibrariesSettings />);
+    const list = await screen.findByRole("list", { name: "Libraries" });
+
+    await user.click(screen.getByRole("button", { name: "Move Music up" }));
+    await waitFor(() => expect(namesIn(list)).toEqual(["Movies", "Music", "TV"]));
+    await user.click(screen.getByRole("button", { name: "Move Music up" }));
+    await waitFor(() => expect(namesIn(list)).toEqual(["Music", "Movies", "TV"]));
+    await waitFor(() => expect(answers).toHaveLength(1));
+    answers[0]?.answer([libraries[0], libraries[2], libraries[1]]);
+    await waitFor(() => expect(answers).toHaveLength(2));
+
+    // Refused, before the libraries come back from the server: the list
+    // shows the order last saved, with the first move.
+    answers[1]?.answer(refused());
+    await waitFor(() => expect(namesIn(list)).toEqual(["Movies", "Music", "TV"]));
+    expect(screen.getByRole("status")).toHaveTextContent("Music moved back to position 2 of 3");
+    refetched.answer([libraries[0], libraries[2], libraries[1]]);
+  });
+
+  it("keeps the focus on a library whose move is undone", async () => {
+    const user = userEvent.setup();
+    const saved = heldBack();
+    serve({ list: libraries.slice(0, 2), order: saved.reply });
+    renderWithProviders(<LibrariesSettings />);
+    const list = await screen.findByRole("list", { name: "Libraries" });
+
+    screen.getByRole("button", { name: "Move Movies down" }).focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(namesIn(list)).toEqual(["TV", "Movies"]));
+    // Last, its "down" button stops working: the focus goes up.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Move Movies up" })).toHaveFocus());
+
+    // First again once refused: now "up" stops working, the focus goes down.
+    saved.answer(refused());
+    await waitFor(() => expect(namesIn(list)).toEqual(["Movies", "TV"]));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Move Movies down" })).toHaveFocus());
   });
 
   it("puts the saved order back when quick moves are all refused", async () => {

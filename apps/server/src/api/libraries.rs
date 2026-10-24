@@ -116,10 +116,11 @@ pub async fn create(
         return Err(AppError::bad_request("library name must be 1-100 characters"));
     }
     let paths = validate_paths(&body.paths)?;
-    // Listed last.
+    // Listed last, with an id no library has had (migrations/0021).
     let id: i64 = sqlx::query_scalar(
-        "INSERT INTO libraries (name, kind, paths, created_at, position)
-         VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(position) + 1, 0) FROM libraries)) RETURNING id",
+        "INSERT INTO libraries (id, name, kind, paths, created_at, position)
+         VALUES ((SELECT last + 1 FROM library_ids), ?, ?, ?, ?, (SELECT COALESCE(MAX(position) + 1, 0) FROM libraries))
+         RETURNING id",
     )
     .bind(name)
     .bind(body.kind.as_str())

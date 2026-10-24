@@ -166,6 +166,16 @@ async fn libraries_are_listed_in_the_order_administrators_choose() {
     let order = app.put("/api/libraries/order", &admin, json!({"ids": [anime, movies, music]})).await;
     assert_eq!(order.status, StatusCode::OK, "{:?}", order.body);
     assert_eq!(library_names(&app, &admin).await, ["Anime", "Movies", "Music"]);
+
+    // A library added after the newest was deleted doesn't get its id, so an
+    // order made before still can't place it.
+    assert_eq!(app.delete(&format!("/api/libraries/{anime}"), &admin).await.status, StatusCode::NO_CONTENT);
+    app.media_file("kids/Up (2009).mkv", 1024);
+    let kids = app.library(&admin, "Kids", "movies", "kids").await;
+    assert!(kids > anime, "{kids} after {anime}");
+    let stale = app.put("/api/libraries/order", &admin, json!({"ids": [anime, movies, music]})).await;
+    assert_eq!(stale.status, StatusCode::CONFLICT, "made before Anime was deleted");
+    assert_eq!(library_names(&app, &admin).await, ["Movies", "Music", "Kids"]);
 }
 
 #[tokio::test]

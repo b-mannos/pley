@@ -339,12 +339,16 @@ export function LibrariesSettings() {
                   {...(reorderable ? drag.rowProps(i, { handle: true }) : {})}
                   className={cn("relative transition-opacity", drag.dragging === i && "opacity-40")}
                 >
-                  {/* Where a dragged library would land: a line in the gap. */}
+                  {/* Where a dragged library would land: a line in the gap, on a
+                      strip that takes the drop too (before the first card and
+                      after the last, it is outside the list). */}
                   {mark ? (
                     <span
                       aria-hidden
-                      className={cn("absolute inset-x-0 h-0.5 rounded-full bg-accent", mark === "before" ? "-top-1.75" : "-bottom-1.75")}
-                    />
+                      className={cn("absolute inset-x-0 flex h-3 items-center", mark === "before" ? "-top-3" : "-bottom-3")}
+                    >
+                      <span className="h-0.5 w-full rounded-full bg-accent" />
+                    </span>
                   ) : null}
                   <LibraryRow
                     lib={lib}

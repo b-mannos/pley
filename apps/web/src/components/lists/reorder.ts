@@ -63,10 +63,17 @@ export function useDragReorder<K>(keys: readonly K[], onMove: (from: number, to:
     onDragEnd: () => setDrag(null),
   });
 
-  /** The list's handlers, for lists with gaps: a drop between rows lands where the mark shows. */
+  /**
+   * The list's handlers, for lists with gaps: a drop between rows lands
+   * where the mark shows, and off the list no mark shows.
+   */
   const listProps = {
     onDragOver: (e: DragEvent<HTMLElement>) => {
       if (drag) allowDrop(e);
+    },
+    onDragLeave: (e: DragEvent<HTMLElement>) => {
+      const into = e.relatedTarget;
+      if (drag && !(into instanceof Node && e.currentTarget.contains(into))) setDrag({ key: drag.key, over: from });
     },
     onDrop: (e: DragEvent<HTMLElement>) => {
       e.preventDefault();
