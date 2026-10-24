@@ -255,8 +255,17 @@ pub async fn reset_password(config: Config, username: &str, password: &str, admi
                 .await?
                 .rows_affected();
             sqlx::query("DELETE FROM recovery_codes WHERE user_id = ?").bind(id).execute(&db.write).await?;
+            // Apps using the account or allowed by it end too (the server
+            // isn't running: there is no cache to forget).
+            let apps = sqlx::query("DELETE FROM app_grants WHERE user_id = ? OR approved_by = ?")
+                .bind(id)
+                .bind(id)
+                .execute(&db.write)
+                .await?
+                .rows_affected();
             let off = if two_step > 0 { "; two-step sign-in is off" } else { "" };
-            println!("password updated for '{username}'{off}");
+            let apps = if apps > 0 { "; apps signed out" } else { "" };
+            println!("password updated for '{username}'{off}{apps}");
         }
         None => {
             sqlx::query("INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?)")

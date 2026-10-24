@@ -192,10 +192,12 @@ pub async fn update_user(
             .bind(id)
             .execute(&state.db.write)
             .await?;
-        // Sign the user out everywhere else.
+        // Sign the user out everywhere else, and every app using the account
+        // or allowed by it (an administrator's own included).
         if id != admin.id {
             sqlx::query("DELETE FROM sessions WHERE user_id = ?").bind(id).execute(&state.db.write).await?;
         }
+        state.auth.end_apps(id).await?;
     }
     if let Some(name) = body.display_name {
         let name = name.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty());
@@ -358,7 +360,7 @@ pub async fn user_devices(
     Ok(Json(devices_of(&state, id, None).await?))
 }
 
-/// Sign a user out on every device.
+/// Sign a user out on every device and in every app.
 pub async fn sign_out_everywhere(
     State(state): State<AppState>,
     AdminUser(admin): AdminUser,
@@ -367,8 +369,7 @@ pub async fn sign_out_everywhere(
     if id == admin.id {
         return Err(AppError::bad_request("sign yourself out from your account page instead"));
     }
-    sqlx::query("DELETE FROM sessions WHERE user_id = ?").bind(id).execute(&state.db.write).await?;
-    state.auth.forget_user(id);
+    state.auth.sign_out_everywhere(id, None).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
