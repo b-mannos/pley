@@ -37,7 +37,7 @@ import { ChaptersMenu } from "./ChaptersMenu";
 import { SeekBar } from "./SeekBar";
 import { methodLabel, PlaybackDetails } from "./PlaybackDetails";
 import { SettingsPopover } from "./SettingsPopover";
-import { fileMarkers, SkipButton, useSkipMarkers } from "./SkipButton";
+import { fileMarkers, SkipButton, skipTarget, useSkipMarkers } from "./SkipButton";
 import { SubtitleOverlay } from "./SubtitleOverlay";
 import { activeCues, DEFAULT_SUBTITLE_STYLE, parseVtt, subtitleStyle, type SubtitleCue, type SubtitleStyle } from "./subtitles";
 import { UpNext } from "./UpNext";
@@ -183,7 +183,6 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const [hoveringControls, setHoveringControls] = useState(false);
   const [ended, setEnded] = useState(false);
   const [upNext, setUpNext] = useState<ItemSummary | null>(null);
-  const [autoSkip, setAutoSkip] = useLocalStorage<boolean>("pley.autoSkipIntro", false);
 
   const duration = (info?.duration_ms ?? item.duration_ms ?? 0) / 1000 || mediaDuration;
   const isEpisode = item.kind === "episode";
@@ -867,11 +866,6 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     markers,
     seconds: current,
     enabled: !!info && !loading && !error && !ended,
-    autoSkip,
-    onAutoSkip: (m) => {
-      seekTo(m.end_ms / 1000);
-      toast.info("Skipped intro");
-    },
     onCredits: () => {
       if (!hasNext || upNext) return;
       findNext()
@@ -882,7 +876,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     },
   });
   const skipMarker = () => {
-    if (marker) seekTo(Math.min(marker.end_ms / 1000, duration));
+    if (marker) seekTo(Math.min(skipTarget(marker), duration));
   };
 
   const retry = () => {
@@ -1224,8 +1218,6 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             onSubtitle={changeSubtitle}
             subtitleStyle={subStyle}
             onSubtitleStyle={setSubtitleStyle}
-            autoSkip={autoSkip}
-            onAutoSkip={setAutoSkip}
           />
           <button
             type="button"

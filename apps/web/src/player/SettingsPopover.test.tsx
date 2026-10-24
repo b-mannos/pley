@@ -22,8 +22,6 @@ function renderPopover(overrides: Partial<SettingsPopoverProps> = {}) {
     onSubtitle: vi.fn(),
     subtitleStyle: DEFAULT_SUBTITLE_STYLE,
     onSubtitleStyle: vi.fn(),
-    autoSkip: false,
-    onAutoSkip: vi.fn(),
     ...overrides,
   };
   render(<SettingsPopover {...props} />);

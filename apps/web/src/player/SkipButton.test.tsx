@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ItemDetail, Marker, MediaFile } from "@/api/types";
 import { makeItem, makeMarker } from "@/test/fixtures";
-import { activeMarker, fileMarkers, SkipButton, useSkipMarkers } from "./SkipButton";
+import { activeMarker, fileMarkers, SkipButton, skipTarget, useSkipMarkers } from "./SkipButton";
 
 const intro = makeMarker({ kind: "intro", start_ms: 10_000, end_ms: 70_000 });
 const credits = makeMarker({ kind: "credits", start_ms: 1_200_000, end_ms: 1_300_000 });
@@ -32,55 +32,54 @@ describe("activeMarker", () => {
   });
 });
 
+describe("skipTarget", () => {
+  it("lands just before an intro ends, so its last moment plays, and at the end of credits", () => {
+    expect(skipTarget(intro)).toBe(69.25);
+    expect(skipTarget(credits)).toBe(1_300);
+  });
+
+  it("stays inside a very short intro", () => {
+    expect(skipTarget(makeMarker({ kind: "intro", start_ms: 0, end_ms: 1_000 }))).toBe(0.5);
+  });
+});
+
 describe("useSkipMarkers", () => {
-  type Props = { seconds: number; autoSkip?: boolean; enabled?: boolean; markers?: Marker[] };
+  type Props = { seconds: number; enabled?: boolean; markers?: Marker[] };
 
   function setup(initial: Props) {
-    const onAutoSkip = vi.fn();
     const onCredits = vi.fn();
     const hook = renderHook(
-      ({ seconds, autoSkip = true, enabled = true, markers = [intro, credits] }: Props) =>
-        useSkipMarkers({ markers, seconds, enabled, autoSkip, onAutoSkip, onCredits }),
+      ({ seconds, enabled = true, markers = [intro, credits] }: Props) =>
+        useSkipMarkers({ markers, seconds, enabled, onCredits }),
       { initialProps: initial },
     );
-    return { ...hook, onAutoSkip, onCredits };
+    return { ...hook, onCredits };
   }
 
-  it("skips an intro once, even when seeking back into it", () => {
-    const { result, rerender, onAutoSkip } = setup({ seconds: 5 });
+  it("offers to skip an intro, and nothing more", () => {
+    const { result, rerender, onCredits } = setup({ seconds: 5 });
     expect(result.current).toBeNull();
 
     rerender({ seconds: 12 });
     expect(result.current).toBe(intro);
-    expect(onAutoSkip).toHaveBeenCalledTimes(1);
-    expect(onAutoSkip).toHaveBeenCalledWith(intro);
-
-    rerender({ seconds: 20 });
-    rerender({ seconds: 100 });
-    rerender({ seconds: 15 });
-    expect(onAutoSkip).toHaveBeenCalledTimes(1);
+    expect(onCredits).not.toHaveBeenCalled();
   });
 
-  it("only offers the button when auto-skip is off, until it is turned on", () => {
-    const { result, rerender, onAutoSkip } = setup({ seconds: 12, autoSkip: false });
-    expect(result.current).toBe(intro);
-    expect(onAutoSkip).not.toHaveBeenCalled();
-
-    rerender({ seconds: 13, autoSkip: true });
-    expect(onAutoSkip).toHaveBeenCalledTimes(1);
-  });
-
-  it("announces the credits", () => {
-    const { rerender, onCredits, onAutoSkip } = setup({ seconds: 1_000, autoSkip: false });
-    rerender({ seconds: 1_201, autoSkip: false });
+  it("announces the credits once, even when seeking back into them", () => {
+    const { result, rerender, onCredits } = setup({ seconds: 1_000 });
+    rerender({ seconds: 1_201 });
+    expect(result.current).toBe(credits);
     expect(onCredits).toHaveBeenCalledWith(credits);
-    expect(onAutoSkip).not.toHaveBeenCalled();
+
+    rerender({ seconds: 1_000 });
+    rerender({ seconds: 1_210 });
+    expect(onCredits).toHaveBeenCalledTimes(1);
   });
 
   it("does nothing while disabled", () => {
-    const { result, onAutoSkip } = setup({ seconds: 12, enabled: false });
+    const { result, onCredits } = setup({ seconds: 1_201, enabled: false });
     expect(result.current).toBeNull();
-    expect(onAutoSkip).not.toHaveBeenCalled();
+    expect(onCredits).not.toHaveBeenCalled();
   });
 });
 

@@ -5,6 +5,8 @@ import { cn } from "@/lib/cn";
 
 /** The button disappears this long before the segment ends. */
 const TAIL_MS = 1_000;
+/** Skip Intro lands this long before the intro ends, so it plays out. */
+const INTRO_LEAD_MS = 750;
 
 const LABEL: Record<Marker["kind"], string> = {
   intro: "Skip Intro",
@@ -23,40 +25,40 @@ export function activeMarker(markers: Marker[], seconds: number): Marker | null 
   return markers.find((m) => ms >= m.start_ms && ms < m.end_ms - TAIL_MS) ?? null;
 }
 
+/** Where skipping a marker lands (seconds): the last moment of an intro, the end of credits. */
+export function skipTarget(marker: Marker): number {
+  const lead = marker.kind === "intro" ? Math.min(INTRO_LEAD_MS, (marker.end_ms - marker.start_ms) / 2) : 0;
+  return (marker.end_ms - lead) / 1000;
+}
+
 /**
  * Skip Intro / Skip Credits behaviour. Returns the marker the playhead is in.
- * Entering an intro skips it when `autoSkip` is on, entering credits calls
- * `onCredits` (Up Next for episodes); each happens once per segment, so
- * seeking back into it later lets it play.
+ * Entering credits calls `onCredits` (Up Next for episodes), once per
+ * segment, so seeking back into them later lets them play.
  */
 export function useSkipMarkers({
   markers,
   seconds,
   enabled,
-  autoSkip,
-  onAutoSkip,
   onCredits,
 }: {
   markers: Marker[];
   seconds: number;
   enabled: boolean;
-  autoSkip: boolean;
-  onAutoSkip: (marker: Marker) => void;
   onCredits: (marker: Marker) => void;
 }): Marker | null {
   const marker = enabled ? activeMarker(markers, seconds) : null;
   const handled = useRef(new Set<string>());
   const key = marker ? `${marker.file_id}:${marker.kind}:${marker.start_ms}` : null;
-  const reached = useEffectEvent((m: Marker) => (m.kind === "intro" ? onAutoSkip(m) : onCredits(m)));
+  const reached = useEffectEvent((m: Marker) => onCredits(m));
 
   useEffect(() => {
-    if (!marker || !key || handled.current.has(key)) return;
-    if (marker.kind === "intro" && !autoSkip) return;
+    if (!marker || !key || marker.kind !== "credits" || handled.current.has(key)) return;
     handled.current.add(key);
     reached(marker);
     // Runs when the playhead enters a different segment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, autoSkip]);
+  }, [key]);
 
   return marker;
 }

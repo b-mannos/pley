@@ -4,7 +4,6 @@ import type { MediaStream } from "@/api/types";
 import { cn } from "@/lib/cn";
 import { streamLabel } from "@/lib/format";
 import { useDismiss } from "@/lib/hooks";
-import { Toggle } from "@/components/ui";
 import { qualityById, type QualityOption } from "./quality";
 import { SUBTITLE_BACKGROUNDS, SUBTITLE_SIZES, type SubtitleStyle } from "./subtitles";
 
@@ -85,14 +84,11 @@ export interface SettingsPopoverProps {
   /** How text subtitles look on this device. */
   subtitleStyle: SubtitleStyle;
   onSubtitleStyle: (style: SubtitleStyle) => void;
-  /** Skip intros without waiting for a click. */
-  autoSkip: boolean;
-  onAutoSkip: (on: boolean) => void;
 }
 
 export function SettingsPopover(props: SettingsPopoverProps) {
   const { open, setOpen, details, qualities, quality, originalHint, autoQuality, onQuality } = props;
-  const { audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle, autoSkip, onAutoSkip } = props;
+  const { audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle } = props;
   const { subtitleStyle, onSubtitleStyle } = props;
   const [panel, setPanel] = useState<Panel>("root");
   const ref = useRef<HTMLDivElement>(null);
@@ -158,11 +154,6 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                   onClick={() => setPanel("style")}
                 />
               ) : null}
-              <div className="my-1 h-px bg-white/10" />
-              <div className="flex items-center gap-3 px-4 py-2.5 text-sm">
-                <span className="flex-1">Skip intros automatically</span>
-                <Toggle checked={autoSkip} onChange={onAutoSkip} label="Skip intros automatically" />
-              </div>
             </>
           ) : (
             <>
