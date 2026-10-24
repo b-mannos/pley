@@ -1,8 +1,9 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, EllipsisVertical, FolderPlus, GripVertical, Pencil, Plus, RefreshCw, ScanSearch, Trash2 } from "lucide-react";
 import { errorMessage } from "@/api/client";
-import { useActivity, useDeleteLibrary, useLibraries, useReorderLibraries, useScanAll, useScanLibrary } from "@/api/hooks";
+import { keys, useActivity, useDeleteLibrary, useLibraries, useReorderLibraries, useScanAll, useScanLibrary } from "@/api/hooks";
 import type { Id, Library, ScanStatus } from "@/api/types";
 import { moved, useDragReorder } from "@/components/lists/reorder";
 import { Menu, MenuItem, MenuSeparator } from "@/components/Menu";
@@ -70,7 +71,20 @@ function LibraryRow({
   return (
     <div className="group/library rounded-lg border border-border bg-surface p-4">
       <div className="flex items-start gap-4">
-        {place ? <GripVertical className="-ml-1 -mr-2 mt-3.5 hidden size-4 shrink-0 cursor-grab text-subtle sm:block" aria-hidden /> : null}
+        {place ? (
+          // What a library is dragged by, so the rest of the card keeps its
+          // text selectable (its folders, to copy). The arrows do the same
+          // from a keyboard or a touch screen.
+          <span
+            draggable
+            data-drag-handle
+            title="Drag to reorder"
+            aria-hidden
+            className="-ml-2 -mr-3 mt-2.5 hidden shrink-0 cursor-grab rounded p-1 text-subtle transition-colors hover:text-fg active:cursor-grabbing sm:block"
+          >
+            <GripVertical className="size-4" />
+          </span>
+        ) : null}
         <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-surface-3 text-accent">
           <LibraryIcon kind={lib.kind} className="size-5" />
         </div>
@@ -113,7 +127,9 @@ function LibraryRow({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {place ? (
-            <div className="flex items-center transition-opacity sm:opacity-0 sm:group-focus-within/library:opacity-100 sm:group-hover/library:opacity-100">
+            // Stacked on phones, where the row is narrow; shown on hover
+            // where there is a pointer to hover with, always on touch screens.
+            <div className="flex flex-col items-center transition-opacity sm:flex-row [@media(hover:hover)]:sm:opacity-0 sm:group-focus-within/library:opacity-100 sm:group-hover/library:opacity-100">
               <IconButton
                 label={`Move ${lib.name} up`}
                 size="sm"
@@ -189,6 +205,7 @@ export function LibrariesSettings() {
   const libs = useLibraries();
   const activity = useActivity();
   const toast = useToast();
+  const qc = useQueryClient();
   const scanAll = useScanAll();
   const del = useDeleteLibrary();
   const reorder = useReorderLibraries();
@@ -208,9 +225,18 @@ export function LibrariesSettings() {
     const lib = libraries[from];
     if (!lib || to < 0 || to >= libraries.length || to === from) return;
     setMoveNote(`${lib.name} moved to position ${to + 1} of ${libraries.length}`);
-    reorder.mutate(moved(libraries.map((l) => l.id), from, to), { onError: (e) => toast.error(errorMessage(e)) });
+    reorder.mutate(moved(libraries.map((l) => l.id), from, to), {
+      onError: (e) => {
+        toast.error(errorMessage(e));
+        // The list is back in the saved order: say where the library went,
+        // which also makes trying again read out (the note changes).
+        const saved = qc.getQueryData<Library[]>(keys.libraries) ?? [];
+        const back = saved.findIndex((l) => l.id === lib.id);
+        setMoveNote(back < 0 ? `${lib.name} wasn't moved` : `${lib.name} moved back to position ${back + 1} of ${saved.length}`);
+      },
+    });
   };
-  const drag = useDragReorder((from, to) => {
+  const drag = useDragReorder(libraries.map((l) => l.id), (from, to) => {
     movedWith.current = null;
     move(from, to);
   });
@@ -285,7 +311,8 @@ export function LibrariesSettings() {
         </div>
       </div>
 
-      {libs.isError ? (
+      {/* A list once loaded stays up when fetching it again fails. */}
+      {!libs.data ? (
         <EmptyState title="Couldn't load libraries" description={errorMessage(libs.error)} />
       ) : libs.data.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border-strong">
@@ -302,14 +329,14 @@ export function LibrariesSettings() {
         </div>
       ) : (
         <>
-          <ol ref={listRef} aria-label="Libraries" className="space-y-3">
+          <ol ref={listRef} aria-label="Libraries" className="space-y-3" {...(reorderable ? drag.listProps : {})}>
             {libs.data.map((lib, i) => {
               const mark = drag.dropMark(i);
               return (
                 <li
                   key={lib.id}
                   data-library={lib.id}
-                  {...(reorderable ? drag.rowProps(i) : {})}
+                  {...(reorderable ? drag.rowProps(i, { handle: true }) : {})}
                   className={cn("relative transition-opacity", drag.dragging === i && "opacity-40")}
                 >
                   {/* Where a dragged library would land: a line in the gap. */}

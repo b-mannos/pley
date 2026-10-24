@@ -74,7 +74,7 @@ function HistoryRow({
         label="Remove from history"
         disabled={removing}
         onClick={onRemove}
-        className="shrink-0 sm:opacity-0 sm:focus-visible:opacity-100 sm:group-hover:opacity-100"
+        className="shrink-0 [@media(hover:hover)]:sm:opacity-0 sm:focus-visible:opacity-100 sm:group-hover:opacity-100"
       >
         <X className="size-4" />
       </IconButton>

@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useCallback, useMemo } from "react";
+import { queryOptions, useInfiniteQuery, useMutation, useMutationState, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, qs, request } from "./client";
 import { reordered } from "./lists";
 import type {
@@ -351,8 +351,22 @@ export const queries = {
   activity: () => queryOptions({ queryKey: keys.activity, queryFn: () => api.get<Activity>("/api/activity"), staleTime: 2_000 }),
 };
 
+/** The key of {@link useReorderLibraries}'s moves. */
+const libraryOrderKey = ["libraries", "order"] as const;
+
+/**
+ * The libraries, in the order of the newest move still being saved
+ * ({@link useReorderLibraries}). The cache only ever holds what the server
+ * said, so a fetch that lands meanwhile can't undo a move on screen, and a
+ * move that isn't saved simply drops out.
+ */
 export function useLibraries() {
-  return useQuery(queries.libraries());
+  const moving = useMutationState({
+    filters: { mutationKey: libraryOrderKey, status: "pending" },
+    select: (mutation) => mutation.state.variables as Id[] | undefined,
+  }).at(-1);
+  const select = useCallback((list: Library[]) => (moving ? reordered(list, moving, (l) => l.id) : list), [moving]);
+  return useQuery({ ...queries.libraries(), select });
 }
 
 export function useLibrary(id: Id) {
@@ -480,37 +494,31 @@ export function useDeleteLibrary() {
   });
 }
 
-const libraryOrderKey = ["libraries", "order"];
-
 /**
  * The order libraries are listed in, for everyone (`ids`: all of them).
- * Shows it at once, the sidebar too, and puts the old order back if it
- * isn't saved. Moves are saved one at a time, in the order they were made.
+ * Lists show it at once, the sidebar too ({@link useLibraries}), and go back
+ * to the saved order by themselves if it isn't saved. Moves are saved one at
+ * a time, in the order they were made.
  */
 export function useReorderLibraries() {
   const qc = useQueryClient();
-  // Whether the move being settled is the last one still on its way.
-  const last = () => qc.isMutating({ mutationKey: libraryOrderKey }) <= 1;
+  // Who is signed in: after a profile switch the cache is someone else's.
+  const me = () => qc.getQueryData<User>(keys.me)?.id;
   return useMutation({
     mutationKey: libraryOrderKey,
     scope: { id: "library-order" },
     mutationFn: (ids: Id[]) => api.put<Library[]>("/api/libraries/order", { ids }),
-    onMutate: async (ids) => {
-      await qc.cancelQueries({ queryKey: keys.libraries, exact: true });
-      const previous = qc.getQueryData<Library[]>(keys.libraries);
-      qc.setQueryData<Library[]>(keys.libraries, (old) => old && reordered(old, ids, (l) => l.id));
-      return { previous };
-    },
-    onSuccess: (data) => {
-      if (last()) qc.setQueryData(keys.libraries, data);
+    onMutate: () => ({ by: me() }),
+    onSuccess: (data, _ids, move) => {
+      if (me() !== move.by) return;
+      qc.setQueryData(keys.libraries, data);
       // The home page has a row for each library, in this order.
       void qc.invalidateQueries({ queryKey: keys.homeHubs });
     },
-    onError: (_err, _ids, context) => {
-      if (!last()) return;
-      if (context?.previous) qc.setQueryData(keys.libraries, context.previous);
-      // It may have been refused because libraries came or went meanwhile.
-      void qc.invalidateQueries({ queryKey: keys.libraries, exact: true });
+    onError: () => {
+      // Refused, perhaps because libraries came or went meanwhile: once the
+      // last move is settled, see how they are now.
+      if (qc.isMutating({ mutationKey: libraryOrderKey }) <= 1) void qc.invalidateQueries({ queryKey: keys.libraries, exact: true });
     },
   });
 }

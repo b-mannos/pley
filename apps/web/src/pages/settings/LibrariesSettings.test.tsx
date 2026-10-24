@@ -1,9 +1,9 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Library } from "@/api/types";
 import { Sidebar } from "@/components/Sidebar";
-import { apiError, mockApi, renderWithProviders, type FakeRequest } from "@/test/render";
+import { apiError, mockApi, renderWithProviders, testUser, type FakeRequest } from "@/test/render";
 import { LibrariesSettings } from "./LibrariesSettings";
 
 function library(id: number, name: string, kind: Library["kind"]): Library {
@@ -47,6 +47,25 @@ function heldBack() {
   return { reply: () => reply, answer: (value: unknown) => answer(value) };
 }
 
+/** Holds back every answer to a new order: `answers[n]` sends the n-th. */
+function heldBackOrders() {
+  const answers: ReturnType<typeof heldBack>[] = [];
+  const order = () => {
+    const held = heldBack();
+    answers.push(held);
+    return held.reply();
+  };
+  return { answers, order };
+}
+
+const refused = () => apiError(409, "conflict", "the libraries have changed: the order must list each of them once");
+
+/** Lets the page catch up with the cache, which tells it on a timer. */
+const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 10)));
+
+/** The new orders sent. */
+const puts = (requests: FakeRequest[]) => requests.filter((r) => r.method === "PUT");
+
 /** The libraries a part of the page lists, in order. */
 function namesIn(element: HTMLElement): string[] {
   return within(element)
@@ -64,6 +83,18 @@ function rowOf(name: string): HTMLElement {
   return row;
 }
 
+/** What a library is dragged by. */
+function gripOf(name: string): HTMLElement {
+  const grip = rowOf(name).querySelector<HTMLElement>("[data-drag-handle]");
+  if (!grip) throw new Error(`no grip for ${name}`);
+  return grip;
+}
+
+/** A drag's data, as browsers hand it over. */
+function dataTransfer() {
+  return { effectAllowed: "", dropEffect: "", setData: vi.fn(), setDragImage: vi.fn() };
+}
+
 describe("LibrariesSettings", () => {
   it("moves a library with its buttons and keeps the focus on it", async () => {
     const user = userEvent.setup();
@@ -78,8 +109,8 @@ describe("LibrariesSettings", () => {
     await waitFor(() => expect(namesIn(list)).toEqual(["TV", "Movies", "Music"]));
     expect(screen.getByRole("button", { name: "Move Movies down" })).toHaveFocus();
     expect(screen.getByRole("status")).toHaveTextContent("Movies moved to position 2 of 3");
-    await waitFor(() => expect(requests.filter((r) => r.method === "PUT")).toHaveLength(1));
-    expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ ids: [2, 1, 3] });
+    await waitFor(() => expect(puts(requests)).toHaveLength(1));
+    expect(puts(requests)[0]?.body).toEqual({ ids: [2, 1, 3] });
 
     // Last in the list, its "down" button stops working: the focus goes up.
     await user.keyboard("{Enter}");
@@ -87,29 +118,74 @@ describe("LibrariesSettings", () => {
     expect(screen.getByRole("button", { name: "Move Movies down" })).toBeDisabled();
     await waitFor(() => expect(screen.getByRole("button", { name: "Move Movies up" })).toHaveFocus());
     expect(screen.getByRole("status")).toHaveTextContent("Movies moved to position 3 of 3");
-    await waitFor(() => expect(requests.filter((r) => r.method === "PUT")).toHaveLength(2));
-    expect(requests.filter((r) => r.method === "PUT")[1]?.body).toEqual({ ids: [2, 3, 1] });
+    await waitFor(() => expect(puts(requests)).toHaveLength(2));
+    expect(puts(requests)[1]?.body).toEqual({ ids: [2, 3, 1] });
   });
 
-  it("moves a library where it is dropped", async () => {
+  it("moves a library picked up by its grip where it is dropped", async () => {
+    const requests = serve();
+    renderWithProviders(<LibrariesSettings />);
+    const list = await screen.findByRole("list", { name: "Libraries" });
+    // The rest of the card keeps its text selectable.
+    expect(rowOf("Music")).not.toHaveAttribute("draggable");
+    expect(gripOf("Music")).toHaveAttribute("draggable", "true");
+
+    const drag = dataTransfer();
+    fireEvent.dragStart(rowOf("TV"), { dataTransfer: drag });
+    fireEvent.drop(rowOf("Movies"), { dataTransfer: drag });
+    expect(namesIn(list)).toEqual(["Movies", "TV", "Music"]);
+
+    fireEvent.dragStart(gripOf("Music"), { dataTransfer: drag });
+    // The whole card goes with the pointer.
+    expect(drag.setDragImage).toHaveBeenCalledWith(rowOf("Music"), expect.any(Number), expect.any(Number));
+    fireEvent.dragOver(rowOf("Movies"), { dataTransfer: drag });
+    fireEvent.drop(rowOf("Movies"), { dataTransfer: drag });
+
+    await waitFor(() => expect(namesIn(list)).toEqual(["Music", "Movies", "TV"]));
+    await waitFor(() => expect(puts(requests)).toHaveLength(1));
+    expect(puts(requests)[0]?.body).toEqual({ ids: [3, 1, 2] });
+  });
+
+  it("takes a drop in the gap where the line shows it", async () => {
     const requests = serve();
     renderWithProviders(<LibrariesSettings />);
     const list = await screen.findByRole("list", { name: "Libraries" });
 
-    const dataTransfer = { effectAllowed: "", dropEffect: "", setData: vi.fn() };
-    fireEvent.dragStart(rowOf("Music"), { dataTransfer });
-    fireEvent.dragOver(rowOf("Movies"), { dataTransfer });
-    fireEvent.drop(rowOf("Movies"), { dataTransfer });
+    const drag = dataTransfer();
+    fireEvent.dragStart(gripOf("Movies"), { dataTransfer: drag });
+    fireEvent.dragOver(rowOf("Music"), { dataTransfer: drag });
+    // Off the cards, between them: the drop is still taken (cancelled).
+    expect(fireEvent.dragOver(list, { dataTransfer: drag })).toBe(false);
+    fireEvent.drop(list, { dataTransfer: drag });
 
-    await waitFor(() => expect(namesIn(list)).toEqual(["Music", "Movies", "TV"]));
-    await waitFor(() => expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ ids: [3, 1, 2] }));
+    await waitFor(() => expect(namesIn(list)).toEqual(["TV", "Music", "Movies"]));
+    await waitFor(() => expect(puts(requests)).toHaveLength(1));
+    expect(puts(requests)[0]?.body).toEqual({ ids: [2, 3, 1] });
+  });
+
+  it("moves the library picked up when the list changes during the drag", async () => {
+    const requests = serve();
+    const { client } = renderWithProviders(<LibrariesSettings />);
+    const list = await screen.findByRole("list", { name: "Libraries" });
+
+    const drag = dataTransfer();
+    fireEvent.dragStart(gripOf("TV"), { dataTransfer: drag });
+    // Another administrator deletes Movies meanwhile: TV is first now.
+    await act(() => client.setQueryData(["libraries"], [libraries[1], libraries[2]]));
+    await waitFor(() => expect(namesIn(list)).toEqual(["TV", "Music"]));
+    expect(rowOf("TV")).toHaveClass("opacity-40");
+    fireEvent.dragOver(rowOf("Music"), { dataTransfer: drag });
+    fireEvent.drop(rowOf("Music"), { dataTransfer: drag });
+
+    await waitFor(() => expect(puts(requests)).toHaveLength(1));
+    expect(puts(requests)[0]?.body).toEqual({ ids: [3, 2] });
   });
 
   it("shows the new order in the sidebar before the server answers", async () => {
     const user = userEvent.setup();
     const saved = heldBack();
     serve({ order: saved.reply });
-    renderWithProviders(
+    const { client } = renderWithProviders(
       <>
         <Sidebar open={false} onClose={() => {}} />
         <LibrariesSettings />
@@ -121,8 +197,59 @@ describe("LibrariesSettings", () => {
     await user.click(await screen.findByRole("button", { name: "Move Music up" }));
     await waitFor(() => expect(namesIn(sidebar)).toEqual(["Movies", "Music", "TV"]));
     saved.answer([libraries[0], libraries[2], libraries[1]]);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Move TV down" })).toBeDisabled());
+    await waitFor(() => expect(client.isMutating()).toBe(0));
+    await settle();
     expect(namesIn(sidebar)).toEqual(["Movies", "Music", "TV"]);
+  });
+
+  it("keeps a move on screen when the libraries are fetched before it is saved", async () => {
+    const user = userEvent.setup();
+    const saved = heldBack();
+    // Fetched again, they still come in the old order.
+    const requests = serve({ order: saved.reply, refetch: () => libraries });
+    const { client } = renderWithProviders(<LibrariesSettings />);
+    const list = await screen.findByRole("list", { name: "Libraries" });
+
+    await user.click(screen.getByRole("button", { name: "Move Music up" }));
+    await waitFor(() => expect(namesIn(list)).toEqual(["Movies", "Music", "TV"]));
+    // What a server event does (a scan finished, another tab's change).
+    await act(() => client.invalidateQueries({ queryKey: ["libraries"] }));
+    await settle();
+    expect(requests.filter((r) => r.path === "/api/libraries")).toHaveLength(2);
+    expect(namesIn(list)).toEqual(["Movies", "Music", "TV"]);
+
+    saved.answer([libraries[0], libraries[2], libraries[1]]);
+    await waitFor(() => expect(client.isMutating()).toBe(0));
+    await settle();
+    expect(namesIn(list)).toEqual(["Movies", "Music", "TV"]);
+  });
+
+  it("saves quick moves one after the other, showing the last", async () => {
+    const user = userEvent.setup();
+    const { answers, order } = heldBackOrders();
+    const requests = serve({ order });
+    const { client } = renderWithProviders(<LibrariesSettings />);
+    const list = await screen.findByRole("list", { name: "Libraries" });
+
+    await user.click(screen.getByRole("button", { name: "Move Music up" }));
+    await waitFor(() => expect(namesIn(list)).toEqual(["Movies", "Music", "TV"]));
+    await user.click(screen.getByRole("button", { name: "Move Music up" }));
+    await waitFor(() => expect(namesIn(list)).toEqual(["Music", "Movies", "TV"]));
+    await waitFor(() => expect(answers).toHaveLength(1));
+    // The second waits for the first to be answered.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(puts(requests)).toHaveLength(1);
+
+    answers[0]?.answer([libraries[0], libraries[2], libraries[1]]);
+    await waitFor(() => expect(answers).toHaveLength(2));
+    await settle();
+    expect(puts(requests)[1]?.body).toEqual({ ids: [3, 1, 2] });
+    expect(namesIn(list)).toEqual(["Music", "Movies", "TV"]);
+
+    answers[1]?.answer([libraries[2], libraries[0], libraries[1]]);
+    await waitFor(() => expect(client.isMutating()).toBe(0));
+    await settle();
+    expect(namesIn(list)).toEqual(["Music", "Movies", "TV"]);
   });
 
   it("puts the old order back when the server refuses the new one", async () => {
@@ -135,15 +262,59 @@ describe("LibrariesSettings", () => {
 
     await user.click(screen.getByRole("button", { name: "Move Music up" }));
     await waitFor(() => expect(namesIn(list)).toEqual(["Movies", "Music", "TV"]));
-    saved.answer(apiError(409, "conflict", "the libraries have changed: the order must list each of them once"));
+    saved.answer(refused());
 
     // Back at once, before the libraries are fetched again (in case some
-    // came or went meanwhile).
+    // came or went meanwhile), and said so.
     expect(await screen.findByText("The libraries have changed: the order must list each of them once")).toBeInTheDocument();
     await waitFor(() => expect(namesIn(list)).toEqual(["Movies", "TV", "Music"]));
+    expect(screen.getByRole("status")).toHaveTextContent("Music moved back to position 3 of 3");
     expect(screen.getByRole("button", { name: "Move Music up" })).toHaveFocus();
     await waitFor(() => expect(requests.filter((r) => r.path === "/api/libraries")).toHaveLength(2));
     refetched.answer(libraries);
+  });
+
+  it("puts the saved order back when quick moves are all refused", async () => {
+    const user = userEvent.setup();
+    const { answers, order } = heldBackOrders();
+    serve({ order });
+    renderWithProviders(<LibrariesSettings />);
+    const list = await screen.findByRole("list", { name: "Libraries" });
+
+    await user.click(screen.getByRole("button", { name: "Move Music up" }));
+    await waitFor(() => expect(namesIn(list)).toEqual(["Movies", "Music", "TV"]));
+    await user.click(screen.getByRole("button", { name: "Move Music up" }));
+    await waitFor(() => expect(namesIn(list)).toEqual(["Music", "Movies", "TV"]));
+    await waitFor(() => expect(answers).toHaveLength(1));
+    answers[0]?.answer(refused());
+    await waitFor(() => expect(answers).toHaveLength(2));
+    await settle();
+    // The second move still shows until it is answered.
+    expect(namesIn(list)).toEqual(["Music", "Movies", "TV"]);
+
+    answers[1]?.answer(refused());
+    await waitFor(() => expect(namesIn(list)).toEqual(["Movies", "TV", "Music"]));
+    expect(screen.getByRole("status")).toHaveTextContent("Music moved back to position 3 of 3");
+  });
+
+  it("keeps an order saved after a profile switch out of the new profile's cache", async () => {
+    const user = userEvent.setup();
+    const saved = heldBack();
+    serve({ order: saved.reply });
+    const { client, unmount } = renderWithProviders(<LibrariesSettings />);
+    client.setQueryData(["me"], testUser);
+    await user.click(await screen.findByRole("button", { name: "Move Music up" }));
+    const [move] = client.getMutationCache().getAll();
+
+    // The administrator switches to a profile that sees fewer libraries
+    // before the answer comes, which starts the cache over.
+    unmount();
+    client.clear();
+    client.setQueryData(["me"], { ...testUser, id: 2, is_admin: false });
+    saved.answer([libraries[0], libraries[2], libraries[1]]);
+
+    await waitFor(() => expect(move?.state.status).toBe("success"));
+    expect(client.getQueryData(["libraries"])).toBeUndefined();
   });
 
   it("has nothing to move with a single library", async () => {
@@ -153,6 +324,7 @@ describe("LibrariesSettings", () => {
 
     expect(screen.queryByRole("button", { name: /^Move / })).not.toBeInTheDocument();
     expect(rowOf("Movies")).not.toHaveAttribute("draggable");
+    expect(rowOf("Movies").querySelector("[data-drag-handle]")).toBeNull();
     expect(screen.queryByText("Everyone sees them in this order.", { exact: false })).not.toBeInTheDocument();
   });
 });

@@ -73,7 +73,7 @@ function PlaylistView({ playlist: p }: { playlist: PlaylistDetail }) {
       { onError: (err) => toast.error(errorMessage(err)) },
     );
   };
-  const { dragging, rowProps, dropMark } = useDragReorder(move);
+  const { dragging, rowProps, dropMark } = useDragReorder(p.entries.map((e) => e.entry_id), move);
 
   return (
     <div className="animate-fade-in px-4 pb-16 pt-8 sm:px-8">
@@ -170,7 +170,7 @@ function PlaylistView({ playlist: p }: { playlist: PlaylistDetail }) {
                   <span className="hidden shrink-0 text-xs tabular-nums text-muted sm:inline">{formatDuration(item.duration_ms)}</span>
                   <div
                     hidden={!editable}
-                    className="flex shrink-0 items-center opacity-100 transition-opacity sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
+                    className="flex shrink-0 items-center opacity-100 transition-opacity [@media(hover:hover)]:sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
                   >
                     <IconButton label="Move up" size="sm" disabled={i === 0} onClick={() => move(i, i - 1)}>
                       <ChevronUp className="size-4" />

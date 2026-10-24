@@ -250,7 +250,7 @@ function ManageItems({ collection: c }: { collection: CollectionDetail }) {
       { onError: (err) => toast.error(errorMessage(err)) },
     );
   };
-  const { dragging, rowProps, dropMark } = useDragReorder(move);
+  const { dragging, rowProps, dropMark } = useDragReorder(c.items.map((i) => i.id), move);
 
   return (
     <div className="max-w-3xl">
