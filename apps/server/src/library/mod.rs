@@ -151,6 +151,11 @@ mod tests {
 
         let db = Db::open(&path).await.unwrap();
         assert_eq!(names(list_libraries(&db).await.unwrap()), ["Anime", "movies", "Music", "TV"]);
+        // Kept as their places, not worked out from their names: a library
+        // renamed afterwards stays where it was.
+        sqlx::query("UPDATE libraries SET name = 'Zoo' WHERE id = 3").execute(&db.write).await.unwrap();
+        assert_eq!(names(list_libraries(&db).await.unwrap()), ["Zoo", "movies", "Music", "TV"]);
+        sqlx::query("UPDATE libraries SET name = 'Anime' WHERE id = 3").execute(&db.write).await.unwrap();
         assert!(set_order(&db, &[4, 3, 2, 1]).await.unwrap());
         assert_eq!(names(list_libraries(&db).await.unwrap()), ["Music", "Anime", "movies", "TV"]);
         assert!(!set_order(&db, &[4, 3, 2]).await.unwrap(), "every library");

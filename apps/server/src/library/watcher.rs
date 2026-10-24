@@ -4,7 +4,7 @@
 //! ([`super::scanner::ScanFailures`]).
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -86,8 +86,7 @@ impl LibraryWatcher {
             tokio::select! {
                 path = rx.recv() => {
                     let Some(path) = path else { break };
-                    let library = self.roots.lock().iter().find(|(root, _)| path.starts_with(root)).map(|(_, id)| *id);
-                    if let Some(id) = library {
+                    if let Some(id) = library_of(&self.roots.lock(), &path) {
                         pending.insert(id, Instant::now());
                     }
                 }
@@ -126,6 +125,37 @@ impl LibraryWatcher {
                     self.scanner.enqueue(lib.id, false);
                 }
             }
+        }
+    }
+}
+
+/// The library a changed path belongs to. Library folders can be nested:
+/// the deepest folder holding the path wins (then the oldest library),
+/// whatever order the libraries are listed in.
+fn library_of(roots: &[(PathBuf, i64)], path: &Path) -> Option<i64> {
+    roots
+        .iter()
+        .filter(|(root, _)| path.starts_with(root))
+        .max_by_key(|(root, id)| (root.components().count(), std::cmp::Reverse(*id)))
+        .map(|(_, id)| *id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn changes_go_to_the_deepest_library_folder_whatever_the_order() {
+        let movies = (PathBuf::from("/media/movies"), 1);
+        let kids = (PathBuf::from("/media/movies/kids"), 2);
+        let also_kids = (PathBuf::from("/media/movies/kids"), 3);
+        for roots in
+            [[movies.clone(), kids.clone(), also_kids.clone()], [also_kids.clone(), kids.clone(), movies.clone()]]
+        {
+            assert_eq!(library_of(&roots, Path::new("/media/movies/kids/Up (2009)/Up.mkv")), Some(2));
+            assert_eq!(library_of(&roots, Path::new("/media/movies/Heat (1995).mkv")), Some(1));
+            assert_eq!(library_of(&roots, Path::new("/media/movies-4k/Heat (1995).mkv")), None);
+            assert_eq!(library_of(&roots, Path::new("/media/music/Song.mp3")), None);
         }
     }
 }
