@@ -25,6 +25,7 @@ pub mod library;
 pub mod logging;
 pub mod markers;
 pub mod metadata;
+pub mod oauth;
 pub mod overrides;
 pub mod people;
 pub mod playback;

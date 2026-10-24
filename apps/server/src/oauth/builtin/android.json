@@ -1,0 +1,10 @@
+{
+  "client_id": "https://hhaidar.github.io/pley/oauth/android.json",
+  "client_name": "pley for Android",
+  "client_uri": "https://github.com/hhaidar/pley",
+  "redirect_uris": ["app.pley.android:/oauth/callback"],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none",
+  "scope": "library play playlists profiles"
+}
