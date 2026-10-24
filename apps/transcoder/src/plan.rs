@@ -660,17 +660,20 @@ impl Plan {
         }
 
         let join = |parts: &[String]| if parts.is_empty() { "null".to_owned() } else { parts.join(",") };
+        // Picture subtitles come on a canvas of their own (1080p on 4K discs):
+        // it is fitted to the frame's width, keeping its shape, and laid on
+        // the bottom of the frame.
+        let overlay = |subs: &str| {
+            format!(
+                "{input}{}[base];{subs}scale={}:-1[subs];[base][subs]overlay=x=(W-w)/2:y=H-h:eof_action=pass:repeatlast=0[ov];[ov]{}[vout]",
+                join(&pre),
+                v.src_width,
+                join(&post)
+            )
+        };
         match &self.burn {
-            Some(Burn::Image { stream_index, .. }) => format!(
-                "{input}{}[base];[base][0:{stream_index}]overlay=x=(W-w)/2:y=H-h:eof_action=pass:repeatlast=0[ov];[ov]{}[vout]",
-                join(&pre),
-                join(&post)
-            ),
-            Some(Burn::ImageFile { .. }) => format!(
-                "{input}{}[base];[base][1:0]overlay=x=(W-w)/2:y=H-h:eof_action=pass:repeatlast=0[ov];[ov]{}[vout]",
-                join(&pre),
-                join(&post)
-            ),
+            Some(Burn::Image { stream_index, .. }) => overlay(&format!("[0:{stream_index}]")),
+            Some(Burn::ImageFile { .. }) => overlay("[1:0]"),
             _ => {
                 let mut all = pre;
                 all.extend(post);
@@ -1308,7 +1311,8 @@ mod tests {
         req.subtitle = Some(SubtitleBurnRequest { stream_index: Some(2), external_path: None });
         let plan = Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, None).unwrap();
         let args = args_string(&plan, 0, 2);
-        assert!(args.contains("[base][0:2]overlay"), "{args}");
+        // The subtitles' canvas fills the 4K frame's width, then both go to 1080p.
+        assert!(args.contains("[0:2]scale=3840:-1[subs];[base][subs]overlay=x=(W-w)/2:y=H-h"), "{args}");
         assert!(args.contains("scale=1920:1080"));
         assert!(!args.contains("-ss"));
     }
