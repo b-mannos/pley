@@ -23,30 +23,20 @@ class LinksTest {
     }
 
     @Test
-    fun singleSignOnPassesThroughTheProvidersPages() {
-        val places = Places("https://pley.example.com")
-        val go = { url: String -> Links.navigation(url, places) }
-        assertEquals(Navigation.Browser, go("https://auth.example.com/authorize"), "outside a sign-in")
-        assertEquals(Navigation.Allow, go("https://pley.example.com/api/auth/sso/start?next=%2F"))
-        assertEquals(Navigation.Allow, go("https://auth.example.com/authorize?client_id=pley"))
-        assertEquals(Navigation.Allow, go("https://pley.example.com/api/auth/sso/callback?code=c"))
-        assertEquals(Navigation.Allow, go("https://pley.example.com/"))
-        assertEquals(Navigation.Browser, go("https://auth.example.com/account"), "back at pley")
-    }
-
-    @Test
-    fun aSignInAtThePublicAddressMovesTheAppThere() {
+    fun anotherSiteAfterASignInPageOpensInTheBrowser() {
         val places = Places(server)
-        for (step in listOf(
-            "https://pley.example.com/api/auth/sso/start?next=%2F&hop=1",
-            "https://auth.example.com/authorize?client_id=pley",
-            "https://pley.example.com/api/auth/sso/callback?code=c",
-            "https://pley.example.com/",
-        )) {
-            assertEquals(Navigation.Allow, Links.navigation(step, places), step)
+        for (page in listOf("$server/login?next=%2F", "$server/api/auth/login")) {
+            assertEquals(Navigation.Allow, Links.navigation(page, places), page)
+            // Signing in happens on the server's own pages: other sites, and
+            // other addresses of the server, open in the browser.
+            for (other in listOf(
+                "https://auth.example.com/authorize?client_id=pley",
+                "https://pley.example.com/api/auth/login",
+                "https://pley.example.com/",
+            )) {
+                assertEquals(Navigation.Browser, Links.navigation(other, places), "$other after $page")
+            }
         }
-        org.junit.Assert.assertEquals("https://pley.example.com", places.server)
-        assertNull(places.signingIn)
     }
 
     @Test

@@ -86,8 +86,7 @@ class WebActivity : ComponentActivity() {
 
     /**
      * Offers `window.PleyAndroid` (the native player) to the server's pages:
-     * only to its origin and only to the page itself, not to frames in it,
-     * nor to a sign-in provider's pages.
+     * only to its origin and only to the page itself, not to frames in it.
      */
     private fun offerPlayer() {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return
@@ -139,11 +138,7 @@ class WebActivity : ComponentActivity() {
 
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
             when (Links.navigation(request.url.toString(), places)) {
-                Navigation.Allow -> {
-                    // A sign-in at the server's public address makes it the server's address.
-                    offerPlayer()
-                    false
-                }
+                Navigation.Allow -> false
                 Navigation.Servers -> {
                     startActivity(ServersActivity.pick(this@WebActivity))
                     finish()
