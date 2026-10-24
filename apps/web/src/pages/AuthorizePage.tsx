@@ -100,7 +100,7 @@ export function AuthorizePage() {
   if (!current || isApiError(current.error, 401)) return <Splash />;
   if (!current.answer) {
     return (
-      <AuthLayout title={isApiError(current.error, 400) ? "This app can't sign in here" : "Something went wrong"}>
+      <AuthLayout title={isApiError(current.error, 400) ? "This app can't sign in here" : "Couldn't load this request"}>
         <p className="text-sm text-muted">{errorMessage(current.error)}</p>
       </AuthLayout>
     );

@@ -598,7 +598,7 @@ function AppsCard() {
                       .join(" · ")}
                   </div>
                   <div className="truncate text-xs text-subtle">
-                    {[a.device, a.ip, `last used ${formatRelative(a.last_used_at)}`, `allowed ${formatRelative(a.created_at)}`]
+                    {[a.device, a.ip, `last active ${formatRelative(a.last_used_at)}`, `allowed ${formatRelative(a.created_at)}`]
                       .filter(Boolean)
                       .join(" · ")}
                   </div>

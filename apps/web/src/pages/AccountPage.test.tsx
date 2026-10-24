@@ -144,7 +144,7 @@ describe("AccountPage", () => {
 
     expect(own).toHaveTextContent("pley's own app");
     expect(own).toHaveTextContent("Libraries · Play · Playlists · Profiles");
-    expect(own).toHaveTextContent(/Android · 192\.0\.2\.8 · last used 1 hour ago · allowed 3 days ago/);
+    expect(own).toHaveTextContent(/Android · 192\.0\.2\.8 · last active 1 hour ago · allowed 3 days ago/);
     expect(own).not.toHaveTextContent(/Using|Allowed by/);
 
     // Others by host first; the name is only what the app calls itself.

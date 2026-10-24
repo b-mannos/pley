@@ -119,7 +119,7 @@ function UserDevices({ user, self }: { user: User; self: boolean }) {
       {confirming ? (
         <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface-2 px-3 py-2.5">
           <p className="text-xs text-muted">
-            {user.name} will be signed out on every device, and every app using their account will be signed out too.
+            <strong className="text-fg">{user.name}</strong> will be signed out on every device and in every app.
           </p>
           <div className="flex shrink-0 gap-1">
             <Button size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={signOut.isPending}>
@@ -211,7 +211,7 @@ function UserApps({ user }: { user: User }) {
                       scopesLabel(a.scopes),
                       a.device,
                       a.ip,
-                      `last used ${formatRelative(a.last_used_at)}`,
+                      `last active ${formatRelative(a.last_used_at)}`,
                     ]
                       .filter(Boolean)
                       .join(" · ")}
