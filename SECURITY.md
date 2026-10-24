@@ -23,8 +23,6 @@ Only the latest release gets fixes.
 - **Mount media read-only** (the Docker example does), run pley as an
   unprivileged user, and don't let untrusted people write to library
   folders.
-- **Single sign-on:** use a provider you control, or set the group that may
-  sign in; turn on new accounts only then.
 - **Two-step sign-in:** turn it on for administrators of a server reachable
   from the internet (Account → Two-step sign-in), and keep the recovery codes
   somewhere safe.
@@ -50,9 +48,7 @@ code works once; wrong codes are limited like passwords, and after 100 in a
 row only a recovery code signs in. The authenticator secrets are encrypted
 with a key kept in the data folder (`secret.key`), so a copy of the database
 or of its backups can't make codes; recovery codes are stored hashed.
-Switching to a profile with its password, and linking the account to a
-single sign-on identity, take its code too. Single sign-on itself skips it:
-the provider asks for its own.
+Switching to a profile with its password takes its code too.
 
 **Sessions.** Random 256-bit tokens, stored hashed. Browsers keep them in an
 `HttpOnly`, `SameSite=Lax` cookie only: no answer gives a page's script the
@@ -76,15 +72,6 @@ only.
 random token. One started on another machine refuses to listen on the
 network without a token of at least 16 characters, since it reads whatever
 files it can open, and keeps its work folder private.
-
-**Single sign-on** (OpenID Connect): the authorization code flow with PKCE,
-a `state` bound to the browser by a cookie, and the ID token's signature,
-issuer, audience, nonce and expiry checked. pley asks only who signed in
-(the scopes `openid email`, `profile` to name new accounts, `groups` to check
-a group) and keeps none of the provider's tokens. Identities are linked to
-accounts explicitly, with the account's password, never matched by name or
-e-mail address; new accounts start without libraries. The client secret is
-never sent back to browsers.
 
 **Apps.** The desktop app hands only web and mail links to the system and
 gives server pages none of its commands. The Android app offers its player

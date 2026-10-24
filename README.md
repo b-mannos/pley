@@ -48,10 +48,6 @@ web app in React and TypeScript.
   own libraries and age limit.
 - A profile switcher with optional PINs, invitation links, and a list of
   signed-in devices that can be signed out remotely.
-- Single sign-on with an OpenID Connect provider (Authentik, Authelia,
-  Keycloak, Pocket ID…), linked account by account and optionally limited to
-  a group. Providers that take client metadata documents need no
-  registration.
 - Optional two-step sign-in with an authenticator app (scan a QR code), with
   recovery codes for a lost phone.
 - First-run setup with a one-time code from the server's log, which the

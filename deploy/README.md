@@ -96,23 +96,14 @@ put pley behind a reverse proxy with TLS (Caddy, nginx, Traefik); it serves
 plain HTTP and works under any host name. Docker publishes ports around host
 firewalls: behind a proxy on the same host, publish pley on `127.0.0.1` only.
 
-## Single sign-on
+## Upgrading from single sign-on
 
-pley signs people in with an OpenID Connect provider. In **Settings →
-Server → Single sign-on**:
+pley no longer signs people in through an OpenID Connect provider: if you
+set one up, delete pley's client at the provider. Upgrading removes the
+single sign-on settings and the identities linked to accounts, but the copy
+of the database made before the upgrade (`backups/pley-…-before-upgrade.db`
+in the data folder) and older backups still hold the old client secret.
 
-1. Enter pley's **public address** (`https://pley.example.com`): sign-ins
-   happen there, and the provider sends people back to it.
-2. Enter the provider's **issuer** exactly as it shows it, and test it.
-3. Either register pley with the provider as a client (redirect URI
-   `https://pley.example.com/api/auth/sso/callback`, shown in the settings)
-   and enter its client ID and secret, or leave the client ID empty if the
-   provider takes client metadata documents: it then reads pley's at
-   `https://pley.example.com/api/auth/sso/client`.
-4. Turn it on. People link their account from their account page (with
-   their password) and then sign in with the provider.
-
-Optionally, let only members of one group in (the provider must send a
-`groups` claim), or give accounts to people the provider knows but pley
-doesn't: they start without libraries. pley asks the provider only who
-signed in and keeps none of its tokens.
+Accounts that signed in only through the provider stay signed in where they
+are, but have no password to sign in again: an administrator gives them one
+in **Settings → Users**, or `pley reset-password <user> <password>` does.
