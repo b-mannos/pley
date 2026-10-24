@@ -9,6 +9,7 @@
 pub mod grants;
 pub mod scopes;
 
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -711,7 +712,9 @@ impl<S: Send + Sync> FromRequestParts<S> for CurrentToken {
     }
 }
 
-/// The client's address as seen by the server (for the devices list).
+/// The client's address as seen by the server (for the devices list). It is
+/// the first X-Forwarded-For value when there is one, which anyone can
+/// write: limits count by [`SourceIp`] instead.
 pub struct ClientIp(pub Option<String>);
 
 impl<S: Send + Sync> FromRequestParts<S> for ClientIp {
@@ -731,6 +734,59 @@ impl<S: Send + Sync> FromRequestParts<S> for ClientIp {
             .map(|info| info.0.ip().to_string());
         Ok(ClientIp(forwarded.or(peer)))
     }
+}
+
+/// Where a request came from, for limits on what anyone may start (TV
+/// sign-ins): the other end of its connection, or the client a proxy on
+/// this computer or its network forwards for ([`forwarded_for`]). Unlike
+/// [`ClientIp`], nobody on the internet can choose it. Unknown only without
+/// a connection (tests).
+pub struct SourceIp(pub Option<IpAddr>);
+
+impl<S: Send + Sync> FromRequestParts<S> for SourceIp {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let peer = parts.extensions.get::<axum::extract::ConnectInfo<SocketAddr>>().map(|info| info.0.ip());
+        Ok(SourceIp(peer.map(|peer| forwarded_for(peer, &parts.headers))))
+    }
+}
+
+/// How many proxies in a row a request is followed back through.
+const MAX_PROXIES: usize = 10;
+
+/// The client that sent a request pley got from `peer`: `peer` itself,
+/// unless it has a loopback or private address
+/// ([`crate::setup::is_local_address`]). Then `peer` is a proxy, such as
+/// nginx or Caddy on this computer, and the client is the address it added
+/// at the end of X-Forwarded-For; when that one is local too, it is another
+/// proxy's, and the address before it counts, and so on. What a client
+/// writes in the header itself comes before its own address, so an address
+/// on the internet ends the search before reaching it. Someone on the local
+/// network can name any address here, as they could connect from another
+/// one. Anything but an address (from a proxy on a Unix socket, say) leaves
+/// the proxy's own.
+pub fn forwarded_for(peer: IpAddr, headers: &axum::http::HeaderMap) -> IpAddr {
+    let mut client = peer.to_canonical();
+    let hops = headers
+        .get_all("x-forwarded-for")
+        .iter()
+        .rev()
+        .flat_map(|value| value.to_str().unwrap_or_default().rsplit(','))
+        .take(MAX_PROXIES);
+    for hop in hops {
+        if !crate::setup::is_local_address(client) {
+            break;
+        }
+        let hop = hop.trim();
+        // Some proxies add the client's port.
+        let Some(address) = hop.parse::<IpAddr>().ok().or_else(|| hop.parse::<SocketAddr>().ok().map(|a| a.ip()))
+        else {
+            break;
+        };
+        client = address.to_canonical();
+    }
+    client
 }
 
 /// The user a request was authenticated as, kept for its other extractors.
@@ -927,6 +983,49 @@ mod tests {
         headers.insert("x-forwarded-proto", "https, http".parse().unwrap());
         assert!(forwarded_https(&headers));
         assert!(clear_cookie().contains("pley_token=;") && clear_cookie().contains("Max-Age=0"));
+    }
+
+    #[test]
+    fn a_request_comes_from_its_connection_or_the_client_a_local_proxy_names() {
+        let from = |peer: &str, forwarded: &[&[u8]]| {
+            let mut headers = axum::http::HeaderMap::new();
+            for value in forwarded {
+                headers.append("x-forwarded-for", axum::http::HeaderValue::from_bytes(value).unwrap());
+            }
+            forwarded_for(peer.parse().unwrap(), &headers).to_string()
+        };
+        // From the internet: the connection's address, whatever the header says.
+        assert_eq!(from("203.0.113.9", &[]), "203.0.113.9");
+        assert_eq!(from("203.0.113.9", &[b"10.0.0.1"]), "203.0.113.9");
+        assert_eq!(from("203.0.113.9", &[b"198.51.100.4, 127.0.0.1"]), "203.0.113.9");
+        assert_eq!(from("2001:db8::1", &[b"198.51.100.4"]), "2001:db8::1");
+        // From a proxy on this computer or its network: the address it added
+        // last, never what the client sent before it.
+        assert_eq!(from("127.0.0.1", &[b"203.0.113.9"]), "203.0.113.9");
+        assert_eq!(from("::1", &[b"2001:db8::7"]), "2001:db8::7");
+        assert_eq!(from("172.18.0.2", &[b"10.9.9.9, 198.51.100.4, 203.0.113.9"]), "203.0.113.9");
+        assert_eq!(from("127.0.0.1", &[b"198.51.100.4", b"203.0.113.9"]), "203.0.113.9", "the last header too");
+        // Proxies in a row on the network are followed back to the client.
+        assert_eq!(from("127.0.0.1", &[b"198.51.100.4, 203.0.113.9, 192.168.1.2"]), "203.0.113.9");
+        assert_eq!(from("127.0.0.1", &[b"198.51.100.4, 203.0.113.9", b"172.18.0.3"]), "203.0.113.9");
+        // A client on the local network, through the proxy or not.
+        assert_eq!(from("127.0.0.1", &[b"192.168.1.20"]), "192.168.1.20");
+        assert_eq!(from("192.168.1.20", &[]), "192.168.1.20");
+        // Ports some proxies add.
+        assert_eq!(from("127.0.0.1", &[b"203.0.113.9:4711"]), "203.0.113.9");
+        assert_eq!(from("127.0.0.1", &[b"[2001:db8::7]:4711"]), "2001:db8::7");
+        // Anything else is the proxy's own address.
+        for odd in [&b"spoof-1"[..], b"", b"unknown", b"203.0.113.9, unix:", b"\xff203.0.113.9"] {
+            assert_eq!(from("127.0.0.1", &[odd]), "127.0.0.1", "{}", String::from_utf8_lossy(odd));
+        }
+        // IPv4 clients of an IPv6 socket count as IPv4.
+        assert_eq!(from("::ffff:203.0.113.9", &[b"10.0.0.1"]), "203.0.113.9");
+        assert_eq!(from("::ffff:127.0.0.1", &[b"::ffff:203.0.113.9"]), "203.0.113.9");
+        // At most 10 proxies in a row.
+        let ten = ["10.0.0.1"; 10].join(", ");
+        assert_eq!(from("127.0.0.1", &[format!("203.0.113.9, {ten}").as_bytes()]), "10.0.0.1");
+        let nine = ["10.0.0.1"; 9].join(", ");
+        assert_eq!(from("127.0.0.1", &[format!("203.0.113.9, {nine}").as_bytes()]), "203.0.113.9");
     }
 
     async fn service_with_user(dir: &std::path::Path) -> (Db, AuthService) {

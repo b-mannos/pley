@@ -252,7 +252,9 @@ pub async fn change_password(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    // The apps acting as this account or allowed by it end too.
+    // The apps acting as this account or allowed by it end too, and TVs it
+    // allowed that haven't asked for their answer yet are refused.
+    state.oauth.devices.forget_user(user.id);
     state.auth.sign_out_everywhere(user.id, Some(keep.as_str())).await?;
     Ok(StatusCode::NO_CONTENT)
 }

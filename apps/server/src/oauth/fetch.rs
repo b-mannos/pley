@@ -18,6 +18,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use axum::http;
@@ -289,6 +290,8 @@ pub struct Documents {
     /// When each person's fetches of the last minute started.
     turns: Mutex<HashMap<i64, VecDeque<Instant>>>,
     permits: Semaphore,
+    /// Documents read so far ([`Documents::fetched`]).
+    fetched: AtomicUsize,
 }
 
 impl Documents {
@@ -307,6 +310,7 @@ impl Documents {
             in_flight: Mutex::default(),
             turns: Mutex::default(),
             permits: Semaphore::new(FETCHES_AT_ONCE),
+            fetched: AtomicUsize::new(0),
         }
     }
 
@@ -406,6 +410,7 @@ impl Documents {
 
     async fn fetch(&self, client_id: &str, url: Url) -> Result<(Client, Option<Duration>), ClientError> {
         let _permit = self.permits.acquire().await.map_err(|_| ClientError::Unreachable("pley is stopping".into()))?;
+        self.fetched.fetch_add(1, Ordering::Relaxed);
         let response = match &self.fetcher {
             // The address is the client ID, byte for byte.
             Fetcher::Internet(http) => http.get(url).send().await.map_err(failed)?,
@@ -472,6 +477,13 @@ impl Documents {
             !turns.is_empty()
         });
     }
+
+    /// How many documents were read since pley started: for tests that
+    /// check none was.
+    #[doc(hidden)]
+    pub fn fetched(&self) -> usize {
+        self.fetched.load(Ordering::Relaxed)
+    }
 }
 
 /// Lets others fetch `client_id` again once its fetch is over, or dropped.
@@ -496,8 +508,6 @@ fn same_host(host: &str, own_host: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
     use futures::future::BoxFuture;
     use futures::{FutureExt, StreamExt};
 
@@ -1004,6 +1014,10 @@ mod tests {
         assert!(about(documents.cached_for(ID), 3_600), "no cache headers: an hour");
         let unknown = documents.get("https://apps.example.com/unknown.json", 1, true, OWN).await;
         assert!(matches!(unknown, Err(ClientError::Unreachable(_))), "{unknown:?}");
+        // Each was read once: kept documents and pley's own apps never are.
+        documents.get(ID, 1, true, OWN).await.unwrap();
+        documents.get(ANDROID_ID, 1, true, OWN).await.unwrap();
+        assert_eq!(documents.fetched(), 2);
     }
 
     #[tokio::test]

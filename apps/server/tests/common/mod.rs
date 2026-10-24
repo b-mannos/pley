@@ -309,16 +309,38 @@ impl TestApp {
     }
 
     /// A form POSTed as apps do to the token and revocation endpoints
-    /// (`form` already encoded), to Host [`HOST`], with `extra` headers.
+    /// (`form` already encoded), to Host [`HOST`] with the Android app's
+    /// User-Agent. `extra` headers replace those.
     pub async fn form_post(&self, uri: &str, form: &str, extra: &[(&str, &str)]) -> Reply {
-        let mut req = Request::builder()
-            .method(Method::POST)
-            .uri(uri)
-            .header(header::HOST, HOST)
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .header(header::USER_AGENT, "pley-android/1.0 okhttp/5");
-        for (k, v) in extra {
-            req = req.header(*k, *v);
+        self.form_post_with(None, uri, form, extra).await
+    }
+
+    /// [`TestApp::form_post`] over a connection from `peer` (an IP address
+    /// and port), as the server sees it.
+    pub async fn form_post_from(&self, peer: &str, uri: &str, form: &str, extra: &[(&str, &str)]) -> Reply {
+        self.form_post_with(Some(peer.parse().unwrap()), uri, form, extra).await
+    }
+
+    async fn form_post_with(
+        &self,
+        peer: Option<std::net::SocketAddr>,
+        uri: &str,
+        form: &str,
+        extra: &[(&str, &str)],
+    ) -> Reply {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HOST.parse().unwrap());
+        headers.insert(header::CONTENT_TYPE, "application/x-www-form-urlencoded".parse().unwrap());
+        headers.insert(header::USER_AGENT, "pley-android/1.0 okhttp/5".parse().unwrap());
+        for (name, value) in extra {
+            headers.insert(header::HeaderName::from_bytes(name.as_bytes()).unwrap(), value.parse().unwrap());
+        }
+        let mut req = Request::builder().method(Method::POST).uri(uri);
+        for (name, value) in &headers {
+            req = req.header(name, value);
+        }
+        if let Some(peer) = peer {
+            req = req.extension(axum::extract::ConnectInfo(peer));
         }
         reply(self.api.clone().oneshot(req.body(Body::from(form.to_owned())).unwrap()).await.unwrap()).await
     }

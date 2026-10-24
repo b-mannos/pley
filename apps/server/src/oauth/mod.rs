@@ -16,11 +16,13 @@
 //!   [`clients`] allow.
 //!
 //! A sign-in in progress lives here too: the request the consent page shows
-//! ([`pending`]) and the code an allowed app exchanges for its tokens
-//! ([`codes`]). The HTTP side is `api/oauth.rs`.
+//! ([`pending`]), the code an allowed app exchanges for its tokens
+//! ([`codes`]), and the request of a TV that signs in with a code it shows
+//! ([`devices`]). The HTTP side is `api/oauth.rs`.
 
 pub mod clients;
 pub mod codes;
+pub mod devices;
 pub mod fetch;
 pub mod pending;
 
@@ -35,6 +37,8 @@ pub struct AuthorizationServer {
     pub pending: pending::Pending,
     /// Codes handed to apps that were allowed, until they are exchanged.
     pub codes: codes::Codes,
+    /// Requests of TVs signing in with a code, until they have their answer.
+    pub devices: devices::Devices,
 }
 
 impl AuthorizationServer {
@@ -43,6 +47,7 @@ impl AuthorizationServer {
             documents: fetch::Documents::new(config.client_documents.clone()),
             pending: pending::Pending::default(),
             codes: codes::Codes::default(),
+            devices: devices::Devices::default(),
         }
     }
 
@@ -51,6 +56,7 @@ impl AuthorizationServer {
         self.pending.sweep();
         self.codes.sweep();
         self.documents.sweep();
+        self.devices.sweep();
     }
 }
 

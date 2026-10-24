@@ -15,6 +15,8 @@ use serde::Deserialize;
 use serde::de::{Deserializer, IgnoredAny};
 use url::{Host, Url};
 
+use super::devices::DEVICE_GRANT;
+
 /// The longest client ID, and the longest registered return address.
 pub const MAX_ID_LEN: usize = 512;
 /// The largest document pley reads (CIMD §8.7 suggests 5 KB).
@@ -52,6 +54,10 @@ pub struct Client {
     /// The app gets refresh tokens (its `grant_types` lists
     /// `refresh_token`, RFC 7591 §2).
     pub refresh: bool,
+    /// The app signs in with a code shown on a screen (its `grant_types`
+    /// lists RFC 8628's device code grant). Only pley's own apps may, all
+    /// the same: see [`super::devices`].
+    pub device: bool,
 }
 
 /// Where an authorization answer goes, for the consent page.
@@ -222,13 +228,14 @@ pub fn parse_document(client_id: &str, bytes: &[u8], trusted: bool) -> Result<Cl
     if !matches!(document.token_endpoint_auth_method.as_deref(), None | Some("none")) {
         return bad("its token_endpoint_auth_method isn't \"none\"");
     }
-    // RFC 7591 §2: absent means ["authorization_code"]. Others are ignored:
-    // pley serves only these two.
+    // RFC 7591 §2: absent means ["authorization_code"]. pley reads
+    // refresh_token and the device code grant from it; others are ignored.
     let grant_types = document.grant_types.unwrap_or_else(|| vec!["authorization_code".to_owned()]);
     if !grant_types.iter().any(|g| g == "authorization_code") {
         return bad("its grant_types leave out authorization_code");
     }
     let refresh = grant_types.iter().any(|g| g == "refresh_token");
+    let device = grant_types.iter().any(|g| g == DEVICE_GRANT);
     if document.response_types.as_ref().is_some_and(|types| !types.iter().any(|t| t == "code")) {
         return bad("its response_types leave out code");
     }
@@ -251,6 +258,7 @@ pub fn parse_document(client_id: &str, bytes: &[u8], trusted: bool) -> Result<Cl
         redirect_uris: document.redirect_uris,
         scope_cap: document.scope,
         refresh,
+        device,
     })
 }
 
@@ -549,6 +557,7 @@ mod tests {
                 redirect_uris: vec!["https://apps.example.com/callback".into()],
                 scope_cap: None,
                 refresh: false,
+                device: false,
             }
         );
         // Everything a document may say.
@@ -561,6 +570,15 @@ mod tests {
         assert!(client.refresh, "refresh tokens when refresh_token is listed");
         assert_eq!(client.scope_cap.as_deref(), Some("library play"), "the scope cap, as written");
         assert!(!client.first_party, "documents never make pley's own apps");
+        assert!(!client.device);
+        // The device code grant is read from any document (only pley's own
+        // apps may use it, all the same).
+        let tv = parse(&document(
+            r#""grant_types": ["authorization_code", "urn:ietf:params:oauth:grant-type:device_code"],"#,
+        ))
+        .unwrap();
+        assert!(tv.device && !tv.refresh && !tv.first_party);
+        assert!(parse(&document(r#""grant_types": ["urn:ietf:params:oauth:grant-type:device_code"],"#)).is_err());
         // Other grant types are ignored.
         assert!(parse(&document(r#""grant_types": ["authorization_code", "client_credentials"],"#)).is_ok());
         // Unknown fields, and fields pley never reads or fetches, are ignored.
@@ -773,12 +791,15 @@ mod tests {
                 redirect_uris: vec!["app.pley.android:/oauth/callback".into()],
                 scope_cap: Some("library play playlists profiles".into()),
                 refresh: true,
+                // The same app runs on phones, Android TV and Fire TV.
+                device: true,
             }
         );
         let desktop = builtin(DESKTOP_ID).unwrap();
         assert_eq!(desktop.name.as_deref(), Some("pley for desktop"));
         assert_eq!(desktop.redirect_uris, ["http://127.0.0.1/oauth/callback", "http://[::1]/oauth/callback"]);
         assert!(desktop.first_party && desktop.refresh);
+        assert!(!desktop.device, "desktops have browsers");
         assert_eq!(
             redirect_kind(android, "app.pley.android:/oauth/callback"),
             Ok(RedirectKind::App { scheme: "app.pley.android".into() })

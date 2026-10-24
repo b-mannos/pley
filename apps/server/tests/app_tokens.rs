@@ -30,6 +30,8 @@ const PUBLIC: &[(&str, &str)] = &[
     // Apps exchange codes and refresh tokens, and sign out, with forms.
     ("POST", "/api/oauth/token"),
     ("POST", "/api/oauth/revoke"),
+    // TVs start signing in with a code (pley's own apps only).
+    ("POST", "/api/oauth/device"),
 ];
 
 /// Routes for pley's own sign-in only: how an account signs in, its
@@ -102,11 +104,12 @@ const ADMIN: &[(&str, &str)] = &[
 ];
 
 /// Routes that take pley's own page's cookie and nothing else: allowing
-/// an app (api/oauth.rs WebUser).
+/// an app, or a TV by the code it shows (api/oauth.rs WebUser).
 const COOKIE_ONLY: &[(&str, &str)] = &[
     ("POST", "/api/oauth/requests"),
     ("POST", "/api/oauth/requests/{id}"),
     ("GET", "/api/oauth/requests/{id}/continue"),
+    ("POST", "/api/oauth/device/verify"),
 ];
 
 /// Every method and path of the API router of `source` (api/mod.rs): the
@@ -248,6 +251,9 @@ fn every_route_is_classified() {
     // The household's profiles, for apps allowed to switch between them.
     assert!(routes.contains(&("GET".into(), "/api/oauth/profiles".into())));
     assert_eq!(app_route("GET", "/api/oauth/profiles"), Some(Need::Scope(pley::auth::scopes::Scope::Profiles)));
+    // TVs: anyone starts with a code, which only pley's own page takes.
+    assert!(PUBLIC.contains(&("POST", "/api/oauth/device")));
+    assert!(COOKIE_ONLY.contains(&("POST", "/api/oauth/device/verify")));
 }
 
 #[test]

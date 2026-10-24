@@ -328,12 +328,14 @@ async fn metadata_names_the_address_it_was_asked_at() {
             "authorization_endpoint": "http://pley.local:7539/oauth/authorize",
             "token_endpoint": "http://pley.local:7539/api/oauth/token",
             "revocation_endpoint": "http://pley.local:7539/api/oauth/revoke",
+            "device_authorization_endpoint": "http://pley.local:7539/api/oauth/device",
             "response_types_supported": ["code"],
             "response_modes_supported": ["query"],
             "grant_types_supported": [
                 "authorization_code",
                 "refresh_token",
-                "urn:pley:params:oauth:grant-type:switch-profile"
+                "urn:pley:params:oauth:grant-type:switch-profile",
+                "urn:ietf:params:oauth:grant-type:device_code"
             ],
             "token_endpoint_auth_methods_supported": ["none"],
             "revocation_endpoint_auth_methods_supported": ["none"],
@@ -538,7 +540,7 @@ async fn the_consent_api_takes_the_cookie_of_pleys_own_page_only() {
     let elsewhere = decide(&app, &other_session, &id, true).await;
     assert_eq!(
         (elsewhere.status, &elsewhere.body["message"]),
-        (StatusCode::NOT_FOUND, &json!("this request is over: start again from the app"))
+        (StatusCode::NOT_FOUND, &json!("this request is over: start again from the app or the TV"))
     );
     assert_eq!(decide(&app, &admin, "made-up", true).await.status, StatusCode::NOT_FOUND);
     let first = decide(&app, &admin, &id, true).await;
@@ -894,9 +896,11 @@ async fn pending_requests_are_capped() {
                 session_hash: "elsewhere".into(),
                 issuer: ISSUER.into(),
                 app: snapshot.clone(),
-                redirect_uri: ANDROID_BACK.into(),
-                state: None,
-                code_challenge: CHALLENGE.into(),
+                kind: pley::oauth::pending::Kind::Redirect(pley::oauth::pending::Redirect {
+                    redirect_uri: ANDROID_BACK.into(),
+                    state: None,
+                    code_challenge: CHALLENGE.into(),
+                }),
                 scopes: pley::auth::scopes::Scopes::parse("library").unwrap(),
                 error: None,
             };

@@ -9,6 +9,10 @@
 //! 1,000. Once answered, the way back repeats for a minute: while the code
 //! works and wasn't exchanged when allowed, and for 60 seconds after a
 //! refusal or an error.
+//!
+//! The request of a TV signing in with a code ([`super::devices`]) waits
+//! here too, while the person decides: its answer goes to the TV's request,
+//! and nothing goes back through the browser.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -49,14 +53,31 @@ pub struct PendingRequest {
     /// The address pley was reached at.
     pub issuer: String,
     pub app: AppSnapshot,
-    /// As the app sent it: answers go there, port included.
-    pub redirect_uri: String,
-    pub state: Option<String>,
-    /// Empty when `error` says it was missing or wrong.
-    pub code_challenge: String,
+    /// Where the answer goes.
+    pub kind: Kind,
     pub scopes: Scopes,
     /// Set when the request can't be allowed: it only goes back.
     pub error: Option<ReturnedError>,
+}
+
+/// Where the answer to a request goes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Kind {
+    /// Back to the app, through the browser.
+    Redirect(Redirect),
+    /// To a TV that shows a code and asks pley for the answer: the key of
+    /// its request in [`super::devices::Devices`].
+    Device(String),
+}
+
+/// How the browser goes back to the app.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Redirect {
+    /// As the app sent it: answers go there, port included.
+    pub redirect_uri: String,
+    pub state: Option<String>,
+    /// Empty when the request's `error` says it was missing or wrong.
+    pub code_challenge: String,
 }
 
 /// Too many requests are waiting.
@@ -70,7 +91,7 @@ pub enum DecideError<E> {
     NotFound,
     /// Decided the other way already, or a request that can only go back.
     Conflict,
-    /// The code couldn't be made.
+    /// The code couldn't be made, or the TV's request couldn't be told.
     Code(E),
 }
 
@@ -109,19 +130,20 @@ pub struct Pending {
     requests: Mutex<HashMap<String, Entry>>,
 }
 
-/// `redirect_uri` with `params`, then `state` (when the app sent one) and
-/// `iss` added to its query (its own query kept).
-pub fn answer_url(request: &PendingRequest, params: &[(&str, &str)]) -> String {
-    let Ok(mut url) = Url::parse(&request.redirect_uri) else { return request.redirect_uri.clone() };
+/// The return address of `back` with `params`, then `state` (when the app
+/// sent one) and `iss` (the `issuer`) added to its query (its own query
+/// kept).
+pub fn answer_url(issuer: &str, back: &Redirect, params: &[(&str, &str)]) -> String {
+    let Ok(mut url) = Url::parse(&back.redirect_uri) else { return back.redirect_uri.clone() };
     {
         let mut query = url.query_pairs_mut();
         for (name, value) in params {
             query.append_pair(name, value);
         }
-        if let Some(state) = &request.state {
+        if let Some(state) = &back.state {
             query.append_pair("state", state);
         }
-        query.append_pair("iss", &request.issuer);
+        query.append_pair("iss", issuer);
     }
     url.into()
 }
@@ -129,6 +151,12 @@ pub fn answer_url(request: &PendingRequest, params: &[(&str, &str)]) -> String {
 impl Pending {
     /// Keeps a request; its id. The person's oldest goes past 10.
     pub fn create(&self, request: PendingRequest) -> Result<String, Full> {
+        self.create_lasting(request, PENDING_LIFETIME)
+    }
+
+    /// [`Pending::create`], for a request that ends after `lifetime` (10
+    /// minutes at most): a TV's request ends no later than the TV's own.
+    pub fn create_lasting(&self, request: PendingRequest, lifetime: Duration) -> Result<String, Full> {
         let now = Instant::now();
         let mut requests = self.requests.lock();
         requests.retain(|_, entry| entry.alive(now));
@@ -150,9 +178,24 @@ impl Pending {
             return Err(Full);
         }
         let id = new_token();
-        let entry = Entry { request, created: now, until: now + PENDING_LIFETIME, decision: None, answer: None };
+        let until = now + lifetime.min(PENDING_LIFETIME);
+        let entry = Entry { request, created: now, until, decision: None, answer: None };
         requests.insert(id.clone(), entry);
         Ok(id)
+    }
+
+    /// Forgets request `id`.
+    pub fn remove(&self, id: &str) {
+        self.requests.lock().remove(id);
+    }
+
+    /// Whose request `id` is, while it isn't over: the person, and the
+    /// SHA-256 of their session's token.
+    pub fn owner(&self, id: &str) -> Option<(i64, String)> {
+        let now = Instant::now();
+        let requests = self.requests.lock();
+        let entry = requests.get(id).filter(|entry| entry.alive(now))?;
+        Some((entry.request.user_id, entry.request.session_hash.clone()))
     }
 
     /// The request `id`, when it is this person's and this session's and
@@ -165,21 +208,66 @@ impl Pending {
     }
 
     /// Allows the app (with the code `make_code` makes for the request) or
-    /// not. The same decision again changes nothing; the other one is a
-    /// conflict.
+    /// not, for a request that goes back to the app. The same decision again
+    /// changes nothing; the other one is a conflict.
     pub fn decide<E>(
         &self,
         id: &str,
         user_id: i64,
         session_hash: &str,
         allow: bool,
-        make_code: impl FnOnce(&PendingRequest) -> Result<String, E>,
+        make_code: impl FnOnce(&PendingRequest, &Redirect) -> Result<String, E>,
+    ) -> Result<(), DecideError<E>> {
+        self.answer(id, user_id, session_hash, allow, false, |request| {
+            let Kind::Redirect(back) = &request.kind else { return Err(DecideError::NotFound) };
+            let answer = if allow {
+                let code = make_code(request, back).map_err(DecideError::Code)?;
+                Continue { location: answer_url(&request.issuer, back, &[("code", &code)]), code: Some(code) }
+            } else {
+                Continue { location: answer_url(&request.issuer, back, &[("error", "access_denied")]), code: None }
+            };
+            Ok(Some(answer))
+        })
+    }
+
+    /// Allows the app on a TV or not, for a TV's request ([`Kind::Device`]):
+    /// `tell` passes the answer on to the TV's request (by its key), and when
+    /// it can't, because that request is over, nothing is decided. The same
+    /// decision again changes nothing; the other one is a conflict.
+    pub fn decide_device<E>(
+        &self,
+        id: &str,
+        user_id: i64,
+        session_hash: &str,
+        allow: bool,
+        tell: impl FnOnce(&PendingRequest, &str) -> Result<(), E>,
+    ) -> Result<(), DecideError<E>> {
+        self.answer(id, user_id, session_hash, allow, true, |request| {
+            let Kind::Device(key) = &request.kind else { return Err(DecideError::NotFound) };
+            tell(request, key).map_err(DecideError::Code)?;
+            Ok(None)
+        })
+    }
+
+    /// Decides request `id` of the given kind (a TV's or not): the first
+    /// time, with what `first` makes of the request, under the lock, so
+    /// that when it fails nothing is decided.
+    fn answer<E>(
+        &self,
+        id: &str,
+        user_id: i64,
+        session_hash: &str,
+        allow: bool,
+        device: bool,
+        first: impl FnOnce(&PendingRequest) -> Result<Option<Continue>, DecideError<E>>,
     ) -> Result<(), DecideError<E>> {
         let now = Instant::now();
         let mut requests = self.requests.lock();
-        let Some(entry) =
-            requests.get_mut(id).filter(|entry| entry.alive(now) && entry.belongs_to(user_id, session_hash))
-        else {
+        let Some(entry) = requests.get_mut(id).filter(|entry| {
+            entry.alive(now)
+                && entry.belongs_to(user_id, session_hash)
+                && matches!(entry.request.kind, Kind::Device(_)) == device
+        }) else {
             return Err(DecideError::NotFound);
         };
         if entry.request.error.is_some() {
@@ -190,14 +278,8 @@ impl Pending {
             Some(_) => return Err(DecideError::Conflict),
             None => {}
         }
-        let answer = if allow {
-            let code = make_code(&entry.request).map_err(DecideError::Code)?;
-            Continue { location: answer_url(&entry.request, &[("code", &code)]), code: Some(code) }
-        } else {
-            Continue { location: answer_url(&entry.request, &[("error", "access_denied")]), code: None }
-        };
+        entry.answer = first(&entry.request)?;
         entry.decision = Some(allow);
-        entry.answer = Some(answer);
         entry.until = now + ANSWER_LIFETIME;
         Ok(())
     }
@@ -205,15 +287,17 @@ impl Pending {
     /// Where the browser goes back to, once the request is answered (or
     /// can only go back): for a minute after the answer, or after the first
     /// time back for a request with a mistake (the person may read the page
-    /// for a while before clicking).
+    /// for a while before clicking). Never for a TV's request.
     pub fn location(&self, id: &str, user_id: i64, session_hash: &str) -> Option<Continue> {
         let now = Instant::now();
         let mut requests = self.requests.lock();
         let entry = requests.get_mut(id).filter(|entry| entry.alive(now) && entry.belongs_to(user_id, session_hash))?;
         if entry.answer.is_none() {
             let error = entry.request.error.clone()?;
+            let Kind::Redirect(back) = &entry.request.kind else { return None };
             let params = [("error", error.error), ("error_description", error.description.as_str())];
-            entry.answer = Some(Continue { location: answer_url(&entry.request, &params), code: None });
+            let location = answer_url(&entry.request.issuer, back, &params);
+            entry.answer = Some(Continue { location, code: None });
             entry.until = now + ANSWER_LIFETIME;
         }
         entry.answer.clone()
@@ -255,15 +339,22 @@ mod tests {
                 first_party: true,
                 refresh: true,
             },
-            redirect_uri: "http://127.0.0.1:53111/oauth/callback?keep=1".into(),
-            state: Some("st&te".into()),
-            code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".into(),
+            kind: Kind::Redirect(Redirect {
+                redirect_uri: "http://127.0.0.1:53111/oauth/callback?keep=1".into(),
+                state: Some("st&te".into()),
+                code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".into(),
+            }),
             scopes: Scopes::parse("library").unwrap(),
             error: None,
         }
     }
 
-    fn code(_: &PendingRequest) -> Result<String, ()> {
+    /// A TV's request, shown to `user_id`.
+    fn tv_request(user_id: i64) -> PendingRequest {
+        PendingRequest { kind: Kind::Device("tv-key".into()), ..request(user_id) }
+    }
+
+    fn code(_: &PendingRequest, _: &Redirect) -> Result<String, ()> {
         Ok("c0de".into())
     }
 
@@ -293,7 +384,7 @@ mod tests {
         let id = pending.create(request(1)).unwrap();
         assert_eq!(pending.decide(&id, 1, "session-of-1", false, code), Ok(()));
         // The same again changes nothing, and makes no code.
-        let no_code = |_: &PendingRequest| -> Result<String, ()> { panic!("no code for a refusal") };
+        let no_code = |_: &PendingRequest, _: &Redirect| -> Result<String, ()> { panic!("no code for a refusal") };
         assert_eq!(pending.decide(&id, 1, "session-of-1", false, no_code), Ok(()));
         assert_eq!(pending.decide(&id, 1, "session-of-1", true, code), Err(DecideError::Conflict));
         let back = pending.location(&id, 1, "session-of-1").unwrap();
@@ -301,15 +392,66 @@ mod tests {
         assert!(back.location.contains("?keep=1&error=access_denied&state=st%26te&iss="), "{}", back.location);
         // A code that can't be made decides nothing.
         let id = pending.create(request(1)).unwrap();
-        assert_eq!(pending.decide(&id, 1, "session-of-1", true, |_| Err("full")), Err(DecideError::Code("full")));
+        assert_eq!(pending.decide(&id, 1, "session-of-1", true, |_, _| Err("full")), Err(DecideError::Code("full")));
         assert_eq!(pending.decide(&id, 1, "session-of-1", false, code), Ok(()));
+    }
+
+    #[test]
+    fn a_tvs_request_is_answered_to_the_tv() {
+        let pending = Pending::default();
+        let id = pending.create(tv_request(1)).unwrap();
+        assert_eq!(pending.decide(&id, 1, "session-of-1", true, code), Err(DecideError::NotFound), "no code");
+        // The TV's request is told once, and nothing goes back through the
+        // browser.
+        let mut told = Vec::new();
+        let tell = |request: &PendingRequest, key: &str| -> Result<(), ()> {
+            told.push((request.user_id, key.to_owned()));
+            Ok(())
+        };
+        assert_eq!(pending.decide_device(&id, 1, "session-of-1", true, tell), Ok(()));
+        assert_eq!(told, [(1, "tv-key".to_owned())]);
+        let never = |_: &PendingRequest, _: &str| -> Result<(), ()> { panic!("told twice") };
+        assert_eq!(pending.decide_device(&id, 1, "session-of-1", true, never), Ok(()));
+        assert_eq!(pending.decide_device(&id, 1, "session-of-1", false, never), Err(DecideError::Conflict));
+        assert_eq!(pending.location(&id, 1, "session-of-1"), None);
+
+        // When the TV's request is over, nothing is decided.
+        let id = pending.create(tv_request(1)).unwrap();
+        assert_eq!(
+            pending.decide_device(&id, 1, "session-of-1", true, |_, _| Err("over")),
+            Err(DecideError::Code("over"))
+        );
+        assert_eq!(pending.decide_device(&id, 1, "session-of-1", false, |_, _| Ok::<_, ()>(())), Ok(()));
+        // Only its person and session decide it, and only as a TV's.
+        let id = pending.create(tv_request(2)).unwrap();
+        assert_eq!(pending.decide_device(&id, 1, "session-of-1", true, never), Err(DecideError::NotFound));
+        assert_eq!(pending.decide_device(&id, 2, "another session", true, never), Err(DecideError::NotFound));
+        let redirect = pending.create(request(1)).unwrap();
+        assert_eq!(pending.decide_device(&redirect, 1, "session-of-1", true, never), Err(DecideError::NotFound));
+    }
+
+    #[test]
+    fn requests_last_as_long_as_asked_and_say_whose_they_are() {
+        let pending = Pending::default();
+        let id = pending.create_lasting(tv_request(1), Duration::from_secs(30)).unwrap();
+        assert!(pending.requests.lock()[&id].until <= Instant::now() + Duration::from_secs(30));
+        assert_eq!(pending.owner(&id), Some((1, "session-of-1".to_owned())));
+        // Never longer than ten minutes.
+        let long = pending.create_lasting(tv_request(1), Duration::from_secs(3600)).unwrap();
+        assert!(pending.requests.lock()[&long].until <= Instant::now() + PENDING_LIFETIME);
+        pending.remove(&id);
+        assert_eq!(pending.owner(&id), None, "removed");
+        pending.ends_in(&long, Duration::ZERO);
+        assert_eq!(pending.owner(&long), None, "over");
     }
 
     #[test]
     fn mistakes_only_go_back() {
         let pending = Pending::default();
         let mut wrong = request(1);
-        wrong.state = None;
+        if let Kind::Redirect(back) = &mut wrong.kind {
+            back.state = None;
+        }
         wrong.error = Some(ReturnedError { error: "invalid_scope", description: "no such scope".into() });
         let id = pending.create(wrong).unwrap();
         assert_eq!(pending.decide(&id, 1, "session-of-1", true, code), Err(DecideError::Conflict));

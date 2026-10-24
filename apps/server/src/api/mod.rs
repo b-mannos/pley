@@ -59,6 +59,8 @@ pub fn router(state: AppState) -> Router {
         .route("/oauth/requests/{id}/continue", get(oauth::continue_to_app))
         .route("/oauth/token", post(oauth::token).layer(DefaultBodyLimit::max(FORM_MAX)))
         .route("/oauth/revoke", post(oauth::revoke).layer(DefaultBodyLimit::max(FORM_MAX)))
+        .route("/oauth/device", post(oauth::device_authorization).layer(DefaultBodyLimit::max(FORM_MAX)))
+        .route("/oauth/device/verify", post(oauth::verify_user_code).layer(DefaultBodyLimit::max(FORM_MAX)))
         .route("/oauth/profiles", get(oauth::profiles))
         .route("/libraries", get(libraries::list).post(libraries::create))
         .route("/libraries/scan", post(libraries::scan_all))
@@ -177,8 +179,8 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// The largest body of the authorization server's endpoints (forms and
-/// the consent page's request).
+/// The largest body of the authorization server's endpoints (forms, and
+/// the requests of the consent and `/link` pages).
 const FORM_MAX: usize = 16 * 1024;
 
 /// What pages of the web app may load and do: only pley's own scripts and
@@ -196,9 +198,10 @@ pub(crate) fn truthy(value: &str) -> bool {
 }
 
 /// The request URI for logs, with credentials in the query left out:
-/// `token`, `X-Plex-Token` and `api_key`, and what apps send while signing
-/// in (`code`, `state`, `code_verifier`, `access_token`, `refresh_token`).
-/// Bodies and the Authorization header are never logged.
+/// `token`, `X-Plex-Token` and `api_key`, and what apps and TVs send while
+/// signing in (`code`, `state`, `code_verifier`, `access_token`,
+/// `refresh_token`, `device_code`, `user_code`). Bodies and the
+/// Authorization header are never logged.
 pub(crate) fn loggable_uri(uri: &axum::http::Uri) -> String {
     let Some(query) = uri.query() else { return uri.path().to_owned() };
     let query: Vec<String> = query
@@ -215,6 +218,8 @@ pub(crate) fn loggable_uri(uri: &axum::http::Uri) -> String {
                         | "code_verifier"
                         | "access_token"
                         | "refresh_token"
+                        | "device_code"
+                        | "user_code"
                 ) =>
             {
                 format!("{key}=…")
@@ -249,6 +254,12 @@ mod tests {
             loggable_uri(&uri),
             "/oauth/authorize?client_id=c&code_challenge=x&State=…&code_verifier=…&access_token=…&refresh_token=…"
         );
+        // A TV's codes: the address the person opens, and what an app may
+        // put in one by mistake.
+        let uri: axum::http::Uri = "/link?code=BCDFGHJK".parse().unwrap();
+        assert_eq!(loggable_uri(&uri), "/link?code=…");
+        let uri: axum::http::Uri = "/link?user_code=BCDF-GHJK&device_code=d&client_id=c".parse().unwrap();
+        assert_eq!(loggable_uri(&uri), "/link?user_code=…&device_code=…&client_id=c");
         assert_eq!(loggable_uri(&"/api/items/1".parse().unwrap()), "/api/items/1");
     }
 }

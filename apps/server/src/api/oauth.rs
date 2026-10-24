@@ -12,6 +12,11 @@
 //!   the web app's cookie and nothing else, from pley's own page only.
 //! * Apps exchange codes and refresh tokens at `POST /api/oauth/token` and
 //!   sign out at `POST /api/oauth/revoke`: forms, no cookies, no secrets.
+//! * TVs, which have no usable browser, sign in with a code they show
+//!   (RFC 8628): pley's own apps start at `POST /api/oauth/device`, the
+//!   person types the code on the web app's `/link` page, which hands it to
+//!   `POST /api/oauth/device/verify` (the cookie only, as above) and shows
+//!   the consent, and the TV asks the token endpoint for the answer.
 //! * pley's own apps, allowed `profiles`, list the household at
 //!   `GET /api/oauth/profiles` and switch with a grant of the token
 //!   endpoint, by the web app's rules.
@@ -19,6 +24,7 @@
 //!   `/api/me/apps`; administrators, anyone's at `/api/users/{id}/apps`.
 
 use std::collections::{HashMap, HashSet};
+use std::net::IpAddr;
 
 use axum::Json;
 use axum::body::Bytes;
@@ -37,11 +43,13 @@ use super::auth::{
 };
 use crate::auth::grants::{self, GrantRow, Issued, NewGrant, RefreshError, RefreshInput, SwitchInput};
 use crate::auth::scopes::{Scope, Scopes};
-use crate::auth::{AdminUser, AuthUser, ClientIp, cookie_token, forwarded_https, hash_token};
+use crate::auth::{AdminUser, AuthUser, ClientIp, SourceIp, cookie_token, forwarded_https, hash_token};
 use crate::error::{ApiResult, AppError};
+use crate::oauth::AppSnapshot;
 use crate::oauth::clients::{self, ClientError, RedirectKind};
 use crate::oauth::codes::{self, CodeGrant, Redeem};
-use crate::oauth::pending::{self, DecideError, PendingRequest, ReturnedError};
+use crate::oauth::devices::{self, DEVICE_GRANT, Poll, Refused};
+use crate::oauth::pending::{self, DecideError, Kind, PendingRequest, Redirect, ReturnedError};
 use crate::state::AppState;
 use crate::util::now;
 
@@ -53,7 +61,9 @@ const REDIRECT_URI_MAX: usize = 512;
 const STATE_MAX: usize = 1024;
 
 const NOT_FROM_PLEY: &str = "this page must be opened from pley itself";
-const OVER: &str = "this request is over: start again from the app";
+/// A request that is over can't be told from one that never was, so the
+/// sentence fits an app's request and a TV's alike.
+const OVER: &str = "this request is over: start again from the app or the TV";
 const BUSY: &str = "too many sign-ins in progress: try again in a minute";
 
 /// The grant type of a profile switch by one of pley's own apps (an
@@ -109,9 +119,11 @@ pub async fn metadata(State(state): State<AppState>, headers: HeaderMap) -> ApiR
         "authorization_endpoint": format!("{issuer}/oauth/authorize"),
         "token_endpoint": format!("{issuer}/api/oauth/token"),
         "revocation_endpoint": format!("{issuer}/api/oauth/revoke"),
+        // RFC 8628 §4.
+        "device_authorization_endpoint": format!("{issuer}/api/oauth/device"),
         "response_types_supported": ["code"],
         "response_modes_supported": ["query"],
-        "grant_types_supported": ["authorization_code", "refresh_token", SWITCH_PROFILE],
+        "grant_types_supported": ["authorization_code", "refresh_token", SWITCH_PROFILE, DEVICE_GRANT],
         "token_endpoint_auth_methods_supported": ["none"],
         "revocation_endpoint_auth_methods_supported": ["none"],
         "code_challenge_methods_supported": ["S256"],
@@ -286,13 +298,15 @@ pub async fn create_request(
         session_hash: web.session_hash,
         issuer,
         app: (&client).into(),
-        redirect_uri: redirect_uri.to_owned(),
-        state: param(&params, "state").map(str::to_owned),
-        code_challenge: if error.is_none() {
-            param(&params, "code_challenge").unwrap_or_default().to_owned()
-        } else {
-            String::new()
-        },
+        kind: Kind::Redirect(Redirect {
+            redirect_uri: redirect_uri.to_owned(),
+            state: param(&params, "state").map(str::to_owned),
+            code_challenge: if error.is_none() {
+                param(&params, "code_challenge").unwrap_or_default().to_owned()
+            } else {
+                String::new()
+            },
+        }),
         scopes,
         error: error.clone(),
     };
@@ -356,39 +370,7 @@ fn check_request(params: &[(String, String)], client: &clients::Client, issuer: 
              fix it",
         ));
     }
-    let asked = match param(params, "scope").map(Scopes::parse) {
-        None => Ok(Scopes::default()),
-        Some(parsed) => parsed,
-    };
-    let asked = match asked {
-        Ok(asked) if asked.is_empty() => Scopes::default().with(Scope::Library),
-        Ok(asked) => asked,
-        Err(name) if name == "openid" => {
-            return Err(fail(
-                "invalid_scope",
-                "pley doesn't sign people in to other sites (openid): ask the app's publisher to fix it",
-            ));
-        }
-        Err(_) => {
-            return Err(fail(
-                "invalid_scope",
-                "this app asked for access pley doesn't offer: ask the app's publisher to fix it",
-            ));
-        }
-    };
-    if asked.contains(Scope::Profiles) && !client.first_party {
-        // A profile's PIN is typed into the app: pley's own apps only.
-        return Err(fail(
-            "invalid_scope",
-            "only pley's own apps can switch profiles (profiles): ask the app's publisher to fix it",
-        ));
-    }
-    if client.scope_cap.as_deref().is_some_and(|cap| !asked.is_subset_of(Scopes::from_stored(cap))) {
-        return Err(fail(
-            "invalid_scope",
-            "this app asked for more than its description allows: ask the app's publisher to fix it",
-        ));
-    }
+    let asked = asked_scopes(param(params, "scope"), client)?;
     if !is_this_server(param(params, "resource"), issuer) {
         return Err(fail(
             "invalid_target",
@@ -401,6 +383,34 @@ fn check_request(params: &[(String, String)], client: &clients::Client, issuer: 
     Ok(asked)
 }
 
+/// The scopes an app asks for in `scope` (here and at the device endpoint):
+/// none means `library`; names pley doesn't know (openid among them),
+/// `profiles` for apps by other publishers, and more than the app's
+/// description allows are refused.
+fn asked_scopes(scope: Option<&str>, client: &clients::Client) -> Result<Scopes, ReturnedError> {
+    let fail = |description: &str| ReturnedError { error: "invalid_scope", description: description.to_owned() };
+    let asked = match scope.map(Scopes::parse) {
+        None => Ok(Scopes::default()),
+        Some(parsed) => parsed,
+    };
+    let asked = match asked {
+        Ok(asked) if asked.is_empty() => Scopes::default().with(Scope::Library),
+        Ok(asked) => asked,
+        Err(name) if name == "openid" => {
+            return Err(fail("pley doesn't sign people in to other sites (openid): ask the app's publisher to fix it"));
+        }
+        Err(_) => return Err(fail("this app asked for access pley doesn't offer: ask the app's publisher to fix it")),
+    };
+    if asked.contains(Scope::Profiles) && !client.first_party {
+        // A profile's PIN is typed into the app: pley's own apps only.
+        return Err(fail("only pley's own apps can switch profiles (profiles): ask the app's publisher to fix it"));
+    }
+    if client.scope_cap.as_deref().is_some_and(|cap| !asked.is_subset_of(Scopes::from_stored(cap))) {
+        return Err(fail("this app asked for more than its description allows: ask the app's publisher to fix it"));
+    }
+    Ok(asked)
+}
+
 #[derive(Deserialize)]
 pub struct Decision {
     allow: bool,
@@ -408,18 +418,24 @@ pub struct Decision {
 
 /// `POST /api/oauth/requests/{id}`: the person allows the app (a code is
 /// made) or not. The same answer again gets the same reply; the other one
-/// a conflict.
+/// a conflict. A TV's request answers the TV instead
+/// ([`decide_for_device`]). One that is over, an app's or a TV's, gets 404
+/// ([`OVER`]).
 pub async fn decide(
     State(state): State<AppState>,
     web: WebUser,
     Path(id): Path<String>,
     Json(body): Json<Decision>,
 ) -> ApiResult<Json<Value>> {
-    let decided = state.oauth.pending.decide(&id, web.user.id, &web.session_hash, body.allow, |request| {
+    let shown = state.oauth.pending.get(&id, web.user.id, &web.session_hash);
+    if shown.is_some_and(|shown| matches!(shown.kind, Kind::Device(_))) {
+        return decide_for_device(&state, &web, &id, body.allow);
+    }
+    let decided = state.oauth.pending.decide(&id, web.user.id, &web.session_hash, body.allow, |request, back| {
         state.oauth.codes.new_code(CodeGrant {
             app: request.app.clone(),
-            redirect_uri: request.redirect_uri.clone(),
-            code_challenge: request.code_challenge.clone(),
+            redirect_uri: back.redirect_uri.clone(),
+            code_challenge: back.code_challenge.clone(),
             user_id: request.user_id,
             scopes: request.scopes,
         })
@@ -601,7 +617,8 @@ fn tokens(issued: Issued) -> Response {
 
 /// `POST /api/oauth/token`: a code for the first tokens
 /// (`authorization_code`), a refresh token for new ones (`refresh_token`,
-/// rotated every time), or a refresh token for tokens acting as another
+/// rotated every time), a TV's question whether it was allowed
+/// ([`DEVICE_GRANT`]), or a refresh token for tokens acting as another
 /// profile of the household ([`SWITCH_PROFILE`], pley's own apps).
 pub async fn token(
     State(state): State<AppState>,
@@ -616,10 +633,11 @@ pub async fn token(
     let answer = match form.get("grant_type") {
         Some("authorization_code") => exchange_code(&state, &headers, ip, &form).await,
         Some("refresh_token") => refresh(&state, &headers, ip, &form).await,
+        Some(DEVICE_GRANT) => device_token(&state, &headers, ip, &form).await,
         Some(SWITCH_PROFILE) => switch_profile(&state, &headers, ip, &form).await,
         Some(_) => Err(OAuthError::new(
             "unsupported_grant_type",
-            "pley knows authorization_code, refresh_token and its own apps' profile switch",
+            "pley knows authorization_code, refresh_token, the device code grant and its own apps' profile switch",
         )),
         None => Err(OAuthError::invalid_request("grant_type is missing")),
     };
@@ -743,6 +761,229 @@ async fn refresh(
         Err(RefreshError::Internal(err)) => Err(OAuthError::server_error(err)),
         Err(err) => Err(OAuthError::invalid_grant(err.to_string())),
     }
+}
+
+// ------------------------------------------------------------------ TVs (RFC 8628)
+
+const NOT_A_CODE: &str = "that isn't a code from a pley app: codes are 8 letters, like BCDF-GHJK";
+const NO_SUCH_CODE: &str = "no TV is waiting for that code: check the code on your TV, or start again there";
+const CODE_USED: &str = "that code was already used: start again on your TV";
+
+/// `POST /api/oauth/device` (RFC 8628 §3.1-3.2): a TV starts signing in. It
+/// gets a code to show with the address where to type it, then asks the
+/// token endpoint for the answer every `interval` seconds. pley's own apps
+/// only: anyone may call this, and pley reads no app's description for
+/// someone who isn't signed in. The form rules are the token endpoint's.
+pub async fn device_authorization(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    SourceIp(source): SourceIp,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let form = match Form::read(&headers, body) {
+        Ok(form) => form,
+        Err(err) => return err.into_response(),
+    };
+    start_on_device(&state, &headers, source, &form).unwrap_or_else(IntoResponse::into_response)
+}
+
+/// A TV's request to sign in, from `source` (see [`SourceIp`]: the limit
+/// per address counts by it, never by a header the caller writes).
+fn start_on_device(
+    state: &AppState,
+    headers: &HeaderMap,
+    source: Option<IpAddr>,
+    form: &Form,
+) -> Result<Response, OAuthError> {
+    let client_id = form.required("client_id")?;
+    let Some(client) = clients::builtin(client_id) else {
+        return Err(OAuthError::new("invalid_client", "only pley's own apps can sign in with a code"));
+    };
+    if !client.device {
+        return Err(OAuthError::new("unauthorized_client", "this app doesn't sign in with a code"));
+    }
+    let scopes = asked_scopes(form.get("scope"), client).map_err(|err| OAuthError::new(err.error, err.description))?;
+    let issuer = issuer(headers).map_err(|_| OAuthError::invalid_request("the Host header is missing or wrong"))?;
+    let app = AppSnapshot::from(client);
+    // When full, nothing in progress is dropped to make room.
+    let started = state.oauth.devices.create(app.clone(), scopes, source).map_err(|_| OAuthError {
+        status: StatusCode::TOO_MANY_REQUESTS,
+        ..OAuthError::new("temporarily_unavailable", BUSY)
+    })?;
+    let from = source.map_or_else(|| "an unknown address".to_owned(), |source| source.to_string());
+    tracing::info!("{} asked to sign in with a code from {from}", app.label());
+    let body = json!({
+        "device_code": started.device_code,
+        "user_code": devices::shown(&started.user_code),
+        "verification_uri": format!("{issuer}/link"),
+        "verification_uri_complete": format!("{issuer}/link?code={}", started.user_code),
+        "expires_in": devices::LIFETIME.as_secs(),
+        "interval": devices::INTERVAL.as_secs(),
+    });
+    Ok((StatusCode::OK, NO_STORE, Json(body)).into_response())
+}
+
+/// What the `/link` page sends: the code the TV shows, as it was typed.
+#[derive(Deserialize)]
+pub struct TypedCode {
+    user_code: String,
+}
+
+/// `POST /api/oauth/device/verify`: the person typed the code their TV
+/// shows on the web app's `/link` page (RFC 8628 §3.3). The answer is the
+/// consent `POST /api/oauth/requests` answers with, for a request whose
+/// answer goes to the TV. The cookie only, from pley's own page
+/// ([`WebUser`]).
+///
+/// Wrong codes count (see [`devices::Devices::find`]). A code shown on
+/// another page already is used, unless the session of that page ended
+/// (signed out, or switched to another profile): then this page takes it
+/// over, as it does from an earlier page of this session.
+pub async fn verify_user_code(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    web: WebUser,
+    Json(body): Json<TypedCode>,
+) -> ApiResult<Json<Value>> {
+    let issuer = issuer(&headers)?;
+    let code = devices::normalize(&body.user_code).ok_or_else(|| AppError::bad_request(NOT_A_CODE))?;
+    let found = state.oauth.devices.find(&code, web.user.id).map_err(|refused| match refused {
+        Refused::Throttled => {
+            AppError::TooManyRequests("too many wrong codes: wait a few minutes and try again".into())
+        }
+        Refused::Unknown => AppError::not_found(NO_SUCH_CODE),
+        Refused::Used => AppError::conflict(CODE_USED),
+    })?;
+    if let Some((user_id, session_hash)) = found.deciding.as_deref().and_then(|id| state.oauth.pending.owner(id)) {
+        let mine = user_id == web.user.id && session_hash == web.session_hash;
+        if !mine && signed_in(&state, &session_hash).await? {
+            return Err(AppError::conflict(CODE_USED));
+        }
+    }
+    // It ends no later than the TV's request.
+    let lifetime = found.left.min(pending::PENDING_LIFETIME);
+    let request = PendingRequest {
+        user_id: web.user.id,
+        session_hash: web.session_hash,
+        issuer,
+        app: found.app.clone(),
+        kind: Kind::Device(found.key.clone()),
+        scopes: found.scopes,
+        error: None,
+    };
+    let id = state.oauth.pending.create_lasting(request, lifetime).map_err(|_| AppError::Unavailable(BUSY.into()))?;
+    if !state.oauth.devices.link(&found.key, found.deciding.as_deref(), &id) {
+        // Someone was quicker.
+        state.oauth.pending.remove(&id);
+        return Err(AppError::conflict(CODE_USED));
+    }
+    if let Some(before) = &found.deciding {
+        // The page that showed it before can't answer any more.
+        state.oauth.pending.remove(before);
+    }
+    let app = &found.app;
+    Ok(Json(json!({
+        "status": "consent",
+        "id": id,
+        "expires_at": now() + lifetime.as_secs() as i64,
+        "client": ClientDto { id: &app.id, host: &app.host, name: app.name.as_deref(), first_party: app.first_party },
+        "redirect": {"kind": "device", "to": devices::shown(&code)},
+        "scopes": found.scopes.names(),
+    })))
+}
+
+/// Whether the browser session whose token has the SHA-256 `session_hash`
+/// is still signed in, to an enabled account.
+async fn signed_in(state: &AppState, session_hash: &str) -> ApiResult<bool> {
+    let found: Option<i64> = sqlx::query_scalar(
+        "SELECT s.user_id FROM sessions s JOIN users u ON u.id = s.user_id
+         WHERE s.token_hash = ? AND s.expires_at > ? AND NOT u.disabled",
+    )
+    .bind(session_hash)
+    .bind(now())
+    .fetch_optional(&state.db.read)
+    .await?;
+    Ok(found.is_some())
+}
+
+/// `POST /api/oauth/requests/{id}` for a TV's request: allowed, the TV acts
+/// as the profile the person uses, who allowed it; refused, it is told so.
+/// The TV gets the answer when it next asks: nothing goes back through the
+/// browser.
+fn decide_for_device(state: &AppState, web: &WebUser, id: &str, allow: bool) -> ApiResult<Json<Value>> {
+    let decided = state.oauth.pending.decide_device(id, web.user.id, &web.session_hash, allow, |request, key| {
+        state.oauth.devices.decide(key, id, allow, web.user.id, request.scopes)?;
+        if allow {
+            tracing::info!(
+                "{} may use {}'s account ({}) on a device",
+                request.app.label(),
+                web.user.username,
+                request.scopes
+            );
+        }
+        Ok(())
+    });
+    match decided {
+        Ok(()) => Ok(Json(json!({"done": true}))),
+        Err(DecideError::NotFound | DecideError::Code(devices::Over)) => Err(AppError::not_found(OVER)),
+        Err(DecideError::Conflict) => {
+            Err(AppError::conflict("this request was answered already: start again on your TV"))
+        }
+    }
+}
+
+/// grant_type=urn:ietf:params:oauth:grant-type:device_code (RFC 8628
+/// §3.4-3.5): a TV asks whether it was allowed. Until the person answers:
+/// authorization_pending, or slow_down when it asks sooner than its
+/// interval, which then grows by 5 seconds. Then access_denied, or its
+/// tokens, once; after 10 minutes, expired_token.
+///
+/// A device code never appears in an address or a page, so one shown again
+/// after its answer is just unknown: unlike an authorization code, it can't
+/// have leaked on the way, and nothing has to end.
+async fn device_token(
+    state: &AppState,
+    headers: &HeaderMap,
+    ip: Option<String>,
+    form: &Form,
+) -> Result<Response, OAuthError> {
+    let device_code = form.required("device_code")?;
+    let client_id = form.required("client_id")?;
+    form.check_resource(headers)?;
+    let allowed = match state.oauth.devices.poll(device_code, client_id) {
+        Poll::Allowed(allowed) => allowed,
+        Poll::Pending => return Err(OAuthError::new("authorization_pending", "the person hasn't answered yet")),
+        Poll::SlowDown => {
+            return Err(OAuthError::new("slow_down", "asked too soon: wait 5 seconds longer between questions"));
+        }
+        Poll::Denied => return Err(OAuthError::new("access_denied", "the person didn't allow this app")),
+        Poll::Expired => return Err(OAuthError::new("expired_token", "the code expired: start again")),
+        Poll::Unknown => return Err(OAuthError::invalid_grant("unknown device_code")),
+    };
+    // Things may have changed since the person allowed it.
+    for id in [allowed.user_id, allowed.approved_by] {
+        match AuthUser::load(&state.db, id).await {
+            Ok(Some(_)) => {}
+            Ok(None) => return Err(OAuthError::invalid_grant("the account is disabled")),
+            Err(err) => return Err(OAuthError::server_error(err)),
+        }
+    }
+    let issued = state
+        .auth
+        .issue(NewGrant {
+            user_id: allowed.user_id,
+            approved_by: allowed.approved_by,
+            client_id: allowed.app.id.clone(),
+            client_name: allowed.app.name.clone(),
+            scopes: allowed.scopes,
+            refresh: allowed.app.refresh,
+            first_party: allowed.app.first_party,
+            user_agent: user_agent(headers),
+            ip,
+        })
+        .await
+        .map_err(OAuthError::server_error)?;
+    Ok(tokens(issued))
 }
 
 // ------------------------------------------------------------------ profiles (pley's own apps)

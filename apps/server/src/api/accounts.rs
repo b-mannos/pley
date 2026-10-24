@@ -193,10 +193,12 @@ pub async fn update_user(
             .execute(&state.db.write)
             .await?;
         // Sign the user out everywhere else, and every app using the account
-        // or allowed by it (an administrator's own included).
+        // or allowed by it (an administrator's own included), with the TVs
+        // allowed that haven't asked for their answer yet.
         if id != admin.id {
             sqlx::query("DELETE FROM sessions WHERE user_id = ?").bind(id).execute(&state.db.write).await?;
         }
+        state.oauth.devices.forget_user(id);
         state.auth.end_apps(id).await?;
     }
     if let Some(name) = body.display_name {
@@ -223,6 +225,11 @@ pub async fn update_user(
             .bind(id)
             .execute(&state.db.write)
             .await?;
+        // A TV it allowed that hasn't asked for its answer yet is refused,
+        // rather than signed in should the account be enabled again.
+        if disabled {
+            state.oauth.devices.forget_user(id);
+        }
     }
     if let Some(all) = body.all_libraries {
         sqlx::query("UPDATE users SET all_libraries = ? WHERE id = ?")
@@ -274,6 +281,9 @@ pub async fn delete_user(
         let _ = tokio::fs::remove_file(accounts::avatars_dir(&state.config.data_dir).join(file)).await;
     }
     state.auth.forget_user(id);
+    // A TV it allowed gets nothing, even from an account made later with
+    // the same number.
+    state.oauth.devices.forget_user(id);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -360,7 +370,8 @@ pub async fn user_devices(
     Ok(Json(devices_of(&state, id, None).await?))
 }
 
-/// Sign a user out on every device and in every app.
+/// Sign a user out on every device and in every app, TVs they allowed that
+/// haven't asked for their answer yet included.
 pub async fn sign_out_everywhere(
     State(state): State<AppState>,
     AdminUser(admin): AdminUser,
@@ -369,6 +380,7 @@ pub async fn sign_out_everywhere(
     if id == admin.id {
         return Err(AppError::bad_request("sign yourself out from your account page instead"));
     }
+    state.oauth.devices.forget_user(id);
     state.auth.sign_out_everywhere(id, None).await?;
     Ok(StatusCode::NO_CONTENT)
 }
