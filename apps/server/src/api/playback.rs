@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 use dashmap::DashMap;
 use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
-use pley_transcoder_api::{AudioMode, JobRequest, VideoMode};
+use pley_transcoder_api::{AudioMode, JobRequest, SUBTITLES_COMPLETE_HEADER, VideoMode};
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
@@ -424,11 +424,26 @@ pub async fn subtitles(
             return Ok(vtt(text));
         }
     }
-    let (path, stream) = match sidecar {
-        Some(path) => (path, None),
-        None => (file.path.clone(), Some(index)),
+    let Some(path) = sidecar else {
+        // An embedded track: the cues found so far, at once, while the rest
+        // of the file is read (minutes for a big one on a network share).
+        // The player asks again until it has them all.
+        let (text, complete) = state.transcoder.subtitles_so_far(&file.path, index).await?;
+        if complete {
+            cache_subtitles(&cache, &text).await;
+            return Ok(vtt(text));
+        }
+        return Ok((
+            [
+                (header::CONTENT_TYPE, "text/vtt; charset=utf-8"),
+                (header::CACHE_CONTROL, "no-store"),
+                (header::HeaderName::from_static(SUBTITLES_COMPLETE_HEADER), "0"),
+            ],
+            text,
+        )
+            .into_response());
     };
-    let text = extract_subtitles(&state, path, stream, cache).await?;
+    let text = extract_subtitles(&state, path, cache).await?;
     Ok(vtt((*text).clone()))
 }
 
@@ -437,24 +452,18 @@ type Extraction = Shared<BoxFuture<'static, Result<Arc<String>, Arc<AppError>>>>
 /// Subtitles being pulled out of their files, by cache file.
 static EXTRACTIONS: LazyLock<DashMap<PathBuf, Extraction>> = LazyLock::new(DashMap::new);
 
-/// The subtitles in stream `stream` of `path` (a sidecar file: `None`) as
-/// WebVTT, made once and cached at `cache`. Pulling them out of a big file
-/// on a network share reads all of it and can take minutes: requests for the
-/// same subtitles wait for one extraction, which goes on to the cache when
-/// nobody waits any more (a player that moved on, or restarted).
-async fn extract_subtitles(
-    state: &AppState,
-    path: String,
-    stream: Option<i64>,
-    cache: PathBuf,
-) -> ApiResult<Arc<String>> {
+/// The subtitle file at `path` (a sidecar) as WebVTT, made once and cached
+/// at `cache`: requests for the same subtitles wait for one conversion, which
+/// goes on to the cache when nobody waits any more (a player that moved on,
+/// or restarted).
+async fn extract_subtitles(state: &AppState, path: String, cache: PathBuf) -> ApiResult<Arc<String>> {
     let extraction = EXTRACTIONS
         .entry(cache.clone())
         .or_insert_with(|| {
             let state = state.clone();
             let cache = cache.clone();
             let task = tokio::spawn(async move {
-                let text = state.transcoder.subtitles(&path, stream).await?;
+                let text = state.transcoder.subtitles(&path, None).await?;
                 cache_subtitles(&cache, &text).await;
                 Ok::<_, AppError>(Arc::new(text))
             });

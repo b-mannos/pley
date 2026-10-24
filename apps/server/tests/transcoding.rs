@@ -13,15 +13,15 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, Method, StatusCode, header};
+use axum::http::{HeaderMap, HeaderName, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use parking_lot::Mutex;
 use pley_transcoder_api::{
     API_VERSION, AudioMode, AudioPlan, Capabilities, EncoderInfo, ErrorBody, HwAccel, JobCreated, JobRequest,
-    JobStatus, Limits, MediaInfo, MediaStream, ProbeRequest, StreamKind, SubtitleRequest, TranscoderInfo,
-    TranscoderStatus, TrickplayInfo, TrickplayRequest, VideoCodec, VideoMode, VideoPlan,
+    JobStatus, Limits, MediaInfo, MediaStream, ProbeRequest, SUBTITLES_COMPLETE_HEADER, StreamKind, SubtitleRequest,
+    TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest, VideoCodec, VideoMode, VideoPlan,
 };
 use serde_json::{Value, json};
 
@@ -296,17 +296,22 @@ async fn start_fake() -> (Fake, String) {
         )
         .route(
             "/v1/subtitles",
-            // Stream 99 can't be converted; stream 5 takes a while (a big file).
+            // Stream 99 can't be converted; stream 5 is in a big file: the
+            // first answer has only the cues read so far.
             post(|State(fake): State<Fake>, Json(req): Json<SubtitleRequest>| async move {
                 let text = format!("WEBVTT\n\n00:00.000 --> 00:01.000\n{}#{:?}\n", req.path, req.stream_index);
                 let fails = req.stream_index == Some(99);
-                let slow = matches!(req.stream_index, Some(5 | 6));
+                let first_of_slow =
+                    req.stream_index == Some(5) && !fake.subtitles.lock().iter().any(|r| r.stream_index == Some(5));
+                let partial = req.partial;
                 fake.subtitles.lock().push(req);
-                if slow {
-                    tokio::time::sleep(Duration::from_millis(400)).await;
-                }
                 if fails {
                     return error(StatusCode::INTERNAL_SERVER_ERROR, "ffmpeg_failed");
+                }
+                if first_of_slow && partial {
+                    let so_far = "WEBVTT\n\n00:00.000 --> 00:01.000\nso far\n\n";
+                    let more = HeaderName::from_static(SUBTITLES_COMPLETE_HEADER);
+                    return ([(header::CONTENT_TYPE, "text/vtt"), (more, "0")], so_far).into_response();
                 }
                 ([(header::CONTENT_TYPE, "text/vtt")], text).into_response()
             }),
@@ -669,7 +674,7 @@ async fn subtitles_are_converted_once() {
     assert_eq!(sidecar.status, StatusCode::OK);
     let request = w.fake.subtitles.lock()[1].clone();
     assert!(request.path.ends_with("Feature (2021).en.srt"));
-    assert_eq!(request.stream_index, None);
+    assert_eq!((request.stream_index, request.partial), (None, false));
     for missing in ["1001.vtt", "4.srt", "x.vtt"] {
         let reply = app.get(&format!("/api/files/{file}/subtitles/{missing}"), admin).await;
         assert_eq!(reply.status, StatusCode::NOT_FOUND, "{missing}");
@@ -678,24 +683,26 @@ async fn subtitles_are_converted_once() {
 }
 
 #[tokio::test]
-async fn subtitles_are_pulled_out_once_however_many_ask_and_whoever_leaves() {
+async fn embedded_subtitles_come_as_far_as_they_are_read() {
     let w = world().await;
     let (app, admin) = (&w.app, w.admin.as_str());
     let file = app.file_of(w.movies["Feature"]).await;
-    let asked = |stream: i64| w.fake.subtitles.lock().iter().filter(|r| r.stream_index == Some(stream)).count();
-
-    // Players asking at once (a restart, another tab) wait for one extraction.
+    let asked = || w.fake.subtitles.lock().iter().filter(|r| r.stream_index == Some(5)).count();
     let slow = format!("/api/files/{file}/subtitles/5.vtt");
-    let replies = futures::future::join_all((0..3).map(|_| app.get(&slow, admin))).await;
-    assert!(replies.iter().all(|r| r.status == StatusCode::OK && r.text() == replies[0].text()));
-    assert_eq!(asked(5), 1);
 
-    // A player that stops waiting doesn't stop it: what it asked for is cached.
-    let left = format!("/api/files/{file}/subtitles/6.vtt");
-    assert!(tokio::time::timeout(Duration::from_millis(100), app.get(&left, admin)).await.is_err());
-    tokio::time::sleep(Duration::from_millis(600)).await;
-    assert_eq!(app.get(&left, admin).await.status, StatusCode::OK);
-    assert_eq!(asked(6), 1, "served from the cache");
+    // The cues read so far, at once, kept out of caches: more are coming.
+    let first = app.get(&slow, admin).await;
+    assert_eq!(first.status, StatusCode::OK);
+    assert!(first.text().ends_with("so far\n\n"), "{}", first.text());
+    assert_eq!(first.headers[SUBTITLES_COMPLETE_HEADER], "0");
+    assert_eq!(first.headers[header::CACHE_CONTROL], "no-store");
+    assert!(w.fake.subtitles.lock()[0].partial, "players don't wait for the whole file");
+
+    // Asked again: all of them, cached from then on.
+    let all = app.get(&slow, admin).await;
+    assert!(all.text().contains("#Some(5)") && !all.headers.contains_key(SUBTITLES_COMPLETE_HEADER));
+    assert_eq!(app.get(&slow, admin).await.text(), all.text());
+    assert_eq!(asked(), 2, "served from the cache");
 }
 
 #[tokio::test]

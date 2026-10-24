@@ -72,7 +72,7 @@ following status codes:
 | POST | `/v1/probe` | `ProbeRequest {path}` | `MediaInfo` (cached per file version) |
 | POST | `/v1/thumbnail` | `ThumbnailRequest {path, time_ms?, width?, duration_ms?, hdr}` | `image/jpeg` |
 | POST | `/v1/cover` | `CoverRequest {path}` | embedded cover art (`image/jpeg` or `image/png`) |
-| POST | `/v1/subtitles` | `SubtitleRequest {path, stream_index?}` | `text/vtt` |
+| POST | `/v1/subtitles` | `SubtitleRequest {path, stream_index?, partial?}` | `text/vtt`. With `partial` (embedded tracks): the cues read so far at once, `X-Pley-Complete: 0` while the extraction goes on in the background |
 | POST | `/v1/keyframes` | `KeyframesRequest {path}` | `200` if indexed, `202` if queued |
 | POST | `/v1/trickplay` | `TrickplayRequest {path, interval_ms?, width?}` | `TrickplayInfo {id, interval_ms, width, height, columns, rows, count, sheets}`: seek-bar previews, cached per file version until all sheets have been fetched (or for a day). Keyframes only are decoded (seconds for a film); HDR and Dolby Vision are tone-mapped with libplacebo when available. |
 | GET | `/v1/trickplay/{id}/{n}.jpg` | – | sprite sheet `n` (`columns × rows` thumbnails); once every sheet of a set has been fetched, the set is deleted (fetch them all in one go and keep them) |

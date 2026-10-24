@@ -145,6 +145,46 @@ impl Extractor {
         }
     }
 
+    /// An embedded text track's WebVTT as far as it has been pulled out of the
+    /// file, and whether that is all of it. Pulling it out reads the whole
+    /// file (minutes for a big one on a network share), so it runs on its
+    /// own, past this request, and players ask again for the cues found since.
+    pub async fn subtitle_so_far(
+        self: &Arc<Self>,
+        path: &str,
+        index: i64,
+        wait: Duration,
+    ) -> ApiResult<(String, bool)> {
+        let path = existing(path)?;
+        let key = file_key(&path)?;
+        let target = self.subs_dir.join(format!("{key}_{index}.vtt"));
+        if let Some(text) = cached_vtt(&target).await {
+            return Ok((text, true));
+        }
+        let running = self.file_locks.lock().get(&key).is_some_and(|lock| lock.try_lock().is_err());
+        if !running {
+            Metrics::inc(&self.metrics.subtitle_extractions);
+            let this = self.clone();
+            let file = path.clone();
+            let extraction = tokio::spawn(async move { this.embedded(&file, index).await });
+            // Small files are done at once.
+            match tokio::time::timeout(wait, extraction).await {
+                Ok(Ok(result)) => return result.map(|text| (text, true)),
+                Ok(Err(err)) => return Err(ApiError::Internal(err.into())),
+                Err(_) => {}
+            }
+        }
+        let part = self.subs_dir.join(format!("{key}_{index}.vtt.part"));
+        match tokio::fs::read_to_string(&part).await {
+            Ok(text) => Ok((whole_cues(&text), false)),
+            // Finished (and renamed) meanwhile, or not started yet.
+            Err(_) => match cached_vtt(&target).await {
+                Some(text) => Ok((text, true)),
+                None => Ok(("WEBVTT\n\n".to_owned(), false)),
+            },
+        }
+    }
+
     async fn convert_file(&self, path: &Path) -> ApiResult<String> {
         let raw = tokio::fs::read(path).await?;
         let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
@@ -219,7 +259,9 @@ impl Extractor {
         let mut outputs = Vec::new();
         for index in streams {
             let part = self.subs_dir.join(format!("{key}_{index}.vtt.part"));
-            cmd.args(["-map", &format!("0:{index}"), "-c:s", "webvtt", "-f", "webvtt"]).arg(&part);
+            // Each cue is written as soon as it is read, for `subtitle_so_far`.
+            cmd.args(["-map", &format!("0:{index}"), "-c:s", "webvtt", "-flush_packets", "1", "-f", "webvtt"])
+                .arg(&part);
             outputs.push((part, self.subs_dir.join(format!("{key}_{index}.vtt"))));
         }
         let result = run_capture(cmd, Duration::from_secs(20 * 60)).await;
@@ -310,6 +352,15 @@ async fn cached_vtt(path: &Path) -> Option<String> {
     // In use: cache pruning keeps it.
     touch(path);
     Some(text)
+}
+
+/// WebVTT being written, up to its last complete cue (cues end with a blank line).
+fn whole_cues(text: &str) -> String {
+    let text = text.replace("\r\n", "\n");
+    match text.rfind("\n\n") {
+        Some(end) if text.starts_with("WEBVTT") => text[..end + 2].to_owned(),
+        _ => "WEBVTT\n\n".to_owned(),
+    }
 }
 
 /// Make sure a file another process wrote is on disk.
@@ -468,6 +519,53 @@ mod tests {
         // …a whole one is.
         std::fs::write(&cached, "WEBVTT\n\n00:01.000 --> 00:02.000\nHello\n").unwrap();
         assert!(extractor.subtitle(&name, None).await.unwrap().contains("Hello"));
+    }
+
+    #[tokio::test]
+    async fn embedded_subtitles_come_as_far_as_they_are_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let ff = Arc::new(Ffmpeg {
+            ffmpeg: dir.path().join("no-ffmpeg"),
+            ffprobe: dir.path().join("no-ffprobe"),
+            caps: Default::default(),
+            segment_times_relative: true,
+        });
+        let metrics = Arc::new(Metrics::default());
+        let prober = Arc::new(Prober::new(ff.clone(), metrics.clone(), 1));
+        let subs = dir.path().join("subtitles");
+        let extractor = Arc::new(Extractor::new(ff, prober, metrics, subs.clone(), 1));
+        let movie = dir.path().join("movie.mkv");
+        std::fs::write(&movie, "not really a movie").unwrap();
+        let name = movie.to_string_lossy().into_owned();
+        let key = file_key(&movie).unwrap();
+        let wait = Duration::from_millis(500);
+
+        // An extraction that can't run says so.
+        assert!(extractor.subtitle_so_far(&name, 2, wait).await.is_err());
+
+        // While one runs, the cues read so far come, the one being written left out.
+        let lock = FileLock::acquire(&extractor.file_locks, &key);
+        let running = lock.lock.lock().await;
+        assert_eq!(extractor.subtitle_so_far(&name, 2, wait).await.unwrap(), ("WEBVTT\n\n".to_owned(), false));
+        std::fs::write(
+            subs.join(format!("{key}_2.vtt.part")),
+            "WEBVTT\r\n\r\n00:01.000 --> 00:02.000\r\nHello\r\n\r\n00:03.0",
+        )
+        .unwrap();
+        let (text, complete) = extractor.subtitle_so_far(&name, 2, wait).await.unwrap();
+        assert_eq!((text.as_str(), complete), ("WEBVTT\n\n00:01.000 --> 00:02.000\nHello\n\n", false));
+
+        // Once done, all of it.
+        drop(running);
+        drop(lock);
+        std::fs::remove_file(subs.join(format!("{key}_2.vtt.part"))).unwrap();
+        std::fs::write(
+            subs.join(format!("{key}_2.vtt")),
+            "WEBVTT\n\n00:01.000 --> 00:02.000\nHello\n\n00:03.000 --> 00:04.000\nBye\n",
+        )
+        .unwrap();
+        let (text, complete) = extractor.subtitle_so_far(&name, 2, wait).await.unwrap();
+        assert!(complete && text.contains("Bye"), "{text}");
     }
 
     #[test]

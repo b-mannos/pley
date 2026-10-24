@@ -17,8 +17,8 @@ use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
 use pley_transcoder_api::{
     Announce, CoverRequest, ErrorBody, Fingerprint, FingerprintRequest, JobCreated, JobRequest, JobStatus,
-    KeyframesRequest, MediaInfo, ProbeRequest, SubtitleRequest, TOKEN_ENV, ThumbnailRequest, TranscoderInfo,
-    TranscoderStatus, TrickplayInfo, TrickplayRequest,
+    KeyframesRequest, MediaInfo, ProbeRequest, SUBTITLES_COMPLETE_HEADER, SubtitleRequest, TOKEN_ENV, ThumbnailRequest,
+    TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -229,9 +229,20 @@ impl Transcoder {
     }
 
     pub async fn subtitles(&self, path: &str, stream_index: Option<i64>) -> TranscoderResult<String> {
-        let req = SubtitleRequest { path: path.to_owned(), stream_index };
+        let req = SubtitleRequest { path: path.to_owned(), stream_index, partial: false };
         let resp = self.post("/v1/subtitles", &req, Duration::from_secs(25 * 60)).await?;
         Ok(resp.text().await?)
+    }
+
+    /// An embedded track's subtitles as far as they have been pulled out of
+    /// the file, and whether that is all of them (the transcoder goes on
+    /// pulling them out after answering).
+    pub async fn subtitles_so_far(&self, path: &str, stream_index: i64) -> TranscoderResult<(String, bool)> {
+        let req = SubtitleRequest { path: path.to_owned(), stream_index: Some(stream_index), partial: true };
+        let resp = self.post("/v1/subtitles", &req, Duration::from_secs(60)).await?;
+        // A transcoder from before partial answers only answers when done.
+        let complete = resp.headers().get(SUBTITLES_COMPLETE_HEADER).is_none_or(|v| v.as_bytes() != b"0");
+        Ok((resp.text().await?, complete))
     }
 
     pub async fn request_keyframes(&self, path: &str) -> TranscoderResult<()> {

@@ -541,7 +541,7 @@ queue.
 | GET | `/api/playback/{session_id}/index.m3u8` | – | HLS VOD playlist (`application/vnd.apple.mpegurl`) |
 | GET | `/api/playback/{session_id}/{n}.ts` | – | MPEG-TS segment |
 | GET | `/api/files/{id}/stream` | – | raw file, supports `Range` (direct play) |
-| GET | `/api/files/{id}/subtitles/{index}.vtt` | – | WebVTT (text subtitles; extracted/converted on demand and cached) |
+| GET | `/api/files/{id}/subtitles/{index}.vtt` | – | WebVTT (text subtitles; extracted/converted on demand and cached). An embedded track still being read out of its file comes with the cues found so far and `X-Pley-Complete: 0` (not cached): ask again for the rest |
 | GET | `/api/files/{id}/trickplay` | – | `{ id, interval_ms, width, height, columns, rows, count, sheets }` seek-bar previews; `404` while they are being made (asking, or opening the item, queues them) |
 | GET | `/api/files/{id}/trickplay/{n}.jpg?v={id}` | – | sprite sheet `n`: thumbnail `k` is at column `k % columns`, row `k / columns` of sheet `k / (columns × rows)` and shows the video at `k × interval_ms` |
 | GET | `/api/files/{id}/chapters/{n}.jpg` | – | picture of chapter `n` (0-based), cut from the seek previews (a few seconds into the chapter); `404` until the file has previews |

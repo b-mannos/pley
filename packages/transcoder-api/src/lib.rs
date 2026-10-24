@@ -685,7 +685,14 @@ pub struct SubtitleRequest {
     /// Embedded stream index; `None` means `path` is itself a subtitle file.
     #[serde(default)]
     pub stream_index: Option<i64>,
+    /// For an embedded track: answer with the cues found so far rather than
+    /// wait for the whole file; `X-Pley-Complete: 0` says more are coming.
+    #[serde(default)]
+    pub partial: bool,
 }
+
+/// Header of a `partial` subtitles answer: `1` when the track is complete.
+pub const SUBTITLES_COMPLETE_HEADER: &str = "x-pley-complete";
 
 /// `POST /v1/keyframes` → `202` (index is built in the background so later
 /// copy-mode jobs can be segmented exactly on keyframes).

@@ -4,18 +4,19 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::extract::{Path, Request, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use pley_transcoder_api::{
     CoverRequest, Fingerprint, FingerprintRequest, JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo,
-    ProbeRequest, SubtitleRequest, ThumbnailRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
+    ProbeRequest, SUBTITLES_COMPLETE_HEADER, SubtitleRequest, ThumbnailRequest, TranscoderInfo, TranscoderStatus,
+    TrickplayInfo, TrickplayRequest,
 };
 use tokio_util::io::ReaderStream;
 
@@ -202,6 +203,18 @@ async fn cover(State(state): Shared, Json(req): Json<CoverRequest>) -> ApiResult
 }
 
 async fn subtitles(State(state): Shared, Json(req): Json<SubtitleRequest>) -> ApiResult<Response> {
+    if let (true, Some(index)) = (req.partial, req.stream_index) {
+        let (text, complete) = state.extractor.subtitle_so_far(&req.path, index, Duration::from_secs(2)).await?;
+        let complete = if complete { "1" } else { "0" };
+        return Ok((
+            [
+                (header::CONTENT_TYPE, "text/vtt; charset=utf-8"),
+                (HeaderName::from_static(SUBTITLES_COMPLETE_HEADER), complete),
+            ],
+            text,
+        )
+            .into_response());
+    }
     let text = state.extractor.subtitle(&req.path, req.stream_index).await?;
     Ok(([(header::CONTENT_TYPE, "text/vtt; charset=utf-8")], text).into_response())
 }

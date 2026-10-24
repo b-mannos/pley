@@ -78,6 +78,16 @@ const STALL_CHECK_MS = 2_000;
 /** Seconds of playback after which recoveries start over: the trouble is over. */
 const RECOVERED_AFTER_S = 5;
 
+/** How often subtitles still being read out of their file are asked for again. */
+const SUBTITLES_AGAIN_MS = 3_000;
+
+/** Whether `after` starts with the cues of `before` (subtitles read further). */
+function sameStart(before: VTTCue[], after: VTTCue[]): boolean {
+  if (after.length < before.length) return false;
+  const last = before.length - 1;
+  return last < 0 || (after[last]?.startTime === before[last]?.startTime && after[last]?.text === before[last]?.text);
+}
+
 /** The text track pley gives subtitle cues to, one per video element. */
 const pleyTracks = new WeakMap<HTMLVideoElement, TextTrack>();
 function pleyTrack(video: HTMLVideoElement): TextTrack {
@@ -703,25 +713,42 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const shownTextUrl = (info?.subtitles ?? []).find((s) => s.index === shownTextIndex && s.text_based)?.url ?? null;
   const [loadedCues, setLoadedCues] = useState<{ url: string; cues: VTTCue[] } | null>(null);
   // Subtitles show up by themselves once loaded (nothing is said meanwhile).
+  // Embedded ones come as far as the server has read them out of the file
+  // (`X-Pley-Complete: 0`); the player asks again until it has them all.
   useEffect(() => {
     if (!shownTextUrl || typeof VTTCue === "undefined") return;
     const abort = new AbortController();
-    fetch(shownTextUrl, { credentials: "same-origin", signal: abort.signal })
-      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((text) => setLoadedCues({ url: shownTextUrl, cues: parseVtt(text, VTTCue) }))
-      .catch(() => {
-        if (!abort.signal.aborted) toast.error("These subtitles couldn't be loaded.");
-      });
-    return () => abort.abort();
+    let again: number | undefined;
+    const load = () =>
+      fetch(shownTextUrl, { credentials: "same-origin", signal: abort.signal })
+        .then(async (r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const complete = r.headers.get("x-pley-complete") !== "0";
+          setLoadedCues({ url: shownTextUrl, cues: parseVtt(await r.text(), VTTCue) });
+          if (!complete) again = window.setTimeout(() => void load(), SUBTITLES_AGAIN_MS);
+        })
+        .catch(() => {
+          if (!abort.signal.aborted) toast.error("These subtitles couldn't be loaded.");
+        });
+    void load();
+    return () => {
+      abort.abort();
+      window.clearTimeout(again);
+    };
   }, [shownTextUrl, toast]);
   const shownCues = loadedCues && loadedCues.url === shownTextUrl ? loadedCues.cues : null;
+  /** The cues on the track: more of the same subtitles only add the new ones. */
+  const trackCues = useRef<{ track: TextTrack | null; cues: VTTCue[] | null }>({ track: null, cues: null });
   useEffect(() => {
     const v = videoRef.current;
     if (!v || typeof v.addTextTrack !== "function") return;
     // One track for the element's life: tracks added by script can't be removed.
     const track = pleyTrack(v);
-    for (const cue of Array.from(track.cues ?? [])) track.removeCue(cue);
-    for (const cue of shownCues ?? []) track.addCue(cue);
+    const before = trackCues.current;
+    const more = before.track === track && !!before.cues && !!shownCues && sameStart(before.cues, shownCues);
+    if (!more) for (const cue of Array.from(track.cues ?? [])) track.removeCue(cue);
+    for (const cue of (shownCues ?? []).slice(more ? (before.cues?.length ?? 0) : 0)) track.addCue(cue);
+    trackCues.current = { track, cues: shownCues };
     track.mode = shownCues?.length ? (nativeFullscreen ? "showing" : "hidden") : "disabled";
     const update = () => setCues(track.mode === "hidden" ? activeCues(track) : []);
     track.addEventListener("cuechange", update);
