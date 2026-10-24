@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { ServiceTestResult, Settings } from "@/api/types";
@@ -24,6 +24,7 @@ const SETTINGS = {
   detect_markers: true,
   seek_previews: true,
   previews_in_background: true,
+  third_party_apps: false,
 } satisfies Settings;
 
 describe("ServerSettings", () => {
@@ -35,6 +36,34 @@ describe("ServerSettings", () => {
     // The second time the settings come from the cache straight away.
     renderWithProviders(<ServerSettings />, { client: first.client });
     expect(await screen.findByLabelText("Server name")).toHaveValue("Den");
+  });
+
+  it("lets apps by other publishers sign in", async () => {
+    const user = userEvent.setup();
+    const requests = mockApi({
+      "GET /api/settings": () => SETTINGS,
+      "GET /api/system": () => ({}),
+      "PUT /api/settings": (req) => ({ ...SETTINGS, ...(req.body as Partial<Settings>) }),
+    });
+    renderWithProviders(<ServerSettings />);
+    const toggle = await screen.findByRole("switch", { name: "Apps by other publishers" });
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText(/Turning this off signs them out\. Leave it off unless you need one\./)).toBeInTheDocument();
+
+    await user.click(toggle);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Settings saved")).toBeInTheDocument();
+    await waitFor(() => expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ third_party_apps: true }));
+    expect(screen.getByRole("switch", { name: "Apps by other publishers" })).toBeChecked();
+  });
+
+  it("keeps apps by other publishers off when the server doesn't say", async () => {
+    const older: Partial<Settings> = { ...SETTINGS };
+    delete older.third_party_apps;
+    mockApi({ "GET /api/settings": () => older, "GET /api/system": () => ({}) });
+    renderWithProviders(<ServerSettings />);
+    expect(await screen.findByRole("switch", { name: "Apps by other publishers" })).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 });
 

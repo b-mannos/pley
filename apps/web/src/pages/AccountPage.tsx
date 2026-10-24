@@ -1,6 +1,8 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import {
+  AppWindow,
   Camera,
   Check,
   History,
@@ -14,6 +16,7 @@ import {
   Trash2,
   UserRound,
 } from "lucide-react";
+import { appKeys, appLabel, scopesLabel, useMyApps, useSignOutMyApp } from "@/api/apps";
 import { errorMessage } from "@/api/client";
 import {
   useChangePassword,
@@ -378,6 +381,7 @@ function PinCard() {
 
 function PasswordCard() {
   const toast = useToast();
+  const qc = useQueryClient();
   const change = useChangePassword();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -395,6 +399,8 @@ function PasswordCard() {
       {
         onSuccess: () => {
           toast.success("Password changed");
+          // A new password signs the account's apps out.
+          void qc.invalidateQueries({ queryKey: appKeys.mine });
           setCurrent("");
           setNext("");
           setConfirm("");
@@ -547,6 +553,79 @@ function DevicesCard() {
   );
 }
 
+/** Apps allowed to use this account (or allowed by it, for another profile), on pley's own page. */
+function AppsCard() {
+  const me = useAuth();
+  const toast = useToast();
+  const apps = useMyApps();
+  const signOut = useSignOutMyApp();
+  const list = apps.data ?? [];
+
+  return (
+    <Card>
+      <CardTitle icon={<AppWindow />}>Apps</CardTitle>
+      {apps.isPending ? (
+        <p className="text-sm text-subtle">Loading…</p>
+      ) : apps.isError ? (
+        <p className="text-sm text-danger">{errorMessage(apps.error)}</p>
+      ) : list.length === 0 ? (
+        <p className="text-sm text-subtle">No apps use your account. Apps ask on a pley page before they get access.</p>
+      ) : (
+        <ul className="divide-y divide-white/[0.05] rounded-md border border-border">
+          {list.map((a) => {
+            const label = appLabel(a);
+            return (
+              <li key={a.id} className="flex items-center gap-3 px-3 py-2.5">
+                <AppWindow className="size-5 shrink-0 text-subtle" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="truncate text-sm font-medium" title={a.client_id}>
+                      {label}
+                    </span>
+                    {a.first_party ? (
+                      <Badge tone="accent">pley's own app</Badge>
+                    ) : a.name ? (
+                      <span className="truncate text-xs text-subtle">calls itself “{a.name}”</span>
+                    ) : null}
+                  </div>
+                  <div className="truncate text-xs text-muted">
+                    {[
+                      a.profile.id !== me.id ? `Using ${a.profile.name}` : null,
+                      a.approved_by.id !== me.id ? `Allowed by ${a.approved_by.name}` : null,
+                      scopesLabel(a.scopes),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                  <div className="truncate text-xs text-subtle">
+                    {[a.device, a.ip, `last used ${formatRelative(a.last_used_at)}`, `allowed ${formatRelative(a.created_at)}`]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`Sign out ${label}`}
+                  loading={signOut.isPending && signOut.variables === a.id}
+                  onClick={() =>
+                    signOut.mutate(a.id, {
+                      onSuccess: () => toast.success(`Signed out ${label}`),
+                      onError: (err) => toast.error(errorMessage(err)),
+                    })
+                  }
+                >
+                  Sign out
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 export function AccountPage() {
   useDocumentTitle("Account");
   const user = useAuth();
@@ -577,6 +656,7 @@ export function AccountPage() {
       <TwoStepCard />
       <HistoryCard />
       <DevicesCard />
+      <AppsCard />
     </div>
   );
 }

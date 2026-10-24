@@ -584,6 +584,8 @@ export interface Settings {
   detect_markers: boolean;
   seek_previews: boolean;
   previews_in_background: boolean;
+  /** Apps by other publishers may sign in (pley's own apps always can); turning it off signs them out. */
+  third_party_apps: boolean;
 }
 
 /** A service the settings can test (`POST /api/settings/test`). */

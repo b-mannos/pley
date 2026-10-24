@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { ChevronRight, Laptop, Lock, LogOut, Plus, ShieldCheck, Smartphone, Trash2, UserPlus } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { AppWindow, ChevronRight, Laptop, Lock, LogOut, Plus, ShieldCheck, Smartphone, Trash2, UserPlus } from "lucide-react";
+import { appKeys, appLabel, scopesLabel, useSignOutUserApp, useUserApps } from "@/api/apps";
 import { errorMessage } from "@/api/client";
 import {
   useCreateUser,
@@ -97,30 +99,52 @@ function isPhone(d: Device) {
 
 function UserDevices({ user, self }: { user: User; self: boolean }) {
   const devices = useUserDevices(user.id);
+  const apps = useUserApps(user.id);
   const signOut = useSignOutEverywhere();
+  const qc = useQueryClient();
   const toast = useToast();
+  const [confirming, setConfirming] = useState(false);
   const list = devices.data ?? [];
+  const signedIn = list.length > 0 || (apps.data ?? []).length > 0;
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-sm font-medium">Signed-in devices</h3>
-        {!self && list.length > 0 ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<LogOut className="size-4" />}
-            loading={signOut.isPending}
-            onClick={() =>
-              signOut.mutate(user.id, {
-                onSuccess: () => toast.success(`${user.name} was signed out everywhere`),
-                onError: (e) => toast.error(errorMessage(e)),
-              })
-            }
-          >
+        {!self && signedIn && !confirming ? (
+          <Button size="sm" variant="ghost" icon={<LogOut className="size-4" />} onClick={() => setConfirming(true)}>
             Sign out everywhere
           </Button>
         ) : null}
       </div>
+      {confirming ? (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface-2 px-3 py-2.5">
+          <p className="text-xs text-muted">
+            {user.name} will be signed out on every device, and every app using their account will be signed out too.
+          </p>
+          <div className="flex shrink-0 gap-1">
+            <Button size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={signOut.isPending}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              loading={signOut.isPending}
+              onClick={() =>
+                signOut.mutate(user.id, {
+                  onSuccess: () => {
+                    toast.success(`${user.name} was signed out everywhere`);
+                    void qc.invalidateQueries({ queryKey: appKeys.user(user.id) });
+                  },
+                  onError: (e) => toast.error(errorMessage(e)),
+                  onSettled: () => setConfirming(false),
+                })
+              }
+            >
+              Sign out everywhere
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {devices.isPending ? (
         <p className="text-sm text-subtle">Loading…</p>
       ) : list.length === 0 ? (
@@ -138,6 +162,78 @@ function UserDevices({ user, self }: { user: User; self: boolean }) {
                 <span className="shrink-0 text-xs text-subtle">
                   {[d.ip, formatRelative(d.last_seen_at)].filter(Boolean).join(" · ")}
                 </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** The apps using someone's account, or allowed by them for another profile. */
+function UserApps({ user }: { user: User }) {
+  const apps = useUserApps(user.id);
+  const signOut = useSignOutUserApp();
+  const toast = useToast();
+  const list = apps.data ?? [];
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-medium">Apps</h3>
+      {apps.isPending ? (
+        <p className="text-sm text-subtle">Loading…</p>
+      ) : apps.isError ? (
+        <p className="text-sm text-danger">{errorMessage(apps.error)}</p>
+      ) : list.length === 0 ? (
+        <p className="text-sm text-subtle">No apps use this account.</p>
+      ) : (
+        <ul className="divide-y divide-white/[0.05] rounded-md border border-border">
+          {list.map((a) => {
+            const label = appLabel(a);
+            return (
+              <li key={a.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+                <AppWindow className="size-4 shrink-0 text-subtle" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="truncate" title={a.client_id}>
+                      {label}
+                    </span>
+                    {a.first_party ? (
+                      <Badge tone="accent">pley's own app</Badge>
+                    ) : a.name ? (
+                      <span className="truncate text-xs text-subtle">calls itself “{a.name}”</span>
+                    ) : null}
+                  </div>
+                  <div className="truncate text-xs text-subtle">
+                    {[
+                      a.profile.id !== user.id ? `Using ${a.profile.name}` : null,
+                      a.approved_by.id !== user.id ? `Allowed by ${a.approved_by.name}` : null,
+                      scopesLabel(a.scopes),
+                      a.device,
+                      a.ip,
+                      `last used ${formatRelative(a.last_used_at)}`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`Sign out ${label}`}
+                  loading={signOut.isPending && signOut.variables?.app === a.id}
+                  onClick={() =>
+                    signOut.mutate(
+                      { user: user.id, app: a.id },
+                      {
+                        onSuccess: () => toast.success(`Signed out ${label}`),
+                        onError: (e) => toast.error(errorMessage(e)),
+                      },
+                    )
+                  }
+                >
+                  Sign out
+                </Button>
               </li>
             );
           })}
@@ -432,7 +528,8 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
         </Field>
 
         {!isNew && user?.two_step ? <TwoStepReset user={user} /> : null}
-        {!isNew && user ? <UserDevices user={user} self={self} /> : null}
+        {!isNew && user ? <UserDevices key={user.id} user={user} self={self} /> : null}
+        {!isNew && user ? <UserApps user={user} /> : null}
 
         {error ? <p className="text-sm text-danger">{error}</p> : null}
         <button type="submit" className="hidden" />

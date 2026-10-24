@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, CircleCheck, Eye, EyeOff, Save } from "lucide-react";
+import { appKeys } from "@/api/apps";
 import { errorMessage } from "@/api/client";
 import { useSaveSettings, useSettings, useSystemInfo, useTestService } from "@/api/hooks";
 import type { HwAccel, ServiceTest, Settings, ToneMapping, TranscodePreset, TvMetadata } from "@/api/types";
@@ -178,6 +180,7 @@ export function ServerSettings() {
   const settings = useSettings();
   const system = useSystemInfo();
   const save = useSaveSettings();
+  const qc = useQueryClient();
   const toast = useToast();
   // The form starts from the saved settings, which are already there when
   // the page opens again (cached) or was opened by its route, and returns to
@@ -223,7 +226,14 @@ export function ServerSettings() {
       if (form[k] !== settings.data[k]) (changes as Record<string, unknown>)[k] = form[k];
     }
     save.mutate(changes, {
-      onSuccess: () => toast.success("Settings saved"),
+      onSuccess: () => {
+        toast.success("Settings saved");
+        // Turning apps by other publishers off signed them out.
+        if (changes.third_party_apps === false) {
+          void qc.invalidateQueries({ queryKey: appKeys.mine });
+          void qc.invalidateQueries({ queryKey: ["users"] });
+        }
+      },
       onError: (e) => toast.error(errorMessage(e)),
     });
   };
@@ -456,6 +466,20 @@ ${form.tvdb_pin}`}
             />
             <span className="text-sm text-muted">minutes</span>
           </div>
+        </Row>
+      </Group>
+
+      <Group title="Apps">
+        <Row
+          label="Apps by other publishers"
+          hint="pley's own apps can always sign in. Apps by other publishers are known by the address of a description they publish, which pley reads from the internet when someone allows one. Turning this off signs them out. Leave it off unless you need one."
+        >
+          {/* Off until a server that knows the setting sends it. */}
+          <Toggle
+            checked={form.third_party_apps ?? false}
+            onChange={(v) => set("third_party_apps", v)}
+            label="Apps by other publishers"
+          />
         </Row>
       </Group>
 

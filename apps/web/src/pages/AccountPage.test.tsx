@@ -1,6 +1,7 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
+import type { AppGrant } from "@/api/apps";
 import type { User } from "@/api/types";
 import { AudioPlayerProvider } from "@/audio/AudioPlayer";
 import { type FakeRequest, mockApi, renderWithProviders, testUser } from "@/test/render";
@@ -57,12 +58,21 @@ describe("PlaybackCard", () => {
   });
 });
 
-/** The whole page as `user`, with nothing in its history or devices. */
-function renderAccount(user: User) {
-  mockApi({
+/**
+ * The whole page as `user`, with nothing in its history or devices and
+ * these apps; returns the requests it makes.
+ */
+function renderAccount(user: User, apps: AppGrant[] = []) {
+  let list = apps;
+  const requests = mockApi({
     "GET /api/me/two-step": () => ({ enabled: false, since: null, recovery_codes_left: 0 }),
     "GET /api/history": () => ({ total: 0, entries: [] }),
     "GET /api/me/devices": () => [],
+    "GET /api/me/apps": () => list,
+    "DELETE /api/me/apps/7": () => {
+      list = list.filter((a) => a.id !== 7);
+      return undefined;
+    },
   });
   renderWithProviders(
     <AudioPlayerProvider>
@@ -70,7 +80,40 @@ function renderAccount(user: User) {
     </AudioPlayerProvider>,
     { user },
   );
+  return requests;
 }
+
+const NOW = Math.floor(Date.now() / 1000);
+/** pley's own app, on the account's phone. */
+const android: AppGrant = {
+  id: 7,
+  client_id: "https://hhaidar.github.io/pley/oauth/android.json",
+  name: "pley for Android",
+  first_party: true,
+  host: "hhaidar.github.io",
+  scopes: ["library", "play", "playlists", "profiles"],
+  profile: { id: 1, name: "Admin" },
+  approved_by: { id: 1, name: "Admin" },
+  device: "Android",
+  ip: "192.0.2.8",
+  created_at: NOW - 86400 * 3,
+  last_used_at: NOW - 3600,
+};
+/** An app by another publisher the account allowed for a child's profile. */
+const other: AppGrant = {
+  id: 8,
+  client_id: "https://apps.example.com/client.json",
+  name: "Movie Night",
+  first_party: false,
+  host: "apps.example.com",
+  scopes: ["library"],
+  profile: { id: 2, name: "Kiddo" },
+  approved_by: { id: 1, name: "Admin" },
+  device: null,
+  ip: null,
+  created_at: NOW - 86400,
+  last_used_at: NOW - 60,
+};
 
 const NO_PASSWORD = "This account has no password: an administrator can give it one.";
 
@@ -91,5 +134,49 @@ describe("AccountPage", () => {
     renderAccount({ ...testUser, is_admin: false, managed: true, has_password: false });
     expect(screen.queryByRole("heading", { name: "Change password" })).not.toBeInTheDocument();
     expect(screen.queryByText(NO_PASSWORD)).not.toBeInTheDocument();
+  });
+
+  it("lists the apps that use the account, and what they may do", async () => {
+    renderAccount(testUser, [android, other]);
+    const card = (await screen.findByText("pley for Android")).closest("ul");
+    if (!card) throw new Error("no list of apps");
+    const [own, theirs] = within(card).getAllByRole("listitem");
+
+    expect(own).toHaveTextContent("pley's own app");
+    expect(own).toHaveTextContent("Libraries · Play · Playlists · Profiles");
+    expect(own).toHaveTextContent(/Android · 192\.0\.2\.8 · last used 1 hour ago · allowed 3 days ago/);
+    expect(own).not.toHaveTextContent(/Using|Allowed by/);
+
+    // Others by host first; the name is only what the app calls itself.
+    expect(theirs).toHaveTextContent("apps.example.com");
+    expect(theirs).toHaveTextContent("calls itself “Movie Night”");
+    expect(theirs).not.toHaveTextContent("pley's own app");
+    expect(theirs).toHaveTextContent("Using Kiddo · Libraries");
+  });
+
+  it("says who allowed an app that uses the profile", async () => {
+    const kiddo: User = { ...testUser, id: 2, name: "Kiddo", is_admin: false, managed: true, has_password: false };
+    renderAccount(kiddo, [other]);
+    expect(await screen.findByText("apps.example.com")).toBeInTheDocument();
+    expect(screen.getByText(/Allowed by Admin/)).toBeInTheDocument();
+    expect(screen.queryByText(/Using Kiddo/)).not.toBeInTheDocument();
+  });
+
+  it("signs an app out", async () => {
+    const user = userEvent.setup();
+    const requests = renderAccount(testUser, [android, other]);
+    await user.click(await screen.findByRole("button", { name: "Sign out pley for Android" }));
+
+    expect(await screen.findByText("Signed out pley for Android")).toBeInTheDocument();
+    expect(requests.some((r) => r.method === "DELETE" && r.path === "/api/me/apps/7")).toBe(true);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Sign out pley for Android" })).not.toBeInTheDocument());
+    expect(screen.getByText("apps.example.com")).toBeInTheDocument();
+  });
+
+  it("says how apps get access when none has it", async () => {
+    renderAccount(testUser);
+    expect(
+      await screen.findByText("No apps use your account. Apps ask on a pley page before they get access."),
+    ).toBeInTheDocument();
   });
 });

@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
+import type { AppGrant } from "@/api/apps";
 import type { Library, User } from "@/api/types";
 import { mockApi, renderWithProviders, testUser } from "@/test/render";
 import { UsersSettings } from "./UsersSettings";
@@ -27,8 +28,37 @@ const libraries: Library[] = [
   { id: 2, name: "Cartoons", kind: "shows", paths: [], item_count: 0, created_at: 0, scanned_at: null, scanning: false },
 ];
 
+/** pley's own app, which Ann allowed for Kiddo. */
+const kidsApp: AppGrant = {
+  id: 9,
+  client_id: "https://hhaidar.github.io/pley/oauth/android.json",
+  name: "pley for Android",
+  first_party: true,
+  host: "hhaidar.github.io",
+  scopes: ["library", "play"],
+  profile: { id: 2, name: "Kiddo" },
+  approved_by: { id: 3, name: "Ann" },
+  device: "Android",
+  ip: "192.0.2.9",
+  created_at: 0,
+  last_used_at: 0,
+};
+
 function serve() {
+  let kidsApps = [kidsApp];
   return mockApi({
+    "GET /api/users/1/apps": () => [],
+    "GET /api/users/2/apps": () => kidsApps,
+    "DELETE /api/users/2/apps/9": () => {
+      kidsApps = [];
+      return undefined;
+    },
+    "DELETE /api/users/2/devices": () => {
+      kidsApps = [];
+      return undefined;
+    },
+    "GET /api/users/3/apps": () => [],
+    "GET /api/users/4/apps": () => [],
     "GET /api/users": () => [admin, kid, ann, lee],
     "GET /api/libraries": () => libraries,
     "GET /api/users/1/devices": () => [],
@@ -205,5 +235,39 @@ describe("UsersSettings", () => {
 
     expect(await screen.findByText("Deleted Kiddo")).toBeInTheDocument();
     expect(requests.some((r) => r.method === "DELETE" && r.path === "/api/users/2")).toBe(true);
+  });
+
+  it("lists someone's apps and signs one out", async () => {
+    const user = userEvent.setup();
+    const requests = renderUsers();
+    await user.click(await screen.findByRole("button", { name: /Kiddo/ }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Kiddo" });
+
+    const app = (await within(dialog).findByText("pley for Android")).closest("li");
+    if (!app) throw new Error("no row for the app");
+    expect(app).toHaveTextContent("pley's own app");
+    expect(app).toHaveTextContent("Allowed by Ann · Libraries · Play · Android · 192.0.2.9");
+
+    await user.click(within(app).getByRole("button", { name: "Sign out pley for Android" }));
+    expect(await screen.findByText("Signed out pley for Android")).toBeInTheDocument();
+    expect(requests.some((r) => r.method === "DELETE" && r.path === "/api/users/2/apps/9")).toBe(true);
+    expect(await within(dialog).findByText("No apps use this account.")).toBeInTheDocument();
+  });
+
+  it("says that signing out everywhere signs the apps out too", async () => {
+    const user = userEvent.setup();
+    const requests = renderUsers();
+    await user.click(await screen.findByRole("button", { name: /Kiddo/ }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Kiddo" });
+    await within(dialog).findByText("pley for Android");
+
+    await user.click(within(dialog).getByRole("button", { name: "Sign out everywhere" }));
+    expect(within(dialog).getByText(/every app using their account will be signed out too/)).toBeInTheDocument();
+    expect(requests.some((r) => r.method === "DELETE")).toBe(false);
+
+    await user.click(within(dialog).getByRole("button", { name: "Sign out everywhere" }));
+    expect(await screen.findByText("Kiddo was signed out everywhere")).toBeInTheDocument();
+    expect(requests.some((r) => r.method === "DELETE" && r.path === "/api/users/2/devices")).toBe(true);
+    expect(await within(dialog).findByText("No apps use this account.")).toBeInTheDocument();
   });
 });
