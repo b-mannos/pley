@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   AppWindow,
@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Smartphone,
   Trash2,
+  Tv,
   UserRound,
 } from "lucide-react";
 import { appKeys, appLabel, scopesLabel, useMyApps, useSignOutMyApp } from "@/api/apps";
@@ -34,7 +35,7 @@ import { useAuth } from "@/auth";
 import { Avatar, AVATAR_COLORS, avatarColor } from "@/components/Avatar";
 import { useToast } from "@/components/Toast";
 import { HistoryList } from "@/components/HistoryList";
-import { Badge, Button, Card, CardTitle, Field, Select, TextInput } from "@/components/ui";
+import { Badge, Button, buttonClass, Card, CardTitle, Field, Select, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatDay, formatRelative } from "@/lib/format";
 import { LANGUAGES } from "@/lib/languages";
@@ -563,7 +564,15 @@ function AppsCard() {
 
   return (
     <Card>
-      <CardTitle icon={<AppWindow />}>Apps</CardTitle>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 text-base font-semibold">
+          <AppWindow className="size-4 text-accent" /> Apps
+        </h2>
+        {/* Where the code a TV shows is typed in. */}
+        <Link to="/link" className={buttonClass("ghost", "sm")}>
+          <Tv className="size-4" aria-hidden /> Sign in on a TV
+        </Link>
+      </div>
       {apps.isPending ? (
         <p className="text-sm text-subtle">Loading…</p>
       ) : apps.isError ? (

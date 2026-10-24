@@ -20,6 +20,15 @@ describe("safeNext", () => {
     }
   });
 
+  it("keeps the code of a TV signing in", () => {
+    expect(safeNext("/link?code=BCDFGHJK")).toBe("/link?code=BCDFGHJK");
+    expect(safeNext("/link?code=BCDF-GHJK")).toBe("/link?code=BCDF-GHJK");
+    expect(safeNext("/link")).toBe("/link");
+    // As it comes back from sign-in and the profile picker.
+    const next = new URLSearchParams(`next=${encodeURIComponent("/link?code=BCDFGHJK")}`).get("next");
+    expect(safeNext(next)).toBe("/link?code=BCDFGHJK");
+  });
+
   it("doesn't loop back to sign-in or the profile picker", () => {
     expect(safeNext("/login?next=/x")).toBe("/");
     expect(safeNext("/profiles")).toBe("/");

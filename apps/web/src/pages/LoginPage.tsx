@@ -17,6 +17,8 @@ export function LoginPage() {
   const next = safeNext(params.get("next"));
   /** Signing in to allow an app (the OAuth authorize page). */
   const forApp = next === "/oauth/authorize" || next.startsWith("/oauth/authorize?");
+  /** Signing in to allow a TV (the page for the code it shows). */
+  const forTv = next === "/link" || next.startsWith("/link?");
   const navigate = useNavigate();
   const qc = useQueryClient();
   const server = useServer();
@@ -159,7 +161,15 @@ export function LoginPage() {
   return (
     <AuthLayout
       title="Sign in"
-      subtitle={server.data ? (forApp ? `to let an app use ${server.data.name}` : `to ${server.data.name}`) : undefined}
+      subtitle={
+        server.data
+          ? forApp
+            ? `to let an app use ${server.data.name}`
+            : forTv
+              ? `to let your TV use ${server.data.name}`
+              : `to ${server.data.name}`
+          : undefined
+      }
     >
       <form onSubmit={onSubmit} className="space-y-4">
         <Field label="Username" htmlFor="username">

@@ -15,14 +15,20 @@ export interface OAuthClient {
 /** What an app may ask for. */
 export type OAuthScope = "library" | "play" | "playlists" | "profiles";
 
-/** `POST /api/oauth/requests`: a request to show for consent. */
+/**
+ * `POST /api/oauth/requests`: a request to show for consent. Also
+ * `POST /api/oauth/device/verify`, for a TV that showed a code.
+ */
 export interface ConsentRequest {
   status: "consent";
   id: string;
   expires_at: number;
   client: OAuthClient;
-  /** Where the browser goes back to: a website's host, or an app's scheme. */
-  redirect: { kind: "app" | "loopback" | "web"; to: string };
+  /**
+   * Where the answer goes: back to a website (its host) or an app (its
+   * scheme), or to the TV showing a code ("BCDF-GHJK").
+   */
+  redirect: { kind: "app" | "loopback" | "web" | "device"; to: string };
   scopes: (OAuthScope | (string & {}))[];
 }
 
@@ -42,6 +48,11 @@ export interface Decision {
   continue_url: string;
 }
 
+/** `POST /api/oauth/requests/{id}` for a TV: nothing to go back to, the TV hears the answer when it next asks. */
+export interface DeviceDecision {
+  done: true;
+}
+
 /** Hands the authorize page's query (without "?") to the server, which checks it. */
 export function startRequest(query: string) {
   return api.post<RequestAnswer>("/api/oauth/requests", { query });
@@ -50,4 +61,14 @@ export function startRequest(query: string) {
 /** Allows the app, or not. */
 export function decide(id: string, allow: boolean) {
   return api.post<Decision>(`/api/oauth/requests/${encodeURIComponent(id)}`, { allow });
+}
+
+/** Hands over the code a TV shows; the TV's request, to allow or not. */
+export function verifyCode(userCode: string) {
+  return api.post<ConsentRequest>("/api/oauth/device/verify", { user_code: userCode });
+}
+
+/** Allows the TV, or not. */
+export function decideDevice(id: string, allow: boolean) {
+  return api.post<DeviceDecision>(`/api/oauth/requests/${encodeURIComponent(id)}`, { allow });
 }

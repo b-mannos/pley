@@ -72,6 +72,15 @@ describe("LoginPage", () => {
     expect(await screen.findByTestId("location")).toHaveTextContent(authorize);
   });
 
+  it("says when signing in is for letting a TV in", async () => {
+    serve();
+    renderLogin(`/login?next=${encodeURIComponent("/link?code=BCDFGHJK")}`);
+
+    expect(await screen.findByText("to let your TV use Living Room")).toBeInTheDocument();
+    await signIn("open-sesame");
+    expect(await screen.findByTestId("location")).toHaveTextContent("/link?code=BCDFGHJK");
+  });
+
   it("lets a household pick a profile first", async () => {
     serve({ profiles: [testUser, { ...testUser, id: 2, name: "Kid" }] });
     renderLogin();

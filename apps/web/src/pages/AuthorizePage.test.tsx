@@ -306,7 +306,7 @@ describe("AuthorizePage", () => {
   });
 
   it("says when the request is over", async () => {
-    serve({ decision: () => apiError(404, "not_found", "this request is over: start again from the app") });
+    serve({ decision: () => apiError(404, "not_found", "this request is over: start again from the app or the TV") });
     renderPage();
     const { deny } = await consentShown();
 

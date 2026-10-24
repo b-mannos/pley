@@ -173,6 +173,12 @@ describe("AccountPage", () => {
     expect(screen.getByText("apps.example.com")).toBeInTheDocument();
   });
 
+  it("leads to the page where a TV's code is typed", async () => {
+    renderAccount(testUser, [android]);
+    await screen.findByText("pley for Android");
+    expect(screen.getByRole("link", { name: "Sign in on a TV" })).toHaveAttribute("href", "/link");
+  });
+
   it("says how apps get access when none has it", async () => {
     renderAccount(testUser);
     expect(

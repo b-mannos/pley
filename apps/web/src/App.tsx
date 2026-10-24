@@ -86,6 +86,16 @@ const router = createBrowserRouter([
           <Splash />,
         ),
       },
+      // A TV signs in with the code it shows (OAuth device authorization).
+      {
+        path: "/link",
+        ...onDemand(
+          () => import("@/pages/LinkPage"),
+          (m) => m.LinkPage,
+          () => [],
+          <Splash />,
+        ),
+      },
       {
         path: "/play/:id",
         ...onDemand(
