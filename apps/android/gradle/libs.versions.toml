@@ -7,6 +7,9 @@ composeBom = "2026.09.00"
 lifecycle = "2.11.0"
 media3 = "1.11.1"
 webkit = "1.18.0"
+browser = "1.10.0"
+# What media3-datasource-okhttp brings, named for the sign-in module and its tests.
+okhttp = "4.12.0"
 coroutines = "1.11.0"
 junit = "4.13.2"
 json = "20260814"
@@ -23,6 +26,10 @@ androidx-media3-exoplayer-hls = { group = "androidx.media3", name = "media3-exop
 androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
 androidx-media3-datasource-okhttp = { group = "androidx.media3", name = "media3-datasource-okhttp", version.ref = "media3" }
 androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
+androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "browser" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
+okhttp-tls = { group = "com.squareup.okhttp3", name = "okhttp-tls", version.ref = "okhttp" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 json = { group = "org.json", name = "json", version.ref = "json" }
