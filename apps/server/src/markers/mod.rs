@@ -8,13 +8,21 @@
 //!    shared audio near the end. The transcoder computes Chromaprint
 //!    fingerprints of the first half (at most 10 min) and the last 35 % (at
 //!    most 8 min) of each episode; they are cached per file version, so an
-//!    episode added later is only compared against cached data.
+//!    episode added later is only compared against cached data. Each episode
+//!    is compared with the 8 nearest of its season, then (a premiere with an
+//!    intro of its own, a short season) with episodes of the show's other
+//!    seasons already fingerprinted.
+//! 3. **Key frames**, for credits no other episode shares (a different song
+//!    every week): the last stretch of text on black near the end, as
+//!    Plex and Jellyfin's Intro Skipper find them.
 //!
 //! A single background worker analyses one season at a time after library
 //! scans (and on demand), at low priority and pausing while anything plays.
 //! A season being watched goes first, during playback: the episodes playing
 //! before the rest of it, and their players are told when they have markers.
 
+#[cfg(test)]
+mod eval;
 pub mod matcher;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -23,7 +31,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use pley_transcoder_api::{Chapter, FingerprintRequest, MediaInfo};
+use pley_transcoder_api::{Chapter, FingerprintRequest, FrameStats, FramesRequest, MediaInfo};
 use serde::Serialize;
 use tokio::sync::{Notify, mpsc};
 
@@ -37,23 +45,40 @@ use crate::util::now;
 use matcher::{MatchParams, consensus, shared_run};
 
 /// Bump when detection improves so every file is analysed again.
-pub const ALGORITHM_VERSION: i64 = 1;
+pub const ALGORITHM_VERSION: i64 = 2;
 /// Episodes each episode is compared with (the nearest ones in the season).
-const NEIGHBORS: usize = 4;
+const NEIGHBORS: usize = 8;
+/// Episodes of the show's other seasons compared with one its own season
+/// shares nothing with (cached fingerprints only).
+const OTHER_SEASONS: usize = 6;
 const INTRO_MIN_SECONDS: f64 = 12.0;
 const INTRO_MAX_MS: i64 = 3 * 60_000;
 const CREDITS_MIN_SECONDS: f64 = 15.0;
 /// The last matching fingerprint value is computed from audio that starts
 /// about this long before the shared audio ends.
 const END_PADDING_MS: i64 = 1_300;
-/// The first match usually starts slightly before the shared audio (its
-/// analysis window still overlaps the audio before).
-const START_OFFSET_MS: i64 = 300;
+/// The first match usually starts before the shared audio (its analysis
+/// window still overlaps the audio before): about a second, measured
+/// against chapter-marked intros.
+const START_OFFSET_MS: i64 = 1_000;
 /// A match ending this close to the end of the other fingerprint was cut
 /// short by it rather than by the audio.
 const TRUNCATION_MS: f64 = 3_000.0;
 /// Credits ending this close to the end of the file run to the end.
 const CREDITS_TAIL_MS: i64 = 5_000;
+/// A key frame is a page of credits when this share (%) of its pixels is
+/// near black…
+const PAGE_BLACK: f32 = 85.0;
+/// …or a smaller share is, around text on true black (studio-range luma 16,
+/// no colour, dark overall): longer lines take more room.
+const PAGE_BLACK_WITH_TEXT: f32 = 65.0;
+/// Luma range of a page with text on it.
+const PAGE_TEXT: f32 = 60.0;
+/// Pages this close together belong to the same credits.
+const PAGES_GAP_MS: i64 = 20_000;
+/// On-screen credits end at most this long before the end of the file (an
+/// after-credits scene); a dark stretch earlier is part of the episode.
+const CREDITS_NEAR_END_MS: i64 = 120_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MarkerKind {
@@ -77,7 +102,7 @@ pub struct Marker {
     pub kind: String,
     pub start_ms: i64,
     pub end_ms: i64,
-    /// `chapter` or `fingerprint`.
+    /// `chapter`, `fingerprint` or `frames`.
     pub source: String,
 }
 
@@ -467,19 +492,19 @@ impl MarkerService {
         .bind(season_id)
         .fetch_optional(&self.db.read)
         .await?;
-        // Single-episode seasons borrow neighbours from the rest of the show.
-        let pool = if season.len() < 2 {
-            let show: Option<i64> = sqlx::query_scalar("SELECT parent_id FROM items WHERE id = ?")
-                .bind(season_id)
-                .fetch_one(&self.db.read)
-                .await?;
-            match show {
-                Some(show) => self.episode_files("e.grandparent_id = ?", show, chromaprint).await?,
-                None => season.clone(),
-            }
-        } else {
-            season.clone()
+        let show: Option<i64> = sqlx::query_scalar("SELECT parent_id FROM items WHERE id = ?")
+            .bind(season_id)
+            .fetch_one(&self.db.read)
+            .await?;
+        let whole_show = match show {
+            Some(show) => self.episode_files("e.grandparent_id = ?", show, chromaprint).await?,
+            None => season.clone(),
         };
+        // Single-episode seasons borrow neighbours from the rest of the show.
+        let pool = if season.len() < 2 { whole_show.clone() } else { season.clone() };
+        // Episodes of other seasons, for what the season shares nothing of.
+        let elsewhere: Vec<EpisodeFile> =
+            whole_show.into_iter().filter(|f| !season.iter().any(|s| s.file_id == f.file_id)).collect();
 
         // Chapters first; fingerprints only for what they don't cover.
         let mut found: Vec<(EpisodeFile, Vec<Found>)> =
@@ -502,7 +527,7 @@ impl MarkerService {
                 if targets.is_empty() {
                     continue;
                 }
-                match self.detect(&pool, &mut found, &targets, watched).await {
+                match self.detect(&pool, &elsewhere, &mut found, &targets, watched).await {
                     Ok(()) => {}
                     Err(FpError::Unsupported) => {
                         fingerprinted = false;
@@ -542,10 +567,12 @@ impl MarkerService {
     }
 
     /// Fingerprint matches for what chapters left the episodes `targets`
-    /// (indices in `found`) without.
+    /// (indices in `found`) without; then the show's other seasons, and the
+    /// key frames for credits.
     async fn detect(
         &self,
         pool: &[EpisodeFile],
+        elsewhere: &[EpisodeFile],
         found: &mut [(EpisodeFile, Vec<Found>)],
         targets: &[usize],
         watched: bool,
@@ -580,16 +607,23 @@ impl MarkerService {
         }
         let fps = self.fingerprints(pool, &needed, watched).await?;
         for (i, kind, pos, others) in plans {
-            let target = &found[i].0;
+            let target = found[i].0.clone();
             let Some(own) = fps.get(&(pos, kind)) else { continue };
-            let candidates: Vec<(i64, i64)> = others
-                .iter()
-                .filter_map(|o| fps.get(&(*o, kind)))
-                .filter_map(|other| shared_segment(own, other, kind))
-                .collect();
-            if let Some(marker) = finalize(consensus(&candidates), kind, target.duration_ms) {
-                found[i].1.push(marker);
+            let others: Vec<&Fp> = others.iter().filter_map(|o| fps.get(&(*o, kind))).collect();
+            let mut marker = detect_one(own, &others, kind, target.duration_ms);
+            if marker.is_none() {
+                // Other seasons, as far as they are fingerprinted already.
+                let cached: Vec<Fp> = elsewhere
+                    .iter()
+                    .filter_map(|f| read_cached(&self.cache_path(f, kind)))
+                    .take(OTHER_SEASONS)
+                    .collect();
+                marker = detect_one(own, &cached.iter().collect::<Vec<_>>(), kind, target.duration_ms);
             }
+            if marker.is_none() && kind == MarkerKind::Credits {
+                marker = self.frames(&target, watched).await?.and_then(|f| credits_from_frames(&f, target.duration_ms));
+            }
+            found[i].1.extend(marker);
         }
         Ok(())
     }
@@ -644,22 +678,58 @@ impl MarkerService {
         Ok(out)
     }
 
-    async fn fingerprint(&self, file: &EpisodeFile, kind: MarkerKind, watched: bool) -> Result<Option<Fp>, FpError> {
+    /// Where the fingerprint of `file` for `kind` is cached.
+    fn cache_path(&self, file: &EpisodeFile, kind: MarkerKind) -> PathBuf {
         let (start_ms, duration_ms) = window(kind, file.duration_ms);
-        let cache = self
-            .cache_dir
-            .join(format!("{}_{}_{}_{}_{}.fp", file.file_id, file.size, file.mtime, start_ms, duration_ms));
-        if let Some(fp) = read_cached(&cache) {
-            return Ok(Some(fp));
-        }
-        // Background work: playback has the machine to itself, except for
-        // the markers of what plays.
+        self.cache_dir.join(format!("{}_{}_{}_{}_{}.fp", file.file_id, file.size, file.mtime, start_ms, duration_ms))
+    }
+
+    /// Background work: playback has the machine to itself, except for the
+    /// markers of what plays.
+    async fn wait_turn(&self, watched: bool) -> Result<(), FpError> {
         while !watched && self.sessions.quiet_for() < QUIET_BEFORE_BACKGROUND_SECS {
             if !self.watched.lock().is_empty() {
                 return Err(FpError::Preempted);
             }
             let _ = tokio::time::timeout(Duration::from_secs(15), self.wake.notified()).await;
         }
+        Ok(())
+    }
+
+    /// The key frames of the credits window of `file`, from the cache or the
+    /// transcoder; `None` for files without video or a transcoder that can't.
+    async fn frames(&self, file: &EpisodeFile, watched: bool) -> Result<Option<Vec<FrameStats>>, FpError> {
+        let (start_ms, duration_ms) = window(MarkerKind::Credits, file.duration_ms);
+        let cache = self
+            .cache_dir
+            .join(format!("{}_{}_{}_{}_{}.frames", file.file_id, file.size, file.mtime, start_ms, duration_ms));
+        if let Some(frames) = std::fs::read(&cache).ok().and_then(|b| serde_json::from_slice(&b).ok()) {
+            return Ok(Some(frames));
+        }
+        self.wait_turn(watched).await?;
+        let req = FramesRequest { path: file.path.clone(), start_ms, duration_ms };
+        match self.transcoder.frames(&req).await {
+            Ok(frames) => {
+                if let Ok(bytes) = serde_json::to_vec(&frames.frames) {
+                    write_cache_file(&self.cache_dir, &cache, file.file_id, &bytes);
+                }
+                Ok(Some(frames.frames))
+            }
+            Err(TranscoderError::Api { message, .. }) => {
+                tracing::debug!("no key frames for {}: {message}", file.path);
+                Ok(None)
+            }
+            Err(err) => Err(FpError::Retry(err.to_string())),
+        }
+    }
+
+    async fn fingerprint(&self, file: &EpisodeFile, kind: MarkerKind, watched: bool) -> Result<Option<Fp>, FpError> {
+        let (start_ms, duration_ms) = window(kind, file.duration_ms);
+        let cache = self.cache_path(file, kind);
+        if let Some(fp) = read_cached(&cache) {
+            return Ok(Some(fp));
+        }
+        self.wait_turn(watched).await?;
         let req = FingerprintRequest { path: file.path.clone(), stream_index: file.audio_index, start_ms, duration_ms };
         match self.transcoder.fingerprint(&req).await {
             Ok(fp) => {
@@ -745,15 +815,26 @@ fn window(kind: MarkerKind, duration_ms: i64) -> (i64, i64) {
 
 /// Up to [`NEIGHBORS`] other positions in a list of `len`, nearest first.
 fn neighbours(pos: usize, len: usize) -> Vec<usize> {
+    nearest(pos, len, NEIGHBORS)
+}
+
+/// Up to `count` other positions in a list of `len`, nearest first.
+fn nearest(pos: usize, len: usize, count: usize) -> Vec<usize> {
     let mut out = Vec::new();
     for d in 1..len {
         for p in [pos.checked_sub(d), pos.checked_add(d).filter(|p| *p < len)].into_iter().flatten() {
-            if out.len() < NEIGHBORS {
+            if out.len() < count {
                 out.push(p);
             }
         }
     }
     out
+}
+
+/// An episode's marker of `kind` from its fingerprint and its neighbours'.
+fn detect_one(own: &Fp, others: &[&Fp], kind: MarkerKind, duration_ms: i64) -> Option<Found> {
+    let candidates: Vec<(i64, i64)> = others.iter().filter_map(|other| shared_segment(own, other, kind)).collect();
+    finalize(consensus(&candidates), kind, duration_ms)
 }
 
 /// The segment of `own` (in ms within its file) that `other` shares.
@@ -788,8 +869,9 @@ fn finalize(range: Option<(i64, i64)>, kind: MarkerKind, duration_ms: i64) -> Op
             if end - start > INTRO_MAX_MS {
                 return None;
             }
-            // An intro opening the file starts at 0:00.
-            if start < 1_000 {
+            // An intro opening the file starts at 0:00 (as Intro Skipper
+            // does for starts within 2 s).
+            if start <= 2_000 {
                 start = 0;
             }
         }
@@ -805,6 +887,50 @@ fn finalize(range: Option<(i64, i64)>, kind: MarkerKind, duration_ms: i64) -> Op
     (end - start >= 10_000).then_some(Found { kind, start_ms: start, end_ms: end, source: "fingerprint" })
 }
 
+/// Credits as text on black in key frames (sorted by time) of the end of a
+/// file: the last stretch of pages less than [`PAGES_GAP_MS`] apart, at least
+/// [`CREDITS_MIN_SECONDS`] long, mostly pages and the pages mostly with text,
+/// ending near the end of the file. Black stretches without text (a fade
+/// between scenes) and dark scenes (no true black) don't count.
+fn credits_from_frames(frames: &[FrameStats], duration_ms: i64) -> Option<Found> {
+    let page = |f: &FrameStats| {
+        f.black >= PAGE_BLACK || (f.black >= PAGE_BLACK_WITH_TEXT && f.ylow <= 16.5 && f.sat <= 4.0 && f.yhigh <= 45.0)
+    };
+    let mut best: Option<(usize, usize)> = None;
+    let mut i = 0;
+    while i < frames.len() {
+        if !page(&frames[i]) {
+            i += 1;
+            continue;
+        }
+        let (first, mut last) = (i, i);
+        for (j, f) in frames.iter().enumerate().skip(i + 1) {
+            if f.ms - frames[last].ms > PAGES_GAP_MS {
+                break;
+            }
+            if page(f) {
+                last = j;
+            }
+        }
+        let pages: Vec<&FrameStats> = frames[first..=last].iter().filter(|f| page(f)).collect();
+        let with_text = pages.iter().filter(|f| f.ymax - f.ylow >= PAGE_TEXT).count();
+        let long = (frames[last].ms - frames[first].ms) as f64 >= CREDITS_MIN_SECONDS * 1000.0;
+        // Mostly pages, and the pages mostly with text.
+        if long && pages.len() * 2 > last - first && with_text * 2 >= pages.len() {
+            best = Some((first, last));
+        }
+        i = last + 1;
+    }
+    let (first, last) = best?;
+    if duration_ms - frames[last].ms > CREDITS_NEAR_END_MS {
+        return None;
+    }
+    // Up to the next key frame (an after-credits scene), or the end.
+    let end = frames.get(last + 1).map_or(duration_ms, |f| f.ms);
+    let end = if duration_ms - end <= CREDITS_TAIL_MS { duration_ms } else { end };
+    Some(Found { kind: MarkerKind::Credits, start_ms: frames[first].ms, end_ms: end, source: "frames" })
+}
+
 /// Markers from chapter titles ("Opening", "OP", "Intro", "Ending", "ED",
 /// "End Credits", …).
 fn chapter_markers(chapters: &[Chapter], duration_ms: i64) -> Vec<Found> {
@@ -814,7 +940,9 @@ fn chapter_markers(chapters: &[Chapter], duration_ms: i64) -> Vec<Found> {
         let (start, end) = (chapter.start_ms.max(0), chapter.end_ms.min(duration_ms.max(chapter.end_ms)));
         let plausible = match kind {
             MarkerKind::Intro => (5_000..=5 * 60_000).contains(&(end - start)),
-            MarkerKind::Credits => end - start >= 5_000,
+            // Shorter "Credits" chapters mark the last seconds of a file (a
+            // logo), not the credits: those are found as if there were none.
+            MarkerKind::Credits => (end - start) as f64 >= CREDITS_MIN_SECONDS * 1000.0,
         };
         if plausible && !out.iter().any(|m| m.kind == kind) {
             out.push(Found { kind, start_ms: start, end_ms: end, source: "chapter" });
@@ -894,6 +1022,21 @@ fn read_cached(path: &Path) -> Option<Fp> {
 
 /// Store a fingerprint, dropping cached ones of older versions of the file.
 fn write_cached(dir: &Path, path: &Path, file_id: i64, fp: &Fp) {
+    let mut bytes = Vec::with_capacity(CACHE_HEADER + fp.data.len() * 4);
+    bytes.extend_from_slice(CACHE_MAGIC);
+    bytes.extend_from_slice(&fp.start_ms.to_le_bytes());
+    bytes.extend_from_slice(&fp.end_ms.to_le_bytes());
+    bytes.extend_from_slice(&fp.item_ms.to_le_bytes());
+    bytes.extend_from_slice(&(fp.data.len() as u32).to_le_bytes());
+    for v in &fp.data {
+        bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    write_cache_file(dir, path, file_id, &bytes);
+}
+
+/// Store `bytes` at `path` (`{file}_{size}_{mtime}_…`), dropping what is
+/// cached for older versions of the file.
+fn write_cache_file(dir: &Path, path: &Path, file_id: i64, bytes: &[u8]) {
     if std::fs::create_dir_all(dir).is_err() {
         return;
     }
@@ -908,15 +1051,6 @@ fn write_cached(dir: &Path, path: &Path, file_id: i64, fp: &Fp) {
                 let _ = std::fs::remove_file(entry.path());
             }
         }
-    }
-    let mut bytes = Vec::with_capacity(CACHE_HEADER + fp.data.len() * 4);
-    bytes.extend_from_slice(CACHE_MAGIC);
-    bytes.extend_from_slice(&fp.start_ms.to_le_bytes());
-    bytes.extend_from_slice(&fp.end_ms.to_le_bytes());
-    bytes.extend_from_slice(&fp.item_ms.to_le_bytes());
-    bytes.extend_from_slice(&(fp.data.len() as u32).to_le_bytes());
-    for v in &fp.data {
-        bytes.extend_from_slice(&v.to_le_bytes());
     }
     let tmp = path.with_extension("tmp");
     if std::fs::write(&tmp, bytes).is_ok() {
@@ -963,9 +1097,69 @@ mod tests {
         assert_eq!(window(MarkerKind::Intro, 3_600_000), (0, 600_000));
         assert_eq!(window(MarkerKind::Credits, 300_000), (195_000, 105_000));
         assert_eq!(window(MarkerKind::Credits, 3_600_000), (3_120_000, 480_000));
-        assert_eq!(neighbours(0, 6), vec![1, 2, 3, 4]);
-        assert_eq!(neighbours(3, 6), vec![2, 4, 1, 5]);
+        assert_eq!(nearest(0, 6, 4), vec![1, 2, 3, 4]);
+        assert_eq!(nearest(3, 6, 4), vec![2, 4, 1, 5]);
         assert_eq!(neighbours(1, 2), vec![0]);
+        assert_eq!(neighbours(3, 12), vec![2, 4, 1, 5, 0, 6, 7, 8]);
+    }
+
+    /// Key frames 4 s apart from `from_s` to `to_s`, each as `kind` says.
+    fn key_frames(from_s: i64, to_s: i64, kind: impl Fn(i64) -> &'static str) -> Vec<FrameStats> {
+        (from_s..to_s)
+            .step_by(4)
+            .map(|s| {
+                let (black, ylow, yhigh, ymax, sat) = match kind(s) {
+                    // White text on black.
+                    "page" => (95.0, 16.0, 16.0, 200.0, 0.1),
+                    // Plain black between scenes or pages.
+                    "black" => (100.0, 16.0, 16.0, 17.0, 0.0),
+                    // A dark scene: never true black, some colour.
+                    "dark" => (70.0, 22.0, 45.0, 180.0, 2.5),
+                    _ => (10.0, 30.0, 150.0, 235.0, 20.0),
+                };
+                FrameStats { ms: s * 1000, black, ylow, yhigh, ymax, sat }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn credits_are_found_as_text_on_black() {
+        // A 30 min episode: credits from 28:00 to 29:20, an after-credits scene.
+        let frames = key_frames(1_320, 1_800, |s| match s {
+            1_680..1_760 => "page",
+            1_500..1_600 => "dark",
+            _ => "scene",
+        });
+        let found = credits_from_frames(&frames, 1_800_000).unwrap();
+        assert_eq!((found.start_ms, found.end_ms, found.source), (1_680_000, 1_760_000, "frames"));
+
+        // Running to the end of the file.
+        let frames = key_frames(1_320, 1_800, |s| if s >= 1_740 { "page" } else { "scene" });
+        assert_eq!(
+            credits_from_frames(&frames, 1_800_000).map(|f| (f.start_ms, f.end_ms)),
+            Some((1_740_000, 1_800_000))
+        );
+
+        // Black without text (a fade), a dark scene, credits too short or too
+        // far from the end: none.
+        for kind in ["black", "dark"] {
+            let frames = key_frames(1_320, 1_800, |s| if s >= 1_700 { kind } else { "scene" });
+            assert_eq!(credits_from_frames(&frames, 1_800_000), None, "{kind}");
+        }
+        let frames = key_frames(1_320, 1_800, |s| if (1_780..1_790).contains(&s) { "page" } else { "scene" });
+        assert_eq!(credits_from_frames(&frames, 1_800_000), None, "10 s");
+        let frames = key_frames(1_320, 1_800, |s| if (1_400..1_480).contains(&s) { "page" } else { "scene" });
+        assert_eq!(credits_from_frames(&frames, 1_800_000), None, "5 min before the end");
+    }
+
+    #[test]
+    fn short_credits_chapters_are_not_credits() {
+        let chapter = |start_ms, end_ms, title: &str| Chapter { start_ms, end_ms, title: Some(title.into()) };
+        let found =
+            chapter_markers(&[chapter(0, 1_560_000, "Episode"), chapter(1_566_000, 1_571_000, "Credits")], 1_571_000);
+        assert!(found.is_empty(), "{found:?}");
+        let found = chapter_markers(&[chapter(1_500_000, 1_571_000, "Credits")], 1_571_000);
+        assert_eq!(found.len(), 1);
     }
 
     #[test]
@@ -1004,7 +1198,8 @@ mod tests {
         let other =
             Fp { start_ms: 500_000, end_ms: 535_000 + 1_500, item_ms: 100.0, data: [noise(50), credits].concat() };
         let (start, end) = shared_segment(&own, &other, MarkerKind::Credits).unwrap();
-        assert!((start - 610_000).abs() <= 400, "{start}");
+        // The first match starts up to a second early: START_OFFSET_MS.
+        assert!((start - 610_700).abs() <= 400, "{start}");
         assert_eq!(end, 640_000 + 1_500, "extended to where the other's audio ends");
         assert_eq!(finalize(Some((300, 30_100)), MarkerKind::Intro, 1_300_000).map(|f| f.start_ms), Some(0));
     }

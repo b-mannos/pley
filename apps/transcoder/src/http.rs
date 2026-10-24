@@ -14,9 +14,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use pley_transcoder_api::{
-    CoverRequest, Fingerprint, FingerprintRequest, JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo,
-    ProbeRequest, SUBTITLES_COMPLETE_HEADER, SubtitleRequest, ThumbnailRequest, TranscoderInfo, TranscoderStatus,
-    TrickplayInfo, TrickplayRequest,
+    CoverRequest, Fingerprint, FingerprintRequest, Frames, FramesRequest, JobCreated, JobRequest, JobStatus,
+    KeyframesRequest, MediaInfo, ProbeRequest, SUBTITLES_COMPLETE_HEADER, SubtitleRequest, ThumbnailRequest,
+    TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
 };
 use tokio_util::io::ReaderStream;
 
@@ -122,6 +122,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/subtitles", post(subtitles))
         .route("/keyframes", post(keyframes))
         .route("/fingerprint", post(fingerprint))
+        .route("/frames", post(frames))
         .route("/trickplay", post(trickplay))
         .route("/trickplay/{id}/{sheet}", get(trickplay_sheet))
         .route("/jobs", get(list_jobs).post(create_job))
@@ -250,6 +251,10 @@ async fn trickplay_sheet(State(state): Shared, Path((id, sheet)): Path<(String, 
 
 async fn fingerprint(State(state): Shared, Json(req): Json<FingerprintRequest>) -> ApiResult<Json<Fingerprint>> {
     Ok(Json(state.fingerprinter.fingerprint(&req).await?))
+}
+
+async fn frames(State(state): Shared, Json(req): Json<FramesRequest>) -> ApiResult<Json<Frames>> {
+    Ok(Json(state.fingerprinter.frames(&req).await?))
 }
 
 async fn list_jobs(State(state): Shared) -> Json<Vec<JobStatus>> {

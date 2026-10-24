@@ -16,9 +16,9 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
 use pley_transcoder_api::{
-    Announce, CoverRequest, ErrorBody, Fingerprint, FingerprintRequest, JobCreated, JobRequest, JobStatus,
-    KeyframesRequest, MediaInfo, ProbeRequest, SUBTITLES_COMPLETE_HEADER, SubtitleRequest, TOKEN_ENV, ThumbnailRequest,
-    TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
+    Announce, CoverRequest, ErrorBody, Fingerprint, FingerprintRequest, Frames, FramesRequest, JobCreated, JobRequest,
+    JobStatus, KeyframesRequest, MediaInfo, ProbeRequest, SUBTITLES_COMPLETE_HEADER, SubtitleRequest, TOKEN_ENV,
+    ThumbnailRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -253,6 +253,11 @@ impl Transcoder {
     /// Chromaprint fingerprint of part of a file (intro/credits detection).
     pub async fn fingerprint(&self, req: &FingerprintRequest) -> TranscoderResult<Fingerprint> {
         self.post_json("/v1/fingerprint", req, Duration::from_secs(15 * 60)).await
+    }
+
+    /// Darkness and contrast of the key frames of part of a video (credits detection).
+    pub async fn frames(&self, req: &FramesRequest) -> TranscoderResult<Frames> {
+        self.post_json("/v1/frames", req, Duration::from_secs(15 * 60)).await
     }
 
     /// Make (or look up) the seek previews of a video; can take minutes.

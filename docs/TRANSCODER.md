@@ -77,6 +77,7 @@ following status codes:
 | POST | `/v1/trickplay` | `TrickplayRequest {path, interval_ms?, width?}` | `TrickplayInfo {id, interval_ms, width, height, columns, rows, count, sheets}`: seek-bar previews, cached per file version until all sheets have been fetched (or for a day). Keyframes only are decoded (seconds for a film); HDR and Dolby Vision are tone-mapped with libplacebo when available. |
 | GET | `/v1/trickplay/{id}/{n}.jpg` | – | sprite sheet `n` (`columns × rows` thumbnails); once every sheet of a set has been fetched, the set is deleted (fetch them all in one go and keep them) |
 | POST | `/v1/fingerprint` | `FingerprintRequest {path, stream_index?, start_ms, duration_ms}` | `Fingerprint {start_ms, item_seconds, data: u32[]}`: raw Chromaprint values of the audio (`400` when FFmpeg lacks Chromaprint) |
+| POST | `/v1/frames` | `FramesRequest {path, start_ms, duration_ms}` | `Frames {frames: [{ms, black, ylow, yhigh, ymax, sat}]}`: how dark the key frames of part of the video are and how much contrast they have, for credits detection |
 | POST | `/v1/jobs` | `JobRequest` | `201 JobCreated` |
 | GET | `/v1/jobs` | – | `JobStatus[]` |
 | GET | `/v1/jobs/{id}` | – | `JobStatus` |
@@ -226,6 +227,13 @@ returned as a plain number. The pley server compares the fingerprints of
 episodes to find shared intros and credits. Requests run two at a time, at
 below-normal process priority, so they never slow down playback. Whether the
 FFmpeg build includes Chromaprint is reported as `capabilities.chromaprint`.
+
+`POST /v1/frames` decodes only the key frames of part of the first video
+stream (`-skip_frame nokey`), shrinks them to 320 pixels wide in 8 bits (HDR
+too) and measures each with `blackframe` (share of pixels at most 32) and
+`signalstats` (luma of the darkest and brightest tenth, the maximum,
+average saturation). The server finds credits in them: text on black. It
+shares the fingerprints' limit and priority.
 
 ## Metrics
 

@@ -727,6 +727,40 @@ pub struct Fingerprint {
     pub data: Vec<u32>,
 }
 
+/// `POST /v1/frames` → [`Frames`]: how dark the key frames of part of a video
+/// are and how much contrast they have. The server looks for credits in
+/// them: text on black.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct FramesRequest {
+    pub path: String,
+    /// Where to start, ms from the beginning of the file.
+    #[serde(default)]
+    pub start_ms: i64,
+    /// How much video to look at; the end of the file may stop it earlier.
+    pub duration_ms: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Frames {
+    /// Key frames in order of time.
+    pub frames: Vec<FrameStats>,
+}
+
+/// One key frame, its luma in 8-bit studio range (black is 16).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]
+pub struct FrameStats {
+    /// Ms from the beginning of the file.
+    pub ms: i64,
+    /// Share of pixels at most 32 (near black), in percent.
+    pub black: f32,
+    /// Luma of the darkest and brightest 10 % of pixels, and the extremes.
+    pub ylow: f32,
+    pub yhigh: f32,
+    pub ymax: f32,
+    /// Average saturation.
+    pub sat: f32,
+}
+
 /// `POST /v1/trickplay`: seek-bar preview thumbnails of a video, tiled into
 /// JPEG sprite sheets fetched with `GET /v1/trickplay/{id}/{n}`. Cached until
 /// every sheet has been fetched (callers keep their own copy), or for a day:

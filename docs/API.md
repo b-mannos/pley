@@ -175,7 +175,7 @@ interface Marker {
   kind: "intro" | "credits";
   start_ms: number;
   end_ms: number;                   // credits that run to the end of the file end at its duration
-  source: "chapter" | "fingerprint";
+  source: "chapter" | "fingerprint" | "frames";
 }
 
 interface MediaFile {
@@ -599,19 +599,29 @@ then `DELETE /api/playback/{session_id}`.
 
 ## Intro and credits detection
 
-Markers come from two sources, best first:
+Markers come from three sources, best first:
 
 1. **Chapters** titled like an intro or credits (*Intro*, *Opening*, *OP*,
    *Opening Credits*, *Ending*, *ED*, *Credits*, *End Credits*, …), for movies
-   and episodes.
+   and episodes. *Credits* chapters shorter than 15 s (a logo at the very end)
+   are ignored.
 2. **Audio fingerprints** of episodes. The transcoder computes Chromaprint
    fingerprints of the first half (at most 10 minutes) and the last 35 % (at
    most 8 minutes) of every episode. An intro is audio of 12 s to 3 minutes
    near the start that the nearest episodes of the season (or of the show, for
    a season with one episode) share; credits are shared audio near the end.
-   Each episode is compared with up to four others and the boundaries agreed
-   on by most comparisons win. Fingerprints are cached per file version in the
-   cache folder, so a new episode only needs its own.
+   Each episode is compared with up to eight others of its season and the
+   boundaries agreed on by most comparisons win; an episode its season shares
+   nothing with (a premiere, a short season) is compared with up to six
+   episodes of the show's other seasons whose fingerprints are cached.
+   Matching follows Jellyfin's Intro Skipper: alignments are found from
+   matching values, and parts of a title sequence split by a gag that changes
+   every episode count as one. Fingerprints are cached per file version in
+   the cache folder, so a new episode only needs its own.
+3. **Key frames** (`source: "frames"`), for credits no other episode shares:
+   the key frames of the last 35 % (at most 8 minutes) are measured, and the
+   last stretch of at least 15 s that is mostly text on black, ending less
+   than 2 minutes before the end of the file, is the credits.
 
 A background worker analyses one season at a time after library scans (and
 30 s after start-up), waits while anything plays, and records the algorithm
