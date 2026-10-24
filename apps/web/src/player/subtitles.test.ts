@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { activeCues, cueAtTop, DEFAULT_SUBTITLE_STYLE, parseVtt, subtitleFontSize, subtitleStyle, type SubtitleCue } from "./subtitles";
+import { cueAtTop, cuesAt, DEFAULT_SUBTITLE_STYLE, parseVtt, subtitleFontSize, subtitleStyle, type SubtitleCue } from "./subtitles";
 
 function cue(text: string, extra: Partial<SubtitleCue> = {}): SubtitleCue {
   return {
     startTime: 0,
+    endTime: 1,
     text,
     line: "auto",
     snapToLines: true,
@@ -39,15 +40,17 @@ describe("cueAtTop", () => {
   });
 });
 
-describe("activeCues", () => {
-  it("lists the cues showing now, in order", () => {
-    const later = cue("second", { startTime: 5 });
-    const earlier = cue("first", { startTime: 2 });
-    const notVtt = { startTime: 1 };
-    const list = Object.assign([later, notVtt, earlier], { getCueById: () => null });
-    const track = { activeCues: list } as unknown as TextTrack;
-    expect(activeCues(track).map((c) => c.text)).toEqual(["first", "second"]);
-    expect(activeCues({ activeCues: null } as unknown as TextTrack)).toEqual([]);
+describe("cuesAt", () => {
+  it("lists the cues showing at a time, in order", () => {
+    const later = cue("second", { startTime: 5, endTime: 9 });
+    const earlier = cue("first", { startTime: 2, endTime: 8 });
+    const gone = cue("gone", { startTime: 1, endTime: 5 });
+    const cues = [later, gone, earlier];
+    expect(cuesAt(cues, 6).map((c) => c.text)).toEqual(["first", "second"]);
+    // A cue shows from its start up to (not at) its end.
+    expect(cuesAt(cues, 5).map((c) => c.text)).toEqual(["first", "second"]);
+    expect(cuesAt(cues, 1).map((c) => c.text)).toEqual(["gone"]);
+    expect(cuesAt(cues, 9)).toEqual([]);
   });
 });
 

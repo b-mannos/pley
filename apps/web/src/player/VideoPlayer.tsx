@@ -39,7 +39,7 @@ import { methodLabel, PlaybackDetails } from "./PlaybackDetails";
 import { SettingsPopover } from "./SettingsPopover";
 import { fileMarkers, SkipButton, skipTarget, useSkipMarkers } from "./SkipButton";
 import { SubtitleOverlay } from "./SubtitleOverlay";
-import { activeCues, DEFAULT_SUBTITLE_STYLE, parseVtt, subtitleStyle, type SubtitleCue, type SubtitleStyle } from "./subtitles";
+import { cuesAt, DEFAULT_SUBTITLE_STYLE, parseVtt, subtitleStyle, type SubtitleCue, type SubtitleStyle } from "./subtitles";
 import { UpNext } from "./UpNext";
 import { itemUrl } from "@/lib/urls";
 
@@ -750,11 +750,21 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     for (const cue of (shownCues ?? []).slice(more ? (before.cues?.length ?? 0) : 0)) track.addCue(cue);
     trackCues.current = { track, cues: shownCues };
     track.mode = shownCues?.length ? (nativeFullscreen ? "showing" : "hidden") : "disabled";
-    const update = () => setCues(track.mode === "hidden" ? activeCues(track) : []);
+    // The lines at the playhead, worked out here: after a seek the track's
+    // own active cues stay as they were until the video plays again (seconds
+    // while it loads), and a line ending meanwhile never showed.
+    const update = () => {
+      const next = track.mode === "hidden" && shownCues ? cuesAt(shownCues, v.currentTime) : [];
+      setCues((now) => (now.length === next.length && now.every((c, i) => c === next[i]) ? now : next));
+    };
     track.addEventListener("cuechange", update);
+    v.addEventListener("seeking", update);
+    v.addEventListener("timeupdate", update);
     update();
     return () => {
       track.removeEventListener("cuechange", update);
+      v.removeEventListener("seeking", update);
+      v.removeEventListener("timeupdate", update);
       setCues([]);
     };
   }, [shownCues, nativeFullscreen]);

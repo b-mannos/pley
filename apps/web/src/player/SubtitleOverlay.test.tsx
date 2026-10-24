@@ -7,6 +7,7 @@ import { DEFAULT_SUBTITLE_STYLE, type SubtitleCue } from "./subtitles";
 function cue(text: string, extra: Partial<SubtitleCue> = {}): SubtitleCue {
   return {
     startTime: 1,
+    endTime: 2,
     text,
     line: "auto",
     snapToLines: true,

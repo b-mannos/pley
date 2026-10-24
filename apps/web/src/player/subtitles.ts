@@ -47,6 +47,7 @@ export function subtitleStyle(stored: unknown): SubtitleStyle {
 /** What the overlay needs of a cue (a `VTTCue` in browsers). */
 export interface SubtitleCue {
   startTime: number;
+  endTime: number;
   text: string;
   /** `"auto"` (the default) or a line number / percentage from the top. */
   line?: number | "auto" | null;
@@ -108,14 +109,11 @@ export function parseVtt<C extends Pick<VTTCue, "line" | "snapToLines">>(
   return cues;
 }
 
-/** The cues of `track` showing now. */
-export function activeCues(track: TextTrack): SubtitleCue[] {
-  const list = track.activeCues;
-  if (!list) return [];
-  const cues: SubtitleCue[] = [];
-  for (let i = 0; i < list.length; i++) {
-    const cue = list[i] as unknown as Partial<SubtitleCue> | undefined;
-    if (cue && typeof cue.getCueAsHTML === "function") cues.push(cue as SubtitleCue);
-  }
-  return cues.sort((a, b) => a.startTime - b.startTime);
+/**
+ * The cues showing at `seconds`, in order. (Not the text track's
+ * `activeCues`: after a seek browsers keep those as they were until the
+ * video plays again, which can be seconds while it loads.)
+ */
+export function cuesAt<C extends Pick<SubtitleCue, "startTime" | "endTime">>(cues: readonly C[], seconds: number): C[] {
+  return cues.filter((c) => c.startTime <= seconds && seconds < c.endTime).sort((a, b) => a.startTime - b.startTime);
 }
