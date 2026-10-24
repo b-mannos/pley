@@ -122,6 +122,16 @@ interface ItemSummary {
   summary?: string;                 // in lists only for episodes; always in ItemDetail
   release_date?: string;            // "YYYY-MM-DD"
   extra_type?: string;              // kind "extra": trailer | featurette | behind_the_scenes | deleted_scene | interview | scene | short | other
+  media?: MediaSummary;             // only in library listings sorted by bitrate
+}
+
+interface MediaSummary {            // what a title's files are like: a movie's best file, a show's episodes together
+  bitrate: number | null;           // bits per second (a show: its episodes' average)
+  size: number | null;              // bytes (a show: all its episodes)
+  width: number | null;
+  height: number | null;            // a show: its largest episode
+  video_codec: string | null;       // null for shows
+  dynamic_range: "sdr" | "hdr10" | "hdr10plus" | "hlg" | "dolby_vision" | null; // null for shows
 }
 
 interface ItemDetail extends ItemSummary {
@@ -366,7 +376,7 @@ hubs, search, artwork, streams and the Plex-compatible API.
 | DELETE | `/api/libraries/{id}` *(admin)* | – | `204` |
 | POST | `/api/libraries/{id}/scan` *(admin)* | `{ force?: boolean }` (force = re-probe files and refresh metadata) | `202` |
 | POST | `/api/libraries/scan` *(admin)* | – | `202` (scan all) |
-| GET | `/api/libraries/{id}/items` | query: `sort=title\|year\|added\|rating\|user_rating\|release\|duration\|last_played` (default `title`), `order=asc\|desc`, `watched=true\|false`, `genre=<name>`, `year=<yyyy>`, `offset`, `limit` | `{ total: number, items: ItemSummary[] }` — top-level items only; `total` counts every match, not just the page; `watched=true` matches shows whose every episode is watched. Items leave out `backdrop_url` and `thumb_url` (grids show posters). Answers carry an `ETag` and `Cache-Control: private, no-cache`; `If-None-Match` with the same tag answers `304` while the library, the user's watch state and their access are unchanged |
+| GET | `/api/libraries/{id}/items` | query: `sort=title\|year\|added\|rating\|user_rating\|release\|duration\|last_played\|bitrate` (default `title`), `order=asc\|desc`, `watched=true\|false`, `genre=<name>`, `year=<yyyy>`, `offset`, `limit` | `{ total: number, items: ItemSummary[] }` — top-level items only; `total` counts every match, not just the page; `watched=true` matches shows whose every episode is watched. Items leave out `backdrop_url` and `thumb_url` (grids show posters). Answers carry an `ETag` and `Cache-Control: private, no-cache`; `If-None-Match` with the same tag answers `304` while the library, the user's watch state and their access are unchanged |
 | GET | `/api/libraries/{id}/filters` | – | `{ genres: string[], years: number[] }` |
 | GET | `/api/libraries/{id}/hubs` | – | `{ hubs: Hub[] }` (continue watching, recently added, recently released, top rated – empty hubs omitted) |
 
