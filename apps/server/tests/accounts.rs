@@ -5,6 +5,8 @@
 
 mod common;
 
+use std::time::{Duration, Instant};
+
 use axum::http::{Method, StatusCode, header};
 use serde_json::{Value, json};
 
@@ -482,6 +484,81 @@ async fn a_new_password_signs_you_out_everywhere_else() {
     assert_eq!(change_password(&app, &here, "test-pass-1", "a-new-one-2").await.status, StatusCode::NO_CONTENT);
     assert_eq!(app.get("/api/auth/me", &elsewhere).await.status, StatusCode::UNAUTHORIZED, "whoever knew the old one");
     assert_eq!(app.get("/api/auth/me", &here).await.status, StatusCode::OK, "not the device that changed it");
+}
+
+#[tokio::test]
+async fn accounts_from_single_sign_on_need_a_password_from_an_administrator() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    // Made by single sign-on before it was removed: a marker instead of a
+    // password hash, and a session from back then.
+    let sam: i64 = sqlx::query_scalar(
+        "INSERT INTO users (username, password_hash, created_at) VALUES ('sam', '!sso', 0) RETURNING id",
+    )
+    .fetch_one(&app.state.db.write)
+    .await
+    .unwrap();
+    let session = app.state.auth.create_session(sam, Some("a browser"), None).await.unwrap();
+
+    assert_eq!(user_named(&app, &admin, "sam").await["has_password"], json!(false));
+    let me = app.get("/api/auth/me", &session).await;
+    assert_eq!(me.status, StatusCode::OK, "{}", me.text());
+    assert_eq!((me.body["username"].as_str(), me.body["has_password"].as_bool()), (Some("sam"), Some(false)));
+
+    // No password signs in to it, the marker included.
+    assert_eq!(app.try_login("sam", "!sso").await.status, StatusCode::UNAUTHORIZED);
+    // Trying takes as long as for a name that doesn't exist (a real check,
+    // against a stand-in hash), so such accounts can't be found by timing.
+    // The quickest of several tries leaves out waiting for the passwords of
+    // other tests; each try has an account of its own, since 5 wrong
+    // passwords hold a name up for 15 minutes.
+    let (mut marker, mut unknown) = (Duration::MAX, Duration::MAX);
+    for round in 0..8 {
+        let name = format!("old-{round}");
+        sqlx::query("INSERT INTO users (username, password_hash, created_at) VALUES (?, '!sso', 0)")
+            .bind(&name)
+            .execute(&app.state.db.write)
+            .await
+            .unwrap();
+        let started = Instant::now();
+        assert_eq!(app.try_login(&name, "!sso").await.status, StatusCode::UNAUTHORIZED);
+        marker = marker.min(started.elapsed());
+        let started = Instant::now();
+        assert_eq!(app.try_login(&format!("nobody-{round}"), "!sso").await.status, StatusCode::UNAUTHORIZED);
+        unknown = unknown.min(started.elapsed());
+    }
+    assert!(marker * 4 > unknown, "{marker:?}, and {unknown:?} for a name that doesn't exist");
+
+    // Its session can't give it a password, nor a PIN.
+    let no_password = Some("this account has no password: an administrator can give it one");
+    let password = change_password(&app, &session, "", "a-new-one-2").await;
+    assert_eq!((password.status, password.body["message"].as_str()), (StatusCode::BAD_REQUEST, no_password));
+    let pin = app.put("/api/me/pin", &session, json!({"pin": "4321", "password": ""})).await;
+    assert_eq!((pin.status, pin.body["message"].as_str()), (StatusCode::FORBIDDEN, no_password));
+
+    // An administrator gives it one.
+    let given = app.patch(&format!("/api/users/{sam}"), &admin, json!({"password": "sams-own-1"})).await;
+    assert_eq!(given.status, StatusCode::OK, "{}", given.text());
+    assert_eq!(given.body["has_password"], json!(true));
+    let signed_in = app.try_login("sam", "sams-own-1").await;
+    assert_eq!(signed_in.status, StatusCode::OK, "{}", signed_in.text());
+    assert_eq!(signed_in.body["user"]["has_password"], json!(true));
+}
+
+#[tokio::test]
+async fn single_sign_on_routes_are_gone() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    for (method, uri) in
+        [(Method::GET, "/api/auth/sso/start"), (Method::GET, "/api/me/sso"), (Method::DELETE, "/api/users/1/sso")]
+    {
+        let reply = app.call(method, uri, Some(&admin), None, &[]).await;
+        assert_eq!(reply.status, StatusCode::NOT_FOUND, "{uri}: {}", reply.text());
+        assert_eq!(reply.body["message"], json!("no such endpoint"), "{uri}");
+    }
+    let server = app.call(Method::GET, "/api/server", None, None, &[]).await;
+    assert_eq!(server.status, StatusCode::OK);
+    assert!(server.body.get("sso").is_none(), "{}", server.text());
 }
 
 #[tokio::test]

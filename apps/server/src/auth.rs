@@ -505,7 +505,7 @@ mod tests {
         let hash = hash_password("hunter22".into()).await.unwrap();
         assert!(verify_password("hunter22".into(), hash.clone()).await.unwrap());
         assert!(!verify_password("wrong".into(), hash).await.unwrap());
-        assert!(!verify_password(String::new(), "!sso".into()).await.unwrap());
+        assert!(!verify_password(String::new(), "!managed".into()).await.unwrap());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

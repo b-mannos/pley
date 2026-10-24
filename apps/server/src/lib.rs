@@ -35,7 +35,6 @@ pub mod ratings;
 pub mod related;
 pub mod settings;
 pub mod setup;
-pub mod sso;
 pub mod state;
 pub mod store;
 pub mod streams;

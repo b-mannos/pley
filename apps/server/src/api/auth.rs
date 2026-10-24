@@ -35,20 +35,12 @@ pub struct Credentials {
 pub async fn server_status(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
     let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&state.db.read).await?;
     let settings = state.settings.get();
-    // The sign-in page's "Sign in with …" button.
-    let sso = settings.sso_enabled.then(|| {
-        serde_json::json!({
-            "name": super::sso::provider_name(&settings),
-            "start": crate::sso::Sso::start_url(&settings),
-        })
-    });
     Ok(Json(serde_json::json!({
         "name": settings.server_name,
         "version": env!("CARGO_PKG_VERSION"),
         "setup_required": users == 0,
         // Setting up takes the code in the log (see crate::setup).
         "setup_code_required": users == 0,
-        "sso": sso,
     })))
 }
 
@@ -136,9 +128,11 @@ pub async fn login(
             .bind(&username)
             .fetch_optional(&state.db.read)
             .await?;
-    let Some((id, hash, disabled)) = row else {
-        // A real check against a stand-in hash takes as long as one against a
-        // user's, so usernames can't be probed by timing.
+    // An account without a password (a marker starting with '!' instead of a
+    // hash) never signs in with one, like a username that doesn't exist. A
+    // real check against a stand-in hash takes as long as one against a
+    // user's, so neither can be told apart by timing.
+    let Some((id, hash, disabled)) = row.filter(|(_, hash, _)| !hash.starts_with('!')) else {
         verify_password(body.password, dummy_password_hash().await).await?;
         attempt.failed();
         return Err(AppError::Unauthorized);
@@ -166,10 +160,8 @@ pub(crate) async fn confirm_password(state: &AppState, user: &AuthUser, password
     if managed {
         return Err(AppError::forbidden("managed profiles are signed in to through their household"));
     }
-    if hash == crate::sso::NO_PASSWORD {
-        return Err(AppError::forbidden(
-            "this account signs in only with single sign-on: an administrator can give it a password first",
-        ));
+    if hash.starts_with('!') {
+        return Err(AppError::forbidden("this account has no password: an administrator can give it one"));
     }
     let attempt = state.auth.throttle.begin(&format!("login:{}", user.username.to_lowercase()))?;
     if !verify_password(password.unwrap_or_default(), hash).await? {
@@ -214,10 +206,8 @@ pub async fn change_password(
     if hash == accounts::NO_PASSWORD {
         return Err(AppError::bad_request("managed profiles have no password"));
     }
-    if hash == crate::sso::NO_PASSWORD {
-        return Err(AppError::bad_request(
-            "this account signs in with single sign-on and has no password: an administrator can give it one",
-        ));
+    if hash.starts_with('!') {
+        return Err(AppError::bad_request("this account has no password: an administrator can give it one"));
     }
     let attempt = state.auth.throttle.begin(&format!("login:{}", user.username.to_lowercase()))?;
     if !verify_password(body.current_password, hash).await? {

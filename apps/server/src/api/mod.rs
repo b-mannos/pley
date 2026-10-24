@@ -13,7 +13,6 @@ mod libraries;
 mod people;
 pub(crate) mod playback;
 mod playlists;
-mod sso;
 mod two_step;
 
 use std::time::Duration;
@@ -41,11 +40,6 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/password", put(auth::change_password))
         .route("/auth/profiles", get(auth::profiles))
         .route("/auth/switch", post(auth::switch))
-        .route("/auth/sso/start", get(sso::start))
-        .route("/auth/sso/callback", get(sso::callback))
-        .route("/auth/sso/client", get(sso::client))
-        .route("/auth/sso/link", post(sso::request_link))
-        .route("/me/sso", get(sso::mine).delete(sso::unlink))
         .route("/me/two-step", get(two_step::status).post(two_step::enable).delete(two_step::disable))
         .route("/me/two-step/setup", post(two_step::setup))
         .route("/me/two-step/recovery-codes", post(two_step::recovery_codes))
@@ -121,7 +115,6 @@ pub fn router(state: AppState) -> Router {
         .route("/users/{id}", patch(accounts::update_user).delete(accounts::delete_user))
         .route("/users/{id}/avatar", get(accounts::avatar))
         .route("/users/{id}/devices", get(accounts::user_devices).delete(accounts::sign_out_everywhere))
-        .route("/users/{id}/sso", delete(sso::unlink_user))
         .route("/users/{id}/two-step", delete(two_step::reset_user))
         .route("/invites", get(accounts::list_invites).post(accounts::create_invite))
         .route("/invites/{code}", get(accounts::check_invite).delete(accounts::delete_invite))
@@ -185,8 +178,8 @@ pub(crate) fn truthy(value: &str) -> bool {
 }
 
 /// The request URI for logs, with credentials in the query (`token`,
-/// `X-Plex-Token`, `api_key`, and a single sign-on's `code` and `state`)
-/// left out.
+/// `X-Plex-Token`, `api_key`, and the `code` and `state` of a sign-in) left
+/// out.
 pub(crate) fn loggable_uri(uri: &axum::http::Uri) -> String {
     let Some(query) = uri.query() else { return uri.path().to_owned() };
     let query: Vec<String> = query
@@ -220,8 +213,8 @@ mod tests {
     fn logs_leave_credentials_out() {
         let uri: axum::http::Uri = "/api/files/3/stream?token=secret&t=10&X-Plex-Token=abc&api_key=k".parse().unwrap();
         assert_eq!(loggable_uri(&uri), "/api/files/3/stream?token=…&t=10&X-Plex-Token=…&api_key=…");
-        let uri: axum::http::Uri = "/api/auth/sso/callback?code=c0de&state=st4te".parse().unwrap();
-        assert_eq!(loggable_uri(&uri), "/api/auth/sso/callback?code=…&state=…");
+        let uri: axum::http::Uri = "/api/x?code=c0de&state=st4te".parse().unwrap();
+        assert_eq!(loggable_uri(&uri), "/api/x?code=…&state=…");
         assert_eq!(loggable_uri(&"/api/items/1".parse().unwrap()), "/api/items/1");
     }
 }

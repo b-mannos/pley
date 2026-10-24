@@ -37,7 +37,6 @@ struct UserRow {
     subtitle_language: Option<String>,
     subtitle_mode: String,
     has_password: bool,
-    sso: bool,
     two_step: bool,
 }
 
@@ -66,11 +65,10 @@ pub struct UserDto {
     pub audio_language: Option<String>,
     pub subtitle_language: Option<String>,
     pub subtitle_mode: SubtitleMode,
-    /// Signs in with a password (not only through single sign-on, nor by
-    /// switching to a managed profile).
+    /// Signs in with a password: false for a managed profile (reached by
+    /// switching), and for an account without one until an administrator
+    /// gives it one.
     pub has_password: bool,
-    /// Linked to an identity at the single sign-on provider.
-    pub sso: bool,
     /// Signs in with a code from an authenticator app after the password.
     pub two_step: bool,
 }
@@ -78,7 +76,6 @@ pub struct UserDto {
 const USER_COLUMNS: &str = "id, username, display_name, is_admin, managed, home, pin_hash IS NOT NULL AS has_pin,
     avatar, avatar_color, all_libraries, max_age, disabled, created_at, audio_language, subtitle_language,
     subtitle_mode, password_hash NOT LIKE '!%' AS has_password,
-    EXISTS (SELECT 1 FROM user_identities i WHERE i.user_id = users.id) AS sso,
     EXISTS (SELECT 1 FROM two_step t WHERE t.user_id = users.id) AS two_step";
 
 impl UserRow {
@@ -103,7 +100,6 @@ impl UserRow {
             subtitle_language: self.subtitle_language,
             subtitle_mode: SubtitleMode::parse(&self.subtitle_mode),
             has_password: self.has_password,
-            sso: self.sso,
             two_step: self.two_step,
         }
     }
@@ -541,7 +537,6 @@ mod tests {
             subtitle_language: Some("fre".into()),
             subtitle_mode: "foreign".into(),
             has_password: true,
-            sso: false,
             two_step: false,
         }
     }

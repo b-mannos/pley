@@ -42,7 +42,6 @@ pub struct Inner {
     pub sessions: Arc<Sessions>,
     pub markers: Arc<MarkerService>,
     pub trickplay: Arc<TrickplayService>,
-    pub sso: crate::sso::Sso,
     pub two_step: crate::two_step::TwoStep,
     pub started_at: Instant,
     /// Cancelled when the server starts shutting down (the tray's Quit
@@ -130,7 +129,6 @@ impl AppState {
                 sessions,
                 markers,
                 trickplay,
-                sso: crate::sso::Sso::new(),
                 two_step,
                 started_at: Instant::now(),
                 stopping,

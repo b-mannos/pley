@@ -146,4 +146,90 @@ mod tests {
         Db::open(&dir.path().join("new.db")).await.unwrap().close().await;
         assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 1);
     }
+
+    /// A database at `path` as an older version left it: only the
+    /// migrations numbered below `version`.
+    async fn database_before(version: i64, path: &Path) -> SqlitePool {
+        let older = path.with_extension("migrations");
+        std::fs::create_dir(&older).unwrap();
+        for file in std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations")).unwrap().flatten() {
+            let name = file.file_name().to_string_lossy().into_owned();
+            let number: i64 = name.split('_').next().and_then(|n| n.parse().ok()).expect(&name);
+            if number < version {
+                std::fs::copy(file.path(), older.join(&name)).unwrap();
+            }
+        }
+        let options = SqliteConnectOptions::new().filename(path).create_if_missing(true);
+        let pool = SqlitePool::connect_with(options).await.unwrap();
+        Migrator::new(older.as_path()).await.unwrap().run(&pool).await.unwrap();
+        pool
+    }
+
+    async fn server_settings(db: &Db) -> String {
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'server'").fetch_one(&db.read).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn single_sign_on_leaves_nothing_behind_after_an_upgrade() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pley.db");
+        // A version with single sign-on: an account it made, linked to an
+        // identity at the provider, and its settings with the client secret.
+        let pool = database_before(22, &path).await;
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'ann', '!sso', 0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO user_identities (issuer, subject, user_id, email, created_at)
+             VALUES ('https://idp', 'ann-at-idp', 1, 'ann@example.com', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let settings = serde_json::json!({
+            "server_name": "Attic",
+            "public_url": "https://p",
+            "sso_enabled": true,
+            "sso_name": "Idp",
+            "sso_issuer": "https://idp",
+            "sso_client_id": "pley",
+            "sso_client_secret": "s3cret",
+            "sso_new_accounts": true,
+            "sso_group": "pley-users",
+        });
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('server', ?)")
+            .bind(settings.to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        let db = Db::open(&path).await.unwrap();
+        let left: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE name IN ('user_identities', 'user_identities_user')",
+        )
+        .fetch_all(&db.read)
+        .await
+        .unwrap();
+        assert!(left.is_empty(), "{left:?}");
+        let value = server_settings(&db).await;
+        let kept: serde_json::Value = serde_json::from_str(&value).unwrap();
+        assert_eq!(kept, serde_json::json!({"server_name": "Attic"}), "the other settings stay");
+        assert!(!value.contains("s3cret"), "{value}");
+        // The account stays, without a password until an administrator gives it one.
+        let hash: String =
+            sqlx::query_scalar("SELECT password_hash FROM users WHERE id = 1").fetch_one(&db.read).await.unwrap();
+        assert_eq!(hash, "!sso");
+        db.close().await;
+
+        // Settings that aren't JSON don't stop the upgrade, and stay as they were.
+        let path = dir.path().join("unreadable.db");
+        let pool = database_before(22, &path).await;
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('server', 'not json')").execute(&pool).await.unwrap();
+        pool.close().await;
+        let db = Db::open(&path).await.unwrap();
+        assert_eq!(server_settings(&db).await, "not json");
+        db.close().await;
+    }
 }
