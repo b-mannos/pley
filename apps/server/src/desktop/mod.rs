@@ -18,7 +18,8 @@ mod windows;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 use tokio::sync::mpsc;
@@ -242,6 +243,22 @@ fn open(target: impl AsRef<std::ffi::OsStr>) {
     let _ = target;
 }
 
+/// Waits for `thread` to end, for at most `timeout`: whether it did. One
+/// that doesn't is left running (the end of the process stops it) rather
+/// than holding up the shutdown.
+#[cfg_attr(not(all(feature = "tray", windows)), allow(dead_code))]
+pub(crate) fn join_within(thread: JoinHandle<()>, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while !thread.is_finished() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let _ = thread.join();
+    true
+}
+
 /// Decode an embedded PNG into straight RGBA pixels.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 fn rgba(png: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
@@ -260,6 +277,21 @@ mod tests {
         assert_eq!(web_url("127.0.0.1:8000".parse().unwrap()), "http://localhost:8000");
         assert_eq!(web_url("192.168.1.5:7539".parse().unwrap()), "http://192.168.1.5:7539");
         assert_eq!(web_url("[fe80::1]:7539".parse().unwrap()), "http://[fe80::1]:7539");
+    }
+
+    #[test]
+    fn a_thread_that_does_not_end_does_not_hold_up_the_shutdown() {
+        let quick = std::thread::spawn(|| std::thread::sleep(Duration::from_millis(20)));
+        assert!(join_within(quick, Duration::from_secs(5)));
+
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let stuck = std::thread::spawn(move || {
+            let _ = held.recv();
+        });
+        let started = Instant::now();
+        assert!(!join_within(stuck, Duration::from_millis(100)));
+        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+        drop(release);
     }
 
     #[test]

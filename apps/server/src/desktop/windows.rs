@@ -5,6 +5,8 @@
 
 use std::cell::RefCell;
 use std::ptr::{null, null_mut};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -18,9 +20,9 @@ use windows_sys::Win32::System::Console::{
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, GetSystemMetrics, KillTimer, MSG,
-    PostThreadMessageW, RegisterClassW, SM_CXSMICON, SetTimer, TranslateMessage, WM_CLOSE, WM_ENDSESSION,
-    WM_QUERYENDSESSION, WM_QUIT, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, EndMenu, GetMessageW, GetSystemMetrics,
+    KillTimer, MSG, PostMessageW, PostQuitMessage, PostThreadMessageW, RegisterClassW, SM_CXSMICON, SetTimer,
+    TranslateMessage, WM_APP, WM_CLOSE, WM_ENDSESSION, WM_QUERYENDSESSION, WM_QUIT, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
 };
 
 use super::{Command, TrayContext, TrayGuard, autostart, item};
@@ -31,6 +33,10 @@ const REFRESH_MS: u32 = 3000;
 /// How long the end of the Windows session waits for pley to stop (Windows
 /// lists apps that take longer as holding up the sign-out or shutdown).
 const SESSION_END_WAIT: Duration = Duration::from_secs(4);
+/// Asks the tray's thread to stop, through its hidden stop window.
+const WM_STOP_TRAY: u32 = WM_APP + 1;
+/// How long the server waits for the tray's thread when it stops.
+const TRAY_STOP_WAIT: Duration = Duration::from_secs(2);
 
 thread_local! {
     /// The tray's context, for [`stop_window_proc`] (on the tray's thread).
@@ -39,27 +45,47 @@ thread_local! {
 
 struct Guard {
     thread_id: u32,
+    /// The hidden stop window (an `HWND`, as a number to cross threads), or 0.
+    stop_window: isize,
+    /// Looked at by the tray's message loop at least every few seconds.
+    stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl Drop for Guard {
     fn drop(&mut self) {
-        // SAFETY: posting to a thread id we own; harmless if it already exited.
-        unsafe { PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0) };
+        // A message posted to the thread alone is lost when a modal loop takes
+        // it, such as the menu's: Quit once left pley running, its icon still
+        // there. The stop window's message gets through even then, and the
+        // loop also looks at `stop` on its timer.
+        self.stop.store(true, Ordering::Release);
+        // SAFETY: posting to a window and a thread this guard owns; harmless
+        // if they are gone already.
+        unsafe {
+            if self.stop_window != 0 {
+                PostMessageW(self.stop_window as HWND, WM_STOP_TRAY, 0, 0);
+            }
+            PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0);
+        }
         if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+            if !super::join_within(thread, TRAY_STOP_WAIT) {
+                tracing::warn!("the tray icon's thread did not stop: leaving it to the end of the process");
+            }
         }
     }
 }
 
 pub fn start(ctx: TrayContext) -> Option<TrayGuard> {
     let (ready_tx, ready_rx) = mpsc::channel();
-    let thread = std::thread::Builder::new().name("pley-tray".into()).spawn(move || run(ctx, ready_tx)).ok()?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopped = stop.clone();
+    let thread =
+        std::thread::Builder::new().name("pley-tray".into()).spawn(move || run(ctx, ready_tx, stopped)).ok()?;
     match ready_rx.recv() {
-        Ok(Ok(thread_id)) => {
+        Ok(Ok((thread_id, stop_window))) => {
             detach_console();
             let _ = std::thread::Builder::new().name("pley-tray-promote".into()).spawn(promote_once);
-            Some(TrayGuard(Box::new(Guard { thread_id, thread: Some(thread) })))
+            Some(TrayGuard(Box::new(Guard { thread_id, stop_window, stop, thread: Some(thread) })))
         }
         Ok(Err(err)) => {
             tracing::warn!("no tray icon: {err}");
@@ -120,7 +146,7 @@ fn icon() -> Icon {
     })
 }
 
-fn run(ctx: TrayContext, ready: mpsc::Sender<Result<u32, String>>) {
+fn run(ctx: TrayContext, ready: mpsc::Sender<Result<(u32, isize), String>>, stop: Arc<AtomicBool>) {
     let (tray, items) = match build(&ctx) {
         Ok(built) => built,
         Err(err) => {
@@ -131,8 +157,8 @@ fn run(ctx: TrayContext, ready: mpsc::Sender<Result<u32, String>>) {
     // SAFETY: plain Win32 calls on this thread's message queue.
     let thread_id = unsafe { GetCurrentThreadId() };
     let timer = unsafe { SetTimer(null_mut(), 0, REFRESH_MS, None) };
-    let stop = stop_window(&ctx);
-    let _ = ready.send(Ok(thread_id));
+    let stop_hwnd = stop_window(&ctx);
+    let _ = ready.send(Ok((thread_id, stop_hwnd as isize)));
 
     let mut tooltip = ctx.tooltip();
     // SAFETY: MSG is plain data; GetMessageW fills it in.
@@ -140,8 +166,8 @@ fn run(ctx: TrayContext, ready: mpsc::Sender<Result<u32, String>>) {
     loop {
         // SAFETY: standard message loop on the thread that owns the icon's window.
         let got = unsafe { GetMessageW(&mut msg, null_mut(), 0, 0) };
-        if got == 0 || got == -1 {
-            break; // WM_QUIT (server stopped) or error
+        if got == 0 || got == -1 || stop.load(Ordering::Acquire) {
+            break; // WM_QUIT or the guard's flag (server stopped), or an error
         }
         // `taskkill` posts WM_CLOSE to each window of the process: pley
         // stops instead of the icon's window closing.
@@ -161,6 +187,10 @@ fn run(ctx: TrayContext, ready: mpsc::Sender<Result<u32, String>>) {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
+        // The server stopped while that message ran a menu, which is closed now.
+        if stop.load(Ordering::Acquire) {
+            break;
+        }
         // Clicks are queued while the message above is dispatched.
         while let Ok(event) = MenuEvent::receiver().try_recv() {
             handle_menu(&ctx, &items, &event);
@@ -174,8 +204,8 @@ fn run(ctx: TrayContext, ready: mpsc::Sender<Result<u32, String>>) {
     // SAFETY: the timer and the window were created on this thread.
     unsafe {
         KillTimer(null_mut(), timer);
-        if !stop.is_null() {
-            DestroyWindow(stop);
+        if !stop_hwnd.is_null() {
+            DestroyWindow(stop_hwnd);
         }
     }
     drop(tray); // removes the icon right away instead of leaving a ghost
@@ -220,6 +250,17 @@ unsafe extern "system" fn stop_window_proc(hwnd: HWND, msg: u32, wparam: WPARAM,
     match msg {
         WM_CLOSE => {
             quit();
+            0
+        }
+        // The server stopped (see `Guard`). An open menu runs a loop of its
+        // own, which gets this message too and would keep the thread: it
+        // closes, and the message loop ends.
+        WM_STOP_TRAY => {
+            // SAFETY: on the thread that owns the menu and the loop.
+            unsafe {
+                EndMenu();
+                PostQuitMessage(0);
+            }
             0
         }
         // The session may end: pley agrees.

@@ -499,17 +499,27 @@ impl Transcoder {
         });
 
         let mut stdout_lines = BufReader::new(stdout).lines();
-        let announce = tokio::time::timeout(Duration::from_secs(120), async {
-            while let Ok(Some(line)) = stdout_lines.next_line().await {
-                if let Ok(a) = serde_json::from_str::<Announce>(&line) {
-                    if a.event == "listening" {
-                        return Some(a.addr);
+        // Stopping while it starts (probing ffmpeg and the GPU takes seconds)
+        // ends it at once: it has nothing to finish yet.
+        let stop = self.stop.notified();
+        tokio::pin!(stop);
+        stop.as_mut().enable();
+        if self.stopping.load(Ordering::SeqCst) {
+            return stop_starting(&mut child).await;
+        }
+        let announce = tokio::select! {
+            announce = tokio::time::timeout(Duration::from_secs(120), async {
+                while let Ok(Some(line)) = stdout_lines.next_line().await {
+                    if let Ok(a) = serde_json::from_str::<Announce>(&line) {
+                        if a.event == "listening" {
+                            return Some(a.addr);
+                        }
                     }
                 }
-            }
-            None
-        })
-        .await;
+                None
+            }) => announce,
+            () = &mut stop => return stop_starting(&mut child).await,
+        };
         let addr = match announce {
             Ok(Some(addr)) => addr,
             Ok(None) => {
@@ -519,7 +529,11 @@ impl Transcoder {
             Err(_) => return Err("transcoder did not start within 120s".into()),
         };
         let base = format!("http://{addr}");
-        match self.fetch_info(&base).await {
+        let info = tokio::select! {
+            info = self.fetch_info(&base) => info,
+            () = &mut stop => return stop_starting(&mut child).await,
+        };
+        match info {
             Ok(info) => {
                 tracing::info!(
                     "transcoder {} ({}) ready at {base}: ffmpeg {}, encoders [{}]",
@@ -534,9 +548,6 @@ impl Transcoder {
         }
         tokio::spawn(async move { while let Ok(Some(_)) = stdout_lines.next_line().await {} });
 
-        let stop = self.stop.notified();
-        tokio::pin!(stop);
-        stop.as_mut().enable();
         if self.stopping.load(Ordering::SeqCst) {
             return self.stop_child(&mut child, &mut stdin).await;
         }
@@ -561,6 +572,13 @@ impl Transcoder {
         }
         Ok(())
     }
+}
+
+/// Ends a transcoder that hasn't started serving.
+async fn stop_starting(child: &mut tokio::process::Child) -> Result<(), String> {
+    let _ = child.start_kill();
+    let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+    Ok(())
 }
 
 fn default_transcoder_path() -> PathBuf {

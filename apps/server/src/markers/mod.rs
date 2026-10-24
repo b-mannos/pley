@@ -34,6 +34,7 @@ use parking_lot::Mutex;
 use pley_transcoder_api::{Chapter, FingerprintRequest, FrameStats, FramesRequest, MediaInfo};
 use serde::Serialize;
 use tokio::sync::{Notify, mpsc};
+use tokio_util::sync::CancellationToken;
 
 use crate::db::Db;
 use crate::events::{EventBus, ServerEvent};
@@ -153,6 +154,8 @@ pub struct MarkerService {
     /// Wakes the worker for a season in `watched`.
     wake: Notify,
     status: Mutex<Option<AnalysisStatus>>,
+    /// Cancelled when the server shuts down: the worker stops.
+    stopping: CancellationToken,
 }
 
 /// A media file of an episode, with what analysis needs.
@@ -237,6 +240,7 @@ impl MarkerService {
         sessions: Arc<Sessions>,
         events: EventBus,
         cache_dir: PathBuf,
+        stopping: CancellationToken,
     ) -> Arc<Self> {
         let (queue, receiver) = mpsc::unbounded_channel();
         Arc::new(Self {
@@ -252,6 +256,7 @@ impl MarkerService {
             watched: Mutex::default(),
             wake: Notify::new(),
             status: Mutex::default(),
+            stopping,
         })
     }
 
@@ -377,7 +382,18 @@ impl MarkerService {
         self.transcoder.info().is_some_and(|i| i.capabilities.chromaprint)
     }
 
-    async fn worker(self: Arc<Self>, mut receiver: mpsc::UnboundedReceiver<Job>) {
+    /// Analyses what is queued until the server shuts down, which drops the
+    /// job in progress (it would only fail without the database and the
+    /// transcoder; its season is analysed again next time).
+    async fn worker(self: Arc<Self>, receiver: mpsc::UnboundedReceiver<Job>) {
+        let stopping = self.stopping.clone();
+        tokio::select! {
+            () = stopping.cancelled() => {}
+            () = self.work(receiver) => {}
+        }
+    }
+
+    async fn work(&self, mut receiver: mpsc::UnboundedReceiver<Job>) {
         loop {
             // A season being watched first.
             let watched = self.watched.lock().pop_front();

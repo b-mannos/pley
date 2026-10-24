@@ -98,6 +98,7 @@ impl AppState {
         let watcher = LibraryWatcher::new(db.clone(), scanner.clone(), settings.clone());
         let images = Images::new(config.cache_dir().join("images"));
         let sessions = Arc::new(Sessions::default());
+        let stopping = CancellationToken::new();
         let markers = MarkerService::new(
             db.clone(),
             transcoder.clone(),
@@ -105,6 +106,7 @@ impl AppState {
             sessions.clone(),
             events.clone(),
             config.cache_dir().join("fingerprints"),
+            stopping.clone(),
         );
         let trickplay = TrickplayService::new(
             db.clone(),
@@ -113,6 +115,7 @@ impl AppState {
             sessions.clone(),
             store.clone(),
             config.cache_dir().join("trickplay"),
+            stopping.clone(),
         );
         let auth = AuthService::new(db.clone());
         let two_step = crate::two_step::TwoStep::new(db.clone(), &config.data_dir);
@@ -130,7 +133,7 @@ impl AppState {
                 sso: crate::sso::Sso::new(),
                 two_step,
                 started_at: Instant::now(),
-                stopping: CancellationToken::new(),
+                stopping,
                 config,
                 db,
                 settings,

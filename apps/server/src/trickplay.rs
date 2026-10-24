@@ -18,6 +18,7 @@ use anyhow::Context;
 use image::codecs::jpeg::JpegEncoder;
 use parking_lot::Mutex;
 use pley_transcoder_api::TrickplayInfo;
+use tokio_util::sync::CancellationToken;
 
 use crate::catalog::{self, FileRow};
 use crate::db::Db;
@@ -49,6 +50,8 @@ pub struct TrickplayService {
     failed: Mutex<HashMap<i64, String>>,
     /// One chapter-image or BIF job per file at a time.
     cutting: Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>,
+    /// Cancelled when the server shuts down: the worker stops.
+    stopping: CancellationToken,
 }
 
 #[derive(Default)]
@@ -84,6 +87,7 @@ impl TrickplayService {
         sessions: Arc<Sessions>,
         store: Arc<Store>,
         legacy_cache: PathBuf,
+        stopping: CancellationToken,
     ) -> Arc<Self> {
         let service = Arc::new(Self {
             db,
@@ -96,6 +100,7 @@ impl TrickplayService {
             pending: Mutex::default(),
             failed: Mutex::default(),
             cutting: Mutex::default(),
+            stopping,
         });
         // Earlier versions kept previews in the cache, keyed by file id.
         tokio::spawn(async move {
@@ -192,7 +197,18 @@ impl TrickplayService {
         }
     }
 
+    /// Makes what is queued until the server shuts down, which drops the file
+    /// in progress (its half-made previews are cleared next time): it would
+    /// only fail without the database and the transcoder.
     async fn worker(self: Arc<Self>) {
+        let stopping = self.stopping.clone();
+        tokio::select! {
+            () = stopping.cancelled() => {}
+            () = self.work() => {}
+        }
+    }
+
+    async fn work(&self) {
         loop {
             let next = {
                 let mut queues = self.queues.lock();

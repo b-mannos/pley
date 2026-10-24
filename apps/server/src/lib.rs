@@ -65,6 +65,38 @@ pub fn request_shutdown() {
     SHUTDOWN.notify_one();
 }
 
+/// How long a server that started shutting down may take before the process
+/// ends anyway. Each step keeps to a limit of its own (connections,
+/// background work, the transcoder, the database, the tray icon), so this
+/// only catches one that doesn't: a lost message to the tray once kept pley
+/// running, its icon still there, after Quit.
+const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(45);
+
+/// Whether the server started shutting down, for [`watch_shutdown`].
+static SHUTTING_DOWN: parking_lot::Mutex<bool> = parking_lot::const_mutex(false);
+static SHUTTING_DOWN_CHANGED: parking_lot::Condvar = parking_lot::Condvar::new();
+
+fn set_shutting_down(shutting_down: bool) {
+    *SHUTTING_DOWN.lock() = shutting_down;
+    SHUTTING_DOWN_CHANGED.notify_all();
+}
+
+/// Ends the process when a shutdown isn't over [`SHUTDOWN_DEADLINE`] after
+/// it started. For `pley serve` only: servers that tests run share their
+/// process.
+fn watch_shutdown() {
+    let _ = std::thread::Builder::new().name("pley-shutdown-watch".into()).spawn(|| {
+        let mut started = SHUTTING_DOWN.lock();
+        while !*started {
+            SHUTTING_DOWN_CHANGED.wait(&mut started);
+        }
+        drop(started);
+        std::thread::sleep(SHUTDOWN_DEADLINE);
+        tracing::error!("pley did not stop within {}s of being asked to: ending it", SHUTDOWN_DEADLINE.as_secs());
+        std::process::exit(0);
+    });
+}
+
 /// Whether the server finished shutting down (its database is closed), see
 /// [`wait_until_stopped`].
 static STOPPED: parking_lot::Mutex<bool> = parking_lot::const_mutex(false);
@@ -94,6 +126,7 @@ pub(crate) fn wait_until_stopped(timeout: Duration) -> bool {
 /// is set and this is an interactive desktop session.
 pub fn serve(config: Config, tray: bool) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().thread_name("pley-worker").build()?;
+    watch_shutdown();
     let tray = tray && desktop::interactive_session();
     #[cfg(all(feature = "tray", target_os = "macos"))]
     if tray {
@@ -139,6 +172,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) -> anyhow::Result<()> {
     let _instance = instance::InstanceLock::acquire(&config.data_dir)?;
     set_stopped(false);
+    set_shutting_down(false);
     let bind = config.bind;
     let listener =
         tokio::net::TcpListener::bind(bind).await.map_err(|e| anyhow::anyhow!("cannot listen on {bind}: {e}"))?;
@@ -180,6 +214,7 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
         () = shutdown_signal(&stopping) => false,
     };
     tracing::info!("shutting down");
+    set_shutting_down(true);
     stopping.cancel();
     if !stopped && tokio::time::timeout(grace, serving).await.is_err() {
         tracing::warn!(
