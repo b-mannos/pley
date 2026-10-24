@@ -1,0 +1,810 @@
+//! Apps' tokens (src/auth/grants.rs) open only the routes their scopes allow
+//! (src/auth/scopes.rs), and only from `Authorization: Bearer`: every route
+//! of api/mod.rs is classified, an administrator's app administers nothing,
+//! and the Plex-compatible API refuses them.
+
+mod common;
+
+use std::time::Duration;
+
+use axum::body::Body;
+use axum::http::{Method, Request, StatusCode, header};
+use futures::StreamExt;
+use pley::auth::scopes::{APP_ROUTES, Need};
+use serde_json::{Value, json};
+use tower::ServiceExt;
+
+use common::TestApp;
+
+// ------------------------------------------------------------------ routes
+
+/// Routes anyone may call.
+const PUBLIC: &[(&str, &str)] = &[
+    ("GET", "/api/health"),
+    ("GET", "/api/server"),
+    ("POST", "/api/setup"),
+    ("POST", "/api/auth/login"),
+    ("POST", "/api/auth/logout"),
+    ("GET", "/api/invites/{code}"),
+    ("POST", "/api/invites/{code}/accept"),
+];
+
+/// Routes for pley's own sign-in only: how an account signs in, its
+/// profiles and devices, and what everyone is playing.
+const FIRST_PARTY: &[(&str, &str)] = &[
+    ("PUT", "/api/auth/password"),
+    ("GET", "/api/auth/profiles"),
+    ("POST", "/api/auth/switch"),
+    ("GET", "/api/me/two-step"),
+    ("POST", "/api/me/two-step"),
+    ("DELETE", "/api/me/two-step"),
+    ("POST", "/api/me/two-step/setup"),
+    ("POST", "/api/me/two-step/recovery-codes"),
+    ("PATCH", "/api/me"),
+    ("PUT", "/api/me/pin"),
+    ("PUT", "/api/me/avatar"),
+    ("DELETE", "/api/me/avatar"),
+    ("GET", "/api/me/devices"),
+    ("DELETE", "/api/me/devices/{id}"),
+    ("GET", "/api/activity"),
+];
+
+/// Administration.
+const ADMIN: &[(&str, &str)] = &[
+    ("POST", "/api/libraries"),
+    ("POST", "/api/libraries/scan"),
+    ("PUT", "/api/libraries/order"),
+    ("PATCH", "/api/libraries/{id}"),
+    ("DELETE", "/api/libraries/{id}"),
+    ("POST", "/api/libraries/{id}/scan"),
+    ("POST", "/api/libraries/{id}/collections"),
+    ("PATCH", "/api/collections/{id}"),
+    ("DELETE", "/api/collections/{id}"),
+    ("POST", "/api/collections/{id}/items"),
+    ("DELETE", "/api/collections/{id}/items/{item_id}"),
+    ("PUT", "/api/collections/{id}/order"),
+    ("PATCH", "/api/items/{id}"),
+    ("GET", "/api/items/{id}/matches"),
+    ("POST", "/api/items/{id}/match"),
+    ("GET", "/api/items/{id}/artwork/{kind}"),
+    ("PUT", "/api/items/{id}/artwork/{kind}"),
+    ("DELETE", "/api/items/{id}/artwork/{kind}"),
+    ("POST", "/api/items/{id}/artwork/{kind}/upload"),
+    ("POST", "/api/items/{id}/refresh"),
+    ("POST", "/api/items/{id}/analyze"),
+    ("GET", "/api/users"),
+    ("POST", "/api/users"),
+    ("PATCH", "/api/users/{id}"),
+    ("DELETE", "/api/users/{id}"),
+    ("GET", "/api/users/{id}/devices"),
+    ("DELETE", "/api/users/{id}/devices"),
+    ("DELETE", "/api/users/{id}/two-step"),
+    ("GET", "/api/invites"),
+    ("POST", "/api/invites"),
+    ("DELETE", "/api/invites/{code}"),
+    ("GET", "/api/system"),
+    ("GET", "/api/system/storage"),
+    ("GET", "/api/system/backups"),
+    ("POST", "/api/system/backups"),
+    ("POST", "/api/system/storage/clean"),
+    ("GET", "/api/transcoder"),
+    ("GET", "/api/settings"),
+    ("PUT", "/api/settings"),
+    ("POST", "/api/settings/test"),
+    ("GET", "/api/fs"),
+];
+
+/// Routes that take pley's own page's cookie and nothing else.
+const COOKIE_ONLY: &[(&str, &str)] = &[];
+
+/// Every method and path of the API router of `source` (api/mod.rs): the
+/// `.route(path, …)` calls between `let api = Router::new()` and its
+/// `.fallback`, with the methods named in each (`get(…)`, `.post(…)`, …).
+fn routes_in(source: &str) -> Vec<(String, String)> {
+    let start = source.find("let api = Router::new()").expect("the api router");
+    let end = start + source[start..].find(".fallback(").expect("its fallback");
+    let block = &source[start..end];
+    let mut routes = Vec::new();
+    let mut rest = block;
+    while let Some(at) = rest.find(".route(") {
+        rest = &rest[at + ".route(".len()..];
+        let open = rest.find('"').expect("a path");
+        let close = open + 1 + rest[open + 1..].find('"').expect("the end of the path");
+        let path = format!("/api{}", &rest[open + 1..close]);
+        let args = call_arguments(&rest[close + 1..]);
+        let methods = methods_in(args);
+        assert!(!methods.is_empty(), "no method for {path}");
+        routes.extend(methods.into_iter().map(|method| (method, path.clone())));
+        rest = &rest[close + 1 + args.len()..];
+    }
+    routes
+}
+
+/// The rest of a call's arguments: up to the parenthesis that closes it.
+fn call_arguments(text: &str) -> &str {
+    let mut depth = 1;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (i, c) in text.char_indices() {
+        match (in_string, c) {
+            (true, _) if escaped => escaped = false,
+            (true, '\\') => escaped = true,
+            (true, '"') => in_string = false,
+            (true, _) => {}
+            (false, '"') => in_string = true,
+            (false, '(') => depth += 1,
+            (false, ')') => {
+                depth -= 1;
+                if depth == 0 {
+                    return &text[..i];
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("unclosed .route(")
+}
+
+/// HTTP methods named in a route's arguments: `get(` at the start (after
+/// the path's comma) or after a dot, outside strings.
+fn methods_in(args: &str) -> Vec<String> {
+    let chars: Vec<char> = args.chars().collect();
+    let mut methods = Vec::new();
+    let mut previous = ',';
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '"' {
+            i += 1;
+            while i < chars.len() && chars[i] != '"' {
+                i += if chars[i] == '\\' { 2 } else { 1 };
+            }
+            previous = '"';
+            i += 1;
+            continue;
+        }
+        if c.is_alphabetic() || c == '_' {
+            let begin = i;
+            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let word: String = chars[begin..i].iter().collect();
+            let called = chars.get(i) == Some(&'(');
+            if called && matches!(previous, ',' | '.') && ["get", "post", "put", "patch", "delete"].contains(&&*word) {
+                methods.push(word.to_uppercase());
+            }
+            previous = 'a';
+            continue;
+        }
+        if !c.is_whitespace() {
+            previous = c;
+        }
+        i += 1;
+    }
+    methods
+}
+
+fn api_routes() -> Vec<(String, String)> {
+    routes_in(include_str!("../src/api/mod.rs"))
+}
+
+fn app_route(method: &str, path: &str) -> Option<Need> {
+    APP_ROUTES.iter().find(|(m, p, _)| *m == method && *p == path).map(|(_, _, need)| *need)
+}
+
+/// Which class lists a route: problems as sentences.
+fn classification_problems(routes: &[(String, String)]) -> Vec<String> {
+    let classes: [(&str, Vec<(&str, &str)>); 5] = [
+        ("APP_ROUTES", APP_ROUTES.iter().map(|(m, p, _)| (*m, *p)).collect()),
+        ("PUBLIC", PUBLIC.to_vec()),
+        ("FIRST_PARTY", FIRST_PARTY.to_vec()),
+        ("ADMIN", ADMIN.to_vec()),
+        ("COOKIE_ONLY", COOKIE_ONLY.to_vec()),
+    ];
+    let mut problems = Vec::new();
+    for (method, path) in routes {
+        let found: Vec<&str> = classes
+            .iter()
+            .filter(|(_, list)| list.iter().any(|(m, p)| m == method && p == path))
+            .map(|(name, _)| *name)
+            .collect();
+        match found.len() {
+            1 => {}
+            0 => problems.push(format!("{method} {path} is in no class: add it to one (apps get no route by default)")),
+            _ => problems.push(format!("{method} {path} is in several classes: {found:?}")),
+        }
+    }
+    for (name, list) in &classes {
+        for (method, path) in list {
+            if !routes.iter().any(|(m, p)| m == method && p == path) {
+                problems.push(format!("{name} lists {method} {path}, which api/mod.rs doesn't route"));
+            }
+        }
+    }
+    problems
+}
+
+#[test]
+fn every_route_is_classified() {
+    let routes = api_routes();
+    assert!(routes.len() >= 109, "{} routes read: the parser lost some", routes.len());
+    assert!(routes.contains(&("GET".into(), "/api/health".into())), "a closure handler");
+    assert!(routes.contains(&("DELETE".into(), "/api/me/avatar".into())), "a method after a layered one");
+    assert!(routes.contains(&("POST".into(), "/api/items/{id}/artwork/{kind}/upload".into())), "a multi-line route");
+    let problems = classification_problems(&routes);
+    assert!(problems.is_empty(), "{problems:#?}");
+}
+
+#[test]
+fn the_classification_notices_new_routes_and_misspellings() {
+    // A route added to the router without a class.
+    let source = include_str!("../src/api/mod.rs").replacen(
+        ".route(\"/health\"",
+        ".route(\"/me/secrets\", get(accounts::my_secrets).post(\n            accounts::more))\n        .route(\"/health\"",
+        1,
+    );
+    let problems = classification_problems(&routes_in(&source));
+    assert_eq!(problems.len(), 2, "{problems:#?}");
+    assert!(problems.iter().all(|p| p.contains("/api/me/secrets") && p.contains("no class")));
+    // A table entry naming no route (here, a route gone from the router).
+    let source = include_str!("../src/api/mod.rs").replacen(".route(\"/hubs/home\", get(browse::home))", "", 1);
+    let problems = classification_problems(&routes_in(&source));
+    assert_eq!(problems, ["APP_ROUTES lists GET /api/hubs/home, which api/mod.rs doesn't route"]);
+}
+
+// ------------------------------------------------------------------ requests
+
+/// A request with the token in `Authorization: Bearer`, and a JSON body
+/// for methods that take one.
+fn bearer(method: &str, uri: &str, token: &str) -> Request<Body> {
+    let req = Request::builder()
+        .method(Method::from_bytes(method.as_bytes()).unwrap())
+        .uri(uri)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"));
+    if matches!(method, "POST" | "PUT" | "PATCH") {
+        req.header(header::CONTENT_TYPE, "application/json").body(Body::from("{}")).unwrap()
+    } else {
+        req.body(Body::empty()).unwrap()
+    }
+}
+
+/// Status and `WWW-Authenticate` of a request, without reading the body
+/// (the event stream doesn't end).
+async fn status_of(app: &TestApp, req: Request<Body>) -> (StatusCode, String) {
+    let resp = app.api.clone().oneshot(req).await.unwrap();
+    let challenge = resp.headers().get(header::WWW_AUTHENTICATE).map(|v| v.to_str().unwrap().to_owned());
+    (resp.status(), challenge.unwrap_or_default())
+}
+
+/// A request path for a routed path: every parameter 1.
+fn concrete(path: &str) -> String {
+    let mut out = String::new();
+    let mut rest = path;
+    while let Some(open) = rest.find('{') {
+        let close = open + rest[open..].find('}').unwrap();
+        out.push_str(&rest[..open]);
+        out.push('1');
+        rest = &rest[close + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+const NO_SCOPE: &str = r#"Bearer error="insufficient_scope""#;
+
+#[tokio::test]
+async fn an_administrators_app_token_opens_only_app_routes() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Film (2020).mkv", 2048);
+    app.library(&admin, "Movies", "movies", "movies").await;
+    let (token, _) = app.app_token(1, "library play playlists").await;
+    for (method, path) in api_routes() {
+        if PUBLIC.iter().any(|(m, p)| *m == method && *p == path) {
+            // No sign-in needed (and logout would end the grant).
+            continue;
+        }
+        let uri = concrete(&path);
+        let (status, challenge) = status_of(&app, bearer(&method, &uri, &token)).await;
+        let first_party = FIRST_PARTY.iter().chain(ADMIN).any(|(m, p)| *m == method && *p == path);
+        if first_party {
+            assert_eq!((status, challenge.as_str()), (StatusCode::FORBIDDEN, NO_SCOPE), "{method} {uri}");
+        } else if app_route(&method, &path).is_some() {
+            assert!(status != StatusCode::UNAUTHORIZED && challenge.is_empty(), "{method} {uri}: {status} {challenge}");
+        } else if COOKIE_ONLY.iter().any(|(m, p)| *m == method && *p == path) {
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {uri}");
+        }
+    }
+    // Still signed in: nothing above ended the grant.
+    let me = app.get("/api/auth/me", &token).await;
+    assert_eq!((me.status, &me.body["is_admin"]), (StatusCode::OK, &json!(false)));
+    // HEAD is GET.
+    let head = Request::builder()
+        .method(Method::HEAD)
+        .uri("/api/libraries")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    assert!(status_of(&app, head).await.1.is_empty());
+}
+
+#[tokio::test]
+async fn each_scope_opens_only_its_routes() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (_, ann) = app.user(&admin, "ann", json!({})).await;
+    for scope in ["library", "play", "playlists"] {
+        let (token, _) = app.app_token(ann, scope).await;
+        for (method, path, need) in APP_ROUTES {
+            let uri = concrete(path);
+            let (status, challenge) = status_of(&app, bearer(method, &uri, &token)).await;
+            match need {
+                Need::Scope(needed) if needed.name() != scope => {
+                    let expected = format!(r#"Bearer error="insufficient_scope", scope="{}""#, needed.name());
+                    assert_eq!((status, challenge), (StatusCode::FORBIDDEN, expected), "{scope}: {method} {uri}");
+                }
+                _ => assert!(challenge.is_empty(), "{scope}: {method} {uri}: {status} {challenge}"),
+            }
+        }
+    }
+    let (library, _) = app.app_token(ann, "library").await;
+    let denied = app.app_call(Method::POST, "/api/playlists", &library, Some(json!({"title": "Mine"}))).await;
+    assert_eq!((denied.status, &denied.body["code"]), (StatusCode::FORBIDDEN, &json!("insufficient_scope")));
+    assert_eq!(
+        denied.body["message"],
+        "this app wasn't allowed to make, change and delete the profile's playlists: sign in to it again to allow it"
+    );
+    let settings = app.get("/api/settings", &library).await;
+    assert_eq!(settings.body["message"], "apps can't do that: use pley's web app");
+}
+
+#[tokio::test]
+async fn app_tokens_go_only_in_the_authorization_header() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (token, refresh) = app.app_token(1, "library").await;
+    let misplaced = [
+        app.call(Method::GET, &format!("/api/auth/me?token={token}"), None, None, &[]).await,
+        app.call(Method::GET, "/api/auth/me", None, None, &[("x-pley-token", &token)]).await,
+        app.call(Method::GET, "/api/auth/me", None, None, &[("cookie", &format!("pley_token={token}"))]).await,
+        app.call(Method::GET, &format!("/api/libraries?token={token}"), None, None, &[]).await,
+    ];
+    for reply in misplaced {
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+        assert_eq!(reply.body["message"], "app tokens go in the Authorization header");
+        assert_eq!(reply.headers[header::WWW_AUTHENTICATE], r#"Bearer error="invalid_request""#);
+    }
+    // A signed-in page whose URL carries an app token: the cookie decides.
+    let page = app
+        .call(
+            Method::GET,
+            &format!("/api/auth/me?token={token}"),
+            None,
+            None,
+            &[("cookie", &format!("pley_token={admin}"))],
+        )
+        .await;
+    assert_eq!(
+        (page.status, &page.body["is_admin"], &page.body["scope"]),
+        (StatusCode::OK, &json!(true), &Value::Null)
+    );
+    // A refresh token is no bearer token, nor is an unknown one.
+    for bad in [refresh.as_str(), "pley_at_unknown", "pley_x"] {
+        let reply = app.get("/api/auth/me", bad).await;
+        assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{bad}");
+        assert_eq!(reply.body["code"], "unauthorized");
+        assert_eq!(reply.headers[header::WWW_AUTHENTICATE], r#"Bearer error="invalid_token""#);
+    }
+    // The scheme in any letter case.
+    let lower =
+        app.call(Method::GET, "/api/auth/me", None, None, &[("authorization", &format!("bearer {token}"))]).await;
+    assert_eq!((lower.status, &lower.body["scope"]), (StatusCode::OK, &json!("library")));
+    // Session tokens work as before, wherever they are.
+    let session = app.call(Method::GET, "/api/auth/me", None, None, &[("x-pley-token", &admin)]).await;
+    assert_eq!(session.status, StatusCode::OK);
+    assert!(!session.headers.contains_key(header::WWW_AUTHENTICATE));
+    let nothing = app.call(Method::GET, "/api/auth/me", None, None, &[]).await;
+    assert_eq!(nothing.status, StatusCode::UNAUTHORIZED);
+    assert!(!nothing.headers.contains_key(header::WWW_AUTHENTICATE), "sessions answer as they always did");
+}
+
+#[tokio::test]
+async fn the_plex_api_refuses_app_tokens() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (token, _) = app.app_token(1, "library play playlists").await;
+    assert_eq!(app.plex(Method::GET, "/library/sections", &admin, &[]).await.status, StatusCode::OK);
+    assert_eq!(app.plex(Method::GET, "/library/sections", &token, &[]).await.status, StatusCode::UNAUTHORIZED);
+    let plex = |uri: String, headers: Vec<(&'static str, String)>| {
+        let mut req = Request::builder().uri(uri).header(header::ACCEPT, "application/json");
+        for (name, value) in headers {
+            req = req.header(name, value);
+        }
+        app.plex.clone().oneshot(req.body(Body::empty()).unwrap())
+    };
+    for (uri, headers) in [
+        (format!("/library/sections?X-Plex-Token={token}"), vec![]),
+        ("/library/sections".to_owned(), vec![("authorization", format!("Bearer {token}"))]),
+        ("/library/sections".to_owned(), vec![("x-pley-token", token.clone())]),
+        (format!("/library/sections?token={token}"), vec![]),
+        // Not even next to a session token.
+        ("/library/sections".to_owned(), vec![("x-plex-token", token.clone()), ("x-pley-token", admin.clone())]),
+    ] {
+        let resp = plex(uri.clone(), headers).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+    // The notification socket, before upgrading.
+    let socket = app.plex(Method::GET, "/:/websockets/notifications", &token, &[]).await;
+    assert_eq!(socket.status, StatusCode::UNAUTHORIZED);
+    let socket = app.plex(Method::GET, "/:/websockets/notifications", &admin, &[]).await;
+    assert_ne!(socket.status, StatusCode::UNAUTHORIZED, "a session gets as far as the upgrade");
+}
+
+// ------------------------------------------------------------------ rights
+
+#[tokio::test]
+async fn an_administrators_app_sees_everything_but_administers_nothing() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Film (2020).mkv", 2048);
+    app.media_file("private/Secret (2021).mkv", 2048);
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let private = app.library(&admin, "Private", "movies", "private").await;
+    let film = app.ids(movies, &admin).await["Film"];
+    let secret = app.ids(private, &admin).await["Secret"];
+    let (bob, bob_id) = app.user(&admin, "bob", json!({})).await;
+    // The administrator's own profile would see no library if roles didn't count.
+    sqlx::query("UPDATE users SET all_libraries = 0, max_age = 12 WHERE id = 1")
+        .execute(&app.state.db.write)
+        .await
+        .unwrap();
+    app.state.auth.forget_user(1);
+    let (token, _) = app.app_token(1, "library play playlists").await;
+
+    let me = app.get("/api/auth/me", &token).await;
+    assert_eq!((me.status, &me.body["id"], &me.body["is_admin"]), (StatusCode::OK, &json!(1), &json!(false)));
+    assert_eq!(me.body["scope"], "library play playlists");
+    assert_eq!(app.get("/api/auth/me", &admin).await.body["is_admin"], json!(true));
+
+    let libraries = app.get("/api/libraries", &token).await;
+    let names: Vec<&str> = libraries.body.as_array().unwrap().iter().map(|l| l["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["Movies", "Private"], "every library");
+    assert_eq!(app.get(&format!("/api/items/{secret}"), &token).await.status, StatusCode::OK, "no age limit");
+
+    // Only its own history, whatever it asks.
+    for (user, item) in [(1, film), (bob_id, secret)] {
+        sqlx::query("INSERT INTO play_history (user_id, item_id, viewed_at) VALUES (?, ?, 1)")
+            .bind(user)
+            .bind(item)
+            .execute(&app.state.db.write)
+            .await
+            .unwrap();
+    }
+    assert_eq!(app.get("/api/history?all=1", &admin).await.body["total"], json!(2));
+    assert_eq!(app.get("/api/history?all=1", &token).await.body["total"], json!(1));
+    assert_eq!(app.get(&format!("/api/history?user_id={bob_id}"), &token).await.body["total"], json!(1));
+    let theirs: i64 = sqlx::query_scalar("SELECT id FROM play_history WHERE user_id = ?")
+        .bind(bob_id)
+        .fetch_one(&app.state.db.read)
+        .await
+        .unwrap();
+    assert_eq!(app.delete(&format!("/api/history/{theirs}"), &token).await.status, StatusCode::NOT_FOUND);
+
+    // Nobody else's playback.
+    let caps = json!({"containers": ["mkv"], "video_codecs": ["h264"], "audio_codecs": ["aac"]});
+    let play = app.post("/api/playback", &bob, json!({"item_id": film, "caps": caps, "mode": "direct"})).await;
+    assert_eq!(play.status, StatusCode::OK, "{:?}", play.body);
+    let session = play.body["session_id"].as_str().unwrap();
+    assert_eq!(app.get(&format!("/api/playback/{session}"), &admin).await.status, StatusCode::OK);
+    assert_eq!(app.get(&format!("/api/playback/{session}"), &token).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(app.delete(&format!("/api/playback/{session}"), &token).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(app.get("/api/activity", &token).await.status, StatusCode::FORBIDDEN);
+
+    // Empty curated collections are for administrators to fill.
+    let empty = app.post(&format!("/api/libraries/{movies}/collections"), &admin, json!({"title": "Empty"})).await;
+    assert_eq!(empty.status, StatusCode::CREATED, "{:?}", empty.body);
+    let collection = empty.body["id"].as_i64().unwrap();
+    let titles = |reply: common::Reply| common::titles(&reply.body["collections"]);
+    let listed = titles(app.get(&format!("/api/libraries/{movies}/collections"), &admin).await);
+    assert_eq!(listed, ["Empty"]);
+    let listed = titles(app.get(&format!("/api/libraries/{movies}/collections"), &token).await);
+    assert!(listed.is_empty(), "{listed:?}");
+    assert_eq!(app.get(&format!("/api/collections/{collection}"), &token).await.status, StatusCode::NOT_FOUND);
+
+    // Administration, and turning into a session.
+    let refused = [
+        app.post("/api/libraries", &token, json!({"name": "X", "kind": "movies", "paths": []})).await,
+        app.post("/api/auth/switch", &token, json!({"user_id": 1})).await,
+        app.put("/api/auth/password", &token, json!({"current_password": "secret-one", "new_password": "x"})).await,
+        app.get("/api/settings", &token).await,
+        app.get("/api/users", &token).await,
+    ];
+    for reply in refused {
+        assert_eq!((reply.status, &reply.body["code"]), (StatusCode::FORBIDDEN, &json!("insufficient_scope")));
+        assert!(reply.body.get("token").is_none());
+    }
+}
+
+#[tokio::test]
+async fn apps_dont_see_folders_or_file_paths() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Film (2020)/Film (2020).mkv", 2048);
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let film = app.ids(movies, &admin).await["Film"];
+    let (token, _) = app.app_token(1, "library").await;
+    let folder = app.media_path("movies");
+
+    assert_eq!(app.get("/api/libraries", &admin).await.body[0]["paths"], json!([folder]));
+    assert_eq!(app.get("/api/libraries", &token).await.body[0]["paths"], json!([]));
+    assert_eq!(app.get(&format!("/api/libraries/{movies}"), &token).await.body["paths"], json!([]));
+    let path = app.get(&format!("/api/items/{film}"), &admin).await.body["files"][0]["path"].clone();
+    assert!(path.as_str().unwrap().starts_with(&folder), "{path}");
+    let detail = app.get(&format!("/api/items/{film}"), &token).await;
+    assert_eq!(detail.body["files"][0]["path"], "Film (2020).mkv");
+    assert!(!detail.mentions(&folder.replace('\\', "\\\\")) && !detail.mentions(&folder));
+}
+
+#[tokio::test]
+async fn apps_see_only_their_households_pictures() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (_, ann) = app.user(&admin, "ann", json!({"home": true})).await;
+    let (_, bob) = app.user(&admin, "bob", json!({"home": true})).await;
+    let (_, carl) = app.user(&admin, "carl", json!({"home": false})).await;
+    let (_, dave) = app.user(&admin, "dave", json!({"home": true})).await;
+    let avatars = app.state.config.data_dir.join("avatars");
+    std::fs::create_dir_all(&avatars).unwrap();
+    for id in [ann, bob, carl, dave] {
+        std::fs::write(avatars.join(format!("{id}.jpg")), b"jpeg").unwrap();
+        sqlx::query("UPDATE users SET avatar = ? WHERE id = ?")
+            .bind(format!("{id}.jpg"))
+            .bind(id)
+            .execute(&app.state.db.write)
+            .await
+            .unwrap();
+    }
+    sqlx::query("UPDATE users SET disabled = 1 WHERE id = ?").bind(dave).execute(&app.state.db.write).await.unwrap();
+    let picture = |token: String, id: i64| {
+        let app = &app;
+        async move { app.get(&format!("/api/users/{id}/avatar"), &token).await.status }
+    };
+    let (anns, _) = app.app_token(ann, "library").await;
+    assert_eq!(picture(anns.clone(), ann).await, StatusCode::OK, "its own");
+    assert_eq!(picture(anns.clone(), bob).await, StatusCode::OK, "its household's");
+    assert_eq!(picture(anns.clone(), carl).await, StatusCode::NOT_FOUND, "not in the household");
+    assert_eq!(picture(anns.clone(), dave).await, StatusCode::NOT_FOUND, "disabled");
+    let (carls, _) = app.app_token(carl, "library").await;
+    assert_eq!(picture(carls.clone(), carl).await, StatusCode::OK);
+    assert_eq!(picture(carls, ann).await, StatusCode::NOT_FOUND, "outside the household, only its own");
+    assert_eq!(picture(admin, carl).await, StatusCode::OK, "sessions see every picture as before");
+}
+
+// ------------------------------------------------------------------ ends
+
+#[tokio::test]
+async fn logout_with_an_app_token_ends_its_grant() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (token, refresh) = app.app_token(1, "library").await;
+    let (other, _) = app.app_token(1, "library").await;
+    assert_eq!(app.get("/api/auth/me", &token).await.status, StatusCode::OK);
+    let out = app.call(Method::POST, "/api/auth/logout", Some(&token), None, &[]).await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT);
+    let after = app.get("/api/auth/me", &token).await;
+    assert_eq!(after.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(after.headers[header::WWW_AUTHENTICATE], r#"Bearer error="invalid_token""#);
+    let exchange = pley::auth::grants::RefreshInput {
+        token: refresh,
+        client_id: common::ANDROID_APP.into(),
+        scope: None,
+        user_agent: None,
+        ip: None,
+    };
+    assert!(app.state.auth.refresh(exchange).await.is_err());
+    assert_eq!(app.get("/api/auth/me", &other).await.status, StatusCode::OK, "another sign-in of the app stays");
+    assert_eq!(app.get("/api/auth/me", &admin).await.status, StatusCode::OK, "and the session");
+    // From a misplaced header too: the app is signing out.
+    let out = app.call(Method::POST, "/api/auth/logout", None, None, &[("x-pley-token", &other)]).await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT);
+    assert_eq!(app.get("/api/auth/me", &other).await.status, StatusCode::UNAUTHORIZED);
+    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM app_grants").fetch_one(&app.state.db.read).await.unwrap();
+    assert_eq!(left, 0);
+}
+
+#[tokio::test]
+async fn a_password_change_ends_the_accounts_apps() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (ann_session, ann) = app.user(&admin, "ann", json!({})).await;
+    let (_, bob) = app.user(&admin, "bob", json!({})).await;
+    let (anns, refresh) = app.app_token(ann, "library").await;
+    let (bobs, _) = app.app_token(bob, "library").await;
+    // An app acting as Bob that Ann allowed.
+    let allowed = app
+        .state
+        .auth
+        .issue(pley::auth::grants::NewGrant {
+            user_id: bob,
+            approved_by: ann,
+            client_id: common::ANDROID_APP.into(),
+            client_name: None,
+            scopes: pley::auth::scopes::Scopes::parse("library").unwrap(),
+            refresh: false,
+            first_party: true,
+            user_agent: None,
+            ip: None,
+        })
+        .await
+        .unwrap();
+    for token in [&anns, &bobs, &allowed.access_token] {
+        assert_eq!(app.get("/api/auth/me", token).await.status, StatusCode::OK);
+    }
+    let changed = app
+        .put(
+            "/api/auth/password",
+            &ann_session,
+            json!({"current_password": "test-pass-1", "new_password": "another-pass-2"}),
+        )
+        .await;
+    assert_eq!(changed.status, StatusCode::NO_CONTENT, "{:?}", changed.body);
+    assert_eq!(app.get("/api/auth/me", &anns).await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(app.get("/api/auth/me", &allowed.access_token).await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(app.get("/api/auth/me", &bobs).await.status, StatusCode::OK, "Bob's own app stays");
+    assert_eq!(app.get("/api/auth/me", &ann_session).await.status, StatusCode::OK, "the session that changed it stays");
+    let exchange = pley::auth::grants::RefreshInput {
+        token: refresh,
+        client_id: common::ANDROID_APP.into(),
+        scope: None,
+        user_agent: None,
+        ip: None,
+    };
+    assert!(matches!(app.state.auth.refresh(exchange).await, Err(pley::auth::grants::RefreshError::Invalid(_))));
+}
+
+#[tokio::test]
+async fn an_apps_event_stream_ends_when_its_grant_does() {
+    let app = TestApp::with_config(|config| config.event_recheck = Duration::from_millis(200)).await;
+    app.setup_admin().await;
+    let (token, _) = app.app_token(1, "library").await;
+    let resp = app.api.clone().oneshot(bearer("GET", "/api/events", &token)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let mut stream = resp.into_body().into_data_stream();
+    // Open across several checks while the token works.
+    let open = tokio::time::timeout(Duration::from_millis(700), async {
+        while let Some(chunk) = stream.next().await {
+            chunk.unwrap();
+        }
+    })
+    .await;
+    assert!(open.is_err(), "the stream ended while its token worked");
+    assert!(app.state.auth.revoke_app_token(&token, None).await);
+    let ended = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(chunk) = stream.next().await {
+            chunk.unwrap();
+        }
+    })
+    .await;
+    assert!(ended.is_ok(), "the stream outlived its grant");
+}
+
+#[tokio::test]
+async fn plex_session_files_refuse_app_sessions_and_disabled_accounts() {
+    use pley::playback::{Method as Play, Session, TranscodeSpec};
+
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Film (2020).mkv", 2048);
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let film = app.ids(movies, &admin).await["Film"];
+    let file = app.file_of(film).await;
+    let (_, bob) = app.user(&admin, "bob", json!({})).await;
+    let (token, _) = app.app_token(bob, "play").await;
+
+    // Playback an app starts is marked with its grant.
+    let caps = json!({"containers": ["mkv"], "video_codecs": ["h264"], "audio_codecs": ["aac"]});
+    let body = json!({"item_id": film, "caps": caps, "mode": "direct"});
+    let by_app = app.post("/api/playback", &token, body.clone()).await;
+    let by_session = app.post("/api/playback", &admin, body).await;
+    let session_of =
+        |reply: &common::Reply| app.state.sessions.get(reply.body["session_id"].as_str().unwrap()).unwrap();
+    let grant: i64 = sqlx::query_scalar("SELECT id FROM app_grants").fetch_one(&app.state.db.read).await.unwrap();
+    assert_eq!(session_of(&by_app).app_grant, Some(grant));
+    assert_eq!(session_of(&by_session).app_grant, None);
+
+    // Transcode sessions, as the transcoder would have started them.
+    let transcode = |user: i64, grant: Option<i64>| {
+        let spec = TranscodeSpec { request: Default::default(), segment_count: 1, duration_ms: 1000 };
+        let mut session =
+            Session::new(user, "u".into(), None, film, file, Play::Transcode, 1000, Some(spec), Some("job".into()), 0);
+        session.app_grant = grant;
+        app.state.sessions.insert(session).id.clone()
+    };
+    let plex_file = |session: String| {
+        let req = Request::builder()
+            .uri(format!("/video/:/transcode/universal/session/{session}/base/index.m3u8"))
+            .body(Body::empty())
+            .unwrap();
+        let plex = app.plex.clone();
+        async move { plex.oneshot(req).await.unwrap().status() }
+    };
+    let bobs = transcode(bob, None);
+    let apps = transcode(bob, Some(grant));
+    // No transcoder runs here: it gets as far as asking it.
+    assert_ne!(plex_file(bobs.clone()).await, StatusCode::NOT_FOUND);
+    assert_eq!(plex_file(apps).await, StatusCode::NOT_FOUND, "an app's session");
+    sqlx::query("UPDATE users SET disabled = 1 WHERE id = ?").bind(bob).execute(&app.state.db.write).await.unwrap();
+    assert_eq!(plex_file(bobs).await, StatusCode::NOT_FOUND, "a disabled account's session");
+}
+
+// ------------------------------------------------------------------ the tables
+
+#[tokio::test]
+async fn the_apps_tables_come_with_an_upgrade() {
+    use sqlx::migrate::Migrator;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
+
+    // A database of the version before apps: every migration below 0023.
+    let dir = tempfile::tempdir().unwrap();
+    let older = dir.path().join("older");
+    std::fs::create_dir(&older).unwrap();
+    for file in std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations")).unwrap().flatten() {
+        let name = file.file_name().to_string_lossy().into_owned();
+        if name.as_str() < "0023" {
+            std::fs::copy(file.path(), older.join(&name)).unwrap();
+        }
+    }
+    let path = dir.path().join("pley.db");
+    let pool =
+        SqlitePool::connect_with(SqliteConnectOptions::new().filename(&path).create_if_missing(true)).await.unwrap();
+    Migrator::new(older.as_path()).await.unwrap().run(&pool).await.unwrap();
+    sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'ann', 'x', 0)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at) VALUES ('s', 1, 0, 0, 9)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let db = pley::db::Db::open(&path).await.unwrap();
+    let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions").fetch_one(&db.read).await.unwrap();
+    assert_eq!(sessions, 1, "kept");
+    let auth = pley::auth::AuthService::new(db.clone());
+    let issued = auth
+        .issue(pley::auth::grants::NewGrant {
+            user_id: 1,
+            approved_by: 1,
+            client_id: common::ANDROID_APP.into(),
+            client_name: None,
+            scopes: pley::auth::scopes::Scopes::parse("library").unwrap(),
+            refresh: true,
+            first_party: true,
+            user_agent: None,
+            ip: None,
+        })
+        .await
+        .unwrap();
+    assert!(auth.validate_app(&issued.access_token).await.is_some());
+    // Deleting the account deletes its grants and their tokens.
+    sqlx::query("DELETE FROM users WHERE id = 1").execute(&db.write).await.unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT (SELECT COUNT(*) FROM app_grants) + (SELECT COUNT(*) FROM app_tokens)")
+        .fetch_one(&db.read)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+    db.close().await;
+
+    // And a new database.
+    let fresh = pley::db::Db::open(&dir.path().join("new.db")).await.unwrap();
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'app_%' ORDER BY name")
+            .fetch_all(&fresh.read)
+            .await
+            .unwrap();
+    assert_eq!(tables, ["app_grants", "app_tokens"]);
+    fresh.close().await;
+}

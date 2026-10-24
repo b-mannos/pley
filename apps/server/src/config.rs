@@ -20,6 +20,8 @@ pub const PLEX_PORT: u16 = 32400;
 /// enough to leave time for stopping the transcoder and closing the database
 /// before Docker's default stop timeout (10 s) kills the process.
 pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+/// How often an open event stream checks that its token still works.
+pub const EVENT_RECHECK: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Parser)]
 #[command(name = "pley", version, about = "pley — a fast, self-hosted media server")]
@@ -137,6 +139,8 @@ pub struct Config {
     pub shutdown_grace: Duration,
     /// Answer apps looking for servers on the local network (see [`crate::discovery`]).
     pub discovery: bool,
+    /// See [`EVENT_RECHECK`] (tests shorten it).
+    pub event_recheck: Duration,
 }
 
 impl Config {
@@ -181,6 +185,7 @@ impl Config {
             metadata_endpoints: Some(crate::providers::Endpoints::default()),
             shutdown_grace: SHUTDOWN_GRACE,
             discovery: !cli.no_discovery && file.discovery.unwrap_or(true),
+            event_recheck: EVENT_RECHECK,
             data_dir,
             transcode_dir,
         })
@@ -204,6 +209,7 @@ impl Config {
             metadata_endpoints: None,
             shutdown_grace: SHUTDOWN_GRACE,
             discovery: false,
+            event_recheck: EVENT_RECHECK,
         }
     }
 

@@ -16,6 +16,9 @@ use tower::ServiceExt;
 
 use pley::{AppState, Config};
 
+/// The client_id of pley's Android app.
+pub const ANDROID_APP: &str = "https://hhaidar.github.io/pley/oauth/android.json";
+
 pub struct TestApp {
     pub api: Router,
     pub plex: pley::plex::Service,
@@ -233,6 +236,34 @@ impl TestApp {
             .iter()
             .map(|i| (i["title"].as_str().unwrap().to_owned(), i["id"].as_i64().unwrap()))
             .collect()
+    }
+
+    /// Tokens of pley's Android app acting as `user_id`, allowed `scope` by
+    /// that user: `(access token, refresh token)`.
+    pub async fn app_token(&self, user_id: i64, scope: &str) -> (String, String) {
+        let issued = self
+            .state
+            .auth
+            .issue(pley::auth::grants::NewGrant {
+                user_id,
+                approved_by: user_id,
+                client_id: ANDROID_APP.into(),
+                client_name: Some("pley".into()),
+                scopes: pley::auth::scopes::Scopes::parse(scope).unwrap(),
+                refresh: true,
+                first_party: true,
+                user_agent: Some("pley-android/1.0 okhttp/5".into()),
+                ip: Some("10.0.0.9".into()),
+            })
+            .await
+            .unwrap();
+        (issued.access_token, issued.refresh_token.unwrap())
+    }
+
+    /// A pley API request as apps make it: the token in `Authorization:
+    /// Bearer`, JSON bodies.
+    pub async fn app_call(&self, method: Method, uri: &str, token: &str, body: Option<Value>) -> Reply {
+        self.call(method, uri, Some(token), body, &[]).await
     }
 
     /// Ids of the children (seasons, episodes, albums, tracks) of an item, by title.

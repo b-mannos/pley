@@ -5,6 +5,7 @@ use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 
 use crate::accounts::{self, UserDto};
+use crate::auth::grants::APP_TOKEN_PREFIX;
 use crate::auth::{
     AuthUser, ClientIp, CurrentToken, clear_cookie, dummy_password_hash, forwarded_https, hash_password, hash_token,
     session_cookie, token_from_parts, validate_password, validate_username, verify_password,
@@ -174,14 +175,36 @@ pub(crate) async fn confirm_password(state: &AppState, user: &AuthUser, password
 
 pub async fn logout(State(state): State<AppState>, request: axum::extract::Request) -> Response {
     let (parts, _) = request.into_parts();
-    if let Some(token) = token_from_parts(&parts) {
-        state.auth.revoke(&token).await;
+    match token_from_parts(&parts) {
+        // An app signing out ends its grant, wherever it put its token.
+        Some(token) if token.starts_with(APP_TOKEN_PREFIX) => {
+            state.auth.revoke_app_token(&token, None).await;
+        }
+        Some(token) => state.auth.revoke(&token).await,
+        None => {}
     }
     (StatusCode::NO_CONTENT, [(header::SET_COOKIE, clear_cookie())]).into_response()
 }
 
-pub async fn me(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<UserDto>> {
-    Ok(Json(accounts::user(&state.db, user.id).await?.ok_or(AppError::Unauthorized)?))
+#[derive(Serialize)]
+pub struct Me {
+    #[serde(flatten)]
+    user: UserDto,
+    /// What the app was allowed, for an app's token (space-separated).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope: Option<String>,
+}
+
+pub async fn me(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Me>> {
+    let mut dto = accounts::user(&state.db, user.id).await?.ok_or(AppError::Unauthorized)?;
+    let scope = user.app.as_ref().map(|app| app.scopes.to_string());
+    if user.app.is_some() {
+        // What the app may do, not what the account's role allows.
+        dto.is_admin = user.is_admin;
+        dto.all_libraries = user.all_libraries;
+        dto.max_age = user.max_age;
+    }
+    Ok(Json(Me { user: dto, scope }))
 }
 
 #[derive(Deserialize)]
@@ -225,11 +248,12 @@ pub async fn change_password(
         .await?;
     sqlx::query("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?")
         .bind(user.id)
-        .bind(keep)
+        .bind(&keep)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    state.auth.forget_user(user.id);
+    // The apps acting as this account or allowed by it end too.
+    state.auth.sign_out_everywhere(user.id, Some(keep.as_str())).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

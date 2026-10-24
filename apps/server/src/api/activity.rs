@@ -86,9 +86,6 @@ pub async fn activity(State(state): State<AppState>, user: AuthUser) -> ApiResul
     Ok(Json(Activity { scans, sessions: out, analysis, previews_pending }))
 }
 
-/// How often an open event stream checks its session again.
-const RECHECK: Duration = Duration::from_secs(30);
-
 pub async fn events(
     State(state): State<AppState>,
     user: AuthUser,
@@ -96,13 +93,14 @@ pub async fn events(
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     // Events about libraries the user can't open aren't theirs to see.
     let libraries = Arc::new(parking_lot::RwLock::new(access::library_ids(&state.db, &user).await?));
-    // The session is checked again every so often: the stream ends once it
-    // is signed out (or its user disabled), and follows changes of access.
+    // The session or app token is checked again every so often
+    // (`Config::event_recheck`): the stream ends once it is signed out, it
+    // expires or its user is disabled, and follows changes of access.
     let ended = tokio_util::sync::CancellationToken::new();
     {
         let (state, libraries, ended) = (state.clone(), libraries.clone(), ended.clone());
         tokio::spawn(async move {
-            let mut tick = tokio::time::interval(RECHECK);
+            let mut tick = tokio::time::interval(state.config.event_recheck);
             tick.tick().await;
             loop {
                 tokio::select! {
@@ -110,7 +108,7 @@ pub async fn events(
                     () = ended.cancelled() => break,
                 }
                 let Some(user) = (match token.as_deref() {
-                    Some(token) => state.auth.validate(token).await,
+                    Some(token) => state.auth.validate_any(token).await,
                     None => None,
                 }) else {
                     ended.cancel();

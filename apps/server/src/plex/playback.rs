@@ -575,12 +575,17 @@ pub async fn universal_start(
 }
 
 /// Session playlists and segments. The session id (128 random bits) is the
-/// credential, like the URLs Plex hands to players.
+/// credential, like the URLs Plex hands to players. Not for sessions an app
+/// started (its token is what stops it, not this listener), nor for disabled
+/// accounts.
 pub async fn universal_file(
     State(state): State<AppState>,
     Path((session_id, file)): Path<(String, String)>,
 ) -> PlexResult<Response> {
     let session = state.sessions.get(&session_id).ok_or(PlexError::NotFound)?;
+    if session.app_grant.is_some() {
+        return Err(PlexError::NotFound);
+    }
     let user = AuthUser::load(&state.db, session.user_id).await?.ok_or(PlexError::NotFound)?;
     crate::api::playback::hls_file(State(state), user, Path((session_id, file))).await.map_err(PlexError::from)
 }

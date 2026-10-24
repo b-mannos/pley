@@ -84,7 +84,7 @@ pub async fn start(
 
     if decision.method == Method::Direct {
         let duration = file.duration_ms.or(row.duration_ms).unwrap_or(0);
-        let session = state.sessions.insert(Session::new(
+        let mut session = Session::new(
             user.id,
             user.username.clone(),
             client_id,
@@ -95,7 +95,9 @@ pub async fn start(
             None,
             None,
             start_ms,
-        ));
+        );
+        session.app_grant = user.app.as_ref().map(|app| app.grant_id);
+        let session = state.sessions.insert(session);
         state.events.send(ServerEvent::SessionsChanged);
         return Ok(Json(PlaybackInfo {
             session_id: session.id.clone(),
@@ -151,21 +153,20 @@ pub async fn start(
         video.mode = plan.mode;
     }
     let spec = TranscodeSpec { request, segment_count: created.segment_count, duration_ms: created.duration_ms };
-    let session = state.sessions.insert_transcode(
-        Session::new(
-            user.id,
-            user.username.clone(),
-            client_id,
-            row.id,
-            file.id,
-            method,
-            created.duration_ms,
-            Some(spec),
-            Some(created.id.clone()),
-            start_ms,
-        ),
-        slot,
+    let mut session = Session::new(
+        user.id,
+        user.username.clone(),
+        client_id,
+        row.id,
+        file.id,
+        method,
+        created.duration_ms,
+        Some(spec),
+        Some(created.id.clone()),
+        start_ms,
     );
+    session.app_grant = user.app.as_ref().map(|app| app.grant_id);
+    let session = state.sessions.insert_transcode(session, slot);
     state.events.send(ServerEvent::SessionsChanged);
     Ok(Json(PlaybackInfo {
         session_id: session.id.clone(),

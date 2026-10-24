@@ -1,5 +1,5 @@
 use axum::Json;
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 
@@ -24,6 +24,17 @@ pub enum AppError {
     /// The second step of a sign-in is missing or wrong (see `crate::two_step`).
     #[error("{0}")]
     TwoStep(String),
+    /// An app's token that is expired, signed out or unknown, a refresh
+    /// token sent as a bearer token, or one whose account is disabled.
+    #[error("this token doesn't work any more: refresh it, or sign in again")]
+    InvalidToken,
+    /// An app's token anywhere but `Authorization: Bearer`.
+    #[error("app tokens go in the Authorization header")]
+    TokenPlacement,
+    /// An app's token on a route its scopes don't open: the scope that
+    /// would, or `None` when no scope opens it (see `crate::auth::scopes`).
+    #[error("{}", scope_message(*.0))]
+    InsufficientScope(Option<&'static str>),
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
@@ -59,6 +70,9 @@ impl AppError {
             Self::Unavailable(m) => Self::Unavailable(m.clone()),
             Self::TooManyRequests(m) => Self::TooManyRequests(m.clone()),
             Self::TwoStep(m) => Self::TwoStep(m.clone()),
+            Self::InvalidToken => Self::InvalidToken,
+            Self::TokenPlacement => Self::TokenPlacement,
+            Self::InsufficientScope(scope) => Self::InsufficientScope(*scope),
             Self::Internal(err) => Self::Internal(anyhow::anyhow!("{err:#}")),
         }
     }
@@ -73,8 +87,31 @@ impl AppError {
             Self::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable"),
             Self::TooManyRequests(_) => (StatusCode::TOO_MANY_REQUESTS, "too_many_requests"),
             Self::TwoStep(_) => (StatusCode::UNAUTHORIZED, "two_step"),
+            Self::InvalidToken => (StatusCode::UNAUTHORIZED, "unauthorized"),
+            Self::TokenPlacement => (StatusCode::BAD_REQUEST, "bad_request"),
+            Self::InsufficientScope(_) => (StatusCode::FORBIDDEN, "insufficient_scope"),
             Self::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         }
+    }
+
+    /// `WWW-Authenticate` of the answers to apps' tokens (RFC 6750 §3).
+    fn challenge(&self) -> Option<String> {
+        match self {
+            Self::InvalidToken => Some(r#"Bearer error="invalid_token""#.to_owned()),
+            Self::TokenPlacement => Some(r#"Bearer error="invalid_request""#.to_owned()),
+            Self::InsufficientScope(None) => Some(r#"Bearer error="insufficient_scope""#.to_owned()),
+            Self::InsufficientScope(Some(scope)) => {
+                Some(format!(r#"Bearer error="insufficient_scope", scope="{scope}""#))
+            }
+            _ => None,
+        }
+    }
+}
+
+fn scope_message(scope: Option<&str>) -> String {
+    match scope.and_then(crate::auth::scopes::Scope::from_name) {
+        Some(scope) => format!("this app wasn't allowed to {}: sign in to it again to allow it", scope.words()),
+        None => "apps can't do that: use pley's web app".to_owned(),
     }
 }
 
@@ -99,6 +136,7 @@ impl From<std::io::Error> for AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, code) = self.status_and_code();
+        let challenge = self.challenge();
         let message = match &self {
             Self::Internal(err) => {
                 tracing::error!(error = ?err, "internal error");
@@ -106,7 +144,11 @@ impl IntoResponse for AppError {
             }
             other => other.to_string(),
         };
-        (status, Json(json!({ "code": code, "message": message }))).into_response()
+        let mut response = (status, Json(json!({ "code": code, "message": message }))).into_response();
+        if let Some(value) = challenge.and_then(|c| HeaderValue::from_str(&c).ok()) {
+            response.headers_mut().insert(header::WWW_AUTHENTICATE, value);
+        }
+        response
     }
 }
 
@@ -132,11 +174,53 @@ mod tests {
             (AppError::TooManyRequests("no".into()), 429, "too_many_requests"),
             (AppError::Unavailable("no".into()), 503, "unavailable"),
             (AppError::TwoStep("no".into()), 401, "two_step"),
+            (AppError::InvalidToken, 401, "unauthorized"),
+            (AppError::TokenPlacement, 400, "bad_request"),
+            (AppError::InsufficientScope(None), 403, "insufficient_scope"),
+            (AppError::InsufficientScope(Some("play")), 403, "insufficient_scope"),
         ] {
+            let again = err.again();
             let (got, body) = answer(err).await;
             assert_eq!((got, body["code"].as_str().unwrap()), (status, code));
+            assert_eq!(answer(again).await.0, status);
         }
         assert_eq!(answer(AppError::not_found("item 42 not found")).await.1["message"], "item 42 not found");
+    }
+
+    #[tokio::test]
+    async fn app_token_errors_say_why_in_their_header() {
+        for (err, challenge, message) in [
+            (AppError::InvalidToken, Some(r#"Bearer error="invalid_token""#), None),
+            (
+                AppError::TokenPlacement,
+                Some(r#"Bearer error="invalid_request""#),
+                Some("app tokens go in the Authorization header"),
+            ),
+            (
+                AppError::InsufficientScope(None),
+                Some(r#"Bearer error="insufficient_scope""#),
+                Some("apps can't do that: use pley's web app"),
+            ),
+            (
+                AppError::InsufficientScope(Some("playlists")),
+                Some(r#"Bearer error="insufficient_scope", scope="playlists""#),
+                Some(
+                    "this app wasn't allowed to make, change and delete the profile's playlists: \
+                     sign in to it again to allow it",
+                ),
+            ),
+            (AppError::Unauthorized, None, None),
+            (AppError::forbidden("no"), None, None),
+        ] {
+            let response = err.into_response();
+            let header = response.headers().get(header::WWW_AUTHENTICATE).map(|v| v.to_str().unwrap().to_owned());
+            assert_eq!(header.as_deref(), challenge);
+            let bytes = axum::body::to_bytes(response.into_body(), 1 << 16).await.unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            if let Some(message) = message {
+                assert_eq!(body["message"], message);
+            }
+        }
     }
 
     #[tokio::test]

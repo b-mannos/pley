@@ -1,12 +1,21 @@
 //! Accounts and sessions: Argon2id password hashes, random session tokens stored
 //! hashed (SHA-256) in the database, a short-lived in-memory cache so that
 //! segment/image requests don't hit SQLite, and axum extractors.
+//!
+//! Apps signed in through pley's own page hold app tokens instead
+//! ([`grants`]): they act without administrator rights, and only on the
+//! routes their [`scopes`] open.
 
+pub mod grants;
+pub mod scopes;
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
-use axum::extract::FromRequestParts;
+use axum::extract::{FromRequestParts, MatchedPath};
 use axum::http::header;
 use axum::http::request::Parts;
 use base64::Engine;
@@ -14,6 +23,8 @@ use dashmap::DashMap;
 use rand_core::{OsRng, RngCore};
 use sha2::{Digest, Sha256};
 
+use self::grants::{ACCESS_PREFIX, APP_TOKEN_PREFIX, Issued, NewGrant, RefreshError, RefreshInput};
+use self::scopes::{Need, Scopes};
 use crate::db::Db;
 use crate::error::AppError;
 use crate::state::AppState;
@@ -28,27 +39,45 @@ const TOUCH_INTERVAL_SECS: i64 = 600;
 pub struct AuthUser {
     pub id: i64,
     pub username: String,
+    /// Administrator rights for this request: the account's role for pley's
+    /// own sign-in, never for an app's token.
     pub is_admin: bool,
     /// Every library, or only the ones in `user_libraries` (see [`crate::access`]).
     pub all_libraries: bool,
     /// Age limit for movies and shows; `None` = unrestricted.
     pub max_age: Option<i64>,
+    /// The app acting for the user (an app token); `None`: pley's own sign-in.
+    pub app: Option<Arc<AppAccess>>,
+}
+
+/// What an app's token was allowed (see [`grants`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppAccess {
+    pub grant_id: i64,
+    /// The address of the app's client metadata document.
+    pub client_id: Arc<str>,
+    pub scopes: Scopes,
+    /// Who allowed it (the profile it acts as, unless it switched since).
+    pub approved_by: i64,
 }
 
 impl AuthUser {
-    /// A user acting with all rights the account has, for server-side work.
+    /// A user acting with all rights the account has, for server-side work;
+    /// `None` for a disabled account.
     pub async fn load(db: &Db, id: i64) -> sqlx::Result<Option<AuthUser>> {
-        let row: Option<(i64, String, bool, bool, Option<i64>)> =
-            sqlx::query_as("SELECT id, username, is_admin, all_libraries, max_age FROM users WHERE id = ?")
-                .bind(id)
-                .fetch_optional(&db.read)
-                .await?;
+        let row: Option<(i64, String, bool, bool, Option<i64>)> = sqlx::query_as(
+            "SELECT id, username, is_admin, all_libraries, max_age FROM users WHERE id = ? AND NOT disabled",
+        )
+        .bind(id)
+        .fetch_optional(&db.read)
+        .await?;
         Ok(row.map(|(id, username, is_admin, all_libraries, max_age)| AuthUser {
             id,
             username,
             is_admin,
             all_libraries,
             max_age: if is_admin { None } else { max_age },
+            app: None,
         }))
     }
 }
@@ -112,6 +141,17 @@ pub fn new_token() -> String {
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// A session token from `draw`, never one that looks like an app's token
+/// (drawn again, which practically never happens).
+fn session_token(mut draw: impl FnMut() -> String) -> String {
+    loop {
+        let token = draw();
+        if !token.starts_with(APP_TOKEN_PREFIX) {
+            return token;
+        }
+    }
 }
 
 pub fn hash_token(token: &str) -> String {
@@ -299,9 +339,21 @@ struct CachedSession {
     touched_at: i64,
 }
 
+struct CachedApp {
+    user: AuthUser,
+    /// When the token, or its grant, stops working.
+    expires_at: i64,
+    cached_at: Instant,
+}
+
 pub struct AuthService {
     db: Db,
     cache: DashMap<String, CachedSession>,
+    /// App access tokens, like `cache` but never extended.
+    apps: DashMap<String, CachedApp>,
+    /// Bumped by every forget before it forgets: a validation that read the
+    /// database before a forget doesn't cache what it read.
+    epoch: AtomicU64,
     /// Failed password and PIN attempts.
     pub throttle: crate::accounts::Throttle,
     /// The code that sets up a server without accounts from elsewhere.
@@ -310,7 +362,14 @@ pub struct AuthService {
 
 impl AuthService {
     pub fn new(db: Db) -> Self {
-        Self { db, cache: DashMap::new(), throttle: Default::default(), setup: Default::default() }
+        Self {
+            db,
+            cache: DashMap::new(),
+            apps: DashMap::new(),
+            epoch: AtomicU64::new(0),
+            throttle: Default::default(),
+            setup: Default::default(),
+        }
     }
 
     pub async fn create_session(
@@ -319,7 +378,7 @@ impl AuthService {
         user_agent: Option<&str>,
         ip: Option<&str>,
     ) -> Result<String, AppError> {
-        let token = new_token();
+        let token = session_token(new_token);
         let now = now();
         sqlx::query(
             "INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at, user_agent, last_ip)
@@ -337,7 +396,12 @@ impl AuthService {
         Ok(token)
     }
 
+    /// The user of a session token. Never of an app's token: those go
+    /// through [`AuthService::validate_app`].
     pub async fn validate(&self, token: &str) -> Option<AuthUser> {
+        if token.starts_with(APP_TOKEN_PREFIX) {
+            return None;
+        }
         let key = hash_token(token);
         let now = now();
         if let Some(entry) = self.cache.get(&key) {
@@ -362,7 +426,14 @@ impl AuthService {
             self.cache.remove(&key);
             return None;
         }
-        let user = AuthUser { id, username, is_admin, all_libraries, max_age: if is_admin { None } else { max_age } };
+        let user = AuthUser {
+            id,
+            username,
+            is_admin,
+            all_libraries,
+            max_age: if is_admin { None } else { max_age },
+            app: None,
+        };
         let mut touched_at = last_seen_at;
         if now - last_seen_at > TOUCH_INTERVAL_SECS {
             // Sliding expiration, written at most every few minutes.
@@ -384,16 +455,206 @@ impl AuthService {
         let _ = sqlx::query("DELETE FROM sessions WHERE token_hash = ?").bind(key).execute(&self.db.write).await;
     }
 
-    /// Drop cached sessions of a user (password change, deletion, role change).
+    /// Drop cached sessions of a user (password change, deletion, role
+    /// change), and the cached tokens of apps acting as them or allowed by
+    /// them.
     pub fn forget_user(&self, user_id: i64) {
+        self.epoch.fetch_add(1, Ordering::SeqCst);
         self.cache.retain(|_, s| s.user.id != user_id);
+        self.apps
+            .retain(|_, a| a.user.id != user_id && a.user.app.as_ref().is_none_or(|app| app.approved_by != user_id));
+    }
+
+    /// Drop the cached tokens of these grants (ended, or changed).
+    pub fn forget_grants(&self, grant_ids: &[i64]) {
+        self.epoch.fetch_add(1, Ordering::SeqCst);
+        self.apps.retain(|_, a| a.user.app.as_ref().is_none_or(|app| !grant_ids.contains(&app.grant_id)));
+    }
+
+    /// Drop every cached app token.
+    pub fn forget_apps(&self) {
+        self.epoch.fetch_add(1, Ordering::SeqCst);
+        self.apps.clear();
     }
 
     pub async fn purge_expired(&self) {
         let _ = sqlx::query("DELETE FROM sessions WHERE expires_at <= ?").bind(now()).execute(&self.db.write).await;
+        if let Err(err) = grants::purge(&self.db).await {
+            tracing::warn!("could not forget apps' expired tokens: {err}");
+        }
         let now = now();
         self.cache.retain(|_, s| s.expires_at > now && s.touched_at > 0);
+        self.apps.retain(|_, a| a.expires_at > now);
     }
+
+    /// The user an app's access token acts as, with the app's rights: never
+    /// an administrator's; every library and no age limit for an
+    /// administrator's role, the profile's limits otherwise. Not for an
+    /// expired token, an ended grant, or a disabled profile or approver.
+    /// Never extended: apps refresh their tokens.
+    pub async fn validate_app(&self, token: &str) -> Option<AuthUser> {
+        if !token.starts_with(ACCESS_PREFIX) {
+            return None;
+        }
+        let key = hash_token(token);
+        let now = now();
+        if let Some(entry) = self.apps.get(&key) {
+            if entry.cached_at.elapsed() < CACHE_TTL && entry.expires_at > now {
+                return Some(entry.user.clone());
+            }
+        }
+        let epoch = self.epoch.load(Ordering::SeqCst);
+        let row: Option<AppRow> = sqlx::query_as(
+            "SELECT u.id, u.username, u.is_admin AS role_admin, u.all_libraries, u.max_age, u.disabled,
+                    a.disabled AS approver_disabled, t.expires_at AS token_expires, g.id AS grant_id, g.client_id,
+                    g.scope, g.approved_by, g.expires_at AS grant_expires, g.ends_at
+             FROM app_tokens t
+             JOIN app_grants g ON g.id = t.grant_id
+             JOIN users u ON u.id = g.user_id
+             JOIN users a ON a.id = g.approved_by
+             WHERE t.token_hash = ? AND t.kind = 'access'",
+        )
+        .bind(&key)
+        .fetch_optional(&self.db.read)
+        .await
+        .ok()?;
+        let Some(row) = row else {
+            self.apps.remove(&key);
+            return None;
+        };
+        let expires_at = row.token_expires.min(row.grant_expires).min(row.ends_at.unwrap_or(i64::MAX));
+        if expires_at <= now || row.disabled || row.approver_disabled {
+            self.apps.remove(&key);
+            return None;
+        }
+        let user = AuthUser {
+            id: row.id,
+            username: row.username,
+            is_admin: false,
+            all_libraries: row.all_libraries || row.role_admin,
+            max_age: if row.role_admin { None } else { row.max_age },
+            app: Some(Arc::new(AppAccess {
+                grant_id: row.grant_id,
+                client_id: row.client_id.into(),
+                scopes: Scopes::from_stored(&row.scope),
+                approved_by: row.approved_by,
+            })),
+        };
+        self.remember_app(key, CachedApp { user: user.clone(), expires_at, cached_at: Instant::now() }, epoch);
+        Some(user)
+    }
+
+    /// Caches an app token read while the epoch was `epoch`, unless
+    /// something was forgotten since: what was read may be gone.
+    fn remember_app(&self, key: String, entry: CachedApp, epoch: u64) {
+        if self.epoch.load(Ordering::SeqCst) != epoch {
+            return;
+        }
+        self.apps.insert(key.clone(), entry);
+        // A forget between the check and the insert has bumped the epoch
+        // already, and its sweep may have missed this entry.
+        if self.epoch.load(Ordering::SeqCst) != epoch {
+            self.apps.remove(&key);
+        }
+    }
+
+    /// The user of a session token or of an app's access token.
+    pub async fn validate_any(&self, token: &str) -> Option<AuthUser> {
+        if token.starts_with(ACCESS_PREFIX) { self.validate_app(token).await } else { self.validate(token).await }
+    }
+
+    /// Records what a person allowed an app; its first tokens.
+    pub async fn issue(&self, grant: NewGrant) -> Result<Issued, AppError> {
+        let (issued, dropped) = grants::issue(&self.db, grant).await?;
+        if !dropped.is_empty() {
+            self.forget_grants(&dropped);
+        }
+        Ok(issued)
+    }
+
+    /// Exchanges an app's refresh token (see [`grants::refresh`]).
+    pub async fn refresh(&self, input: RefreshInput) -> Result<Issued, RefreshError> {
+        let client = input.client_id.clone();
+        let result = grants::refresh(&self.db, input).await;
+        match &result {
+            // Its oldest access tokens may be gone.
+            Ok(issued) => self.forget_grants(&[issued.grant_id]),
+            Err(RefreshError::Reused { grant_id }) => {
+                tracing::warn!("{client} showed a spent refresh token (someone has a copy): its access is ended");
+                self.forget_grants(&[*grant_id]);
+            }
+            Err(RefreshError::Ended { grant_id }) => {
+                tracing::warn!("{client} refreshed its tokens too often: its access is ended");
+                self.forget_grants(&[*grant_id]);
+            }
+            Err(_) => {}
+        }
+        result
+    }
+
+    /// Ends the grant of an app token (access or refresh, spent or not);
+    /// with `client_id`, only when it is that app's. Whether one ended.
+    pub async fn revoke_app_token(&self, token: &str, client_id: Option<&str>) -> bool {
+        let Ok(Some((grant_id, owner))) = grants::find_grant_of_token(&self.db, token).await else { return false };
+        if client_id.is_some_and(|client| client != owner) {
+            return false;
+        }
+        self.end_grant(grant_id).await.unwrap_or(false)
+    }
+
+    /// Ends one grant; whether there was one.
+    pub async fn end_grant(&self, grant_id: i64) -> Result<bool, AppError> {
+        let ended = grants::delete(&self.db, grant_id).await?;
+        self.forget_grants(&[grant_id]);
+        Ok(ended)
+    }
+
+    /// Ends the apps acting as `user_id` or allowed by them; their grants.
+    pub async fn end_apps(&self, user_id: i64) -> Result<Vec<i64>, AppError> {
+        let ended = grants::delete_for(&self.db, user_id).await?;
+        self.forget_grants(&ended);
+        Ok(ended)
+    }
+
+    /// Ends the grants of every app but `clients`; their ids.
+    pub async fn end_grants_except_clients(&self, clients: &[&str]) -> Result<Vec<i64>, AppError> {
+        let ended = grants::delete_except_clients(&self.db, clients).await?;
+        self.forget_grants(&ended);
+        Ok(ended)
+    }
+
+    /// Signs `user_id` out everywhere: their sessions but the one whose hash
+    /// is `keep_session_hash`, then every app acting as them or allowed by
+    /// them.
+    pub async fn sign_out_everywhere(&self, user_id: i64, keep_session_hash: Option<&str>) -> Result<(), AppError> {
+        sqlx::query("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?")
+            .bind(user_id)
+            .bind(keep_session_hash.unwrap_or_default())
+            .execute(&self.db.write)
+            .await?;
+        self.end_apps(user_id).await?;
+        self.forget_user(user_id);
+        Ok(())
+    }
+}
+
+/// What [`AuthService::validate_app`] reads about a token.
+#[derive(sqlx::FromRow)]
+struct AppRow {
+    id: i64,
+    username: String,
+    role_admin: bool,
+    all_libraries: bool,
+    max_age: Option<i64>,
+    disabled: bool,
+    approver_disabled: bool,
+    token_expires: i64,
+    grant_id: i64,
+    client_id: String,
+    scope: String,
+    approved_by: i64,
+    grant_expires: i64,
+    ends_at: Option<i64>,
 }
 
 /// Token from `Authorization: Bearer`, `X-Pley-Token`, the session cookie, or `?token=`.
@@ -407,17 +668,19 @@ pub fn token_without_cookie(parts: &Parts) -> Option<String> {
     header_token(parts).or_else(|| query_token(parts))
 }
 
-fn header_token(parts: &Parts) -> Option<String> {
-    let headers = &parts.headers;
-    if let Some(v) = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()) {
-        if let Some(token) = v.strip_prefix("Bearer ") {
-            return Some(token.trim().to_owned());
-        }
-    }
-    headers.get("x-pley-token").and_then(|v| v.to_str().ok()).map(|v| v.trim().to_owned())
+/// The token of `Authorization: Bearer`, the scheme in any letter case.
+fn bearer_token(parts: &Parts) -> Option<String> {
+    let value = parts.headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    let (scheme, token) = value.split_once(' ')?;
+    scheme.eq_ignore_ascii_case("bearer").then(|| token.trim().to_owned())
 }
 
-fn cookie_token(parts: &Parts) -> Option<String> {
+fn header_token(parts: &Parts) -> Option<String> {
+    bearer_token(parts)
+        .or_else(|| parts.headers.get("x-pley-token").and_then(|v| v.to_str().ok()).map(|v| v.trim().to_owned()))
+}
+
+pub(crate) fn cookie_token(parts: &Parts) -> Option<String> {
     for cookie_header in parts.headers.get_all(header::COOKIE) {
         let Ok(cookies) = cookie_header.to_str() else { continue };
         for pair in cookies.split(';') {
@@ -470,17 +733,61 @@ impl<S: Send + Sync> FromRequestParts<S> for ClientIp {
     }
 }
 
+/// The user a request was authenticated as, kept for its other extractors.
+/// Private, so nothing else can put a user there.
+#[derive(Clone)]
+struct Authenticated(AuthUser);
+
+/// Every pley API handler that needs a user goes through here: sessions as
+/// always, and app tokens only from `Authorization: Bearer`, and only on the
+/// routes their scopes open ([`scopes::APP_ROUTES`]: any other route is
+/// closed to apps).
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
-        if let Some(user) = parts.extensions.get::<AuthUser>() {
-            return Ok(user.clone());
+        let user = match parts.extensions.get::<Authenticated>() {
+            Some(Authenticated(user)) => user.clone(),
+            None => {
+                let user = authenticate(parts, state).await?;
+                parts.extensions.insert(Authenticated(user.clone()));
+                user
+            }
+        };
+        if let Some(app) = &user.app {
+            app_may_use(parts, app)?;
         }
-        let token = token_from_parts(parts).ok_or(AppError::Unauthorized)?;
-        let user = state.auth.validate(&token).await.ok_or(AppError::Unauthorized)?;
-        parts.extensions.insert(user.clone());
         Ok(user)
+    }
+}
+
+async fn authenticate(parts: &Parts, state: &AppState) -> Result<AuthUser, AppError> {
+    if let Some(token) = bearer_token(parts) {
+        if token.starts_with(ACCESS_PREFIX) {
+            return state.auth.validate_app(&token).await.ok_or(AppError::InvalidToken);
+        }
+        if token.starts_with(APP_TOKEN_PREFIX) {
+            // A refresh token is no bearer token.
+            return Err(AppError::InvalidToken);
+        }
+    }
+    let token = token_from_parts(parts).ok_or(AppError::Unauthorized)?;
+    if token.starts_with(APP_TOKEN_PREFIX) {
+        // In X-Pley-Token, a cookie or the URL (where logs and Referer
+        // headers keep it): refused, with no other token tried.
+        return Err(AppError::TokenPlacement);
+    }
+    state.auth.validate(&token).await.ok_or(AppError::Unauthorized)
+}
+
+/// Whether the app's token opens the route of this request.
+fn app_may_use(parts: &Parts, app: &AppAccess) -> Result<(), AppError> {
+    let path = parts.extensions.get::<MatchedPath>().map(MatchedPath::as_str);
+    match path.and_then(|path| scopes::required(&parts.method, path)) {
+        None => Err(AppError::InsufficientScope(None)),
+        Some(Need::AnyApp) => Ok(()),
+        Some(Need::Scope(scope)) if app.scopes.contains(scope) => Ok(()),
+        Some(Need::Scope(scope)) => Err(AppError::InsufficientScope(Some(scope.name()))),
     }
 }
 
@@ -643,7 +950,14 @@ mod tests {
         let user = auth.validate(&token).await.unwrap();
         assert_eq!(
             user,
-            AuthUser { id: 1, username: "kid".into(), is_admin: false, all_libraries: false, max_age: Some(12) }
+            AuthUser {
+                id: 1,
+                username: "kid".into(),
+                is_admin: false,
+                all_libraries: false,
+                max_age: Some(12),
+                app: None
+            }
         );
         let admin = auth.create_session(2, None, None).await.unwrap();
         let admin = auth.validate(&admin).await.unwrap();
@@ -706,5 +1020,166 @@ mod tests {
                 .unwrap();
         assert!(last_seen > stale);
         assert!(expires >= now() + SESSION_TTL_SECS - 5, "a full lifetime again");
+    }
+
+    /// Tokens of an app acting as `user_id`, allowed by `approved_by`.
+    async fn app_of(auth: &AuthService, user_id: i64, approved_by: i64) -> Issued {
+        auth.issue(NewGrant {
+            user_id,
+            approved_by,
+            client_id: "https://hhaidar.github.io/pley/oauth/android.json".into(),
+            client_name: None,
+            scopes: Scopes::parse("library play").unwrap(),
+            refresh: true,
+            first_party: true,
+            user_agent: None,
+            ip: None,
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn app_tokens_act_without_administrator_rights() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_db, auth) = service_with_user(dir.path()).await;
+        let admin = app_of(&auth, 2, 2).await;
+        let user = auth.validate_app(&admin.access_token).await.unwrap();
+        assert!(!user.is_admin, "never an administrator through an app");
+        assert!(user.all_libraries, "an administrator's role sees every library");
+        assert_eq!(user.max_age, None, "and has no age limit");
+        let app = user.app.as_deref().unwrap();
+        assert_eq!((app.grant_id, app.approved_by), (admin.grant_id, 2));
+        assert_eq!(app.scopes.to_string(), "library play");
+        assert_eq!(&*app.client_id, "https://hhaidar.github.io/pley/oauth/android.json");
+
+        let kid = app_of(&auth, 1, 1).await;
+        let kid = auth.validate_app(&kid.access_token).await.unwrap();
+        assert_eq!((kid.id, kid.is_admin, kid.all_libraries, kid.max_age), (1, false, false, Some(12)));
+        assert!(auth.validate_any(&admin.access_token).await.is_some_and(|u| u.app.is_some()));
+        assert!(auth.validate_app(admin.refresh_token.as_ref().unwrap()).await.is_none(), "no refresh token");
+        assert!(auth.validate_app("pley_at_unknown").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn disabled_users_and_approvers_stop_their_apps() {
+        let dir = tempfile::tempdir().unwrap();
+        let (db, auth) = service_with_user(dir.path()).await;
+        // The kid's profile, allowed by the administrator.
+        let issued = app_of(&auth, 1, 2).await;
+        for id in [1, 2] {
+            sqlx::query("UPDATE users SET disabled = 1 WHERE id = ?").bind(id).execute(&db.write).await.unwrap();
+            auth.forget_user(id);
+            assert!(auth.validate_app(&issued.access_token).await.is_none(), "user {id} disabled");
+            sqlx::query("UPDATE users SET disabled = 0 WHERE id = ?").bind(id).execute(&db.write).await.unwrap();
+            auth.forget_user(id);
+            assert!(auth.validate_app(&issued.access_token).await.is_some(), "user {id} enabled again");
+        }
+        sqlx::query("UPDATE app_tokens SET expires_at = ? WHERE kind = 'access'")
+            .bind(now() - 1)
+            .execute(&db.write)
+            .await
+            .unwrap();
+        auth.forget_apps();
+        assert!(auth.validate_app(&issued.access_token).await.is_none(), "expired");
+    }
+
+    #[tokio::test]
+    async fn forgetting_reaches_cached_app_tokens() {
+        let dir = tempfile::tempdir().unwrap();
+        let (db, auth) = service_with_user(dir.path()).await;
+        let disable = |id: i64, off: bool| {
+            let db = db.clone();
+            async move {
+                sqlx::query("UPDATE users SET disabled = ? WHERE id = ?")
+                    .bind(off)
+                    .bind(id)
+                    .execute(&db.write)
+                    .await
+                    .unwrap();
+            }
+        };
+        let issued = app_of(&auth, 1, 2).await;
+        let token = issued.access_token.as_str();
+        assert!(auth.validate_app(token).await.is_some());
+
+        // The profile it acts as.
+        disable(1, true).await;
+        assert!(auth.validate_app(token).await.is_some(), "served from the cache");
+        auth.forget_user(1);
+        assert!(auth.validate_app(token).await.is_none());
+        disable(1, false).await;
+        assert!(auth.validate_app(token).await.is_some());
+
+        // Who allowed it.
+        disable(2, true).await;
+        assert!(auth.validate_app(token).await.is_some(), "served from the cache");
+        auth.forget_user(2);
+        assert!(auth.validate_app(token).await.is_none());
+        disable(2, false).await;
+        assert!(auth.validate_app(token).await.is_some());
+
+        // Its grant, and every app.
+        let other = app_of(&auth, 2, 2).await;
+        assert!(auth.validate_app(&other.access_token).await.is_some());
+        sqlx::query("DELETE FROM app_grants").execute(&db.write).await.unwrap();
+        assert!(auth.validate_app(token).await.is_some(), "served from the cache");
+        auth.forget_grants(&[issued.grant_id]);
+        assert!(auth.validate_app(token).await.is_none());
+        assert!(auth.validate_app(&other.access_token).await.is_some(), "another grant stays cached");
+        auth.forget_apps();
+        assert!(auth.validate_app(&other.access_token).await.is_none());
+
+        // A validation that read the database before a forget doesn't cache.
+        let again = app_of(&auth, 1, 1).await;
+        let key = hash_token(&again.access_token);
+        let user = auth.validate_app(&again.access_token).await.unwrap();
+        auth.apps.clear();
+        let epoch = auth.epoch.load(Ordering::SeqCst);
+        auth.forget_grants(&[again.grant_id]);
+        let entry = CachedApp { user, expires_at: now() + 60, cached_at: Instant::now() };
+        auth.remember_app(key.clone(), entry, epoch);
+        assert!(!auth.apps.contains_key(&key));
+    }
+
+    #[tokio::test]
+    async fn session_validation_never_accepts_app_tokens() {
+        let dir = tempfile::tempdir().unwrap();
+        let (db, auth) = service_with_user(dir.path()).await;
+        let issued = app_of(&auth, 1, 1).await;
+        // Even a session stored under the same hash.
+        sqlx::query(
+            "INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at) VALUES (?, 1, 0, 0, ?)",
+        )
+        .bind(hash_token(&issued.access_token))
+        .bind(now() + 3600)
+        .execute(&db.write)
+        .await
+        .unwrap();
+        assert!(auth.validate(&issued.access_token).await.is_none());
+        assert!(auth.validate(issued.refresh_token.as_ref().unwrap()).await.is_none());
+        let session = auth.create_session(1, None, None).await.unwrap();
+        assert!(auth.validate_app(&session).await.is_none(), "and the other way round");
+        assert!(auth.validate_any(&session).await.is_some_and(|u| u.app.is_none()));
+    }
+
+    #[test]
+    fn session_tokens_never_start_like_app_tokens() {
+        let mut draws = ["pley_at_x", "pley_abc", "pleyfine"].into_iter().map(str::to_owned);
+        assert_eq!(session_token(|| draws.next().unwrap()), "pleyfine");
+        assert!(!session_token(new_token).starts_with(APP_TOKEN_PREFIX));
+    }
+
+    #[test]
+    fn bearer_is_case_insensitive() {
+        for header in ["Bearer abc", "bearer abc", "BEARER abc", "bEaReR   abc "] {
+            let parts = axum::http::Request::builder().header("authorization", header).body(()).unwrap().into_parts().0;
+            assert_eq!(bearer_token(&parts).as_deref(), Some("abc"), "{header}");
+            assert_eq!(token_from_parts(&parts).as_deref(), Some("abc"), "{header}");
+        }
+        for header in ["Basic abc", "Bearerabc", "Bearer"] {
+            let parts = axum::http::Request::builder().header("authorization", header).body(()).unwrap().into_parts().0;
+            assert_eq!(bearer_token(&parts), None, "{header}");
+        }
     }
 }

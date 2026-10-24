@@ -454,6 +454,9 @@ pub struct Session {
     pub job_id: Mutex<Option<String>>,
     pub started_at: i64,
     pub play: Mutex<PlayState>,
+    /// The app grant whose token started it (`None`: a session token). The
+    /// Plex API's token-less session files refuse these.
+    pub app_grant: Option<i64>,
     /// Serialises job re-creation when the transcoder lost the job.
     pub recreate: tokio::sync::Mutex<()>,
     last_transcoder_touch: AtomicI64,
@@ -492,6 +495,7 @@ impl Session {
             job_id: Mutex::new(job_id),
             started_at: now,
             play: Mutex::new(PlayState { position_ms: start_ms, state: "playing".into(), updated_at: now }),
+            app_grant: None,
             recreate: tokio::sync::Mutex::new(()),
             last_transcoder_touch: AtomicI64::new(now),
             quiet: AtomicBool::new(false),

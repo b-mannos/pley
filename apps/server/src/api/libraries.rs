@@ -63,14 +63,22 @@ pub(crate) async fn visible_library(state: &AppState, user: &AuthUser, id: i64) 
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<LibraryDto>>> {
     let mut out = Vec::new();
     for lib in access::visible_libraries(&state.db, &user).await? {
-        out.push(to_dto(&state, &lib).await?);
+        out.push(for_user(&user, to_dto(&state, &lib).await?));
     }
     Ok(Json(out))
 }
 
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<Json<LibraryDto>> {
     let lib = visible_library(&state, &user, id).await?;
-    Ok(Json(to_dto(&state, &lib).await?))
+    Ok(Json(for_user(&user, to_dto(&state, &lib).await?)))
+}
+
+/// Apps aren't told where the server keeps its media.
+fn for_user(user: &AuthUser, mut dto: LibraryDto) -> LibraryDto {
+    if user.app.is_some() {
+        dto.paths.clear();
+    }
+    dto
 }
 
 #[derive(Deserialize)]

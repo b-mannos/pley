@@ -326,8 +326,10 @@ pub type PlexResult<T> = Result<T, PlexError>;
 impl From<AppError> for PlexError {
     fn from(err: AppError) -> Self {
         match err {
-            AppError::Unauthorized | AppError::TwoStep(_) => PlexError::Unauthorized,
-            AppError::Forbidden(_) => PlexError::Forbidden,
+            AppError::Unauthorized | AppError::TwoStep(_) | AppError::InvalidToken | AppError::TokenPlacement => {
+                PlexError::Unauthorized
+            }
+            AppError::Forbidden(_) | AppError::InsufficientScope(_) => PlexError::Forbidden,
             AppError::NotFound(_) => PlexError::NotFound,
             AppError::BadRequest(m) | AppError::Conflict(m) => PlexError::BadRequest(m),
             AppError::Unavailable(m) | AppError::TooManyRequests(m) => PlexError::Unavailable(m),
@@ -408,9 +410,10 @@ impl FromRequestParts<AppState> for PlexAdmin {
 
 /// The token of a Plex request: `X-Plex-Token` (header or query), or a
 /// bearer token. Never the web UI's cookie: pages on other sites could make
-/// a browser send that.
+/// a browser send that. Never an app's token (`pley_…`): apps use pley's
+/// own API only, within what they were allowed.
 pub(super) fn request_token(parts: &Parts) -> Option<String> {
-    plex_token(parts).or_else(|| token_without_cookie(parts))
+    plex_token(parts).or_else(|| token_without_cookie(parts)).filter(|token| !token.starts_with("pley_"))
 }
 
 fn plex_token(parts: &Parts) -> Option<String> {

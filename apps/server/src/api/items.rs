@@ -67,6 +67,15 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i
             }
         }
     }
+    // Apps get the file names, not where the server keeps them.
+    if user.app.is_some() {
+        for file in &mut detail.files {
+            file.path = std::path::Path::new(&file.path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+        }
+    }
     Ok(Json(detail))
 }
 

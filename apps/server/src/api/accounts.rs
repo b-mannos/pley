@@ -503,7 +503,21 @@ pub async fn delete_avatar(State(state): State<AppState>, user: AuthUser) -> Api
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn avatar(State(state): State<AppState>, _user: AuthUser, Path(id): Path<i64>) -> ApiResult<Response> {
+pub async fn avatar(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<Response> {
+    // Apps see their own profile's picture, and those of its household.
+    if user.app.is_some() && id != user.id {
+        let household: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM users me, users them
+                            WHERE me.id = ? AND them.id = ? AND me.home AND them.home AND NOT them.disabled)",
+        )
+        .bind(user.id)
+        .bind(id)
+        .fetch_one(&state.db.read)
+        .await?;
+        if !household {
+            return Err(AppError::not_found("no picture"));
+        }
+    }
     let file: Option<Option<String>> =
         sqlx::query_scalar("SELECT avatar FROM users WHERE id = ?").bind(id).fetch_optional(&state.db.read).await?;
     let file = file.flatten().ok_or_else(|| AppError::not_found("no picture"))?;

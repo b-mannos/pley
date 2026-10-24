@@ -1,0 +1,238 @@
+//! What an app may do with its token: the scopes a person allows on pley's
+//! own page, and the routes each one opens. Everything else stays closed to
+//! apps (administration, sign-in settings, devices, the Plex-compatible API):
+//! there is no scope for it.
+
+use std::fmt;
+
+use axum::http::Method;
+
+/// One thing an app may be allowed to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Scope {
+    /// See the profile's libraries, playlists and watch history.
+    Library,
+    /// Play, and keep the place, watched marks, ratings and track choices.
+    Play,
+    /// Make, change and delete playlists.
+    Playlists,
+}
+
+impl Scope {
+    /// Every scope, in the order they are written and shown.
+    pub const ALL: [Scope; 3] = [Scope::Library, Scope::Play, Scope::Playlists];
+
+    /// The name in `scope` parameters and answers.
+    pub fn name(self) -> &'static str {
+        match self {
+            Scope::Library => "library",
+            Scope::Play => "play",
+            Scope::Playlists => "playlists",
+        }
+    }
+
+    /// What it allows, in the words of the consent page, the profile being
+    /// the one the app acts as: "this app wasn't allowed to <words>".
+    pub fn words(self) -> &'static str {
+        match self {
+            Scope::Library => "see the profile's libraries, playlists and watch history",
+            Scope::Play => "play titles, and keep the profile's place, watched marks, ratings and track choices",
+            Scope::Playlists => "make, change and delete the profile's playlists",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Scope> {
+        Scope::ALL.into_iter().find(|scope| scope.name() == name)
+    }
+
+    fn bit(self) -> u8 {
+        1 << (self as u8)
+    }
+}
+
+/// A set of scopes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Scopes(u8);
+
+impl Scopes {
+    /// Every scope there is.
+    pub fn all() -> Scopes {
+        Scope::ALL.into_iter().fold(Scopes::default(), Scopes::with)
+    }
+
+    /// A `scope` parameter: names separated by spaces, each known. The name
+    /// that isn't is the error ("openid" among them: pley signs nobody in to
+    /// other sites).
+    pub fn parse(text: &str) -> Result<Scopes, String> {
+        let mut scopes = Scopes::default();
+        for name in text.split(' ').filter(|name| !name.is_empty()) {
+            scopes = scopes.with(Scope::from_name(name).ok_or_else(|| name.to_owned())?);
+        }
+        Ok(scopes)
+    }
+
+    /// A scope stored with a grant. Names this version doesn't know (from a
+    /// newer one) are left out rather than refused.
+    pub fn from_stored(text: &str) -> Scopes {
+        text.split(' ').filter_map(Scope::from_name).fold(Scopes::default(), Scopes::with)
+    }
+
+    pub fn with(self, scope: Scope) -> Scopes {
+        Scopes(self.0 | scope.bit())
+    }
+
+    pub fn contains(self, scope: Scope) -> bool {
+        self.0 & scope.bit() != 0
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn is_subset_of(self, other: Scopes) -> bool {
+        self.0 & !other.0 == 0
+    }
+
+    /// The names, in the fixed order of [`Scope::ALL`].
+    pub fn names(self) -> Vec<&'static str> {
+        Scope::ALL.into_iter().filter(|scope| self.contains(*scope)).map(Scope::name).collect()
+    }
+}
+
+impl fmt::Display for Scopes {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.names().join(" "))
+    }
+}
+
+/// What an app's token needs for a route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Need {
+    /// Any app token (who it acts as, and pictures of its household).
+    AnyApp,
+    Scope(Scope),
+}
+
+use Need::AnyApp;
+use Scope::{Library, Play, Playlists};
+
+/// The routes apps may use: (method, path as routed, with `/api`, what the
+/// token needs). HEAD is looked up as GET.
+///
+/// A route missing from this table is closed to apps: a route added to
+/// `api/mod.rs` stays first-party until it is added here on purpose
+/// (tests/app_tokens.rs checks that every route is classified, and that
+/// every entry here names a real route).
+pub const APP_ROUTES: &[(&str, &str, Need)] = &[
+    // Any app.
+    ("GET", "/api/auth/me", AnyApp),
+    ("GET", "/api/users/{id}/avatar", AnyApp),
+    // library
+    ("GET", "/api/libraries", Need::Scope(Library)),
+    ("GET", "/api/libraries/{id}", Need::Scope(Library)),
+    ("GET", "/api/libraries/{id}/items", Need::Scope(Library)),
+    ("GET", "/api/libraries/{id}/filters", Need::Scope(Library)),
+    ("GET", "/api/libraries/{id}/hubs", Need::Scope(Library)),
+    ("GET", "/api/libraries/{id}/collections", Need::Scope(Library)),
+    ("GET", "/api/collections/{id}", Need::Scope(Library)),
+    ("GET", "/api/collections/{id}/images/{kind}", Need::Scope(Library)),
+    ("GET", "/api/playlists", Need::Scope(Library)),
+    ("GET", "/api/playlists/{id}", Need::Scope(Library)),
+    ("GET", "/api/items/{id}", Need::Scope(Library)),
+    ("GET", "/api/items/{id}/children", Need::Scope(Library)),
+    ("GET", "/api/items/{id}/on-deck", Need::Scope(Library)),
+    ("GET", "/api/items/{id}/next", Need::Scope(Library)),
+    ("GET", "/api/items/{id}/related", Need::Scope(Library)),
+    ("GET", "/api/items/{id}/images/{kind}", Need::Scope(Library)),
+    ("GET", "/api/items/{id}/collections", Need::Scope(Library)),
+    ("GET", "/api/people/{id}", Need::Scope(Library)),
+    ("GET", "/api/people/{id}/photo", Need::Scope(Library)),
+    ("GET", "/api/history", Need::Scope(Library)),
+    ("GET", "/api/hubs/home", Need::Scope(Library)),
+    ("GET", "/api/search", Need::Scope(Library)),
+    ("GET", "/api/events", Need::Scope(Library)),
+    // play
+    ("POST", "/api/playback", Need::Scope(Play)),
+    ("GET", "/api/playback/{session}", Need::Scope(Play)),
+    ("DELETE", "/api/playback/{session}", Need::Scope(Play)),
+    ("GET", "/api/playback/{session}/{file}", Need::Scope(Play)),
+    ("GET", "/api/files/{id}/stream", Need::Scope(Play)),
+    ("GET", "/api/files/{id}/subtitles/{file}", Need::Scope(Play)),
+    ("GET", "/api/files/{id}/trickplay", Need::Scope(Play)),
+    ("GET", "/api/files/{id}/trickplay/{sheet}", Need::Scope(Play)),
+    ("GET", "/api/files/{id}/chapters/{image}", Need::Scope(Play)),
+    ("POST", "/api/items/{id}/prefetch", Need::Scope(Play)),
+    ("POST", "/api/items/{id}/progress", Need::Scope(Play)),
+    ("POST", "/api/items/{id}/watched", Need::Scope(Play)),
+    ("POST", "/api/items/{id}/unwatched", Need::Scope(Play)),
+    ("PUT", "/api/items/{id}/streams", Need::Scope(Play)),
+    ("PUT", "/api/items/{id}/rating", Need::Scope(Play)),
+    ("DELETE", "/api/history/{id}", Need::Scope(Play)),
+    // playlists
+    ("POST", "/api/playlists", Need::Scope(Playlists)),
+    ("PATCH", "/api/playlists/{id}", Need::Scope(Playlists)),
+    ("DELETE", "/api/playlists/{id}", Need::Scope(Playlists)),
+    ("POST", "/api/playlists/{id}/items", Need::Scope(Playlists)),
+    ("DELETE", "/api/playlists/{id}/items/{entry_id}", Need::Scope(Playlists)),
+    ("PUT", "/api/playlists/{id}/order", Need::Scope(Playlists)),
+];
+
+/// What an app's token needs for `method` on the routed `path`; `None`:
+/// apps may not use it at all.
+pub fn required(method: &Method, path: &str) -> Option<Need> {
+    let method = if method == Method::HEAD { "GET" } else { method.as_str() };
+    APP_ROUTES.iter().find(|(m, p, _)| *m == method && *p == path).map(|(_, _, need)| *need)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scopes_parse_and_print() {
+        let scopes = Scopes::parse("playlists library").unwrap();
+        assert_eq!(scopes.to_string(), "library playlists", "always in the same order");
+        assert_eq!(Scopes::parse("play  play library").unwrap().to_string(), "library play", "duplicates once");
+        assert_eq!(Scopes::parse("").unwrap(), Scopes::default());
+        assert_eq!(Scopes::parse("openid library"), Err("openid".to_owned()));
+        assert_eq!(Scopes::parse("library admin"), Err("admin".to_owned()));
+        assert_eq!(Scopes::parse("Library"), Err("Library".to_owned()), "names are lower case");
+        assert_eq!(Scopes::parse("library\tplay"), Err("library\tplay".to_owned()), "spaces only");
+        assert_eq!(Scopes::from_stored("library future play"), Scopes::parse("library play").unwrap());
+        assert_eq!(Scopes::all().to_string(), "library play playlists");
+        assert_eq!(Scopes::all().names(), ["library", "play", "playlists"]);
+
+        let library = Scopes::default().with(Scope::Library);
+        assert!(library.contains(Scope::Library) && !library.contains(Scope::Play));
+        assert!(library.is_subset_of(Scopes::all()) && library.is_subset_of(library));
+        assert!(!Scopes::all().is_subset_of(library));
+        assert!(Scopes::default().is_subset_of(library) && Scopes::default().is_empty());
+        for scope in Scope::ALL {
+            assert_eq!(Scope::from_name(scope.name()), Some(scope));
+            assert!(!scope.words().is_empty());
+        }
+    }
+
+    #[test]
+    fn every_app_route_is_on_a_real_path() {
+        // Whether each names a route of api/mod.rs is checked by
+        // tests/app_tokens.rs, which reads it.
+        assert_eq!(APP_ROUTES.len(), 47);
+        for (i, (method, path, _)) in APP_ROUTES.iter().enumerate() {
+            assert!(["GET", "POST", "PUT", "PATCH", "DELETE"].contains(method), "{method} {path}");
+            assert!(path.starts_with("/api/") && !path.ends_with('/'), "{path}");
+            assert!(
+                !APP_ROUTES[..i].iter().any(|(m, p, _)| m == method && p == path),
+                "{method} {path} is listed twice"
+            );
+        }
+        assert_eq!(required(&Method::GET, "/api/libraries"), Some(Need::Scope(Scope::Library)));
+        assert_eq!(required(&Method::HEAD, "/api/files/{id}/stream"), Some(Need::Scope(Scope::Play)));
+        assert_eq!(required(&Method::POST, "/api/playlists"), Some(Need::Scope(Scope::Playlists)));
+        assert_eq!(required(&Method::GET, "/api/auth/me"), Some(Need::AnyApp));
+        assert_eq!(required(&Method::POST, "/api/libraries"), None, "creating libraries is administration");
+        assert_eq!(required(&Method::GET, "/api/settings"), None);
+        assert_eq!(required(&Method::GET, "/api/libraries/1"), None, "routed paths, not request paths");
+        assert_eq!(required(&Method::OPTIONS, "/api/libraries"), None);
+    }
+}
