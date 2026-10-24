@@ -15,6 +15,8 @@ export function LoginPage() {
   useDocumentTitle("Sign in");
   const [params] = useSearchParams();
   const next = safeNext(params.get("next"));
+  /** Signing in to allow an app (the OAuth authorize page). */
+  const forApp = next === "/oauth/authorize" || next.startsWith("/oauth/authorize?");
   const navigate = useNavigate();
   const qc = useQueryClient();
   const server = useServer();
@@ -155,7 +157,10 @@ export function LoginPage() {
   }
 
   return (
-    <AuthLayout title="Sign in" subtitle={server.data ? `to ${server.data.name}` : undefined}>
+    <AuthLayout
+      title="Sign in"
+      subtitle={server.data ? (forApp ? `to let an app use ${server.data.name}` : `to ${server.data.name}`) : undefined}
+    >
       <form onSubmit={onSubmit} className="space-y-4">
         <Field label="Username" htmlFor="username">
           <TextInput

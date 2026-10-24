@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { LoaderCircle } from "lucide-react";
 import { ApiError, setUnauthorizedHandler } from "@/api/client";
 import { queries } from "@/api/hooks";
-import { RequireAuth } from "@/auth";
+import { RequireAuth, Splash } from "@/auth";
 import { AppLayout } from "@/components/AppLayout";
 import { ToastProvider } from "@/components/Toast";
 import { PageSpinner } from "@/components/ui";
@@ -76,6 +76,16 @@ const router = createBrowserRouter([
     errorElement: <RouteErrorPage />,
     children: [
       { path: "/profiles", element: <ProfilesPage /> },
+      // The OAuth authorization endpoint: an app asks to use the account.
+      {
+        path: "/oauth/authorize",
+        ...onDemand(
+          () => import("@/pages/AuthorizePage"),
+          (m) => m.AuthorizePage,
+          () => [],
+          <Splash />,
+        ),
+      },
       {
         path: "/play/:id",
         ...onDemand(

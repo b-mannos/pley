@@ -62,6 +62,16 @@ describe("LoginPage", () => {
     expect(requests.find((r) => r.method === "POST")?.body).toEqual({ username: "admin", password: "open-sesame" });
   });
 
+  it("says when signing in is for letting an app in", async () => {
+    serve();
+    const authorize = "/oauth/authorize?response_type=code&client_id=https%3A%2F%2Fapps.example.com%2Fpley.json&state=a%26b";
+    renderLogin(`/login?next=${encodeURIComponent(authorize)}`);
+
+    expect(await screen.findByText("to let an app use Living Room")).toBeInTheDocument();
+    await signIn("open-sesame");
+    expect(await screen.findByTestId("location")).toHaveTextContent(authorize);
+  });
+
   it("lets a household pick a profile first", async () => {
     serve({ profiles: [testUser, { ...testUser, id: 2, name: "Kid" }] });
     renderLogin();
