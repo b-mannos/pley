@@ -24,14 +24,6 @@ const SETTINGS = {
   detect_markers: true,
   seek_previews: true,
   previews_in_background: true,
-  public_url: "",
-  sso_enabled: false,
-  sso_name: "",
-  sso_issuer: "",
-  sso_client_id: "",
-  sso_client_secret: "",
-  sso_new_accounts: false,
-  sso_group: "",
 } satisfies Settings;
 
 describe("ServerSettings", () => {

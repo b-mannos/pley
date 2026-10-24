@@ -20,6 +20,8 @@ const kid: User = {
   max_age: 7,
 };
 const ann: User = { ...testUser, id: 3, username: "ann", name: "Ann", is_admin: false, two_step: true };
+/** An account without a password: it can't sign in until it gets one. */
+const lee: User = { ...testUser, id: 4, username: "lee", name: "Lee", is_admin: false, has_password: false };
 const libraries: Library[] = [
   { id: 1, name: "Movies", kind: "movies", paths: [], item_count: 0, created_at: 0, scanned_at: null, scanning: false },
   { id: 2, name: "Cartoons", kind: "shows", paths: [], item_count: 0, created_at: 0, scanned_at: null, scanning: false },
@@ -27,7 +29,7 @@ const libraries: Library[] = [
 
 function serve() {
   return mockApi({
-    "GET /api/users": () => [admin, kid, ann],
+    "GET /api/users": () => [admin, kid, ann, lee],
     "GET /api/libraries": () => libraries,
     "GET /api/users/1/devices": () => [],
     "GET /api/users/2/devices": () => [{ id: "d1", name: "Safari on iPhone", user_agent: null, ip: "192.0.2.4", created_at: 0, last_seen_at: 0, current: false }],
@@ -36,6 +38,7 @@ function serve() {
     "DELETE /api/users/2": () => undefined,
     "GET /api/users/3/devices": () => [],
     "DELETE /api/users/3/two-step": () => undefined,
+    "GET /api/users/4/devices": () => [],
   });
 }
 
@@ -74,6 +77,24 @@ describe("UsersSettings", () => {
     await user.click(within(dialog).getByRole("button", { name: "Turn off" }));
     expect(await screen.findByText("Two-step sign-in is off for Ann")).toBeInTheDocument();
     expect(requests.find((r) => r.method === "DELETE")?.path).toBe("/api/users/3/two-step");
+  });
+
+  it("says that an account without a password needs one to sign in", async () => {
+    const user = userEvent.setup();
+    renderUsers();
+    await user.click(await screen.findByRole("button", { name: /Lee/ }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Lee" });
+    expect(within(dialog).getByText("This account has no password: set one so it can sign in.")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Leave empty to keep the current one.")).not.toBeInTheDocument();
+  });
+
+  it("says an account with a password keeps it unless a new one is typed", async () => {
+    const user = userEvent.setup();
+    renderUsers();
+    await user.click(await screen.findByRole("button", { name: /Ann/ }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Ann" });
+    expect(within(dialog).getByText("Leave empty to keep the current one.")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/has no password/)).not.toBeInTheDocument();
   });
 
   it("adds an account after checking the form", async () => {

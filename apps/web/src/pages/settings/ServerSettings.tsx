@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
-import { CircleAlert, CircleCheck, Eye, EyeOff, Save, TriangleAlert } from "lucide-react";
+import { CircleAlert, CircleCheck, Eye, EyeOff, Save } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useSaveSettings, useSettings, useSystemInfo, useTestService } from "@/api/hooks";
 import type { HwAccel, ServiceTest, Settings, ToneMapping, TranscodePreset, TvMetadata } from "@/api/types";
@@ -102,14 +102,12 @@ function SecretInput({
   onChange,
   what,
   className,
-  placeholder = "Not set",
 }: {
   id: string;
   value: string;
   onChange: (value: string) => void;
   what: string;
   className?: string;
-  placeholder?: string;
 }) {
   const [visible, setVisible] = useState(false);
   return (
@@ -121,7 +119,7 @@ function SecretInput({
         spellCheck={false}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
+        placeholder="Not set"
         className={cn("font-mono text-xs", className)}
       />
       <IconButton label={`${visible ? "Hide" : "Show"} ${what}`} onClick={() => setVisible((s) => !s)} className="rounded-md bg-surface-2">
@@ -158,130 +156,6 @@ export function TestButton({ test, label, className = "mt-2" }: { test: ServiceT
         ) : null}
       </div>
     </div>
-  );
-}
-
-/** An address to copy into the provider's settings. */
-function Copyable({ value }: { value: string }) {
-  return (
-    <code className="block select-all break-all rounded-md border border-border bg-surface-2 px-3 py-2 font-mono text-xs text-fg">{value}</code>
-  );
-}
-
-/**
- * Signing in with an OpenID Connect provider. pley asks it only who signs
- * in, and keeps none of its tokens.
- */
-function SingleSignOnGroup({
-  form,
-  set,
-  secretSaved,
-  onRemoveSecret,
-}: {
-  form: Settings;
-  set: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
-  /** A client secret is saved (it's never sent back). */
-  secretSaved: boolean;
-  onRemoveSecret: () => void;
-}) {
-  const base = form.public_url.trim().replace(/\/+$/, "") || window.location.origin;
-  const registered = form.sso_client_id.trim() !== "";
-  return (
-    <Group
-      title="Single sign-on"
-      description="Sign in with an OpenID Connect provider (Authentik, Authelia, Keycloak, Pocket ID, Kanidm…). People link their account to it on their account page."
-    >
-      <Row label="Sign in with a provider" hint="The sign-in page offers it next to the password.">
-        <Toggle checked={form.sso_enabled} onChange={(v) => set("sso_enabled", v)} label="Single sign-on" />
-      </Row>
-      <Row
-        label="Public address"
-        htmlFor="public-url"
-        hint="Where people open pley, such as https://pley.example.com. Sign-ins happen there: the provider sends people back to it."
-      >
-        <TextInput
-          id="public-url"
-          inputMode="url"
-          spellCheck={false}
-          placeholder="https://pley.example.com"
-          value={form.public_url}
-          onChange={(e) => set("public_url", e.target.value)}
-        />
-      </Row>
-      <Row label="Provider's name" htmlFor="sso-name" hint="On the button: Sign in with Authentik.">
-        <TextInput id="sso-name" placeholder="Authentik" value={form.sso_name} onChange={(e) => set("sso_name", e.target.value)} />
-      </Row>
-      <Row label="Issuer" htmlFor="sso-issuer" hint="The issuer URL exactly as the provider shows it, trailing slash and all.">
-        <TextInput
-          id="sso-issuer"
-          inputMode="url"
-          spellCheck={false}
-          placeholder="https://auth.example.com/application/o/pley/"
-          value={form.sso_issuer}
-          onChange={(e) => set("sso_issuer", e.target.value)}
-        />
-        <TestButton
-          key={`${form.sso_issuer}
-${form.sso_client_id}
-${form.public_url}`}
-          label="Test the provider"
-          test={{ service: "sso", issuer: form.sso_issuer, client_id: form.sso_client_id, public_url: form.public_url }}
-        />
-      </Row>
-      <Row
-        label="Client ID"
-        htmlFor="sso-client"
-        hint="From registering pley with the provider. Leave it empty for providers that take client metadata documents: they read pley's instead, and nothing needs registering."
-      >
-        <TextInput id="sso-client" spellCheck={false} value={form.sso_client_id} onChange={(e) => set("sso_client_id", e.target.value)} />
-      </Row>
-      {registered ? (
-        <Row label="Client secret" htmlFor="sso-secret" hint="For confidential clients. Public clients have none: PKCE protects them.">
-          <SecretInput
-            id="sso-secret"
-            what="secret"
-            value={form.sso_client_secret}
-            onChange={(v) => set("sso_client_secret", v)}
-            placeholder={secretSaved ? "Saved (type to replace it)" : "None"}
-          />
-          {secretSaved && !form.sso_client_secret ? (
-            <Button size="sm" variant="ghost" className="mt-2" onClick={onRemoveSecret}>
-              Remove the saved secret
-            </Button>
-          ) : null}
-        </Row>
-      ) : null}
-      <Row
-        label={registered ? "Redirect URI" : "Client ID (metadata document)"}
-        hint={registered ? "Register this with the provider." : "The provider reads pley's client metadata document here: pley must be reachable at an https address."}
-      >
-        <Copyable value={registered ? `${base}/api/auth/sso/callback` : `${base}/api/auth/sso/client`} />
-      </Row>
-      <Row
-        label="Only this group"
-        htmlFor="sso-group"
-        hint="Only members of this group at the provider can sign in (it sends groups in the groups claim). Empty: everyone it lets through."
-      >
-        <TextInput id="sso-group" spellCheck={false} placeholder="pley-users" value={form.sso_group} onChange={(e) => set("sso_group", e.target.value)} />
-      </Row>
-      <Row
-        label="New accounts"
-        hint="People the provider lets in who have no account here get one, without libraries until you give them some."
-      >
-        <Toggle checked={form.sso_new_accounts} onChange={(v) => set("sso_new_accounts", v)} label="New accounts from the provider" />
-      </Row>
-      {form.sso_new_accounts && !form.sso_group.trim() ? (
-        <p className="flex items-start gap-2 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger">
-          <TriangleAlert className="mt-px size-3.5 shrink-0" />
-          Anyone who can sign in at this provider gets an account here. With a provider whose accounts you don't all trust (Google,
-          Microsoft), set a group.
-        </p>
-      ) : null}
-      <p className="text-xs text-subtle">
-        pley asks the provider only who signs in: the scopes openid and email, profile when it makes new accounts and groups when it
-        checks a group. It keeps none of the provider's tokens.
-      </p>
-    </Group>
   );
 }
 
@@ -537,21 +411,6 @@ ${form.tvdb_pin}`}
           <Toggle checked={form.throttle_transcodes} onChange={(v) => set("throttle_transcodes", v)} label="Throttle transcodes" />
         </Row>
       </Group>
-
-      <SingleSignOnGroup
-        form={form}
-        set={set}
-        secretSaved={settings.data?.sso_client_secret_set === true}
-        onRemoveSecret={() =>
-          save.mutate(
-            { sso_client_secret: "" },
-            {
-              onSuccess: () => toast.success("Client secret removed"),
-              onError: (e) => toast.error(errorMessage(e)),
-            },
-          )
-        }
-      />
 
       <Group title="Library scanning">
         <Row label="Watch folders for changes" hint="Pick up new, changed and deleted files automatically.">

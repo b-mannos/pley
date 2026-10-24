@@ -2,8 +2,9 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { User } from "@/api/types";
+import { AudioPlayerProvider } from "@/audio/AudioPlayer";
 import { type FakeRequest, mockApi, renderWithProviders, testUser } from "@/test/render";
-import { PlaybackCard } from "./AccountPage";
+import { AccountPage, PlaybackCard } from "./AccountPage";
 
 /** The last account change: queries refetched after it may come later. */
 function lastSave(requests: FakeRequest[]) {
@@ -53,5 +54,42 @@ describe("PlaybackCard", () => {
     serve();
     renderWithProviders(<PlaybackCard />, { user: { ...testUser, subtitle_mode: "always" } });
     expect(screen.getByText(/without one, only forced subtitles come on/)).toBeInTheDocument();
+  });
+});
+
+/** The whole page as `user`, with nothing in its history or devices. */
+function renderAccount(user: User) {
+  mockApi({
+    "GET /api/me/two-step": () => ({ enabled: false, since: null, recovery_codes_left: 0 }),
+    "GET /api/history": () => ({ total: 0, entries: [] }),
+    "GET /api/me/devices": () => [],
+  });
+  renderWithProviders(
+    <AudioPlayerProvider>
+      <AccountPage />
+    </AudioPlayerProvider>,
+    { user },
+  );
+}
+
+const NO_PASSWORD = "This account has no password: an administrator can give it one.";
+
+describe("AccountPage", () => {
+  it("tells an account without a password that an administrator can give it one", () => {
+    renderAccount({ ...testUser, is_admin: false, has_password: false });
+    expect(screen.getByText(NO_PASSWORD)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Change password" })).not.toBeInTheDocument();
+  });
+
+  it("lets an account with a password change it", () => {
+    renderAccount(testUser);
+    expect(screen.getByRole("heading", { name: "Change password" })).toBeInTheDocument();
+    expect(screen.queryByText(NO_PASSWORD)).not.toBeInTheDocument();
+  });
+
+  it("says nothing about passwords to a managed profile", () => {
+    renderAccount({ ...testUser, is_admin: false, managed: true, has_password: false });
+    expect(screen.queryByRole("heading", { name: "Change password" })).not.toBeInTheDocument();
+    expect(screen.queryByText(NO_PASSWORD)).not.toBeInTheDocument();
   });
 });

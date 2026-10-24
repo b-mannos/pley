@@ -1,9 +1,8 @@
 import { useRef, useState, type FormEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useNavigate } from "react-router";
 import {
   Camera,
   Check,
-  Fingerprint,
   History,
   KeyRound,
   Languages,
@@ -21,11 +20,8 @@ import {
   useDeleteAvatar,
   useDevices,
   useLogout,
-  useMySso,
-  useRequestSsoLink,
   useSetPin,
   useSignOutDevice,
-  useUnlinkSso,
   useUpdateProfile,
   useUploadAvatar,
 } from "@/api/hooks";
@@ -41,8 +37,6 @@ import { formatDay, formatRelative } from "@/lib/format";
 import { LANGUAGES } from "@/lib/languages";
 import { useDocumentTitle } from "@/lib/hooks";
 import { passwordProblem } from "@/lib/passwords";
-import { atPublicAddress, ssoNotice, ssoStartUrl } from "@/lib/sso";
-import { codeKind } from "@/lib/twoStep";
 import { TwoStepCard } from "./TwoStepCard";
 
 const MAX_AVATAR_BYTES = 10 * 1024 * 1024;
@@ -451,134 +445,12 @@ function PasswordCard() {
   );
 }
 
-/** Signing in with the single sign-on provider: linking this account to an identity there, or unlinking it. */
-function SingleSignOnCard() {
-  const user = useAuth();
-  const toast = useToast();
-  const [params] = useSearchParams();
-  const sso = useMySso(!user.managed);
-  const link = useRequestSsoLink();
-  const unlink = useUnlinkSso();
-  // Changing how the account signs in takes its password: a session alone isn't enough.
-  const [asking, setAsking] = useState<"link" | "unlink" | null>(null);
-  const [password, setPassword] = useState("");
-  // Signing in through the provider skips two-step sign-in: linking takes its code.
-  const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const needsCode = asking === "link" && user.two_step;
-  const info = sso.data;
-  if (user.managed || !info?.enabled) return null;
-  const name = info.name ?? "single sign-on";
-  const notice = ssoNotice(params.get("sso"), name);
-  const publicUrl = info.public_url ?? "";
-  const here = atPublicAddress(publicUrl);
-  const busy = link.isPending || unlink.isPending;
-
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    if (asking === "link") {
-      link.mutate(needsCode ? { password, code: code.trim() } : { password }, {
-        // Off to the provider; it sends the browser back here.
-        onSuccess: () => window.location.assign(ssoStartUrl(info.start ?? "", "/account")),
-        onError: (err) => setError(errorMessage(err)),
-      });
-    } else if (asking === "unlink") {
-      unlink.mutate(password, {
-        onSuccess: () => {
-          toast.success(`Unlinked from ${name}`);
-          setAsking(null);
-          setPassword("");
-        },
-        onError: (err) => setError(errorMessage(err)),
-      });
-    }
-  };
-
+/** In place of the password form, for an account that has no password to change. */
+function NoPasswordCard() {
   return (
     <Card>
-      <CardTitle icon={<Fingerprint />}>Single sign-on</CardTitle>
-      {notice ? <p className={cn("mb-3 text-sm", notice.tone === "success" ? "text-success" : "text-danger")}>{notice.text}</p> : null}
-      <p className="text-sm text-muted">
-        {info.linked ? (
-          <>
-            Signs in with {name}
-            {info.email ? (
-              <>
-                {" "}
-                as <span className="text-fg">{info.email}</span>
-              </>
-            ) : null}
-            .
-          </>
-        ) : (
-          <>Sign in with your {name} account instead of a password.</>
-        )}
-      </p>
-      {!info.has_password ? (
-        <p className="mt-2 text-sm text-subtle">This account has no password: it signs in only with {name}. An administrator can give it one.</p>
-      ) : !here ? (
-        <p className="mt-2 text-sm text-subtle">
-          Linking happens at{" "}
-          <a href={`${publicUrl}/account`} className="text-accent hover:underline">
-            {publicUrl.replace(/^https?:\/\//, "")}
-          </a>
-          , where {name} sends people back.
-        </p>
-      ) : asking ? (
-        <form onSubmit={onSubmit} className="mt-4 space-y-3">
-          <Field label="Your password" htmlFor="sso-password" hint="Changing how this account signs in takes its password.">
-            <TextInput
-              id="sso-password"
-              type="password"
-              autoComplete="current-password"
-              autoFocus
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </Field>
-          {needsCode ? (
-            <Field label="Code from your authenticator app" htmlFor="sso-code">
-              <TextInput
-                id="sso-code"
-                autoComplete="one-time-code"
-                autoCapitalize="off"
-                spellCheck={false}
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                required
-              />
-            </Field>
-          ) : null}
-          {error ? <p className="text-sm text-danger">{error}</p> : null}
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setAsking(null)} disabled={busy}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              variant={asking === "unlink" ? "danger" : "primary"}
-              loading={busy}
-              disabled={!password || (needsCode && !codeKind(code))}
-            >
-              {asking === "unlink" ? `Unlink ${name}` : `Continue to ${name}`}
-            </Button>
-          </div>
-        </form>
-      ) : (
-        <div className="mt-4 flex justify-end">
-          {info.linked ? (
-            <Button variant="outline" onClick={() => setAsking("unlink")}>
-              Unlink
-            </Button>
-          ) : (
-            <Button variant="primary" onClick={() => setAsking("link")}>
-              Link your {name} account
-            </Button>
-          )}
-        </div>
-      )}
+      <CardTitle icon={<KeyRound />}>Password</CardTitle>
+      <p className="text-sm text-muted">This account has no password: an administrator can give it one.</p>
     </Card>
   );
 }
@@ -701,8 +573,7 @@ export function AccountPage() {
       <ProfileCard key={user.id} />
       <PlaybackCard />
       <PinCard />
-      <SingleSignOnCard />
-      {user.managed || user.has_password === false ? null : <PasswordCard />}
+      {user.managed ? null : user.has_password === false ? <NoPasswordCard /> : <PasswordCard />}
       <TwoStepCard />
       <HistoryCard />
       <DevicesCard />

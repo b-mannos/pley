@@ -7,7 +7,6 @@ import {
   useLibraries,
   useResetUserTwoStep,
   useSignOutEverywhere,
-  useUnlinkUserSso,
   useUpdateUser,
   useUserDevices,
   useUsers,
@@ -49,37 +48,6 @@ function SwitchRow({
       </div>
       <Toggle checked={checked} onChange={onChange} label={label} disabled={disabled} />
     </div>
-  );
-}
-
-/** A user's identity at the single sign-on provider, which an administrator can unlink (an account lost or taken over there). */
-function SingleSignOnLink({ user }: { user: User }) {
-  const unlink = useUnlinkUserSso();
-  const toast = useToast();
-  return (
-    <section className="flex items-center justify-between gap-3">
-      <div>
-        <h3 className="text-sm font-medium">Single sign-on</h3>
-        <p className="text-xs text-subtle">
-          {user.has_password ? "Also signs in with a password." : "No password: signs in only with the provider."}
-        </p>
-      </div>
-      <Button
-        size="sm"
-        variant="ghost"
-        loading={unlink.isPending}
-        disabled={!user.has_password}
-        title={user.has_password ? undefined : "Give the account a password first, or it can't sign in"}
-        onClick={() =>
-          unlink.mutate(user.id, {
-            onSuccess: () => toast.success(`${user.name} no longer signs in with single sign-on`),
-            onError: (e) => toast.error(errorMessage(e)),
-          })
-        }
-      >
-        Unlink
-      </Button>
-    </section>
   );
 }
 
@@ -386,7 +354,13 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
             <Field
               label={user?.managed ? "Password" : "New password"}
               htmlFor="user-password"
-              hint={user?.managed ? "Setting one turns this profile into a regular account." : "Leave empty to keep the current one."}
+              hint={
+                user?.managed
+                  ? "Setting one turns this profile into a regular account."
+                  : user?.has_password === false
+                    ? "This account has no password: set one so it can sign in."
+                    : "Leave empty to keep the current one."
+              }
             >
               <TextInput id="user-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
             </Field>
@@ -457,7 +431,6 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
           </div>
         </Field>
 
-        {!isNew && user?.sso ? <SingleSignOnLink user={user} /> : null}
         {!isNew && user?.two_step ? <TwoStepReset user={user} /> : null}
         {!isNew && user ? <UserDevices user={user} self={self} /> : null}
 
@@ -496,7 +469,6 @@ function UserRow({ user, self, libraries, onOpen }: { user: User; self: boolean;
                 <Lock className="size-3" /> PIN
               </Badge>
             ) : null}
-            {user.sso ? <Badge tone="info">Single sign-on</Badge> : null}
             {user.two_step ? (
               <Badge tone="success">
                 <ShieldCheck className="size-3" /> 2FA

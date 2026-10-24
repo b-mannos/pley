@@ -19,7 +19,7 @@ const sizes: Record<Size, string> = {
   lg: "h-12 px-6 text-base gap-2",
 };
 
-/** A button's look, for links that take people to another page (a sign-in elsewhere). */
+/** A button's look, for links. */
 export function buttonClass(variant: Variant = "secondary", size: Size = "md", className?: string): string {
   return cn(
     "inline-flex select-none items-center justify-center whitespace-nowrap rounded-md font-medium transition-colors duration-150",

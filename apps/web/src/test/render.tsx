@@ -27,7 +27,6 @@ export const testUser: User = {
   subtitle_language: null,
   subtitle_mode: "forced",
   has_password: true,
-  sso: false,
   two_step: false,
 };
 

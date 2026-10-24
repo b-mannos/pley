@@ -31,10 +31,8 @@ export interface User {
   /** `null`: the audio language. */
   subtitle_language: string | null;
   subtitle_mode: SubtitleMode;
-  /** Signs in with a password (not only through single sign-on, nor by switching to a managed profile). */
+  /** `false`: a managed profile, or an account without a password. */
   has_password: boolean;
-  /** Linked to an identity at the single sign-on provider. */
-  sso: boolean;
   /** Signs in with a code from an authenticator app after the password. */
   two_step: boolean;
 }
@@ -88,27 +86,6 @@ export interface ServerStatus {
   setup_required: boolean;
   /** Setting up takes the code in the server's log. */
   setup_code_required?: boolean;
-  /** Single sign-on, when it is on: the provider's name and where sign-ins start. */
-  sso?: SingleSignOn | null;
-}
-
-export interface SingleSignOn {
-  name: string;
-  /** `https://pley.example.com/api/auth/sso/start`: the page browsers are sent to. */
-  start: string;
-}
-
-/** `GET /api/me/sso`: single sign-on for the signed-in user. */
-export interface MySingleSignOn {
-  enabled: boolean;
-  name?: string;
-  linked?: boolean;
-  /** The linked identity's e-mail address, when the provider said. */
-  email?: string | null;
-  has_password?: boolean;
-  /** pley's public address: linking happens there. */
-  public_url?: string;
-  start?: string;
 }
 
 /** `GET /api/me/two-step`: two-step sign-in for the signed-in user. */
@@ -607,35 +584,16 @@ export interface Settings {
   detect_markers: boolean;
   seek_previews: boolean;
   previews_in_background: boolean;
-  /** Where people reach pley (`https://pley.example.com`): single sign-on runs there. */
-  public_url: string;
-  sso_enabled: boolean;
-  /** The provider's name, on the sign-in button. */
-  sso_name: string;
-  sso_issuer: string;
-  /** Empty: pley's client metadata document is its client ID (for providers that take those). */
-  sso_client_id: string;
-  /** Never sent back: always empty in answers (`sso_client_secret_set` says whether there is one). */
-  sso_client_secret: string;
-  sso_client_secret_set?: boolean;
-  /** People the provider knows but pley doesn't get an account (without libraries). */
-  sso_new_accounts: boolean;
-  /** Only members of this group at the provider may sign in; empty: anyone it lets through. */
-  sso_group: string;
 }
 
 /** A service the settings can test (`POST /api/settings/test`). */
-export type TestedService = "tmdb" | "tvdb" | "tvmaze" | "musicbrainz" | "transcoder" | "sso";
+export type TestedService = "tmdb" | "tvdb" | "tvmaze" | "musicbrainz" | "transcoder";
 
 export interface ServiceTest {
   service: TestedService;
   /** A key typed in the form (not saved yet); the saved one when left out. */
   api_key?: string;
   pin?: string;
-  /** Single sign-on, likewise: the provider's issuer, the client ID, pley's public address. */
-  issuer?: string;
-  client_id?: string;
-  public_url?: string;
 }
 
 export interface ServiceTestResult {
