@@ -10,6 +10,7 @@ pub(crate) mod editing;
 mod history;
 pub(crate) mod items;
 mod libraries;
+mod oauth;
 mod people;
 pub(crate) mod playback;
 mod playlists;
@@ -20,7 +21,7 @@ use std::time::Duration;
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderName, HeaderValue, header};
-use axum::routing::{delete, get, patch, post, put};
+use axum::routing::{any, delete, get, patch, post, put};
 use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
 use tower_http::compression::{CompressionLayer, CompressionLevel};
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -51,6 +52,13 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/me/devices", get(accounts::my_devices))
         .route("/me/devices/{id}", delete(accounts::sign_out_device))
+        .route("/me/apps", get(oauth::my_apps))
+        .route("/me/apps/{id}", delete(oauth::sign_out_my_app))
+        .route("/oauth/requests", post(oauth::create_request).layer(DefaultBodyLimit::max(FORM_MAX)))
+        .route("/oauth/requests/{id}", post(oauth::decide))
+        .route("/oauth/requests/{id}/continue", get(oauth::continue_to_app))
+        .route("/oauth/token", post(oauth::token).layer(DefaultBodyLimit::max(FORM_MAX)))
+        .route("/oauth/revoke", post(oauth::revoke).layer(DefaultBodyLimit::max(FORM_MAX)))
         .route("/libraries", get(libraries::list).post(libraries::create))
         .route("/libraries/scan", post(libraries::scan_all))
         .route("/libraries/order", put(libraries::reorder))
@@ -115,6 +123,8 @@ pub fn router(state: AppState) -> Router {
         .route("/users/{id}", patch(accounts::update_user).delete(accounts::delete_user))
         .route("/users/{id}/avatar", get(accounts::avatar))
         .route("/users/{id}/devices", get(accounts::user_devices).delete(accounts::sign_out_everywhere))
+        .route("/users/{id}/apps", get(oauth::user_apps))
+        .route("/users/{id}/apps/{grant}", delete(oauth::sign_out_user_app))
         .route("/users/{id}/two-step", delete(two_step::reset_user))
         .route("/invites", get(accounts::list_invites).post(accounts::create_invite))
         .route("/invites/{code}", get(accounts::check_invite).delete(accounts::delete_invite))
@@ -140,6 +150,9 @@ pub fn router(state: AppState) -> Router {
 
     Router::new()
         .nest("/api", api)
+        // Before the web app's pages, which would answer any path.
+        .route("/.well-known/oauth-authorization-server", get(oauth::metadata))
+        .route("/.well-known/{*rest}", any(oauth::no_document))
         .fallback(crate::web::static_handler)
         .layer(SetResponseHeaderLayer::if_not_present(
             header::CONTENT_SECURITY_POLICY,
@@ -163,6 +176,10 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// The largest body of the authorization server's endpoints (forms and
+/// the consent page's request).
+const FORM_MAX: usize = 16 * 1024;
+
 /// What pages of the web app may load and do: only pley's own scripts and
 /// styles (an injected script can't run, nor send what it finds elsewhere),
 /// pictures from pley and TMDB (Fix Match, artwork), media and hls.js's
@@ -177,9 +194,10 @@ pub(crate) fn truthy(value: &str) -> bool {
     matches!(value, "1" | "true" | "yes")
 }
 
-/// The request URI for logs, with credentials in the query (`token`,
-/// `X-Plex-Token`, `api_key`, and the `code` and `state` of a sign-in) left
-/// out.
+/// The request URI for logs, with credentials in the query left out:
+/// `token`, `X-Plex-Token` and `api_key`, and what apps send while signing
+/// in (`code`, `state`, `code_verifier`, `access_token`, `refresh_token`).
+/// Bodies and the Authorization header are never logged.
 pub(crate) fn loggable_uri(uri: &axum::http::Uri) -> String {
     let Some(query) = uri.query() else { return uri.path().to_owned() };
     let query: Vec<String> = query
@@ -188,7 +206,14 @@ pub(crate) fn loggable_uri(uri: &axum::http::Uri) -> String {
             Some((key, _))
                 if matches!(
                     key.to_ascii_lowercase().as_str(),
-                    "token" | "x-plex-token" | "api_key" | "code" | "state"
+                    "token"
+                        | "x-plex-token"
+                        | "api_key"
+                        | "code"
+                        | "state"
+                        | "code_verifier"
+                        | "access_token"
+                        | "refresh_token"
                 ) =>
             {
                 format!("{key}=…")
@@ -210,11 +235,19 @@ mod tests {
     }
 
     #[test]
-    fn logs_leave_credentials_out() {
+    fn logs_leave_codes_and_tokens_out() {
         let uri: axum::http::Uri = "/api/files/3/stream?token=secret&t=10&X-Plex-Token=abc&api_key=k".parse().unwrap();
         assert_eq!(loggable_uri(&uri), "/api/files/3/stream?token=…&t=10&X-Plex-Token=…&api_key=…");
         let uri: axum::http::Uri = "/api/x?code=c0de&state=st4te".parse().unwrap();
         assert_eq!(loggable_uri(&uri), "/api/x?code=…&state=…");
+        let uri =
+            "/oauth/authorize?client_id=c&code_challenge=x&State=s&code_verifier=v&access_token=a&refresh_token=r"
+                .parse()
+                .unwrap();
+        assert_eq!(
+            loggable_uri(&uri),
+            "/oauth/authorize?client_id=c&code_challenge=x&State=…&code_verifier=…&access_token=…&refresh_token=…"
+        );
         assert_eq!(loggable_uri(&"/api/items/1".parse().unwrap()), "/api/items/1");
     }
 }

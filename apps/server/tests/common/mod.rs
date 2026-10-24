@@ -18,6 +18,12 @@ use pley::{AppState, Config};
 
 /// The client_id of pley's Android app.
 pub const ANDROID_APP: &str = "https://hhaidar.github.io/pley/oauth/android.json";
+/// The client_id of pley's desktop app.
+pub const DESKTOP_APP: &str = "https://hhaidar.github.io/pley/oauth/desktop.json";
+/// The Host the tests' browsers and apps reach pley at.
+pub const HOST: &str = "pley.local:7539";
+/// The issuer for [`HOST`].
+pub const ISSUER: &str = "http://pley.local:7539";
 
 pub struct TestApp {
     pub api: Router,
@@ -264,6 +270,57 @@ impl TestApp {
     /// Bearer`, JSON bodies.
     pub async fn app_call(&self, method: Method, uri: &str, token: &str, body: Option<Value>) -> Reply {
         self.call(method, uri, Some(token), body, &[]).await
+    }
+
+    /// A request from pley's own page in a browser: the session cookie,
+    /// Host [`HOST`], Origin [`ISSUER`] and `Sec-Fetch-Site: same-origin`,
+    /// and a JSON body. `extra` headers replace those; an empty value
+    /// leaves one out.
+    pub async fn browser_call(
+        &self,
+        method: Method,
+        uri: &str,
+        cookie: &str,
+        body: Option<Value>,
+        extra: &[(&str, &str)],
+    ) -> Reply {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, format!("theme=dark; pley_token={cookie}").parse().unwrap());
+        headers.insert(header::HOST, HOST.parse().unwrap());
+        headers.insert(header::ORIGIN, ISSUER.parse().unwrap());
+        headers.insert("sec-fetch-site", "same-origin".parse().unwrap());
+        for (name, value) in extra {
+            let name = header::HeaderName::from_bytes(name.as_bytes()).unwrap();
+            if value.is_empty() {
+                headers.remove(&name);
+            } else {
+                headers.insert(name, value.parse().unwrap());
+            }
+        }
+        let mut req = Request::builder().method(method).uri(uri);
+        for (name, value) in &headers {
+            req = req.header(name, value);
+        }
+        let req = match body {
+            Some(b) => req.header(header::CONTENT_TYPE, "application/json").body(Body::from(b.to_string())).unwrap(),
+            None => req.body(Body::empty()).unwrap(),
+        };
+        reply(self.api.clone().oneshot(req).await.unwrap()).await
+    }
+
+    /// A form POSTed as apps do to the token and revocation endpoints
+    /// (`form` already encoded), to Host [`HOST`], with `extra` headers.
+    pub async fn form_post(&self, uri: &str, form: &str, extra: &[(&str, &str)]) -> Reply {
+        let mut req = Request::builder()
+            .method(Method::POST)
+            .uri(uri)
+            .header(header::HOST, HOST)
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header(header::USER_AGENT, "pley-android/1.0 okhttp/5");
+        for (k, v) in extra {
+            req = req.header(*k, *v);
+        }
+        reply(self.api.clone().oneshot(req.body(Body::from(form.to_owned())).unwrap()).await.unwrap()).await
     }
 
     /// Ids of the children (seasons, episodes, albums, tracks) of an item, by title.

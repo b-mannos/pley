@@ -51,6 +51,10 @@ pub struct Settings {
     pub seek_previews: bool,
     /// Make them for whole libraries after scans, not only when a title is opened.
     pub previews_in_background: bool,
+    /// Apps by other publishers may sign in (their client metadata documents
+    /// are read from the internet: see [`crate::oauth`]). pley's own apps
+    /// always may. Off by default; turning it off signs them out.
+    pub third_party_apps: bool,
 }
 
 impl Default for Settings {
@@ -76,6 +80,7 @@ impl Default for Settings {
             detect_markers: true,
             seek_previews: true,
             previews_in_background: true,
+            third_party_apps: false,
         }
     }
 }
@@ -112,6 +117,7 @@ pub struct SettingsPatch {
     pub detect_markers: Option<bool>,
     pub seek_previews: Option<bool>,
     pub previews_in_background: Option<bool>,
+    pub third_party_apps: Option<bool>,
 }
 
 pub struct SettingsStore {
@@ -208,6 +214,9 @@ impl SettingsStore {
         }
         if let Some(v) = patch.previews_in_background {
             next.previews_in_background = v;
+        }
+        if let Some(v) = patch.third_party_apps {
+            next.third_party_apps = v;
         }
         let json = serde_json::to_string(&next).map_err(|e| AppError::Internal(e.into()))?;
         sqlx::query(
@@ -336,6 +345,26 @@ mod tests {
         sqlx::query("UPDATE settings SET value = 'not json' WHERE key = 'server'").execute(&db.write).await.unwrap();
         let s = SettingsStore::load(&db).await.unwrap().get();
         assert_eq!(s.max_transcodes, Settings::default().max_transcodes);
+    }
+
+    #[tokio::test]
+    async fn apps_by_other_publishers_stay_off_until_allowed() {
+        let (_dir, db, store) = store().await;
+        assert!(!store.get().third_party_apps, "off on a new server");
+        // Saved by a version that didn't have the setting.
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('server', '{\"server_name\":\"Attic\"}')")
+            .execute(&db.write)
+            .await
+            .unwrap();
+        assert!(!SettingsStore::load(&db).await.unwrap().get().third_party_apps, "off after an upgrade");
+        let s = store.update(&db, patch(serde_json::json!({"third_party_apps": true}))).await.unwrap();
+        assert!(s.third_party_apps);
+        assert!(SettingsStore::load(&db).await.unwrap().get().third_party_apps, "kept");
+        // Other changes leave it alone.
+        let s = store.update(&db, patch(serde_json::json!({"server_name": "Den"}))).await.unwrap();
+        assert!(s.third_party_apps);
+        let s = store.update(&db, patch(serde_json::json!({"third_party_apps": false}))).await.unwrap();
+        assert!(!s.third_party_apps);
     }
 
     #[tokio::test]

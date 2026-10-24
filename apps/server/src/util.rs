@@ -34,6 +34,12 @@ pub fn percent_decode(s: &str, plus: bool) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Whether `a` and `b` are equal, taking as long whichever byte differs
+/// (secrets compared with what someone sent).
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
+}
+
 /// Current unix time in seconds.
 pub fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or_default()

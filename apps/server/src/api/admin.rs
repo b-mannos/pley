@@ -30,6 +30,11 @@ pub async fn put_settings(
     if before.watch_libraries != after.watch_libraries {
         state.watcher.reload().await;
     }
+    // Apps by other publishers turned off: they are signed out at once.
+    if before.third_party_apps && !after.third_party_apps {
+        let ended = state.auth.end_grants_except_clients(crate::oauth::clients::BUILTIN_IDS).await?;
+        tracing::info!("apps by other publishers were turned off: {} signed out", ended.len());
+    }
     // A new key or source: fetch metadata for everything that has none yet
     // (shows are fetched again from a new TV source).
     if crate::providers::settings_changed(&state.db, &before, &after).await? {

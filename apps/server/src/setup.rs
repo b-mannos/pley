@@ -40,17 +40,13 @@ impl SetupCode {
         let given: String =
             given.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_uppercase()).collect();
         let current = self.0.lock();
-        current.as_deref().is_some_and(|code| constant_time_eq(code.as_bytes(), given.as_bytes()))
+        current.as_deref().is_some_and(|code| crate::util::constant_time_eq(code.as_bytes(), given.as_bytes()))
     }
 
     /// Setup is done: the code no longer claims anything.
     pub fn clear(&self) {
         *self.0.lock() = None;
     }
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
 }
 
 /// The address a request came from: the other end of its connection, never

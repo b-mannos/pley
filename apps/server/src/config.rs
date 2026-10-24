@@ -141,6 +141,10 @@ pub struct Config {
     pub discovery: bool,
     /// See [`EVENT_RECHECK`] (tests shorten it).
     pub event_recheck: Duration,
+    /// Where the client metadata documents of other publishers' apps come
+    /// from: the internet, or nowhere in tests (which may also give fixed
+    /// ones). pley's own apps are built in either way.
+    pub client_documents: crate::oauth::fetch::Source,
 }
 
 impl Config {
@@ -186,6 +190,7 @@ impl Config {
             shutdown_grace: SHUTDOWN_GRACE,
             discovery: !cli.no_discovery && file.discovery.unwrap_or(true),
             event_recheck: EVENT_RECHECK,
+            client_documents: crate::oauth::fetch::Source::Internet,
             data_dir,
             transcode_dir,
         })
@@ -210,6 +215,7 @@ impl Config {
             shutdown_grace: SHUTDOWN_GRACE,
             discovery: false,
             event_recheck: EVENT_RECHECK,
+            client_documents: crate::oauth::fetch::Source::Off,
         }
     }
 

@@ -27,6 +27,9 @@ const PUBLIC: &[(&str, &str)] = &[
     ("POST", "/api/auth/logout"),
     ("GET", "/api/invites/{code}"),
     ("POST", "/api/invites/{code}/accept"),
+    // Apps exchange codes and refresh tokens, and sign out, with forms.
+    ("POST", "/api/oauth/token"),
+    ("POST", "/api/oauth/revoke"),
 ];
 
 /// Routes for pley's own sign-in only: how an account signs in, its
@@ -46,6 +49,8 @@ const FIRST_PARTY: &[(&str, &str)] = &[
     ("DELETE", "/api/me/avatar"),
     ("GET", "/api/me/devices"),
     ("DELETE", "/api/me/devices/{id}"),
+    ("GET", "/api/me/apps"),
+    ("DELETE", "/api/me/apps/{id}"),
     ("GET", "/api/activity"),
 ];
 
@@ -78,6 +83,8 @@ const ADMIN: &[(&str, &str)] = &[
     ("DELETE", "/api/users/{id}"),
     ("GET", "/api/users/{id}/devices"),
     ("DELETE", "/api/users/{id}/devices"),
+    ("GET", "/api/users/{id}/apps"),
+    ("DELETE", "/api/users/{id}/apps/{grant}"),
     ("DELETE", "/api/users/{id}/two-step"),
     ("GET", "/api/invites"),
     ("POST", "/api/invites"),
@@ -94,8 +101,13 @@ const ADMIN: &[(&str, &str)] = &[
     ("GET", "/api/fs"),
 ];
 
-/// Routes that take pley's own page's cookie and nothing else.
-const COOKIE_ONLY: &[(&str, &str)] = &[];
+/// Routes that take pley's own page's cookie and nothing else: allowing
+/// an app (api/oauth.rs WebUser).
+const COOKIE_ONLY: &[(&str, &str)] = &[
+    ("POST", "/api/oauth/requests"),
+    ("POST", "/api/oauth/requests/{id}"),
+    ("GET", "/api/oauth/requests/{id}/continue"),
+];
 
 /// Every method and path of the API router of `source` (api/mod.rs): the
 /// `.route(path, …)` calls between `let api = Router::new()` and its

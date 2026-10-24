@@ -15,7 +15,77 @@
 //!   carefully: a document is believed no further than the rules in
 //!   [`clients`] allow.
 //!
-//! Nothing in this module is reachable over HTTP by itself.
+//! A sign-in in progress lives here too: the request the consent page shows
+//! ([`pending`]) and the code an allowed app exchanges for its tokens
+//! ([`codes`]). The HTTP side is `api/oauth.rs`.
 
 pub mod clients;
+pub mod codes;
 pub mod fetch;
+pub mod pending;
+
+use crate::config::Config;
+
+/// What the authorization server keeps between the steps of a sign-in, in
+/// memory: one process, so a restart only cancels sign-ins in progress.
+pub struct AuthorizationServer {
+    /// The apps that may ask (see [`fetch::Documents`]).
+    pub documents: fetch::Documents,
+    /// Requests shown on the consent page, until they are answered.
+    pub pending: pending::Pending,
+    /// Codes handed to apps that were allowed, until they are exchanged.
+    pub codes: codes::Codes,
+}
+
+impl AuthorizationServer {
+    pub fn new(config: &Config) -> Self {
+        Self {
+            documents: fetch::Documents::new(config.client_documents.clone()),
+            pending: pending::Pending::default(),
+            codes: codes::Codes::default(),
+        }
+    }
+
+    /// Forgets what is over: requests, codes, documents and counters.
+    pub fn sweep(&self) {
+        self.pending.sweep();
+        self.codes.sweep();
+        self.documents.sweep();
+    }
+}
+
+/// What a sign-in remembers of the app it is for, as it was when the
+/// person was asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppSnapshot {
+    pub id: String,
+    pub host: String,
+    /// What the app calls itself (pley vouches for it only for its own apps).
+    pub name: Option<String>,
+    pub first_party: bool,
+    /// The app gets refresh tokens.
+    pub refresh: bool,
+}
+
+impl From<&clients::Client> for AppSnapshot {
+    fn from(client: &clients::Client) -> Self {
+        Self {
+            id: client.id.clone(),
+            host: client.host.clone(),
+            name: client.name.clone(),
+            first_party: client.first_party,
+            refresh: client.refresh,
+        }
+    }
+}
+
+impl AppSnapshot {
+    /// How the app is called in logs: pley's own apps by name, others by
+    /// host, which is all pley can vouch for.
+    pub fn label(&self) -> &str {
+        match (&self.name, self.first_party) {
+            (Some(name), true) => name,
+            _ => &self.host,
+        }
+    }
+}

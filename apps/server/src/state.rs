@@ -43,6 +43,8 @@ pub struct Inner {
     pub markers: Arc<MarkerService>,
     pub trickplay: Arc<TrickplayService>,
     pub two_step: crate::two_step::TwoStep,
+    /// Sign-ins of apps in progress (see [`crate::oauth`]).
+    pub oauth: crate::oauth::AuthorizationServer,
     pub started_at: Instant,
     /// Cancelled when the server starts shutting down (the tray's Quit
     /// cancels it to ask for that). Responses that never end on their own,
@@ -117,6 +119,7 @@ impl AppState {
             stopping.clone(),
         );
         let auth = AuthService::new(db.clone());
+        let oauth = crate::oauth::AuthorizationServer::new(&config);
         let two_step = crate::two_step::TwoStep::new(db.clone(), &config.data_dir);
         two_step.check_key().await;
         let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&db.read).await?;
@@ -130,6 +133,7 @@ impl AppState {
                 markers,
                 trickplay,
                 two_step,
+                oauth,
                 started_at: Instant::now(),
                 stopping,
                 config,
@@ -208,6 +212,7 @@ impl AppState {
             loop {
                 tick.tick().await;
                 state.auth.purge_expired().await;
+                state.oauth.sweep();
             }
         });
     }
