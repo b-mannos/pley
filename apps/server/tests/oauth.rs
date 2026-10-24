@@ -330,11 +330,15 @@ async fn metadata_names_the_address_it_was_asked_at() {
             "revocation_endpoint": "http://pley.local:7539/api/oauth/revoke",
             "response_types_supported": ["code"],
             "response_modes_supported": ["query"],
-            "grant_types_supported": ["authorization_code", "refresh_token"],
+            "grant_types_supported": [
+                "authorization_code",
+                "refresh_token",
+                "urn:pley:params:oauth:grant-type:switch-profile"
+            ],
             "token_endpoint_auth_methods_supported": ["none"],
             "revocation_endpoint_auth_methods_supported": ["none"],
             "code_challenge_methods_supported": ["S256"],
-            "scopes_supported": ["library", "play", "playlists"],
+            "scopes_supported": ["library", "play", "playlists", "profiles"],
             "authorization_response_iss_parameter_supported": true,
             "client_id_metadata_document_supported": false,
             "service_documentation": "https://github.com/hhaidar/pley/blob/master/docs/API.md",

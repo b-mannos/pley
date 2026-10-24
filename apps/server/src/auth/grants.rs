@@ -301,6 +301,190 @@ pub async fn refresh(db: &Db, input: RefreshInput) -> Result<Issued, RefreshErro
     Ok(Issued { grant_id, access_token, refresh_token: Some(refresh_token), expires_in: access_expires - now, scopes })
 }
 
+/// The grant of a refresh token about to be shown for a profile switch,
+/// read without spending the token (see [`holder`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Holder {
+    pub grant_id: i64,
+    pub client_id: String,
+    pub scopes: Scopes,
+    pub approved_by: i64,
+    /// The profile the app acts as, with the app's rights: never an
+    /// administrator's (as [`super::AuthService::validate_app`]).
+    pub user: super::AuthUser,
+}
+
+/// Reads the grant of refresh token `token` of app `client_id`, as a
+/// refresh would (flow B of the design), without spending it: unknown,
+/// another app's, expired, a disabled profile or approver, or a grant past
+/// its refresh limit get nothing. A spent one ends its grant, as a refresh
+/// does: someone has a copy.
+pub async fn holder(db: &Db, token: &str, client_id: &str) -> Result<Holder, RefreshError> {
+    if !token.starts_with(REFRESH_PREFIX) {
+        return Err(RefreshError::Invalid("unknown refresh token"));
+    }
+    let key = hash_token(token);
+    let now = now();
+    let mut tx = db.write.begin().await?;
+    #[allow(clippy::type_complexity)]
+    let row: Option<(i64, i64, Option<i64>, String, String, i64, i64, Option<i64>, bool, bool)> = sqlx::query_as(
+        "SELECT t.grant_id, t.expires_at, t.used_at, g.client_id, g.scope, g.approved_by, g.expires_at, g.ends_at,
+                u.disabled, a.disabled
+         FROM app_tokens t
+         JOIN app_grants g ON g.id = t.grant_id
+         JOIN users u ON u.id = g.user_id
+         JOIN users a ON a.id = g.approved_by
+         WHERE t.token_hash = ? AND t.kind = 'refresh'",
+    )
+    .bind(&key)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((
+        grant_id,
+        token_expires,
+        used_at,
+        owner,
+        scope,
+        approved_by,
+        grant_expires,
+        ends_at,
+        user_off,
+        approver_off,
+    )) = row
+    else {
+        return Err(RefreshError::Invalid("unknown refresh token"));
+    };
+    if owner != client_id {
+        return Err(RefreshError::Invalid("this refresh token belongs to another app"));
+    }
+    if used_at.is_some() {
+        end_grant_in(&mut tx, grant_id).await?;
+        tx.commit().await?;
+        return Err(RefreshError::Reused { grant_id });
+    }
+    if token_expires <= now || grant_expires <= now || ends_at.is_some_and(|end| end <= now) {
+        return Err(RefreshError::Invalid("the app's access has expired"));
+    }
+    if user_off || approver_off {
+        return Err(RefreshError::Invalid("the account is disabled"));
+    }
+    let on_record: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM app_tokens WHERE grant_id = ? AND kind = 'refresh'")
+        .bind(grant_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    if on_record >= MAX_REFRESH_TOKENS_ON_RECORD {
+        end_grant_in(&mut tx, grant_id).await?;
+        tx.commit().await?;
+        return Err(RefreshError::Ended { grant_id });
+    }
+    let (user_id, username, role_admin, all_libraries, max_age): (i64, String, bool, bool, Option<i64>) =
+        sqlx::query_as(
+            "SELECT u.id, u.username, u.is_admin, u.all_libraries, u.max_age
+             FROM app_grants g JOIN users u ON u.id = g.user_id WHERE g.id = ?",
+        )
+        .bind(grant_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    let scopes = Scopes::from_stored(&scope);
+    let user = super::AuthUser {
+        id: user_id,
+        username,
+        is_admin: false,
+        all_libraries: all_libraries || role_admin,
+        max_age: if role_admin { None } else { max_age },
+        app: Some(std::sync::Arc::new(super::AppAccess {
+            grant_id,
+            client_id: owner.as_str().into(),
+            scopes,
+            approved_by,
+        })),
+    };
+    Ok(Holder { grant_id, client_id: owner, scopes, approved_by, user })
+}
+
+/// A profile switch (flow D of the design), once the switch is allowed.
+#[derive(Debug, Clone)]
+pub struct SwitchInput {
+    /// The refresh token shown: spent by the switch.
+    pub token: String,
+    pub grant_id: i64,
+    /// The profile the app acts as from now on.
+    pub user_id: i64,
+    pub user_agent: Option<String>,
+    pub ip: Option<String>,
+}
+
+/// Moves a grant to another profile in one transaction: the refresh token
+/// shown is spent (one spent meanwhile means two holders, and ends the
+/// grant), the grant acts as the new profile (whoever allowed it, its app
+/// and its scope stay), every access token it had stops working, and a new
+/// pair is issued. The new profile's grants past [`MAX_GRANTS_PER_USER`]
+/// end (the least recently used): their ids come second.
+pub async fn switch_profile(db: &Db, input: SwitchInput) -> Result<(Issued, Vec<i64>), RefreshError> {
+    let key = hash_token(&input.token);
+    let now = now();
+    let mut tx = db.write.begin().await?;
+    let spent = sqlx::query(
+        "UPDATE app_tokens SET used_at = ? WHERE token_hash = ? AND grant_id = ? AND kind = 'refresh' AND used_at IS NULL",
+    )
+    .bind(now)
+    .bind(&key)
+    .bind(input.grant_id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if spent == 0 {
+        // Spent by another exchange in the meantime (or its grant ended).
+        end_grant_in(&mut tx, input.grant_id).await?;
+        tx.commit().await?;
+        return Err(RefreshError::Reused { grant_id: input.grant_id });
+    }
+    let row: Option<(String, Option<i64>)> = sqlx::query_as(
+        "UPDATE app_grants SET user_id = ?, last_used_at = ?, expires_at = ?, user_agent = ?, last_ip = ?
+         WHERE id = ? RETURNING scope, ends_at",
+    )
+    .bind(input.user_id)
+    .bind(now)
+    .bind(now + GRANT_IDLE_SECS)
+    .bind(agent(input.user_agent.as_deref()))
+    .bind(&input.ip)
+    .bind(input.grant_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((scope, ends_at)) = row else {
+        return Err(RefreshError::Invalid("unknown refresh token"));
+    };
+    // Tokens of the profile it acted as stop now, and expired ones go.
+    sqlx::query("DELETE FROM app_tokens WHERE grant_id = ? AND (kind = 'access' OR expires_at <= ?)")
+        .bind(input.grant_id)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+    let refresh_token =
+        insert_token(&mut tx, input.grant_id, "refresh", capped(now + GRANT_IDLE_SECS, ends_at)).await?;
+    let access_expires = capped(now + ACCESS_TOKEN_SECS, ends_at);
+    let access_token = insert_token(&mut tx, input.grant_id, "access", access_expires).await?;
+    let dropped: Vec<i64> = sqlx::query_scalar(
+        "DELETE FROM app_grants WHERE user_id = ? AND id NOT IN
+           (SELECT id FROM app_grants WHERE user_id = ? ORDER BY last_used_at DESC, id DESC LIMIT ?)
+         RETURNING id",
+    )
+    .bind(input.user_id)
+    .bind(input.user_id)
+    .bind(MAX_GRANTS_PER_USER)
+    .fetch_all(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    let issued = Issued {
+        grant_id: input.grant_id,
+        access_token,
+        refresh_token: Some(refresh_token),
+        expires_in: access_expires - now,
+        scopes: Scopes::from_stored(&scope),
+    };
+    Ok((issued, dropped))
+}
+
 async fn end_grant_in(tx: &mut Transaction<'_, Sqlite>, grant_id: i64) -> sqlx::Result<()> {
     sqlx::query("DELETE FROM app_grants WHERE id = ?").bind(grant_id).execute(&mut **tx).await?;
     Ok(())
@@ -763,6 +947,69 @@ mod tests {
         assert_eq!(count, MAX_GRANTS_PER_USER);
         let ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM app_grants").fetch_all(&db.read).await.unwrap();
         assert!(ids.contains(&used.grant_id) && ids.contains(&bob.grant_id), "other people's grants stay");
+    }
+
+    fn moving(token: &str, grant_id: i64, user_id: i64) -> SwitchInput {
+        SwitchInput {
+            token: token.into(),
+            grant_id,
+            user_id,
+            user_agent: Some("okhttp/5".into()),
+            ip: Some("10.0.0.4".into()),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_profile_switch_reads_without_spending_and_moves_only_the_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = database(dir.path()).await;
+        sqlx::query("UPDATE users SET is_admin = 1, max_age = 12 WHERE id = 1").execute(&db.write).await.unwrap();
+        let (first, _) = issue(&db, grant(ANDROID, "library profiles")).await.unwrap();
+        let token = first.refresh_token.unwrap();
+        let before = tokens(&db).await;
+        let held = holder(&db, &token, ANDROID).await.unwrap();
+        assert_eq!(tokens(&db).await, before, "reading spends nothing");
+        assert_eq!((held.grant_id, held.approved_by), (first.grant_id, 1));
+        assert_eq!(held.scopes.to_string(), "library profiles");
+        // The app's rights: an administrator's role gives every library and
+        // no age limit, never administration.
+        assert_eq!((held.user.id, held.user.is_admin, held.user.all_libraries), (1, false, true));
+        assert_eq!(held.user.max_age, None);
+        assert!(matches!(holder(&db, &token, OTHER).await, Err(RefreshError::Invalid(_))));
+        assert!(matches!(holder(&db, &first.access_token, ANDROID).await, Err(RefreshError::Invalid(_))));
+
+        let (moved, dropped) = switch_profile(&db, moving(&token, first.grant_id, 2)).await.unwrap();
+        assert!(dropped.is_empty());
+        assert_eq!((moved.grant_id, moved.scopes.to_string()), (first.grant_id, "library profiles".to_owned()));
+        let row: (i64, i64, String, String, String) =
+            sqlx::query_as("SELECT user_id, approved_by, client_id, scope, last_ip FROM app_grants")
+                .fetch_one(&db.read)
+                .await
+                .unwrap();
+        assert_eq!(row, (2, 1, ANDROID.to_owned(), "library profiles".to_owned(), "10.0.0.4".to_owned()));
+        let access: Vec<String> = sqlx::query_scalar("SELECT token_hash FROM app_tokens WHERE kind = 'access'")
+            .fetch_all(&db.read)
+            .await
+            .unwrap();
+        assert_eq!(access, [hash_token(&moved.access_token)], "the old access token is gone");
+        // The token shown was spent: shown again, it ends the grant.
+        let err = holder(&db, &token, ANDROID).await.unwrap_err();
+        assert!(matches!(err, RefreshError::Reused { .. }), "{err:?}");
+        assert_eq!(grants(&db).await, 0);
+    }
+
+    #[tokio::test]
+    async fn a_refresh_token_spent_while_switching_ends_the_grant() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = database(dir.path()).await;
+        let (first, _) = issue(&db, grant(ANDROID, "library profiles")).await.unwrap();
+        let token = first.refresh_token.unwrap();
+        holder(&db, &token, ANDROID).await.unwrap();
+        // A refresh with the same token gets there first: two holders.
+        refresh(&db, exchange(&token, ANDROID)).await.unwrap();
+        let err = switch_profile(&db, moving(&token, first.grant_id, 2)).await.unwrap_err();
+        assert!(matches!(err, RefreshError::Reused { grant_id } if grant_id == first.grant_id), "{err:?}");
+        assert_eq!(grants(&db).await, 0);
     }
 
     #[tokio::test]

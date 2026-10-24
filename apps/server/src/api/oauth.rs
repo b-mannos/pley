@@ -12,10 +12,13 @@
 //!   the web app's cookie and nothing else, from pley's own page only.
 //! * Apps exchange codes and refresh tokens at `POST /api/oauth/token` and
 //!   sign out at `POST /api/oauth/revoke`: forms, no cookies, no secrets.
+//! * pley's own apps, allowed `profiles`, list the household at
+//!   `GET /api/oauth/profiles` and switch with a grant of the token
+//!   endpoint, by the web app's rules.
 //! * People see and sign out the apps using their account at
 //!   `/api/me/apps`; administrators, anyone's at `/api/users/{id}/apps`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use axum::Json;
 use axum::body::Bytes;
@@ -28,7 +31,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use url::Url;
 
-use crate::auth::grants::{self, GrantRow, Issued, NewGrant, RefreshError, RefreshInput};
+use super::auth::{
+    NO_WAY_IN, NOT_ALLOWED, PIN_LOCKED, PIN_NEEDED, SwitchError, SwitchTarget, check_switch, switch_needs,
+    switch_targets,
+};
+use crate::auth::grants::{self, GrantRow, Issued, NewGrant, RefreshError, RefreshInput, SwitchInput};
 use crate::auth::scopes::{Scope, Scopes};
 use crate::auth::{AdminUser, AuthUser, ClientIp, cookie_token, forwarded_https, hash_token};
 use crate::error::{ApiResult, AppError};
@@ -48,6 +55,10 @@ const STATE_MAX: usize = 1024;
 const NOT_FROM_PLEY: &str = "this page must be opened from pley itself";
 const OVER: &str = "this request is over: start again from the app";
 const BUSY: &str = "too many sign-ins in progress: try again in a minute";
+
+/// The grant type of a profile switch by one of pley's own apps (an
+/// extension grant, RFC 6749 §4.5).
+pub(crate) const SWITCH_PROFILE: &str = "urn:pley:params:oauth:grant-type:switch-profile";
 
 // ------------------------------------------------------------------ issuer
 
@@ -100,7 +111,7 @@ pub async fn metadata(State(state): State<AppState>, headers: HeaderMap) -> ApiR
         "revocation_endpoint": format!("{issuer}/api/oauth/revoke"),
         "response_types_supported": ["code"],
         "response_modes_supported": ["query"],
-        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "grant_types_supported": ["authorization_code", "refresh_token", SWITCH_PROFILE],
         "token_endpoint_auth_methods_supported": ["none"],
         "revocation_endpoint_auth_methods_supported": ["none"],
         "code_challenge_methods_supported": ["S256"],
@@ -365,6 +376,13 @@ fn check_request(params: &[(String, String)], client: &clients::Client, issuer: 
             ));
         }
     };
+    if asked.contains(Scope::Profiles) && !client.first_party {
+        // A profile's PIN is typed into the app: pley's own apps only.
+        return Err(fail(
+            "invalid_scope",
+            "only pley's own apps can switch profiles (profiles): ask the app's publisher to fix it",
+        ));
+    }
     if client.scope_cap.as_deref().is_some_and(|cap| !asked.is_subset_of(Scopes::from_stored(cap))) {
         return Err(fail(
             "invalid_scope",
@@ -451,11 +469,14 @@ pub struct OAuthError {
     description: String,
     /// The app tried HTTP Basic authentication: say how it would work.
     basic: bool,
+    /// Why a profile switch was refused, for the app to word it (an extra
+    /// field beside RFC 6749's).
+    reason: Option<&'static str>,
 }
 
 impl OAuthError {
     fn new(error: &'static str, description: impl Into<String>) -> Self {
-        Self { status: StatusCode::BAD_REQUEST, error, description: description.into(), basic: false }
+        Self { status: StatusCode::BAD_REQUEST, error, description: description.into(), basic: false, reason: None }
     }
 
     fn invalid_request(description: impl Into<String>) -> Self {
@@ -487,8 +508,11 @@ const NO_STORE: [(header::HeaderName, HeaderValue); 2] = [
 
 impl IntoResponse for OAuthError {
     fn into_response(self) -> Response {
-        let body = Json(json!({"error": self.error, "error_description": self.description}));
-        let mut response = (self.status, NO_STORE, body).into_response();
+        let mut body = json!({"error": self.error, "error_description": self.description});
+        if let Some(reason) = self.reason {
+            body["reason"] = json!(reason);
+        }
+        let mut response = (self.status, NO_STORE, Json(body)).into_response();
         if self.basic {
             response.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static(r#"Basic realm="pley""#));
         }
@@ -576,8 +600,9 @@ fn tokens(issued: Issued) -> Response {
 }
 
 /// `POST /api/oauth/token`: a code for the first tokens
-/// (`authorization_code`), or a refresh token for new ones
-/// (`refresh_token`, rotated every time).
+/// (`authorization_code`), a refresh token for new ones (`refresh_token`,
+/// rotated every time), or a refresh token for tokens acting as another
+/// profile of the household ([`SWITCH_PROFILE`], pley's own apps).
 pub async fn token(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -591,7 +616,11 @@ pub async fn token(
     let answer = match form.get("grant_type") {
         Some("authorization_code") => exchange_code(&state, &headers, ip, &form).await,
         Some("refresh_token") => refresh(&state, &headers, ip, &form).await,
-        Some(_) => Err(OAuthError::new("unsupported_grant_type", "pley knows authorization_code and refresh_token")),
+        Some(SWITCH_PROFILE) => switch_profile(&state, &headers, ip, &form).await,
+        Some(_) => Err(OAuthError::new(
+            "unsupported_grant_type",
+            "pley knows authorization_code, refresh_token and its own apps' profile switch",
+        )),
         None => Err(OAuthError::invalid_request("grant_type is missing")),
     };
     answer.unwrap_or_else(IntoResponse::into_response)
@@ -714,6 +743,157 @@ async fn refresh(
         Err(RefreshError::Internal(err)) => Err(OAuthError::server_error(err)),
         Err(err) => Err(OAuthError::invalid_grant(err.to_string())),
     }
+}
+
+// ------------------------------------------------------------------ profiles (pley's own apps)
+
+/// grant_type=urn:pley:params:oauth:grant-type:switch-profile (an
+/// extension grant, RFC 6749 §4.5; flow D of the design): one of pley's own
+/// apps, allowed `profiles`, moves to another profile of the household.
+///
+/// It shows its refresh token, never an access token, so a stolen one-hour
+/// token can't become a lasting grant; a spent one ends the grant as a
+/// refresh does. The rules are the web app's switch ([`check_switch`]),
+/// from the app's own rights: no administrator goes anywhere through an app.
+/// Profiles that need their password are picked in the browser, where the
+/// app signs in again: apps never see passwords or two-step codes. A
+/// refusal spends nothing. A switch keeps the app, what it was allowed and
+/// whoever allowed it, and ends the tokens it had at once.
+async fn switch_profile(
+    state: &AppState,
+    headers: &HeaderMap,
+    ip: Option<String>,
+    form: &Form,
+) -> Result<Response, OAuthError> {
+    let token = form.required("refresh_token")?;
+    let client_id = form.required("client_id")?;
+    let profile: i64 = form
+        .required("profile")?
+        .parse()
+        .map_err(|_| OAuthError::invalid_request("profile must be the id of a profile"))?;
+    form.check_resource(headers)?;
+    let holder =
+        grants::holder(&state.db, token, client_id).await.map_err(|err| refused_refresh(state, client_id, err))?;
+    if clients::builtin(client_id).is_none() {
+        return Err(OAuthError::new("unauthorized_client", "only pley's own apps can switch profiles"));
+    }
+    if !holder.scopes.contains(Scope::Profiles) {
+        return Err(OAuthError::new(
+            "unauthorized_client",
+            format!("this app wasn't allowed to {}: sign in to it again to allow it", Scope::Profiles.words()),
+        ));
+    }
+    if profile == holder.user.id {
+        return Err(OAuthError::invalid_request("the app uses this profile already"));
+    }
+    check_switch(state, &holder.user, profile, form.get("pin"), None, None).await.map_err(refused_switch)?;
+    let input = SwitchInput {
+        token: token.to_owned(),
+        grant_id: holder.grant_id,
+        user_id: profile,
+        user_agent: user_agent(headers),
+        ip,
+    };
+    let (issued, dropped) =
+        grants::switch_profile(&state.db, input).await.map_err(|err| refused_refresh(state, client_id, err))?;
+    // Its tokens, cached as the profile it acted as, are gone.
+    state.auth.forget_grants(&[issued.grant_id]);
+    if !dropped.is_empty() {
+        state.auth.forget_grants(&dropped);
+    }
+    state.auth.forget_user(holder.user.id);
+    state.auth.forget_user(profile);
+    tracing::info!(
+        "{} switched from {}'s profile to profile {profile} ({})",
+        app_label(client_id),
+        holder.user.username,
+        issued.scopes
+    );
+    Ok(tokens(issued))
+}
+
+/// A refresh token that got nothing, for a switch; a spent one ended its
+/// grant (see [`grants::holder`]).
+fn refused_refresh(state: &AppState, client_id: &str, err: RefreshError) -> OAuthError {
+    match err {
+        RefreshError::Reused { grant_id } => {
+            tracing::warn!("{client_id} showed a spent refresh token (someone has a copy): its access is ended");
+            state.auth.forget_grants(&[grant_id]);
+            OAuthError::invalid_grant(RefreshError::Reused { grant_id }.to_string())
+        }
+        RefreshError::Ended { grant_id } => {
+            tracing::warn!("{client_id} refreshed its tokens too often: its access is ended");
+            state.auth.forget_grants(&[grant_id]);
+            OAuthError::invalid_grant(RefreshError::Ended { grant_id }.to_string())
+        }
+        RefreshError::Internal(err) => OAuthError::server_error(err),
+        err => OAuthError::invalid_grant(err.to_string()),
+    }
+}
+
+/// A switch the rules refused: invalid_grant, with a `reason` the app words
+/// for the person.
+fn refused_switch(err: SwitchError) -> OAuthError {
+    let (reason, description) = match err {
+        SwitchError::NotFound | SwitchError::NotAllowed => ("not_allowed", NOT_ALLOWED.to_owned()),
+        SwitchError::NoWayIn => ("not_allowed", NO_WAY_IN.to_owned()),
+        SwitchError::Throttled(err) => ("throttled", err.to_string()),
+        SwitchError::PinLocked => ("pin_locked", PIN_LOCKED.to_owned()),
+        SwitchError::PinNeeded => ("wrong_pin", PIN_NEEDED.to_owned()),
+        SwitchError::WrongPin => ("wrong_pin", "wrong PIN".to_owned()),
+        SwitchError::PasswordNeeded | SwitchError::WrongPassword | SwitchError::TwoStep(_) => (
+            "browser",
+            "this profile can see more than yours: sign in to the app again, and pick the profile in the browser"
+                .to_owned(),
+        ),
+        SwitchError::Internal(err) => return OAuthError::server_error(err),
+    };
+    OAuthError { reason: Some(reason), ..OAuthError::invalid_grant(description) }
+}
+
+/// A profile of the household, for apps: no usernames, roles, libraries,
+/// age limits or sign-in settings.
+#[derive(Serialize)]
+pub struct AppProfile {
+    id: i64,
+    name: String,
+    avatar_url: Option<String>,
+    avatar_color: Option<String>,
+    /// The profile the app acts as.
+    current: bool,
+    /// What switching to it takes: none, pin, password (in the browser) or
+    /// locked.
+    needs: &'static str,
+}
+
+/// `GET /api/oauth/profiles` (apps allowed `profiles`): the enabled
+/// profiles of the household the caller belongs to, with what switching to
+/// each takes from the caller's own rights (the web app's rules, without
+/// the administrators' exemption for apps). Nobody's for a caller outside
+/// the household.
+pub async fn profiles(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<AppProfile>>> {
+    let all = crate::accounts::users(&state.db).await?;
+    if !all.iter().any(|u| u.id == user.id && u.home) {
+        return Ok(Json(Vec::new()));
+    }
+    let targets: HashMap<i64, SwitchTarget> =
+        switch_targets(&state, user.id).await?.into_iter().map(|target| (target.id, target)).collect();
+    let listed = all
+        .into_iter()
+        .filter(|u| u.home && !u.disabled)
+        .filter_map(|u| {
+            let target = targets.get(&u.id)?;
+            Some(AppProfile {
+                id: u.id,
+                name: u.name,
+                avatar_url: u.avatar_url,
+                avatar_color: u.avatar_color,
+                current: u.id == user.id,
+                needs: switch_needs(&user, target).name(),
+            })
+        })
+        .collect();
+    Ok(Json(listed))
 }
 
 /// `POST /api/oauth/revoke` (RFC 7009): an app signs out. A token of that

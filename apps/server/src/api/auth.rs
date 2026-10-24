@@ -282,13 +282,232 @@ pub struct Switch {
     code: Option<String>,
 }
 
-/// Switch this device to another home profile. The target's PIN is required
-/// when it has one (until 100 wrong ones in a row lock it). A profile freer
-/// than the current one (an administrator, a higher age limit, libraries the
-/// current one can't see) without a PIN needs its password, and its code
-/// with two-step sign-in, so age limits and library choices hold: one that
-/// has neither can only be switched to from a profile at least as free,
-/// until it gets a PIN.
+/// What switching to a profile takes, from the profile one is on (see
+/// [`check_switch`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Needs {
+    /// Nothing: a profile without a PIN that sees no more than this one.
+    None,
+    /// Its PIN.
+    Pin,
+    /// Its password (and its code, with two-step sign-in): a freer profile
+    /// without a PIN.
+    Password,
+    /// No way in from here: a freer profile with neither PIN nor password,
+    /// or a PIN locked after too many wrong tries.
+    Locked,
+}
+
+impl Needs {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Needs::None => "none",
+            Needs::Pin => "pin",
+            Needs::Password => "password",
+            Needs::Locked => "locked",
+        }
+    }
+}
+
+/// A profile someone may switch to, as seen from the profile they are on.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub(crate) struct SwitchTarget {
+    pub id: i64,
+    /// Both are home members (the household's profile switcher).
+    pub both_home: bool,
+    pub disabled: bool,
+    pub is_admin: bool,
+    pub pin_hash: Option<String>,
+    pub pin_failures: i64,
+    pub password_hash: String,
+    pub all_libraries: bool,
+    pub max_age: Option<i64>,
+    /// It sees a library the current profile can't.
+    pub more_libraries: bool,
+}
+
+const SWITCH_TARGETS: &str = "SELECT t.id, t.home AND me.home AS both_home, t.disabled, t.is_admin, t.pin_hash,
+        t.pin_failures, t.password_hash, t.all_libraries, t.max_age,
+        EXISTS (SELECT library_id FROM user_libraries WHERE user_id = t.id
+                EXCEPT SELECT library_id FROM user_libraries WHERE user_id = me.id) AS more_libraries
+ FROM users t, users me WHERE me.id = ?";
+
+/// Profile `target` as seen from `from`'s; `None` when there is no such
+/// profile.
+pub(crate) async fn switch_target(state: &AppState, from: i64, target: i64) -> ApiResult<Option<SwitchTarget>> {
+    Ok(sqlx::query_as(&format!("{SWITCH_TARGETS} AND t.id = ?"))
+        .bind(from)
+        .bind(target)
+        .fetch_optional(&state.db.read)
+        .await?)
+}
+
+/// Every profile as seen from `from`'s.
+pub(crate) async fn switch_targets(state: &AppState, from: i64) -> ApiResult<Vec<SwitchTarget>> {
+    Ok(sqlx::query_as(SWITCH_TARGETS).bind(from).fetch_all(&state.db.read).await?)
+}
+
+/// Whether `target` is freer than the profile `from` acts as: an
+/// administrator, a higher age limit, or libraries it can't see. From
+/// `from`'s rights for this request: an administrator's own sign-in may go
+/// anywhere, but an app's token, even an administrator's, has no such
+/// exemption (its `is_admin` is false).
+fn is_freer(from: &AuthUser, target: &SwitchTarget) -> bool {
+    !from.is_admin
+        && (target.is_admin
+            || from.max_age.is_some_and(|mine| target.max_age.is_none_or(|theirs| theirs > mine))
+            || (!from.all_libraries && (target.all_libraries || target.more_libraries)))
+}
+
+/// What switching from `from`'s profile to `target` takes, by the rules of
+/// [`check_switch`]; not whether it is allowed at all (both home members,
+/// the target enabled).
+pub(crate) fn switch_needs(from: &AuthUser, target: &SwitchTarget) -> Needs {
+    if target.id == from.id {
+        return Needs::None;
+    }
+    match (&target.pin_hash, is_freer(from, target)) {
+        (Some(_), _) if target.pin_failures >= accounts::MAX_PIN_FAILURES_IN_A_ROW => Needs::Locked,
+        (Some(_), _) => Needs::Pin,
+        (None, true) if target.password_hash.starts_with('!') => Needs::Locked,
+        (None, true) => Needs::Password,
+        (None, false) => Needs::None,
+    }
+}
+
+/// Why a switch was refused (see [`check_switch`]).
+#[derive(Debug)]
+pub(crate) enum SwitchError {
+    /// No such profile.
+    NotFound,
+    /// Not both home members, or the target is disabled.
+    NotAllowed,
+    /// Too many wrong PINs or passwords for the profile lately.
+    Throttled(AppError),
+    /// Its PIN is locked after too many wrong ones in a row.
+    PinLocked,
+    /// It has a PIN, and none was given.
+    PinNeeded,
+    WrongPin,
+    /// A freer profile with neither PIN nor password.
+    NoWayIn,
+    /// A freer profile without a PIN, and no password was given.
+    PasswordNeeded,
+    WrongPassword,
+    /// Its second step (two-step sign-in) failed.
+    TwoStep(AppError),
+    Internal(AppError),
+}
+
+impl From<AppError> for SwitchError {
+    fn from(err: AppError) -> Self {
+        SwitchError::Internal(err)
+    }
+}
+
+impl From<sqlx::Error> for SwitchError {
+    fn from(err: sqlx::Error) -> Self {
+        SwitchError::Internal(err.into())
+    }
+}
+
+/// The web app's answers.
+impl From<SwitchError> for AppError {
+    fn from(err: SwitchError) -> Self {
+        match err {
+            SwitchError::NotFound => AppError::not_found("profile not found"),
+            SwitchError::NotAllowed => AppError::forbidden(NOT_ALLOWED),
+            SwitchError::PinLocked => AppError::forbidden(PIN_LOCKED),
+            SwitchError::PinNeeded => AppError::forbidden(PIN_NEEDED),
+            SwitchError::WrongPin => AppError::forbidden("wrong PIN"),
+            SwitchError::NoWayIn => AppError::forbidden(NO_WAY_IN),
+            SwitchError::PasswordNeeded => {
+                AppError::forbidden("this profile can see more than yours: it needs its password")
+            }
+            SwitchError::WrongPassword => AppError::forbidden("wrong password"),
+            SwitchError::Throttled(err) | SwitchError::TwoStep(err) | SwitchError::Internal(err) => err,
+        }
+    }
+}
+
+pub(crate) const NOT_ALLOWED: &str = "you can't switch to this profile";
+pub(crate) const PIN_NEEDED: &str = "this profile is protected by a PIN";
+pub(crate) const PIN_LOCKED: &str = "this profile's PIN is locked after too many wrong tries: its owner can set it \
+                                     again in their account, or an administrator can";
+pub(crate) const NO_WAY_IN: &str =
+    "this profile can see more than yours: an administrator can give it a PIN to switch to it";
+
+/// Checks that `from` may switch to profile `target`: both home members,
+/// and the target enabled. Then, unless it is the same profile: the
+/// target's PIN when it has one (until 100 wrong ones in a row lock it);
+/// for a profile freer than the current one (see [`is_freer`]) without a
+/// PIN, its password, and its code with two-step sign-in, so age limits and
+/// library choices hold. One that has neither can only be switched to from
+/// a profile at least as free, until it gets a PIN. Attempts are throttled
+/// per profile (`profile:{id}`) and wrong PINs counted in a row
+/// (`users.pin_failures`), for the web app and apps alike.
+pub(crate) async fn check_switch(
+    state: &AppState,
+    from: &AuthUser,
+    target: i64,
+    pin: Option<&str>,
+    password: Option<&str>,
+    code: Option<&str>,
+) -> Result<(), SwitchError> {
+    let Some(profile) = switch_target(state, from.id, target).await? else {
+        return Err(SwitchError::NotFound);
+    };
+    if !profile.both_home || profile.disabled {
+        return Err(SwitchError::NotAllowed);
+    }
+    if target == from.id {
+        return Ok(());
+    }
+    let freer = is_freer(from, &profile);
+    let attempt = state.auth.throttle.begin(&format!("profile:{target}")).map_err(SwitchError::Throttled)?;
+    let ok = match (&profile.pin_hash, freer) {
+        (Some(pin_hash), _) => match pin {
+            // Throttled per profile, and capped in a row: guessing a
+            // 4-digit PIN over weeks doesn't get through either.
+            Some(_) if profile.pin_failures >= accounts::MAX_PIN_FAILURES_IN_A_ROW => {
+                return Err(SwitchError::PinLocked);
+            }
+            Some(pin) => {
+                let right = verify_password(pin.to_owned(), pin_hash.clone()).await?;
+                if !right || profile.pin_failures > 0 {
+                    sqlx::query(
+                        "UPDATE users SET pin_failures = CASE WHEN ? THEN 0 ELSE pin_failures + 1 END WHERE id = ?",
+                    )
+                    .bind(right)
+                    .bind(target)
+                    .execute(&state.db.write)
+                    .await?;
+                }
+                right
+            }
+            None => return Err(SwitchError::PinNeeded),
+        },
+        (None, true) if profile.password_hash.starts_with('!') => return Err(SwitchError::NoWayIn),
+        (None, true) => match password {
+            Some(password) => verify_password(password.to_owned(), profile.password_hash.clone()).await?,
+            None => return Err(SwitchError::PasswordNeeded),
+        },
+        (None, false) => true,
+    };
+    if !ok {
+        attempt.failed();
+        return Err(if profile.pin_hash.is_some() { SwitchError::WrongPin } else { SwitchError::WrongPassword });
+    }
+    if profile.pin_hash.is_none() && freer {
+        // Its password signs in to it: so does its second step.
+        state.two_step.check(&state.auth.throttle, target, code).await.map_err(SwitchError::TwoStep)?;
+    }
+    attempt.succeeded();
+    Ok(())
+}
+
+/// Switch this device to another home profile, by the rules of
+/// [`check_switch`]: the session it came from ends, and a new one starts.
 pub async fn switch(
     State(state): State<AppState>,
     user: AuthUser,
@@ -297,88 +516,8 @@ pub async fn switch(
     CurrentToken(token): CurrentToken,
     Json(body): Json<Switch>,
 ) -> ApiResult<Response> {
-    #[allow(clippy::type_complexity)]
-    let row: Option<(bool, bool, bool, Option<String>, i64, String, bool, Option<i64>, bool)> = sqlx::query_as(
-        "SELECT t.home AND me.home, t.disabled, t.is_admin, t.pin_hash, t.pin_failures, t.password_hash,
-                t.all_libraries, t.max_age,
-                EXISTS (SELECT library_id FROM user_libraries WHERE user_id = t.id
-                        EXCEPT SELECT library_id FROM user_libraries WHERE user_id = me.id)
-         FROM users t, users me WHERE t.id = ? AND me.id = ?",
-    )
-    .bind(body.user_id)
-    .bind(user.id)
-    .fetch_optional(&state.db.read)
-    .await?;
-    let Some((
-        both_home,
-        disabled,
-        target_admin,
-        pin_hash,
-        pin_failures,
-        password_hash,
-        all_libraries,
-        max_age,
-        more_libraries,
-    )) = row
-    else {
-        return Err(AppError::not_found("profile not found"));
-    };
-    if !both_home || disabled {
-        return Err(AppError::forbidden("you can't switch to this profile"));
-    }
-    // Administrators may go anywhere; anyone else not into more than they have.
-    let freer = !user.is_admin
-        && (target_admin
-            || user.max_age.is_some_and(|mine| max_age.is_none_or(|theirs| theirs > mine))
-            || (!user.all_libraries && (all_libraries || more_libraries)));
-    if body.user_id != user.id {
-        let attempt = state.auth.throttle.begin(&format!("profile:{}", body.user_id))?;
-        let ok = match (&pin_hash, freer) {
-            (Some(pin_hash), _) => match &body.pin {
-                // Throttled per profile, and capped in a row: guessing a
-                // 4-digit PIN over weeks doesn't get through either.
-                Some(_) if pin_failures >= accounts::MAX_PIN_FAILURES_IN_A_ROW => {
-                    return Err(AppError::forbidden(
-                        "this profile's PIN is locked after too many wrong tries: its owner can set it again in their \
-                         account, or an administrator can",
-                    ));
-                }
-                Some(pin) => {
-                    let right = verify_password(pin.clone(), pin_hash.clone()).await?;
-                    if !right || pin_failures > 0 {
-                        sqlx::query(
-                            "UPDATE users SET pin_failures = CASE WHEN ? THEN 0 ELSE pin_failures + 1 END WHERE id = ?",
-                        )
-                        .bind(right)
-                        .bind(body.user_id)
-                        .execute(&state.db.write)
-                        .await?;
-                    }
-                    right
-                }
-                None => return Err(AppError::forbidden("this profile is protected by a PIN")),
-            },
-            (None, true) if password_hash.starts_with('!') => {
-                return Err(AppError::forbidden(
-                    "this profile can see more than yours: an administrator can give it a PIN to switch to it",
-                ));
-            }
-            (None, true) => match &body.password {
-                Some(password) => verify_password(password.clone(), password_hash).await?,
-                None => return Err(AppError::forbidden("this profile can see more than yours: it needs its password")),
-            },
-            (None, false) => true,
-        };
-        if !ok {
-            attempt.failed();
-            return Err(AppError::forbidden(if pin_hash.is_some() { "wrong PIN" } else { "wrong password" }));
-        }
-        if pin_hash.is_none() && freer {
-            // Its password signs in to it: so does its second step.
-            state.two_step.check(&state.auth.throttle, body.user_id, body.code.as_deref()).await?;
-        }
-        attempt.succeeded();
-    }
+    check_switch(&state, &user, body.user_id, body.pin.as_deref(), body.password.as_deref(), body.code.as_deref())
+        .await?;
     if let Some(token) = token {
         state.auth.revoke(&token).await;
     }

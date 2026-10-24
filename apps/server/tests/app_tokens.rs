@@ -245,6 +245,9 @@ fn every_route_is_classified() {
     assert!(routes.contains(&("POST".into(), "/api/items/{id}/artwork/{kind}/upload".into())), "a multi-line route");
     let problems = classification_problems(&routes);
     assert!(problems.is_empty(), "{problems:#?}");
+    // The household's profiles, for apps allowed to switch between them.
+    assert!(routes.contains(&("GET".into(), "/api/oauth/profiles".into())));
+    assert_eq!(app_route("GET", "/api/oauth/profiles"), Some(Need::Scope(pley::auth::scopes::Scope::Profiles)));
 }
 
 #[test]
@@ -310,7 +313,7 @@ async fn an_administrators_app_token_opens_only_app_routes() {
     let admin = app.setup_admin().await;
     app.media_file("movies/Film (2020).mkv", 2048);
     app.library(&admin, "Movies", "movies", "movies").await;
-    let (token, _) = app.app_token(1, "library play playlists").await;
+    let (token, _) = app.app_token(1, "library play playlists profiles").await;
     for (method, path) in api_routes() {
         if PUBLIC.iter().any(|(m, p)| *m == method && *p == path) {
             // No sign-in needed (and logout would end the grant).
@@ -345,7 +348,7 @@ async fn each_scope_opens_only_its_routes() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;
     let (_, ann) = app.user(&admin, "ann", json!({})).await;
-    for scope in ["library", "play", "playlists"] {
+    for scope in ["library", "play", "playlists", "profiles"] {
         let (token, _) = app.app_token(ann, scope).await;
         for (method, path, need) in APP_ROUTES {
             let uri = concrete(path);
@@ -424,7 +427,7 @@ async fn app_tokens_go_only_in_the_authorization_header() {
 async fn the_plex_api_refuses_app_tokens() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;
-    let (token, _) = app.app_token(1, "library play playlists").await;
+    let (token, _) = app.app_token(1, "library play playlists profiles").await;
     assert_eq!(app.plex(Method::GET, "/library/sections", &admin, &[]).await.status, StatusCode::OK);
     assert_eq!(app.plex(Method::GET, "/library/sections", &token, &[]).await.status, StatusCode::UNAUTHORIZED);
     let plex = |uri: String, headers: Vec<(&'static str, String)>| {

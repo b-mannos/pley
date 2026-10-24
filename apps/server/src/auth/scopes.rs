@@ -16,11 +16,14 @@ pub enum Scope {
     Play,
     /// Make, change and delete playlists.
     Playlists,
+    /// Switch to the household's other profiles (pley's own apps only: a
+    /// profile's PIN is typed into the app).
+    Profiles,
 }
 
 impl Scope {
     /// Every scope, in the order they are written and shown.
-    pub const ALL: [Scope; 3] = [Scope::Library, Scope::Play, Scope::Playlists];
+    pub const ALL: [Scope; 4] = [Scope::Library, Scope::Play, Scope::Playlists, Scope::Profiles];
 
     /// The name in `scope` parameters and answers.
     pub fn name(self) -> &'static str {
@@ -28,6 +31,7 @@ impl Scope {
             Scope::Library => "library",
             Scope::Play => "play",
             Scope::Playlists => "playlists",
+            Scope::Profiles => "profiles",
         }
     }
 
@@ -38,6 +42,7 @@ impl Scope {
             Scope::Library => "see the profile's libraries, playlists and watch history",
             Scope::Play => "play titles, and keep the profile's place, watched marks, ratings and track choices",
             Scope::Playlists => "make, change and delete the profile's playlists",
+            Scope::Profiles => "switch to the household's other profiles",
         }
     }
 
@@ -114,7 +119,7 @@ pub enum Need {
 }
 
 use Need::AnyApp;
-use Scope::{Library, Play, Playlists};
+use Scope::{Library, Play, Playlists, Profiles};
 
 /// The routes apps may use: (method, path as routed, with `/api`, what the
 /// token needs). HEAD is looked up as GET.
@@ -175,6 +180,9 @@ pub const APP_ROUTES: &[(&str, &str, Need)] = &[
     ("POST", "/api/playlists/{id}/items", Need::Scope(Playlists)),
     ("DELETE", "/api/playlists/{id}/items/{entry_id}", Need::Scope(Playlists)),
     ("PUT", "/api/playlists/{id}/order", Need::Scope(Playlists)),
+    // profiles (the switch itself is a grant of the token endpoint, which
+    // checks the grant's scope)
+    ("GET", "/api/oauth/profiles", Need::Scope(Profiles)),
 ];
 
 /// What an app's token needs for `method` on the routed `path`; `None`:
@@ -199,8 +207,9 @@ mod tests {
         assert_eq!(Scopes::parse("Library"), Err("Library".to_owned()), "names are lower case");
         assert_eq!(Scopes::parse("library\tplay"), Err("library\tplay".to_owned()), "spaces only");
         assert_eq!(Scopes::from_stored("library future play"), Scopes::parse("library play").unwrap());
-        assert_eq!(Scopes::all().to_string(), "library play playlists");
-        assert_eq!(Scopes::all().names(), ["library", "play", "playlists"]);
+        assert_eq!(Scopes::all().to_string(), "library play playlists profiles");
+        assert_eq!(Scopes::all().names(), ["library", "play", "playlists", "profiles"]);
+        assert_eq!(Scopes::parse("profiles library").unwrap().to_string(), "library profiles");
 
         let library = Scopes::default().with(Scope::Library);
         assert!(library.contains(Scope::Library) && !library.contains(Scope::Play));
@@ -217,7 +226,7 @@ mod tests {
     fn every_app_route_is_on_a_real_path() {
         // Whether each names a route of api/mod.rs is checked by
         // tests/app_tokens.rs, which reads it.
-        assert_eq!(APP_ROUTES.len(), 47);
+        assert_eq!(APP_ROUTES.len(), 48);
         for (i, (method, path, _)) in APP_ROUTES.iter().enumerate() {
             assert!(["GET", "POST", "PUT", "PATCH", "DELETE"].contains(method), "{method} {path}");
             assert!(path.starts_with("/api/") && !path.ends_with('/'), "{path}");
@@ -230,6 +239,8 @@ mod tests {
         assert_eq!(required(&Method::HEAD, "/api/files/{id}/stream"), Some(Need::Scope(Scope::Play)));
         assert_eq!(required(&Method::POST, "/api/playlists"), Some(Need::Scope(Scope::Playlists)));
         assert_eq!(required(&Method::GET, "/api/auth/me"), Some(Need::AnyApp));
+        assert_eq!(required(&Method::GET, "/api/oauth/profiles"), Some(Need::Scope(Scope::Profiles)));
+        assert_eq!(required(&Method::POST, "/api/auth/switch"), None, "the web's switch makes sessions");
         assert_eq!(required(&Method::POST, "/api/libraries"), None, "creating libraries is administration");
         assert_eq!(required(&Method::GET, "/api/settings"), None);
         assert_eq!(required(&Method::GET, "/api/libraries/1"), None, "routed paths, not request paths");
