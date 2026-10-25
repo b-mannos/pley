@@ -673,6 +673,16 @@ impl AuthService {
         Ok(ended)
     }
 
+    /// Ends the grant of the token whose SHA-256 is `token_hash`, if it is
+    /// still there (see [`grants::delete_of_token`]); whether there was one.
+    pub async fn end_grant_of_token(&self, token_hash: &str) -> Result<bool, AppError> {
+        let ended = grants::delete_of_token(&self.db, token_hash).await?;
+        if let Some(grant_id) = ended {
+            self.forget_grants(&[grant_id]);
+        }
+        Ok(ended.is_some())
+    }
+
     /// Ends the apps acting as `user_id` or allowed by them; their grants.
     pub async fn end_apps(&self, user_id: i64) -> Result<Vec<i64>, AppError> {
         let ended = grants::delete_for(&self.db, user_id).await?;

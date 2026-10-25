@@ -92,6 +92,16 @@ pub struct Issued {
     pub scopes: Scopes,
 }
 
+impl Issued {
+    /// The SHA-256 of a token the grant keeps on record as long as it
+    /// lasts, to end it by later (see [`delete_of_token`]): its refresh
+    /// token, kept when spent until it expires, or else its access token,
+    /// the only one an app without refresh tokens ever gets.
+    pub fn on_record(&self) -> String {
+        hash_token(self.refresh_token.as_deref().unwrap_or(&self.access_token))
+    }
+}
+
 /// A refresh token exchange.
 #[derive(Debug, Clone)]
 pub struct RefreshInput {
@@ -474,10 +484,20 @@ pub async fn switch_profile(db: &Db, input: SwitchInput) -> Result<(Issued, Vec<
     .await?
     .rows_affected();
     if spent == 0 {
-        // Spent by another exchange in the meantime (or its grant ended).
-        end_grant_in(&mut tx, input.grant_id).await?;
+        // Spent by another exchange in the meantime: two holders, and its
+        // grant ends. Or gone with its grant, whose number may be another
+        // grant's by now: nothing to end.
+        let owner: Option<i64> =
+            sqlx::query_scalar("SELECT grant_id FROM app_tokens WHERE token_hash = ? AND kind = 'refresh'")
+                .bind(&key)
+                .fetch_optional(&mut *tx)
+                .await?;
+        let Some(grant_id) = owner else {
+            return Err(RefreshError::Invalid("unknown refresh token"));
+        };
+        end_grant_in(&mut tx, grant_id).await?;
         tx.commit().await?;
-        return Err(RefreshError::Reused { grant_id: input.grant_id });
+        return Err(RefreshError::Reused { grant_id });
     }
     let row: Option<(String, Option<i64>)> = sqlx::query_as(
         "UPDATE app_grants SET user_id = ?, last_used_at = ?, expires_at = ?, user_agent = ?, last_ip = ?
@@ -619,6 +639,19 @@ pub async fn list(db: &Db, user_id: i64) -> Result<Vec<GrantRow>, AppError> {
 pub async fn delete(db: &Db, grant_id: i64) -> Result<bool, AppError> {
     let deleted = sqlx::query("DELETE FROM app_grants WHERE id = ?").bind(grant_id).execute(&db.write).await?;
     Ok(deleted.rows_affected() > 0)
+}
+
+/// Ends the grant of the token whose SHA-256 is `token_hash`, if it is
+/// still there; its id. A token belongs to one grant only, while a grant's
+/// number is given again once the newest grant is gone (SQLite's rowid):
+/// what was remembered of a grant a while ago ends only that grant.
+pub async fn delete_of_token(db: &Db, token_hash: &str) -> Result<Option<i64>, AppError> {
+    Ok(sqlx::query_scalar(
+        "DELETE FROM app_grants WHERE id = (SELECT grant_id FROM app_tokens WHERE token_hash = ?) RETURNING id",
+    )
+    .bind(token_hash)
+    .fetch_optional(&db.write)
+    .await?)
 }
 
 /// Ends the grants acting as `user_id` or allowed by them; their ids.

@@ -666,12 +666,12 @@ async fn exchange_code(
     let grant = match state.oauth.codes.redeem(code, client_id, form.get("redirect_uri"), verifier) {
         Redeem::First(grant) => grant,
         Redeem::Invalid(why) => return Err(OAuthError::invalid_grant(why)),
-        Redeem::Replay(grant_id) => {
+        Redeem::Replay(made) => {
             tracing::warn!(
                 "{client_id} exchanged a code a second time (someone else may have it): its access is ended"
             );
-            if let Some(grant_id) = grant_id {
-                if let Err(err) = state.auth.end_grant(grant_id).await {
+            if let Some(token_hash) = made {
+                if let Err(err) = state.auth.end_grant_of_token(&token_hash).await {
                     tracing::error!("could not end an app's access: {err}");
                 }
             }
@@ -720,7 +720,7 @@ async fn exchange_code(
             return Err(OAuthError::server_error(err));
         }
     };
-    let refusal = match state.oauth.codes.issued(code, issued.grant_id) {
+    let refusal = match state.oauth.codes.issued(code, issued.on_record()) {
         codes::Issued::Kept => None,
         codes::Issued::Replayed => {
             tracing::warn!(

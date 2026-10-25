@@ -75,15 +75,16 @@ pub enum Redeem {
     /// call [`Codes::issued`] (or [`Codes::failed`]).
     First(CodeGrant),
     /// The code was exchanged before: someone else has it. The grant its
-    /// first exchange made, which must end; `None` while it is still being
-    /// issued ([`Codes::issued`] then says so).
-    Replay(Option<i64>),
+    /// first exchange made, which must end, by the SHA-256 of one of its
+    /// tokens; `None` while it is still being issued ([`Codes::issued`]
+    /// then says so).
+    Replay(Option<String>),
     /// Unknown, expired, or not this app's, return address or verifier.
     /// The code is as it was.
     Invalid(&'static str),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Redeemed {
     No,
     /// Its tokens are being issued; meanwhile it was exchanged again, or
@@ -92,7 +93,10 @@ enum Redeemed {
         replayed: bool,
         signed_out: bool,
     },
-    Grant(i64),
+    /// Exchanged: the SHA-256 of a token of the grant it made, which stays
+    /// on record as long as that grant does (unlike its number, which is
+    /// given again once it ends).
+    Grant(String),
 }
 
 struct Entry {
@@ -176,14 +180,15 @@ impl Codes {
                 entry.redeemed = Redeemed::InProgress { replayed: true, signed_out };
                 Redeem::Replay(None)
             }
-            Redeemed::Grant(grant_id) => Redeem::Replay(Some(grant_id)),
+            Redeemed::Grant(ref token_hash) => Redeem::Replay(Some(token_hash.clone())),
         }
     }
 
-    /// The first exchange of `code` made the grant `grant_id`: whether the
-    /// app keeps it, or it must end now because the code was exchanged
-    /// again meanwhile, or the account's sign-ins ended.
-    pub fn issued(&self, code: &str, grant_id: i64) -> Issued {
+    /// The first exchange of `code` made a grant, one of whose tokens has
+    /// the SHA-256 `token_hash` (one it keeps on record while it lasts):
+    /// whether the app keeps it, or it must end now because the code was
+    /// exchanged again meanwhile, or the account's sign-ins ended.
+    pub fn issued(&self, code: &str, token_hash: String) -> Issued {
         let mut codes = self.codes.lock();
         let Some(entry) = codes.get_mut(&hash_token(code)) else { return Issued::Kept };
         let issued = match entry.redeemed {
@@ -191,7 +196,7 @@ impl Codes {
             Redeemed::InProgress { signed_out: true, .. } => Issued::SignedOut,
             _ => Issued::Kept,
         };
-        entry.redeemed = Redeemed::Grant(grant_id);
+        entry.redeemed = Redeemed::Grant(token_hash);
         issued
     }
 
@@ -311,16 +316,16 @@ mod tests {
         let code = codes.new_code(grant()).unwrap();
         assert!(matches!(codes.redeem(&code, APP, None, VERIFIER), Redeem::First(_)));
         // Nobody came again: the grant stays.
-        assert_eq!(codes.issued(&code, 3), Issued::Kept);
-        assert_eq!(codes.redeem(&code, APP, None, VERIFIER), Redeem::Replay(Some(3)));
+        assert_eq!(codes.issued(&code, "grant-3".into()), Issued::Kept);
+        assert_eq!(codes.redeem(&code, APP, None, VERIFIER), Redeem::Replay(Some("grant-3".into())));
         // Wrong ones are no replays.
         assert!(matches!(codes.redeem(&code, APP, None, &"b".repeat(43)), Redeem::Invalid(_)));
 
         let code = codes.new_code(grant()).unwrap();
         assert!(matches!(codes.redeem(&code, APP, None, VERIFIER), Redeem::First(_)));
         assert_eq!(codes.redeem(&code, APP, None, VERIFIER), Redeem::Replay(None));
-        assert_eq!(codes.issued(&code, 4), Issued::Replayed, "the replay came during issuance");
-        assert_eq!(codes.redeem(&code, APP, None, VERIFIER), Redeem::Replay(Some(4)));
+        assert_eq!(codes.issued(&code, "grant-4".into()), Issued::Replayed, "the replay came during issuance");
+        assert_eq!(codes.redeem(&code, APP, None, VERIFIER), Redeem::Replay(Some("grant-4".into())));
     }
 
     #[test]
@@ -332,16 +337,16 @@ mod tests {
         let someone_elses = codes.new_code(CodeGrant { user_id: 8, ..grant() }).unwrap();
         assert!(matches!(codes.redeem(&issuing, APP, None, VERIFIER), Redeem::First(_)));
         assert!(matches!(codes.redeem(&used, APP, None, VERIFIER), Redeem::First(_)));
-        assert_eq!(codes.issued(&used, 5), Issued::Kept);
+        assert_eq!(codes.issued(&used, "grant-5".into()), Issued::Kept);
 
         codes.forget_user(7);
         // Nobody exchanged it: it is gone.
         assert_eq!(codes.redeem(&waiting, APP, None, VERIFIER), Redeem::Invalid("unknown code"));
         // Being issued: what it gets ends at once.
-        assert_eq!(codes.issued(&issuing, 6), Issued::SignedOut);
+        assert_eq!(codes.issued(&issuing, "grant-6".into()), Issued::SignedOut);
         // Used: its grant ends with the account's apps; a replay is still
         // noticed.
-        assert_eq!(codes.redeem(&used, APP, None, VERIFIER), Redeem::Replay(Some(5)));
+        assert_eq!(codes.redeem(&used, APP, None, VERIFIER), Redeem::Replay(Some("grant-5".into())));
         // Others' codes stay.
         assert!(codes.unredeemed(&someone_elses));
     }
@@ -367,7 +372,7 @@ mod tests {
         // A used one is kept as long, to notice replays, then forgotten.
         let used = codes.new_code(grant()).unwrap();
         assert!(matches!(codes.redeem(&used, APP, None, VERIFIER), Redeem::First(_)));
-        assert_eq!(codes.issued(&used, 1), Issued::Kept);
+        assert_eq!(codes.issued(&used, "grant-1".into()), Issued::Kept);
         codes.sweep();
         assert_eq!(codes.codes.lock().len(), 1, "the expired one goes, the used one stays");
         codes.age(&used, Duration::from_secs(61));

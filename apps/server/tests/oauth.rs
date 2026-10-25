@@ -950,6 +950,29 @@ async fn consent_answers_are_json_without_cors() {
 }
 
 #[tokio::test]
+async fn a_replayed_code_ends_only_the_grant_it_made() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (_, bob) = app.user(&admin, "bob", json!({})).await;
+    let code = code_for(&app, &admin, ANDROID_APP, ANDROID_BACK).await;
+    let (access, _) = pair(&exchange(&app, &code, ANDROID_APP, ANDROID_BACK, VERIFIER).await);
+    let first: i64 = sqlx::query_scalar("SELECT id FROM app_grants").fetch_one(&app.state.db.read).await.unwrap();
+    // The app signs out, and someone else's app signs in: SQLite gives it
+    // the number the first one had.
+    let revoked =
+        app.form_post("/api/oauth/revoke", &form(&[("token", &access), ("client_id", ANDROID_APP)]), &[]).await;
+    assert_eq!(revoked.status, StatusCode::OK);
+    let (bobs, _) = app.app_token(bob, "library").await;
+    let second: i64 = sqlx::query_scalar("SELECT id FROM app_grants").fetch_one(&app.state.db.read).await.unwrap();
+    assert_eq!(second, first, "the number was given again");
+
+    // The code shown again ends nothing of Bob's.
+    let replay = exchange(&app, &code, ANDROID_APP, ANDROID_BACK, VERIFIER).await;
+    assert_eq!(oauth_error(&replay), (StatusCode::BAD_REQUEST, "invalid_grant"));
+    assert_eq!(app.get("/api/auth/me", &bobs).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn a_code_exchanged_twice_at_once_leaves_no_access() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;
