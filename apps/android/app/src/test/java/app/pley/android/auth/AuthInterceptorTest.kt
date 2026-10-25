@@ -296,8 +296,12 @@ class AuthInterceptorTest {
         assertEquals(1, sent)
     }
 
-    /** A network chain whose connection goes to [to]. */
-    private class FakeChain(private val request: Request, private val to: InetAddress, private val onSend: () -> Unit) : Interceptor.Chain {
+    /**
+     * A network chain whose connection goes to [to]. What the interceptor
+     * doesn't use (OkHttp 5's per-call settings among it) isn't there.
+     */
+    private class FakeChain(private val request: Request, private val to: InetAddress, private val onSend: () -> Unit) :
+        Interceptor.Chain by unsupported() {
         var sent: Request? = null
 
         private val connection = object : Connection {
@@ -342,3 +346,9 @@ class AuthInterceptorTest {
         override fun withWriteTimeout(timeout: Int, unit: TimeUnit): Interceptor.Chain = this
     }
 }
+
+/** A chain whose every member throws: the rest of a fake one. */
+private fun unsupported(): Interceptor.Chain = java.lang.reflect.Proxy.newProxyInstance(
+    Interceptor.Chain::class.java.classLoader,
+    arrayOf(Interceptor.Chain::class.java),
+) { _, method, _ -> throw UnsupportedOperationException(method.name) } as Interceptor.Chain

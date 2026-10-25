@@ -1,0 +1,5 @@
+# Every module's build output (build-logic's too), and Gradle's and Kotlin's state.
+build/
+.gradle/
+.kotlin/
+local.properties
