@@ -6,6 +6,9 @@ import app.pley.android.common.Addresses
 import app.pley.android.common.Servers
 import app.pley.android.common.TraceNames
 import app.pley.android.common.perf.StartupSignals
+import app.pley.android.data.LegacyPreferences
+import app.pley.android.data.SavedServersJson
+import app.pley.android.data.StartupFiles
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -35,8 +38,6 @@ data class StartupState(
  * (300 ms at most).
  */
 object StartupRead {
-    /** Where the data module keeps a copy of the active profile's Home, for this read. */
-    const val HOME_SNAPSHOT = "snapshots/startup/home.json"
 
     fun start(context: Context): Deferred<StartupState> {
         val app = context.applicationContext
@@ -50,13 +51,19 @@ object StartupRead {
     }
 
     private fun read(context: Context): StartupState {
-        // Today the servers the web view app saved (ServerStore).
-        val saved = ServerStore.decode(context.getSharedPreferences("servers", Context.MODE_PRIVATE).getString("saved", null))
-        val server = Servers.lastUsed(saved)?.url?.let(Addresses::origin)
+        // The data module writes the active server's origin beside Home's copy; until it has
+        // (the first start after the web view app), the servers that app saved.
+        val server = File(context.filesDir, StartupFiles.SERVER).takeIf { it.isFile }?.readText()?.trim()?.ifEmpty { null }
+            ?: Servers.lastUsed(legacyServers(context))?.url?.let(Addresses::origin)
         // The sign-in module's shelf keeps each server's sealed tokens under "tokens:<issuer>".
         val signedIn = server != null &&
             context.getSharedPreferences("sign_in", Context.MODE_PRIVATE).contains("tokens:$server")
-        val snapshot = File(context.filesDir, HOME_SNAPSHOT).takeIf { it.isFile }?.readBytes()
+        val snapshot = File(context.filesDir, StartupFiles.HOME).takeIf { it.isFile }?.readBytes()
         return StartupState(server, signedIn, snapshot)
     }
+
+    private fun legacyServers(context: Context) =
+        SavedServersJson.decode(
+            context.getSharedPreferences(LegacyPreferences.SERVERS_FILE, Context.MODE_PRIVATE).getString(LegacyPreferences.SERVERS_KEY, null),
+        )
 }

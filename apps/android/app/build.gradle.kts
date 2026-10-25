@@ -9,8 +9,8 @@ android {
 
     defaultConfig {
         applicationId = "app.pley.android"
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     // Where a build goes: the stores (no self-updater), or the pley server's
@@ -80,13 +80,8 @@ dependencies {
     implementation(libs.androidx.media3.ui)
     // OkHttp sends the session token to the server only, also across redirects.
     implementation(libs.androidx.media3.datasource.okhttp)
-    // The player bridge, offered to the server's own pages only.
-    implementation(libs.androidx.webkit)
     implementation(libs.okhttp)
     implementation(libs.kotlinx.coroutines.android)
-
-    // Android's org.json is a stub in local unit tests.
-    testImplementation(libs.json)
 }
 
 // One command for every module (CI and docs/ANDROID.md): the flavors' debug

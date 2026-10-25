@@ -17,7 +17,6 @@ profileinstaller = "1.4.1"
 tracing = "2.0.5"
 metricsPerformance = "1.0.0"
 # Only until the native app replaces the web view.
-webkit = "1.18.0"
 # Pinned: PlayerSurface and the Compose state holders are @UnstableApi.
 media3 = "1.11.1"
 # Above the 4.12.0 that media3-datasource-okhttp brings.
@@ -55,7 +54,6 @@ androidx-browser = { group = "androidx.browser", name = "browser", version.ref =
 androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
 androidx-tracing-ktx = { group = "androidx.tracing", name = "tracing-ktx", version.ref = "tracing" }
 androidx-metrics-performance = { group = "androidx.metrics", name = "metrics-performance", version.ref = "metricsPerformance" }
-androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
 
 # Compose: versions from the BOM.
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
