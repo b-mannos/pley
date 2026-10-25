@@ -1,6 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- The navigation bar and rail. -->
+    <string name="shell_tab_home">Home</string>
+    <string name="shell_tab_libraries">Libraries</string>
+    <string name="shell_tab_search">Search</string>
+    <string name="shell_tab_playlists">Playlists</string>
+    <string name="shell_tab_me">Me</string>
+    <string name="shell_brand" translatable="false">pley</string>
+
+    <!-- Around every screen. -->
+    <string name="shell_offline">Showing what pley had saved. Reconnecting…</string>
+    <string name="shell_scope">pley wasn\'t allowed to do that: sign in again to allow it</string>
+    <string name="shell_scope_action">Sign in</string>
+    <string name="shell_now_playing">Open Now Playing</string>
+
+    <!-- Screens that aren't built yet. -->
     <string name="shell_placeholder_title">%1$s isn\'t built yet</string>
     <string name="shell_placeholder_body">This is the native app, on its way. The app you use today is still on the home screen as pley.</string>
     <string name="shell_placeholder_next">Open another screen</string>
+    <string name="shell_placeholder_in">Continue to Home</string>
+    <string name="shell_placeholder_kit">Show the phone kit</string>
+
+    <!-- The kit. -->
+    <string name="kit_back">Back</string>
+    <string name="kit_cancel">Cancel</string>
+    <string name="kit_retry">Retry</string>
+    <string name="kit_card_more">More actions</string>
+    <string name="kit_rating_label">Your rating</string>
+    <string name="kit_rating_none">Not rated</string>
+    <plurals name="kit_rating_stars">
+        <item quantity="one">%1$s star</item>
+        <item quantity="other">%1$s stars</item>
+    </plurals>
 </resources>
