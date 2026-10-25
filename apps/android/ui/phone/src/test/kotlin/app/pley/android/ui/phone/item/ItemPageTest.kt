@@ -1,0 +1,119 @@
+package app.pley.android.ui.phone.item
+
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.hasText
+import app.pley.android.common.TestTags
+import app.pley.android.model.ItemDetail
+import app.pley.android.screens.Navigator
+import app.pley.android.screens.PleyKey
+import app.pley.android.screens.item.ItemViewModel
+import app.pley.android.screens.item.ItemUiState
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import app.pley.android.ui.phone.theme.PhoneTheme
+import kotlinx.coroutines.Dispatchers
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+
+/**
+ * The phone's item page: Play, Resume and From start, Unavailable, the
+ * summary clamped to four lines with More, and where its links go.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-xxhdpi")
+// Real text measuring, so the summary has lines to clamp.
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+class ItemPageTest {
+    @get:Rule
+    val compose = createComposeRule()
+
+    private val opened = mutableListOf<PleyKey>()
+    private val navigator = object : Navigator {
+        override fun open(key: PleyKey) {
+            opened += key
+        }
+
+        override fun back() = Unit
+
+        override fun restart(key: PleyKey) = Unit
+    }
+
+    private fun show(detail: ItemDetail): ItemData {
+        val data = ItemData(detail)
+        val model = ItemViewModel(data, data.launcher, detail.id, compute = Dispatchers.Main.immediate)
+        compose.setContent {
+            PhoneTheme {
+                val state by model.state.collectAsState()
+                (state as? ItemUiState.Ready)?.let { ItemPageContent(it.page, model, navigator) }
+            }
+        }
+        compose.waitForIdle()
+        return data
+    }
+
+    @Test
+    fun aMovieNotStartedPlays() {
+        show(movie())
+        compose.onNodeWithText("Play").assertExists()
+        compose.onNodeWithText("From start").assertDoesNotExist()
+    }
+
+    @Test
+    fun aMovieInProgressResumesWithWhatIsLeftAndFromStart() {
+        val data = show(movie(positionMs = 3_480_000))
+        compose.onNodeWithText("Resume").assertExists()
+        compose.onNodeWithText("1h 33m left").assertExists()
+        compose.onNodeWithText("From start").performClick()
+        compose.waitForIdle()
+        assertEquals(0L, data.played.single().startMs)
+    }
+
+    @Test
+    fun noFilesIsUnavailable() {
+        show(movie().copy(files = emptyList()))
+        compose.onNodeWithText("Unavailable").assertExists()
+        compose.onNodeWithTag(TestTags.ITEM_PLAY).assertDoesNotExist()
+    }
+
+    @Test
+    fun aLongSummaryIsClampedWithMore() {
+        val long = List(30) { "The caravan crosses the salt flats under a white sky." }.joinToString(" ")
+        show(movie().copy(summary = long))
+        compose.onNodeWithText("More").assertExists().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Less").assertExists()
+    }
+
+    @Test
+    fun aShortSummaryHasNoMore() {
+        show(movie())
+        compose.onNodeWithText("More").assertDoesNotExist()
+    }
+
+    @Test
+    fun thePlaylistActionOpensAddToPlaylist() {
+        show(movie())
+        compose.onNodeWithText("Playlist").performClick()
+        assertEquals(listOf(PleyKey.AddToPlaylist(listOf(1L))), opened)
+    }
+
+    @Test
+    fun mediaInfoIsCollapsedAndShowsTheFileName() {
+        show(movie())
+        compose.onNodeWithTag(ITEM_PAGE).performScrollToNode(hasText("Media info"))
+        compose.onNodeWithText("Saltwind.mkv").assertDoesNotExist()
+        compose.onNodeWithText("Media info").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag(ITEM_PAGE).performScrollToNode(hasText("Saltwind.mkv"))
+        compose.onNodeWithText("Saltwind.mkv").assertExists()
+    }
+}

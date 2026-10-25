@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The item page's buttons (apps/web/src/pages/item, design spec §4.3, §4.4). -->
+    <string name="item_play">Play</string>
+    <string name="item_resume">Resume</string>
+    <string name="item_play_episode">Play %1$s</string>
+    <string name="item_resume_episode">Resume %1$s</string>
+    <string name="item_unavailable">Unavailable</string>
+    <string name="item_from_start">From start</string>
+    <string name="item_watched">Watched</string>
+    <string name="item_mark_watched">Mark as watched</string>
+    <string name="item_mark_unwatched">Mark as unwatched</string>
+    <string name="item_playlist">Playlist</string>
+    <string name="item_trailer">Trailer</string>
+    <string name="item_more_actions">More actions</string>
+    <string name="item_play_named">Play %1$s</string>
+
+    <!-- The rest of the page. -->
+    <string name="item_your_rating">Your rating</string>
+    <string name="item_part_of">Part of %1$s</string>
+    <string name="item_read_more">More</string>
+    <string name="item_read_less">Less</string>
+    <string name="item_version">Version</string>
+    <string name="item_audio">Audio</string>
+    <string name="item_subtitles">Subtitles</string>
+    <string name="item_subtitles_off">Off</string>
+    <string name="item_extras">Extras</string>
+    <string name="item_cast">Cast</string>
+    <string name="item_guest_stars">Guest Stars</string>
+    <string name="item_more_like_this">More Like This</string>
+    <string name="item_details">Details</string>
+    <string name="item_episodes">Episodes</string>
+    <string name="item_more_episodes">More episodes in %1$s</string>
+    <string name="item_no_episodes">No episodes found.</string>
+    <string name="item_choose_season">Choose a season</string>
+    <string name="item_media_info">Media info</string>
+    <plurals name="item_media_versions">
+        <item quantity="one">(%1$d version)</item>
+        <item quantity="other">(%1$d versions)</item>
+    </plurals>
+    <string name="item_left">%1$s left</string>
+
+    <!-- Details (Credits.tsx, VideoItemView.tsx). -->
+    <string name="item_created_by">Created by</string>
+    <string name="item_director">Director</string>
+    <string name="item_directors">Directors</string>
+    <string name="item_writer">Writer</string>
+    <string name="item_writers">Writers</string>
+    <plurals name="item_and_more">
+        <item quantity="one">and %1$d more</item>
+        <item quantity="other">and %1$d more</item>
+    </plurals>
+    <string name="item_original_title">Original title</string>
+    <string name="item_released">Released</string>
+    <string name="item_studio">Studio</string>
+    <string name="item_network">Network</string>
+    <string name="item_plays">Plays</string>
+    <string name="item_versions">Versions</string>
+
+    <!-- Media info (MediaInfo.tsx). -->
+    <string name="item_info_file">File</string>
+    <string name="item_info_container">Container</string>
+    <string name="item_info_size">Size</string>
+    <string name="item_info_duration">Duration</string>
+    <string name="item_info_bitrate">Bitrate</string>
+    <string name="item_info_video">Video</string>
+    <string name="item_info_audio">Audio</string>
+    <string name="item_info_streams">Streams</string>
+    <string name="item_stream_video">Video</string>
+    <string name="item_stream_audio">Audio</string>
+    <string name="item_stream_subtitle">Subtitle</string>
+
+    <!-- States (design spec §8). -->
+    <string name="item_failed">Couldn\'t load this item</string>
+    <string name="item_not_found">Item not found</string>
+    <string name="item_not_found_body">It may have been removed, or this profile can\'t see it.</string>
+    <string name="item_nothing_to_play">Nothing to play: this item has no media files.</string>
+    <string name="item_loading">Loading</string>
+
+    <!-- The action sheet. -->
+    <string name="item_action_play">Play</string>
+    <string name="item_action_resume">Resume</string>
+    <string name="item_action_from_start">Play from start</string>
+    <string name="item_action_mark_watched">Mark as watched</string>
+    <string name="item_action_mark_unwatched">Mark as unwatched</string>
+    <string name="item_action_add_to_playlist">Add to playlist…</string>
+    <string name="item_action_go_to_show">Go to show</string>
+    <string name="item_action_go_to_season">Go to season</string>
+    <string name="item_action_open">Open</string>
+
+    <!-- Person pages (PersonPage.tsx). -->
+    <string name="person_movies">Movies</string>
+    <string name="person_shows">Shows</string>
+    <string name="person_in_libraries">%1$s in your libraries</string>
+    <string name="person_not_found">Person not found</string>
+    <string name="person_not_found_body">No one by that link has anything in your libraries.</string>
+    <string name="person_failed">Couldn\'t load this person</string>
+</resources>
