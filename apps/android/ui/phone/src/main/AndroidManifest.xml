@@ -5,12 +5,14 @@
         <!--
           The phone and tablet player: it keeps playing through rotation,
           folding, a keyboard or a dark-mode change, and shrinks into
-          picture in picture.
+          picture in picture. Phones turn it to landscape in code; tablets
+          stay as they are held.
         -->
         <activity
             android:name=".player.PhonePlayerActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
             android:exported="false"
+            android:resizeableActivity="true"
             android:supportsPictureInPicture="true"
             android:theme="@style/Theme.PleyPhone.Player" />
     </application>

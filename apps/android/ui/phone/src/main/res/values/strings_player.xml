@@ -1,4 +1,95 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="player_placeholder">Playback isn\'t built yet. Press Back to return.</string>
+    <!-- The top bar. -->
+    <string name="player_back">Back</string>
+    <string name="player_pip">Picture in picture</string>
+    <string name="player_settings">Playback settings</string>
+
+    <!-- The centre. -->
+    <string name="player_play">Play</string>
+    <string name="player_pause">Pause</string>
+    <string name="player_back_10">Back 10 seconds</string>
+    <string name="player_forward_10">Forward 10 seconds</string>
+    <string name="player_loading">Loading</string>
+    <!-- A run of double-taps: "+20 s", "−10 s". -->
+    <string name="player_seek_forward">+%1$d s</string>
+    <string name="player_seek_back">−%1$d s</string>
+
+    <!-- The seek bar. -->
+    <string name="player_seek_bar">Position</string>
+    <!-- "32 minutes 40 seconds of 58 minutes". -->
+    <string name="player_position_of">%1$s of %2$s</string>
+    <string name="player_show_total">Show the length</string>
+    <string name="player_show_remaining">Show the time left</string>
+    <!-- "Part 1 · 1:02:03". -->
+    <string name="player_chapter_at">%1$s · %2$s</string>
+    <string name="player_chapter_number">Chapter %1$d</string>
+
+    <!-- The bottom row. -->
+    <string name="player_subtitles">Subtitles</string>
+    <string name="player_audio">Audio</string>
+    <string name="player_quality">Quality</string>
+    <string name="player_chapters">Chapters</string>
+    <string name="player_lock">Lock</string>
+    <string name="player_unlock">Unlock</string>
+    <string name="player_next_episode">Next episode</string>
+    <string name="player_fit">Fit</string>
+    <string name="player_fill">Fill</string>
+    <string name="player_zoom">Zoom</string>
+    <string name="player_fit_hint">Show the whole picture</string>
+    <string name="player_fill_hint">Fill the screen</string>
+    <string name="player_zoom_hint">Zoom past the black bars</string>
+    <string name="player_free">Zoomed</string>
+    <string name="player_method_hint">How it plays: %1$s</string>
+
+    <!-- Gestures. -->
+    <string name="player_volume">Volume</string>
+    <string name="player_brightness">Brightness</string>
+
+    <!-- Skip and Up Next. -->
+    <string name="player_play_now">Play now</string>
+    <!-- "Play now (7)". -->
+    <string name="player_play_now_in">Play now (%1$d)</string>
+    <string name="player_next_in">Next in %1$d</string>
+    <string name="player_cancel">Cancel</string>
+
+    <!-- Errors and notices. -->
+    <string name="player_error_title">Can\'t play this item</string>
+    <string name="player_try_again">Try again</string>
+    <string name="player_play_original">Play original</string>
+    <string name="player_lower_quality">Lower quality</string>
+
+    <!-- The sheet. -->
+    <string name="player_close">Close</string>
+    <string name="player_sheet_back">Back to settings</string>
+    <string name="player_subtitle_style">Subtitle style</string>
+    <string name="player_details">Playback details</string>
+    <string name="player_size">Size</string>
+    <string name="player_background">Background</string>
+    <string name="player_size_small">Small</string>
+    <string name="player_size_normal">Normal</string>
+    <string name="player_size_large">Large</string>
+    <string name="player_size_huge">Huge</string>
+    <string name="player_background_none">None</string>
+    <string name="player_background_box">Dark box</string>
+    <string name="player_burn_in">(burn-in)</string>
+    <string name="player_none">None</string>
+    <string name="player_default">Default</string>
+    <string name="player_selected">Selected</string>
+    <string name="player_details_device">This device</string>
+    <string name="player_details_decoder">Decoder</string>
+    <string name="player_details_hardware">%1$s (hardware)</string>
+    <string name="player_details_software">%1$s (software)</string>
+    <string name="player_details_picture">Picture</string>
+    <string name="player_details_display">Display</string>
+    <!-- "1080 × 2400 · 120 Hz · HDR10, HLG". -->
+    <string name="player_details_dropped">Dropped frames</string>
+    <!-- "3 of 4,512". -->
+    <string name="player_details_dropped_of">%1$d of %2$d</string>
+    <string name="player_details_audio_out">Audio output</string>
+    <string name="player_details_passthrough">%1$s, to the receiver as it is</string>
+    <string name="player_details_decoded">%1$s, decoded here</string>
+    <string name="player_details_first_frame">First frame</string>
+    <!-- "640 ms". -->
+    <string name="player_details_ms">%1$d ms</string>
 </resources>
