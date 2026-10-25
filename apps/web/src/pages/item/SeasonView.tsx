@@ -7,6 +7,7 @@ import { Button, SectionTitle, Skeleton } from "@/components/ui";
 import { episodeLabel, formatDate, formatDuration, pluralize, progressFraction, seasonTitle } from "@/lib/format";
 import { thumbCandidates } from "@/lib/images";
 import { usePlayItem } from "@/lib/usePlayItem";
+import { playIntent } from "@/player/preload";
 import { MoreActions } from "./ItemActions";
 import { ItemArt, ItemPageShell, MetaLine, Summary, WatchedButton } from "./shared";
 import { CastRow } from "./Credits";
@@ -30,6 +31,7 @@ function EpisodeRow({ ep }: { ep: ChildItem }) {
           type="button"
           aria-label={`Play ${ep.title}`}
           onClick={() => void play(ep)}
+          {...playIntent(ep.kind)}
           className="absolute left-1/2 top-1/2 flex size-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-accent text-accent-fg opacity-0 shadow-lg transition hover:bg-accent-hover focus-visible:opacity-100 group-hover:opacity-100"
         >
           <Play className="ml-0.5 size-4 fill-current" />
@@ -91,6 +93,7 @@ export function SeasonView({ item }: { item: ItemDetail }) {
               size="lg"
               icon={<Play className="size-5 fill-current" />}
               onClick={() => void play(item)}
+              {...playIntent(item.kind)}
               disabled={episodes.data?.length === 0}
             >
               {ep ? `${resuming ? "Resume" : "Play"} ${episodeLabel(ep)}` : "Play"}

@@ -8,6 +8,7 @@ import { Button, SectionTitle } from "@/components/ui";
 import { episodeLabel, pluralize } from "@/lib/format";
 import { useElementWidth } from "@/lib/hooks";
 import { usePlayItem } from "@/lib/usePlayItem";
+import { playIntent } from "@/player/preload";
 import { CastRow, CrewRows, hasCrew } from "./Credits";
 import { ExtrasRow } from "./Extras";
 import { MoreLikeThis } from "./MoreLikeThis";
@@ -64,6 +65,7 @@ export function ShowView({ item }: { item: ItemDetail }) {
               size="lg"
               icon={<Play className="size-5 fill-current" />}
               onClick={() => void play(item)}
+              {...playIntent(item.kind)}
               disabled={!item.leaf_count && !ep}
             >
               {playLabel}

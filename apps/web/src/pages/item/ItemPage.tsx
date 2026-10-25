@@ -11,6 +11,7 @@ import { ShowView } from "./ShowView";
 import { VideoItemView } from "./VideoItemView";
 import { itemUrl } from "@/lib/urls";
 import { idParam } from "@/lib/ids";
+import { usePreloadPlayerWhenIdle } from "@/player/preload";
 
 function ItemSkeleton() {
   return (
@@ -37,6 +38,8 @@ export function ItemPage() {
   const itemId = idParam(id);
   const item = useItem(itemId);
   useDocumentTitle(item.data ? fullTitle(item.data) : null);
+  // Play is the likely next step: its code is fetched by then.
+  usePreloadPlayerWhenIdle(item.data?.kind);
 
   if (!Number.isFinite(itemId) || itemId <= 0) return <NotFoundPage />;
   if (item.isPending) return <ItemSkeleton />;

@@ -19,6 +19,7 @@ import { PersonPage } from "@/pages/PersonPage";
 import { ProfilesPage } from "@/pages/ProfilesPage";
 import { SearchPage } from "@/pages/SearchPage";
 import { SetupPage } from "@/pages/SetupPage";
+import { loadPlayerPage } from "@/player/preload";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -78,7 +79,7 @@ const router = createBrowserRouter([
       {
         path: "/play/:id",
         ...onDemand(
-          () => import("@/player/PlayerPage"),
+          loadPlayerPage,
           (m) => m.PlayerPage,
           () => [],
           <PlayerFallback />,

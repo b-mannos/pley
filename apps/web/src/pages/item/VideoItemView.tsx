@@ -10,6 +10,7 @@ import { Button, Select } from "@/components/ui";
 import { codecLabel, formatBytes, formatDate, formatDuration, resolutionLabel, seasonTitle, streamLabel } from "@/lib/format";
 import { saveStreamChoice } from "@/lib/progress";
 import { usePlayItem } from "@/lib/usePlayItem";
+import { playIntent } from "@/player/preload";
 import { CastRow, CrewRows } from "./Credits";
 import { ExtrasRow } from "./Extras";
 import { MediaInfo } from "./MediaInfo";
@@ -144,7 +145,13 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
 
           <div className="flex flex-wrap items-center gap-2.5 pt-1">
             {item.files.length ? (
-              <Button variant="primary" size="lg" icon={<Play className="size-5 fill-current" />} onClick={() => onPlay(false)}>
+              <Button
+                variant="primary"
+                size="lg"
+                icon={<Play className="size-5 fill-current" />}
+                onClick={() => onPlay(false)}
+                {...playIntent(item.kind)}
+              >
                 {resumable ? "Resume" : "Play"}
               </Button>
             ) : (
@@ -153,7 +160,13 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
               </Button>
             )}
             {resumable ? (
-              <Button variant="secondary" size="lg" icon={<RotateCcw className="size-4" />} onClick={() => onPlay(true)}>
+              <Button
+                variant="secondary"
+                size="lg"
+                icon={<RotateCcw className="size-4" />}
+                onClick={() => onPlay(true)}
+                {...playIntent(item.kind)}
+              >
                 <span className="hidden sm:inline">From start</span>
               </Button>
             ) : null}
