@@ -85,6 +85,8 @@ data class Playback(
     val hls: Boolean,
     val durationMs: Long,
     val subtitles: List<SubtitleTrack>,
+    /** The subtitles are drawn into the picture itself (picture subtitles such as PGS). */
+    val burnSubtitles: Boolean = false,
 ) {
     companion object {
         fun parse(o: JSONObject): Playback {
@@ -95,6 +97,7 @@ data class Playback(
                 url = o.getString("url"),
                 hls = o.optBoolean("hls"),
                 durationMs = o.optLong("duration_ms"),
+                burnSubtitles = o.optBoolean("burn_subtitles"),
                 subtitles = (0 until subs.length()).map { i ->
                     val s = subs.getJSONObject(i)
                     SubtitleTrack(

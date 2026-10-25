@@ -2,12 +2,16 @@ package app.pley.android
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.CookieManager
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -28,7 +32,11 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
+import androidx.media3.common.VideoSize
+import androidx.media3.common.text.CueGroup
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +61,12 @@ class PlayerActivity : ComponentActivity() {
     private lateinit var api: PleyApi
     private lateinit var view: PlayerView
     private lateinit var title: TextView
+    private lateinit var zoomButton: TextView
+    private lateinit var backButton: TextView
+    private lateinit var header: LinearLayout
+    private var fill = false
+    private var zoom = 1f
+    private lateinit var subtitles: SubtitleView
     private var player: ExoPlayer? = null
     private var request: PlayRequest? = null
     private var playback: Playback? = null
@@ -73,6 +87,13 @@ class PlayerActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
+        // The picture may use the whole screen, beside the camera cutout too:
+        // filling the width is up to the viewer (pinch, or the Fill button).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
 
         view = PlayerView(this).apply {
             setBackgroundColor(0xFF000000.toInt())
@@ -85,18 +106,187 @@ class PlayerActivity : ComponentActivity() {
             textSize = 18f
             setPadding(48, 36, 48, 36)
             setShadowLayer(8f, 0f, 2f, 0xCC000000.toInt())
+            gravity = Gravity.CENTER_VERTICAL
+            // The title is also a way back, for a thumb that misses the arrow.
+            isClickable = true
+            setOnClickListener { onBackPressedDispatcher.onBackPressed() }
+        }
+        val touch = (56 * resources.displayMetrics.density).toInt()
+        backButton = TextView(this).apply {
+            text = "←"
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 30f
+            gravity = Gravity.CENTER
+            minWidth = touch
+            minHeight = touch
+            setPadding(touch / 3, touch / 4, touch / 6, touch / 4)
+            setShadowLayer(8f, 0f, 2f, 0xCC000000.toInt())
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Back"
+            setOnClickListener { onBackPressedDispatcher.onBackPressed() }
+        }
+        zoomButton = TextView(this).apply {
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 16f
+            setPadding(48, 36, 48, 36)
+            setShadowLayer(8f, 0f, 2f, 0xCC000000.toInt())
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { nextZoom() }
         }
         view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
-            title.visibility = visibility
+            header.visibility = visibility
+            zoomButton.visibility = visibility
         })
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(backButton)
+            addView(title)
+        }
+        this.header = header
+        // Subtitles are drawn over the screen, not inside the video frame, so
+        // they stay in view however far the picture is zoomed.
+        view.subtitleView?.visibility = android.view.View.GONE
+        subtitles = SubtitleView(this).apply {
+            setUserDefaultStyle()
+            setUserDefaultTextSize()
+        }
+        view.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
+            // A turned screen changes what covering it takes.
+            if (fill && (r - l != or - ol || b - t != ob - ot)) view.post { setZoom(coverZoom()) }
+        }
         val root = FrameLayout(this)
         root.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        root.addView(subtitles, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         root.addView(
-            title,
+            header,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START),
         )
+        root.addView(
+            zoomButton,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END),
+        )
         setContentView(root)
+        setFill(getSharedPreferences("player", Context.MODE_PRIVATE).getBoolean("fill", false))
         start(first, mode = "auto", startMs = first.startMs)
+    }
+
+    /**
+     * Fill zooms the picture until it covers the whole screen (a 16:9 or
+     * 2.39:1 film on a 20:9 phone loses a little at the edges); fit shows all
+     * of it. Pinching zooms freely in between and beyond, for films whose
+     * black bars are part of the picture. Fill or fit is remembered.
+     */
+    private fun setFill(on: Boolean) {
+        fill = on
+        setZoom(if (on) coverZoom() else 1f)
+        getSharedPreferences("player", Context.MODE_PRIVATE).edit { putBoolean("fill", on) }
+    }
+
+    /**
+     * The button steps through fit, fill and zoom. Zoom goes one step past
+     * fill for wide films stored with black bars inside a 16:9 picture: it
+     * grows the picture until a 2.39:1 image covers the screen's height.
+     */
+    private fun nextZoom() {
+        val cover = coverZoom()
+        val crop = cover * barsCrop()
+        when {
+            zoom <= 1.001f -> setFill(true)
+            zoom < crop - 0.01f && crop > cover + 0.02f -> {
+                fill = true
+                setZoom(crop)
+            }
+            else -> setFill(false)
+        }
+    }
+
+    /** How much more than fill it takes to hide 2.39:1 bars stored in a 16:9 picture. */
+    private fun barsCrop(): Float {
+        val size = player?.videoSize ?: return 1f
+        if (size.width == 0 || size.height == 0 || view.width == 0 || view.height == 0) return 1f
+        val video = size.width * size.pixelWidthHeightRatio / size.height
+        val screen = view.width.toFloat() / view.height
+        // Only pictures narrower than the screen can hide bars this way.
+        return if (video < 2f && screen > video) maxOf(1f, SCOPE / screen) else 1f
+    }
+
+    /** How much the fitted picture must grow to cover the screen. */
+    private fun coverZoom(): Float {
+        val size = player?.videoSize ?: return 1f
+        if (size.width == 0 || size.height == 0 || view.width == 0 || view.height == 0) return 1f
+        val video = size.width * size.pixelWidthHeightRatio / size.height
+        val screen = view.width.toFloat() / view.height
+        return maxOf(video / screen, screen / video)
+    }
+
+    /**
+     * Zooms by giving the video frame a box larger than the screen; the screen
+     * shows its middle. The frame keeps fitting the picture inside that box.
+     * Subtitles burned into the picture sit at its bottom, so then the bottom
+     * stays on screen and only the top is cropped.
+     */
+    private fun setZoom(value: Float) {
+        zoom = value.coerceIn(1f, MAX_ZOOM)
+        val frame = view.findViewById<AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame)
+        frame ?: return
+        val params = frame.layoutParams as? FrameLayout.LayoutParams ?: return
+        val burned = playback?.burnSubtitles == true
+        if (zoom <= 1.001f || view.width == 0) {
+            params.width = ViewGroup.LayoutParams.MATCH_PARENT
+            params.height = ViewGroup.LayoutParams.MATCH_PARENT
+            params.gravity = Gravity.CENTER
+        } else {
+            params.width = (view.width * zoom).toInt()
+            params.height = (view.height * zoom).toInt()
+            params.gravity = if (burned) Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL else Gravity.CENTER
+        }
+        frame.layoutParams = params
+        // The button names what it does next.
+        val cover = coverZoom()
+        val crop = cover * barsCrop()
+        val next = when {
+            zoom <= 1.001f -> "Fill"
+            zoom < crop - 0.01f && crop > cover + 0.02f -> "Zoom"
+            else -> "Fit"
+        }
+        zoomButton.text = next
+        zoomButton.contentDescription = when (next) {
+            "Fill" -> "Fill the screen"
+            "Zoom" -> "Zoom past the black bars"
+            else -> "Show the whole picture"
+        }
+    }
+
+    // Pinching zooms the picture, as in other video apps; taps still reach
+    // the controls.
+    private val pinch by lazy {
+        ScaleGestureDetector(
+            this,
+            object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                override fun onScale(detector: ScaleGestureDetector): Boolean {
+                    setZoom(zoom * detector.scaleFactor)
+                    return true
+                }
+
+                override fun onScaleEnd(detector: ScaleGestureDetector) {
+                    // Close to covering the screen counts as fill.
+                    val cover = coverZoom()
+                    if (zoom > 1.001f && kotlin.math.abs(zoom - cover) < 0.04f) setZoom(cover)
+                    fill = zoom > 1.001f
+                    getSharedPreferences("player", Context.MODE_PRIVATE).edit { putBoolean("fill", fill) }
+                }
+            },
+        )
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        pinch.onTouchEvent(event)
+        // A two-finger gesture is a pinch: the controls don't see it.
+        if (event.pointerCount > 1 || pinch.isInProgress) return true
+        return super.dispatchTouchEvent(event)
     }
 
     private fun newPlayer(): ExoPlayer {
@@ -132,6 +322,15 @@ class PlayerActivity : ComponentActivity() {
             override fun onPlayerError(error: PlaybackException) {
                 failed(error)
             }
+
+            override fun onCues(cueGroup: CueGroup) {
+                subtitles.setCues(cueGroup.cues)
+            }
+
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                // Covering the screen depends on the picture's shape.
+                if (fill) setZoom(coverZoom())
+            }
         })
         view.player = exo
         return exo
@@ -149,6 +348,7 @@ class PlayerActivity : ComponentActivity() {
                 val caps = DeviceCaps.detect(this@PlayerActivity)
                 val answer = api.startPlayback(Playback.body(next, caps, clientId(this@PlayerActivity), mode, startMs))
                 playback = answer
+                if (fill) setZoom(coverZoom())
                 val exo = player ?: newPlayer().also { player = it }
                 exo.setMediaItem(mediaItem(answer, next))
                 exo.seekTo(startMs)
@@ -284,6 +484,10 @@ class PlayerActivity : ComponentActivity() {
         private const val EXTRA_SERVER = "server"
         private const val EXTRA_REQUEST = "request"
         private const val REPORT_EVERY_MS = 10_000L
+        private const val MAX_ZOOM = 3f
+
+        /** The widest common film shape (CinemaScope). */
+        private const val SCOPE = 2.39f
 
         /** Reports that must reach the server after the screen is gone. */
         private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
