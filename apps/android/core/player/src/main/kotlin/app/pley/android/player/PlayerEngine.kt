@@ -1,8 +1,14 @@
 package app.pley.android.player
 
 import android.content.Context
+import android.view.Window
 import androidx.media3.common.Player
 import app.pley.android.common.DeviceProfile
+import app.pley.android.model.MediaStream
+import app.pley.android.player.engine.EngineState
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /** Where the engine reads a video from: a file as it is, or the server's HLS playlist. */
 data class EngineSource(
@@ -10,6 +16,14 @@ data class EngineSource(
     val hls: Boolean,
     /** The container's MIME type when the address doesn't tell (`video/x-matroska`…). */
     val mimeType: String? = null,
+    /**
+     * The video stream as it will arrive (the file's for direct play, what
+     * the server sends otherwise): its frame rate and dynamic range choose
+     * the TV's display mode before the first frame. `null` leaves the mode.
+     */
+    val video: MediaStream? = null,
+    /** How long the item is; display modes only change for 10 minutes or more. */
+    val durationMs: Long? = null,
 )
 
 /**
@@ -22,8 +36,23 @@ interface PlayerEngine {
     /** The player, for surfaces, subtitles and the media session. */
     val player: Player
 
+    /**
+     * What the engine knows beyond the player: a display mode change under
+     * way, tracks the device can't play, a decoder that struggles, stats.
+     */
+    val state: StateFlow<EngineState> get() = IdleEngineState.flow
+
     /** Loads [source] at [startMs]; plays at once when [playWhenReady]. */
     fun prepare(source: EngineSource, startMs: Long, playWhenReady: Boolean)
+
+    /**
+     * The player screen's window (its onStart): a TV changes the display mode
+     * through it. A [prepare] made before waits for the window to decide.
+     */
+    fun attachWindow(window: Window) {}
+
+    /** The window goes (onStop): the display mode returns to the system's choice. */
+    fun detachWindow() {}
 
     /** Lets go of the decoders and the audio output (the TV's player does in onStop). */
     fun release()
@@ -33,4 +62,9 @@ interface PlayerEngine {
         /** An engine for video, or for music when [music] (no video decoders, offload with the screen off). */
         fun create(context: Context, profile: DeviceProfile, music: Boolean): PlayerEngine
     }
+}
+
+/** The state of an engine that reports none (fakes). */
+private object IdleEngineState {
+    val flow: StateFlow<EngineState> = MutableStateFlow(EngineState()).asStateFlow()
 }

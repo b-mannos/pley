@@ -1,0 +1,79 @@
+package app.pley.android.player.engine
+
+import android.content.Context
+import android.os.Handler
+import androidx.annotation.OptIn
+import androidx.media3.common.Format
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.video.MediaCodecVideoRenderer
+import androidx.media3.exoplayer.video.VideoRendererEventListener
+
+/**
+ * Media3's renderers with pley's decoder rules: the video renderer weighs
+ * each format against [rules] (size, rate, bit depth, HDR) before choosing a
+ * decoder; a decoder that fails to start falls back to the next one listed
+ * (a Dolby Vision decoder to the base layer's HEVC decoder); Fire TV queues
+ * buffers asynchronously, as Amazon asks, unless its model's kill switch
+ * says no. Music gets no video renderer.
+ */
+@OptIn(markerClass = [UnstableApi::class])
+class PleyRenderersFactory(
+    context: Context,
+    private val rules: DecoderRules,
+    asyncQueueing: Boolean,
+    private val music: Boolean,
+) : DefaultRenderersFactory(context) {
+    init {
+        setEnableDecoderFallback(true)
+        setMediaCodecSelector(rules.selector())
+        setExtensionRendererMode(EXTENSION_RENDERER_MODE_OFF)
+        if (asyncQueueing) forceEnableMediaCodecAsynchronousQueueing()
+    }
+
+    override fun buildVideoRenderers(
+        context: Context,
+        extensionRendererMode: Int,
+        mediaCodecSelector: MediaCodecSelector,
+        enableDecoderFallback: Boolean,
+        eventHandler: Handler,
+        eventListener: VideoRendererEventListener,
+        allowedVideoJoiningTimeMs: Long,
+        out: ArrayList<Renderer>,
+    ) {
+        if (music) return
+        val builder = MediaCodecVideoRenderer.Builder(context)
+            .setCodecAdapterFactory(getCodecAdapterFactory())
+            .setMediaCodecSelector(mediaCodecSelector)
+            .setAllowedJoiningTimeMs(allowedVideoJoiningTimeMs)
+            .setEnableDecoderFallback(enableDecoderFallback)
+            .setEventHandler(eventHandler)
+            .setEventListener(eventListener)
+            .setMaxDroppedFramesToNotify(MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY)
+        out.add(PolicyVideoRenderer(builder, rules))
+    }
+
+    override fun buildCameraMotionRenderers(context: Context, extensionRendererMode: Int, out: ArrayList<Renderer>) = Unit
+}
+
+/**
+ * Media3's video renderer, asking the decoder lists through a selector that
+ * knows the format: the same renderer otherwise.
+ */
+@OptIn(markerClass = [UnstableApi::class])
+internal class PolicyVideoRenderer(
+    builder: MediaCodecVideoRenderer.Builder,
+    private val rules: DecoderRules,
+) : MediaCodecVideoRenderer(builder) {
+    override fun supportsFormat(mediaCodecSelector: MediaCodecSelector, format: Format): Int =
+        super.supportsFormat(rules.selectorFor(mediaCodecSelector, format), format)
+
+    override fun getDecoderInfos(
+        mediaCodecSelector: MediaCodecSelector,
+        format: Format,
+        requiresSecureDecoder: Boolean,
+    ): List<MediaCodecInfo> = super.getDecoderInfos(rules.selectorFor(mediaCodecSelector, format), format, requiresSecureDecoder)
+}
