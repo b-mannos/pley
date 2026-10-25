@@ -63,6 +63,7 @@
     <!-- Errors (VideoPlayer.tsx). -->
     <string name="session_error_unplayable">This video can\'t be played on this device.</string>
     <string name="session_error_stuck">This video doesn\'t play on this device: it stops at the same spot each time.</string>
+    <string name="session_error_short">This video ends before the point it was to play from.</string>
     <string name="session_error_stopped">Playback stopped and couldn\'t get going again.</string>
     <string name="session_error_network">The server can\'t be reached.</string>
     <!-- "Playback failed (ERROR_CODE_DECODING_FAILED)." -->

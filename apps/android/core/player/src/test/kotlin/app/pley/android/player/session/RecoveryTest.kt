@@ -53,6 +53,18 @@ class RecoveryTest {
     }
 
     @Test
+    fun `media that ends short is a transcode for direct play, one new session for a stream, then a failure`() {
+        val r = Recovery()
+        assertEquals(Action.NewSession(PlaybackMode.Transcode, FallbackReason.Unplayable), r.onEndedShort(PlaybackMethod.Direct))
+        assertEquals(Action.NewSession(null, null), r.onEndedShort(PlaybackMethod.Transcode))
+        assertEquals(Action.Fail(Failure.Short, null), r.onEndedShort(PlaybackMethod.Transcode))
+        // Retry gives the new session back, not the transcode: that was tried.
+        r.retry()
+        assertEquals(Action.NewSession(null, null), r.onEndedShort(PlaybackMethod.Direct))
+        assertEquals(Action.Fail(Failure.Short, null), r.onEndedShort(PlaybackMethod.Direct))
+    }
+
+    @Test
     fun `five seconds of progress and Retry give the budgets back`() {
         val r = Recovery()
         repeat(3) { r.decide(EngineError.Playlist("p"), PlaybackMethod.Remux, null) }

@@ -113,6 +113,9 @@ class SessionPlaybackController(
     /** The playhead as last known: kept while a session (re)starts and the engine sits at 0. */
     private var lastPositionMs = 0L
 
+    /** Where playback last started or was sought to: an end that comes right after it can be media that falls short. */
+    private var startedAtMs = 0L
+
     /** The engine shows this session's media: only then is its position the playhead. */
     private var mediaShown = false
     private val wantPlay = MutableStateFlow(true)
@@ -243,6 +246,7 @@ class SessionPlaybackController(
         // The session before ends first ("stopped", then DELETE), unless the server is slow to say so.
         if (endSession(atMs)) withTimeoutOrNull(END_WAIT_MS) { env.reporter.flush() }
         lastPositionMs = atMs
+        startedAtMs = atMs
         mediaShown = false
         tracksChecked = false
         ended = false
@@ -363,7 +367,7 @@ class SessionPlaybackController(
                 mediaShown = true
                 phase(if (link?.playWhenReady == true) PlayerPhase.Playing else PlayerPhase.Paused)
             }
-            EngineStatus.Ended -> onEnded()
+            EngineStatus.Ended -> if (endedShort()) onEndedShort() else onEnded()
             EngineStatus.Idle -> Unit
         }
     }
@@ -429,6 +433,32 @@ class SessionPlaybackController(
             Recovery.Action.SuggestLowerQuality -> ui.update { it.copy(suggestLowerQuality = true, note = texts.slowServer) }
             is Recovery.Action.Fail -> fail(texts.failure(action.failure, action.detail), canRetry = action.failure != Failure.Unplayable)
         }
+    }
+
+    /**
+     * The media ended moments after where it started, a minute or more
+     * before the end the server gives: the stream or file doesn't hold that
+     * part (resuming past its real end). That isn't the end of the video.
+     */
+    private fun endedShort(): Boolean {
+        if (ended) return false
+        val engineLink = link ?: return false
+        val expected = session?.info?.durationMs?.takeIf { it > 0 } ?: file?.durationMs ?: return false
+        val reached = engineLink.positionMs
+        return reached + SHORT_END_MS < expected && reached < startedAtMs + SHORT_PLAY_MS
+    }
+
+    /**
+     * Recovers from media that fell short ([Recovery.onEndedShort]). Where
+     * it was to play from stays the playhead, for the next session and the
+     * reports: nothing is reported at the media's end, nothing is marked watched.
+     */
+    private fun onEndedShort() {
+        val s = session ?: return
+        mediaShown = false
+        lastPositionMs = startedAtMs
+        ui.update { it.copy(positionMs = startedAtMs, skipLabel = null) }
+        act(recovery.onEndedShort(s.info.method), starving = false)
     }
 
     private fun onEnded() {
@@ -570,6 +600,7 @@ class SessionPlaybackController(
         }
         engineLink.seekTo(target)
         lastPositionMs = target
+        startedAtMs = target
         recovery.onJump()
         struggle.reset()
         lastAdvanceAt = env.now()
@@ -933,6 +964,12 @@ class SessionPlaybackController(
 
         /** How long playback may stand still, wanting to play, before it counts as stalled. */
         const val STALL_MS = 12_000L
+
+        /** An end at least this far before the server's duration… */
+        const val SHORT_END_MS = 60_000L
+
+        /** …that comes less than this after where playback started is media that falls short, not the end. */
+        const val SHORT_PLAY_MS = 5_000L
 
         /** Less than this buffered ahead while waiting: starving for data. */
         const val STARVING_MS = 1_000L

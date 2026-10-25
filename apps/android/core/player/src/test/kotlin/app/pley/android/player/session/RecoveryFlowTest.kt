@@ -6,6 +6,7 @@ import app.pley.android.player.PlayRequest
 import app.pley.android.player.PlayerPhase
 import app.pley.android.testing.caps.TestDevices
 import app.pley.android.testing.caps.capsOf
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -24,6 +25,15 @@ class RecoveryFlowTest {
     fun close() = h.close()
 
     private fun starts() = h.timeline().count { it == "start" }
+
+    private companion object {
+        /** Generated movies the FixtureServer streams its 20 s clips for: 2 h 40 min of 1080p H.264, and 4K HDR10. */
+        const val DISTANT_HARBOR = 7L
+        const val FROZEN_HARBOR = 9L
+
+        /** Past the clips' end, long before the movies'. */
+        const val RESUME_MS = 3_600_000L
+    }
 
     @Test
     fun `direct play whose audio fails becomes a remux, then a transcode, then an error`() {
@@ -77,6 +87,91 @@ class RecoveryFlowTest {
         )
         h.settle()
         assertEquals(listOf(PlaybackMode.Auto, PlaybackMode.Remux), h.playbackRequests().map { it.mode })
+    }
+
+    @Test
+    fun `a 4K HDR10 direct play whose decoder fails on a TV is transcoded, and a transcode that fails says so`() {
+        h.close()
+        h = SessionHarness(caps = TestCaps.hdrTv())
+        val c = h.play(PlayRequest(FixtureIds.SAMPLE_HDR10))
+        assertFalse(h.engine.source!!.hls)
+        h.engine.fail(EngineError.Unsupported(audio = false, container = false, detail = "ERROR_CODE_DECODER_INIT_FAILED"))
+        h.settle()
+        assertEquals(listOf(PlaybackMode.Auto, PlaybackMode.Transcode), h.playbackRequests().map { it.mode })
+        assertTrue(h.engine.source!!.hls)
+        assertEquals(PlayerPhase.Buffering, c.state.value.phase)
+
+        h.engine.fail(EngineError.Unsupported(audio = false, container = false, detail = "ERROR_CODE_DECODING_FAILED"))
+        h.settle()
+        assertEquals(PlayerPhase.Error("This video can't be played on this device.", canRetry = false), c.state.value.phase)
+    }
+
+    @Test
+    fun `a direct play resumed past the end of its media is transcoded, then fails, and never counts as the end`() {
+        val c = h.play(PlayRequest(DISTANT_HARBOR, startMs = RESUME_MS))
+        assertFalse(h.engine.source!!.hls)
+        // The file holds 20 s where its details say 2 h 40 min: the engine ends at once.
+        h.engine.durationMs = 20_000
+        h.engine.ready()
+        h.engine.end()
+        h.settle()
+        assertEquals(listOf(PlaybackMode.Auto, PlaybackMode.Transcode), h.playbackRequests().map { it.mode })
+        assertEquals(RESUME_MS, h.playbackRequests().last().startMs)
+        assertEquals(RESUME_MS, c.state.value.positionMs)
+        assertFalse(c.state.value.phase == PlayerPhase.Ended)
+
+        // The transcode falls short too: one new session, then an error to go back from.
+        h.engine.ready()
+        h.engine.end()
+        h.settle()
+        assertEquals(3, starts())
+        assertEquals(RESUME_MS, h.playbackRequests().last().startMs)
+        h.engine.ready()
+        h.engine.end()
+        h.settle()
+        assertEquals(3, starts())
+        assertEquals(PlayerPhase.Error("This video ends before the point it was to play from.", canRetry = true), c.state.value.phase)
+
+        // Nothing was reported at the media's end, and closing keeps the resume point.
+        c.close()
+        h.settle()
+        val reports = h.progress(DISTANT_HARBOR).map { it.second.positionMs }
+        assertTrue("reports: $reports", reports.isNotEmpty() && reports.all { it == RESUME_MS })
+        val state = runBlocking { h.api.item(DISTANT_HARBOR) }.userState
+        assertFalse(state.watched)
+        assertEquals(RESUME_MS, state.positionMs)
+    }
+
+    @Test
+    fun `a 4K stream resumed past its end gets one new session, then an error to try again from`() {
+        val c = h.play(PlayRequest(FROZEN_HARBOR, startMs = RESUME_MS))
+        // HDR10 on an SDR screen: the server converts it.
+        assertTrue(h.engine.source!!.hls)
+        h.engine.durationMs = 20_000
+        repeat(2) {
+            h.engine.ready()
+            h.engine.end()
+            h.settle()
+        }
+        assertEquals(listOf(PlaybackMode.Auto, PlaybackMode.Auto), h.playbackRequests().map { it.mode })
+        assertEquals(PlayerPhase.Error("This video ends before the point it was to play from.", canRetry = true), c.state.value.phase)
+
+        c.retry()
+        h.settle()
+        assertEquals(3, starts())
+        assertEquals(RESUME_MS, h.playbackRequests().last().startMs)
+    }
+
+    @Test
+    fun `media shorter than the server says still ends when it played to its end`() {
+        val c = h.play(PlayRequest(DISTANT_HARBOR, startMs = 0))
+        h.engine.durationMs = 20_000
+        h.engine.ready()
+        h.advance(20_000)
+        h.engine.end()
+        h.settle()
+        assertEquals(1, starts())
+        assertFalse(c.state.value.phase is PlayerPhase.Error)
     }
 
     @Test

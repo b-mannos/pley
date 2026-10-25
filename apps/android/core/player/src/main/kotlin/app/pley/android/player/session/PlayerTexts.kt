@@ -116,6 +116,7 @@ class ResourcePlayerTexts(context: Context) : PlayerTexts {
     override fun failure(failure: Failure, detail: String?): String = when (failure) {
         Failure.Unplayable -> s(R.string.session_error_unplayable)
         Failure.Stuck -> s(R.string.session_error_stuck)
+        Failure.Short -> s(R.string.session_error_short)
         Failure.Stopped -> s(R.string.session_error_stopped)
         Failure.Network -> s(R.string.session_error_network)
         Failure.Engine -> res.getString(R.string.session_error_engine, detail?.substringBefore(':')?.takeIf { it.isNotBlank() } ?: "?")

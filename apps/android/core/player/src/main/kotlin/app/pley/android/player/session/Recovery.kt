@@ -20,6 +20,9 @@ enum class Failure {
     /** It stops at the same spot each time. */
     Stuck,
 
+    /** The media ends before the point it was to play from. */
+    Short,
+
     /** It stopped and couldn't get going again. */
     Stopped,
 
@@ -45,6 +48,9 @@ enum class Failure {
  * - A 12 s stall: a direct play that has data but doesn't move becomes a
  *   transcode; a stream asks the server first ([Action.CheckServer]); a
  *   stream that keeps stopping gets one new session, a starving one up to 3.
+ * - Media that ends where it started, long before its end ([onEndedShort]):
+ *   a direct play becomes a transcode, a stream gets one new session, then
+ *   it fails. It never counts as the end.
  *
  * Budgets start over after 5 s of playback and on Retry. Not thread-safe:
  * the controller calls it on the main thread.
@@ -90,6 +96,10 @@ class Recovery {
     var stuck = 0
         private set
 
+    /** New sessions for media that ends short of where it was to play. */
+    var short = 0
+        private set
+
     private var playedFrom: Long? = null
 
     /** Where playback is now: 5 s played on from where it last (re)started means the trouble is over. */
@@ -101,6 +111,7 @@ class Recovery {
             recreate = 0
             network = 0
             stuck = 0
+            short = 0
             playedFrom = positionMs
         }
     }
@@ -189,6 +200,24 @@ class Recovery {
     }
 
     /**
+     * The media ended right where it was started (or sought to), long
+     * before the end the server gives: it doesn't hold that part. A direct
+     * play is asked again as a transcode, the server reading what the
+     * device can't; a stream gets one new session; then it fails.
+     */
+    fun onEndedShort(method: PlaybackMethod): Action = when {
+        method == PlaybackMethod.Direct && !transcodeTried -> {
+            transcodeTried = true
+            switchTo(PlaybackMode.Transcode, FallbackReason.Unplayable)
+        }
+        short < MAX_SHORT -> {
+            short++
+            Action.NewSession(null, null)
+        }
+        else -> Action.Fail(Failure.Short, null)
+    }
+
+    /**
      * The decoder drops frames: one switch to a transcode per item, with
      * "Play original" offered; `null` when it switched already or transcodes.
      */
@@ -213,6 +242,7 @@ class Recovery {
         recreate = 0
         network = 0
         stuck = 0
+        short = 0
         playedFrom = null
     }
 
@@ -231,6 +261,7 @@ class Recovery {
         const val MAX_RECREATE = 3
         const val MAX_NETWORK = 3
         const val MAX_STUCK = 1
+        const val MAX_SHORT = 1
 
         /** Videos a remux copies, which the device's decoders take in another container. */
         private val COPYABLE_VIDEO = setOf("h264", "hevc")
