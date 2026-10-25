@@ -87,12 +87,3 @@ internal fun openInBrowser(context: Context, url: String) {
         // No browser: the sign-in screen offers a code instead.
     }
 }
-
-/** Whether no browser can open pley's page on this phone: no Custom Tabs browser, and nothing that opens web addresses. */
-internal fun noBrowser(context: Context): Boolean {
-    val pm = context.packageManager
-    val tabs = pm.queryIntentServices(Intent("android.support.customtabs.action.CustomTabsService"), 0)
-    if (tabs.isNotEmpty()) return false
-    val view = Intent(Intent.ACTION_VIEW, "https://example.com".toUri()).addCategory(Intent.CATEGORY_BROWSABLE)
-    return view.resolveActivity(pm) == null
-}

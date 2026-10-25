@@ -48,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
@@ -244,7 +245,8 @@ private fun Tabs(navigation: PhoneNavigation, shell: PhoneShellState, entries: (
     val itemColors = ShortNavigationBarItemDefaults.colors(
         selectedIconColor = PleyColors.AccentBright,
         selectedTextColor = PleyColors.Fg,
-        selectedIndicatorColor = PleyColors.PrimaryContainer,
+        // No pill behind the chosen tab: its accent icon and bright label say it.
+        selectedIndicatorColor = Color.Transparent,
         unselectedIconColor = PleyColors.Muted,
         unselectedTextColor = PleyColors.Muted,
     )

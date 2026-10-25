@@ -42,7 +42,7 @@ fun PleyChip(
         onClick = onClick,
         modifier = modifier.height(32.dp),
         enabled = enabled,
-        shape = PleyShape.Pill,
+        shape = PleyShape.Control,
         label = { Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingIcon = when {
             selected -> ({ Icon(PleyIcons.Check, contentDescription = null, size = 18.dp, tint = content) })

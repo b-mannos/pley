@@ -118,13 +118,13 @@ internal fun Scrolling(content: @Composable () -> Unit) {
 /** The chips over the grid; the count of what matches at the end. */
 @Composable
 private fun Toolbar(state: LibraryUiState<ArtworkTileModel>, vm: LibraryViewModel<ArtworkTileModel>, total: Int?, onSheet: (LibrarySheet) -> Unit) {
-    val margin = LocalPhoneMetrics.current.margin
+    val metrics = LocalPhoneMetrics.current
     val params = state.params
     val music = state.kind == LibraryKind.Music
     val resources = LocalResources.current
     LazyRow(
         modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = margin, vertical = 8.dp),
+        contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, top = 8.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -243,7 +243,7 @@ private fun LibraryGrid(
             columns = remember(columns) { EqualCells(columns) },
             state = grid,
             modifier = Modifier.fillMaxSize().testTag(TestTags.LIBRARY_GRID),
-            contentPadding = PaddingValues(start = metrics.margin, end = metrics.margin, top = 6.dp, bottom = 24.dp),
+            contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, top = 6.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(gap),
             verticalArrangement = Arrangement.spacedBy(ROW_GAP),
             userScrollEnabled = cells != null,
@@ -279,7 +279,7 @@ private fun LibraryGrid(
                 total = cells.total,
                 columns = columns,
                 index = state.grid.index,
-                modifier = Modifier.align(Alignment.TopEnd),
+                modifier = Modifier.align(Alignment.TopEnd).padding(end = metrics.insetEnd),
             )
         }
     }

@@ -56,7 +56,7 @@ fun PrimaryButton(
         onClick = onClick,
         modifier = modifier.heightIn(min = 48.dp),
         enabled = enabled,
-        shape = PleyShape.Pill,
+        shape = PleyShape.Control,
         colors = ButtonDefaults.buttonColors(containerColor = PleyColors.Accent, contentColor = PleyColors.OnAccent),
         contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
     ) {
@@ -81,7 +81,7 @@ fun TonalButton(
         onClick = onClick,
         modifier = modifier.heightIn(min = 40.dp),
         enabled = enabled,
-        shape = PleyShape.Pill,
+        shape = PleyShape.Control,
         colors = ButtonDefaults.filledTonalButtonColors(containerColor = PleyColors.Surface3, contentColor = PleyColors.Fg),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
     ) {

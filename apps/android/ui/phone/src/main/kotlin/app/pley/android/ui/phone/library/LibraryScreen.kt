@@ -120,7 +120,7 @@ private fun LibraryTabs(tabs: List<LibraryTab>, selected: LibraryTab, onSelect: 
                 width = androidx.compose.ui.unit.Dp.Unspecified,
                 height = 3.dp,
                 color = PleyColors.Accent,
-                shape = PleyShape.Pill,
+                shape = PleyShape.Control,
             )
         },
         divider = { HorizontalDivider(Modifier.padding(horizontal = margin), thickness = 1.dp, color = PleyColors.Surface4) },

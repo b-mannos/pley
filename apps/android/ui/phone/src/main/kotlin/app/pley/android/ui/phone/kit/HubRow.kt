@@ -110,7 +110,7 @@ fun HubRow(
     val metrics = LocalPhoneMetrics.current
     val width = rowCardWidth(row.kind, metrics.contentWidth - metrics.margin * 2)
     Column(modifier.fillMaxWidth()) {
-        RowHeader(row.title, metrics.margin, onTitleClick)
+        RowHeader(row.title, metrics.marginStart, metrics.marginEnd, onTitleClick)
         Spacer(Modifier.height(PleyPhone.HeaderToContent - PRESS_ROOM))
         val items = row.items
         val density = LocalDensity.current
@@ -125,7 +125,7 @@ fun HubRow(
         LazyRow(
             state = state,
             modifier = Modifier.fillMaxWidth().testTag(TestTags.HOME_ROWS + "." + row.key),
-            contentPadding = PaddingValues(horizontal = metrics.margin, vertical = PRESS_ROOM),
+            contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, top = PRESS_ROOM, bottom = PRESS_ROOM),
             horizontalArrangement = Arrangement.spacedBy(PleyPhone.TileGap),
             flingBehavior = rememberSnapFlingBehavior(state, SnapPosition.Start),
             userScrollEnabled = items != null,
@@ -160,13 +160,13 @@ fun rememberHubRowState(): LazyListState =
     rememberLazyListState(cacheWindow = remember { LazyLayoutCacheWindow(aheadFraction = 1f, behindFraction = 0.25f) })
 
 @Composable
-private fun RowHeader(title: String, margin: Dp, onClick: (() -> Unit)?) {
+private fun RowHeader(title: String, start: Dp, end: Dp, onClick: (() -> Unit)?) {
     Row(
         Modifier
             .fillMaxWidth()
             .heightIn(min = 32.dp)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = margin)
+            .padding(start = start, end = end)
             .semantics { heading() },
         verticalAlignment = Alignment.CenterVertically,
     ) {

@@ -1,5 +1,7 @@
 package app.pley.android.ui.phone.onboarding
 
+import android.content.Context
+import android.content.Intent
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -56,6 +58,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -88,8 +91,10 @@ import app.pley.android.ui.phone.shell.LocalPhoneNavigator
  * "Sign in to pley" (design spec §4.7, mockup phone-signin): the servers
  * this phone knows and those that answer on the network, an address to
  * type, and "Continue in browser", which opens the chosen server's own
- * sign-in page in a private Custom Tab. [preselect] is the server the
- * app was signed out of (PleyKey.SignIn).
+ * sign-in page in a private Custom Tab. Only when no browser on the phone
+ * opens that page does the button sign in with a code from another device
+ * instead. [preselect] is the server the app was signed out of
+ * (PleyKey.SignIn).
  */
 @Composable
 internal fun PhoneSignInScreen(preselect: String?) {
@@ -101,14 +106,14 @@ internal fun PhoneSignInScreen(preselect: String?) {
     val signIn = viewModel(key = "sign-in") { SignInViewModel(given ?: onboardingSource()) }
     val state by servers.state.collectAsStateWithLifecycle()
     val signInState by signIn.state.collectAsStateWithLifecycle()
-    val withoutBrowser = remember { noBrowser(context) }
+    val withoutBrowser = remember(state.selected) { noBrowserFor(context, state.selected) }
     var viaCode by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(servers) {
         servers.chosen.collect { chosen ->
             when {
                 chosen.signedIn -> navigator.restart(PleyKey.Home)
-                viaCode || withoutBrowser -> navigator.open(PleyKey.Link(chosen.url))
+                viaCode || noBrowserFor(context, chosen.url) -> navigator.open(PleyKey.Link(chosen.url))
                 else -> signIn.signIn(activity, chosen.url)
             }
         }
@@ -154,6 +159,20 @@ internal fun PhoneSignInScreen(preselect: String?) {
         onOpenInBrowser = { server -> openInBrowser(context, server) },
     )
 }
+
+/**
+ * Whether nothing on this phone opens [server]'s sign-in page: no app
+ * takes a browsable view of its address. Browsers are visible to the app
+ * from Android 11 through the manifest's queries.
+ */
+private fun noBrowserFor(context: Context, server: String?): Boolean {
+    val page = server?.toUri()?.takeIf { it.scheme == "http" || it.scheme == "https" } ?: ANY_PAGE.toUri()
+    val view = Intent(Intent.ACTION_VIEW, page).addCategory(Intent.CATEGORY_BROWSABLE)
+    return view.resolveActivity(context.packageManager) == null
+}
+
+/** A page to ask about before a server is chosen. */
+private const val ANY_PAGE = "https://example.com"
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -275,14 +294,6 @@ internal fun PhoneSignInContent(
                     enabled = state.selected != null && !busy,
                     modifier = Modifier.fillMaxWidth().testTag(CONTINUE_TAG),
                 )
-                if (!withoutBrowser) {
-                    PleyTextButton(
-                        stringResource(R.string.onboarding_use_code),
-                        onClick = onUseCode,
-                        enabled = state.selected != null && !busy,
-                        modifier = Modifier.align(Alignment.CenterHorizontally).testTag(USE_CODE_TAG),
-                    )
-                }
             }
         }
     }
@@ -454,6 +465,5 @@ internal const val ADDRESS_FIELD_TAG = "pley.signin.address"
 internal const val ADDRESS_PROBLEM_TAG = "pley.signin.address.problem"
 internal const val CONNECT_TAG = "pley.signin.connect"
 internal const val CONTINUE_TAG = "pley.signin.continue"
-internal const val USE_CODE_TAG = "pley.signin.use_code"
 internal const val DEMO_TAG = "pley.signin.demo"
 internal const val SIGN_IN_STATUS_TAG = "pley.signin.status"

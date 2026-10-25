@@ -19,7 +19,6 @@
     <string name="onboarding_connect">Connect</string>
     <string name="onboarding_checking">Checking…</string>
     <string name="onboarding_continue">Continue in browser</string>
-    <string name="onboarding_use_code">Use a code instead</string>
     <string name="onboarding_code_primary">Sign in with a code from another device</string>
     <string name="onboarding_demo">Use demo server</string>
     <string name="onboarding_forget">Forget</string>

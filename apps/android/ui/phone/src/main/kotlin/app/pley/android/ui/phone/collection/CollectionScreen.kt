@@ -9,13 +9,16 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
@@ -135,7 +138,7 @@ private fun CollectionContent(state: Loadable<CollectionPage<ArtworkTileModel>>,
                 columns = EqualCells(columns),
                 state = grid,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = metrics.margin, end = metrics.margin, bottom = 32.dp),
+                contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, bottom = 32.dp),
                 horizontalArrangement = Arrangement.spacedBy(PleyPhone.TileGap),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
@@ -169,7 +172,9 @@ private fun CollectionContent(state: Loadable<CollectionPage<ArtworkTileModel>>,
             PleyIcons.ArrowLeft,
             stringResource(R.string.kit_back),
             onClick = navigator::back,
-            modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars).padding(start = 4.dp, top = 4.dp),
+            modifier = Modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+                .padding(start = 4.dp + metrics.insetStart, top = 4.dp),
         )
     }
 }
@@ -185,11 +190,12 @@ private fun Header(page: CollectionPage<ArtworkTileModel>?, vm: CollectionViewMo
     val metrics = LocalPhoneMetrics.current
     val resources = LocalResources.current
     val skeleton = rememberSkeleton(animated = true)
-    // The grid's side margins don't apply to the backdrop: it bleeds to the edges.
+    // The grid's side margins don't apply to the backdrop: it bleeds to the edges, under the insets too.
     Column(Modifier.fillMaxWidth()) {
         Box(
             Modifier
-                .requiredWidth(metrics.contentWidth)
+                .offset(x = (metrics.insetEnd - metrics.insetStart) / 2)
+                .requiredWidth(metrics.pageWidth)
                 .height(BACKDROP),
         ) {
             val image = remember(page?.backdropUrl, page?.posterUrl, page?.origin) {

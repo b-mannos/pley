@@ -6,11 +6,13 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -132,7 +134,8 @@ internal fun ItemPageContent(page: ItemPage, model: ItemViewModel, navigator: Na
         season = page.context?.seasonTitle?.let { stringResource(R.string.item_more_episodes, it) } ?: stringResource(R.string.item_episodes),
     )
     val rows = remember(page, titles) { phoneRows(page, titles) }
-    val margin = metrics.margin
+    // The sections keep clear of the bars and the cutout at the sides, as the rows do.
+    val sides = Modifier.padding(start = metrics.marginStart, end = metrics.marginEnd)
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             state = list,
@@ -140,18 +143,18 @@ internal fun ItemPageContent(page: ItemPage, model: ItemViewModel, navigator: Na
             contentPadding = PaddingValues(bottom = 32.dp),
         ) {
             item(key = "header", contentType = "header") { ItemHeader(page, actions) }
-            item(key = "tracks", contentType = "tracks") { TrackSelects(page, actions, Modifier.padding(horizontal = margin)) }
+            item(key = "tracks", contentType = "tracks") { TrackSelects(page, actions, sides) }
             val seasons = page.seasons
             if (seasons != null && page.kind != ItemKind.Episode) {
-                item(key = "seasons", contentType = "seasons") { SeasonPicker(seasons, actions, Modifier.padding(horizontal = margin)) }
+                item(key = "seasons", contentType = "seasons") { SeasonPicker(seasons, actions, sides) }
                 val episodes = seasons.episodes
                 if (episodes == null) {
                     items(EPISODE_SKELETONS, key = { "episode-skeleton-$it" }, contentType = { "episode-skeleton" }) {
-                        EpisodeRowSkeleton(skeleton, Modifier.padding(horizontal = margin))
+                        EpisodeRowSkeleton(skeleton, sides)
                     }
                 } else {
                     items(episodes, key = { "episode-${it.item.id}" }, contentType = { "episode" }) { episode ->
-                        EpisodeRow(episode, page.origin, actions, Modifier.padding(horizontal = margin))
+                        EpisodeRow(episode, page.origin, actions, sides)
                     }
                     if (episodes.isEmpty()) {
                         item(key = "no-episodes") {
@@ -159,7 +162,7 @@ internal fun ItemPageContent(page: ItemPage, model: ItemViewModel, navigator: Na
                                 stringResource(R.string.item_no_episodes),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = PleyColors.Muted,
-                                modifier = Modifier.padding(horizontal = margin, vertical = 12.dp),
+                                modifier = sides.padding(vertical = 12.dp),
                             )
                         }
                     }
@@ -177,10 +180,10 @@ internal fun ItemPageContent(page: ItemPage, model: ItemViewModel, navigator: Na
                 }
             }
             if (!page.details.isEmpty) {
-                item(key = "details", contentType = "details") { DetailsSection(page, actions, Modifier.padding(horizontal = margin)) }
+                item(key = "details", contentType = "details") { DetailsSection(page, actions, sides) }
             }
             if (page.mediaInfo.isNotEmpty()) {
-                item(key = "media", contentType = "media") { MediaInfoSection(page.mediaInfo, Modifier.padding(horizontal = margin)) }
+                item(key = "media", contentType = "media") { MediaInfoSection(page.mediaInfo, sides) }
             }
         }
         ItemTopBar(page, list, onBack = navigator::back, onMore = { navigator.open(PleyKey.ItemActions(page.id)) })
@@ -195,6 +198,7 @@ internal fun ItemPageContent(page: ItemPage, model: ItemViewModel, navigator: Na
 @Composable
 private fun ItemTopBar(page: ItemPage, list: LazyListState, onBack: () -> Unit, onMore: () -> Unit) {
     val density = LocalDensity.current
+    val metrics = LocalPhoneMetrics.current
     val solidAfter = with(density) { SOLID_AFTER.toPx() }
     fun solid(): Float = if (list.firstVisibleItemIndex > 0) 1f else (list.firstVisibleItemScrollOffset / solidAfter).coerceIn(0f, 1f)
     Column(Modifier.fillMaxWidth()) {
@@ -207,10 +211,10 @@ private fun ItemTopBar(page: ItemPage, list: LazyListState, onBack: () -> Unit, 
                     if (a > 0f) drawRect(PleyColors.Bg.copy(alpha = a))
                     if (a >= 1f) drawLine(PleyColors.Surface4, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
                 }
-                .windowInsetsPadding(WindowInsets.statusBars),
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)),
         ) {
             Row(
-                Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 4.dp),
+                Modifier.fillMaxWidth().height(64.dp).padding(start = 4.dp + metrics.insetStart, end = 4.dp + metrics.insetEnd),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 PleyIconButton(PleyIcons.ArrowLeft, stringResource(R.string.kit_back), onBack)
@@ -233,17 +237,17 @@ private fun ItemTopBar(page: ItemPage, list: LazyListState, onBack: () -> Unit, 
 @Composable
 private fun ItemSkeleton(onBack: () -> Unit) {
     val skeleton = rememberSkeleton(animated = true)
-    val margin = LocalPhoneMetrics.current.margin
+    val metrics = LocalPhoneMetrics.current
     val loading = stringResource(R.string.item_loading)
     Box(Modifier.fillMaxSize().testTag(ITEM_SKELETON).semantics { contentDescription = loading }) {
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxWidth().height(BackdropHeight).skeleton(skeleton, RectangleShape))
-            Column(Modifier.padding(horizontal = margin, vertical = 16.dp)) {
+            Column(Modifier.padding(start = metrics.marginStart, end = metrics.marginEnd, top = 16.dp, bottom = 16.dp)) {
                 Bar(skeleton, 0.7f, 36.dp)
                 Spacer(Modifier.height(12.dp))
                 Bar(skeleton, 0.45f, 16.dp)
                 Spacer(Modifier.height(20.dp))
-                Bar(skeleton, 1f, 48.dp, PleyShape.Pill)
+                Bar(skeleton, 1f, 48.dp, PleyShape.Control)
                 Spacer(Modifier.height(24.dp))
                 Bar(skeleton, 1f, 16.dp)
                 Spacer(Modifier.height(8.dp))
@@ -253,7 +257,10 @@ private fun ItemSkeleton(onBack: () -> Unit) {
             }
         }
         Row(
-            Modifier.windowInsetsPadding(WindowInsets.statusBars).height(64.dp).padding(horizontal = 4.dp),
+            Modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+                .height(64.dp)
+                .padding(start = 4.dp + metrics.insetStart, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             PleyIconButton(PleyIcons.ArrowLeft, stringResource(R.string.kit_back), onBack)

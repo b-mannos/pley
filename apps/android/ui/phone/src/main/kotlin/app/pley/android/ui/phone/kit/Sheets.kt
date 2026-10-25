@@ -101,7 +101,7 @@ private fun SheetHandle() {
             },
         contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.size(32.dp, 4.dp).background(PleyColors.Control, PleyShape.Pill))
+        Box(Modifier.size(32.dp, 4.dp).background(PleyColors.Control, PleyShape.Control))
     }
 }
 

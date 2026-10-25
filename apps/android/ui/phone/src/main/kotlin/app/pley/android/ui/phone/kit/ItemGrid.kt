@@ -98,7 +98,7 @@ fun ItemGrid(
         columns = remember(kind, gap) { FittedCells(kind, gap) },
         state = state,
         modifier = modifier.testTag(TestTags.LIBRARY_GRID),
-        contentPadding = contentPadding ?: PaddingValues(horizontal = metrics.margin, vertical = PRESS_ROOM + 2.dp),
+        contentPadding = contentPadding ?: PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, top = PRESS_ROOM + 2.dp, bottom = PRESS_ROOM + 2.dp),
         horizontalArrangement = Arrangement.spacedBy(gap),
         verticalArrangement = Arrangement.spacedBy(ROW_GAP),
         userScrollEnabled = items != null || header != null,

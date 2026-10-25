@@ -4,12 +4,18 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -22,13 +28,12 @@ import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -36,7 +41,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.ClipOp
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -50,6 +63,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyPhone
@@ -178,8 +192,8 @@ internal fun phoneRows(page: ItemPage, titles: RowTitles): List<TileRow> = build
 
 /**
  * Version, Audio and Subtitles (VideoItemView.tsx's selects; design spec
- * §4.3): outlined fields, Audio and Subtitles side by side. Choosing a
- * track is kept for the item.
+ * §4.3): outlined fields, Audio and Subtitles side by side and as tall as
+ * each other. Choosing a track is kept for the item.
  */
 @Composable
 internal fun TrackSelects(page: ItemPage, actions: PageActions, modifier: Modifier = Modifier) {
@@ -196,7 +210,7 @@ internal fun TrackSelects(page: ItemPage, actions: PageActions, modifier: Modifi
             )
         }
         if (tracks.audio.isNotEmpty() || tracks.subtitles.isNotEmpty()) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (tracks.audio.isNotEmpty()) {
                     Select(
                         label = stringResource(R.string.item_audio),
@@ -204,7 +218,7 @@ internal fun TrackSelects(page: ItemPage, actions: PageActions, modifier: Modifi
                         options = tracks.audio.map { it.id to it.label },
                         selected = tracks.audioIndex?.toLong(),
                         onSelect = { id -> id?.let { actions.chooseAudio(it.toInt()) } },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
                 }
                 if (tracks.subtitles.isNotEmpty()) {
@@ -215,7 +229,7 @@ internal fun TrackSelects(page: ItemPage, actions: PageActions, modifier: Modifi
                         options = listOf<Pair<Long?, String>>(null to off) + tracks.subtitles.map { it.id to it.label },
                         selected = tracks.subtitleIndex?.toLong(),
                         onSelect = { id -> actions.chooseSubtitle(id?.toInt()) },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
                 }
             }
@@ -223,7 +237,10 @@ internal fun TrackSelects(page: ItemPage, actions: PageActions, modifier: Modifi
     }
 }
 
-/** An outlined select: the [label] notched into its edge, the [value], a menu of [options] with the [selected] one ticked. */
+/**
+ * An outlined select: the [label] notched into its edge, the [value] on up
+ * to two lines, a menu of [options] with the [selected] one ticked.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Select(
@@ -236,26 +253,18 @@ private fun Select(
 ) {
     var open by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(expanded = open, onExpandedChange = { open = it }, modifier = modifier) {
-        OutlinedTextField(
+        val focus = remember { MutableInteractionSource() }
+        val focused by focus.collectIsFocusedAsState()
+        SelectField(
+            label = label,
             value = value,
-            onValueChange = {},
-            readOnly = true,
-            singleLine = true,
-            label = { Text(label) },
-            trailingIcon = { Icon(PleyIcons.ChevronDown, contentDescription = null, size = 20.dp, tint = PleyColors.Muted) },
-            textStyle = MaterialTheme.typography.bodyLarge,
-            shape = PleyShape.Field,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = PleyColors.Fg,
-                unfocusedTextColor = PleyColors.Fg,
-                focusedBorderColor = PleyColors.AccentBright,
-                unfocusedBorderColor = PleyColors.Control,
-                focusedLabelColor = PleyColors.AccentBright,
-                unfocusedLabelColor = PleyColors.Muted,
-                focusedContainerColor = Color.Transparent,
-                unfocusedContainerColor = Color.Transparent,
-            ),
-            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+            active = open || focused,
+            modifier = Modifier
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                .focusable(interactionSource = focus)
+                .semantics(mergeDescendants = true) { }
+                .fillMaxWidth()
+                .fillMaxHeight(),
         )
         ExposedDropdownMenu(
             expanded = open,
@@ -282,6 +291,70 @@ private fun Select(
 }
 
 /**
+ * The select's box: a 1 dp outline (2 dp in the accent while [active])
+ * with the [label] sitting in a gap in its top edge, the [value] wrapping
+ * to a second line before it ends in an ellipsis, and a chevron.
+ */
+@Composable
+private fun SelectField(label: String, value: String, active: Boolean, modifier: Modifier = Modifier) {
+    val labelStyle = MaterialTheme.typography.bodySmall
+    // The label's middle is on the top edge.
+    val rise = with(LocalDensity.current) { labelStyle.lineHeight.toDp() } / 2
+    var notch by remember { mutableIntStateOf(0) }
+    val edge = if (active) PleyColors.AccentBright else PleyColors.Control
+    Box(modifier) {
+        Row(
+            Modifier
+                .fillMaxSize()
+                .padding(top = rise)
+                .heightIn(min = FIELD_HEIGHT)
+                .drawWithCache {
+                    val stroke = Stroke((if (active) 2 else 1).dp.toPx())
+                    val inset = stroke.width / 2
+                    val outline = PleyShape.Field.createOutline(Size(size.width - stroke.width, size.height - stroke.width), layoutDirection, this)
+                    val gapStart = NOTCH_START.toPx()
+                    onDrawBehind {
+                        val left = if (layoutDirection == LayoutDirection.Ltr) gapStart else size.width - gapStart - notch
+                        clipRect(left, -stroke.width, left + notch, stroke.width * 2, ClipOp.Difference) {
+                            translate(inset, inset) { drawOutline(outline, edge, style = stroke) }
+                        }
+                    }
+                }
+                .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                value,
+                style = MaterialTheme.typography.bodyLarge,
+                color = PleyColors.Fg,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            Icon(PleyIcons.ChevronDown, contentDescription = null, size = 20.dp, tint = PleyColors.Muted)
+        }
+        Text(
+            label,
+            style = labelStyle,
+            color = if (active) PleyColors.AccentBright else PleyColors.Muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .padding(start = NOTCH_START, end = 16.dp)
+                .onSizeChanged { notch = it.width }
+                .padding(horizontal = 4.dp),
+        )
+    }
+}
+
+/** A select's height under its label's rise, as Material's outlined field. */
+private val FIELD_HEIGHT = 56.dp
+
+/** Where the gap for a select's label starts along its top edge. */
+private val NOTCH_START = 12.dp
+
+/**
  * The season picker over the episode list (design spec §3.4, §4.4): a
  * tonal pill opening the show's seasons, with "8 episodes" at the right.
  */
@@ -299,7 +372,7 @@ internal fun SeasonPicker(seasons: SeasonsSection, actions: PageActions, modifie
                     Modifier
                         .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                         .heightIn(min = 40.dp)
-                        .background(PleyColors.Surface3, PleyShape.Pill)
+                        .background(PleyColors.Surface3, PleyShape.Control)
                         .padding(start = 20.dp, end = 14.dp)
                         .semantics { heading() },
                     verticalAlignment = Alignment.CenterVertically,

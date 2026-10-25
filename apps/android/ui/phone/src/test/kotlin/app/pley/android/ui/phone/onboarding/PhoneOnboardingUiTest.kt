@@ -85,8 +85,9 @@ class PhoneOnboardingUiTest {
         compose.onNodeWithText("192.168.1.42:7539").assertExists()
         compose.onNodeWithTag(SERVER_CARD_TAG + office.url).performClick()
         compose.onNodeWithTag(CONTINUE_TAG).assertIsEnabled().performClick()
-        compose.onNodeWithTag(USE_CODE_TAG).performClick()
-        assertEquals(listOf("select ${office.url}", "continue", "code"), events)
+        // With a browser, there's no code to choose.
+        compose.onNodeWithText("Use a code instead").assertDoesNotExist()
+        assertEquals(listOf("select ${office.url}", "continue"), events)
     }
 
     @Test
@@ -127,7 +128,7 @@ class PhoneOnboardingUiTest {
     fun withoutABrowserTheButtonSignsInWithACode() {
         signIn(ServersUiState(rows = listOf(nas), selected = nas.url), withoutBrowser = true)
         compose.onNodeWithText("Sign in with a code from another device").performClick()
-        compose.onNodeWithTag(USE_CODE_TAG).assertDoesNotExist()
+        compose.onNodeWithText("Use a code instead").assertDoesNotExist()
         assertEquals(listOf("code"), events)
     }
 

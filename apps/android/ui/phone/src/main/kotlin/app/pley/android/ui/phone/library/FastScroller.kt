@@ -12,10 +12,12 @@ import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -44,10 +46,12 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * The grid's fast-scroll handle (design spec §4.2): a 48 dp handle on the
- * right edge, 24 dp wide to the touch, showing while the grid scrolls.
- * Dragging it moves through the whole listing at once; when the listing
- * has its A to Z ([index]), a 56 dp bubble beside the finger shows the
- * letter it is at, and each new letter ticks.
+ * right edge, showing while the grid scrolls. Only the handle takes
+ * touches, 48 dp square around it and only while it shows, so a swipe or
+ * a tap near the edge still reaches the grid; the system's back gesture
+ * stays clear of it. Dragging it moves through the whole listing at once;
+ * when the listing has its A to Z ([index]), a 56 dp bubble beside the
+ * finger shows the letter it is at, and each new letter ticks.
  *
  * The handle's place is read while laying out, so scrolling never
  * recomposes it.
@@ -68,6 +72,7 @@ internal fun FastScroller(
     var dragFraction by remember { mutableFloatStateOf(0f) }
     var letter by remember { mutableIntStateOf(-1) }
     val alpha = remember { Animatable(0f) }
+    val shown by remember { derivedStateOf { alpha.value > 0f } }
     val handle = with(density) { HANDLE.roundToPx() }
 
     LaunchedEffect(grid) {
@@ -81,6 +86,8 @@ internal fun FastScroller(
         }
     }
 
+    fun span(): Int = (height - handle).coerceAtLeast(1)
+
     fun fraction(): Float {
         if (dragging) return dragFraction
         val info = grid.layoutInfo
@@ -89,9 +96,9 @@ internal fun FastScroller(
         return (grid.firstVisibleItemIndex.toFloat() / last).coerceIn(0f, 1f)
     }
 
-    fun jump(y: Float) {
-        val span = (height - handle).coerceAtLeast(1)
-        val f = ((y - handle / 2f) / span).coerceIn(0f, 1f)
+    // [top] is where the finger has moved the handle's top to, so the handle stays where it was taken hold of.
+    fun jump(top: Float) {
+        val f = (top / span()).coerceIn(0f, 1f)
         dragFraction = f
         val target = (f * (total - 1)).roundToInt()
         val rowStart = target - target % columns.coerceAtLeast(1)
@@ -103,42 +110,60 @@ internal fun FastScroller(
         }
     }
 
+    // The strip only measures the height and places the handle: it takes no touches of its own.
     Box(
         modifier
             .fillMaxHeight()
             .width(TOUCH)
             .onSizeChanged { height = it.height }
-            .clearAndSetSemantics { }
-            .pointerInput(total, columns, index) {
-                detectVerticalDragGestures(
-                    onDragStart = { offset ->
-                        dragging = true
-                        jump(offset.y)
-                    },
-                    onDragEnd = { dragging = false },
-                    onDragCancel = { dragging = false },
-                    onVerticalDrag = { change, _ ->
-                        change.consume()
-                        jump(change.position.y)
-                    },
-                )
-            },
+            .clearAndSetSemantics { },
     ) {
         val place: () -> Int = { (fraction() * (height - handle).coerceAtLeast(0)).roundToInt() }
         Box(
             Modifier
                 .align(Alignment.TopEnd)
                 .offset { IntOffset(0, place()) }
-                .padding(end = 4.dp)
-                .size(6.dp, HANDLE)
-                .graphicsLayer { this.alpha = alpha.value }
-                .background(if (dragging) PleyColors.Muted else PleyColors.Control, PleyShape.Pill),
-        )
+                .size(TOUCH, HANDLE)
+                .then(
+                    if (shown) {
+                        Modifier
+                            .systemGestureExclusion()
+                            .pointerInput(total, columns, index) {
+                                var top = 0f
+                                detectVerticalDragGestures(
+                                    onDragStart = {
+                                        top = fraction() * span()
+                                        dragFraction = top / span()
+                                        dragging = true
+                                    },
+                                    onDragEnd = { dragging = false },
+                                    onDragCancel = { dragging = false },
+                                    onVerticalDrag = { change, dy ->
+                                        change.consume()
+                                        top += dy
+                                        jump(top)
+                                    },
+                                )
+                            }
+                    } else {
+                        Modifier
+                    },
+                ),
+        ) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = 4.dp)
+                    .size(6.dp, HANDLE)
+                    .graphicsLayer { this.alpha = alpha.value }
+                    .background(if (dragging) PleyColors.Muted else PleyColors.Control, PleyShape.Control),
+            )
+        }
         if (dragging && index != null && letter >= 0) {
             Box(
                 Modifier
                     .align(Alignment.TopEnd)
-                    // Centred on the narrow touch strip, then moved left of the handle, clear of the finger.
+                    // Centred on the touch strip, then moved left of the handle, clear of the finger.
                     .offset { IntOffset(-BUBBLE_SHIFT.roundToPx(), place() + (handle - BUBBLE.roundToPx()) / 2) }
                     .requiredSize(BUBBLE)
                     .background(PleyColors.Surface3, PleyShape.Circle),
@@ -151,8 +176,8 @@ internal fun FastScroller(
 }
 
 private val HANDLE = 48.dp
-private val TOUCH = 24.dp
+private val TOUCH = 48.dp
 private val BUBBLE = 56.dp
-private val BUBBLE_SHIFT = 48.dp
+private val BUBBLE_SHIFT = 36.dp
 private const val HIDE_AFTER_MS = 1_200L
 private const val FADE_MS = 300

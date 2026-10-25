@@ -140,7 +140,7 @@ internal fun PhoneLinkContent(state: LinkUiState, onNewCode: () -> Unit, onChang
                 halves.forEachIndexed { i, half ->
                     if (i > 0) {
                         Box(Modifier.width(32.dp), contentAlignment = Alignment.Center) {
-                            Box(Modifier.size(14.dp, 3.dp).background(PleyColors.Subtle, PleyShape.Pill))
+                            Box(Modifier.size(14.dp, 3.dp).background(PleyColors.Subtle, PleyShape.Control))
                         }
                     }
                     Box(
@@ -173,7 +173,7 @@ internal fun PhoneLinkContent(state: LinkUiState, onNewCode: () -> Unit, onChang
 @Composable
 private fun Step(number: Int, content: @Composable () -> Unit) {
     Row(verticalAlignment = Alignment.Top) {
-        Box(Modifier.size(28.dp).background(PleyColors.Surface3, PleyShape.Circle).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
+        Box(Modifier.size(28.dp).background(PleyColors.Surface3, PleyShape.Field).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
             Text(number.toString(), style = MaterialTheme.typography.labelLarge, color = PleyColors.Fg)
         }
         Spacer(Modifier.width(14.dp))
