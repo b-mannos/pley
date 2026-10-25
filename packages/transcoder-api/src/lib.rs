@@ -169,6 +169,13 @@ pub struct MediaStream {
     /// Dolby Vision base-layer signal compatibility id (0 none, 1 HDR10, 2 SDR, 4 HLG).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dv_bl_compat: Option<i64>,
+    /// HDR10+ dynamic metadata (SMPTE ST 2094-40) in the video's first
+    /// frames. Looked for in Dolby Vision streams only: `true` is a Dolby
+    /// Vision + HDR10+ stream, which some Dolby Vision decoders fail on.
+    /// `None`: not looked for (other streams, or probed by an older
+    /// transcoder).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hdr10plus: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color_transfer: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -368,6 +375,11 @@ pub struct Capabilities {
     /// intro and credits detection (`POST /v1/fingerprint`).
     #[serde(default)]
     pub chromaprint: bool,
+    /// Jobs have a multivariant playlist (`master.m3u8`) naming their
+    /// codecs, and remuxes do what [`VideoRequest::dolby_vision`] and
+    /// [`VideoRequest::strip_hdr10plus`] ask. Older transcoders lack both.
+    #[serde(default)]
+    pub hls_master_playlist: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -459,6 +471,35 @@ pub struct VideoRequest {
     /// Target video bitrate cap in kbit/s (default chosen from the output resolution).
     #[serde(default)]
     pub max_bitrate_kbps: Option<u32>,
+    /// What a remux does with Dolby Vision (ignored when transcoding, and
+    /// for other streams).
+    #[serde(default)]
+    pub dolby_vision: DolbyVisionMode,
+    /// A remux leaves out the HDR10+ metadata (SMPTE ST 2094-40 SEI
+    /// messages) of an HEVC stream, for Dolby Vision decoders that fail on
+    /// streams carrying both (androidx/media#1895).
+    #[serde(default)]
+    pub strip_hdr10plus: bool,
+}
+
+/// What a remux does with a Dolby Vision stream. Whatever it is, the
+/// stream's Dolby Vision metadata (RPU) stays in the MPEG-TS segments,
+/// which can't say what they carry: the master playlist's `CODECS` does.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum DolbyVisionMode {
+    /// Copied as it is and not named: the base layer's codec only
+    /// (`hvc1…`), what a player without Dolby Vision decodes.
+    #[default]
+    Copy,
+    /// Copied as it is and named (`dvh1.05.06`; `hvc1…` with
+    /// `SUPPLEMENTAL-CODECS="dvh1.08.06/db1p"` for profile 8): for players
+    /// that decode the profile.
+    Signal,
+    /// Profile 7 made profile 8.1 and named so: the enhancement layer left
+    /// out and the RPU rewritten (`dovi_tool`'s mode 2). Other profiles are
+    /// signalled as they are.
+    To81,
 }
 
 /// The codec converted audio is encoded to.
@@ -607,6 +648,13 @@ pub struct VideoPlan {
     pub pipeline: Option<String>,
     pub bitrate_kbps: Option<u32>,
     pub subtitle_burn: Option<String>,
+    /// What the remux does with Dolby Vision; `None` when the output carries
+    /// none (a transcode, or another stream).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dolby_vision: Option<DolbyVisionMode>,
+    /// The remux leaves out the stream's HDR10+ metadata.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hdr10plus_stripped: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -892,7 +940,7 @@ mod tests {
     fn job_request_defaults_are_lenient() {
         let req: JobRequest =
             serde_json::from_str(r#"{"input":"/m/a.mkv","video":{},"audio":{"mode":"copy"}}"#).unwrap();
-        assert_eq!(req.video.unwrap().mode, VideoMode::Transcode);
+        assert_eq!(req.video.as_ref().unwrap().mode, VideoMode::Transcode);
         let audio = req.audio.unwrap();
         assert_eq!((audio.mode, audio.codec), (AudioMode::Copy, AudioCodec::Aac), "AAC unless asked");
         let audio: AudioRequest = serde_json::from_str(r#"{"codec":"eac3","channels":6}"#).unwrap();
@@ -900,6 +948,13 @@ mod tests {
         assert!(req.options.hardware_decoding);
         assert!(req.options.throttle);
         assert_eq!(req.options.hwaccel, HwAccel::Auto);
+        // Dolby Vision copied as it is unless asked.
+        let video = req.video.unwrap();
+        assert_eq!((video.dolby_vision, video.strip_hdr10plus), (DolbyVisionMode::Copy, false));
+        let video: VideoRequest =
+            serde_json::from_str(r#"{"mode":"copy","dolby_vision":"to81","strip_hdr10plus":true}"#).unwrap();
+        assert_eq!((video.dolby_vision, video.strip_hdr10plus), (DolbyVisionMode::To81, true));
+        assert_eq!(serde_json::to_value(DolbyVisionMode::Signal).unwrap(), "signal");
     }
 
     #[test]

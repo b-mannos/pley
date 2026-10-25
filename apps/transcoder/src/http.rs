@@ -295,12 +295,13 @@ async fn touch_job(State(state): Shared, Path(id): Path<String>) -> ApiResult<St
 
 async fn job_file(State(state): Shared, Path((id, file)): Path<(String, String)>) -> ApiResult<Response> {
     let job = state.jobs.get(&id).ok_or_else(|| ApiError::JobNotFound(format!("job {id} not found")))?;
-    if file == "index.m3u8" {
+    if file == "index.m3u8" || file == "master.m3u8" {
         job.touch();
         let mut headers = HeaderMap::new();
         headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/vnd.apple.mpegurl"));
         headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-        return Ok((headers, job.playlist()).into_response());
+        let playlist = if file == "master.m3u8" { job.master_playlist() } else { job.playlist() };
+        return Ok((headers, playlist).into_response());
     }
     let n: u32 = file
         .strip_suffix(".ts")
@@ -453,6 +454,7 @@ mod tests {
             ("DELETE", "/v1/jobs/nope"),
             ("POST", "/v1/jobs/nope/touch"),
             ("GET", "/v1/jobs/nope/index.m3u8"),
+            ("GET", "/v1/jobs/nope/master.m3u8"),
             ("GET", "/v1/jobs/nope/3.ts"),
         ] {
             let answer = request(addr, method, path, None, None).await;

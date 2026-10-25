@@ -125,7 +125,39 @@ impl Prober {
                 );
             }
         }
+        self.find_hdr10plus(path, &mut info).await;
         Ok(info)
+    }
+
+    /// Whether a Dolby Vision stream carries HDR10+ too: only its frames
+    /// say, so the first few are decoded (a fraction of a second). Left
+    /// unknown when that fails.
+    async fn find_hdr10plus(&self, path: &Path, info: &mut MediaInfo) {
+        let Some(video) = info
+            .streams
+            .iter_mut()
+            .find(|s| s.kind == StreamKind::Video && s.dynamic_range == Some(DynamicRange::DolbyVision))
+        else {
+            return;
+        };
+        if video.hdr10plus.is_some() {
+            return;
+        }
+        let mut cmd = self.ff.probe_command();
+        cmd.args(["-v", "error", "-select_streams"])
+            .arg(video.index.to_string())
+            .args(["-read_intervals", "%+#12", "-show_entries", "frame=key_frame:frame_side_data=side_data_type"])
+            .args(["-of", "json"])
+            .args(MEDIA_INPUT_OPTIONS)
+            .arg(input_arg(path))
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let Ok(child) = cmd.spawn() else { return };
+        match tokio::time::timeout(Duration::from_secs(30), child.wait_with_output()).await {
+            Ok(Ok(output)) if output.status.success() => video.hdr10plus = hdr10plus_in_frames(&output.stdout),
+            _ => tracing::debug!("{}: frames not read for HDR10+", path.display()),
+        }
     }
 
     /// Whether the first frames of `stream`, decoded, come out with times
@@ -171,6 +203,19 @@ async fn head(path: &Path) -> Vec<u8> {
         let _ = file.take(12).read_to_end(&mut head).await;
     }
     head
+}
+
+/// Whether frames ffprobe showed (`-show_entries frame_side_data`) carry
+/// HDR10+ metadata; `None` without frames.
+pub fn hdr10plus_in_frames(json: &[u8]) -> Option<bool> {
+    let value: serde_json::Value = serde_json::from_slice(json).ok()?;
+    let frames = value.get("frames")?.as_array().filter(|f| !f.is_empty())?;
+    Some(frames.iter().any(|frame| {
+        frame.get("side_data_list").and_then(|l| l.as_array()).is_some_and(|list| {
+            list.iter()
+                .any(|sd| sd.get("side_data_type").and_then(|t| t.as_str()).is_some_and(|t| t.contains("2094-40")))
+        })
+    }))
 }
 
 /// ffprobe ran and could not read the file, as opposed to a timeout or a
@@ -320,19 +365,26 @@ pub fn parse_ffprobe_json(json: &[u8], path: &Path) -> anyhow::Result<MediaInfo>
                 let dovi = s.side_data_list.iter().find(|sd| {
                     sd.get("side_data_type").and_then(|t| t.as_str()).is_some_and(|t| t.contains("DOVI configuration"))
                 });
+                let hdr10plus = s
+                    .side_data_list
+                    .iter()
+                    .any(|sd| sd.get("side_data_type").and_then(|t| t.as_str()).is_some_and(|t| t.contains("2094-40")));
                 let range = if let Some(dovi) = dovi {
                     let get = |k: &str| dovi.get(k).and_then(|v| v.as_i64());
                     stream.dv_profile = get("dv_profile");
                     stream.dv_level = get("dv_level");
                     stream.dv_bl_compat = get("dv_bl_signal_compatibility_id");
+                    // Usually only frames say (see `Prober::find_hdr10plus`).
+                    stream.hdr10plus = hdr10plus.then_some(true);
                     DynamicRange::DolbyVision
                 } else {
                     match s.color_transfer.as_deref() {
                         Some("smpte2084") => {
-                            let hdr10plus = s.side_data_list.iter().any(|sd| {
-                                sd.get("side_data_type").and_then(|t| t.as_str()).is_some_and(|t| t.contains("2094-40"))
-                            });
-                            if hdr10plus { DynamicRange::Hdr10plus } else { DynamicRange::Hdr10 }
+                            if hdr10plus {
+                                DynamicRange::Hdr10plus
+                            } else {
+                                DynamicRange::Hdr10
+                            }
                         }
                         Some("arib-std-b67") => DynamicRange::Hlg,
                         // Untagged transfer but 10+ bit BT.2020: in practice this is PQ (HDR10).
@@ -652,6 +704,29 @@ mod tests {
         let bt709 =
             r#"{"index":0,"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","color_transfer":"bt709"}"#;
         assert_eq!(video_range(bt709), Some(DynamicRange::Sdr));
+    }
+
+    #[test]
+    fn hdr10_plus_shows_in_frames() {
+        let frames = |types: &[&str]| {
+            let list: Vec<String> = types.iter().map(|t| format!(r#"{{"side_data_type":"{t}"}}"#)).collect();
+            format!(r#"{{"frames":[{{"key_frame":1}},{{"key_frame":0,"side_data_list":[{}]}}]}}"#, list.join(","))
+        };
+        let hybrid = frames(&["Dolby Vision RPU Data", "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"]);
+        assert_eq!(hdr10plus_in_frames(hybrid.as_bytes()), Some(true));
+        assert_eq!(hdr10plus_in_frames(frames(&["Dolby Vision RPU Data"]).as_bytes()), Some(false));
+        assert_eq!(hdr10plus_in_frames(br#"{"frames":[]}"#), None, "no frames read: unknown");
+        assert_eq!(hdr10plus_in_frames(b"not json"), None);
+        // Said by the stream itself (rare): no need to look at frames.
+        let json = r#"{"streams":[{"index":0,"codec_type":"video","codec_name":"hevc","pix_fmt":"yuv420p10le",
+            "color_transfer":"smpte2084","side_data_list":[{"side_data_type":"DOVI configuration record","dv_profile":8,
+            "dv_level":6,"dv_bl_signal_compatibility_id":1},{"side_data_type":"HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}]}],
+            "format":{"format_name":"matroska","duration":"10"}}"#;
+        let info = parse_ffprobe_json(json.as_bytes(), Path::new("a.mkv")).unwrap();
+        let video = info.video().unwrap();
+        assert_eq!((video.dynamic_range, video.hdr10plus), (Some(DynamicRange::DolbyVision), Some(true)));
+        let info = parse_ffprobe_json(SAMPLE.as_bytes(), Path::new("/m/Movie.mkv")).unwrap();
+        assert_eq!(info.video().unwrap().hdr10plus, None, "not known before frames are read");
     }
 
     #[test]

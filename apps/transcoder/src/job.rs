@@ -27,10 +27,12 @@ use crate::adaptive;
 use crate::error::{ApiError, ApiResult};
 use crate::extract::Extractor;
 use crate::ffmpeg::Ffmpeg;
+use crate::hls;
 use crate::keyframes::KeyframeStore;
 use crate::metrics::Metrics;
 use crate::plan::{ArgsContext, Burn, MAX_DURATION_MS, PROCESS_WINDOW, Plan, READRATE, READRATE_BURST_MS};
 use crate::probe::Prober;
+use crate::tsedit::{self, Edits};
 use crate::util::now_ms;
 
 /// Wait for the running process instead of restarting when the requested
@@ -603,7 +605,7 @@ impl JobManager {
         let next = Arc::new(AtomicU32::new(start));
         let tail = Arc::new(Mutex::new(VecDeque::new()));
         let pace = Arc::new(Mutex::new(Pace::default()));
-        tokio::spawn(read_segment_list(job.clone(), stdout, next.clone(), spawned, self.metrics.clone()));
+        let lister = tokio::spawn(read_segment_list(job.clone(), stdout, next.clone(), spawned, self.metrics.clone()));
         tokio::spawn(read_progress(job.clone(), stderr, start_ms, tail.clone(), pace.clone()));
 
         let (exit_tx, exit_rx) = watch::channel(false);
@@ -624,6 +626,10 @@ impl JobManager {
                     (child.wait().await, true)
                 }
             };
+            // Every segment it listed is ready (edited, when it needs it)
+            // before the process counts as gone: a request coming then
+            // must not start another one that writes them again.
+            let _ = lister.await;
             slots.release(hw);
             job_ref.on_exit(end, next_ref.load(Relaxed), status, killed, &tail, &metrics);
             let _ = exit_tx.send(true);
@@ -893,6 +899,33 @@ impl Job {
         }
     }
 
+    /// The multivariant playlist, naming the codecs (see [`crate::hls`]).
+    pub fn master_playlist(&self) -> String {
+        hls::master_playlist(&self.plan, &self.media)
+    }
+
+    /// Does to segment `n`'s video what FFmpeg couldn't (see
+    /// [`crate::tsedit`]), before anyone is told it is ready.
+    async fn edit_segment(&self, n: u32, edits: Edits) {
+        let path = self.segment_path(n);
+        let edited = tokio::task::spawn_blocking(move || tsedit::edit_segment(&path, edits)).await;
+        match edited {
+            Ok(Ok(edited)) => {
+                if let Some(err) = edited.first_error.as_deref().filter(|_| edited.rpus_dropped > 0) {
+                    tracing::debug!(job = %self.id, "segment {n}: {} RPUs left out: {err}", edited.rpus_dropped);
+                    self.warn(&format!(
+                        "some Dolby Vision metadata could not be made profile 8.1 and was left out ({err})"
+                    ));
+                }
+            }
+            Ok(Err(err)) => {
+                tracing::warn!(job = %self.id, "segment {n} could not be edited: {err}");
+                self.warn(&format!("a segment's video could not be edited: {err}"));
+            }
+            Err(err) => tracing::warn!(job = %self.id, "segment {n} could not be edited: {err}"),
+        }
+    }
+
     pub fn playlist(&self) -> String {
         let bounds = &self.plan.boundaries;
         let longest = bounds.windows(2).map(|w| w[1] - w[0]).max().unwrap_or(0);
@@ -965,8 +998,12 @@ async fn read_segment_list(
 ) {
     let mut lines = BufReader::new(stdout).lines();
     let mut first = true;
+    let edits = job.plan.segment_edits();
     while let Ok(Some(line)) = lines.next_line().await {
         if let Some(n) = parse_list_line(&line) {
+            if let Some(edits) = edits {
+                job.edit_segment(n, edits).await;
+            }
             tracing::trace!(job = %job.id, "segment {n} ready");
             if std::mem::take(&mut first) {
                 job.runtime.lock().start_cost = Some(spawned.elapsed());
@@ -1047,7 +1084,7 @@ fn parse_list_line(line: &str) -> Option<u32> {
 fn describe(created: &JobCreated) -> String {
     let video = created.video.as_ref().map(|v| {
         format!(
-            "video {} {}→{} {}x{}→{}x{}{}{}",
+            "video {} {}→{} {}x{}→{}x{}{}{}{}{}",
             if v.mode == VideoMode::Copy { "copy" } else { "transcode" },
             v.codec_in,
             v.codec_out,
@@ -1057,6 +1094,8 @@ fn describe(created: &JobCreated) -> String {
             v.height_out.unwrap_or(0),
             v.encoder.as_deref().map(|e| format!(" via {e}")).unwrap_or_default(),
             v.tonemap.map(|t| format!(" tonemap {}", t.as_str())).unwrap_or_default(),
+            v.dolby_vision.map(|m| format!(" dolby vision {m:?}").to_lowercase()).unwrap_or_default(),
+            if v.hdr10plus_stripped { " without hdr10+" } else { "" },
         )
     });
     let audio = created

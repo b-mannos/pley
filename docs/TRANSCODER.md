@@ -85,6 +85,7 @@ following status codes:
 | DELETE | `/v1/jobs/{id}` | – | `204` (kills ffmpeg, deletes segments) |
 | POST | `/v1/jobs/{id}/touch` | – | `204` (keeps a paused session alive) |
 | GET | `/v1/jobs/{id}/index.m3u8` | – | HLS VOD playlist |
+| GET | `/v1/jobs/{id}/master.m3u8` | – | multivariant playlist: one variant (`index.m3u8`) with `CODECS`, `SUPPLEMENTAL-CODECS`, `RESOLUTION`, `FRAME-RATE`, `VIDEO-RANGE` and the bandwidth (see *Dolby Vision in remuxes*). Transcoders that serve it say `hls_master_playlist: true` in their capabilities |
 | GET | `/v1/jobs/{id}/{n}.ts` | – | MPEG-TS segment `n` (waits for it, or starts ffmpeg) |
 
 ## How HLS jobs work
@@ -146,8 +147,9 @@ following status codes:
      other. When that request goes away (served, or aborted by its player),
      the one held back looks again at once.
 3. **Completion tracking.** ffmpeg's segment muxer writes a line to stdout as
-   each segment finishes, which marks it ready and wakes waiting requests at
-   once, with no polling (after noting the process has moved past it, so a
+   each segment finishes (a remux whose video needs editing has the segment
+   edited first: see *Dolby Vision in remuxes*), which marks it ready and
+   wakes waiting requests at once, with no polling (after noting the process has moved past it, so a
    woken request never sees it still owing that segment). ffmpeg's `-progress` output on stderr supplies the
    live metrics: fps, speed, bitrate and position.
 4. **Throttling.** Once a 60 s buffer exists, ffmpeg reads at most 2× realtime
@@ -248,8 +250,8 @@ following status codes:
   whose output has 6 channels or more and that decode E-AC-3 or pass it
   through, AC-3 5.1 when they take only AC-3, and AAC otherwise (docs/API.md,
   *Version 2*). The job's audio plan reports the codec as `codec_out`.
-- **Remux.** H.264 video is copied into HLS, with segments cut exactly on the
-  source's keyframes.
+- **Remux.** H.264 and HEVC video is copied into HLS, with segments cut
+  exactly on the source's keyframes.
   - Matroska and WebM: the keyframe index is read instantly from the file's
     Cues element, so remuxing works on the first play.
   - MP4, MOV and M4V: the index is read just as quickly from the video
@@ -277,6 +279,56 @@ following status codes:
   stream is marked `decode_order_times` if more than one frame comes out
   earlier than the frame before it. The server then converts its video:
   decoding gives every frame its right time.
+- **Dolby Vision in remuxes.** A copied HEVC stream keeps its Dolby Vision
+  metadata (the RPU NAL units, type 62) in the MPEG-TS segments, which have
+  no way to say so (FFmpeg's MPEG-TS muxer writes no Dolby Vision
+  descriptor): `master.m3u8` does, as `VideoRequest.dolby_vision` asks.
+  - `copy` (the default, what older servers ask): nothing named, the base
+    layer's codec only (`hvc1.2.4.L153.B0`);
+  - `signal`: named for a player that decodes it. Profile 5: `dvh1.05.LL`
+    alone; profile 8: the HEVC codec with
+    `SUPPLEMENTAL-CODECS="dvh1.08.LL/db1p"` (8.1, `VIDEO-RANGE=PQ`),
+    `/db4h` (8.4, `HLG`) or `/db2g` (8.2, `SDR`); profile 7: `dvh1.07.LL`;
+  - `to81` (profile 7 only, else as `signal`): made profile 8.1 and named
+    so. FFmpeg can't: `dovi_rpu` refuses to write profile 7 RPUs and never
+    changes a profile, `dovi_split` (FFmpeg 9) drops the enhancement layer
+    but keeps profile 7 RPUs. So FFmpeg copies the stream as it is and the
+    transcoder edits each finished segment before it is ready: the
+    enhancement layer's NAL units (type 63) are left out, and each RPU is
+    rewritten as `dovi_tool`'s mode 2 does: no residual data (NLQ), no
+    enhancement-layer resampling, one partition, the P8.1 colour
+    coefficients in the display management data (BT.2020 YCbCr to RGB, RGB
+    to LMS, `signal_color_space` 0), and, for a full enhancement layer (not
+    a minimal one, whose residual is zero), no-op mapping curves, since its
+    curves only make sense with the layer. The extension blocks (levels 1 to
+    11, 254, 255; content mapping 2.9 and 4.0) and everything else stay as
+    they are, and the CRC is computed again. The RPU syntax is FFmpeg's
+    (`libavcodec/dovi_rpudec.c`) and `dovi_tool`'s; this is the transcoder's
+    own code (`src/dovi.rs`), nothing of theirs is linked or run. An RPU
+    that can't be read (or whose CRC is wrong) is left out with a warning on
+    the job, and that frame plays as its base layer. Profile 7 as MakeMKV
+    writes it is meant (one track); a disc's dual-PID streams carry the RPU
+    in the enhancement-layer PID, which isn't copied.
+  - `strip_hdr10plus`: the HDR10+ messages (ITU-T T.35, country 0xB5,
+    provider 0x003C, application 4) are taken out of the prefix SEI NAL
+    units of each segment, the other messages (mastering display, content
+    light level, captions) kept; an SEI unit with nothing else goes. For
+    Dolby Vision decoders that show black or freeze with both
+    (androidx/media#1895).
+
+  Editing a segment reads it whole, takes its video PES packets apart into
+  NAL units and packetizes the PES again: the first TS packet keeps its
+  adaptation field (PCR, random access), continuity counters run on, and
+  other PIDs' packets are left as they were (those met in the middle of a
+  PES come right after it). A 2 s segment of 4K takes milliseconds. The
+  job's video plan reports `dolby_vision` (`copy`, `signal`, `to81`) and
+  `hdr10plus_stripped`.
+- **HDR10+ in Dolby Vision streams.** Only a stream's frames say whether it
+  carries HDR10+ (ffprobe's stream side data doesn't in Matroska or MP4), so
+  the probe of a Dolby Vision stream decodes its first frames (a fraction of
+  a second; `-read_intervals %+#12 -show_entries frame_side_data`) and
+  records `MediaStream.hdr10plus`. It is left out (unknown) when that fails,
+  and for other streams.
 - **Subtitle extraction.** Text tracks (SubRip, ASS/SSA, plain text and
   WebVTT) become WebVTT, cached per file version.
   - Matroska: mkvmerge and FFmpeg list every subtitle block in the Cues, with

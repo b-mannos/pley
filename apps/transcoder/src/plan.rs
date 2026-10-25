@@ -15,11 +15,12 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use pley_transcoder_api::{
-    AudioCodec, AudioMode, AudioPlan, DynamicRange, EncoderInfo, HwAccel, JobRequest, MediaInfo, MediaStream,
-    StreamKind, Tonemapper, VideoCodec, VideoMode, VideoPlan, decode_key, is_text_subtitle_codec,
+    AudioCodec, AudioMode, AudioPlan, DolbyVisionMode, DynamicRange, EncoderInfo, HwAccel, JobRequest, MediaInfo,
+    MediaStream, StreamKind, Tonemapper, VideoCodec, VideoMode, VideoPlan, decode_key, is_text_subtitle_codec,
 };
 
 use crate::ffmpeg::{Ffmpeg, VAAPI_DEVICE};
+use crate::tsedit::Edits;
 use crate::util::{MEDIA_INPUT_OPTIONS, input_arg, secs};
 
 pub const DEFAULT_SEGMENT_SECONDS: f64 = 4.0;
@@ -104,6 +105,11 @@ pub struct VideoOut {
     pub deinterlace: bool,
     pub preset: String,
     pub pipeline: Pipeline,
+    /// What a remux of a Dolby Vision HEVC stream does with it (`None`:
+    /// transcoded, or no Dolby Vision).
+    pub dolby_vision: Option<DolbyVisionMode>,
+    /// A remux of HEVC leaves out its HDR10+ metadata.
+    pub strip_hdr10plus: bool,
 }
 
 /// The encoder used by fully-GPU Vulkan pipelines.
@@ -205,6 +211,11 @@ impl Plan {
                     warnings.push("keyframe index not ready yet: transcoding instead of remuxing".into());
                 }
                 if copy {
+                    let dv_hevc = src.dynamic_range() == DynamicRange::DolbyVision && src.codec == "hevc";
+                    let dolby_vision = dv_hevc.then_some(match vreq.dolby_vision {
+                        DolbyVisionMode::To81 if src.dv_profile != Some(7) => DolbyVisionMode::Signal,
+                        mode => mode,
+                    });
                     Some(VideoOut {
                         stream_index: src.index,
                         copy: true,
@@ -221,6 +232,8 @@ impl Plan {
                         deinterlace: false,
                         preset: String::new(),
                         pipeline: Pipeline::Software,
+                        dolby_vision,
+                        strip_hdr10plus: vreq.strip_hdr10plus && src.codec == "hevc",
                     })
                 } else {
                     let (width, height) = fit(src_width, src_height, vreq.max_width, vreq.max_height);
@@ -299,6 +312,8 @@ impl Plan {
                             .filter(|p| is_x264_preset(p) || p == AUTO)
                             .unwrap_or_else(|| "veryfast".into()),
                         encoder: Some(encoder),
+                        dolby_vision: None,
+                        strip_hdr10plus: false,
                     })
                 }
             }
@@ -420,7 +435,17 @@ impl Plan {
             ),
             bitrate_kbps: (!v.copy).then_some(v.bitrate_kbps),
             subtitle_burn: self.burn.as_ref().map(|b| b.label().to_owned()),
+            dolby_vision: v.dolby_vision,
+            hdr10plus_stripped: v.strip_hdr10plus,
         })
+    }
+
+    /// What finished segments need done to their video by the transcoder
+    /// itself (see [`crate::tsedit`]), when anything.
+    pub fn segment_edits(&self) -> Option<Edits> {
+        let v = self.video.as_ref().filter(|v| v.copy)?;
+        let edits = Edits { to_81: v.dolby_vision == Some(DolbyVisionMode::To81), strip_hdr10plus: v.strip_hdr10plus };
+        edits.any().then_some(edits)
     }
 
     pub fn audio_plan(&self, media: &MediaInfo) -> Option<AudioPlan> {

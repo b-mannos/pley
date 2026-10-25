@@ -790,6 +790,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             max_width: None,
             max_height,
             max_bitrate_kbps: max_bitrate.map(|b| b.saturating_sub(192).max(500)),
+            ..Default::default()
         }
     });
     let audio_req = audio.map(|a| {
