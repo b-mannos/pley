@@ -93,7 +93,7 @@ internal fun AlbumScreen(albumId: Long, trackId: Long?) {
             is MusicPageState.Ready -> {
                 LaunchedEffect(s.status) { shell.report(s.status) }
                 val page = s.page
-                val margin = LocalPhoneMetrics.current.margin
+                val metrics = LocalPhoneMetrics.current
                 // Opened from a track: it scrolls into view once the tracks are there.
                 var scrolled by rememberSaveable { mutableStateOf(trackId == null) }
                 LaunchedEffect(page.rows.size) {
@@ -105,7 +105,7 @@ internal fun AlbumScreen(albumId: Long, trackId: Long?) {
                 LazyColumn(
                     state = list,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = margin - 8.dp, end = margin - 8.dp, bottom = 32.dp),
+                    contentPadding = PaddingValues(start = metrics.marginStart - 8.dp, end = metrics.marginEnd - 8.dp, bottom = 32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     item(key = "header", contentType = "header") {

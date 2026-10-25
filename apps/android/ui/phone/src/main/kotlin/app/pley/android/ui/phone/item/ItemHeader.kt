@@ -101,7 +101,7 @@ internal fun ItemHeader(page: ItemPage, actions: PageActions) {
                     }
                 },
         )
-        Column(Modifier.padding(start = metrics.margin, end = metrics.margin, top = backdropHeight - TitleOverlap)) {
+        Column(Modifier.padding(start = metrics.marginStart, end = metrics.marginEnd, top = backdropHeight - TitleOverlap)) {
             if (wide) {
                 Row(verticalAlignment = Alignment.Top) {
                     val poster = remember(page.item, page.origin) { ArtworkCandidates.poster(page.item, page.origin) }

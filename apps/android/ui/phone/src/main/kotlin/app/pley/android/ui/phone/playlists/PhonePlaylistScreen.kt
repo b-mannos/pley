@@ -262,7 +262,7 @@ private fun Entries(
         val to = local?.indexOf(key) ?: -1
         if (from >= 0 && to >= 0 && from != to) actions.move(from, to) else local = null
     }
-    val margin = LocalPhoneMetrics.current.margin
+    val metrics = LocalPhoneMetrics.current
     LazyColumn(
         state = list,
         modifier = Modifier.fillMaxSize().testTag(PLAYLIST_ENTRIES),
@@ -283,7 +283,7 @@ private fun Entries(
                     ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = PleyColors.Muted,
-                    modifier = Modifier.padding(horizontal = margin, vertical = 8.dp),
+                    modifier = Modifier.padding(start = metrics.marginStart, end = metrics.marginEnd, top = 8.dp, bottom = 8.dp),
                 )
             }
         }
@@ -317,8 +317,8 @@ private fun Entries(
 /** The cover, what it plays, the title, its facts, and the buttons. */
 @Composable
 private fun Header(page: PlaylistPage<ArtworkTileModel>, actions: PlaylistActions, onRename: () -> Unit, onDelete: () -> Unit) {
-    val margin = LocalPhoneMetrics.current.margin
-    Column(Modifier.fillMaxWidth().padding(start = margin, end = margin, top = 8.dp, bottom = 20.dp)) {
+    val metrics = LocalPhoneMetrics.current
+    Column(Modifier.fillMaxWidth().padding(start = metrics.marginStart, end = metrics.marginEnd, top = 8.dp, bottom = 20.dp)) {
         PlaylistArt(
             artwork = page.artwork,
             origin = page.origin,
@@ -401,7 +401,7 @@ private fun EntryRow(
     onMoveBy: (Int) -> Unit,
     drag: RowDrag,
 ) {
-    val margin = LocalPhoneMetrics.current.margin
+    val metrics = LocalPhoneMetrics.current
     val moveUp = stringResource(R.string.playlist_move_up)
     val moveDown = stringResource(R.string.playlist_move_down)
     val remove = stringResource(R.string.playlist_remove)
@@ -412,7 +412,7 @@ private fun EntryRow(
                 .fillMaxWidth()
                 .background(if (lifted) PleyColors.Surface3 else PleyColors.Bg)
                 .heightIn(min = 72.dp)
-                .padding(start = if (editable) 0.dp else margin, end = margin)
+                .padding(start = if (editable) 0.dp else metrics.marginStart, end = metrics.marginEnd)
                 .semantics {
                     if (editable) {
                         customActions = buildList {
@@ -684,8 +684,8 @@ internal fun SmartBadge(text: String) {
 @Composable
 private fun Skeleton() {
     val skeleton = rememberSkeleton(animated = true)
-    val margin = LocalPhoneMetrics.current.margin
-    Column(Modifier.fillMaxSize().padding(horizontal = margin, vertical = 8.dp)) {
+    val metrics = LocalPhoneMetrics.current
+    Column(Modifier.fillMaxSize().padding(start = metrics.marginStart, end = metrics.marginEnd, top = 8.dp, bottom = 8.dp)) {
         Box(Modifier.size(COVER).skeleton(skeleton, PleyShape.Card))
         Spacer(Modifier.height(20.dp))
         Box(Modifier.size(100.dp, 14.dp).skeleton(skeleton, PleyShape.Badge))

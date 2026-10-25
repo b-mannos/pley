@@ -83,11 +83,11 @@ internal fun HistoryScreen() {
                         icon = PleyIcons.History,
                     )
                 } else {
-                    val margin = LocalPhoneMetrics.current.margin
+                    val metrics = LocalPhoneMetrics.current
                     LazyColumn(
                         state = list,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = margin - 8.dp, end = margin - 8.dp, bottom = 32.dp),
+                        contentPadding = PaddingValues(start = metrics.marginStart - 8.dp, end = metrics.marginEnd - 8.dp, bottom = 32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         items(s.rows, key = { it.entryId }, contentType = { "row" }) { row ->
@@ -152,8 +152,8 @@ private fun HistoryLine(row: HistoryRow, origin: String, onOpen: () -> Unit, onR
 @Composable
 private fun HistorySkeleton() {
     val skeleton = rememberSkeleton(animated = true)
-    val margin = LocalPhoneMetrics.current.margin
-    Column(Modifier.fillMaxWidth().padding(horizontal = margin, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val metrics = LocalPhoneMetrics.current
+    Column(Modifier.fillMaxWidth().padding(start = metrics.marginStart, end = metrics.marginEnd, top = 8.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         repeat(6) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(40.dp, 60.dp).skeleton(skeleton, PleyShape.Badge))

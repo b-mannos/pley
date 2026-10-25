@@ -141,7 +141,7 @@ fun OfflineBanner(modifier: Modifier = Modifier) {
             Modifier
                 .fillMaxWidth()
                 .background(PleyColors.Surface3)
-                .padding(horizontal = LocalPhoneMetrics.current.margin, vertical = 10.dp)
+                .padding(start = LocalPhoneMetrics.current.marginStart, end = LocalPhoneMetrics.current.marginEnd, top = 10.dp, bottom = 10.dp)
                 .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
             verticalAlignment = Alignment.CenterVertically,
         ) {

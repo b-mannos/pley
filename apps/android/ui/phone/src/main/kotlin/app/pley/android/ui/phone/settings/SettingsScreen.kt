@@ -64,11 +64,11 @@ internal fun SettingsScreen() {
     val s = state.settings
     Column(Modifier.fillMaxSize().testTag(SETTINGS_PAGE)) {
         PleyTopAppBar(title = stringResource(R.string.account_settings), onBack = navigator::back, scrolled = { list.canScrollBackward })
-        val margin = LocalPhoneMetrics.current.margin
+        val metrics = LocalPhoneMetrics.current
         LazyColumn(
             state = list,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = margin, end = margin, top = 8.dp, bottom = 32.dp),
+            contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, top = 8.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {

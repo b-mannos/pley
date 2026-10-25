@@ -105,14 +105,14 @@ private fun LibraryPage(state: LibraryUiState<ArtworkTileModel>, vm: LibraryView
  */
 @Composable
 private fun LibraryTabs(tabs: List<LibraryTab>, selected: LibraryTab, onSelect: (LibraryTab) -> Unit) {
-    val margin = LocalPhoneMetrics.current.margin
+    val metrics = LocalPhoneMetrics.current
     val index = tabs.indexOf(selected).coerceAtLeast(0)
     PrimaryScrollableTabRow(
         selectedTabIndex = index,
         modifier = Modifier.fillMaxWidth(),
         containerColor = PleyColors.Bg,
         contentColor = PleyColors.Fg,
-        edgePadding = (margin - 16.dp).coerceAtLeast(0.dp),
+        edgePadding = (metrics.marginStart - 16.dp).coerceAtLeast(0.dp),
         minTabWidth = 0.dp,
         indicator = {
             TabRowDefaults.PrimaryIndicator(
@@ -123,7 +123,7 @@ private fun LibraryTabs(tabs: List<LibraryTab>, selected: LibraryTab, onSelect: 
                 shape = PleyShape.Control,
             )
         },
-        divider = { HorizontalDivider(Modifier.padding(horizontal = margin), thickness = 1.dp, color = PleyColors.Surface4) },
+        divider = { HorizontalDivider(Modifier.padding(start = metrics.marginStart, end = metrics.marginEnd), thickness = 1.dp, color = PleyColors.Surface4) },
     ) {
         tabs.forEach { tab ->
             Tab(

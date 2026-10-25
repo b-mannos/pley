@@ -100,7 +100,7 @@ private fun PersonContent(page: PersonPage, onOpen: (Long) -> Unit, onActions: (
     LazyVerticalGrid(
         columns = remember(gap) { FittedCells(TileKind.Poster, gap) },
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = metrics.margin, end = metrics.margin, bottom = 32.dp),
+        contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, bottom = 32.dp),
         horizontalArrangement = Arrangement.spacedBy(gap),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -158,7 +158,7 @@ private fun PersonHeader(page: PersonPage) {
 private fun PersonSkeleton() {
     val skeleton = rememberSkeleton(animated = true)
     val metrics = LocalPhoneMetrics.current
-    Column(Modifier.fillMaxSize().padding(horizontal = metrics.margin), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.fillMaxSize().padding(start = metrics.marginStart, end = metrics.marginEnd), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(16.dp))
         Box(Modifier.size(PhotoSize).skeleton(skeleton, PleyShape.Circle))
         Spacer(Modifier.height(16.dp))

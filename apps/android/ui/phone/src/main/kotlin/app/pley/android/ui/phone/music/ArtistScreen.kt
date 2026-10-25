@@ -142,7 +142,7 @@ private fun ArtistContent(
         columns = remember(gap) { FittedCells(TileKind.Square, gap) },
         state = grid,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = metrics.margin, end = metrics.margin, bottom = 32.dp),
+        contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, bottom = 32.dp),
         horizontalArrangement = Arrangement.spacedBy(gap),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {

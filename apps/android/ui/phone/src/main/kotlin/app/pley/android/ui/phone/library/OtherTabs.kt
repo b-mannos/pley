@@ -149,7 +149,7 @@ internal fun CollectionsPane(
             LazyVerticalGrid(
                 columns = EqualCells(columns),
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = metrics.margin, end = metrics.margin, top = 8.dp, bottom = 24.dp),
+                contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, top = 8.dp, bottom = 24.dp),
                 horizontalArrangement = Arrangement.spacedBy(PleyPhone.TileGap),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 userScrollEnabled = list != null,

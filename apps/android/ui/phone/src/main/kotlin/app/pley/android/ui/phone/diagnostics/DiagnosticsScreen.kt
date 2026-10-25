@@ -89,11 +89,11 @@ internal fun DiagnosticsScreen() {
                 if (state.capsJson.isNotEmpty()) PleyIconButton(PleyIcons.Copy, stringResource(R.string.diagnostics_copy), onClick = copy)
             },
         )
-        val margin = LocalPhoneMetrics.current.margin
+        val metrics = LocalPhoneMetrics.current
         LazyColumn(
             state = list,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = margin, end = margin, top = 8.dp, bottom = 32.dp),
+            contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, top = 8.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {

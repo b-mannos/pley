@@ -122,7 +122,7 @@ private fun Grid(list: List<PlaylistCard>, state: androidx.compose.foundation.la
         columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(columns),
         state = state,
         modifier = Modifier.fillMaxSize().testTag(PLAYLISTS_GRID),
-        contentPadding = PaddingValues(start = metrics.margin, end = metrics.margin, top = 8.dp, bottom = 32.dp),
+        contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, top = 8.dp, bottom = 32.dp),
         horizontalArrangement = Arrangement.spacedBy(PleyPhone.TileGap),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
@@ -170,7 +170,7 @@ private fun Skeletons() {
     LazyVerticalGrid(
         columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(columns),
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = metrics.margin, end = metrics.margin, top = 8.dp),
+        contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, top = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(PleyPhone.TileGap),
         verticalArrangement = Arrangement.spacedBy(20.dp),
         userScrollEnabled = false,

@@ -212,7 +212,7 @@ private fun SearchBar(field: TextFieldState, onSubmit: () -> Unit, autoFocus: Bo
         Modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.statusBars)
-            .padding(horizontal = metrics.margin, vertical = 8.dp)
+            .padding(start = metrics.marginStart, end = metrics.marginEnd, top = 8.dp, bottom = 8.dp)
             .height(56.dp)
             .background(PleyColors.Surface3, PleyShape.Pill)
             .padding(start = 16.dp, end = 4.dp),
@@ -254,11 +254,11 @@ private fun Recent(recent: List<String>, onRecent: (String) -> Unit, onClear: ()
         Message(stringResource(R.string.search_empty_title), stringResource(R.string.search_empty_body), icon = PleyIcons.Search)
         return
     }
-    val margin = LocalPhoneMetrics.current.margin
+    val metrics = LocalPhoneMetrics.current
     LazyColumn(Modifier.fillMaxSize().testTag(SEARCH_RECENT), contentPadding = PaddingValues(bottom = 24.dp)) {
         item(key = "header", contentType = "header") {
             Row(
-                Modifier.fillMaxWidth().padding(start = margin, end = margin - 8.dp, top = 8.dp),
+                Modifier.fillMaxWidth().padding(start = metrics.marginStart, end = metrics.marginEnd - 8.dp, top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -276,7 +276,7 @@ private fun Recent(recent: List<String>, onRecent: (String) -> Unit, onClear: ()
                     .fillMaxWidth()
                     .heightIn(min = 56.dp)
                     .clickable(role = Role.Button) { onRecent(query) }
-                    .padding(horizontal = margin),
+                    .padding(start = metrics.marginStart, end = metrics.marginEnd),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(PleyIcons.History, contentDescription = null, size = 20.dp, tint = PleyColors.Muted)
@@ -294,7 +294,7 @@ private fun Results(
     onOpen: (SearchGroupKind, Long) -> Unit,
     onActions: (Long) -> Unit,
 ) {
-    val margin = LocalPhoneMetrics.current.margin
+    val metrics = LocalPhoneMetrics.current
     val list = rememberLazyListState()
     LazyColumn(
         state = list,
@@ -303,7 +303,7 @@ private fun Results(
         verticalArrangement = Arrangement.spacedBy(PleyPhone.SectionGap),
     ) {
         item(key = "for", contentType = "for") {
-            Row(Modifier.padding(horizontal = margin), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.padding(start = metrics.marginStart, end = metrics.marginEnd), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     stringResource(R.string.search_results_for, results.query),
                     style = MaterialTheme.typography.bodyMedium,
@@ -335,7 +335,7 @@ private fun ResultRow(group: SearchGroup<ArtworkTileModel>, onOpen: (Long) -> Un
     Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier
-                .padding(horizontal = metrics.margin)
+                .padding(start = metrics.marginStart, end = metrics.marginEnd)
                 .heightIn(min = 32.dp)
                 .clearAndSetSemantics {
                     contentDescription = spoken
@@ -351,7 +351,7 @@ private fun ResultRow(group: SearchGroup<ArtworkTileModel>, onOpen: (Long) -> Un
         LazyRow(
             state = rememberHubRowState(),
             modifier = Modifier.fillMaxWidth().testTag(SEARCH_ROW + group.kind.name),
-            contentPadding = PaddingValues(horizontal = metrics.margin, vertical = PRESS_ROOM),
+            contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, top = PRESS_ROOM, bottom = PRESS_ROOM),
             horizontalArrangement = Arrangement.spacedBy(PleyPhone.TileGap),
         ) {
             items(group.tiles, key = { it.id }, contentType = { kind }) { tile ->
@@ -374,7 +374,7 @@ private fun Skeletons() {
     val metrics = LocalPhoneMetrics.current
     Column(Modifier.fillMaxSize().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(PleyPhone.SectionGap)) {
         repeat(2) {
-            SkeletonRow(skeleton, TileKind.Poster, metrics.margin, rowCardWidth(TileKind.Poster, metrics.contentWidth - metrics.margin * 2))
+            SkeletonRow(skeleton, TileKind.Poster, metrics.marginStart, rowCardWidth(TileKind.Poster, metrics.contentWidth - metrics.margin * 2))
         }
     }
 }

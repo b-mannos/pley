@@ -119,14 +119,14 @@ internal fun PhoneLibrariesScreen(vm: LibrariesViewModel = viewModel(factory = L
 /** One library: a 40 dp tile with its kind's icon, the name and count, a spinner while it is scanned, else a chevron. */
 @Composable
 private fun LibraryRow(entry: LibraryEntry, onClick: () -> Unit) {
-    val margin = LocalPhoneMetrics.current.margin
+    val metrics = LocalPhoneMetrics.current
     val scanning = stringResource(R.string.home_libraries_scanning)
     Row(
         Modifier
             .fillMaxWidth()
             .heightIn(min = 72.dp)
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = margin, vertical = 12.dp),
+            .padding(start = metrics.marginStart, end = metrics.marginEnd, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(40.dp).background(PleyColors.Surface3, IconShape), contentAlignment = Alignment.Center) {
@@ -163,9 +163,9 @@ private fun LibrariesSkeleton() {
     Column(Modifier.fillMaxSize().padding(vertical = 8.dp).semantics { contentDescription = loading }) {
         if (!shown) return@Column
         val state = rememberSkeleton(animated = true)
-        val margin = LocalPhoneMetrics.current.margin
+        val metrics = LocalPhoneMetrics.current
         repeat(4) {
-            Row(Modifier.fillMaxWidth().height(72.dp).padding(horizontal = margin), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().height(72.dp).padding(start = metrics.marginStart, end = metrics.marginEnd), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(40.dp).skeleton(state, IconShape))
                 Spacer(Modifier.width(16.dp))
                 Column {

@@ -105,11 +105,11 @@ internal fun MeScreen() {
     val list = rememberLazyListState()
     Column(Modifier.fillMaxSize().testTag(ME_PAGE)) {
         PleyTopAppBar(title = stringResource(R.string.account_me), scrolled = { list.canScrollBackward })
-        val margin = LocalPhoneMetrics.current.margin
+        val metrics = LocalPhoneMetrics.current
         LazyColumn(
             state = list,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = margin, end = margin, bottom = 32.dp),
+            contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
