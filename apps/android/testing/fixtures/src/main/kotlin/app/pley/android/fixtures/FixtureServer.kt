@@ -121,6 +121,11 @@ class FixtureServer(private val options: Options = Options()) : Closeable {
         get() = synchronized(state.lock) { state.oauth.adoptUnknownTokens }
         set(value) = synchronized(state.lock) { state.oauth.adoptUnknownTokens = value }
 
+    /** Every access token refused with invalid_token, refreshes still answered (OAuth.refuseAccessTokens). */
+    var refuseAccessTokens: Boolean
+        get() = synchronized(state.lock) { state.oauth.refuseAccessTokens }
+        set(value) = synchronized(state.lock) { state.oauth.refuseAccessTokens = value }
+
     /** Event streams open now. */
     val eventListeners: Int get() = state.events.listeners
 

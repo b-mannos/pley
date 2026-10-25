@@ -120,6 +120,9 @@ class Tokens(
 ) {
     private val mutex = Mutex()
 
+    /** The access token the last refresh or profile switch gave, and when (guarded by [mutex]). */
+    private var lastIssued: Pair<String, Long>? = null
+
     // Without the Keystore, so the tokens can be made on any thread: the
     // first request opens them.
     private val _signedIn = MutableStateFlow(store.has(issuer))
@@ -164,7 +167,24 @@ class Tokens(
         if (ScopeGuard.extra(parsed, tokens.scope).isNotEmpty()) widened(fresh)
         // A refresh token is good once: the new one is kept before anything else.
         store.save(fresh)
+        lastIssued = fresh.accessToken to clock()
         fresh.accessToken
+    }
+
+    /**
+     * The server answered invalid_token to [sent]. When [sent] is the token
+     * a refresh gave moments ago, another refresh won't do better: the
+     * server no longer accepts this sign-in. It ends as on invalid_grant
+     * (the tokens go, [AuthEvent.SignedOut] with [SignOutReason.ENDED]) and
+     * this answers true. False when [sent] is older: refresh it.
+     */
+    suspend fun refusedAfterRefresh(sent: String): Boolean = mutex.withLock {
+        val (token, at) = lastIssued ?: return@withLock false
+        if (token != sent || clock() - at > JUST_ISSUED_MS) return@withLock false
+        // Another refresh since, or signed out already: nothing to end here.
+        if (store.load(issuer)?.accessToken != sent) return@withLock false
+        end(SignOutReason.ENDED)
+        true
     }
 
     /**
@@ -195,6 +215,7 @@ class Tokens(
         val fresh = parsed.stored(issuer, tokens.tokenEndpoint, tokens.revocationEndpoint, clock())
         if (ScopeGuard.extra(parsed, tokens.scope).isNotEmpty()) widened(fresh)
         store.save(fresh)
+        lastIssued = fresh.accessToken to clock()
     }
 
     /** Ends this app's sign-in on the server (RFC 7009), then forgets the tokens whatever it answered. */
@@ -224,10 +245,16 @@ class Tokens(
     }
 
     private fun signedOut(): Nothing {
-        store.wipe(issuer)
-        _signedIn.value = false
-        events?.signedOut(issuer, SignOutReason.ENDED)
+        end(SignOutReason.ENDED)
         throw SignedOutException()
+    }
+
+    /** Forgets the tokens and says why: the screens show sign-in. */
+    private fun end(reason: SignOutReason) {
+        store.wipe(issuer)
+        lastIssued = null
+        _signedIn.value = false
+        events?.signedOut(issuer, reason)
     }
 
     /**
@@ -244,6 +271,9 @@ class Tokens(
     }
 
     companion object {
+        /** How long a refreshed token counts as just issued: refused within this, the sign-in is over. */
+        const val JUST_ISSUED_MS = 60_000L
+
         /** Ends the grant of [tokens] on its server; errors are left to the caller. */
         internal suspend fun revoke(http: OkHttpClient, tokens: StoredTokens) {
             // The refresh token ends the whole grant; the access token too, when there is no other.

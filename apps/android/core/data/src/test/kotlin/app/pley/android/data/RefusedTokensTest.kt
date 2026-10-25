@@ -38,8 +38,9 @@ import org.robolectric.RobolectricTestRunner
 /**
  * The app as DataGraph and NetworkGraph wire it, on a FixtureServer that
  * signs in for real: a server that refuses the app's tokens (one that
- * forgot its grants, as the demo server does when the app restarts) signs
- * the app out of it, and a server that isn't listening yet fails the
+ * forgot its grants, as the demo server does when the app restarts, or
+ * one that refuses even a token just refreshed) signs the app out of it,
+ * and a server that isn't listening yet fails the
  * screens' loads, then answers them once it is.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -197,6 +198,29 @@ class RefusedTokensTest {
         eventually(20_000, { "session ${states.toList()}; home ${home.shown()}; libraries ${libraries.shown()}" }) {
             states.lastOrNull() == SessionState.SignedOut(issuer)
         }
+        eventually(5_000, { "home ${home.shown()}; libraries ${libraries.shown()}" }) {
+            home.signedOut() && libraries.signedOut()
+        }
+    }
+
+    @Test
+    fun `a server that refuses even a freshly refreshed token signs the app out of it`() {
+        val dir = folder.newFolder()
+        val server = server()
+        val issuer = server.url
+        val first = firstRun(dir, server)
+
+        // Its token check no longer takes this sign-in; refreshes still answer.
+        server.refuseAccessTokens = true
+        val app = first.restart(dir, issuer)
+        val states = app.record(app.graph.session.state)
+        val home = app.record(app.graph.hubs.home())
+        val libraries = app.record(app.graph.libraries.libraries())
+
+        eventually(15_000, { "session ${states.toList()}; home ${home.shown()}; libraries ${libraries.shown()}" }) {
+            states.lastOrNull() == SessionState.SignedOut(issuer)
+        }
+        assertTrue(app.auth.store.load(issuer) == null)
         eventually(5_000, { "home ${home.shown()}; libraries ${libraries.shown()}" }) {
             home.signedOut() && libraries.signedOut()
         }

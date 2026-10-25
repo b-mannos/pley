@@ -70,6 +70,12 @@ internal class OAuth(private val state: State) {
      */
     var adoptUnknownTokens: Boolean = false
 
+    /**
+     * Every access token is refused with invalid_token while refreshes still
+     * answer: a server whose token check no longer accepts this sign-in.
+     */
+    var refuseAccessTokens: Boolean = false
+
     /** A grant for a token this process never issued ([adoptUnknownTokens]). */
     private fun adopt(): Grant = Grant(nextGrant++, signInAs, SCOPES.toSet())
 
@@ -99,7 +105,7 @@ internal class OAuth(private val state: State) {
         }
         val grant = accessTokens[token]
         val expiresAt = grant?.access?.get(token)
-        if (!header.startsWith("Bearer ") || grant == null || grant.ended || expiresAt == null || expiresAt <= state.nowMs()) {
+        if (refuseAccessTokens || !header.startsWith("Bearer ") || grant == null || grant.ended || expiresAt == null || expiresAt <= state.nowMs()) {
             return null to Reply.error(401, "unauthorized", "the token doesn't work: refresh it or sign in again", "Bearer error=\"invalid_token\"")
         }
         return Caller(state.profile(grant.profileId)!!, grant.scopes, grant, expiresAt) to null

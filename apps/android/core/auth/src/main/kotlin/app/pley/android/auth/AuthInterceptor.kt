@@ -110,21 +110,31 @@ internal fun onServer(url: HttpUrl, issuer: HttpUrl?): Boolean =
 /**
  * On a 401 from the server whose WWW-Authenticate says
  * `error="invalid_token"`, refreshes once (one refresh at a time for the
- * whole app) and tries again. Anything else, a 403 insufficient_scope
- * among them, is the answer.
+ * whole app) and tries again. A token a refresh gave moments ago that is
+ * refused too means the server no longer accepts this sign-in: it ends, as
+ * on invalid_grant ([Tokens.refusedAfterRefresh]). Anything else, a 403
+ * insufficient_scope among them, is the answer.
  */
 class TokenAuthenticator(private val tokens: Tokens) : Authenticator {
     private val issuer = tokens.issuer.toHttpUrlOrNull()
 
     override fun authenticate(route: Route?, response: Response): Request? {
         if (!onServer(response.request.url, issuer)) return null
-        // Once: a 401 after a refresh is the answer.
-        if (generateSequence(response.priorResponse) { it.priorResponse }.any { it.code == 401 }) return null
         val challenge = response.headers("WWW-Authenticate").any { invalidToken(it) }
         if (!challenge) return null
         // The token the server refused, as the interceptor sent it.
         val sent = (response.networkResponse ?: response).request.header("Authorization")
             ?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }?.substring(7) ?: return null
+        // Refused moments after a refresh: the sign-in ends, and the 401 is the answer.
+        val ended = try {
+            runBlocking { tokens.refusedAfterRefresh(sent) }
+        } catch (_: Exception) {
+            // The tokens couldn't be read or wiped (storage, the Keystore).
+            false
+        }
+        if (ended) return null
+        // Once: a 401 after a refresh is the answer.
+        if (generateSequence(response.priorResponse) { it.priorResponse }.any { it.code == 401 }) return null
         return try {
             runBlocking { tokens.refresh(sent) }
             // The interceptor adds the new token.

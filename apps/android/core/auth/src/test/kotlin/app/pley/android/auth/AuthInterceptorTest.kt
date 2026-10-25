@@ -8,6 +8,10 @@ import java.net.Socket
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import javax.net.SocketFactory
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runTest
 import okhttp3.Address
 import okhttp3.Call
 import okhttp3.Connection
@@ -34,6 +38,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class AuthInterceptorTest {
     private val home = MockWebServer()
     private val other = MockWebServer()
@@ -41,6 +46,7 @@ class AuthInterceptorTest {
     private val store = TokenStore(shelf, testVault())
     private val issuer by lazy { issuerOf(home) }
     private val refreshes = AtomicInteger()
+    private val events = AuthEvents()
 
     /** What the server's API answers, by path. */
     private val api = mutableMapOf<String, (RecordedRequest) -> MockResponse>()
@@ -174,6 +180,68 @@ class AuthInterceptorTest {
         response.close()
         assertEquals(401, response.code)
         assertEquals(1, refreshes.get())
+    }
+
+    @Test
+    fun aServerThatRefusesAFreshlyRefreshedTokenEndsTheSignIn() = runTest {
+        val heard = mutableListOf<AuthEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { events.events.collect { heard += it } }
+        store.save(savedTokens(issuer))
+        api["/api/libraries"] = onlyAccepts("never")
+        val tokens = Tokens(issuer, store, endpointsClient(), events)
+        val client = AuthHttp.api(endpointsClient(), tokens)
+
+        val response = get(client, home.url("/api/libraries").toString())
+        response.close()
+        assertEquals(401, response.code)
+        assertEquals(1, refreshes.get())
+        assertNull(store.load(issuer))
+        assertFalse(tokens.signedIn.value)
+        assertEquals(listOf<AuthEvent>(AuthEvent.SignedOut(issuer, SignOutReason.ENDED)), heard)
+
+        // Signed out: the next request goes without a token, and nothing refreshes or ends again.
+        get(client, home.url("/api/libraries").toString()).close()
+        assertEquals(1, refreshes.get())
+        assertEquals(1, heard.size)
+        assertEquals(4, home.requestCount)
+    }
+
+    @Test
+    fun aTokenJustRefreshedAheadOfItsEndThatIsRefusedEndsTheSignInWithoutAnotherRefresh() = runTest {
+        val heard = mutableListOf<AuthEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { events.events.collect { heard += it } }
+        // About to end: the request refreshes before it goes, then the new token is refused.
+        store.save(savedTokens(issuer, expiresAt = System.currentTimeMillis() + 30_000))
+        api["/api/libraries"] = onlyAccepts("never")
+        val tokens = Tokens(issuer, store, endpointsClient(), events)
+
+        val response = get(AuthHttp.api(endpointsClient(), tokens), home.url("/api/libraries").toString())
+        response.close()
+        assertEquals(401, response.code)
+        assertEquals(1, refreshes.get())
+        assertNull(store.load(issuer))
+        assertEquals(listOf<AuthEvent>(AuthEvent.SignedOut(issuer, SignOutReason.ENDED)), heard)
+    }
+
+    @Test
+    fun aTokenRefreshedLongAgoThatIsRefusedIsRefreshedAsUsual() {
+        var now = 1_000_000L
+        store.save(savedTokens(issuer))
+        api["/api/libraries"] = onlyAccepts("pley_at_fresh1")
+        val tokens = Tokens(issuer, store, endpointsClient(), clock = { now })
+        val client = AuthHttp.api(endpointsClient(), tokens)
+        get(client, home.url("/api/libraries").toString()).close()
+        assertEquals(1, refreshes.get())
+
+        // Two minutes on, the server refuses that token: an ordinary refresh, and the sign-in goes on.
+        now += 2 * 60_000
+        api["/api/libraries"] = onlyAccepts("pley_at_fresh2")
+        val response = get(client, home.url("/api/libraries").toString())
+        response.close()
+        assertEquals(200, response.code)
+        assertEquals(2, refreshes.get())
+        assertTrue(tokens.signedIn.value)
+        assertEquals("pley_at_fresh2", store.load(issuer)!!.accessToken)
     }
 
     @Test
