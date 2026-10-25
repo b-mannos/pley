@@ -451,11 +451,19 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
   // Final teardown on unmount: report "stopped" and release the transcode.
   useEffect(() => {
+    const video = videoRef.current;
     return () => {
       const s = sessionRef.current;
       sessionRef.current = null;
       hlsRef.current?.destroy();
       hlsRef.current = null;
+      // A detached element keeps loading (a direct play's range request):
+      // it would compete with whatever plays next.
+      if (video) {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      }
       const done = s ? endSession(item.id, s, positionRef.current * 1000, true) : Promise.resolve();
       void done.then(() => invalidateWatchState(qc));
     };

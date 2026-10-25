@@ -116,12 +116,18 @@ function renderPlayer(startMs = 0) {
   return renderWithProviders(<VideoPlayer item={detail()} startMs={startMs} fileId={null} audio={null} sub={null} />);
 }
 
+/** The media element methods the player calls, which jsdom only stubs. */
+const media = {
+  pause: vi.fn<() => void>(),
+  load: vi.fn<() => void>(),
+};
+
 beforeEach(() => {
   hlsInstances.length = 0;
   // jsdom has media elements, but plays nothing.
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
-  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
-  vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+  media.pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+  media.load = vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
   vi.spyOn(HTMLMediaElement.prototype, "addTextTrack").mockImplementation(
     () =>
       ({
@@ -133,6 +139,36 @@ beforeEach(() => {
         removeEventListener: () => undefined,
       }) as unknown as TextTrack,
   );
+});
+
+describe("VideoPlayer leaving", () => {
+  it("lets go of a direct play's file, so its download doesn't compete with what plays next", async () => {
+    const requests = serve([session("d1", { method: "direct", hls: false, url: "/api/files/3/stream" })], {
+      "DELETE /api/playback/d1": () => undefined,
+    });
+    const { container, unmount } = renderPlayer(0);
+    const video = container.querySelector("video");
+    if (!video) throw new Error("no video element");
+    await waitFor(() => expect(video.getAttribute("src")).toBe("/api/files/3/stream"));
+    media.pause.mockClear();
+    media.load.mockClear();
+
+    unmount();
+
+    expect(video.hasAttribute("src")).toBe(false);
+    expect(media.pause).toHaveBeenCalled();
+    expect(media.load).toHaveBeenCalled();
+    // And the session ends, as before.
+    await waitFor(() => expect(requests.some((r) => r.method === "DELETE" && r.path === "/api/playback/d1")).toBe(true));
+  });
+
+  it("lets go of hls.js", async () => {
+    serve([session("s1")], { "DELETE /api/playback/s1": () => undefined });
+    const { unmount } = renderPlayer(0);
+    await waitFor(() => expect(hlsInstances[0]?.calls).toContain("attachMedia"));
+    unmount();
+    expect(hlsInstances[0]?.calls.at(-1)).toBe("destroy");
+  });
 });
 
 describe("VideoPlayer with hls.js", () => {
