@@ -24,7 +24,10 @@ dependencies {
     // The sign-in code's QR code on the link screen.
     implementation(libs.qrcodegen)
 
+    testImplementation(project(":core:testing"))
     testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
     testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.kotlinx.coroutines.test)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
