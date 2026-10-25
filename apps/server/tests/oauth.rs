@@ -686,7 +686,7 @@ async fn a_disabled_account_gets_no_tokens_for_its_code() {
 }
 
 #[tokio::test]
-async fn revocation_ends_the_grant_and_always_answers_200() {
+async fn revocation_ends_the_grant_and_answers_200_for_tokens_it_doesnt_know() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;
     let revoke = |token: String, client_id: &'static str| {
@@ -695,15 +695,15 @@ async fn revocation_ends_the_grant_and_always_answers_200() {
     };
     // Nothing to end: still 200, and nothing happens.
     let (access, refresh_token) = app.app_token(1, "library").await;
-    for (token, client) in [
-        ("garbage".to_owned(), ANDROID_APP),
-        ("pley_at_unknown".to_owned(), ANDROID_APP),
-        (admin.clone(), ANDROID_APP),
-        (access.clone(), DESKTOP_APP),
-        (refresh_token.clone(), DESKTOP_APP),
-    ] {
-        let reply = revoke(token, client).await;
+    for token in ["garbage".to_owned(), "pley_at_unknown".to_owned(), admin.clone()] {
+        let reply = revoke(token, ANDROID_APP).await;
         assert_eq!((reply.status, reply.bytes.len()), (StatusCode::OK, 0));
+        assert_not_cached(&reply);
+    }
+    // Another app's token is refused, and stays (RFC 7009 §2.1).
+    for token in [access.clone(), refresh_token.clone()] {
+        let reply = revoke(token, DESKTOP_APP).await;
+        assert_eq!(oauth_error(&reply), (StatusCode::BAD_REQUEST, "unauthorized_client"));
         assert_not_cached(&reply);
     }
     assert_eq!(app.get("/api/auth/me", &access).await.status, StatusCode::OK, "another app's token stays");
@@ -731,6 +731,22 @@ async fn revocation_ends_the_grant_and_always_answers_200() {
     assert_eq!(app.get("/api/auth/me", &access).await.status, StatusCode::UNAUTHORIZED);
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM app_grants").fetch_one(&app.state.db.read).await.unwrap();
     assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn revocation_says_when_it_couldnt_revoke() {
+    let app = TestApp::new().await;
+    app.setup_admin().await;
+    let (access, _) = app.app_token(1, "library").await;
+    // The database can't be written to: the app is told to try again, and
+    // its token isn't thrown away for nothing (RFC 7009 §2.2.1).
+    app.state.db.write.close().await;
+    let reply = app.form_post("/api/oauth/revoke", &form(&[("token", &access), ("client_id", ANDROID_APP)]), &[]).await;
+    assert_eq!(oauth_error(&reply), (StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable"));
+    assert_eq!(reply.headers[header::RETRY_AFTER], "5");
+    assert_not_cached(&reply);
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM app_grants").fetch_one(&app.state.db.read).await.unwrap();
+    assert_eq!(count, 1, "the grant is still there");
 }
 
 // ------------------------------------------------------------------ other publishers

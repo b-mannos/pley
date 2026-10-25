@@ -178,7 +178,7 @@ pub async fn logout(State(state): State<AppState>, request: axum::extract::Reque
     match token_from_parts(&parts) {
         // An app signing out ends its grant, wherever it put its token.
         Some(token) if token.starts_with(APP_TOKEN_PREFIX) => {
-            state.auth.revoke_app_token(&token, None).await;
+            state.auth.revoke_app_token(&token).await;
         }
         Some(token) => state.auth.revoke(&token).await,
         None => {}

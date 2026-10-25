@@ -656,14 +656,10 @@ impl AuthService {
         result
     }
 
-    /// Ends the grant of an app token (access or refresh, spent or not);
-    /// with `client_id`, only when it is that app's. Whether one ended.
-    pub async fn revoke_app_token(&self, token: &str, client_id: Option<&str>) -> bool {
-        let Ok(Some((grant_id, owner))) = grants::find_grant_of_token(&self.db, token).await else { return false };
-        if client_id.is_some_and(|client| client != owner) {
-            return false;
-        }
-        self.end_grant(grant_id).await.unwrap_or(false)
+    /// Ends the grant of an app token (access or refresh, spent or not).
+    /// Whether one ended.
+    pub async fn revoke_app_token(&self, token: &str) -> bool {
+        token.starts_with(APP_TOKEN_PREFIX) && self.end_grant_of_token(&hash_token(token)).await.unwrap_or(false)
     }
 
     /// Ends one grant; whether there was one.

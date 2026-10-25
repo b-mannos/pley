@@ -1203,9 +1203,11 @@ pub async fn profiles(State(state): State<AppState>, user: AuthUser) -> ApiResul
 }
 
 /// `POST /api/oauth/revoke` (RFC 7009): an app signs out. A token of that
-/// app (access or refresh, spent or expired) ends its whole grant. Every
-/// well-formed request gets 200 and an empty body, whatever the token
-/// (RFC 7009 §2.2).
+/// app (access or refresh, spent or expired) ends its whole grant, and the
+/// answer is 200 with an empty body, as it is for a token pley doesn't know
+/// (RFC 7009 §2.2). Another app's token is refused (400
+/// unauthorized_client, §2.1) and stays. When the database fails, 503: the
+/// token still works, and the app tries again later (§2.2.1).
 pub async fn revoke(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1219,14 +1221,34 @@ pub async fn revoke(
         (Ok(token), Ok(client_id)) => (token, client_id),
         (Err(err), _) | (_, Err(err)) => return err.into_response(),
     };
-    let grant = grants::find_grant_of_token(&state.db, token).await.ok().flatten();
-    if let Some((grant_id, owner)) = grant.filter(|(_, owner)| owner == client_id) {
-        let described = describe(&state, grant_id).await;
-        if state.auth.revoke_app_token(token, Some(&owner)).await {
+    let unavailable = |err: AppError| {
+        tracing::error!("an app couldn't be signed out: {err}");
+        let mut answer = OAuthError {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            ..OAuthError::new("temporarily_unavailable", "pley couldn't sign the app out: try again in a moment")
+        }
+        .into_response();
+        answer.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static("5"));
+        answer
+    };
+    let grant = match grants::find_grant_of_token(&state.db, token).await {
+        Ok(grant) => grant,
+        Err(err) => return unavailable(err),
+    };
+    let Some((grant_id, owner)) = grant else { return (StatusCode::OK, NO_STORE).into_response() };
+    if owner != client_id {
+        return OAuthError::new("unauthorized_client", "this token belongs to another app").into_response();
+    }
+    let described = describe(&state, grant_id).await;
+    // By the token, which belongs to this grant only.
+    match state.auth.end_grant_of_token(&hash_token(token)).await {
+        Ok(true) => {
             if let Some((app, user)) = described {
                 tracing::info!("{app} was signed out of {user}'s account");
             }
         }
+        Ok(false) => {}
+        Err(err) => return unavailable(err),
     }
     (StatusCode::OK, NO_STORE).into_response()
 }

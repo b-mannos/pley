@@ -700,7 +700,7 @@ async fn an_apps_event_stream_ends_when_its_grant_does() {
     })
     .await;
     assert!(open.is_err(), "the stream ended while its token worked");
-    assert!(app.state.auth.revoke_app_token(&token, None).await);
+    assert!(app.state.auth.revoke_app_token(&token).await);
     let ended = tokio::time::timeout(Duration::from_secs(5), async {
         while let Some(chunk) = stream.next().await {
             chunk.unwrap();
