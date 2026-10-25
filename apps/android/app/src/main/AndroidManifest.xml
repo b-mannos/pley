@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  No TV launcher in release builds yet: the web app has no remote control,
-  so TVs get the native app's own launcher once it replaces the web view.
-  Debug builds have it already (src/debug/AndroidManifest.xml).
+  The native app: MainActivity on phones and tablets, TvActivity on Android
+  TV, Google TV and Fire TV home screens. Exported, beside these two: the
+  sign-in's return address (core/auth) and the music service (core/player).
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    tools:ignore="MissingLeanbackLauncher">
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -36,8 +35,8 @@
 
     <!--
       pley servers on home networks speak plain HTTP, so cleartext traffic is
-      allowed. Nothing is backed up or moved to a new device: the web view
-      holds session tokens, and the sign-in module the app's tokens. Back
+      allowed. Nothing is backed up or moved to a new device: the sign-in
+      module holds the app's tokens, sealed by this device's Keystore. Back
       goes through the system's callbacks (Fire OS 16 can skip onBackPressed).
     -->
     <application
@@ -53,46 +52,47 @@
         android:theme="@style/Theme.Pley"
         android:usesCleartextTraffic="true">
 
+        <!-- Phones and tablets. A TV that opens it is sent on to TvActivity. -->
         <activity
-            android:name=".ServersActivity"
-            android:exported="true">
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Pley.Native">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".WebActivity"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
-            android:exported="false"
-            android:windowSoftInputMode="adjustResize" />
-
-        <activity
-            android:name=".PlayerActivity"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
-            android:screenOrientation="sensorLandscape"
-            android:exported="false"
-            android:theme="@style/Theme.Pley.Player" />
-
         <!--
-          The native app, phones and tablets. No launcher of its own until it
-          replaces the web view: debug builds add one ("pley (native)").
-        -->
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:theme="@style/Theme.Pley.Native" />
-
-        <!--
-          The native app on TVs. Debug builds add its TV launcher ("pley
-          (TV)"). A remote or keyboard connecting doesn't restart it.
+          TVs, with the 320x180 banner on their home screens. A remote or
+          keyboard connecting doesn't restart it.
         -->
         <activity
             android:name=".TvActivity"
+            android:banner="@drawable/tv_banner"
             android:configChanges="keyboard|keyboardHidden|navigation"
             android:exported="true"
-            android:theme="@style/Theme.Pley.Tv" />
+            android:theme="@style/Theme.Pley.Tv">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          Once, after an update from the web view app: its old session ends
+          and its data goes (migration/WebViewCleanup). Run by AndroidX
+          Startup's provider, which the libraries already bring.
+        -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="app.pley.android.migration.WebViewCleanupInitializer"
+                android:value="androidx.startup" />
+        </provider>
 
         <!-- The sign-in module's return address is in core/auth's manifest. -->
     </application>

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 8 to 11: nothing is backed up (the web view's data holds session tokens). -->
+<!-- Android 8 to 11: nothing is backed up (the app's tokens are sealed to this device). -->
 <full-backup-content>
     <exclude domain="root" path="." />
     <exclude domain="file" path="." />

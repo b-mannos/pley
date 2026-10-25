@@ -7,10 +7,6 @@
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 
-    <style name="Theme.Pley.Player">
-        <item name="android:windowBackground">@android:color/black</item>
-    </style>
-
     <!--
       The native app on phones: the system's splash (Android 12's, or the
       library's below it) in pley's colours, kept only for the startup read.
