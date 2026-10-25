@@ -143,10 +143,12 @@ following status codes:
      so segments being served are never rewritten.
    - A process started less than 3 s ago is not replaced while another request
      is waiting for it, so two requests far apart cannot keep restarting each
-     other.
+     other. When that request goes away (served, or aborted by its player),
+     the one held back looks again at once.
 3. **Completion tracking.** ffmpeg's segment muxer writes a line to stdout as
    each segment finishes, which marks it ready and wakes waiting requests at
-   once, with no polling. ffmpeg's `-progress` output on stderr supplies the
+   once, with no polling (after noting the process has moved past it, so a
+   woken request never sees it still owing that segment). ffmpeg's `-progress` output on stderr supplies the
    live metrics: fps, speed, bitrate and position.
 4. **Throttling.** Once a 60 s buffer exists, ffmpeg reads at most 2× realtime
    (`-readrate`), which saves CPU, GPU and disk. This applies when supported

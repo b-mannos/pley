@@ -719,6 +719,11 @@ impl Drop for Waiting<'_> {
         if let Some(i) = waiting.iter().position(|&m| m == self.n) {
             waiting.swap_remove(i);
         }
+        drop(waiting);
+        // A request held back for this one (see `ensure_producing`), now
+        // gone (served, or aborted by its player), looks again right away
+        // rather than at its next timer tick.
+        self.job.notify.notify_waiters();
     }
 }
 
@@ -798,6 +803,7 @@ impl Job {
         self.waiting.lock().iter().any(|&m| pred(m))
     }
 
+    /// Marks segment `n` ready, without waking anyone: see [`segment_written`].
     fn mark_ready(&self, n: u32) {
         let mut ready = self.ready.lock();
         if let Some(slot) = ready.get_mut(n as usize) {
@@ -806,8 +812,6 @@ impl Job {
                 self.ready_count.fetch_add(1, Relaxed);
             }
         }
-        drop(ready);
-        self.notify.notify_waiters();
     }
 
     fn warn(&self, message: &str) {
@@ -967,11 +971,19 @@ async fn read_segment_list(
             if std::mem::take(&mut first) {
                 job.runtime.lock().start_cost = Some(spawned.elapsed());
             }
-            job.mark_ready(n);
-            next.store(n + 1, Relaxed);
+            segment_written(&job, &next, n);
             Metrics::inc(&metrics.segments_produced);
         }
     }
+}
+
+/// FFmpeg finished segment `n`: it is ready, and the process is past it,
+/// before anyone wakes. A woken request then never sees the process still
+/// owing the segment just finished (and wait on it for nothing).
+fn segment_written(job: &Job, next: &AtomicU32, n: u32) {
+    job.mark_ready(n);
+    next.store(n + 1, Relaxed);
+    job.notify.notify_waiters();
 }
 
 async fn read_progress(
@@ -1359,6 +1371,45 @@ mod tests {
         job.record_served(500);
         let status = job.status();
         assert_eq!((status.served_segments, status.served_bytes), (2, 1_500));
+    }
+
+    #[tokio::test]
+    async fn a_request_going_away_wakes_the_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let job = job(dir.path(), vec![0, 4_000, 8_000]);
+        let first = Waiting::register(&job, 0);
+        // Another request, held back while the first waits.
+        let notified = job.notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        drop(first);
+        let woken = tokio::time::timeout(Duration::from_millis(100), notified).await;
+        assert!(woken.is_ok(), "it looks again now, not at its next tick");
+    }
+
+    #[test]
+    fn woken_requests_see_the_process_past_the_finished_segment() {
+        use std::task::{Context, Wake, Waker};
+        /// Where the process was when the request was woken.
+        struct Seen {
+            next: Arc<AtomicU32>,
+            at_wake: Mutex<Option<u32>>,
+        }
+        impl Wake for Seen {
+            fn wake(self: Arc<Self>) {
+                *self.at_wake.lock() = Some(self.next.load(Relaxed));
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let job = job(dir.path(), vec![0, 4_000, 8_000]);
+        let next = Arc::new(AtomicU32::new(0));
+        let seen = Arc::new(Seen { next: next.clone(), at_wake: Mutex::new(None) });
+        let waker = Waker::from(seen.clone());
+        let mut notified = std::pin::pin!(job.notify.notified());
+        assert!(notified.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+        segment_written(&job, &next, 0);
+        assert_eq!(*seen.at_wake.lock(), Some(1), "the process had moved on when the request woke");
+        assert!(job.is_ready(0));
     }
 
     #[test]
