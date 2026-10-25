@@ -97,7 +97,7 @@ internal object TokenEndpoint {
             val body = FormBody.Builder().apply { form.forEach { (name, value) -> add(name, value) } }.build()
             val request = Request.Builder().url(url).header("Accept", "application/json").post(body).build()
             http.newCall(request).execute().use { response ->
-                val text = response.body?.string().orEmpty()
+                val text = response.body.string()
                 if (!response.isSuccessful) throw TokenException(response.code, OAuthError.parse(text))
                 text
             }
@@ -114,10 +114,15 @@ class Tokens(
     val issuer: String,
     private val store: TokenStore,
     private val http: OkHttpClient,
+    /** Told when the server ends the sign-in, or the scope guard does. */
+    private val events: AuthEvents? = null,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val mutex = Mutex()
-    private val _signedIn = MutableStateFlow(store.load(issuer) != null)
+
+    // Without the Keystore, so the tokens can be made on any thread: the
+    // first request opens them.
+    private val _signedIn = MutableStateFlow(store.has(issuer))
 
     /** Whether the app is signed in to this server; false means: show sign-in. */
     val signedIn: StateFlow<Boolean> = _signedIn.asStateFlow()
@@ -154,8 +159,9 @@ class Tokens(
             if (e.oauth?.error == "invalid_grant") signedOut()
             throw e
         }
-        val fresh = TokenResponse.parse(answer, tokens.scope)
-            .stored(issuer, tokens.tokenEndpoint, tokens.revocationEndpoint, clock())
+        val parsed = TokenResponse.parse(answer, tokens.scope)
+        val fresh = parsed.stored(issuer, tokens.tokenEndpoint, tokens.revocationEndpoint, clock())
+        if (ScopeGuard.extra(parsed, tokens.scope).isNotEmpty()) widened(fresh)
         // A refresh token is good once: the new one is kept before anything else.
         store.save(fresh)
         fresh.accessToken
@@ -185,8 +191,9 @@ class Tokens(
             if (e.oauth?.error == "invalid_grant" && e.oauth.reason == null) signedOut()
             throw e
         }
-        val fresh = TokenResponse.parse(answer, tokens.scope)
-            .stored(issuer, tokens.tokenEndpoint, tokens.revocationEndpoint, clock())
+        val parsed = TokenResponse.parse(answer, tokens.scope)
+        val fresh = parsed.stored(issuer, tokens.tokenEndpoint, tokens.revocationEndpoint, clock())
+        if (ScopeGuard.extra(parsed, tokens.scope).isNotEmpty()) widened(fresh)
         store.save(fresh)
     }
 
@@ -219,7 +226,21 @@ class Tokens(
     private fun signedOut(): Nothing {
         store.wipe(issuer)
         _signedIn.value = false
+        events?.signedOut(issuer, SignOutReason.ENDED)
         throw SignedOutException()
+    }
+
+    /**
+     * A refresh or switch gave more than this sign-in holds: the grant is
+     * ended with the new refresh token (the old one is spent), and the app
+     * is signed out.
+     */
+    private suspend fun widened(fresh: StoredTokens): Nothing {
+        revoke(http, fresh)
+        store.wipe(issuer)
+        _signedIn.value = false
+        events?.signedOut(issuer, SignOutReason.WIDER_SCOPE)
+        throw WiderScopeException()
     }
 
     companion object {

@@ -82,6 +82,17 @@ sealed interface SwitchResult {
     data class Failed(val message: String) : SwitchResult
 }
 
+/** How a PIN check of the current profile went (Profiles.confirmPin). */
+sealed interface PinCheck {
+    data object Confirmed : PinCheck
+
+    /** The server can't check a PIN for the profile the app uses: go on without it. */
+    data object Unsupported : PinCheck
+
+    /** Wrong, throttled or locked: the server's reason in words. Nothing is retried. */
+    data class Failed(val message: String) : PinCheck
+}
+
 /**
  * The household's profiles for pley's own apps, and switching between them
  * with the switch-profile grant: with a PIN when the profile has one; never
@@ -95,7 +106,7 @@ class Profiles(private val api: OkHttpClient, private val tokens: Tokens) {
     suspend fun list(): List<Profile> = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(tokens.issuer + PATH).header("Accept", "application/json").get().build()
         api.newCall(request).execute().use { response ->
-            val text = response.body?.string().orEmpty()
+            val text = response.body.string()
             when {
                 response.isSuccessful -> Profile.parseList(text)
                 response.code == 401 -> throw SignedOutException()
@@ -129,6 +140,23 @@ class Profiles(private val api: OkHttpClient, private val tokens: Tokens) {
                 else -> SwitchResult.Failed(message(oauth))
             }
         }
+    }
+
+    /**
+     * Checks [pin] for [profile], the one the app uses already (a TV that
+     * starts as a PIN profile asks for it, as Plex does): the switch-profile
+     * grant to the same profile, with its PIN. Servers that can't check it
+     * for an app answer that the app uses that profile already: then
+     * [PinCheck.Unsupported], and the app goes on without it.
+     */
+    suspend fun confirmPin(profile: Profile, pin: String): PinCheck = try {
+        tokens.switchProfile(profile.id, pin)
+        PinCheck.Confirmed
+    } catch (e: SignedOutException) {
+        throw e
+    } catch (e: TokenException) {
+        val oauth = e.oauth
+        if (oauth?.error == "invalid_request" && oauth.reason == null) PinCheck.Unsupported else PinCheck.Failed(message(oauth))
     }
 
     companion object {

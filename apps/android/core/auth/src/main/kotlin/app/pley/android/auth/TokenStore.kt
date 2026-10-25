@@ -155,11 +155,24 @@ data class StoredTokens(
 /**
  * The tokens of each server, sealed by the [vault] and kept on the [shelf]
  * under the server's address. Nothing here reads or keeps the web view's
- * cookie: the app holds app tokens only.
+ * cookie: the app holds app tokens only. [unreadable] hears of a server
+ * whose tokens were kept but can't be opened anymore.
  */
-class TokenStore(private val shelf: Shelf, private val vault: Vault) {
+class TokenStore(
+    private val shelf: Shelf,
+    private val vault: Vault,
+    private val unreadable: (issuer: String) -> Unit = {},
+) {
     /** What was read or written already, so requests don't each open the vault. */
     private val known = mutableMapOf<String, StoredTokens?>()
+
+    /**
+     * Whether tokens are kept for [issuer], without opening them (no
+     * Keystore): for choosing the first screen. They may still turn out
+     * unreadable.
+     */
+    @Synchronized
+    fun has(issuer: String): Boolean = if (issuer in known) known[issuer] != null else shelf.get(TOKENS + issuer) != null
 
     @Synchronized
     fun load(issuer: String): StoredTokens? {
@@ -175,6 +188,7 @@ class TokenStore(private val shelf: Shelf, private val vault: Vault) {
         if (tokens == null || tokens.issuer != issuer) {
             // Unreadable (the Keystore key went with a reset): signed out.
             shelf.remove(TOKENS + issuer)
+            unreadable(issuer)
         }
         known[issuer] = tokens
         return tokens

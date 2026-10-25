@@ -1,9 +1,9 @@
 package app.pley.android.auth
 
+import android.app.Activity
 import android.content.Context
-import app.pley.android.common.NotBuiltYet
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import okhttp3.OkHttpClient
 
 /**
@@ -11,7 +11,11 @@ import okhttp3.OkHttpClient
  * household's profiles, and the TV's sign-in with a code. One per process.
  */
 interface AuthGraph {
-    /** The tokens of [issuer] (a server's origin), shared by every client. */
+    /**
+     * The tokens of [issuer] (a server's origin), shared by every client.
+     * Made without opening the Keystore, so any thread may ask; the first
+     * request opens them.
+     */
     fun tokens(issuer: String): Tokens
 
     /**
@@ -26,29 +30,49 @@ interface AuthGraph {
     /** Signing in with a code shown on screen (TVs, and phones without a browser). */
     val deviceSignIn: DeviceSignIn
 
+    /**
+     * Signs in to [server] from [activity] (phones) in the browser, on the
+     * server's own page, in a private tab when [privateTab]. How it ends
+     * comes in [signInState].
+     */
+    suspend fun signInWithBrowser(activity: Activity, server: String, privateTab: Boolean = true)
+
+    /** The last browser sign-in's progress: Finishing, then SignedIn or Failed. */
+    val signInState: StateFlow<SignInState>
+
+    /** Sign-ins that ended without the person asking: show sign-in for that server. */
+    val events: SharedFlow<AuthEvent>
+
     companion object {
         /**
-         * The sign-in module over the app's [root] client, introducing
-         * itself as [userAgent]. Today the built module keeps its own
-         * clients; the shared one comes with the device sign-in.
+         * The sign-in module over the app's [root] client (its clients
+         * derive from it, sharing its connections), introducing itself as
+         * [userAgent].
          */
-        fun create(context: Context, root: OkHttpClient, userAgent: String): AuthGraph =
-            BuiltAuthGraph(context.applicationContext)
+        fun create(context: Context, root: OkHttpClient, userAgent: String): AuthGraph {
+            Auth.use(root, userAgent)
+            return AppAuthGraph(context.applicationContext)
+        }
     }
 }
 
-/** The module as built: browser sign-in and profiles; no tokens check before the Keystore, no device sign-in. */
-private class BuiltAuthGraph(private val context: Context) : AuthGraph {
+/** The graph over the process's one [Auth]. */
+private class AppAuthGraph(private val context: Context) : AuthGraph {
     override fun tokens(issuer: String): Tokens = Auth.tokens(context, issuer)
 
-    // Not built yet: the start gate treats every server as signed out.
-    override fun hasTokens(issuer: String): Boolean = false
+    override fun hasTokens(issuer: String): Boolean = Auth.hasTokens(context, issuer)
 
     override fun profiles(issuer: String, api: OkHttpClient): Profiles = Profiles(api, tokens(issuer))
 
-    override val deviceSignIn: DeviceSignIn = object : DeviceSignIn {
-        override suspend fun start(server: String): DeviceCode = throw NotBuiltYet("Signing in with a code")
+    override val deviceSignIn: DeviceSignIn
+        get() = Auth.deviceSignIn(context)
 
-        override fun poll(code: DeviceCode): Flow<DevicePoll> = flow { throw NotBuiltYet("Signing in with a code") }
-    }
+    override suspend fun signInWithBrowser(activity: Activity, server: String, privateTab: Boolean) =
+        Auth.begin(activity, server, privateTab)
+
+    override val signInState: StateFlow<SignInState>
+        get() = Auth.state
+
+    override val events: SharedFlow<AuthEvent>
+        get() = Auth.events
 }

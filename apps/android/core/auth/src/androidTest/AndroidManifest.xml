@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- As the app: pley servers on home networks speak plain HTTP (the sign-in module still refuses it beyond them). -->
+    <application android:usesCleartextTraffic="true" />
+</manifest>

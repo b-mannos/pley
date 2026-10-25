@@ -20,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -207,7 +208,8 @@ class SignIn(
     /**
      * Exchanges [code] for tokens and keeps them. An earlier sign-in to
      * the same server is ended afterwards (it was replaced: a profile
-     * that needed its password, or signing in again).
+     * that needed its password, or signing in again). Tokens with more
+     * than was asked for are ended and refused (ScopeGuard).
      */
     suspend fun exchange(flow: PendingFlow, code: String): StoredTokens {
         val answer = TokenEndpoint.post(
@@ -221,11 +223,9 @@ class SignIn(
                 "redirect_uri" to REDIRECT_URI,
             ),
         )
-        val tokens = TokenResponse.parse(answer, flow.scope)
-            .stored(flow.issuer, flow.tokenEndpoint, flow.revocationEndpoint, clock())
-        val previous = tokensOf(flow.issuer).install(tokens)
-        if (previous != null && previous.refreshToken != tokens.refreshToken) Tokens.revoke(http, previous)
-        return tokens
+        val parsed = TokenResponse.parse(answer, flow.scope)
+        val tokens = parsed.stored(flow.issuer, flow.tokenEndpoint, flow.revocationEndpoint, clock())
+        return keepNewSignIn(http, tokensOf(flow.issuer), parsed, flow.scope, tokens)
     }
 
     /** Exchanges the code of [outcome]; what to show. */
@@ -289,13 +289,23 @@ class SignIn(
         /**
          * Opens [url] in a Custom Tab (RFC 8252: the browser, never a web
          * view), or in the browser when none offers Custom Tabs.
+         *
+         * With [privateTab] (a setting, on by default) and a browser that
+         * offers it, the tab is ephemeral: it shares nothing with the
+         * browser and keeps nothing afterwards, so no pley cookie with the
+         * account's full rights stays in the phone's browser. The password
+         * is then typed at every sign-in.
          */
-        fun open(context: Context, url: String) {
+        fun open(context: Context, url: String, privateTab: Boolean = true) {
             val uri = url.toUri()
             val browser = CustomTabsClient.getPackageName(context, null)
             try {
                 if (browser != null) {
-                    val tab = CustomTabsIntent.Builder().setShowTitle(true).build()
+                    val builder = CustomTabsIntent.Builder().setShowTitle(true)
+                    if (privateTab && CustomTabsClient.isEphemeralBrowsingSupported(context, browser)) {
+                        builder.setEphemeralBrowsingEnabled(true)
+                    }
+                    val tab = builder.build()
                     tab.intent.setPackage(browser)
                     if (context !is Activity) tab.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     tab.launchUrl(context, uri)
@@ -318,30 +328,57 @@ class SignIn(
  */
 object Auth {
     @Volatile private var parts: Parts? = null
+    @Volatile private var base: Base? = null
     private val tokens = ConcurrentHashMap<String, Tokens>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _state = MutableStateFlow<SignInState>(SignInState.Idle)
+    private val sink = AuthEvents()
 
     /** The last sign-in's progress: Finishing, then SignedIn or Failed. */
     val state: StateFlow<SignInState> = _state.asStateFlow()
 
-    private class Parts(val http: OkHttpClient, val store: TokenStore, val signIn: SignIn)
+    /** Sign-ins that ended without the person asking (AuthEvent). */
+    val events: SharedFlow<AuthEvent> = sink.events
+
+    private class Base(val root: OkHttpClient, val userAgent: String)
+
+    private class Parts(val http: OkHttpClient, val store: TokenStore, val signIn: SignIn, val deviceSignIn: DeviceSignIn)
+
+    /**
+     * The app's one OkHttp client, which the sign-in's clients derive from
+     * (one connection pool), and its user agent. Set by AuthGraph.create
+     * before anything signs in. A sign-in the browser finishes in a new
+     * process, before the app made its graph, uses a client of its own.
+     */
+    internal fun use(root: OkHttpClient, userAgent: String) {
+        base = Base(root, userAgent)
+    }
 
     private fun parts(context: Context): Parts = parts ?: synchronized(this) {
         parts ?: run {
             // The application's context only: no activity is kept.
             val app = context.applicationContext
-            val http = AuthHttp.endpoints(UserAgent.of(app))
-            val store = TokenStore(PrefsShelf(app), KeystoreVault())
-            Parts(http, store, SignIn(http, store, { issuer -> tokens(app, issuer) })).also { parts = it }
+            val http = base?.let { AuthHttp.endpoints(it.userAgent, it.root) } ?: AuthHttp.endpoints(UserAgent.of(app))
+            val store = TokenStore(PrefsShelf(app), KeystoreVault()) { issuer -> sink.signedOut(issuer, SignOutReason.UNREADABLE) }
+            val tokensOf = { issuer: String -> tokens(app, issuer) }
+            Parts(http, store, SignIn(http, store, tokensOf), DeviceGrant(http, tokensOf)).also { parts = it }
         }
     }
 
-    /** The tokens of [issuer] (a server's address), shared by every client of the app. */
+    /**
+     * The tokens of [issuer] (a server's address), shared by every client
+     * of the app. Made without opening the Keystore.
+     */
     fun tokens(context: Context, issuer: String): Tokens = tokens.getOrPut(issuer) {
         val p = parts(context)
-        Tokens(issuer, p.store, p.http)
+        Tokens(issuer, p.store, p.http, sink)
     }
+
+    /** Whether tokens are kept for [issuer], read without the Keystore (see TokenStore.has). */
+    fun hasTokens(context: Context, issuer: String): Boolean = parts(context).store.has(issuer)
+
+    /** Signing in with a code shown on screen. */
+    fun deviceSignIn(context: Context): DeviceSignIn = parts(context).deviceSignIn
 
     /** An OkHttp client for [issuer]'s API, images and streams, with its tokens. */
     fun client(context: Context, issuer: String): OkHttpClient =
@@ -349,12 +386,13 @@ object Auth {
 
     /**
      * Signs in to [server] from [activity]: its sign-in page opens in the
-     * browser, and [activity] is brought back when the browser returns.
+     * browser, in a private tab when [privateTab] (SignIn.open), and
+     * [activity] is brought back when the browser returns.
      */
-    suspend fun begin(activity: Activity, server: String) {
+    suspend fun begin(activity: Activity, server: String, privateTab: Boolean = true) {
         val url = parts(activity).signIn.start(server, returnTo = activity.javaClass.name)
         _state.value = SignInState.Idle
-        SignIn.open(activity, url)
+        SignIn.open(activity, url, privateTab)
     }
 
     /** The browser came back with [uri] (see SignInRedirectActivity); `false` when it answers no waiting sign-in. */

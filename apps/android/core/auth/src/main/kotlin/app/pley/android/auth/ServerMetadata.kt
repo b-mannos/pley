@@ -31,7 +31,16 @@ data class ServerMetadata(
     /** The scopes it offers; `null` when it doesn't say. */
     val scopesSupported: List<String>?,
     val grantTypesSupported: List<String>?,
+    /**
+     * Where a TV asks for a code (RFC 8628 §4), on this server too; `null`
+     * when the server has no sign-in with a code.
+     */
+    val deviceAuthorizationEndpoint: String? = null,
 ) {
+    /** Whether a TV can sign in here with a code: the endpoint, and the grant to collect it. */
+    val signsInWithCodes: Boolean
+        get() = deviceAuthorizationEndpoint != null && grantTypesSupported.orEmpty().contains(DEVICE_CODE_GRANT)
+
     companion object {
         const val PATH = "/.well-known/oauth-authorization-server"
 
@@ -50,10 +59,10 @@ data class ServerMetadata(
                 }
                 if (response.code == 404) throw AuthException(TOO_OLD)
                 if (!response.isSuccessful) throw AuthException("the server couldn't answer (HTTP ${response.code})")
-                val type = response.body?.contentType()
+                val type = response.body.contentType()
                 // Older servers answer their web app's page here.
                 if (type == null || type.subtype.lowercase() != "json") throw AuthException(TOO_OLD)
-                parse(response.body?.string().orEmpty(), home)
+                parse(response.body.string(), home)
             }
         }
 
@@ -88,6 +97,9 @@ data class ServerMetadata(
                 revocationEndpoint = endpoint("revocation_endpoint"),
                 scopesSupported = strings(o.optJSONArray("scopes_supported")),
                 grantTypesSupported = strings(o.optJSONArray("grant_types_supported")),
+                // Optional, but on this server like the others.
+                deviceAuthorizationEndpoint = o.optString("device_authorization_endpoint").ifEmpty { null }
+                    ?.let { endpoint("device_authorization_endpoint") },
             )
         }
 
