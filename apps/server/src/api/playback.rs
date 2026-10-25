@@ -138,7 +138,7 @@ pub async fn start(
         start_ms: Some(start_ms),
         options: settings.transcode_options(),
     };
-    let created = state.transcoder.create_job(&job_request).await?;
+    let created = state.transcoder.create_job(&job_request).await.map_err(|err| for_viewer(&user, err))?;
     let method = match (&created.video, &created.audio) {
         (Some(v), _) if v.mode == VideoMode::Copy => Method::Remux,
         (Some(_), _) => Method::Transcode,
@@ -201,7 +201,29 @@ pub async fn status(
         Some(job) => state.transcoder.job_status(&job).await.ok().map(|status| transcode_info(&status)),
         None => None,
     };
+    let transcode = transcode.map(|mut info| {
+        // FFmpeg's last words name the media file.
+        if user.app.is_some() && info.last_error.is_some() {
+            info.last_error = Some("the conversion failed".to_owned());
+        }
+        info
+    });
     Ok(Json(SessionStatus { session_id: session.id.clone(), method: session.method, transcode }))
+}
+
+/// What a viewer is told when the transcoder refused: its own sentence,
+/// which may name the media file's path, for pley's own sign-in; one of
+/// pley's for an app, since apps never see paths.
+fn for_viewer(user: &AuthUser, err: impl Into<AppError>) -> AppError {
+    let err = err.into();
+    if user.app.is_none() {
+        return err;
+    }
+    match err {
+        AppError::NotFound(_) => AppError::not_found("this title's file can't be read right now"),
+        AppError::BadRequest(_) => AppError::bad_request("this title's file can't be played"),
+        err => err,
+    }
 }
 
 fn owned_session(state: &AppState, user: &AuthUser, id: &str) -> ApiResult<Arc<Session>> {
@@ -240,7 +262,7 @@ fn end_sessions(state: &AppState, sessions: Vec<Arc<Session>>) {
 /// new job must have the very same segment layout; when it does not (the
 /// keyframe cache was cleared), the session is over and the client starts a
 /// new one.
-async fn replacement_job(state: &AppState, session: &Session, failed: &str) -> ApiResult<String> {
+async fn replacement_job(state: &AppState, user: &AuthUser, session: &Session, failed: &str) -> ApiResult<String> {
     let _guard = session.recreate.lock().await;
     if let Some(current) = session.job_id() {
         if current != failed {
@@ -250,7 +272,7 @@ async fn replacement_job(state: &AppState, session: &Session, failed: &str) -> A
     let spec = session.transcode.as_ref().ok_or_else(|| AppError::not_found("not a transcode session"))?;
     // Pre-start near the playhead instead of at the beginning.
     let request = JobRequest { start_ms: Some(session.position_ms()), ..spec.request.clone() };
-    let created = state.transcoder.create_job(&request).await?;
+    let created = state.transcoder.create_job(&request).await.map_err(|err| for_viewer(user, err))?;
     let same_mode = match (&spec.request.video, &created.video) {
         (Some(wanted), Some(got)) => wanted.mode == got.mode,
         (None, None) => true,
@@ -284,7 +306,7 @@ pub async fn hls_file(
     if file == "index.m3u8" {
         let playlist = match state.transcoder.playlist(&job).await {
             Err(err) if err.is_job_gone() => {
-                let job = replacement_job(&state, &session, &job).await?;
+                let job = replacement_job(&state, &user, &session, &job).await?;
                 state.transcoder.playlist(&job).await?
             }
             other => other?,
@@ -302,7 +324,7 @@ pub async fn hls_file(
         .ok_or_else(|| AppError::not_found("unknown playlist file"))?;
     let upstream = match state.transcoder.segment(&job, n).await {
         Err(err) if err.is_job_gone() => {
-            let job = replacement_job(&state, &session, &job).await?;
+            let job = replacement_job(&state, &user, &session, &job).await?;
             state.transcoder.segment(&job, n).await?
         }
         other => other?,
@@ -437,7 +459,8 @@ pub async fn subtitles(
         // An embedded track: the cues found so far, at once, while the rest
         // of the file is read (minutes for a big one on a network share).
         // The player asks again until it has them all.
-        let (text, complete) = state.transcoder.subtitles_so_far(&file.path, index).await?;
+        let (text, complete) =
+            state.transcoder.subtitles_so_far(&file.path, index).await.map_err(|err| for_viewer(&user, err))?;
         if complete {
             cache_subtitles(&cache, &text).await;
             return Ok(vtt(text));
@@ -452,7 +475,7 @@ pub async fn subtitles(
         )
             .into_response());
     };
-    let text = extract_subtitles(&state, path, cache).await?;
+    let text = extract_subtitles(&state, path, cache).await.map_err(|err| for_viewer(&user, err))?;
     Ok(vtt((*text).clone()))
 }
 

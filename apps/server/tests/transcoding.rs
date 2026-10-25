@@ -65,6 +65,10 @@ struct Fake {
     sidecar_fails: Arc<AtomicBool>,
     /// Subtitle file conversions answered (done or failed).
     sidecar_answers: Arc<AtomicUsize>,
+    /// The media files can't be read (a share went to sleep): jobs and
+    /// subtitles fail, and the transcoder's words name the file, as
+    /// FFmpeg's do.
+    unreadable: Arc<AtomicBool>,
 }
 
 impl Fake {
@@ -84,6 +88,12 @@ impl Fake {
 
 fn error(status: StatusCode, code: &str) -> Response {
     (status, Json(ErrorBody { code: code.into(), message: format!("{code} (stand-in)") })).into_response()
+}
+
+/// The transcoder's answer for a file it can't read.
+fn unreadable(path: &str) -> Response {
+    let body = ErrorBody { code: "not_found".into(), message: format!("input not found: {path}") };
+    (StatusCode::NOT_FOUND, Json(body)).into_response()
 }
 
 fn video(codec: &str) -> MediaStream {
@@ -255,6 +265,9 @@ async fn start_fake() -> (Fake, String) {
                 if fake.fail_jobs.load(Ordering::SeqCst) {
                     return error(StatusCode::INTERNAL_SERVER_ERROR, "ffmpeg_failed");
                 }
+                if fake.unreadable.load(Ordering::SeqCst) {
+                    return unreadable(&req.input);
+                }
                 let n = fake.next_id.fetch_add(1, Ordering::SeqCst) + 1;
                 let id = format!("job{n}");
                 let segments = fake.layout.lock().unwrap_or(15);
@@ -277,7 +290,13 @@ async fn start_fake() -> (Fake, String) {
             "/v1/jobs/{id}",
             get(|State(fake): State<Fake>, Path(id): Path<String>| async move {
                 match fake.jobs.lock().get(&id) {
-                    Some((req, n)) => Json(job_status(&id, req, *n)).into_response(),
+                    Some((req, n)) => {
+                        let mut status = job_status(&id, req, *n);
+                        if fake.unreadable.load(Ordering::SeqCst) {
+                            status.last_error = Some(format!("Error opening input file file:{}.", req.input));
+                        }
+                        Json(status).into_response()
+                    }
                     None => error(StatusCode::NOT_FOUND, "job_not_found"),
                 }
             })
@@ -330,6 +349,9 @@ async fn start_fake() -> (Fake, String) {
                 let fails = req.stream_index == Some(99);
                 let first_of_slow =
                     req.stream_index == Some(5) && !fake.subtitles.lock().iter().any(|r| r.stream_index == Some(5));
+                if fake.unreadable.load(Ordering::SeqCst) {
+                    return unreadable(&req.path);
+                }
                 let partial = req.partial;
                 let sidecar = req.stream_index.is_none();
                 fake.subtitles.lock().push(req);
@@ -699,6 +721,45 @@ async fn sessions_belong_to_their_user() {
         async move { app.get("/api/activity", &token).await.body["sessions"].as_array().unwrap().len() }
     };
     assert_eq!((sessions(&bob).await, sessions(&alice).await, sessions(admin).await), (1, 0, 1));
+}
+
+#[tokio::test]
+async fn apps_never_see_media_paths_in_the_transcoders_words() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let (token, _) = app.app_token(1, "library play").await;
+    // The media folder's own name, which JSON writes as it is on every
+    // system (unlike the backslashes of a whole path on Windows).
+    let movies = app.media_path("movies");
+    let folder = std::path::Path::new(&movies).parent().unwrap().file_name().unwrap().to_string_lossy().into_owned();
+    let feature = w.movies["Feature"];
+    let file = app.file_of(feature).await;
+    let start = json!({"item_id": feature, "caps": browser(), "client_id": "phone"});
+    let started = play(app, &token, start.clone()).await;
+    assert_eq!(started.status, StatusCode::OK, "{}", started.text());
+    let session = started.body["session_id"].as_str().unwrap().to_owned();
+
+    // The share holding the files goes to sleep.
+    w.fake.unreadable.store(true, Ordering::SeqCst);
+    let status = app.get(&format!("/api/playback/{session}"), &token).await;
+    assert_eq!(status.body["transcode"]["last_error"], "the conversion failed");
+    w.fake.lose_jobs();
+    let replies = [
+        ("the player's details", status),
+        ("a lost job", app.get(&format!("/api/playback/{session}/index.m3u8"), &token).await),
+        ("another session", play(app, &token, json!({"item_id": feature, "caps": browser()})).await),
+        ("embedded subtitles", app.get(&format!("/api/files/{file}/subtitles/4.vtt"), &token).await),
+        ("subtitle files", app.get(&format!("/api/files/{file}/subtitles/1000.vtt"), &token).await),
+    ];
+    for (case, reply) in &replies[1..] {
+        assert_eq!(reply.status, StatusCode::NOT_FOUND, "{case}: {}", reply.text());
+    }
+    for (case, reply) in &replies {
+        assert!(!reply.mentions(&folder), "{case}: {}", reply.text());
+    }
+    // pley's own sign-in gets the transcoder's own words.
+    let own = play(app, admin, start).await;
+    assert!(own.mentions(&folder), "{}", own.text());
 }
 
 #[tokio::test]
