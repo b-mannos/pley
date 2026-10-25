@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
@@ -16,6 +16,7 @@ use pley_transcoder_api::{
     SubtitleBurnRequest, VideoCodec, VideoMode, VideoRequest, dynamic_range_label,
 };
 use serde::{Deserialize, Serialize};
+use tokio::sync::Notify;
 
 use crate::catalog::FileRow;
 use crate::events::{EventBus, ServerEvent};
@@ -554,6 +555,10 @@ pub struct Sessions {
     /// Transcode slots of play requests still creating their job (see
     /// [`Sessions::reserve_transcode`]). Only raised while `map` is locked.
     reserved: AtomicUsize,
+    /// Sessions started so far (see [`Sessions::started_since`]).
+    starts: AtomicU64,
+    /// A session started or ended.
+    changed: Notify,
 }
 
 /// A transcode slot, held while the job is created. It counts against the
@@ -582,6 +587,10 @@ const REAP_EVERY: Duration = Duration::from_secs(15);
 /// never takes the disk, the network or the GPU from someone watching (or
 /// about to start the next episode).
 pub const QUIET_BEFORE_BACKGROUND_SECS: i64 = 60;
+/// A playback is starting for this long after its session began: work that
+/// can wait (seek previews) keeps off the disk and the network meanwhile, so
+/// the player's first reads get them (see [`Sessions::starting_for`]).
+pub const STARTING_SECS: i64 = 30;
 /// Direct plays a user has at most: the oldest go first. They cost only
 /// memory (transcodes have their own limit), but a client starting plays in
 /// a loop mustn't be able to grow it without end.
@@ -603,6 +612,8 @@ impl Sessions {
             }
         }
         map.insert(session.id.clone(), session.clone());
+        drop(map);
+        self.started();
         session
     }
 
@@ -627,7 +638,46 @@ impl Sessions {
         map.insert(session.id.clone(), session.clone());
         // Under the same lock: the session counts as the slot stops counting.
         drop(slot);
+        drop(map);
+        self.started();
         session
+    }
+
+    fn started(&self) {
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        self.changed.notify_waiters();
+    }
+
+    /// How many sessions have started so far, for [`Sessions::started_since`].
+    pub fn starts(&self) -> u64 {
+        self.starts.load(Ordering::SeqCst)
+    }
+
+    /// Resolves once a session starts after [`Sessions::starts`] said `seen`.
+    pub async fn started_since(&self, seen: u64) {
+        loop {
+            // Registered before the look, so no start slips in between.
+            let changed = self.changed.notified();
+            if self.starts() != seen {
+                return;
+            }
+            changed.await;
+        }
+    }
+
+    /// Resolves at the next session that starts or ends.
+    pub async fn changed(&self) {
+        self.changed.notified().await;
+    }
+
+    /// How long the newest session that hasn't stopped is still starting
+    /// (it began less than [`STARTING_SECS`] ago), or `None` when none is.
+    pub fn starting_for(&self) -> Option<Duration> {
+        let now = now();
+        let newest =
+            self.map.lock().values().filter(|s| s.play.lock().state != "stopped").map(|s| s.started_at).max()?;
+        let left = STARTING_SECS - (now - newest);
+        (left > 0).then(|| Duration::from_secs(left as u64))
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<Session>> {
@@ -635,7 +685,11 @@ impl Sessions {
     }
 
     pub fn remove(&self, id: &str) -> Option<Arc<Session>> {
-        self.map.lock().remove(id)
+        let removed = self.map.lock().remove(id);
+        if removed.is_some() {
+            self.changed.notify_waiters();
+        }
+        removed
     }
 
     /// Remove the sessions of `user_id` playing on `client_id` (the client
@@ -647,7 +701,12 @@ impl Sessions {
             .filter(|s| s.user_id == user_id && s.client_id.as_deref() == Some(client_id))
             .map(|s| s.id.clone())
             .collect();
-        ids.iter().filter_map(|id| map.remove(id)).collect()
+        let taken: Vec<_> = ids.iter().filter_map(|id| map.remove(id)).collect();
+        drop(map);
+        if !taken.is_empty() {
+            self.changed.notify_waiters();
+        }
+        taken
     }
 
     pub fn list(&self) -> Vec<Arc<Session>> {
@@ -895,6 +954,57 @@ mod tests {
         assert_eq!(mine, MAX_DIRECT_PER_USER);
         assert!(sessions.get(&last.unwrap().id).is_some(), "the newest stays");
         assert!(sessions.get(&other.id).is_some(), "other users' plays are theirs");
+    }
+
+    #[tokio::test]
+    async fn new_sessions_are_starting_for_a_while() {
+        let sessions = Sessions::default();
+        assert_eq!(sessions.starting_for(), None, "nothing plays");
+        let play = |age: i64| {
+            let mut session = Session::new(1, "u".into(), None, 1, 1, Method::Direct, 0, None, None, 0);
+            session.started_at -= age;
+            session
+        };
+        let seen = sessions.starts();
+        let old = sessions.insert(play(STARTING_SECS + 5));
+        assert_eq!(sessions.starting_for(), None, "playing for a while");
+        assert_ne!(sessions.starts(), seen);
+        // Noticed even when it started before the wait began.
+        tokio::time::timeout(Duration::from_secs(1), sessions.started_since(seen)).await.expect("a start");
+
+        let seen = sessions.starts();
+        let waiting = sessions.started_since(seen);
+        tokio::pin!(waiting);
+        assert!(futures_now(waiting.as_mut()).is_none(), "nothing new yet");
+        let new = sessions.insert(play(10));
+        assert!(futures_now(waiting.as_mut()).is_some(), "a session started");
+        let left = sessions.starting_for().expect("starting");
+        assert!(
+            left <= Duration::from_secs((STARTING_SECS - 10) as u64) && left >= Duration::from_secs(15),
+            "{left:?}"
+        );
+
+        // A stopped one is no longer starting; nor one that ended.
+        new.update(0, "stopped");
+        assert_eq!(sessions.starting_for(), None);
+        new.update(0, "playing");
+        assert!(sessions.starting_for().is_some());
+        let ended = sessions.changed();
+        tokio::pin!(ended);
+        assert!(futures_now(ended.as_mut()).is_none());
+        sessions.remove(&new.id);
+        assert!(futures_now(ended.as_mut()).is_some(), "the end is heard");
+        assert_eq!(sessions.starting_for(), None);
+        assert!(sessions.get(&old.id).is_some());
+    }
+
+    /// Polls a future once.
+    fn futures_now<F: std::future::Future>(future: std::pin::Pin<&mut F>) -> Option<F::Output> {
+        let waker = std::task::Waker::noop();
+        match future.poll(&mut std::task::Context::from_waker(waker)) {
+            std::task::Poll::Ready(out) => Some(out),
+            std::task::Poll::Pending => None,
+        }
     }
 
     fn file(container: &str, bitrate: i64) -> FileRow {

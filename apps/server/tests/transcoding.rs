@@ -43,6 +43,10 @@ struct Fake {
     thumbnails: Arc<AtomicUsize>,
     /// Paths seek previews were asked for.
     previews: Arc<Mutex<Vec<String>>>,
+    /// How long the next previews take.
+    preview_delay: Arc<Mutex<Duration>>,
+    /// Preview requests given up by pley before they were answered.
+    previews_dropped: Arc<AtomicUsize>,
     next_id: Arc<AtomicUsize>,
     /// Segment count of new jobs instead of one per 4 s.
     layout: Arc<Mutex<Option<u32>>>,
@@ -168,6 +172,18 @@ fn job_status(id: &str, req: &JobRequest, segments: u32) -> JobStatus {
             ..Default::default()
         }),
         ..Default::default()
+    }
+}
+
+/// Counts requests dropped before they were answered (pley gave up on them,
+/// and the connection closed).
+struct Answered(Arc<AtomicUsize>, bool);
+
+impl Drop for Answered {
+    fn drop(&mut self) {
+        if !self.1 {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
     }
 }
 
@@ -345,6 +361,10 @@ async fn start_fake() -> (Fake, String) {
             "/v1/trickplay",
             post(|State(fake): State<Fake>, Json(req): Json<TrickplayRequest>| async move {
                 fake.previews.lock().push(req.path.clone());
+                let mut answered = Answered(fake.previews_dropped.clone(), false);
+                let delay = std::mem::take(&mut *fake.preview_delay.lock());
+                tokio::time::sleep(delay).await;
+                answered.1 = true;
                 if !req.path.ends_with(".mp4") {
                     return error(StatusCode::INTERNAL_SERVER_ERROR, "ffmpeg_failed");
                 }
@@ -924,4 +944,45 @@ async fn seek_previews_are_made_once_per_file() {
     assert_eq!(app.get(&format!("/api/files/{broken}/trickplay"), admin).await.status, StatusCode::NOT_FOUND);
     assert_eq!(app.state.trickplay.pending(), 0);
     assert_eq!(w.fake.previews.lock().len(), 2);
+}
+
+#[tokio::test]
+async fn seek_previews_wait_while_a_playback_starts() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    app.put("/api/settings", admin, json!({"seek_previews": true})).await;
+    let clip = app.file_of(w.movies["Clip"]).await;
+    let previews = format!("/api/files/{clip}/trickplay");
+    *w.fake.preview_delay.lock() = Duration::from_secs(60);
+
+    // Opening the clip starts its previews...
+    assert_eq!(app.get(&format!("/api/items/{}", w.movies["Clip"]), admin).await.status, StatusCode::OK);
+    eventually(|| w.fake.previews.lock().len() == 1).await;
+    // ...which a playback starting stops: the transcoder's request is dropped.
+    let started =
+        play(app, admin, json!({"item_id": w.movies["Feature"], "caps": browser(), "client_id": "tab"})).await;
+    assert_eq!(started.status, StatusCode::OK, "{:?}", started.body);
+    eventually(|| w.fake.previews_dropped.load(Ordering::SeqCst) == 1).await;
+    assert_eq!(app.state.trickplay.pending(), 1, "still to be made, not failed");
+
+    // While the playback starts, nothing is made, even when asked again.
+    assert_eq!(app.get(&previews, admin).await.status, StatusCode::NOT_FOUND);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(w.fake.previews.lock().len(), 1);
+
+    // Once it is over (or 30 s in), they are made after all.
+    let session = started.body["session_id"].as_str().unwrap();
+    assert_eq!(app.delete(&format!("/api/playback/{session}"), admin).await.status, StatusCode::NO_CONTENT);
+    eventually(|| w.fake.previews.lock().len() == 2).await;
+    let mut made = false;
+    for _ in 0..200 {
+        if app.get(&previews, admin).await.status == StatusCode::OK {
+            made = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(made, "the previews were made");
+    assert_eq!(w.fake.previews_dropped.load(Ordering::SeqCst), 1);
+    assert_eq!(app.state.trickplay.pending(), 0);
 }

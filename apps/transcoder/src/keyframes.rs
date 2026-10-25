@@ -22,7 +22,7 @@ use tokio::sync::mpsc;
 
 use crate::ffmpeg::Ffmpeg;
 use crate::metrics::Metrics;
-use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg, touch, write_atomically};
+use crate::util::{MEDIA_INPUT_OPTIONS, background_priority, file_key, input_arg, touch, write_atomically};
 
 const MEMORY_ENTRIES: usize = 256;
 /// How long creating a job may spend reading a file's own index (only walking
@@ -179,6 +179,8 @@ async fn scan(ff: &Ffmpeg, path: &Path) -> anyhow::Result<Vec<i64>> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    // Background work: playback comes first.
+    background_priority(&mut cmd);
     let mut child = cmd.spawn().context("spawning ffprobe")?;
     let stdout = child.stdout.take().context("no stdout")?;
     let mut lines = BufReader::with_capacity(1 << 16, stdout).lines();

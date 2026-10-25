@@ -3,8 +3,9 @@
 //! are kept in the file's media folder ([`crate::store`]), so they follow the
 //! file when it is moved or renamed. Files are done one at a time in the
 //! background: first the titles people open (unless the server is busy
-//! transcoding), then whole libraries after scans when the setting allows,
-//! only while nothing plays.
+//! transcoding, or a playback is starting), then whole libraries after scans
+//! when the setting allows, only while nothing plays. A playback that starts
+//! while previews are being made stops them; they are made again later.
 //!
 //! Chapter images and Plex's BIF index (`index-sd.bif`) are cut from the
 //! sprite sheets, so they cost no extra decoding of the video.
@@ -29,6 +30,8 @@ use crate::transcoder::Transcoder;
 
 /// Previews wait while this many transcodes run.
 const BUSY_TRANSCODES: usize = 2;
+/// How often a waiting worker looks again.
+const IDLE_LOOK: Duration = Duration::from_secs(15);
 /// Quality of chapter images and BIF frames cut from the sheets.
 const JPEG_QUALITY: u8 = 82;
 /// A chapter's image is taken this far into it (or 20 % of it, if shorter),
@@ -210,30 +213,68 @@ impl TrickplayService {
 
     async fn work(&self) {
         loop {
+            // A playback that is starting gets the disk and the network to
+            // itself: even the titles people opened wait (their player asks
+            // again every 20 s, so they still show up during the play).
+            let starting = self.sessions.starting_for();
             let next = {
                 let mut queues = self.queues.lock();
-                queues.opened.pop_front().or_else(|| {
+                let opened = if starting.is_none() { queues.opened.pop_front() } else { None };
+                opened.map(|id| (id, true)).or_else(|| {
                     // A library's previews read whole files: only while nothing plays.
                     if self.sessions.quiet_for() >= QUIET_BEFORE_BACKGROUND_SECS {
-                        queues.library.pop_front()
+                        queues.library.pop_front().map(|id| (id, false))
                     } else {
                         None
                     }
                 })
             };
-            let Some(file_id) = next else {
-                // Until something is queued, or a look again (playback may have ended).
-                let _ = tokio::time::timeout(Duration::from_secs(15), self.queued.notified()).await;
+            let Some((file_id, opened)) = next else {
+                // Until something is queued, a playback starts or ends, or a
+                // look again (the start is over, or playback may have ended).
+                let wait = starting.map_or(IDLE_LOOK, |left| left.min(IDLE_LOOK));
+                tokio::select! {
+                    _ = tokio::time::timeout(wait, self.queued.notified()) => {}
+                    () = self.sessions.changed() => {}
+                }
                 continue;
             };
             while self.sessions.active_transcodes() >= BUSY_TRANSCODES {
-                tokio::time::sleep(Duration::from_secs(15)).await;
+                tokio::time::sleep(IDLE_LOOK).await;
             }
-            if let Err(err) = self.make(file_id).await {
-                tracing::warn!("seek previews for file {file_id} failed: {err:#}");
+            if self.sessions.starting_for().is_some() {
+                self.requeue(file_id, opened);
+                continue;
             }
-            self.pending.lock().remove(&file_id);
+            // A playback starting meanwhile stops this one (dropping the
+            // request stops the transcoder's FFmpeg): it is queued again, as
+            // it was, and never counts as failed.
+            let starts = self.sessions.starts();
+            tokio::select! {
+                result = self.make(file_id) => {
+                    if let Err(err) = result {
+                        tracing::warn!("seek previews for file {file_id} failed: {err:#}");
+                    }
+                    self.pending.lock().remove(&file_id);
+                }
+                () = self.sessions.started_since(starts) => {
+                    tracing::debug!("seek previews for file {file_id} put off: a playback is starting");
+                    self.requeue(file_id, opened);
+                }
+            }
         }
+    }
+
+    /// Put a file whose previews were put off back at the head of its queue.
+    fn requeue(&self, file_id: i64, opened: bool) {
+        let mut queues = self.queues.lock();
+        if !opened && queues.opened.contains(&file_id) {
+            // Someone opened it meanwhile: it is queued already.
+            return;
+        }
+        let queue = if opened { &mut queues.opened } else { &mut queues.library };
+        queue.retain(|id| *id != file_id);
+        queue.push_front(file_id);
     }
 
     async fn make(&self, file_id: i64) -> anyhow::Result<()> {
