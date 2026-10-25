@@ -5,6 +5,7 @@ import app.pley.android.auth.AuthGraph
 import app.pley.android.caps.CapsGraph
 import app.pley.android.common.DeviceProfile
 import app.pley.android.common.FormFactor
+import app.pley.android.common.SavedServer
 import app.pley.android.common.Tier
 import app.pley.android.data.AppSettings
 import app.pley.android.data.CollectionsRepository
@@ -24,6 +25,12 @@ import app.pley.android.data.SessionState
 import app.pley.android.data.SnapshotStore
 import app.pley.android.data.TrackDefaultsRepository
 import app.pley.android.model.Hubs
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.Flow
+import app.pley.android.model.PlaylistKind
+import app.pley.android.model.PlaylistDetail
+import app.pley.android.model.PlaylistSummary
+import app.pley.android.model.SearchResults
 import app.pley.android.player.PlayerGraph
 import app.pley.android.screens.PlayerLauncher
 import app.pley.android.screens.PleyGraphOwner
@@ -63,13 +70,35 @@ class TvTestGraph : ScreensGraph {
         override val liveUpdates = object : LiveUpdates {
             override val scans: StateFlow<List<ScanState>> = sources.scans
         }
-        override val servers: ServersRepository get() = unused("servers")
+        // The playlists page asks which server its pictures are on.
+        override val servers = object : ServersRepository {
+            override val saved: Flow<List<SavedServer>> = flowOf(emptyList())
+            override val active: StateFlow<String?> = MutableStateFlow("http://192.168.1.20:7539")
+            override suspend fun use(server: SavedServer) = Unit
+            override suspend fun forget(origin: String) = Unit
+            override suspend fun clientId(): String = "android-test"
+        }
         override val snapshots: SnapshotStore get() = unused("snapshots")
         override val libraryItems: LibraryItemsRepository get() = unused("libraryItems")
-        override val search: SearchRepository get() = unused("search")
+        // The Search tab: nothing searched yet, no recent searches.
+        override val search = object : SearchRepository {
+            override fun search(query: String): Flow<Loadable<SearchResults>> = flowOf(Loadable.Ready(SearchResults(), fresh = true))
+            override val recent: Flow<List<String>> = flowOf(emptyList())
+        }
         override val people: PeopleRepository get() = unused("people")
         override val collections: CollectionsRepository get() = unused("collections")
-        override val playlists: PlaylistsRepository get() = unused("playlists")
+        // The Playlists tab: none yet.
+        override val playlists = object : PlaylistsRepository {
+            override fun playlists(): Flow<Loadable<List<PlaylistSummary>>> = flowOf(Loadable.Ready(emptyList(), fresh = true))
+            override fun playlist(playlistId: Long): Flow<Loadable<PlaylistDetail>> = flowOf(Loadable.Loading)
+            override suspend fun create(title: String, kind: PlaylistKind?, itemIds: List<Long>): Long = unused("create")
+            override suspend fun createSmart(title: String, libraryId: Long, query: String): Long = unused("createSmart")
+            override suspend fun rename(playlistId: Long, title: String) = unused("rename")
+            override suspend fun delete(playlistId: Long) = unused("delete")
+            override suspend fun add(playlistId: Long, itemIds: List<Long>) = unused("add")
+            override suspend fun remove(playlistId: Long, entryIds: List<Long>) = unused("remove")
+            override suspend fun reorder(playlistId: Long, entryIds: List<Long>) = unused("reorder")
+        }
         override val history: HistoryRepository get() = unused("history")
         override val trackDefaults: TrackDefaultsRepository get() = unused("trackDefaults")
         override val settings: AppSettings get() = unused("settings")

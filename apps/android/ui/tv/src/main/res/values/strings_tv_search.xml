@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Search on TV (apps/web/src/pages/SearchPage.tsx, design spec §4.5). -->
+    <string name="tv_search_field">Search movies, shows, people…</string>
+    <string name="tv_search_recent">Recent searches</string>
+    <string name="tv_search_recent_clear">Clear</string>
+    <string name="tv_search_empty_title">Search your libraries</string>
+    <string name="tv_search_empty_body">Find movies, shows, episodes, people, artists, albums and tracks. Press OK on the field to type, or use your keyboard\'s microphone.</string>
+    <string name="tv_search_none_title">No results for “%1$s”</string>
+    <string name="tv_search_none_body">Try a different spelling or fewer words.</string>
+    <string name="tv_search_failed">Search failed</string>
+    <string name="tv_search_loading">Searching…</string>
+
+    <!-- The groups results come in, in their order. -->
+    <string name="tv_search_group_people">People</string>
+    <string name="tv_search_group_movies">Movies</string>
+    <string name="tv_search_group_shows">Shows</string>
+    <string name="tv_search_group_seasons">Seasons</string>
+    <string name="tv_search_group_episodes">Episodes</string>
+    <string name="tv_search_group_artists">Artists</string>
+    <string name="tv_search_group_albums">Albums</string>
+    <string name="tv_search_group_tracks">Tracks</string>
+</resources>
