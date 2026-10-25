@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  No TV launcher yet: the web app has no remote control, so TVs get the
-  native app's own launcher once it replaces the web view.
+  No TV launcher in release builds yet: the web app has no remote control,
+  so TVs get the native app's own launcher once it replaces the web view.
+  Debug builds have it already (src/debug/AndroidManifest.xml).
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
@@ -40,6 +41,7 @@
       goes through the system's callbacks (Fire OS 16 can skip onBackPressed).
     -->
     <application
+        android:name=".PleyApplication"
         android:allowBackup="false"
         android:enableOnBackInvokedCallback="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -72,6 +74,25 @@
             android:screenOrientation="sensorLandscape"
             android:exported="false"
             android:theme="@style/Theme.Pley.Player" />
+
+        <!--
+          The native app, phones and tablets. No launcher of its own until it
+          replaces the web view: debug builds add one ("pley (native)").
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Pley.Native" />
+
+        <!--
+          The native app on TVs. Debug builds add its TV launcher ("pley
+          (TV)"). A remote or keyboard connecting doesn't restart it.
+        -->
+        <activity
+            android:name=".TvActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation"
+            android:exported="true"
+            android:theme="@style/Theme.Pley.Tv" />
 
         <!-- The sign-in module's return address is in core/auth's manifest. -->
     </application>

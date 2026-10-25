@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shell_placeholder_title">%1$s isn\'t built yet</string>
+    <string name="shell_placeholder_body">This is the native app, on its way. The app you use today is still on the home screen as pley.</string>
+    <string name="shell_placeholder_next">Open another screen</string>
+</resources>

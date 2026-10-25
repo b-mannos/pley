@@ -1,0 +1,272 @@
+package app.pley.android.network
+
+import app.pley.android.model.Added
+import app.pley.android.model.CollectionDetail
+import app.pley.android.model.CollectionList
+import app.pley.android.model.EntryIds
+import app.pley.android.model.Health
+import app.pley.android.model.HistoryPage
+import app.pley.android.model.Hubs
+import app.pley.android.model.ImageKind
+import app.pley.android.model.ItemCollections
+import app.pley.android.model.ItemDetail
+import app.pley.android.model.ItemIds
+import app.pley.android.model.ItemList
+import app.pley.android.model.ItemsPage
+import app.pley.android.model.Library
+import app.pley.android.model.LibraryFilters
+import app.pley.android.model.LibrarySort
+import app.pley.android.model.MaybeItem
+import app.pley.android.model.Me
+import app.pley.android.model.NewPlaylist
+import app.pley.android.model.PersonDetail
+import app.pley.android.model.PlaybackInfo
+import app.pley.android.model.PlaybackRequest
+import app.pley.android.model.PlaylistDetail
+import app.pley.android.model.PlaylistList
+import app.pley.android.model.PlaylistPatch
+import app.pley.android.model.ProgressReport
+import app.pley.android.model.RatingRequest
+import app.pley.android.model.SearchResults
+import app.pley.android.model.ServerInfo
+import app.pley.android.model.SessionStatus
+import app.pley.android.model.SortOrder
+import app.pley.android.model.StreamChoice
+import app.pley.android.model.TrickplayInfo
+
+/**
+ * A subtitle track as WebVTT (GET /api/files/{id}/subtitles/{index}.vtt).
+ * An embedded track still being read out of its file comes with the cues
+ * found so far: [complete] is false (the server's `X-Pley-Complete: 0`,
+ * packages/transcoder-api `SUBTITLES_COMPLETE_HEADER`), and asking again
+ * later gets more.
+ */
+data class SubtitleText(
+    val text: String,
+    val complete: Boolean,
+)
+
+/**
+ * pley's HTTP API as an app's token may use it: one function per route of
+ * APP_ROUTES (apps/server/src/auth/scopes.rs), with GET /api/server and
+ * GET /api/health, which answer without signing in. docs/API.md has the
+ * rules of each.
+ *
+ * JSON routes are suspending functions answering the model's types; a
+ * refusal throws [ApiException], a network failure its IOException.
+ * Routes answering bytes for Coil or Media3 (pictures, streams, HLS files,
+ * seek-preview sheets) are address builders instead: absolute addresses
+ * on the server in use, without the token, which goes in the
+ * `Authorization` header of every request, players' included (docs/API.md:
+ * no address pley hands out carries a token).
+ *
+ * Not here: GET /api/events, the server's events, which ServerEvents
+ * streams; GET /api/oauth/profiles, which the sign-in module (:core:auth)
+ * asks, as it switches profiles with the token endpoint.
+ */
+interface PleyApi {
+    // ---------------------------------------------------------------- server
+
+    /** GET /api/health: `{ "status": "ok" }` while the server runs. No token needed. */
+    suspend fun health(): Health
+
+    /** GET /api/server: the server's name and version. No token needed. */
+    suspend fun server(): ServerInfo
+
+    /** GET /api/auth/me: the profile the app acts as, and what it was allowed. Any app token. */
+    suspend fun me(): Me
+
+    /**
+     * GET /api/users/{id}/avatar: a profile's picture (JPEG, 256 px). Apps
+     * see their own profile's and their household's; others answer 404.
+     * [version] is the `v` of the profile's `avatar_url`, which changes
+     * with the picture.
+     */
+    fun avatarUrl(userId: Long, version: String? = null): String
+
+    /**
+     * Makes one of the server's own addresses absolute: picture addresses
+     * in answers (`poster_url`, `photo_url`, `thumb_url`, `artwork`…) and
+     * [PlaybackInfo.url]. With [width], a picture is asked for that many
+     * pixels wide (`w`, bucketed by the server).
+     */
+    fun url(path: String, width: Int? = null): String
+
+    // ---------------------------------------------------------------- libraries (scope library)
+
+    /** GET /api/libraries: the libraries the profile may open, in their order. */
+    suspend fun libraries(): List<Library>
+
+    /** GET /api/libraries/{id}. */
+    suspend fun library(id: Long): Library
+
+    /**
+     * GET /api/libraries/{id}/items: a page of the library's top-level
+     * items. [order] `null` is the server's default for [sort]; [watched]
+     * true matches shows whose every episode is watched. Without [limit],
+     * every item from [offset].
+     */
+    suspend fun libraryItems(
+        libraryId: Long,
+        sort: LibrarySort = LibrarySort.Title,
+        order: SortOrder? = null,
+        watched: Boolean? = null,
+        genre: String? = null,
+        year: Int? = null,
+        offset: Int = 0,
+        limit: Int? = null,
+    ): ItemsPage
+
+    /** GET /api/libraries/{id}/filters: the genres and years to filter [libraryItems] by. */
+    suspend fun libraryFilters(libraryId: Long): LibraryFilters
+
+    /** GET /api/libraries/{id}/hubs: the library's rows (continue watching, recently added and released, top rated). */
+    suspend fun libraryHubs(libraryId: Long): Hubs
+
+    /** GET /api/libraries/{id}/collections: the library's collections, by title. */
+    suspend fun libraryCollections(libraryId: Long): CollectionList
+
+    /** GET /api/collections/{id}: a collection and its items, in its order. */
+    suspend fun collection(id: Long): CollectionDetail
+
+    /**
+     * GET /api/collections/{id}/images/{kind}: a collection's poster or
+     * backdrop ([ImageKind.Thumb] isn't one), or the item artwork it falls
+     * back to.
+     */
+    fun collectionImageUrl(id: Long, kind: ImageKind, width: Int? = null, version: String? = null): String
+
+    // ---------------------------------------------------------------- playlists (scope library)
+
+    /** GET /api/playlists: the profile's playlists, by title. */
+    suspend fun playlists(): PlaylistList
+
+    /** GET /api/playlists/{id}: a playlist and the entries the profile can see. */
+    suspend fun playlist(id: Long): PlaylistDetail
+
+    // ---------------------------------------------------------------- items (scope library)
+
+    /** GET /api/items/{id}: everything about an item, files, markers, extras and credits included. */
+    suspend fun item(id: Long): ItemDetail
+
+    /** GET /api/items/{id}/children: seasons, episodes, albums or tracks, by index. */
+    suspend fun children(id: Long): ItemList
+
+    /** GET /api/items/{id}/on-deck: the episode Play starts for a show or season. */
+    suspend fun onDeck(id: Long): MaybeItem
+
+    /** GET /api/items/{id}/next: the episode or track after this one, for autoplay. */
+    suspend fun next(id: Long): MaybeItem
+
+    /** GET /api/items/{id}/related: "More Like This" for movies and shows; [limit] at most 60. */
+    suspend fun related(id: Long, limit: Int = 20): ItemList
+
+    /**
+     * GET /api/items/{id}/images/{kind}: an item's poster, backdrop or
+     * still, falling back to its parent's (a season's to its show's).
+     * [version] is the `v` of the item's picture address.
+     */
+    fun itemImageUrl(id: Long, kind: ImageKind, width: Int? = null, version: String? = null): String
+
+    /** GET /api/items/{id}/collections: the collections a movie or show is in ("Part of …"). */
+    suspend fun itemCollections(id: Long): ItemCollections
+
+    /** GET /api/people/{id}: a person and what they are credited in. */
+    suspend fun person(id: Long): PersonDetail
+
+    /** GET /api/people/{id}/photo: a person's photo; 404 without one. */
+    fun personPhotoUrl(id: Long, width: Int? = null, version: String? = null): String
+
+    /**
+     * GET /api/history: the profile's plays, newest first. [itemId] is the
+     * item or the episodes and tracks under it; [since] is unix seconds;
+     * [limit] at most 200.
+     */
+    suspend fun history(
+        offset: Int = 0,
+        limit: Int = 50,
+        itemId: Long? = null,
+        libraryId: Long? = null,
+        since: Long? = null,
+    ): HistoryPage
+
+    /** GET /api/hubs/home: Continue Watching, then Recently Added of each library. */
+    suspend fun homeHubs(): Hubs
+
+    /** GET /api/search: titles by relevance, and people. [limit] at most 200. */
+    suspend fun search(query: String, limit: Int = 40): SearchResults
+
+    // ---------------------------------------------------------------- playback (scope play)
+
+    /** POST /api/playback: starts a session; the answer says how and from where it plays. */
+    suspend fun startPlayback(request: PlaybackRequest): PlaybackInfo
+
+    /** GET /api/playback/{session}: how the session plays now, with its transcode's live numbers. */
+    suspend fun playbackStatus(sessionId: String): SessionStatus
+
+    /** DELETE /api/playback/{session}: ends the session and any transcode. */
+    suspend fun stopPlayback(sessionId: String)
+
+    /**
+     * GET /api/playback/{session}/{file}: a file of the session's HLS
+     * stream, "index.m3u8" or a segment "{n}.ts". [PlaybackInfo.url]
+     * already names the playlist.
+     */
+    fun playbackFileUrl(sessionId: String, file: String = "index.m3u8"): String
+
+    /** GET /api/files/{id}/stream: the file as it is, with Range, for direct play. */
+    fun fileStreamUrl(fileId: Long): String
+
+    /** GET /api/files/{id}/subtitles/{index}.vtt: a text subtitle track as WebVTT, maybe partial. */
+    suspend fun subtitles(fileId: Long, index: Int): SubtitleText
+
+    /**
+     * GET /api/files/{id}/trickplay: the file's seek previews; `null`
+     * while they are being made (the server answers 404 and queues them).
+     */
+    suspend fun trickplay(fileId: Long): TrickplayInfo?
+
+    /** GET /api/files/{id}/trickplay/{n}.jpg?v={TrickplayInfo.id}: sheet [sheet] of the seek previews. */
+    fun trickplaySheetUrl(fileId: Long, sheet: Int, version: String): String
+
+    /** GET /api/files/{id}/chapters/{n}.jpg: the picture of chapter [chapter] (0-based), once the file has previews. */
+    fun chapterImageUrl(fileId: Long, chapter: Int, version: String? = null): String
+
+    /** POST /api/items/{id}/progress: where the player is, every ~10 s, on pause and on closing. */
+    suspend fun reportProgress(itemId: Long, report: ProgressReport)
+
+    /** POST /api/items/{id}/watched: watched by hand (containers: all of them). Not a play. */
+    suspend fun markWatched(itemId: Long)
+
+    /** POST /api/items/{id}/unwatched. */
+    suspend fun markUnwatched(itemId: Long)
+
+    /** PUT /api/items/{id}/streams: remembers the tracks picked, for the whole show or the movie. */
+    suspend fun setStreams(itemId: Long, choice: StreamChoice)
+
+    /** PUT /api/items/{id}/rating: the profile's own rating, 0 to 10; `null` clears it. */
+    suspend fun setRating(itemId: Long, rating: RatingRequest)
+
+    /** DELETE /api/history/{id}: forgets one of the profile's plays. */
+    suspend fun deleteHistoryEntry(id: Long)
+
+    // ---------------------------------------------------------------- playlists (scope playlists)
+
+    /** POST /api/playlists: a new playlist, of items or smart. */
+    suspend fun createPlaylist(playlist: NewPlaylist): PlaylistDetail
+
+    /** PATCH /api/playlists/{id}: a new title, or a smart playlist's new filter. */
+    suspend fun updatePlaylist(id: Long, patch: PlaylistPatch): PlaylistDetail
+
+    /** DELETE /api/playlists/{id}. */
+    suspend fun deletePlaylist(id: Long)
+
+    /** POST /api/playlists/{id}/items: adds items at the end; shows, seasons, albums and artists add what they hold. */
+    suspend fun addToPlaylist(id: Long, items: ItemIds): Added
+
+    /** DELETE /api/playlists/{id}/items/{entry_id}: removes one entry. */
+    suspend fun removeFromPlaylist(id: Long, entryId: Long)
+
+    /** PUT /api/playlists/{id}/order: these entries first, in this order, the rest after. */
+    suspend fun reorderPlaylist(id: Long, entries: EntryIds): PlaylistDetail
+}

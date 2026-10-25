@@ -6,6 +6,12 @@ package app.pley.android.common
  */
 interface UserFacing
 
+/**
+ * What a stub of the native app answers: that part isn't built yet. It
+ * says so in the app rather than failing quietly.
+ */
+class NotBuiltYet(what: String) : UnsupportedOperationException("$what isn't built yet"), UserFacing
+
 /** Why a request failed, in a few words for people. */
 fun describe(error: Throwable): String = when (error) {
     is java.net.ConnectException -> "nothing answers there"

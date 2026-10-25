@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tv_shell_placeholder_title">%1$s isn\'t built yet</string>
+    <string name="tv_shell_placeholder_body">This is pley for TVs, on its way: browsing with the remote, signing in with a code and playing with the TV\'s own frame rate and HDR.</string>
+    <string name="tv_shell_placeholder_next">Open another screen</string>
+</resources>

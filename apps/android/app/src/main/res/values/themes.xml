@@ -10,4 +10,20 @@
     <style name="Theme.Pley.Player">
         <item name="android:windowBackground">@android:color/black</item>
     </style>
+
+    <!--
+      The native app on phones: the system's splash (Android 12's, or the
+      library's below it) in pley's colours, kept only for the startup read.
+    -->
+    <style name="Theme.Pley.Native" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/pley_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/pley_tile</item>
+        <item name="postSplashScreenTheme">@style/Theme.Pley</item>
+    </style>
+
+    <!-- The native app on TVs: no splash animation (Google's TV rule), the window already pley's colour. -->
+    <style name="Theme.Pley.Tv">
+        <item name="android:windowBackground">@color/pley_bg</item>
+    </style>
 </resources>

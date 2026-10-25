@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Macrobenchmark starts and inspects the app under test. -->
+    <queries>
+        <package android:name="app.pley.android" />
+    </queries>
+</manifest>
