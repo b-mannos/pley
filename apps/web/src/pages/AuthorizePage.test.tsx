@@ -214,10 +214,7 @@ describe("AuthorizePage", () => {
     expect(allow).toBeDisabled();
     fakeTimers();
 
-    // Not focused: time alone doesn't do it.
-    wait(5000);
-    expect(allow).toBeDisabled();
-
+    // The window gets the focus: a whole second from then.
     setFocus(true);
     wait(999);
     expect(allow).toBeDisabled();
@@ -240,6 +237,25 @@ describe("AuthorizePage", () => {
     expect(allow).toBeDisabled();
     wait(1);
     expect(allow).toBeEnabled();
+  });
+
+  // Real time from the page's first render: the timer it starts as it
+  // appears is the one these check.
+  it("keeps Allow off while the window has no focus", async () => {
+    serve();
+    renderPage();
+    const { allow } = await consentShown();
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(allow).toBeDisabled();
+  });
+
+  it("turns Allow on a second after it appears in a focused window", async () => {
+    focused = true;
+    serve();
+    renderPage();
+    const { allow } = await consentShown();
+    expect(allow).toBeDisabled();
+    await waitFor(() => expect(allow).toBeEnabled(), { timeout: 3000 });
   });
 
   it("allows, goes back to the app, and offers a link if the browser stays", async () => {
