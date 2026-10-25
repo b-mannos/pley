@@ -249,11 +249,9 @@ impl JobManager {
         let id = uuid::Uuid::new_v4().simple().to_string();
         let dir = self.jobs_dir.join(&id);
         tokio::fs::create_dir_all(&dir).await?;
+        let unmade = Unmade(Some(dir.clone()));
         if let Some(Burn::Text { source, file_name, .. }) = &plan.burn {
-            if let Err(err) = self.extractor.extract_ass(&input, source, &dir.join(file_name)).await {
-                let _ = tokio::fs::remove_dir_all(&dir).await;
-                return Err(err);
-            }
+            self.extractor.extract_ass(&input, source, &dir.join(file_name)).await?;
         }
 
         let count = plan.segment_count() as usize;
@@ -288,6 +286,7 @@ impl JobManager {
             plan,
         });
         self.jobs.lock().insert(id.clone(), job.clone());
+        unmade.made();
         Metrics::inc(&self.metrics.jobs_created);
         tracing::info!(
             job = %id,
@@ -907,6 +906,33 @@ fn describe(created: &JobCreated) -> String {
         .join(", ")
 }
 
+/// The folder of a job being made, removed with what's in it (a burn-in
+/// track half written) when the job isn't made after all: an error, or its
+/// request gone (the server gave up waiting, the player left).
+struct Unmade(Option<PathBuf>);
+
+impl Unmade {
+    /// The job is made: its folder stays.
+    fn made(mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for Unmade {
+    fn drop(&mut self) {
+        let Some(dir) = self.0.take() else { return };
+        // FFmpeg, killed with the request, may hold a file there a moment longer.
+        match tokio::runtime::Handle::try_current() {
+            Ok(runtime) => {
+                runtime.spawn(async move { remove_dir_with_retry(&dir).await });
+            }
+            Err(_) => {
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+        }
+    }
+}
+
 async fn remove_dir_with_retry(dir: &Path) {
     for attempt in 0..5 {
         match tokio::fs::remove_dir_all(dir).await {
@@ -925,6 +951,26 @@ async fn remove_dir_with_retry(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn folders_of_jobs_never_made_go() {
+        let dir = tempfile::tempdir().unwrap();
+        let (made, unmade) = (dir.path().join("made"), dir.path().join("unmade"));
+        for job in [&made, &unmade] {
+            std::fs::create_dir(job).unwrap();
+            std::fs::write(job.join("burn.ass"), "[Script Info]\n").unwrap();
+        }
+        Unmade(Some(made.clone())).made();
+        // Dropped midway (an error, or the request gone).
+        drop(Unmade(Some(unmade.clone())));
+        for _ in 0..50 {
+            if !unmade.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(!unmade.exists() && made.join("burn.ass").exists());
+    }
 
     #[test]
     fn parses_segment_list_lines() {

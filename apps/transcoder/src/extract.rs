@@ -409,6 +409,9 @@ impl Extractor {
     }
 
     /// Write a subtitle track as ASS into a job directory for libass burn-in.
+    /// This runs while the job is made, which the server waits 25 minutes
+    /// for: after 20 (a big file on a slow share), it gives up with an error
+    /// the server still hears.
     pub async fn extract_ass(&self, input: &Path, source: &TextSource, out: &Path) -> ApiResult<()> {
         let mut cmd = self.ff.command();
         cmd.args(["-loglevel", "error", "-y"]);

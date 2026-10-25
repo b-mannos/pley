@@ -194,7 +194,10 @@ following status codes:
   - Bitmap subtitles (PGS, VobSub, DVB, `.sup` files) are overlaid at source
     resolution, after tone mapping and before scaling.
   - Text subtitles (SRT, ASS) are rendered by libass from an `.ass` file
-    extracted into the job folder.
+    extracted into the job folder while the job is created. An embedded
+    track's extraction reads the whole file, so it gives up after 20
+    minutes, inside the 25 the server waits for the job; a job folder whose
+    job isn't made after all (an error, or the request gone) is removed.
 - **Audio.** Copied when the client supports the codec. Otherwise it's
   transcoded to AAC, downmixed to stereo by default, and resampled to 48 kHz
   when needed.
