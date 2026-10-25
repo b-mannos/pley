@@ -348,7 +348,7 @@ async fn only_pleys_own_apps_sign_in_with_a_code() {
     assert_eq!(oauth_error(&app.form_post("/api/oauth/device", &twice, &[]).await).1, "invalid_request");
     let secret = form(&[("client_id", ANDROID_APP), ("client_secret", "s3cret")]);
     let refused = app.form_post("/api/oauth/device", &secret, &[]).await;
-    assert_eq!(oauth_error(&refused), (StatusCode::UNAUTHORIZED, "invalid_client"));
+    assert_eq!(oauth_error(&refused), (StatusCode::BAD_REQUEST, "invalid_client"));
     let android = form(&[("client_id", ANDROID_APP)]);
     let basic = app.form_post("/api/oauth/device", &android, &[("authorization", "Basic YTpi")]).await;
     assert_eq!(oauth_error(&basic), (StatusCode::UNAUTHORIZED, "invalid_client"));

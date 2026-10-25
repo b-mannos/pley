@@ -210,13 +210,43 @@ struct ClientDto<'a> {
     first_party: bool,
 }
 
-/// The parameters of a query or a form, each at most once (OAuth 2.1 §3.1):
-/// the name of one given twice is the error.
+/// The parameters pley reads, at the authorization, token, device and
+/// revocation endpoints: each may come once.
+const READ: &[&str] = &[
+    "response_type",
+    "response_mode",
+    "client_id",
+    "client_secret",
+    "redirect_uri",
+    "scope",
+    "state",
+    "code_challenge",
+    "code_challenge_method",
+    "resource",
+    "request",
+    "request_uri",
+    "grant_type",
+    "code",
+    "code_verifier",
+    "refresh_token",
+    "device_code",
+    "profile",
+    "pin",
+    "token",
+];
+
+/// The parameters of a query or a form (OAuth 2.1 §3.1-3.2): one sent
+/// without a value is as if left out, and those pley doesn't read are
+/// ignored, given twice or not. One that pley reads given twice is the
+/// error: its name.
 fn parameters(text: &[u8]) -> Result<Vec<(String, String)>, String> {
     let mut seen = HashSet::new();
     let mut params = Vec::new();
     for (name, value) in url::form_urlencoded::parse(text) {
-        if !seen.insert(name.clone()) {
+        if value.is_empty() {
+            continue;
+        }
+        if READ.contains(&name.as_ref()) && !seen.insert(name.clone()) {
             return Err(name.into_owned());
         }
         params.push((name.into_owned(), value.into_owned()));
@@ -224,14 +254,9 @@ fn parameters(text: &[u8]) -> Result<Vec<(String, String)>, String> {
     Ok(params)
 }
 
-/// The value of `name`, when it was given and isn't empty.
+/// The value of `name`, when it was given (never empty: see [`parameters`]).
 fn param<'a>(params: &'a [(String, String)], name: &str) -> Option<&'a str> {
-    params.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str()).filter(|v| !v.is_empty())
-}
-
-/// Whether `name` was given at all (empty too).
-fn given(params: &[(String, String)], name: &str) -> bool {
-    params.iter().any(|(n, _)| n == name)
+    params.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str())
 }
 
 /// A parameter's name for a message, when it is a plain one.
@@ -348,11 +373,21 @@ pub async fn create_request(
 /// (RFC 6749 §4.1.2.1): the app gets them as error_description.
 fn check_request(params: &[(String, String)], client: &clients::Client, issuer: &str) -> Result<Scopes, ReturnedError> {
     let fail = |error: &'static str, description: &str| ReturnedError { error, description: description.to_owned() };
-    if param(params, "response_type") != Some("code") {
-        return Err(fail(
-            "unsupported_response_type",
-            "this app asked to sign in in a way pley doesn't support (response_type): ask the app's publisher to fix it",
-        ));
+    match param(params, "response_type") {
+        Some("code") => {}
+        None => {
+            return Err(fail(
+                "invalid_request",
+                "this app didn't say how it signs in (response_type): ask the app's publisher to fix it",
+            ));
+        }
+        Some(_) => {
+            return Err(fail(
+                "unsupported_response_type",
+                "this app asked to sign in in a way pley doesn't support (response_type): ask the app's publisher to \
+                 fix it",
+            ));
+        }
     }
     if param(params, "response_mode").is_some_and(|mode| mode != "query") {
         return Err(fail(
@@ -361,7 +396,7 @@ fn check_request(params: &[(String, String)], client: &clients::Client, issuer: 
              fix it",
         ));
     }
-    if given(params, "request") || given(params, "request_uri") {
+    if param(params, "request").is_some() || param(params, "request_uri").is_some() {
         return Err(fail("invalid_request", "request objects aren't supported: ask the app's publisher to fix it"));
     }
     let challenge_ok = param(params, "code_challenge_method") == Some("S256")
@@ -591,8 +626,10 @@ impl Form {
                 None => "a parameter is given twice".to_owned(),
             })
         })?;
-        if given(&params, "client_secret") {
-            return Err(OAuthError::invalid_client("pley's apps have no secrets: leave out client_secret", false));
+        if param(&params, "client_secret").is_some() {
+            // 400: a 401 would need a challenge (RFC 9110 §15.5.2), and there
+            // is no way of authenticating to offer.
+            return Err(OAuthError::new("invalid_client", "pley's apps have no secrets: leave out client_secret"));
         }
         Ok(Form(params))
     }
@@ -1419,10 +1456,13 @@ mod tests {
     }
 
     #[test]
-    fn parameters_come_once() {
+    fn parameters_pley_reads_come_once() {
         assert_eq!(parameters(b"a=1&b=%20x+y").unwrap(), [("a".into(), "1".into()), ("b".into(), " x y".into())]);
-        assert_eq!(parameters(b"a=1&b=2&a=1"), Err("a".to_owned()));
-        assert_eq!(parameters(b"a=&a"), Err("a".to_owned()), "empty ones count");
+        assert_eq!(parameters(b"code=1&b=2&code=1"), Err("code".to_owned()));
+        assert_eq!(parameters(b"state=a&state=b"), Err("state".to_owned()));
+        // Empty ones are as if left out, and others may come twice.
+        assert_eq!(parameters(b"state=&state=x&client_secret=").unwrap(), [("state".into(), "x".into())]);
+        assert_eq!(parameters(b"prompt=a&prompt=b").unwrap().len(), 2);
         assert_eq!(shown_name("client_id"), Some("client_id"));
         assert_eq!(shown_name("<b>"), None);
     }

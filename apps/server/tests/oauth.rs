@@ -405,7 +405,6 @@ async fn bad_clients_and_return_addresses_are_never_redirected_to() {
     let plain = query(&base);
     cases.push(("client twice", format!("{plain}&client_id={}", encode(ANDROID_APP))));
     cases.push(("state twice", format!("{plain}&state=abc")));
-    cases.push(("an empty one twice", format!("{plain}&prompt=&prompt=")));
     for (case, request) in cases {
         let reply = start(&app, &admin, &request).await;
         assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{case}: {}", reply.text());
@@ -430,7 +429,7 @@ async fn other_mistakes_go_back_to_the_app_only_when_asked() {
     let long_state = "s".repeat(1025);
     let cases: Vec<(&str, Vec<Change>)> = vec![
         ("unsupported_response_type", vec![("response_type", Some("token"))]),
-        ("unsupported_response_type", vec![("response_type", None)]),
+        ("invalid_request", vec![("response_type", None)]),
         ("invalid_request", vec![("code_challenge_method", Some("plain")), ("code_challenge", Some(&plain_challenge))]),
         ("invalid_request", vec![("code_challenge", None)]),
         ("invalid_request", vec![("code_challenge", None), ("code_challenge_method", None)]),
@@ -486,6 +485,13 @@ async fn other_mistakes_go_back_to_the_app_only_when_asked() {
         "{}",
         reply.text()
     );
+    // Parameters sent without a value are as if left out, and ones pley
+    // doesn't read may come twice (OAuth 2.1 §3.1-3.2).
+    let plain = query(&request_params(ANDROID_APP, ANDROID_BACK));
+    for extra in ["prompt=&prompt=", "foo=1&foo=2", "state=", "request_uri=&request="] {
+        let reply = start(&app, &admin, &format!("{plain}&{extra}")).await;
+        assert_eq!(reply.body["status"], "consent", "{extra}: {}", reply.text());
+    }
 }
 
 #[tokio::test]
@@ -647,7 +653,7 @@ async fn codes_work_once_and_only_with_their_verifier() {
     // No secrets: every app is public.
     let secret = format!("{}&client_secret=s3cret", form(&fields));
     let reply = app.form_post("/api/oauth/token", &secret, &[]).await;
-    assert_eq!(oauth_error(&reply), (StatusCode::UNAUTHORIZED, "invalid_client"));
+    assert_eq!(oauth_error(&reply), (StatusCode::BAD_REQUEST, "invalid_client"));
     assert!(!reply.headers.contains_key(header::WWW_AUTHENTICATE));
     let basic = app.form_post("/api/oauth/token", &form(&fields), &[("authorization", "Basic YTpi")]).await;
     assert_eq!(oauth_error(&basic), (StatusCode::UNAUTHORIZED, "invalid_client"));
@@ -656,8 +662,9 @@ async fn codes_work_once_and_only_with_their_verifier() {
     let unknown_grant = form(&[("grant_type", "password"), ("username", "admin"), ("password", "secret-one")]);
     assert_eq!(oauth_error(&app.form_post("/api/oauth/token", &unknown_grant, &[]).await).1, "unsupported_grant_type");
 
-    // Everything right: once. The return address may be left out.
-    let first = app.form_post("/api/oauth/token", &form(&fields), &[]).await;
+    // Everything right: once. The return address may be left out, and an
+    // empty secret, as some libraries send, is as if left out.
+    let first = app.form_post("/api/oauth/token", &format!("{}&client_secret=", form(&fields)), &[]).await;
     let (access, refresh_token) = pair(&first);
     assert_eq!(app.get("/api/auth/me", &access).await.status, StatusCode::OK);
     // Again, with everything right: someone else has the code, so the
