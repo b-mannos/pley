@@ -123,6 +123,18 @@ class ProfilesTest {
     }
 
     @Test
+    fun aPinSetSinceTheListWasReadIsAskedFor() = runBlocking {
+        store.save(savedTokens(issuer))
+        val (profiles, _) = profiles()
+        // The list said none; the server wants a PIN now.
+        switchAnswer = refusal("wrong_pin")
+        assertEquals(SwitchResult.NeedsPin, profiles.switchTo(Profile(1, "Sam", null, null, false, Needs.NONE)))
+        assertFalse(switches.single().containsKey("pin"))
+        // A PIN that was sent is wrong.
+        assertEquals(SwitchResult.Failed("wrong PIN"), profiles.switchTo(Profile(2, "Kid", null, null, false, Needs.PIN), "0000"))
+    }
+
+    @Test
     fun profilesThatNeedTheirPasswordSignInAgain() = runBlocking {
         store.save(savedTokens(issuer))
         val (profiles, tokens) = profiles()

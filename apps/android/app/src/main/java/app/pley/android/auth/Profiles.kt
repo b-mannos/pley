@@ -113,15 +113,21 @@ class Profiles(private val api: OkHttpClient, private val tokens: Tokens) {
             Needs.PASSWORD -> return SwitchResult.SignInAgain
             Needs.LOCKED -> return SwitchResult.Failed("this profile can't be used from the app")
         }
+        val sent = pin?.takeIf { profile.needs == Needs.PIN }
         return try {
-            tokens.switchProfile(profile.id, pin?.takeIf { profile.needs == Needs.PIN })
+            tokens.switchProfile(profile.id, sent)
             SwitchResult.Switched
         } catch (e: SignedOutException) {
             throw e
         } catch (e: TokenException) {
             val oauth = e.oauth
-            if (oauth?.error == "invalid_grant" && oauth.reason == "browser") SwitchResult.SignInAgain
-            else SwitchResult.Failed(message(oauth))
+            when {
+                oauth?.error == "invalid_grant" && oauth.reason == "browser" -> SwitchResult.SignInAgain
+                // The list was older than the profile's new PIN: the server
+                // answers wrong_pin to a switch without one. Ask for it.
+                oauth?.reason == "wrong_pin" && sent == null -> SwitchResult.NeedsPin
+                else -> SwitchResult.Failed(message(oauth))
+            }
         }
     }
 

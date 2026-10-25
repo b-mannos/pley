@@ -6,6 +6,7 @@ import android.security.keystore.KeyProperties
 import androidx.core.content.edit
 import java.security.GeneralSecurityException
 import java.security.KeyStore
+import java.security.ProviderException
 import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -46,17 +47,26 @@ class PrefsShelf(context: Context, file: String = "sign_in") : Shelf {
  * another's.
  */
 open class Vault(private val key: () -> SecretKey) {
-    fun seal(plain: ByteArray, aad: String): ByteArray {
+    /**
+     * [plain] sealed with [aad]. When the Keystore fails (the provider throws
+     * ProviderException, a RuntimeException, besides the usual ones), an
+     * [AuthException]: an IOException, so a request fails rather than the app.
+     */
+    fun seal(plain: ByteArray, aad: String): ByteArray = try {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         // The provider picks a fresh 12-byte IV each time.
         cipher.init(Cipher.ENCRYPT_MODE, key())
         cipher.updateAAD(aad.toByteArray(Charsets.UTF_8))
         val iv = cipher.iv
         require(iv.size == IV_BYTES) { "unexpected IV size" }
-        return iv + cipher.doFinal(plain)
+        iv + cipher.doFinal(plain)
+    } catch (_: GeneralSecurityException) {
+        throw AuthException(UNKEPT)
+    } catch (_: ProviderException) {
+        throw AuthException(UNKEPT)
     }
 
-    /** The value [seal] sealed with [aad]; `null` when it wasn't, or the key changed. */
+    /** The value [seal] sealed with [aad]; `null` when it wasn't, the key changed, or the Keystore fails. */
     fun open(sealed: ByteArray, aad: String): ByteArray? {
         if (sealed.size <= IV_BYTES) return null
         return try {
@@ -66,10 +76,14 @@ open class Vault(private val key: () -> SecretKey) {
             cipher.doFinal(sealed, IV_BYTES, sealed.size - IV_BYTES)
         } catch (_: GeneralSecurityException) {
             null
+        } catch (_: ProviderException) {
+            null
         }
     }
 
     companion object {
+        /** Why tokens couldn't be sealed: they aren't used, and the person signs in again. */
+        const val UNKEPT = "the sign-in couldn't be kept on this device: sign in again"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val IV_BYTES = 12
         private const val TAG_BITS = 128

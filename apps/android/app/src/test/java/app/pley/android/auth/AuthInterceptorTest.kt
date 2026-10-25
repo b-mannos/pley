@@ -204,6 +204,52 @@ class AuthInterceptorTest {
     }
 
     @Test
+    fun addressesWithCharactersJavaRefusesAreStillTheServers() {
+        store.save(savedTokens(issuer))
+        api["/api/search?q=a|b"] = onlyAccepts("pley_at_fresh1")
+        val response = get(client(), home.url("/api/search?q=a|b").toString())
+        response.close()
+        assertEquals(200, response.code)
+        assertEquals("Bearer pley_at_one", home.takeRequest().getHeader("Authorization"))
+        assertEquals(1, refreshes.get())
+        home.takeRequest()
+        assertEquals("Bearer pley_at_fresh1", home.takeRequest().getHeader("Authorization"))
+        get(client(), home.url("/api/items/a[1]/b").toString()).close()
+        assertEquals("Bearer pley_at_fresh1", home.takeRequest().getHeader("Authorization"))
+    }
+
+    @Test
+    fun aKeystoreThatFailsFailsTheRequestNotTheApp() {
+        // Tokens about to end: the request refreshes them, and keeping the
+        // new ones fails.
+        var broken = false
+        val key = javax.crypto.KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val store = TokenStore(MemoryShelf(), Vault { if (broken) throw java.security.ProviderException("Keystore") else key })
+        store.save(savedTokens(issuer, expiresAt = System.currentTimeMillis() + 30_000))
+        broken = true
+        val client = AuthHttp.api(endpointsClient(), Tokens(issuer, store, endpointsClient()))
+        val failed = assertThrows(java.io.IOException::class.java) { get(client, home.url("/api/libraries").toString()) }
+        assertEquals(Vault.UNKEPT, failed.message)
+    }
+
+    @Test
+    fun aStoreThatFailsFailsTheRequestNotTheApp() {
+        // A refused token whose refresh can't be kept: the refusal is the answer.
+        store.save(savedTokens(issuer))
+        api["/api/libraries"] = onlyAccepts("pley_at_fresh1")
+        shelf.failWrites = true
+        val response = get(client(), home.url("/api/libraries").toString())
+        response.close()
+        assertEquals(401, response.code)
+        // About to end, then: the request fails with an IOException.
+        store.wipe(issuer)
+        shelf.failWrites = false
+        store.save(savedTokens(issuer, expiresAt = System.currentTimeMillis() + 30_000))
+        shelf.failWrites = true
+        assertThrows(java.io.IOException::class.java) { get(client(), home.url("/api/libraries").toString()) }
+    }
+
+    @Test
     fun invalidTokenChallengesAreRecognized() {
         assertTrue(TokenAuthenticator.invalidToken("Bearer error=\"invalid_token\""))
         assertTrue(TokenAuthenticator.invalidToken("bearer realm=\"pley\", error=\"invalid_token\", error_description=\"expired\""))

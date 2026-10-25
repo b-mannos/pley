@@ -3,7 +3,6 @@ package app.pley.android.auth
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
-import app.pley.android.Links
 import app.pley.android.Servers
 import app.pley.android.USER_AGENT
 import java.io.IOException
@@ -15,6 +14,8 @@ import java.net.URISyntaxException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
 import okhttp3.Authenticator
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -79,17 +80,35 @@ object Transport {
  * also sees redirects. Tokens never go in a URL.
  */
 class AuthInterceptor(private val tokens: Tokens) : Interceptor {
+    private val issuer = tokens.issuer.toHttpUrlOrNull()
+
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
-        if (Links.address(request.url.toString()) != tokens.issuer) {
+        if (!onServer(request.url, issuer)) {
             // Not the server: no token, whoever added one.
             return chain.proceed(request.newBuilder().removeHeader("Authorization").build())
         }
         Transport.checkConnection(chain)
-        val token = runBlocking { tokens.accessToken() } ?: return chain.proceed(request)
+        val token = try {
+            runBlocking { tokens.accessToken() }
+        } catch (e: IOException) {
+            throw e
+        } catch (e: Exception) {
+            // The tokens couldn't be kept or read (storage, the Keystore):
+            // this request fails, as OkHttp expects, rather than the app.
+            throw IOException("the sign-in couldn't be read on this device", e)
+        } ?: return chain.proceed(request)
         return chain.proceed(request.newBuilder().header("Authorization", "Bearer $token").build())
     }
 }
+
+/**
+ * Whether [url] is on the server whose address is [issuer]: the same
+ * scheme, host and port, as OkHttp parsed both (a second parser could read
+ * the same address otherwise).
+ */
+internal fun onServer(url: HttpUrl, issuer: HttpUrl?): Boolean =
+    issuer != null && url.scheme == issuer.scheme && url.host == issuer.host && url.port == issuer.port
 
 /**
  * On a 401 from the server whose WWW-Authenticate says
@@ -98,8 +117,10 @@ class AuthInterceptor(private val tokens: Tokens) : Interceptor {
  * among them, is the answer.
  */
 class TokenAuthenticator(private val tokens: Tokens) : Authenticator {
+    private val issuer = tokens.issuer.toHttpUrlOrNull()
+
     override fun authenticate(route: Route?, response: Response): Request? {
-        if (Links.address(response.request.url.toString()) != tokens.issuer) return null
+        if (!onServer(response.request.url, issuer)) return null
         // Once: a 401 after a refresh is the answer.
         if (generateSequence(response.priorResponse) { it.priorResponse }.any { it.code == 401 }) return null
         val challenge = response.headers("WWW-Authenticate").any { invalidToken(it) }
@@ -112,6 +133,10 @@ class TokenAuthenticator(private val tokens: Tokens) : Authenticator {
             // The interceptor adds the new token.
             response.request
         } catch (_: IOException) {
+            null
+        } catch (_: Exception) {
+            // The new tokens couldn't be kept (storage, the Keystore): the
+            // refusal is the answer.
             null
         }
     }

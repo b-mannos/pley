@@ -14,6 +14,7 @@ import java.net.URI
 import java.net.URISyntaxException
 import java.net.URLDecoder
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -370,7 +371,14 @@ object Auth {
                 _state.value = SignInState.Finishing
                 done(outcome.flow)
                 scope.launch {
-                    _state.value = signIn.complete(outcome)
+                    _state.value = try {
+                        signIn.complete(outcome)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // Anything complete doesn't word itself fails the sign-in, never the app.
+                        SignInState.Failed("the sign-in couldn't be finished: try again")
+                    }
                 }
             }
         }

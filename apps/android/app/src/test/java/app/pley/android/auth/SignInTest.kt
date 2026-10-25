@@ -191,6 +191,21 @@ class SignInTest {
     }
 
     @Test
+    fun tokensThatCantBeKeptFailTheSignIn() = runBlocking {
+        // The Keystore works for the waiting sign-in (kept, then read), and
+        // fails when the tokens are kept.
+        val key = javax.crypto.KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        var uses = 0
+        val store = TokenStore(MemoryShelf(), Vault { if (++uses > 2) throw java.security.ProviderException("Keystore") else key })
+        val signIn = SignIn(http, store, { issuer -> Tokens(issuer, store, http) { now } }) { now }
+        val state = query(signIn.start(server.url("/").toString()))["state"]!!
+        tokenAnswers += MockResponse().setBody(tokenAnswer("pley_at_1", "pley_rt_1", "library play"))
+        val finished = signIn.finish(callback("code" to "c", "state" to state, "iss" to issuer))
+        assertEquals(SignInState.Failed(Vault.UNKEPT), finished)
+        assertNull(store.load(issuer))
+    }
+
+    @Test
     fun aRefusedCodeSaysToTryAgain() = runBlocking {
         val state = query(signIn.start(server.url("/").toString()))["state"]!!
         tokenAnswers += MockResponse().setResponseCode(400).setBody("{\"error\":\"invalid_grant\",\"error_description\":\"the code was used already\"}")
