@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use pley_transcoder_api::{
-    AudioMode, AudioRequest, DynamicRange, JobRequest, JobStatus, MediaInfo, MediaStream, StreamKind,
-    SubtitleBurnRequest, VideoCodec, VideoMode, VideoRequest, dynamic_range_label,
+    AudioCodec, AudioMode, AudioRequest, DolbyVisionMode, DynamicRange, JobRequest, JobStatus, MediaInfo, MediaStream,
+    StreamKind, SubtitleBurnRequest, VideoCodec, VideoMode, VideoRequest, dynamic_range_label,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
@@ -23,6 +23,17 @@ use crate::events::{EventBus, ServerEvent};
 use crate::transcoder::Transcoder;
 use crate::util::now;
 
+/// What a player plays as it is, sent with every play request.
+///
+/// Version 1 is the first five fields: codec lists and two booleans, what
+/// the web app and the Android app's web view send. Version 2
+/// (`caps_version: 2`, the native Android app's `ClientCaps`) adds every
+/// decoder with its limits, the screen's dynamic ranges, the Dolby Vision
+/// profiles decoded, and the audio decoded, passed through to a receiver
+/// and the output's channels. Players without `caps_version` play exactly
+/// as before version 2 existed. Version 2 players still send the version 1
+/// fields: `containers` always counts, the codec lists only where the
+/// version 2 fields that replace them are missing.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Caps {
     #[serde(default)]
@@ -39,17 +50,147 @@ pub struct Caps {
     /// or SDR base layer).
     #[serde(default)]
     pub dolby_vision: bool,
+
+    // ---- version 2 ----
+    /// 2 for the fields below; absent: version 1.
+    #[serde(default)]
+    pub caps_version: Option<u32>,
+    /// Every video decoder with its limits. A codec can have several (4K at
+    /// 30 fps and 1080p at 60, say): a stream plays when one takes it.
+    #[serde(default)]
+    pub video: Option<Vec<VideoDecoder>>,
+    /// The dynamic ranges the screen shows as they are (a decoder that feeds
+    /// it included): `"hdr10"`, `"hdr10plus"`, `"hlg"`, `"dolby_vision"`.
+    #[serde(default)]
+    pub hdr_types: Option<Vec<String>>,
+    /// The Dolby Vision profiles decoded, each with its highest level; sent
+    /// only when the screen shows Dolby Vision.
+    #[serde(default)]
+    pub dolby_vision_profiles: Option<Vec<DolbyVisionDecoder>>,
+    /// Audio codecs decoded on the device, by FFmpeg's names.
+    #[serde(default)]
+    pub audio_decode: Option<Vec<String>>,
+    /// Audio codecs sent as they are to a receiver or a TV.
+    #[serde(default)]
+    pub audio_passthrough: Option<Vec<String>>,
+    /// The most channels the audio output takes: 2, 6, 8.
+    #[serde(default)]
+    pub audio_channels: Option<u32>,
+    /// Subtitle codecs the player shows itself, pictures (PGS…) included.
+    #[serde(default)]
+    pub subtitle_codecs: Option<Vec<String>>,
+    /// The player switches a file's audio tracks itself.
+    #[serde(default)]
+    pub audio_track_switching: Option<bool>,
+    #[serde(default)]
+    pub hls: Option<HlsCaps>,
+    #[serde(default)]
+    pub display: Option<DisplayCaps>,
+    #[serde(default)]
+    pub device: Option<DeviceCaps>,
+}
+
+/// One video decoder of a version 2 player. Limits left out aren't known
+/// and aren't checked.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct VideoDecoder {
+    pub codec: String,
+    pub hardware: bool,
+    /// The profiles it decodes, as ffprobe names them: "Main", "Main 10"…
+    pub profiles: Vec<String>,
+    pub max_width: Option<i64>,
+    pub max_height: Option<i64>,
+    pub max_fps: Option<f64>,
+    pub max_bit_depth: Option<i64>,
+    /// Numbered as ffprobe numbers a stream's `level`.
+    pub max_level: Option<i64>,
+}
+
+/// A Dolby Vision profile a version 2 player decodes.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct DolbyVisionDecoder {
+    pub profile: i64,
+    pub max_level: Option<i64>,
+}
+
+/// What a version 2 player takes of HLS.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct HlsCaps {
+    /// Reads multivariant playlists.
+    pub master_playlist: bool,
+    /// Segment formats: "ts", "fmp4".
+    pub segments: Vec<String>,
+}
+
+/// A version 2 player's screen mode.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct DisplayCaps {
+    pub width: i64,
+    pub height: i64,
+    pub refresh_rates: Vec<f64>,
+}
+
+/// A version 2 player's device.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct DeviceCaps {
+    /// "phone", "tablet", "tv" or "unknown".
+    pub form: String,
+    /// "low", "mid" or "high".
+    pub tier: Option<String>,
+    pub fire_tv: bool,
+    pub model: Option<String>,
+}
+
+fn listed(list: &[String], c: &str) -> bool {
+    list.iter().any(|x| x.eq_ignore_ascii_case(c))
 }
 
 impl Caps {
     fn container(&self, c: &str) -> bool {
-        self.containers.iter().any(|x| x.eq_ignore_ascii_case(c))
+        listed(&self.containers, c)
     }
     fn video(&self, c: &str) -> bool {
-        self.video_codecs.iter().any(|x| x.eq_ignore_ascii_case(c))
+        listed(&self.video_codecs, c)
     }
     fn audio(&self, c: &str) -> bool {
-        self.audio_codecs.iter().any(|x| x.eq_ignore_ascii_case(c))
+        listed(&self.audio_codecs, c)
+    }
+
+    /// A version 2 report (`caps_version` 2 or more).
+    pub fn is_v2(&self) -> bool {
+        self.caps_version.is_some_and(|v| v >= 2)
+    }
+
+    /// The player takes this audio codec as it is: decoded, or (version 2)
+    /// passed through to a receiver.
+    fn plays_audio(&self, c: &str) -> bool {
+        if !self.is_v2() || (self.audio_decode.is_none() && self.audio_passthrough.is_none()) {
+            return self.audio(c);
+        }
+        [&self.audio_decode, &self.audio_passthrough].into_iter().flatten().any(|list| listed(list, c))
+    }
+
+    /// The screen shows this dynamic range (version 2 names).
+    fn shows(&self, range: &str) -> bool {
+        self.hdr_types.as_deref().is_some_and(|types| listed(types, range))
+    }
+
+    /// The version 2 player shows these subtitles itself.
+    fn shows_subtitles(&self, codec: &str) -> bool {
+        self.is_v2() && self.subtitle_codecs.as_deref().is_some_and(|list| listed(list, codec))
+    }
+
+    /// A version 2 player that reads multivariant playlists: its HLS
+    /// sessions start at `master.m3u8`, whose `CODECS` can name Dolby
+    /// Vision, so its remuxes keep it (docs/API.md, "Dolby Vision
+    /// remuxes").
+    pub fn master_playlist(&self) -> bool {
+        self.is_v2() && self.hls.as_ref().is_some_and(|hls| hls.master_playlist)
     }
 }
 
@@ -158,6 +299,17 @@ pub const QUALITIES: [(&str, u32, u32); 7] = [
 /// for the same picture), or that resolution's lowest for a file with fewer
 /// bits than any.
 pub fn closest_quality(width: Option<i64>, height: Option<i64>, bitrate: Option<i64>) -> (&'static str, u32, u32) {
+    closest_quality_within(width, height, bitrate, None)
+}
+
+/// [`closest_quality`] for a player whose decoders stop at `most_lines`
+/// (a 1080p TV stick gets 1080p for a 4K file).
+pub fn closest_quality_within(
+    width: Option<i64>,
+    height: Option<i64>,
+    bitrate: Option<i64>,
+    most_lines: Option<u32>,
+) -> (&'static str, u32, u32) {
     let (w, h) = (width.unwrap_or(0), height.unwrap_or(0));
     let lines = if w >= 3800 || h >= 2100 {
         2160
@@ -167,6 +319,10 @@ pub fn closest_quality(width: Option<i64>, height: Option<i64>, bitrate: Option<
         720
     } else {
         480
+    };
+    let lines = match most_lines {
+        Some(most) => [2160, 1080, 720, 480].into_iter().find(|l| *l <= lines && *l <= most).unwrap_or(480),
+        None => lines,
     };
     let cap = bitrate.filter(|b| *b > 0).map(|b| b as f64 * 1.5 / 1000.0);
     let mut tier = QUALITIES.iter().filter(|q| q.2 == lines);
@@ -222,6 +378,297 @@ fn range_problem(v: &MediaStream, caps: &Caps) -> Option<String> {
     Some(format!("{label} is converted to SDR for this screen."))
 }
 
+/// What a version 2 player does with a video stream.
+#[derive(Debug, Default, PartialEq)]
+struct VideoVerdict {
+    /// The file can play as it is, as far as the video goes.
+    direct: bool,
+    /// The stream can be copied into HLS and play right (Dolby Vision
+    /// profile 7 as its HDR10 base layer, say).
+    copy: bool,
+    /// What a copy does with Dolby Vision.
+    dolby_vision: DolbyVisionMode,
+    /// A copy leaves HDR10+ out.
+    strip_hdr10plus: bool,
+    reasons: Vec<String>,
+}
+
+impl VideoVerdict {
+    fn plays() -> Self {
+        VideoVerdict { direct: true, copy: true, ..Default::default() }
+    }
+    fn no(reason: String) -> Self {
+        VideoVerdict { direct: false, copy: false, reasons: vec![reason], ..Default::default() }
+    }
+}
+
+/// Dolby Vision base-layer compatibility ids (ffprobe's
+/// `dv_bl_signal_compatibility_id`).
+const DV_BL_HDR10: i64 = 1;
+const DV_BL_SDR: i64 = 2;
+const DV_BL_HLG: i64 = 4;
+
+/// The version 2 rules for a video stream (docs/API.md, "Version 2"):
+/// - SDR video needs a decoder entry that takes it: codec, profile (Main 10
+///   for 10-bit), size, frame rate and level;
+/// - HDR10 needs `hdr10` on the screen, HDR10+ `hdr10plus` or `hdr10`, HLG
+///   `hlg`; otherwise it is tone-mapped to SDR;
+/// - Dolby Vision plays as it is when the screen shows it and the profile
+///   is listed. Otherwise profiles 8.1 and 8.4 (and 9, 10) play their
+///   HDR10, HLG or SDR base layer by those rules; profile 7, whose
+///   enhancement layer Media3 can't decode, is repackaged so its HDR10 base
+///   layer plays; profile 5, with no base layer, is tone-mapped, never
+///   repackaged (an MPEG-TS remux loses the Dolby Vision signalling, which
+///   leaves its colours wrong).
+///
+/// Players that read multivariant playlists ([`Caps::master_playlist`])
+/// get Dolby Vision kept in remuxes, named in the playlist's `CODECS`:
+/// profile 5 too when the player lists it; profile 7 converted to 8.1 for
+/// a player listing 8 but not 7; and Dolby Vision + HDR10+ streams
+/// repackaged without their HDR10+ for any player that would decode them
+/// as Dolby Vision, never played as they are (androidx/media#1895). Without
+/// a master playlist, those are repackaged as their base layer.
+fn video_v2(v: &MediaStream, caps: &Caps) -> VideoVerdict {
+    let label = v.dynamic_range_label();
+    let to_sdr = || format!("{label} is converted to SDR for this screen.");
+    match v.dynamic_range() {
+        DynamicRange::Sdr => fits(v, caps),
+        DynamicRange::Hdr10 if caps.shows("hdr10") => fits(v, caps),
+        DynamicRange::Hdr10plus if caps.shows("hdr10plus") || caps.shows("hdr10") => fits(v, caps),
+        DynamicRange::Hlg if caps.shows("hlg") => fits(v, caps),
+        DynamicRange::Hdr10 | DynamicRange::Hdr10plus | DynamicRange::Hlg => VideoVerdict::no(to_sdr()),
+        DynamicRange::DolbyVision => {
+            let profile = v.dv_profile.unwrap_or(0);
+            let decoder_of = |profile: i64| {
+                caps.dolby_vision_profiles
+                    .iter()
+                    .flatten()
+                    .find(|d| d.profile == profile)
+                    .filter(|_| caps.shows("dolby_vision"))
+            };
+            let takes_level = |d: &DolbyVisionDecoder| match (v.dv_level, d.max_level) {
+                (Some(level), Some(max)) => level <= max,
+                _ => true,
+            };
+            let decoder = decoder_of(profile);
+            let level_ok = decoder.is_none_or(takes_level);
+            // Remuxes keep Dolby Vision only where a master playlist names it.
+            let signal = caps.master_playlist() && v.codec == "hevc";
+            let hybrid = v.hdr10plus == Some(true);
+            // What plays when Dolby Vision itself doesn't: the base layer.
+            let compat = v.dv_bl_compat.or((profile == 8).then_some(DV_BL_HDR10));
+            let base = match (profile, compat) {
+                (5, _) => VideoVerdict::no(format!("{label} needs a Dolby Vision screen: it's converted to SDR.")),
+                (7, _) if caps.shows("hdr10") => {
+                    let mut base = fits(v, caps);
+                    if base.copy {
+                        base.direct = false;
+                        base.reasons.push(format!("{label} plays as its HDR10 base layer, repackaged."));
+                    }
+                    base
+                }
+                (7, _) => VideoVerdict::no(to_sdr()),
+                (_, Some(DV_BL_HDR10)) if caps.shows("hdr10") => fits(v, caps),
+                (_, Some(DV_BL_HLG)) if caps.shows("hlg") => fits(v, caps),
+                (_, Some(DV_BL_SDR)) => fits(v, caps),
+                (_, Some(DV_BL_HDR10 | DV_BL_HLG)) => VideoVerdict::no(to_sdr()),
+                _ => VideoVerdict::no(format!("{label} needs a Dolby Vision screen: it's converted to SDR.")),
+            };
+            match decoder {
+                // Dolby Vision decoders show black, or freeze, when HDR10+
+                // comes with it (androidx/media#1895): never as it is.
+                Some(_) if level_ok && hybrid => {
+                    if signal {
+                        return VideoVerdict {
+                            direct: false,
+                            copy: true,
+                            dolby_vision: DolbyVisionMode::Signal,
+                            strip_hdr10plus: true,
+                            reasons: vec![format!(
+                                "{label} plays without its HDR10+ metadata, which this player's Dolby Vision \
+                                 decoder can't take with it."
+                            )],
+                        };
+                    }
+                    let mut base = base;
+                    if base.direct {
+                        base.direct = false;
+                        base.reasons.push(format!(
+                            "{label} with HDR10+ plays as its base layer, repackaged: this player's Dolby Vision \
+                             decoder can't take both."
+                        ));
+                    }
+                    base
+                }
+                Some(_) if level_ok => VideoVerdict {
+                    direct: true,
+                    copy: base.copy || signal,
+                    dolby_vision: if signal { DolbyVisionMode::Signal } else { DolbyVisionMode::Copy },
+                    ..Default::default()
+                },
+                Some(d) if !base.direct => {
+                    let mut base = base;
+                    let max = d.max_level.unwrap_or_default();
+                    base.reasons.insert(
+                        0,
+                        format!("Dolby Vision level {} is above this player's {max}.", v.dv_level.unwrap_or_default()),
+                    );
+                    base
+                }
+                // Profile 7 for a player that decodes 8.1: converted while
+                // repackaged (rather than its base layer alone).
+                _ if profile == 7 && signal && decoder_of(8).is_some_and(takes_level) => VideoVerdict {
+                    direct: false,
+                    copy: true,
+                    dolby_vision: DolbyVisionMode::To81,
+                    strip_hdr10plus: hybrid,
+                    reasons: vec![format!("{label} is converted to profile 8.1 for this player.")],
+                },
+                _ => base,
+            }
+        }
+    }
+}
+
+/// Whether one of a version 2 player's decoders takes the stream: any one
+/// entry of its codec, each limit it gives checked.
+fn fits(v: &MediaStream, caps: &Caps) -> VideoVerdict {
+    let Some(decoders) = caps.video.as_deref() else {
+        // A version 2 report without decoders: its codec list.
+        return if caps.video(&v.codec) {
+            VideoVerdict::plays()
+        } else {
+            VideoVerdict::no(format!("This player can't play {} video.", codec_label(&v.codec)))
+        };
+    };
+    let entries: Vec<&VideoDecoder> = decoders.iter().filter(|d| d.codec.eq_ignore_ascii_case(&v.codec)).collect();
+    if entries.is_empty() {
+        return VideoVerdict::no(format!("This player can't play {} video.", codec_label(&v.codec)));
+    }
+    let depth = bit_depth(v);
+    if entries.iter().any(|d| takes(d, v, depth)) {
+        return VideoVerdict::plays();
+    }
+    let mut what = match (v.width, v.height) {
+        (Some(w), Some(h)) => format!("{w}×{h}"),
+        _ => String::new(),
+    };
+    if let Some(fps) = v.frame_rate {
+        what.push_str(&format!(" at {} fps", trim_fps(fps)));
+    }
+    what.push_str(&format!(", {depth}-bit"));
+    if let Some(profile) = &v.profile {
+        what.push_str(&format!(" ({profile})"));
+    }
+    VideoVerdict::no(format!("This player can't play {} {}.", codec_label(&v.codec), what.trim_start()))
+}
+
+/// A frame rate as people write it: 23.976, 25, 59.94.
+fn trim_fps(fps: f64) -> String {
+    let s = format!("{fps:.3}");
+    s.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+/// Profiles both ffprobe and Android name the same way: a stream's profile
+/// missing from a decoder's list refuses it only when it is one of these.
+const KNOWN_PROFILES: &[&str] = &[
+    "main",
+    "main 10",
+    "main still picture",
+    "rext",
+    "baseline",
+    "constrained baseline",
+    "high",
+    "high 10",
+    "high 4:2:2",
+    "high 4:4:4 predictive",
+    "profile 0",
+    "profile 1",
+    "profile 2",
+    "profile 3",
+    "professional",
+];
+
+fn takes(d: &VideoDecoder, v: &MediaStream, depth: i64) -> bool {
+    if let (Some(w), Some(h), Some(max_w), Some(max_h)) = (v.width, v.height, d.max_width, d.max_height) {
+        // A decoder that takes 1920×1080 takes 1080×1920 too.
+        if !(w <= max_w && h <= max_h) && !(h <= max_w && w <= max_h) {
+            return false;
+        }
+    }
+    if let (Some(fps), Some(max)) = (v.frame_rate, d.max_fps) {
+        if fps > max + 0.01 {
+            return false;
+        }
+    }
+    if d.max_bit_depth.is_some_and(|max| depth > max) {
+        return false;
+    }
+    if let (Some(level), Some(max)) = (v.level, d.max_level) {
+        if level > 0 && level > max {
+            return false;
+        }
+    }
+    if !d.profiles.is_empty() {
+        let has = |p: &str| d.profiles.iter().any(|x| x.eq_ignore_ascii_case(p));
+        if let Some(profile) = v.profile.as_deref() {
+            if !has(profile) && KNOWN_PROFILES.contains(&profile.to_ascii_lowercase().as_str()) {
+                return false;
+            }
+        }
+        // 10-bit HEVC needs Main 10 even when ffprobe gave no profile.
+        if v.codec == "hevc" && depth >= 10 && !has("Main 10") && !has("Rext") {
+            return false;
+        }
+    }
+    true
+}
+
+/// The stream's bit depth, else from its pixel format ("yuv420p10le") or
+/// profile ("Main 10").
+fn bit_depth(v: &MediaStream) -> i64 {
+    if let Some(depth) = v.bit_depth {
+        return depth;
+    }
+    let from_pix_fmt = v.pix_fmt.as_deref().and_then(|f| {
+        let f = f.trim_end_matches("le").trim_end_matches("be");
+        let digits = &f[f.trim_end_matches(|c: char| c.is_ascii_digit()).len()..];
+        digits.parse::<i64>().ok().filter(|d| matches!(d, 10 | 12))
+    });
+    from_pix_fmt.unwrap_or(if v.profile.as_deref().is_some_and(|p| p.contains("10")) { 10 } else { 8 })
+}
+
+/// The codec and channels audio is converted to: E-AC-3 5.1 for a
+/// multichannel output that takes E-AC-3 (decoded or passed through), else
+/// AC-3 5.1, else AAC with as many channels as the output takes (up to
+/// 5.1). Stereo sources, stereo outputs and players that don't say how many
+/// channels they have (the web) get stereo AAC.
+fn converted_audio(caps: &Caps, source: &MediaStream) -> (AudioCodec, u32) {
+    let output = caps.audio_channels.unwrap_or(2).max(1);
+    let surround = output >= 6 && source.channels.unwrap_or(2) > 2;
+    if surround && caps.plays_audio("eac3") {
+        (AudioCodec::Eac3, 6)
+    } else if surround && caps.plays_audio("ac3") {
+        (AudioCodec::Ac3, 6)
+    } else {
+        // The transcoder never makes more channels than the source has.
+        (AudioCodec::Aac, output.clamp(2, 6))
+    }
+}
+
+/// The most lines a version 2 player's H.264 decoders take (what
+/// transcodes are made in), when it says.
+fn h264_lines(caps: &Caps) -> Option<u32> {
+    caps.video
+        .iter()
+        .flatten()
+        .filter(|d| d.codec.eq_ignore_ascii_case("h264"))
+        .map(|d| d.max_height.zip(d.max_width).map(|(h, w)| h.min(w)))
+        .collect::<Option<Vec<i64>>>()
+        .and_then(|lines| lines.into_iter().max())
+        .and_then(|l| u32::try_from(l).ok())
+}
+
 /// Video codecs HLS can carry in MPEG-TS segments, which players unpack
 /// (hls.js turns them into fragmented MP4 for the browser).
 fn hls_copyable(codec: &str) -> bool {
@@ -261,19 +708,41 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     let default_audio = info.default_audio();
     let audio = req.audio_index.and_then(|i| info.stream(i).filter(|s| s.kind == StreamKind::Audio)).or(default_audio);
 
+    let v2 = caps.is_v2();
     let burn_stream =
         req.subtitle_index.and_then(|i| streams.iter().find(|s| s.index == i && s.kind == StreamKind::Subtitle));
-    let burn = burn_stream.filter(|s| !s.text_based.unwrap_or(true) && video.is_some());
+    let pictures = burn_stream.filter(|s| !s.text_based.unwrap_or(true) && video.is_some());
+    // Picture subtitles a version 2 player shows itself need drawing only
+    // when the file doesn't play as it is (HLS segments carry no subtitles).
+    let player_draws = pictures.is_some_and(|s| !s.external && caps.shows_subtitles(&s.codec));
+    let mut burn = pictures.filter(|_| !player_draws);
+    let burn_reason =
+        |s: &MediaStream| format!("{} subtitles are pictures, drawn onto the video.", codec_label(&s.codec));
     if let Some(s) = burn {
-        reasons.push(format!("{} subtitles are pictures, drawn onto the video.", codec_label(&s.codec)));
+        reasons.push(burn_reason(s));
     }
 
     let container_ok = caps.container(container);
     if !container_ok {
         reasons.push(format!("This player can't open {} files.", container.to_uppercase()));
     }
+    // Version 2: whether the video plays as it is, and whether it plays
+    // copied into HLS (a profile 7 base layer, say), which version 1 takes
+    // to be the same.
+    let mut video_copy_ok = true;
+    // What a copy does with Dolby Vision and HDR10+ (version 2).
+    let mut copy_dolby_vision = DolbyVisionMode::Copy;
+    let mut copy_strip_hdr10plus = false;
     let video_ok = match video {
         None => true,
+        Some(v) if v2 => {
+            let verdict = video_v2(v, caps);
+            reasons.extend(verdict.reasons);
+            video_copy_ok = verdict.copy;
+            copy_dolby_vision = verdict.dolby_vision;
+            copy_strip_hdr10plus = verdict.strip_hdr10plus;
+            verdict.direct
+        }
         Some(v) => {
             let mut ok = true;
             if !caps.video(&v.codec) {
@@ -288,12 +757,22 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
                 reasons.push("Browsers can't play 10-bit H.264.".into());
                 ok = false;
             }
+            video_copy_ok = ok;
             ok
         }
     };
+    // Played or copied as they are, its frames stutter: about one in five is
+    // shown out of turn or dropped.
+    let video_ok = if video.is_some_and(|v| v.decode_order_times) {
+        reasons.push("This file's frames carry the wrong times; converting the video puts them right.".into());
+        video_copy_ok = false;
+        false
+    } else {
+        video_ok
+    };
     let audio_ok = match audio {
         None => true,
-        Some(a) if caps.audio(&a.codec) => true,
+        Some(a) if caps.plays_audio(&a.codec) => true,
         Some(a) => {
             reasons.push(format!("This player can't play {} audio.", codec_label(&a.codec)));
             false
@@ -302,7 +781,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     let audio_is_default = match (audio, default_audio) {
         (Some(a), Some(d)) => a.index == d.index,
         _ => true,
-    };
+    } || (v2 && caps.audio_track_switching == Some(true));
     if !audio_is_default {
         reasons.push("This player plays only a file's main audio track.".into());
     }
@@ -313,7 +792,16 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     }
 
     let audio_index = audio.map(|a| a.index);
-    let direct_ok = container_ok && video_ok && audio_ok && audio_is_default && bitrate_ok && size_ok && burn.is_none();
+    let mut direct_ok =
+        container_ok && video_ok && audio_ok && audio_is_default && bitrate_ok && size_ok && burn.is_none();
+    if player_draws && !direct_ok && req.mode != PlaybackMode::Direct {
+        // Not as it is after all: the subtitles are drawn onto the video.
+        burn = pictures;
+        if let Some(s) = burn {
+            reasons.insert(0, burn_reason(s));
+        }
+        direct_ok = false;
+    }
     let direct = match req.mode {
         PlaybackMode::Auto => direct_ok,
         // The user knows better (e.g. a browser that plays more than it
@@ -344,17 +832,24 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         // Whatever the client plays as it is goes through untouched, like
         // Plex's Direct Stream: only the audio or the container changes.
         let copy = req.mode != PlaybackMode::Transcode
-            && video_ok
+            && video_copy_ok
             && hls_copyable(&v.codec)
             && v.interlaced != Some(true)
             && bitrate_ok
             && size_ok
             && burn.is_none();
         // The original, converted: at the closest quality players offer.
+        // A version 2 player's H.264 decoders bound what it is converted to.
+        let most_lines = if v2 && !copy { h264_lines(caps) } else { None };
         let (max_height, max_bitrate) = if copy || req.max_bitrate.is_some() || req.max_height.is_some() {
-            (req.max_height, req.max_bitrate)
+            let max_height = match (req.max_height, most_lines) {
+                (Some(asked), Some(most)) => Some(asked.min(most)),
+                (None, Some(most)) if v.height.is_some_and(|h| h > i64::from(most)) => Some(most),
+                (asked, _) => asked,
+            };
+            (max_height, req.max_bitrate)
         } else {
-            let (id, kbps, lines) = closest_quality(v.width, v.height, file.bitrate);
+            let (id, kbps, lines) = closest_quality_within(v.width, v.height, file.bitrate, most_lines);
             quality = Some(id);
             (Some(lines), Some(kbps))
         };
@@ -365,14 +860,24 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             max_width: None,
             max_height,
             max_bitrate_kbps: max_bitrate.map(|b| b.saturating_sub(192).max(500)),
+            dolby_vision: if copy { copy_dolby_vision } else { DolbyVisionMode::Copy },
+            strip_hdr10plus: copy && copy_strip_hdr10plus,
         }
     });
     let audio_req = audio.map(|a| {
-        let copy = matches!(a.codec.as_str(), "aac" | "mp3") && caps.audio(&a.codec);
+        // Version 1 players copy what browsers play from MPEG-TS; version 2
+        // players everything MPEG-TS carries that they play.
+        let copy = if v2 {
+            matches!(a.codec.as_str(), "aac" | "mp3" | "ac3" | "eac3") && caps.plays_audio(&a.codec)
+        } else {
+            matches!(a.codec.as_str(), "aac" | "mp3") && caps.audio(&a.codec)
+        };
+        let (codec, channels) = converted_audio(caps, a);
         AudioRequest {
             stream_index: Some(a.index),
             mode: if copy { AudioMode::Copy } else { AudioMode::Transcode },
-            channels: Some(2),
+            codec,
+            channels: Some(channels),
             bitrate_kbps: None,
         }
     });
@@ -822,6 +1327,11 @@ pub struct TranscodeInfo {
     /// `gpu` (decode → filters → encode on one GPU), `hybrid`, `cpu` or `copy`.
     pub pipeline: Option<String>,
     pub tonemap: Option<String>,
+    /// What a remux does with Dolby Vision: `kept` (named in the master
+    /// playlist), `converted to 8.1` (profile 7); `None` otherwise.
+    pub dolby_vision: Option<&'static str>,
+    /// A remux leaves out the stream's HDR10+ metadata.
+    pub hdr10plus_stripped: bool,
     pub subtitle_burn: bool,
     pub speed: Option<f64>,
     pub fps: Option<f64>,
@@ -926,6 +1436,12 @@ pub fn transcode_info(job: &JobStatus) -> TranscodeInfo {
         decoder: video.and_then(|v| v.decoder.clone()),
         pipeline: video.and_then(|v| v.pipeline.clone()),
         tonemap: video.and_then(|v| v.tonemap).map(|t| t.as_str().to_owned()),
+        dolby_vision: video.and_then(|v| v.dolby_vision).and_then(|m| match m {
+            DolbyVisionMode::Copy => None,
+            DolbyVisionMode::Signal => Some("kept"),
+            DolbyVisionMode::To81 => Some("converted to 8.1"),
+        }),
+        hdr10plus_stripped: video.is_some_and(|v| v.hdr10plus_stripped),
         subtitle_burn: video.is_some_and(|v| v.subtitle_burn.is_some()),
         speed: process.and_then(|p| p.speed),
         fps: process.and_then(|p| p.fps),
@@ -1070,6 +1586,7 @@ mod tests {
             audio_codecs: vec!["aac".into(), "mp3".into(), "opus".into()],
             hdr: false,
             dolby_vision: false,
+            ..Default::default()
         }
     }
 
@@ -1094,6 +1611,33 @@ mod tests {
         let d = decide(&file("mp4", 5_000_000), Some(&i), &i.streams, &request());
         assert_eq!(d.method, Method::Direct);
         assert!(d.reasons.is_empty());
+    }
+
+    #[test]
+    fn frames_with_the_wrong_times_are_converted() {
+        // A 1080p Blu-ray rip in MP4: HEVC with B-frames, every frame timed
+        // as it is decoded.
+        let mut i = info("hevc", &["aac"], DynamicRange::Sdr);
+        i.streams[0].height = Some(804);
+        i.streams[0].decode_order_times = true;
+        let mut f = file("mp4", 2_231_717);
+        f.height = Some(804);
+        let mut req = request();
+        req.caps.video_codecs.push("hevc".into());
+        let d = decide(&f, Some(&i), &i.streams, &req);
+        assert_eq!(d.method, Method::Transcode, "neither played as it is nor copied");
+        assert_eq!(d.video.as_ref().unwrap().mode, VideoMode::Transcode);
+        assert_eq!(d.quality, Some("8m"), "at its own size");
+        assert!(d.reasons.iter().any(|r| r.contains("wrong times")), "{:?}", d.reasons);
+        req.mode = PlaybackMode::Remux;
+        assert_eq!(decide(&f, Some(&i), &i.streams, &req).method, Method::Transcode, "a copy keeps the times");
+        req.mode = PlaybackMode::Direct;
+        assert_eq!(decide(&f, Some(&i), &i.streams, &req).method, Method::Direct, "the player asked for it");
+        // The apps' players trust the times too.
+        req.mode = PlaybackMode::Auto;
+        req.caps.caps_version = Some(2);
+        let d = decide(&f, Some(&i), &i.streams, &req);
+        assert_eq!((d.method, d.video.unwrap().mode), (Method::Transcode, VideoMode::Transcode));
     }
 
     #[test]
@@ -1554,6 +2098,29 @@ mod tests {
         drop(third);
         assert!(sessions.reserve_transcode(2).is_some());
         assert!(sessions.reserve_transcode(1).is_none(), "a lower limit counts the live session");
+    }
+
+    #[test]
+    fn bit_depths_and_frame_rates_for_version_2_decisions() {
+        let stream = |bit_depth, pix_fmt: Option<&str>, profile: Option<&str>| MediaStream {
+            bit_depth,
+            pix_fmt: pix_fmt.map(str::to_owned),
+            profile: profile.map(str::to_owned),
+            ..Default::default()
+        };
+        assert_eq!(bit_depth(&stream(Some(12), Some("yuv420p10le"), None)), 12, "the stream says");
+        assert_eq!(bit_depth(&stream(None, Some("yuv420p10le"), None)), 10);
+        assert_eq!(bit_depth(&stream(None, Some("p010le"), None)), 10);
+        assert_eq!(bit_depth(&stream(None, Some("yuv444p12be"), None)), 12);
+        assert_eq!(bit_depth(&stream(None, Some("yuv420p"), Some("Main 10"))), 10);
+        assert_eq!(bit_depth(&stream(None, Some("yuv420p"), Some("High"))), 8);
+        assert_eq!(bit_depth(&stream(None, None, None)), 8);
+        assert_eq!(trim_fps(24_000.0 / 1001.0), "23.976");
+        assert_eq!(trim_fps(25.0), "25");
+        assert_eq!(trim_fps(59.94), "59.94");
+        assert_eq!(closest_quality_within(Some(3840), Some(2160), Some(57_000_000), Some(1080)), ("20m", 20_000, 1080));
+        assert_eq!(closest_quality_within(Some(1280), Some(720), None, Some(1080)).2, 720, "never above the file");
+        assert_eq!(closest_quality_within(Some(3840), Some(2160), None, Some(600)).2, 480);
     }
 
     #[test]

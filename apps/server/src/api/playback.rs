@@ -53,9 +53,17 @@ fn label(row: &ItemRow) -> String {
 pub async fn start(
     State(state): State<AppState>,
     user: AuthUser,
-    Json(req): Json<PlaybackRequest>,
+    Json(mut req): Json<PlaybackRequest>,
 ) -> ApiResult<Json<PlaybackInfo>> {
     let row = item_or_404(&state, user.id, req.item_id).await?;
+    // A transcoder older than master playlists can't name Dolby Vision
+    // (or anything else) in one: the player gets what older servers gave.
+    let master_ok = state.transcoder.info().is_some_and(|info| info.capabilities.hls_master_playlist);
+    if !master_ok {
+        if let Some(hls) = req.caps.hls.as_mut() {
+            hls.master_playlist = false;
+        }
+    }
     if !matches!(row.kind.as_str(), "movie" | "episode" | "track" | "extra") {
         return Err(AppError::bad_request("this item cannot be played directly"));
     }
@@ -168,10 +176,13 @@ pub async fn start(
     session.app_grant = user.app.as_ref().map(|app| app.grant_id);
     let session = state.sessions.insert_transcode(session, slot);
     state.events.send(ServerEvent::SessionsChanged);
+    // Players that read multivariant playlists learn the codecs (Dolby
+    // Vision, above all) before the first segment.
+    let playlist = if req.caps.master_playlist() { "master.m3u8" } else { "index.m3u8" };
     Ok(Json(PlaybackInfo {
         session_id: session.id.clone(),
         method,
-        url: format!("/api/playback/{}/index.m3u8", session.id),
+        url: format!("/api/playback/{}/{playlist}", session.id),
         hls: true,
         file_id: file.id,
         duration_ms: created.duration_ms,
@@ -303,11 +314,11 @@ pub async fn hls_file(
     }
     let job = session.job_id().ok_or_else(|| AppError::not_found("playback session expired"))?;
 
-    if file == "index.m3u8" {
-        let playlist = match state.transcoder.playlist(&job).await {
+    if file == "index.m3u8" || file == "master.m3u8" {
+        let playlist = match state.transcoder.playlist_file(&job, &file).await {
             Err(err) if err.is_job_gone() => {
                 let job = replacement_job(&state, &user, &session, &job).await?;
-                state.transcoder.playlist(&job).await?
+                state.transcoder.playlist_file(&job, &file).await?
             }
             other => other?,
         };

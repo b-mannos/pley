@@ -503,6 +503,7 @@ fn hls_caps() -> Caps {
         audio_codecs: vec!["aac".into(), "mp3".into()],
         hdr: false,
         dolby_vision: false,
+        ..Default::default()
     }
 }
 

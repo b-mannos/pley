@@ -374,10 +374,17 @@ impl Transcoder {
         self.get_json("/v1/status", Duration::from_secs(10)).await
     }
 
+    /// The job's media playlist (`index.m3u8`).
     pub async fn playlist(&self, job_id: &str) -> TranscoderResult<String> {
+        self.playlist_file(job_id, "index.m3u8").await
+    }
+
+    /// The job's `index.m3u8`, or its `master.m3u8` (multivariant, naming
+    /// the codecs; transcoders with `hls_master_playlist`).
+    pub async fn playlist_file(&self, job_id: &str, name: &str) -> TranscoderResult<String> {
         let base = self.base()?;
         let resp = self
-            .authed(self.http.get(format!("{base}/v1/jobs/{job_id}/index.m3u8")))
+            .authed(self.http.get(format!("{base}/v1/jobs/{job_id}/{name}")))
             .timeout(Duration::from_secs(30))
             .send()
             .await?;

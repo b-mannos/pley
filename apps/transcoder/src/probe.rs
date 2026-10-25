@@ -20,6 +20,13 @@ use crate::plan::MAX_DURATION_MS;
 use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg};
 
 const CACHE_ENTRIES: usize = 4096;
+/// Packets read from the start of an MP4 or MOV file with its streams, for
+/// the times they carry (see [`MediaStream::decode_order_times`]).
+const TIMED_PACKETS: &str = "%+#128";
+/// Fewest packets of a stream that tell anything about its times.
+const MIN_TIMED_PACKETS: usize = 8;
+/// Packets of a suspect stream decoded to see the order its frames come out in.
+const ORDERED_PACKETS: &str = "%+#48";
 
 pub struct Prober {
     ff: Arc<Ffmpeg>,
@@ -87,8 +94,13 @@ impl Prober {
             bail!("ffprobe is not available");
         }
         let mut cmd = self.ff.probe_command();
-        cmd.args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams", "-show_chapters"])
-            .args(MEDIA_INPUT_OPTIONS)
+        cmd.args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams", "-show_chapters"]);
+        // Other containers time frames as they are shown (Matroska) or both
+        // ways (MPEG-TS): only MP4 and MOV files have their packets read.
+        if crate::mp4::sniff(&head(path).await) {
+            cmd.args(["-show_entries", "packet=stream_index,pts,dts", "-read_intervals", TIMED_PACKETS]);
+        }
+        cmd.args(MEDIA_INPUT_OPTIONS)
             .arg(input_arg(path))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -101,8 +113,109 @@ impl Prober {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(Rejected(format!("ffprobe failed: {}", stderr.trim())).into());
         }
-        parse_ffprobe_json(&output.stdout, path).map_err(|e| Rejected(format!("{e:#}")).into())
+        let mut info = parse_ffprobe_json(&output.stdout, path).map_err(|e| Rejected(format!("{e:#}")))?;
+        // The packets' times only point at it: the frames, decoded, tell.
+        for stream in info.streams.iter_mut().filter(|s| s.decode_order_times) {
+            stream.decode_order_times = self.frames_out_of_order(path, stream.index).await;
+            if stream.decode_order_times {
+                tracing::info!(
+                    "{}: the frames of stream {} carry their decode times, not the times they're shown",
+                    path.display(),
+                    stream.index
+                );
+            }
+        }
+        self.find_hdr10plus(path, &mut info).await;
+        Ok(info)
     }
+
+    /// Whether a Dolby Vision stream carries HDR10+ too: only its frames
+    /// say, so the first few are decoded (a fraction of a second). Left
+    /// unknown when that fails.
+    async fn find_hdr10plus(&self, path: &Path, info: &mut MediaInfo) {
+        let Some(video) = info
+            .streams
+            .iter_mut()
+            .find(|s| s.kind == StreamKind::Video && s.dynamic_range == Some(DynamicRange::DolbyVision))
+        else {
+            return;
+        };
+        if video.hdr10plus.is_some() {
+            return;
+        }
+        let mut cmd = self.ff.probe_command();
+        cmd.args(["-v", "error", "-select_streams"])
+            .arg(video.index.to_string())
+            .args(["-read_intervals", "%+#12", "-show_entries", "frame=key_frame:frame_side_data=side_data_type"])
+            .args(["-of", "json"])
+            .args(MEDIA_INPUT_OPTIONS)
+            .arg(input_arg(path))
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let Ok(child) = cmd.spawn() else { return };
+        match tokio::time::timeout(Duration::from_secs(30), child.wait_with_output()).await {
+            Ok(Ok(output)) if output.status.success() => video.hdr10plus = hdr10plus_in_frames(&output.stdout),
+            _ => tracing::debug!("{}: frames not read for HDR10+", path.display()),
+        }
+    }
+
+    /// Whether the first frames of `stream`, decoded, come out with times
+    /// going back (see [`MediaStream::decode_order_times`]). Unknown when
+    /// ffprobe can't tell: no.
+    async fn frames_out_of_order(&self, path: &Path, stream: i64) -> bool {
+        let mut cmd = self.ff.probe_command();
+        cmd.args(["-v", "error", "-select_streams"])
+            .arg(stream.to_string())
+            .args(["-read_intervals", ORDERED_PACKETS, "-show_entries", "frame=pts", "-of", "csv=p=0"])
+            .args(MEDIA_INPUT_OPTIONS)
+            .arg(input_arg(path))
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let output = match cmd.spawn() {
+            Ok(child) => tokio::time::timeout(Duration::from_secs(60), child.wait_with_output()).await,
+            Err(err) => {
+                tracing::debug!("{}: ffprobe for the frame order did not start: {err}", path.display());
+                return false;
+            }
+        };
+        let Ok(Ok(output)) = output else {
+            tracing::debug!("{}: ffprobe for the frame order failed or timed out", path.display());
+            return false;
+        };
+        let times: Vec<i64> =
+            String::from_utf8_lossy(&output.stdout).lines().filter_map(|l| l.trim().parse().ok()).collect();
+        steps_back(&times) > 1
+    }
+}
+
+/// How many times are earlier than the one before them.
+fn steps_back(times: &[i64]) -> usize {
+    times.windows(2).filter(|w| w[1] < w[0]).count()
+}
+
+/// The first bytes of `path`, to tell its format by (none when unreadable).
+async fn head(path: &Path) -> Vec<u8> {
+    use tokio::io::AsyncReadExt;
+    let mut head = Vec::with_capacity(12);
+    if let Ok(file) = tokio::fs::File::open(path).await {
+        let _ = file.take(12).read_to_end(&mut head).await;
+    }
+    head
+}
+
+/// Whether frames ffprobe showed (`-show_entries frame_side_data`) carry
+/// HDR10+ metadata; `None` without frames.
+pub fn hdr10plus_in_frames(json: &[u8]) -> Option<bool> {
+    let value: serde_json::Value = serde_json::from_slice(json).ok()?;
+    let frames = value.get("frames")?.as_array().filter(|f| !f.is_empty())?;
+    Some(frames.iter().any(|frame| {
+        frame.get("side_data_list").and_then(|l| l.as_array()).is_some_and(|list| {
+            list.iter()
+                .any(|sd| sd.get("side_data_type").and_then(|t| t.as_str()).is_some_and(|t| t.contains("2094-40")))
+        })
+    }))
 }
 
 /// ffprobe ran and could not read the file, as opposed to a timeout or a
@@ -125,6 +238,16 @@ struct RawOutput {
     format: Option<RawFormat>,
     #[serde(default)]
     chapters: Vec<RawChapter>,
+    #[serde(default)]
+    packets: Vec<RawPacket>,
+}
+
+/// A packet from the start of the file. Times are `"N/A"` when unknown.
+#[derive(Deserialize)]
+struct RawPacket {
+    stream_index: i64,
+    pts: Option<serde_json::Value>,
+    dts: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -233,25 +356,35 @@ pub fn parse_ffprobe_json(json: &[u8], path: &Path) -> anyhow::Result<MediaInfo>
                 stream.level = s.level.filter(|l| *l > 0);
                 stream.interlaced = s.field_order.as_deref().map(|f| !matches!(f, "progressive" | "unknown"));
                 stream.has_b_frames = s.has_b_frames.map(|n| n > 0);
+                // Suspected only: the prober decodes a few frames to know.
+                stream.decode_order_times =
+                    stream.has_b_frames == Some(true) && decode_times_only(&raw.packets, s.index);
                 stream.color_transfer = s.color_transfer.clone();
                 stream.color_primaries = s.color_primaries.clone();
                 stream.color_space = s.color_space.clone();
                 let dovi = s.side_data_list.iter().find(|sd| {
                     sd.get("side_data_type").and_then(|t| t.as_str()).is_some_and(|t| t.contains("DOVI configuration"))
                 });
+                let hdr10plus = s
+                    .side_data_list
+                    .iter()
+                    .any(|sd| sd.get("side_data_type").and_then(|t| t.as_str()).is_some_and(|t| t.contains("2094-40")));
                 let range = if let Some(dovi) = dovi {
                     let get = |k: &str| dovi.get(k).and_then(|v| v.as_i64());
                     stream.dv_profile = get("dv_profile");
                     stream.dv_level = get("dv_level");
                     stream.dv_bl_compat = get("dv_bl_signal_compatibility_id");
+                    // Usually only frames say (see `Prober::find_hdr10plus`).
+                    stream.hdr10plus = hdr10plus.then_some(true);
                     DynamicRange::DolbyVision
                 } else {
                     match s.color_transfer.as_deref() {
                         Some("smpte2084") => {
-                            let hdr10plus = s.side_data_list.iter().any(|sd| {
-                                sd.get("side_data_type").and_then(|t| t.as_str()).is_some_and(|t| t.contains("2094-40"))
-                            });
-                            if hdr10plus { DynamicRange::Hdr10plus } else { DynamicRange::Hdr10 }
+                            if hdr10plus {
+                                DynamicRange::Hdr10plus
+                            } else {
+                                DynamicRange::Hdr10
+                            }
                         }
                         Some("arib-std-b67") => DynamicRange::Hlg,
                         // Untagged transfer but 10+ bit BT.2020: in practice this is PQ (HDR10).
@@ -328,6 +461,21 @@ pub fn parse_ffprobe_json(json: &[u8], path: &Path) -> anyhow::Result<MediaInfo>
         chapters,
         has_cover_art,
     })
+}
+
+/// Whether every packet of `stream` read is shown at the time it is decoded
+/// at, and enough were read to say so. A stream that reorders frames and
+/// has them right shows some later than it decodes them.
+fn decode_times_only(packets: &[RawPacket], stream: i64) -> bool {
+    let time = |t: &Option<serde_json::Value>| t.as_ref().and_then(serde_json::Value::as_i64);
+    let mut read = 0;
+    for packet in packets.iter().filter(|p| p.stream_index == stream) {
+        match (time(&packet.pts), time(&packet.dts)) {
+            (Some(pts), Some(dts)) if pts == dts => read += 1,
+            _ => return false,
+        }
+    }
+    read >= MIN_TIMED_PACKETS
 }
 
 fn lowercase_tags(tags: &HashMap<String, String>) -> HashMap<String, String> {
@@ -559,6 +707,29 @@ mod tests {
     }
 
     #[test]
+    fn hdr10_plus_shows_in_frames() {
+        let frames = |types: &[&str]| {
+            let list: Vec<String> = types.iter().map(|t| format!(r#"{{"side_data_type":"{t}"}}"#)).collect();
+            format!(r#"{{"frames":[{{"key_frame":1}},{{"key_frame":0,"side_data_list":[{}]}}]}}"#, list.join(","))
+        };
+        let hybrid = frames(&["Dolby Vision RPU Data", "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"]);
+        assert_eq!(hdr10plus_in_frames(hybrid.as_bytes()), Some(true));
+        assert_eq!(hdr10plus_in_frames(frames(&["Dolby Vision RPU Data"]).as_bytes()), Some(false));
+        assert_eq!(hdr10plus_in_frames(br#"{"frames":[]}"#), None, "no frames read: unknown");
+        assert_eq!(hdr10plus_in_frames(b"not json"), None);
+        // Said by the stream itself (rare): no need to look at frames.
+        let json = r#"{"streams":[{"index":0,"codec_type":"video","codec_name":"hevc","pix_fmt":"yuv420p10le",
+            "color_transfer":"smpte2084","side_data_list":[{"side_data_type":"DOVI configuration record","dv_profile":8,
+            "dv_level":6,"dv_bl_signal_compatibility_id":1},{"side_data_type":"HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}]}],
+            "format":{"format_name":"matroska","duration":"10"}}"#;
+        let info = parse_ffprobe_json(json.as_bytes(), Path::new("a.mkv")).unwrap();
+        let video = info.video().unwrap();
+        assert_eq!((video.dynamic_range, video.hdr10plus), (Some(DynamicRange::DolbyVision), Some(true)));
+        let info = parse_ffprobe_json(SAMPLE.as_bytes(), Path::new("/m/Movie.mkv")).unwrap();
+        assert_eq!(info.video().unwrap().hdr10plus, None, "not known before frames are read");
+    }
+
+    #[test]
     fn odd_ffprobe_output() {
         let json = r#"{
           "streams": [
@@ -649,5 +820,43 @@ mod tests {
             "unknown names pass through"
         );
         assert_eq!(normalize_container(None, Path::new("a.mkv"), &[]), None);
+    }
+
+    #[test]
+    fn frames_shown_at_their_decode_times_are_suspected() {
+        // Video and audio packets in turn; with `shown_later`, every fifth
+        // video frame is shown after the four decoded behind it.
+        let json = |b_frames: i64, shown_later: bool, packets: i64| {
+            let packets: Vec<String> = (0..packets)
+                .flat_map(|n| {
+                    let dts = n * 1001;
+                    let pts = if shown_later && n % 5 == 0 { dts + 4004 } else { dts };
+                    [
+                        format!(r#"{{"stream_index":0,"pts":{pts},"dts":{dts}}}"#),
+                        format!(r#"{{"stream_index":1,"pts":{n},"dts":{n}}}"#),
+                    ]
+                })
+                .collect();
+            format!(
+                r#"{{"streams":[{{"index":0,"codec_type":"video","codec_name":"hevc","has_b_frames":{b_frames}}},
+                    {{"index":1,"codec_type":"audio","codec_name":"aac"}}],
+                  "format":{{"format_name":"mov,mp4","duration":"10"}},"packets":[{}]}}"#,
+                packets.join(",")
+            )
+        };
+        let suspected = |json: String| {
+            parse_ffprobe_json(json.as_bytes(), Path::new("a.mp4")).unwrap().video().unwrap().decode_order_times
+        };
+        assert!(suspected(json(2, false, 40)), "B-frames, every one shown when it is decoded");
+        assert!(!suspected(json(2, true, 40)), "B-frames with times of their own");
+        assert!(!suspected(json(0, false, 40)), "no B-frames: decode order is display order");
+        assert!(!suspected(json(2, false, 4)), "too few packets to tell");
+        let unknown = json(2, false, 40).replacen(r#""pts":0,"dts":0"#, r#""pts":"N/A","dts":0"#, 1);
+        assert!(!suspected(unknown), "a packet without a time says nothing");
+        assert!(!suspected(SAMPLE.into()), "nothing read, nothing suspected");
+
+        // What decoding such a file gives: frames shown before frames decoded earlier.
+        assert_eq!(steps_back(&[50050, 100099, 0, 150149, 300298, 350347, 250248]), 2);
+        assert_eq!(steps_back(&[0, 512, 1024, 1536]), 0);
     }
 }

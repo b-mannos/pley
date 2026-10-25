@@ -15,11 +15,12 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use pley_transcoder_api::{
-    AudioMode, AudioPlan, DynamicRange, EncoderInfo, HwAccel, JobRequest, MediaInfo, MediaStream, StreamKind,
-    Tonemapper, VideoCodec, VideoMode, VideoPlan, decode_key, is_text_subtitle_codec,
+    AudioCodec, AudioMode, AudioPlan, DolbyVisionMode, DynamicRange, EncoderInfo, HwAccel, JobRequest, MediaInfo,
+    MediaStream, StreamKind, Tonemapper, VideoCodec, VideoMode, VideoPlan, decode_key, is_text_subtitle_codec,
 };
 
 use crate::ffmpeg::{Ffmpeg, VAAPI_DEVICE};
+use crate::tsedit::Edits;
 use crate::util::{MEDIA_INPUT_OPTIONS, input_arg, secs};
 
 pub const DEFAULT_SEGMENT_SECONDS: f64 = 4.0;
@@ -104,6 +105,11 @@ pub struct VideoOut {
     pub deinterlace: bool,
     pub preset: String,
     pub pipeline: Pipeline,
+    /// What a remux of a Dolby Vision HEVC stream does with it (`None`:
+    /// transcoded, or no Dolby Vision).
+    pub dolby_vision: Option<DolbyVisionMode>,
+    /// A remux of HEVC leaves out its HDR10+ metadata.
+    pub strip_hdr10plus: bool,
 }
 
 /// The encoder used by fully-GPU Vulkan pipelines.
@@ -115,6 +121,8 @@ pub fn vulkan_encoder() -> EncoderInfo {
 pub struct AudioOut {
     pub stream_index: i64,
     pub copy: bool,
+    /// The codec when converting.
+    pub codec: AudioCodec,
     pub channels: u32,
     pub bitrate_kbps: u32,
     pub resample: bool,
@@ -203,6 +211,11 @@ impl Plan {
                     warnings.push("keyframe index not ready yet: transcoding instead of remuxing".into());
                 }
                 if copy {
+                    let dv_hevc = src.dynamic_range() == DynamicRange::DolbyVision && src.codec == "hevc";
+                    let dolby_vision = dv_hevc.then_some(match vreq.dolby_vision {
+                        DolbyVisionMode::To81 if src.dv_profile != Some(7) => DolbyVisionMode::Signal,
+                        mode => mode,
+                    });
                     Some(VideoOut {
                         stream_index: src.index,
                         copy: true,
@@ -219,6 +232,8 @@ impl Plan {
                         deinterlace: false,
                         preset: String::new(),
                         pipeline: Pipeline::Software,
+                        dolby_vision,
+                        strip_hdr10plus: vreq.strip_hdr10plus && src.codec == "hevc",
                     })
                 } else {
                     let (width, height) = fit(src_width, src_height, vreq.max_width, vreq.max_height);
@@ -297,6 +312,8 @@ impl Plan {
                             .filter(|p| is_x264_preset(p) || p == AUTO)
                             .unwrap_or_else(|| "veryfast".into()),
                         encoder: Some(encoder),
+                        dolby_vision: None,
+                        strip_hdr10plus: false,
                     })
                 }
             }
@@ -315,15 +332,28 @@ impl Plan {
             (Some(areq), Some(src)) => {
                 let copy_ok = matches!(src.codec.as_str(), "aac" | "mp3" | "ac3" | "eac3");
                 let copy = areq.mode == AudioMode::Copy && copy_ok;
+                let codec = areq.codec;
                 if areq.mode == AudioMode::Copy && !copy_ok {
-                    warnings.push(format!("{} audio cannot be copied into HLS, transcoding to AAC", src.codec));
+                    warnings.push(format!(
+                        "{} audio cannot be copied into HLS, transcoding to {}",
+                        src.codec,
+                        codec_name(codec)
+                    ));
                 }
                 let src_channels = src.channels.unwrap_or(2).max(1) as u32;
-                let channels = areq.channels.unwrap_or(2).clamp(1, 8).min(src_channels);
-                let bitrate =
-                    areq.bitrate_kbps.unwrap_or(if channels <= 2 { 192 } else { 64 * channels }).clamp(64, 640);
+                // AC-3 and E-AC-3 (as Dolby makes it, and FFmpeg's encoders)
+                // stop at 5.1; AAC goes to 7.1.
+                let most = if codec == AudioCodec::Aac { 8 } else { 6 };
+                let channels = areq.channels.unwrap_or(2).clamp(1, most).min(src_channels);
+                let default_bitrate = match codec {
+                    _ if channels <= 2 => 192,
+                    AudioCodec::Aac => 64 * channels,
+                    AudioCodec::Ac3 | AudioCodec::Eac3 => 640,
+                };
+                let bitrate = areq.bitrate_kbps.unwrap_or(default_bitrate).clamp(64, 640);
+                // FFmpeg's AC-3 encoders take 32, 44.1 and 48 kHz only.
                 let resample = !matches!(src.sample_rate, Some(44_100) | Some(48_000));
-                Some(AudioOut { stream_index: src.index, copy, channels, bitrate_kbps: bitrate, resample })
+                Some(AudioOut { stream_index: src.index, copy, codec, channels, bitrate_kbps: bitrate, resample })
             }
             (Some(_), None) if video.is_none() => return Err("file has no audio or video stream".into()),
             _ => None,
@@ -405,7 +435,17 @@ impl Plan {
             ),
             bitrate_kbps: (!v.copy).then_some(v.bitrate_kbps),
             subtitle_burn: self.burn.as_ref().map(|b| b.label().to_owned()),
+            dolby_vision: v.dolby_vision,
+            hdr10plus_stripped: v.strip_hdr10plus,
         })
+    }
+
+    /// What finished segments need done to their video by the transcoder
+    /// itself (see [`crate::tsedit`]), when anything.
+    pub fn segment_edits(&self) -> Option<Edits> {
+        let v = self.video.as_ref().filter(|v| v.copy)?;
+        let edits = Edits { to_81: v.dolby_vision == Some(DolbyVisionMode::To81), strip_hdr10plus: v.strip_hdr10plus };
+        edits.any().then_some(edits)
     }
 
     pub fn audio_plan(&self, media: &MediaInfo) -> Option<AudioPlan> {
@@ -414,7 +454,7 @@ impl Plan {
         Some(AudioPlan {
             mode: if a.copy { AudioMode::Copy } else { AudioMode::Transcode },
             codec_in: src.map(|s| s.codec.clone()).unwrap_or_default(),
-            codec_out: if a.copy { src.map(|s| s.codec.clone()).unwrap_or_default() } else { "aac".into() },
+            codec_out: if a.copy { src.map(|s| s.codec.clone()).unwrap_or_default() } else { a.codec.as_str().into() },
             channels_in: src.and_then(|s| s.channels),
             channels_out: Some(if a.copy { src.and_then(|s| s.channels).unwrap_or(2) } else { a.channels as i64 }),
             bitrate_kbps: (!a.copy).then_some(a.bitrate_kbps),
@@ -546,7 +586,7 @@ impl Plan {
                 } else {
                     a.push_all([
                         "-c:a",
-                        "aac",
+                        au.codec.as_str(),
                         "-ac",
                         &au.channels.to_string(),
                         "-b:a",
@@ -889,6 +929,15 @@ fn media_video<'a>(media: &'a MediaInfo, req: &JobRequest) -> Option<&'a MediaSt
     match wanted {
         Some(i) => media.stream(i).filter(|s| s.kind == StreamKind::Video),
         None => media.video(),
+    }
+}
+
+/// A codec as the transcoder's warnings name it.
+fn codec_name(codec: AudioCodec) -> &'static str {
+    match codec {
+        AudioCodec::Aac => "AAC",
+        AudioCodec::Ac3 => "AC-3",
+        AudioCodec::Eac3 => "E-AC-3",
     }
 }
 
@@ -1618,5 +1667,142 @@ mod tests {
         let args = args_string(&plan, 0, 3);
         assert!(args.contains("-vn"));
         assert!(args.contains("-c:a aac -ac 2 -b:a 192k -ar 48000"));
+    }
+
+    /// `media` with its audio replaced by one track of `codec`.
+    fn with_audio(codec: &str, channels: i64, sample_rate: i64) -> MediaInfo {
+        let mut m = media(DynamicRange::Sdr, None);
+        let a = &mut m.streams[1];
+        (a.codec, a.channels, a.sample_rate) = (codec.into(), Some(channels), Some(sample_rate));
+        m
+    }
+
+    fn audio_args(codec: AudioCodec, channels: Option<u32>, source: &MediaInfo) -> (Plan, String) {
+        let ff = ffmpeg_with(vec![x264()], vec![]);
+        let mut req = request();
+        req.audio = Some(AudioRequest { codec, channels, ..Default::default() });
+        let plan = Plan::build(&req, source, &ff, None).unwrap();
+        let args = args_string(&plan, 0, 2);
+        (plan, args)
+    }
+
+    #[test]
+    fn audio_is_converted_to_e_ac_3_or_ac_3_in_5_1() {
+        let truehd = with_audio("truehd", 8, 48_000);
+        let (plan, args) = audio_args(AudioCodec::Eac3, Some(6), &truehd);
+        assert!(args.contains("-map 0:1 -c:a eac3 -ac 6 -b:a 640k"), "{args}");
+        assert!(!args.contains("-ar 48000"), "already 48 kHz");
+        let out = plan.audio_plan(&truehd).unwrap();
+        assert_eq!((out.codec_out.as_str(), out.channels_out, out.bitrate_kbps), ("eac3", Some(6), Some(640)));
+
+        // DTS at 96 kHz: AC-3 takes 48 kHz at most.
+        let dts = with_audio("dts", 6, 96_000);
+        let (_, args) = audio_args(AudioCodec::Ac3, Some(6), &dts);
+        assert!(args.contains("-c:a ac3 -ac 6 -b:a 640k -ar 48000"), "{args}");
+
+        // 7.1 asked for: the AC-3 family stops at 5.1, AAC doesn't.
+        let (_, args) = audio_args(AudioCodec::Eac3, Some(8), &truehd);
+        assert!(args.contains("-c:a eac3 -ac 6 -b:a 640k"), "{args}");
+        let (_, args) = audio_args(AudioCodec::Aac, Some(8), &truehd);
+        assert!(args.contains("-c:a aac -ac 8 -b:a 512k"), "{args}");
+
+        // Never more channels than the source; stereo is 192 kbit/s.
+        let stereo = with_audio("flac", 2, 44_100);
+        let (_, args) = audio_args(AudioCodec::Eac3, Some(6), &stereo);
+        assert!(args.contains("-c:a eac3 -ac 2 -b:a 192k"), "{args}");
+
+        // Copies stay copies, and the default is still stereo AAC.
+        let ff = ffmpeg_with(vec![x264()], vec![]);
+        let mut req = request();
+        req.audio = Some(AudioRequest { mode: AudioMode::Copy, codec: AudioCodec::Eac3, ..Default::default() });
+        let plan = Plan::build(&req, &with_audio("ac3", 6, 48_000), &ff, None).unwrap();
+        assert!(args_string(&plan, 0, 2).contains("-c:a copy"));
+        let plan = Plan::build(&req, &truehd, &ff, None).unwrap();
+        assert_eq!(plan.warnings, ["truehd audio cannot be copied into HLS, transcoding to E-AC-3"]);
+        let (_, args) = audio_args(AudioCodec::default(), None, &truehd);
+        assert!(args.contains("-c:a aac -ac 2 -b:a 192k"), "{args}");
+    }
+
+    /// One stream's fields as ffprobe reports them: `codec_name=eac3`, ….
+    fn probe_stream(file: &Path, stream: &str, entries: &str) -> std::collections::HashMap<String, String> {
+        let out = std::process::Command::new("ffprobe")
+            .args(["-v", "error", "-select_streams", stream, "-show_entries"])
+            .arg(format!("stream={entries}"))
+            .args(["-of", "default=noprint_wrappers=1"])
+            .arg(file)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|l| l.split_once('=').map(|(k, v)| (k.to_owned(), v.to_owned())))
+            .collect()
+    }
+
+    #[test]
+    fn surround_sources_become_e_ac_3_5_1_segments() {
+        if !real_ffmpeg() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        // Local samples made here: H.264 with a keyframe every second, and
+        // 5.1 audio as AC-3 or DTS.
+        for (name, codec) in [("ac3.mkv", "ac3"), ("dts.mkv", "dca")] {
+            let input = dir.path().join(name);
+            let made = std::process::Command::new("ffmpeg")
+                .args(["-hide_banner", "-loglevel", "error", "-y"])
+                .args(["-f", "lavfi", "-i", "testsrc2=s=320x240:r=24:d=6"])
+                .args(["-f", "lavfi", "-i", "sine=f=440:r=48000:d=6"])
+                .args(["-filter_complex", "[1:a]pan=5.1(side)|FL=c0|FR=c0|FC=c0|LFE=c0|SL=c0|SR=c0[a]"])
+                .args(["-map", "0:v", "-map", "[a]"])
+                .args(["-c:v", "libx264", "-preset", "ultrafast", "-g", "24", "-sc_threshold", "0"])
+                .args(["-c:a", codec, "-strict", "-2"])
+                .arg(&input)
+                .status()
+                .unwrap();
+            assert!(made.success(), "{name}");
+            let probed = std::process::Command::new("ffprobe")
+                .args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"])
+                .arg(&input)
+                .output()
+                .unwrap();
+            let m = crate::probe::parse_ffprobe_json(&probed.stdout, &input).unwrap();
+            let source = m.default_audio().unwrap();
+            assert_eq!((source.codec.as_str(), source.channels), (if codec == "dca" { "dts" } else { codec }, Some(6)));
+
+            // A remux for a TV with a 5.1 output: the video copied, the audio
+            // converted to E-AC-3 5.1.
+            let ff = ffmpeg_with(vec![x264()], vec![]);
+            let mut req = request();
+            req.video = Some(VideoRequest { mode: VideoMode::Copy, ..Default::default() });
+            req.audio = Some(AudioRequest { codec: AudioCodec::Eac3, channels: Some(6), ..Default::default() });
+            req.segment_seconds = Some(2.0);
+            req.options.throttle = false;
+            let kf: Vec<i64> = (0..6).map(|s| s * 1_000).collect();
+            let plan = Plan::build(&req, &m, &ff, Some(&kf)).unwrap();
+            let out = dir.path().join(name.replace(".mkv", ""));
+            std::fs::create_dir(&out).unwrap();
+            let ctx = ArgsContext {
+                input: &input,
+                encoder: None,
+                relative_split_times: true,
+                preset: None,
+                shader_cache: None,
+            };
+            let args = plan.ffmpeg_args(&ctx, 0, plan.segment_count());
+            let ran = std::process::Command::new("ffmpeg").args(&args).current_dir(&out).output().unwrap();
+            assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+
+            for n in 0..plan.segment_count() {
+                let segment = out.join(format!("{n}.ts"));
+                let audio = probe_stream(&segment, "a", "codec_name,channels,channel_layout,sample_rate,bit_rate");
+                assert_eq!(audio.get("codec_name").map(String::as_str), Some("eac3"), "{name} {n}: {audio:?}");
+                assert_eq!(audio.get("channels").map(String::as_str), Some("6"), "{name} {n}: {audio:?}");
+                assert!(audio.get("channel_layout").is_some_and(|l| l.starts_with("5.1")), "{audio:?}");
+                assert_eq!(audio.get("sample_rate").map(String::as_str), Some("48000"), "{name} {n}");
+                assert_eq!(audio.get("bit_rate").map(String::as_str), Some("640000"), "{name} {n}");
+                let video = probe_stream(&segment, "v", "codec_name");
+                assert_eq!(video.get("codec_name").map(String::as_str), Some("h264"), "copied");
+            }
+        }
     }
 }

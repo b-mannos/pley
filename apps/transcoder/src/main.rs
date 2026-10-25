@@ -8,10 +8,12 @@
 
 mod adaptive;
 mod cache;
+mod dovi;
 mod error;
 mod extract;
 mod ffmpeg;
 mod fingerprint;
+mod hls;
 mod http;
 mod job;
 mod keyframes;
@@ -21,7 +23,10 @@ mod mp4;
 mod plan;
 mod prefetch;
 mod probe;
+#[cfg(test)]
+mod remux_tests;
 mod trickplay;
+mod tsedit;
 mod util;
 mod webvtt;
 
@@ -236,7 +241,8 @@ async fn run(args: Args) -> anyhow::Result<()> {
         license: "LicenseRef-Restricted".into(),
         source: None,
         started_at_ms: util::now_ms(),
-        capabilities: ff.caps.clone(),
+        // Not FFmpeg's: this program's own (master playlists, segment edits).
+        capabilities: pley_transcoder_api::Capabilities { hls_master_playlist: true, ..ff.caps.clone() },
         limits,
     };
     let state = Arc::new(http::AppState::new(
