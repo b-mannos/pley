@@ -1,0 +1,148 @@
+{
+    "containers": [
+        "mkv",
+        "mp4",
+        "m4v",
+        "mov",
+        "webm",
+        "ts",
+        "avi",
+        "flv",
+        "mpg",
+        "mpeg",
+        "3gp",
+        "mp3",
+        "flac",
+        "m4a",
+        "m4b",
+        "aac",
+        "ogg",
+        "oga",
+        "opus",
+        "wav",
+        "mka"
+    ],
+    "video_codecs": [
+        "h264",
+        "hevc",
+        "vp9"
+    ],
+    "audio_codecs": [
+        "aac",
+        "mp3",
+        "opus",
+        "vorbis",
+        "flac",
+        "ac3",
+        "eac3",
+        "pcm_s16le",
+        "pcm_s24le",
+        "dts"
+    ],
+    "hdr": true,
+    "dolby_vision": false,
+    "caps_version": 2,
+    "video": [
+        {
+            "codec": "h264",
+            "hardware": true,
+            "profiles": [
+                "Constrained Baseline",
+                "Baseline",
+                "Main",
+                "High"
+            ],
+            "max_width": 1920,
+            "max_height": 1080,
+            "max_fps": 60.0,
+            "max_bit_depth": 8,
+            "max_level": 42
+        },
+        {
+            "codec": "hevc",
+            "hardware": true,
+            "profiles": [
+                "Main",
+                "Main 10"
+            ],
+            "max_width": 1920,
+            "max_height": 1080,
+            "max_fps": 60.0,
+            "max_bit_depth": 10,
+            "max_level": 123
+        },
+        {
+            "codec": "vp9",
+            "hardware": true,
+            "profiles": [
+                "Profile 0",
+                "Profile 2"
+            ],
+            "max_width": 1920,
+            "max_height": 1080,
+            "max_fps": 60.0,
+            "max_bit_depth": 10,
+            "max_level": 41
+        }
+    ],
+    "hdr_types": [
+        "hdr10",
+        "hlg"
+    ],
+    "dolby_vision_profiles": [],
+    "audio_decode": [
+        "aac",
+        "mp3",
+        "opus",
+        "vorbis",
+        "flac",
+        "ac3",
+        "eac3",
+        "pcm_s16le",
+        "pcm_s24le"
+    ],
+    "audio_passthrough": [
+        "ac3",
+        "eac3",
+        "dts"
+    ],
+    "audio_channels": 8,
+    "subtitle_codecs": [
+        "subrip",
+        "ass",
+        "ssa",
+        "webvtt",
+        "mov_text",
+        "hdmv_pgs_subtitle",
+        "dvd_subtitle",
+        "dvb_subtitle"
+    ],
+    "audio_track_switching": true,
+    "hls": {
+        "master_playlist": true,
+        "segments": [
+            "ts",
+            "fmp4"
+        ]
+    },
+    "display": {
+        "width": 1920,
+        "height": 1080,
+        "refresh_rates": [
+            23.976,
+            24.0,
+            25.0,
+            29.97,
+            30.0,
+            50.0,
+            59.94,
+            60.0
+        ]
+    },
+    "device": {
+        "form": "tv",
+        "tier": "low",
+        "fire_tv": true,
+        "model": "AFTSS"
+    }
+}
