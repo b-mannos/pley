@@ -237,6 +237,8 @@ interface MediaStream {
   dv_profile?: number;              // Dolby Vision profile (5, 7, 8, …)
   dv_bl_compat?: number;            // DV base-layer compatibility id (1 = HDR10, 4 = HLG, 0 = none)
   decode_order_times?: boolean;     // frames timed as they're decoded, not as they're shown: the video is converted
+  dv_level?: number;                // Dolby Vision level
+  hdr10plus?: boolean;              // Dolby Vision streams: HDR10+ in the first frames too (absent: not looked for)
   profile?: string;
   // audio
   channels?: number;
@@ -269,7 +271,8 @@ interface SubtitleTrack {
 interface PlaybackInfo {
   session_id: string;
   method: "direct" | "remux" | "transcode";
-  url: string;                      // direct: file url; otherwise HLS playlist url
+  url: string;                      // direct: file url; otherwise HLS playlist url (master.m3u8 for
+                                    // version 2 players with hls.master_playlist, else index.m3u8)
   hls: boolean;
   file_id: Id;
   duration_ms: number;
@@ -1020,6 +1023,7 @@ queue.
 | POST | `/api/playback` | see below | `PlaybackInfo` |
 | DELETE | `/api/playback/{session_id}` | – | `204` (stops any transcode) |
 | GET | `/api/playback/{session_id}/index.m3u8` | – | HLS VOD playlist (`application/vnd.apple.mpegurl`) |
+| GET | `/api/playback/{session_id}/master.m3u8` | – | multivariant playlist naming the codecs (see [Dolby Vision remuxes](#dolby-vision-remuxes)), one variant: `index.m3u8` |
 | GET | `/api/playback/{session_id}/{n}.ts` | – | MPEG-TS segment |
 | GET | `/api/files/{id}/stream` | – | raw file, supports `Range` (direct play) |
 | GET | `/api/files/{id}/subtitles/{index}.vtt` | – | WebVTT (text subtitles; extracted/converted on demand and cached). Any embedded track may come partial: one still being read out of its file comes with the cues found so far and `X-Pley-Complete: 0` (not cached), so check that header and ask again for the rest. A Matroska file's track usually comes whole at once, read through its Cues when they list it. Requests for a subtitle file being converted share that conversion, which goes on (to the cache) when they stop waiting; one that failed is tried again on the next request |
@@ -1129,10 +1133,15 @@ always counts, and `video_codecs` or `audio_codecs` stand in only when
     SDR base layer when the screen shows it, by the rules above;
   - 7 is **repackaged** when the screen shows HDR10: the video is copied
     into HLS and plays as its HDR10 base layer (Media3 has no profile 7
-    fallback). Tone-mapped otherwise;
-  - 5, which has no base layer, is tone-mapped, never repackaged: MPEG-TS
-    segments lose the Dolby Vision signalling, which leaves its colours
-    wrong.
+    fallback), or is converted to 8.1 for a Dolby Vision player that reads
+    master playlists (below). Tone-mapped otherwise;
+  - 5, which has no base layer, is tone-mapped, never repackaged without a
+    master playlist: MPEG-TS segments lose the Dolby Vision signalling,
+    which leaves its colours wrong.
+
+  Players that read master playlists keep Dolby Vision in remuxes, and
+  Dolby Vision + HDR10+ streams change: see
+  [Dolby Vision remuxes](#dolby-vision-remuxes).
 - **Audio** plays as it is when its codec is in `audio_decode` or
   `audio_passthrough`. With `audio_track_switching`, another track than the
   file's default no longer needs HLS: the player switches to it itself.
@@ -1150,10 +1159,69 @@ always counts, and `video_codecs` or `audio_codecs` stand in only when
   - else AAC with as many channels as the output takes, up to 5.1 (stereo
     for stereo outputs; a stereo source stays stereo).
 
-Not yet: Dolby Vision kept in remuxes (a multivariant playlist with
-`CODECS`), profile 7 converted to 8.1 for Dolby Vision players, HDR10+
-removed from Dolby Vision streams that carry both, and HDR (HEVC Main 10)
-transcodes for HDR screens.
+Not yet: HDR (HEVC Main 10) transcodes for HDR screens.
+
+### Dolby Vision remuxes
+
+MPEG-TS segments carry a Dolby Vision stream's metadata (its RPUs) but
+can't say that they do: Media3's `TsExtractor` sees plain HEVC, which plays
+as its base layer at best and with wrong colours for profile 5. A
+multivariant playlist can say it. A version 2 player sending
+`hls: { master_playlist: true }` gets `PlaybackInfo.url` pointing to
+`master.m3u8` for every HLS session, remux or transcode, with one variant:
+
+```
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-INDEPENDENT-SEGMENTS
+#EXT-X-STREAM-INF:BANDWIDTH=85293600,AVERAGE-BANDWIDTH=43050000,CODECS="hvc1.2.4.L153.B0,ec-3",SUPPLEMENTAL-CODECS="dvh1.08.06/db1p",RESOLUTION=3840x2160,FRAME-RATE=23.976,VIDEO-RANGE=PQ
+index.m3u8
+```
+
+- `CODECS` per RFC 6381: `avc1.PPCCLL`, `hvc1.P.C.LLLL.B0`, `mp4a.40.2`
+  (AAC), `mp4a.40.34` (MP3), `ac-3`, `ec-3`. Dolby Vision kept in the
+  remux is named: profile 5 as `dvh1.05.LL` alone (no base layer anything
+  else decodes), profile 8 as the HEVC codec with
+  `SUPPLEMENTAL-CODECS="dvh1.08.LL/db1p"` (8.1, `VIDEO-RANGE=PQ`), `/db4h`
+  (8.4, `HLG`) or `/db2g` (8.2, `SDR`), which Media3 turns into a
+  `video/dolby-vision` track; profile 7 as `dvh1.07.LL`.
+- `VIDEO-RANGE` is `SDR`, `PQ` or `HLG`; `FRAME-RATE` has three decimals;
+  `BANDWIDTH` is twice the copied video's average (discs peak about there),
+  or the encoder's rate. TS segments are the same as `index.m3u8`'s.
+- Without `master_playlist` (and for every version 1 player, the web
+  player and Plex clients) the session starts at `index.m3u8` as before,
+  and remuxes name nothing.
+
+For those players, the Dolby Vision rules of version 2 become:
+
+- A **listed profile** (with a Dolby Vision screen, at or above the
+  stream's level) still plays as it is; when the file needs repackaging
+  anyway (the container, the audio, another track), the video is copied
+  with Dolby Vision kept and named, **profile 5 included** (before, it was
+  tone-mapped).
+- **Profile 7** for a player that lists 8 but not 7 (every Fire TV, Google
+  TV devices) is **converted to 8.1** while repackaged: the enhancement
+  layer is left out and each RPU rewritten (no residual, no enhancement
+  layer resampling, P8.1 colour coefficients; a full enhancement layer's
+  curves become no-ops), as `dovi_tool`'s mode 2 does. The reason says
+  "Dolby Vision P7 is converted to profile 8.1 for this player." Profile 8
+  must take the stream's level; otherwise the HDR10 base layer, as before.
+- **Dolby Vision + HDR10+** (`hdr10plus: true` on the stream, found when the
+  file is analysed) never plays as it is for a player that would decode it
+  as Dolby Vision, on any model: Dolby Vision decoders show black or freeze
+  with HDR10+ in the stream (androidx/media#1895). It is repackaged with the
+  HDR10+ messages taken out and Dolby Vision kept ("…plays without its
+  HDR10+ metadata…"); without a master playlist, as its base layer with
+  HDR10+ ("…plays as its base layer, repackaged…"). Players without Dolby
+  Vision play these files as before. Files analysed by older servers don't
+  say: they play as before until a forced scan of their library analyses
+  them again.
+- A server whose transcoder predates master playlists (its capabilities
+  lack `hls_master_playlist`) decides as if no player read them.
+
+The player's details (`GET /api/playback/{session}`) say what became of
+it: `transcode.dolby_vision` (`"kept"`, `"converted to 8.1"`) and
+`transcode.hdr10plus_stripped`.
 
 ## Intro and credits detection
 
@@ -1261,6 +1329,8 @@ interface TranscodeInfo {
   decoder: string | null;       // "cuda", "vulkan", "cpu", …
   pipeline: string | null;      // "gpu" (zero-copy), "hybrid", "cpu" or "copy"
   tonemap: string | null;       // "libplacebo" | "opencl" | "zscale" when HDR/DV is tone-mapped to SDR
+  dolby_vision: string | null;  // remuxes: "kept" (named in master.m3u8), "converted to 8.1" (profile 7)
+  hdr10plus_stripped: boolean;  // the remux leaves out HDR10+ (Dolby Vision + HDR10+ streams)
   subtitle_burn: boolean;
   speed: number | null;         // ffmpeg speed multiplier (2.5 = 2.5× realtime)
   fps: number | null;
