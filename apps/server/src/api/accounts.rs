@@ -8,7 +8,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::auth::{confirm_password, login_response};
+use super::auth::{Me, confirm_password, login_response, me};
 use crate::accounts::{self, NO_PASSWORD, UserDto};
 use crate::auth::{
     AdminUser, AuthUser, ClientIp, CurrentToken, hash_password, hash_token, validate_password, validate_username,
@@ -431,9 +431,7 @@ pub async fn update_me(
     }
     for (column, value) in [("audio_language", body.audio_language), ("subtitle_language", body.subtitle_language)] {
         let Some(value) = value else { continue };
-        if value.as_deref().is_some_and(|code| !streams::valid_language(code)) {
-            return Err(AppError::bad_request(format!("{column} must be an ISO 639 code such as \"eng\"")));
-        }
+        check_language(column, value.as_deref())?;
         sqlx::query(&format!("UPDATE users SET {column} = ? WHERE id = ?"))
             .bind(value)
             .bind(user.id)
@@ -448,6 +446,58 @@ pub async fn update_me(
             .await?;
     }
     Ok(Json(accounts::user(&state.db, user.id).await?.ok_or(AppError::Unauthorized)?))
+}
+
+/// A track default's language: an ISO 639 code, or `None`.
+fn check_language(field: &str, code: Option<&str>) -> ApiResult<()> {
+    match code {
+        Some(code) if !streams::valid_language(code) => {
+            Err(AppError::bad_request(format!("{field} must be an ISO 639 code such as \"eng\"")))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// The tracks titles start with, all three at once: a field left out takes
+/// its default, as `null` does for the languages.
+#[derive(Deserialize)]
+pub struct TrackDefaults {
+    /// ISO 639 code; `null`: the file's default track.
+    #[serde(default)]
+    audio_language: Option<String>,
+    /// ISO 639 code; `null`: the audio language.
+    #[serde(default)]
+    subtitle_language: Option<String>,
+    /// `off`, `forced` (the default), `foreign` or `always`.
+    #[serde(default)]
+    subtitle_mode: Option<String>,
+}
+
+/// `PUT /api/me/track-defaults`: the profile's audio and subtitle defaults,
+/// for apps allowed `play` as for the web (which also has `PATCH /api/me`).
+/// The answer is the profile as `GET /api/auth/me` shows it.
+pub async fn set_track_defaults(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Json(body): Json<TrackDefaults>,
+) -> ApiResult<Json<Me>> {
+    check_language("audio_language", body.audio_language.as_deref())?;
+    check_language("subtitle_language", body.subtitle_language.as_deref())?;
+    let mode = match body.subtitle_mode.as_deref() {
+        None => SubtitleMode::default(),
+        Some(name) => [SubtitleMode::Off, SubtitleMode::Forced, SubtitleMode::Foreign, SubtitleMode::Always]
+            .into_iter()
+            .find(|mode| mode.as_str() == name)
+            .ok_or_else(|| AppError::bad_request("subtitle_mode is off, forced, foreign or always"))?,
+    };
+    sqlx::query("UPDATE users SET audio_language = ?, subtitle_language = ?, subtitle_mode = ? WHERE id = ?")
+        .bind(body.audio_language)
+        .bind(body.subtitle_language)
+        .bind(mode.as_str())
+        .bind(user.id)
+        .execute(&state.db.write)
+        .await?;
+    me(State(state), user).await
 }
 
 #[derive(Deserialize)]

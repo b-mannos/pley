@@ -173,6 +173,9 @@ pub const APP_ROUTES: &[(&str, &str, Need)] = &[
     ("PUT", "/api/items/{id}/streams", Need::Scope(Play)),
     ("PUT", "/api/items/{id}/rating", Need::Scope(Play)),
     ("DELETE", "/api/history/{id}", Need::Scope(Play)),
+    // the profile's track choices for every title (its name, picture and
+    // sign-in stay in the web app)
+    ("PUT", "/api/me/track-defaults", Need::Scope(Play)),
     // playlists
     ("POST", "/api/playlists", Need::Scope(Playlists)),
     ("PATCH", "/api/playlists/{id}", Need::Scope(Playlists)),
@@ -226,7 +229,7 @@ mod tests {
     fn every_app_route_is_on_a_real_path() {
         // Whether each names a route of api/mod.rs is checked by
         // tests/app_tokens.rs, which reads it.
-        assert_eq!(APP_ROUTES.len(), 48);
+        assert_eq!(APP_ROUTES.len(), 49);
         for (i, (method, path, _)) in APP_ROUTES.iter().enumerate() {
             assert!(["GET", "POST", "PUT", "PATCH", "DELETE"].contains(method), "{method} {path}");
             assert!(path.starts_with("/api/") && !path.ends_with('/'), "{path}");
@@ -240,6 +243,8 @@ mod tests {
         assert_eq!(required(&Method::POST, "/api/playlists"), Some(Need::Scope(Scope::Playlists)));
         assert_eq!(required(&Method::GET, "/api/auth/me"), Some(Need::AnyApp));
         assert_eq!(required(&Method::GET, "/api/oauth/profiles"), Some(Need::Scope(Scope::Profiles)));
+        assert_eq!(required(&Method::PUT, "/api/me/track-defaults"), Some(Need::Scope(Scope::Play)));
+        assert_eq!(required(&Method::PATCH, "/api/me"), None, "name and picture stay in the web app");
         assert_eq!(required(&Method::POST, "/api/auth/switch"), None, "the web's switch makes sessions");
         assert_eq!(required(&Method::POST, "/api/libraries"), None, "creating libraries is administration");
         assert_eq!(required(&Method::GET, "/api/settings"), None);

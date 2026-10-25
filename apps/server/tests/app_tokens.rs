@@ -251,6 +251,10 @@ fn every_route_is_classified() {
     // The household's profiles, for apps allowed to switch between them.
     assert!(routes.contains(&("GET".into(), "/api/oauth/profiles".into())));
     assert_eq!(app_route("GET", "/api/oauth/profiles"), Some(Need::Scope(pley::auth::scopes::Scope::Profiles)));
+    // The profile's track defaults are part of playing; its name and
+    // picture (PATCH /api/me) stay the web's.
+    assert_eq!(app_route("PUT", "/api/me/track-defaults"), Some(Need::Scope(pley::auth::scopes::Scope::Play)));
+    assert!(FIRST_PARTY.contains(&("PATCH", "/api/me")));
     // TVs: anyone starts with a code, which only pley's own page takes.
     assert!(PUBLIC.contains(&("POST", "/api/oauth/device")));
     assert!(COOKIE_ONLY.contains(&("POST", "/api/oauth/device/verify")));

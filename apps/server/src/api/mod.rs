@@ -46,6 +46,7 @@ pub fn router(state: AppState) -> Router {
         .route("/me/two-step/recovery-codes", post(two_step::recovery_codes))
         .route("/me", patch(accounts::update_me))
         .route("/me/pin", put(accounts::set_my_pin))
+        .route("/me/track-defaults", put(accounts::set_track_defaults))
         .route(
             "/me/avatar",
             put(accounts::upload_avatar).delete(accounts::delete_avatar).layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
