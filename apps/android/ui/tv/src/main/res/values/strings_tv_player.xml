@@ -1,4 +1,69 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="tv_player_placeholder">Playback isn\'t built yet. Press Back to return.</string>
+    <!-- The control row (design spec §2.7). -->
+    <string name="tv_player_play">Play</string>
+    <string name="tv_player_pause">Pause</string>
+    <string name="tv_player_back_10">Back 10 seconds</string>
+    <string name="tv_player_forward_10">Forward 10 seconds</string>
+    <string name="tv_player_previous">Previous</string>
+    <string name="tv_player_next">Next</string>
+    <string name="tv_player_subtitles">Subtitles</string>
+    <string name="tv_player_audio">Audio</string>
+    <string name="tv_player_quality">Quality</string>
+    <string name="tv_player_chapters">Chapters</string>
+    <string name="tv_player_info">Info</string>
+
+    <!-- The scrubber, the clock and the seek badge. -->
+    <string name="tv_player_ends_at">Ends at %1$s</string>
+    <string name="tv_player_intro">Intro</string>
+    <string name="tv_player_credits">Credits</string>
+    <string name="tv_player_seek_back">−%1$d s</string>
+    <string name="tv_player_seek_forward">+%1$d s</string>
+    <string name="tv_player_position">%1$s of %2$s</string>
+    <string name="tv_player_chapter">Chapter %1$d</string>
+    <string name="tv_player_chapter_named">Chapter %1$d · %2$s</string>
+
+    <!-- Up Next. -->
+    <string name="tv_player_play_now">Play now</string>
+    <string name="tv_player_cancel">Cancel</string>
+    <string name="tv_player_next_in">Next in %1$d</string>
+
+    <!-- Side panels. -->
+    <string name="tv_player_subtitles_off_toast">Subtitles off</string>
+    <string name="tv_player_subtitles_toast">Subtitles: %1$s</string>
+    <string name="tv_player_audio_toast">Audio: %1$s</string>
+    <string name="tv_player_burn_in">Drawn into the picture by the server</string>
+    <string name="tv_player_play_original">Play original</string>
+    <string name="tv_player_play_original_hint">Try the file as it is again</string>
+    <string name="tv_player_info_title">Playback info</string>
+    <string name="tv_player_info_how">How it plays</string>
+    <string name="tv_player_info_device">This TV</string>
+    <string name="tv_player_info_video_decoder">Video decoder</string>
+    <string name="tv_player_info_audio_decoder">Audio decoder</string>
+    <string name="tv_player_info_picture">Picture</string>
+    <string name="tv_player_info_display">Display</string>
+    <string name="tv_player_info_display_switched">Switched to match the video</string>
+    <string name="tv_player_info_display_kept">Unchanged</string>
+    <string name="tv_player_info_audio">Audio</string>
+    <string name="tv_player_info_passthrough">passed through to the TV or receiver</string>
+    <string name="tv_player_info_decoded">decoded on this TV</string>
+    <string name="tv_player_info_dropped">Dropped frames</string>
+    <string name="tv_player_info_dropped_value">%1$d of %2$d</string>
+    <string name="tv_player_info_buffer">Buffered ahead</string>
+    <string name="tv_player_info_buffer_value">%1$d s</string>
+    <string name="tv_player_info_rebuffers">Stalls</string>
+    <string name="tv_player_info_first_frame">First frame</string>
+    <string name="tv_player_info_first_frame_value">%1$d ms</string>
+    <string name="tv_player_info_hardware">hardware</string>
+    <string name="tv_player_info_software">software</string>
+    <string name="tv_player_info_waiting">Asking the server…</string>
+
+    <!-- Refresh rate, buffering and errors (design spec §2.7, §8). -->
+    <string name="tv_player_matching">Matching refresh rate…</string>
+    <string name="tv_player_hz">%1$s Hz</string>
+    <string name="tv_player_frame_rate_hint">Your TV didn\'t switch refresh rate. Turn on match content frame rate in its settings.</string>
+    <string name="tv_player_buffering">Loading</string>
+    <string name="tv_player_error_title">Can\'t play this item</string>
+    <string name="tv_player_try_again">Try again</string>
+    <string name="tv_player_back">Back</string>
 </resources>
