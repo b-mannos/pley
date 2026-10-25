@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.StrictMode
 import androidx.tracing.trace
 import app.pley.android.common.TraceNames
+import app.pley.android.common.perf.StartupSignals
 import app.pley.android.designsystem.PleyImageLoader
 import app.pley.android.screens.PleyGraphOwner
 import app.pley.android.screens.ScreensGraph
@@ -12,15 +13,18 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import java.util.ServiceLoader
 import java.util.concurrent.Callable
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * The app. Starting builds nothing: it starts the one disk read the first
- * screen needs and returns (15 ms at most). The rest is made on first use
- * (AppGraph).
+ * The app. Starting builds nothing on the main thread: it starts the one
+ * disk read the first screen needs, and the graph's warm-up (AppGraph)
+ * beside it, and returns (15 ms at most).
  */
 class PleyApplication : Application(), PleyGraphOwner, SingletonImageLoader.Factory {
     val graph: AppGraph by lazy { AppGraph(this) }
@@ -38,6 +42,23 @@ class PleyApplication : Application(), PleyGraphOwner, SingletonImageLoader.Fact
             if (BuildConfig.DEBUG) watchForSlowCalls()
             startup = StartupRead.start(this)
             restartDemoServer()
+            warmGraph()
+        }
+    }
+
+    /**
+     * Makes, off the main thread, what the first screen and the first play
+     * ask for: the data side at once (its HTTP client reads the system's
+     * certificates, 300 ms on a Fire TV stick), the player and the device's
+     * capabilities once Home is drawn. The graph's parts are made once, so
+     * a screen that asks first waits for this instead of making them again.
+     */
+    private fun warmGraph() {
+        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            graph.data
+            StartupSignals.homeDrawn.first { it }
+            graph.player
+            graph.caps.capabilities
         }
     }
 
