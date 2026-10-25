@@ -1,6 +1,7 @@
 package app.pley.android.ui.tv.shell
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,7 +20,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusEnterExitScope
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
@@ -64,6 +68,13 @@ import app.pley.android.ui.tv.kit.TvRailFocus
  * Going to the rail saves which element of the page had focus
  * ([FocusRequester.saveFocusedChild] on [content], D-pad rule 2), and
  * Right from the rail ([backToContent]) restores it.
+ *
+ * Focus comes into the rail only when someone sends it there: Left
+ * (D-pad rule 3) or Back, to the current entry ([focusCurrent]). When the
+ * focused element goes with its page and the next one has nothing to
+ * focus yet (still loading), Android hands focus to the first thing it
+ * finds, top left: the rail's avatar, which would open the rail by itself.
+ * The rail refuses it ([enter]), and the page's initial focus takes it.
  */
 @Stable
 class RailState(private val content: FocusRequester = FocusRequester()) : TvRailFocus {
@@ -80,6 +91,9 @@ class RailState(private val content: FocusRequester = FocusRequester()) : TvRail
     var shown by mutableStateOf(false)
         internal set
 
+    /** Set while [focusCurrent] sends focus to an entry: the one way in ([enter]). */
+    private var sending = false
+
     internal fun requester(id: String): FocusRequester = requesters.getOrPut(id) { FocusRequester() }
 
     override fun focusCurrent(): Boolean {
@@ -87,7 +101,24 @@ class RailState(private val content: FocusRequester = FocusRequester()) : TvRail
         val id = current ?: "home"
         val requester = requesters[id] ?: requesters["home"] ?: return false
         if (!hasFocus) runCatching { content.saveFocusedChild() }
-        return runCatching { requester.requestFocus() }.isSuccess
+        sending = true
+        try {
+            return runCatching { requester.requestFocus() }.isSuccess
+        } finally {
+            sending = false
+        }
+    }
+
+    /**
+     * Focus coming into the rail other than by [focusCurrent]: Left (with
+     * nothing focused, while a page loads) goes to the current entry, not
+     * the nearest one; anything else, such as Android placing focus on the
+     * first thing it finds, is refused.
+     */
+    internal fun FocusEnterExitScope.enter() {
+        if (sending) return
+        cancelFocusChange()
+        if (requestedFocusDirection == FocusDirection.Left) focusCurrent()
     }
 
     /** Back to the page: the element that had focus there, or the page's first. */
@@ -138,6 +169,8 @@ internal fun NavigationDrawerScope.TvRail(
                 .fillMaxHeight()
                 .testTag(TestTags.TV_RAIL)
                 .onFocusChanged { rail.hasFocus = it.hasFocus }
+                .focusProperties { onEnter = { with(rail) { enter() } } }
+                .focusGroup()
                 // The open rail covers the page's left: Right goes back to where focus was there.
                 .onPreviewKeyEvent { event ->
                     if (event.key == Key.DirectionRight && event.type == KeyEventType.KeyDown) {

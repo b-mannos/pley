@@ -6,6 +6,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -16,6 +17,7 @@ import app.pley.android.common.TestTags
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryKind
 import app.pley.android.testing.screens.onboarding.FakeOnboardingSource
+import app.pley.android.ui.tv.item.TV_ITEM_PAGE
 import app.pley.android.ui.tv.onboarding.LocalOnboardingSource
 import app.pley.android.ui.tv.kit.focused
 import app.pley.android.ui.tv.kit.press
@@ -31,8 +33,9 @@ import org.robolectric.annotation.Config
 /**
  * The frame with the D-pad and Back (D-pad rule 11): initial focus on every
  * start screen, the rail and content, the Back sequence, and a row's focus
- * coming back after Back. Home is the real one, over the JSON fixtures
- * ([TvTestGraph]); the screens not built yet are placeholders.
+ * coming back after Back. Home and the item page are the real ones, over
+ * the JSON fixtures ([TvTestGraph]; an item's details stay loading); the
+ * screens not built yet are placeholders.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w960dp-h540dp-land-television-xhdpi", application = TvTestApplication::class)
@@ -138,7 +141,7 @@ class TvAppTest {
         // A page opened from Home: Back returns to Home, on the tile it was opened from.
         compose.press(Key.DirectionDown)
         compose.press(Key.DirectionCenter)
-        compose.onNodeWithText("Item isn't built yet").assertExists()
+        compose.onNodeWithTag(TV_ITEM_PAGE).assertExists()
         back()
         compose.focused().assertContentDescriptionEquals(HALF_LOOP)
         assertEquals(0, exits)
@@ -149,6 +152,25 @@ class TvAppTest {
         // On the rail: Back leaves the app.
         back()
         assertEquals(1, exits)
+    }
+
+    @Test
+    fun aPageLoadingLeavesTheRailClosed() {
+        app()
+        compose.press(Key.DirectionDown)
+        compose.press(Key.DirectionCenter)
+        // The item's details are still on their way: nothing on its page to focus yet, and focus
+        // isn't handed to the rail meanwhile (which would open it, and make Back leave the app).
+        compose.onNodeWithTag(TV_ITEM_PAGE).assertExists()
+        compose.onNode(isFocused() and hasAnyAncestor(hasTestTag(TestTags.TV_RAIL))).assertDoesNotExist()
+        back()
+        compose.focused().assertContentDescriptionEquals(HALF_LOOP)
+        assertEquals(0, exits)
+        // Left with nothing focused goes to the rail's current entry, as from the page.
+        compose.press(Key.DirectionDown)
+        compose.press(Key.DirectionCenter)
+        compose.press(Key.DirectionLeft)
+        railEntry("home").assertIsFocused()
     }
 
     @Test
@@ -178,7 +200,7 @@ class TvAppTest {
         compose.press(Key.DirectionDown, times = 2)
         compose.focused().assertContentDescriptionEquals(DUNE)
         compose.press(Key.DirectionCenter)
-        compose.onNodeWithText("Item isn't built yet").assertExists()
+        compose.onNodeWithTag(TV_ITEM_PAGE).assertExists()
         back()
         compose.focused().assertContentDescriptionEquals(DUNE)
     }
