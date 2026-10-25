@@ -20,8 +20,9 @@ use axum::{Json, Router};
 use parking_lot::Mutex;
 use pley_transcoder_api::{
     API_VERSION, AudioMode, AudioPlan, Capabilities, EncoderInfo, ErrorBody, HwAccel, JobCreated, JobRequest,
-    JobStatus, Limits, MediaInfo, MediaStream, ProbeRequest, SUBTITLES_COMPLETE_HEADER, StreamKind, SubtitleRequest,
-    TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest, VideoCodec, VideoMode, VideoPlan,
+    JobStatus, Limits, MediaInfo, MediaStream, PrefetchRequest, Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER,
+    StreamKind, SubtitleRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest, VideoCodec,
+    VideoMode, VideoPlan,
 };
 use serde_json::{Value, json};
 
@@ -47,6 +48,10 @@ struct Fake {
     preview_delay: Arc<Mutex<Duration>>,
     /// Preview requests given up by pley before they were answered.
     previews_dropped: Arc<AtomicUsize>,
+    /// Files read ahead of a playback, in order.
+    prefetches: Arc<Mutex<Vec<PrefetchRequest>>>,
+    /// How long reading ahead takes.
+    prefetch_delay: Arc<Mutex<Duration>>,
     next_id: Arc<AtomicUsize>,
     /// Segment count of new jobs instead of one per 4 s.
     layout: Arc<Mutex<Option<u32>>>,
@@ -356,6 +361,15 @@ async fn start_fake() -> (Fake, String) {
             }),
         )
         .route("/v1/keyframes", post(|| async { StatusCode::ACCEPTED }))
+        .route(
+            "/v1/prefetch",
+            post(|State(fake): State<Fake>, Json(req): Json<PrefetchRequest>| async move {
+                fake.prefetches.lock().push(req);
+                let delay = *fake.prefetch_delay.lock();
+                tokio::time::sleep(delay).await;
+                Json(Prefetched { bytes: 4 << 20, ..Default::default() })
+            }),
+        )
         // Previews of the MP4 work: one sheet of 5×2 tiles of 8×4. Others fail.
         .route(
             "/v1/trickplay",
@@ -985,4 +999,44 @@ async fn seek_previews_wait_while_a_playback_starts() {
     assert!(made, "the previews were made");
     assert_eq!(w.fake.previews_dropped.load(Ordering::SeqCst), 1);
     assert_eq!(app.state.trickplay.pending(), 0);
+}
+
+#[tokio::test]
+async fn titles_about_to_play_are_read_ahead_where_play_starts() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    *w.fake.prefetch_delay.lock() = Duration::from_secs(5);
+    let (clip, feature, broken) = (w.movies["Clip"], w.movies["Feature"], w.movies["Broken"]);
+    let progress = json!({"position_ms": 30_000, "duration_ms": 60_000, "state": "stopped"});
+    assert_eq!(app.post(&format!("/api/items/{clip}/progress"), admin, progress).await.status, StatusCode::NO_CONTENT);
+    let read = |n: usize| w.fake.prefetches.lock().get(n).map(|r| (r.path.clone(), r.start_ms));
+
+    // Opening a title reads it ahead from where Play resumes, without waiting.
+    let asked = std::time::Instant::now();
+    assert_eq!(app.get(&format!("/api/items/{clip}"), admin).await.status, StatusCode::OK);
+    assert!(asked.elapsed() < Duration::from_secs(2), "the page never waits for it");
+    eventually(|| w.fake.prefetches.lock().len() == 1).await;
+    let (path, start) = read(0).unwrap();
+    assert!(path.ends_with("Clip (2020).mp4"), "{path}");
+    assert_eq!(start, Some(30_000));
+    // Once every two minutes per file.
+    assert_eq!(app.get(&format!("/api/items/{clip}"), admin).await.status, StatusCode::OK);
+    assert_eq!(app.post(&format!("/api/items/{clip}/prefetch"), admin, json!({})).await.status, StatusCode::ACCEPTED);
+
+    // A card's Play button: from the start for a title never played.
+    let asked = std::time::Instant::now();
+    let reply = app.post(&format!("/api/items/{feature}/prefetch"), admin, json!({})).await;
+    assert_eq!(reply.status, StatusCode::ACCEPTED);
+    assert!(asked.elapsed() < Duration::from_secs(2), "answered at once");
+    eventually(|| w.fake.prefetches.lock().len() == 2).await;
+    let (path, start) = read(1).unwrap();
+    assert!(path.ends_with("Feature (2021).mkv"), "{path}");
+    assert_eq!(start, Some(0));
+
+    // Files without video (ffprobe couldn't read this one) are left alone;
+    // titles that aren't there aren't found.
+    assert_eq!(app.post(&format!("/api/items/{broken}/prefetch"), admin, json!({})).await.status, StatusCode::ACCEPTED);
+    assert_eq!(app.post("/api/items/999999/prefetch", admin, json!({})).await.status, StatusCode::NOT_FOUND);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(w.fake.prefetches.lock().len(), 2);
 }

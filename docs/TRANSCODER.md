@@ -74,6 +74,7 @@ following status codes:
 | POST | `/v1/cover` | `CoverRequest {path}` | embedded cover art (`image/jpeg` or `image/png`) |
 | POST | `/v1/subtitles` | `SubtitleRequest {path, stream_index?, partial?}` | `text/vtt`: a text track of the file, or a subtitle file (see *Subtitle extraction*). With `partial` (embedded tracks): within a few seconds, the whole track when it's done by then (as a rule when it can be read through the file's Cues), else the cues read so far with `X-Pley-Complete: 0` while the extraction goes on in the background |
 | POST | `/v1/keyframes` | `KeyframesRequest {path}` | `200` if indexed, `202` if queued |
+| POST | `/v1/prefetch` | `PrefetchRequest {path, start_ms?}` | `Prefetched {ranges: [{part, start, end}], bytes, elapsed_ms, skipped?, stopped}`: reads the parts of the file a playback starting at `start_ms` reads first, so they come from a cache when it does (see *Reading ahead*) |
 | POST | `/v1/trickplay` | `TrickplayRequest {path, interval_ms?, width?}` | `TrickplayInfo {id, interval_ms, width, height, columns, rows, count, sheets}`: seek-bar previews, cached per file version until all sheets have been fetched (or for a day). Keyframes only are decoded (seconds for a film); HDR and Dolby Vision are tone-mapped with libplacebo when available. |
 | GET | `/v1/trickplay/{id}/{n}.jpg` | – | sprite sheet `n` (`columns × rows` thumbnails); once every sheet of a set has been fetched, the set is deleted (fetch them all in one go and keep them) |
 | POST | `/v1/fingerprint` | `FingerprintRequest {path, stream_index?, start_ms, duration_ms}` | `Fingerprint {start_ms, item_seconds, data: u32[]}`: raw Chromaprint values of the audio (`400` when FFmpeg lacks Chromaprint) |
@@ -296,6 +297,34 @@ too) and measures each with `blackframe` (share of pixels at most 32) and
 `signalstats` (luma of the darkest and brightest tenth, the maximum,
 average saturation). The server finds credits in them: text on black. It
 shares the fingerprints' limit and priority.
+
+## Reading ahead
+
+`POST /v1/prefetch` reads a file the way a playback is about to, before it
+does: the server asks for it when an item's page opens, or a card's Play
+button has the pointer or the focus, at most every two minutes per file. On
+a network share a cold 4 s of video takes 0.3-3 s to read, and a few
+milliseconds once it is in the share's or this host's cache. It reads, in
+this order, each byte once (`part` in the answer):
+
+- `head`: the first 4 MB (headers, the first clusters or chunks);
+- `index`: the Matroska Cues or the MP4 movie box (`moov`), wherever it is,
+  64 MB at most. Matroska Cues are found through the seek heads and the
+  elements before the first cluster only: never by walking the clusters;
+- `start`, for `start_ms > 0`: from the keyframe at or before the start of
+  the 4 s segment holding `start_ms` (where a transcode decodes from; a
+  remux or a direct play starts there or later) to the first keyframe 4 s
+  past `start_ms`, 2 to 40 MB. The keyframes' places come from the index:
+  the Cues' `CueClusterPosition`, or the video track's `stco`/`co64` chunk
+  offsets and `stsc` samples per chunk. Files without either get their head
+  only.
+
+Ranges are read in 2 MB pieces, four at a time, each reader with its own
+handle. A keyframe index for remuxing is kept from the index read. It is
+background work: one file at a time, one request per file at once (another
+answers `skipped`), ten seconds at most, waiting included. None starts
+within 5 s of a job creation (`skipped`), and one that begins meanwhile
+stops the reading (`stopped`), as does the request going away.
 
 ## Metrics
 

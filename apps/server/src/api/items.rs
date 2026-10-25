@@ -24,6 +24,7 @@ pub(crate) async fn item_or_404(state: &AppState, user_id: i64, id: i64) -> ApiR
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<Json<ItemDetail>> {
     let row = item_or_404(&state, user.id, id).await?;
     let scope = streams::scope(&row);
+    let resume = resume_ms(&row);
     let mut detail = catalog::item_detail(&state.db, row).await?;
     detail.locked_fields = crate::overrides::locked_fields(&state.db, id).await?;
     if matches!(detail.summary.kind.as_str(), "movie" | "show") {
@@ -38,11 +39,14 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i
             file.selected_subtitle = selection.subtitle;
         }
     }
-    // Opening an item is a good moment to prepare seek previews and to index
-    // keyframes so playback can remux.
+    // Opening an item is a good moment to prepare seek previews, to index
+    // keyframes so playback can remux, and to read ahead where Play starts.
     if matches!(detail.summary.kind.as_str(), "movie" | "episode") {
         for file in catalog::files_for_item(&state.db, detail.summary.id).await? {
             state.trickplay.request(&file);
+            if file.video_codec.is_some() {
+                state.transcoder.prefetch_soon(&file.path, resume);
+            }
             let Some(dto) = detail.files.iter_mut().find(|f| f.id == file.id) else { continue };
             if dto.chapters.len() > 1 && state.trickplay.has_chapter_images(&file) {
                 let version = file.fingerprint.as_deref().unwrap_or_default();
@@ -64,6 +68,36 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i
         }
     }
     Ok(Json(detail))
+}
+
+/// Where Play starts for this user: the resume point, or the beginning once watched.
+fn resume_ms(row: &ItemRow) -> i64 {
+    if row.watched { 0 } else { row.position_ms.max(0) }
+}
+
+/// Someone is about to press Play (a card's Play button has the pointer or
+/// the focus): read ahead where the item's video, or a show's or season's
+/// next episode, starts for them. Answers at once; the reading happens in the
+/// background, at most every two minutes per file.
+pub async fn prefetch(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+    let row = item_or_404(&state, user.id, id).await?;
+    let target = match row.kind.as_str() {
+        "movie" | "episode" | "extra" => Some(row),
+        "show" | "season" => match catalog::on_deck(&state.db, user.id, &row).await? {
+            Some(next) => catalog::item(&state.db, user.id, next).await?,
+            None => None,
+        },
+        _ => None,
+    };
+    if let Some(item) = target {
+        let start = resume_ms(&item);
+        for file in catalog::files_for_item(&state.db, item.id).await? {
+            if file.video_codec.is_some() {
+                state.transcoder.prefetch_soon(&file.path, start);
+            }
+        }
+    }
+    Ok(StatusCode::ACCEPTED)
 }
 
 #[derive(Deserialize)]

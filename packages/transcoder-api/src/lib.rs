@@ -702,6 +702,45 @@ pub struct KeyframesRequest {
     pub path: String,
 }
 
+/// `POST /v1/prefetch` → [`Prefetched`]: read the parts of a file a playback
+/// starting at `start_ms` reads first (its head, its index, the keyframe
+/// before the start and a few seconds on), so that they come from a cache
+/// when it does: worth seconds on a network share.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct PrefetchRequest {
+    pub path: String,
+    /// Where the playback would start (ms); 0 or none: the beginning.
+    #[serde(default)]
+    pub start_ms: Option<i64>,
+}
+
+/// What a prefetch read.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Prefetched {
+    /// The byte ranges read, in the order they were read.
+    pub ranges: Vec<PrefetchedRange>,
+    /// Bytes read in all.
+    pub bytes: u64,
+    pub elapsed_ms: u64,
+    /// Why nothing was read: a playback is starting, or the file is being
+    /// read already.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<String>,
+    /// Stopped before the end: a playback started, or time ran out.
+    #[serde(default)]
+    pub stopped: bool,
+}
+
+/// A byte range a prefetch read: `part` is `head`, `index` (Matroska Cues or
+/// MP4 movie box) or `start` (where the playback starts).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct PrefetchedRange {
+    pub part: String,
+    pub start: u64,
+    /// Exclusive.
+    pub end: u64,
+}
+
 /// `POST /v1/fingerprint` → [`Fingerprint`]: a Chromaprint fingerprint of the
 /// audio in part of a file. The server compares the fingerprints of episodes
 /// to find the intro and credits they share.

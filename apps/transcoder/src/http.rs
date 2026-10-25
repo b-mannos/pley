@@ -15,8 +15,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use pley_transcoder_api::{
     CoverRequest, Fingerprint, FingerprintRequest, Frames, FramesRequest, JobCreated, JobRequest, JobStatus,
-    KeyframesRequest, MediaInfo, ProbeRequest, SUBTITLES_COMPLETE_HEADER, SubtitleRequest, ThumbnailRequest,
-    TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
+    KeyframesRequest, MediaInfo, PrefetchRequest, Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER, SubtitleRequest,
+    ThumbnailRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
 };
 use tokio_util::io::ReaderStream;
 
@@ -26,6 +26,7 @@ use crate::fingerprint::Fingerprinter;
 use crate::job::JobManager;
 use crate::keyframes::KeyframeStore;
 use crate::metrics::{Metrics, render_prometheus};
+use crate::prefetch::Prefetcher;
 use crate::probe::{Prober, Rejected};
 use crate::trickplay::Trickplay;
 use crate::util::dir_size;
@@ -37,6 +38,7 @@ pub struct AppState {
     pub keyframes: Arc<KeyframeStore>,
     pub fingerprinter: Arc<Fingerprinter>,
     pub trickplay: Arc<Trickplay>,
+    pub prefetcher: Prefetcher,
     pub metrics: Arc<Metrics>,
     pub info: TranscoderInfo,
     pub token: Option<String>,
@@ -61,6 +63,7 @@ impl AppState {
         work_dir: PathBuf,
     ) -> Self {
         Self {
+            prefetcher: Prefetcher::new(jobs.clone(), keyframes.clone()),
             jobs,
             prober,
             extractor,
@@ -121,6 +124,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/cover", post(cover))
         .route("/subtitles", post(subtitles))
         .route("/keyframes", post(keyframes))
+        .route("/prefetch", post(prefetch))
         .route("/fingerprint", post(fingerprint))
         .route("/frames", post(frames))
         .route("/trickplay", post(trickplay))
@@ -230,6 +234,10 @@ async fn keyframes(State(state): Shared, Json(req): Json<KeyframesRequest>) -> A
     }
     state.keyframes.request(path);
     Ok(StatusCode::ACCEPTED)
+}
+
+async fn prefetch(State(state): Shared, Json(req): Json<PrefetchRequest>) -> ApiResult<Json<Prefetched>> {
+    Ok(Json(state.prefetcher.prefetch(&req).await?))
 }
 
 async fn trickplay(State(state): Shared, Json(req): Json<TrickplayRequest>) -> ApiResult<Json<TrickplayInfo>> {
@@ -456,7 +464,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let addr = serve(dir.path(), None).await;
         let missing = serde_json::json!({"path": dir.path().join("missing.mkv")}).to_string();
-        for path in ["/v1/probe", "/v1/keyframes", "/v1/trickplay"] {
+        for path in ["/v1/probe", "/v1/keyframes", "/v1/trickplay", "/v1/prefetch"] {
             let answer = request(addr, "POST", path, None, Some(missing.clone())).await;
             assert_eq!((answer.status, answer.code()), (404, "not_found".to_owned()), "{path}");
         }
@@ -502,6 +510,21 @@ mod tests {
         // …and once every sheet has been fetched, the server has its copy.
         assert!(!set.exists());
         assert_eq!(sheet(0).await.status, 404);
+    }
+
+    #[tokio::test]
+    async fn prefetches_say_what_they_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let addr = serve(dir.path(), None).await;
+        let input = dir.path().join("clip.ts");
+        std::fs::write(&input, vec![0x47u8; 3 << 20]).unwrap();
+        let req = serde_json::json!({"path": input, "start_ms": 60_000}).to_string();
+        let answer = request(addr, "POST", "/v1/prefetch", None, Some(req)).await;
+        assert_eq!(answer.status, 200, "{}", answer.body);
+        let done: Prefetched = serde_json::from_str(&answer.body).unwrap();
+        assert_eq!(done.bytes, 3 << 20);
+        let ranges: Vec<_> = done.ranges.iter().map(|r| (r.part.as_str(), r.start, r.end)).collect();
+        assert_eq!(ranges, vec![("head", 0, 3 << 20)], "no index: the head only");
     }
 
     #[tokio::test]

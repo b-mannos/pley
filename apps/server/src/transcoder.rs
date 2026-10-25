@@ -6,6 +6,7 @@
 //! backoff) and forwards its log output. In *external* mode it talks to a
 //! transcoder running elsewhere (`transcoder_url`).
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -17,8 +18,8 @@ use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
 use pley_transcoder_api::{
     Announce, CoverRequest, ErrorBody, Fingerprint, FingerprintRequest, Frames, FramesRequest, JobCreated, JobRequest,
-    JobStatus, KeyframesRequest, MediaInfo, ProbeRequest, SUBTITLES_COMPLETE_HEADER, SubtitleRequest, TOKEN_ENV,
-    ThumbnailRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
+    JobStatus, KeyframesRequest, MediaInfo, PrefetchRequest, Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER,
+    SubtitleRequest, TOKEN_ENV, ThumbnailRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -80,7 +81,14 @@ pub struct Transcoder {
     stopping: AtomicBool,
     stop: Notify,
     supervisor: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// When each file was last read ahead (see [`Transcoder::prefetch_soon`]).
+    prefetched: Mutex<HashMap<String, Instant>>,
 }
+
+/// A file is read ahead of a playback at most this often.
+const PREFETCH_EVERY: Duration = Duration::from_secs(120);
+/// Files remembered as read ahead before the oldest are forgotten.
+const PREFETCHES_KEPT: usize = 512;
 
 #[derive(Clone)]
 struct ManagedSpec {
@@ -139,6 +147,7 @@ impl Transcoder {
             stopping: AtomicBool::new(false),
             stop: Notify::new(),
             supervisor: Mutex::new(None),
+            prefetched: Mutex::default(),
         })
     }
 
@@ -259,6 +268,51 @@ impl Transcoder {
     pub async fn request_keyframes(&self, path: &str) -> TranscoderResult<()> {
         self.post("/v1/keyframes", &KeyframesRequest { path: path.to_owned() }, Duration::from_secs(30)).await?;
         Ok(())
+    }
+
+    /// Read the parts of a file a playback starting at `start_ms` reads first,
+    /// so they come from a cache when it does (see docs/TRANSCODER.md). The
+    /// transcoder gives up after 10 s, and yields to playbacks.
+    pub async fn prefetch(&self, path: &str, start_ms: i64) -> TranscoderResult<Prefetched> {
+        let req = PrefetchRequest { path: path.to_owned(), start_ms: Some(start_ms.max(0)) };
+        self.post_json("/v1/prefetch", &req, Duration::from_secs(20)).await
+    }
+
+    /// [`Transcoder::prefetch`] in the background, unless the file was read
+    /// ahead in the last [`PREFETCH_EVERY`] (or the transcoder isn't there):
+    /// for when someone looks like they are about to play it.
+    pub fn prefetch_soon(self: &Arc<Self>, path: &str, start_ms: i64) {
+        if !self.is_available() || !self.note_prefetch(path, Instant::now()) {
+            return;
+        }
+        let (this, path) = (self.clone(), path.to_owned());
+        tokio::spawn(async move {
+            match this.prefetch(&path, start_ms).await {
+                Ok(done) => tracing::debug!(
+                    "read ahead {path} at {start_ms} ms: {} bytes in {} ms{}",
+                    done.bytes,
+                    done.elapsed_ms,
+                    done.skipped.map(|why| format!(" (skipped: {why})")).unwrap_or_default()
+                ),
+                Err(err) => tracing::debug!("reading ahead {path}: {err}"),
+            }
+        });
+    }
+
+    /// Whether `path` is due a prefetch at `now`, noting it if so.
+    fn note_prefetch(&self, path: &str, now: Instant) -> bool {
+        let mut done = self.prefetched.lock();
+        if done.get(path).is_some_and(|at| now.duration_since(*at) < PREFETCH_EVERY) {
+            return false;
+        }
+        if done.len() >= PREFETCHES_KEPT {
+            done.retain(|_, at| now.duration_since(*at) < PREFETCH_EVERY);
+            if done.len() >= PREFETCHES_KEPT {
+                done.clear();
+            }
+        }
+        done.insert(path.to_owned(), now);
+        true
     }
 
     /// Chromaprint fingerprint of part of a file (intro/credits detection).
@@ -646,5 +700,20 @@ mod tests {
             AppError::Unavailable(message) => assert!(!message.contains("127.0.0.1"), "{message}"),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn files_are_read_ahead_at_most_every_two_minutes() {
+        let transcoder = Transcoder::new(&Config::for_data_dir(std::path::Path::new("unused")));
+        let now = Instant::now();
+        assert!(transcoder.note_prefetch("a.mkv", now));
+        assert!(!transcoder.note_prefetch("a.mkv", now + Duration::from_secs(60)), "read a minute ago");
+        assert!(transcoder.note_prefetch("b.mkv", now + Duration::from_secs(60)), "another file");
+        assert!(transcoder.note_prefetch("a.mkv", now + PREFETCH_EVERY));
+        // Only so many are remembered.
+        for n in 0..PREFETCHES_KEPT * 2 {
+            assert!(transcoder.note_prefetch(&format!("{n}.mkv"), now));
+        }
+        assert!(transcoder.prefetched.lock().len() <= PREFETCHES_KEPT);
     }
 }

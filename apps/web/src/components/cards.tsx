@@ -5,6 +5,7 @@ import type { ItemSummary } from "@/api/types";
 import { cn } from "@/lib/cn";
 import { cardSubtitle, episodeLabel, formatRemaining, mediaBadges, mediaLine, progressFraction, seasonTitle, unwatchedCount } from "@/lib/format";
 import { posterCandidates, thumbCandidates } from "@/lib/images";
+import { prefetchPlay } from "@/lib/prefetchPlay";
 import { usePlayItem } from "@/lib/usePlayItem";
 import { playIntent } from "@/player/preload";
 import { Artwork } from "./Artwork";
@@ -176,7 +177,7 @@ export const MediaCard = memo(function MediaCard({
             aria-label={`Play ${t}`}
             title="Play"
             onClick={() => void play(item)}
-            {...playIntent(item.kind)}
+            {...playIntent(item.kind, () => prefetchPlay(item))}
             className="absolute left-1/2 top-1/2 flex size-12 -translate-x-1/2 -translate-y-1/2 scale-90 items-center justify-center rounded-full bg-accent text-accent-fg opacity-0 shadow-lg shadow-black/50 transition duration-200 hover:bg-accent-hover focus-visible:opacity-100 group-hover/card:scale-100 group-hover/card:opacity-100"
           >
             <Play className="ml-0.5 size-5 fill-current" />

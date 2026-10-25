@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 
 use pley_transcoder_api::{MediaInfo, StreamKind};
 
+use crate::prefetch::ContainerIndex;
 use crate::webvtt::TextCodec;
 
 const EBML: u32 = 0x1A45_DFA3;
@@ -105,11 +106,39 @@ pub fn cue_keyframes(path: &Path) -> Option<Vec<i64>> {
     let video_track =
         layout.tracks.and_then(|p| child_payload(&mut file, p, TRACKS)).and_then(|d| first_video_track(&d))?;
     let cues = child_payload(&mut file, layout.cues?, CUES)?;
-    let mut times: Vec<i64> =
-        cue_times(&cues, video_track).into_iter().map(|t| (t as u128 * scale as u128 / 1_000_000) as i64).collect();
+    let mut times: Vec<i64> = cue_times(&cues, video_track).into_iter().map(|(t, _)| ticks_to_ms(t, scale)).collect();
     times.sort_unstable();
     times.dedup();
     (times.len() >= 2).then_some(times)
+}
+
+/// Where a file's Cues are (the bytes of the element) and where its video
+/// keyframes are: `(time in ms, offset of the cluster that holds it)`, sorted
+/// by time. For reading ahead of a playback, so only what the seek heads and
+/// the elements before the first cluster point to is looked at: `None` when
+/// that doesn't find the Cues (a search past the clusters would read the
+/// whole file), or the file isn't Matroska.
+pub fn cue_index(path: &Path) -> Option<ContainerIndex> {
+    let mut file = BufReader::with_capacity(64 * 1024, File::open(path).ok()?);
+    let layout = layout(&mut file, false, None).ok()?;
+    let scale = layout.timestamp_scale(&mut file);
+    let video_track =
+        layout.tracks.and_then(|p| child_payload(&mut file, p, TRACKS)).and_then(|d| first_video_track(&d))?;
+    let at = layout.cues?;
+    let cues = child_payload(&mut file, at, CUES)?;
+    let end = file.stream_position().ok()?;
+    let mut points: Vec<(i64, u64)> = cue_times(&cues, video_track)
+        .into_iter()
+        .filter_map(|(time, cluster)| Some((ticks_to_ms(time, scale), layout.segment.checked_add(cluster?)?)))
+        .collect();
+    points.sort_unstable();
+    points.dedup_by_key(|p| p.0);
+    Some((at..end, points))
+}
+
+/// Milliseconds of `ticks` of `scale` nanoseconds.
+fn ticks_to_ms(ticks: u64, scale: u64) -> i64 {
+    (ticks as u128 * scale as u128 / 1_000_000) as i64
 }
 
 /// Where the segment's metadata elements are.
@@ -1349,15 +1378,18 @@ fn first_video_track(tracks: &[u8]) -> Option<u64> {
         .and_then(|(_, entry)| find_uint(entry, TRACK_NUMBER))
 }
 
-fn cue_times(cues: &[u8], track: u64) -> Vec<u64> {
+/// The `(CueTime, CueClusterPosition)` of the cue points of `track`: the
+/// cluster's position counts from the start of the segment's data, and may be
+/// missing.
+fn cue_times(cues: &[u8], track: u64) -> Vec<(u64, Option<u64>)> {
     children(cues)
         .filter(|(id, _)| *id == CUE_POINT)
         .filter_map(|(_, point)| {
             let time = find_uint(point, CUE_TIME)?;
-            let for_track = children(point)
+            let (_, positions) = children(point)
                 .filter(|(id, _)| *id == CUE_TRACK_POSITIONS)
-                .any(|(_, pos)| find_uint(pos, CUE_TRACK) == Some(track));
-            for_track.then_some(time)
+                .find(|(_, pos)| find_uint(pos, CUE_TRACK) == Some(track))?;
+            Some((time, find_uint(positions, CUE_CLUSTER_POSITION)))
         })
         .collect()
 }
@@ -1442,16 +1474,26 @@ pub(crate) mod tests {
         let tracks = el(&[0x16, 0x54, 0xAE, 0x6B], &[audio_entry, video_entry].concat());
         let info = el(&[0x15, 0x49, 0xA9, 0x66], &uint_el(&[0x2A, 0xD7, 0xB1], 1_000_000));
         let cue = |time: u64, track: u64| {
-            el(&[0xBB], &[uint_el(&[0xB3], time), el(&[0xB7], &uint_el(&[0xF7], track))].concat())
+            let position = [uint_el(&[0xF7], track), uint_el(&[0xF1], 1000 + time)].concat();
+            el(&[0xBB], &[uint_el(&[0xB3], time), el(&[0xB7], &position)].concat())
         };
         let cues = el(&[0x1C, 0x53, 0xBB, 0x6B], &[cue(0, 1), cue(2002, 1), cue(500, 2), cue(4004, 1)].concat());
+        let cues_at = (info.len() + tracks.len()) as u64;
+        let cues_len = cues.len() as u64;
         let segment = el(&[0x18, 0x53, 0x80, 0x67], &[info, tracks, cues].concat());
-        let file = [el(&[0x1A, 0x45, 0xDF, 0xA3], &[0x42, 0x86, 0x81, 0x01]), segment].concat();
+        let ebml = el(&[0x1A, 0x45, 0xDF, 0xA3], &[0x42, 0x86, 0x81, 0x01]);
+        // Where the segment's data starts: positions count from there.
+        let data = (ebml.len() + 4 + 8) as u64;
+        let file = [ebml, segment].concat();
 
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.mkv");
         std::fs::write(&path, file).unwrap();
         assert_eq!(cue_keyframes(&path), Some(vec![0, 2002, 4004]));
+        // The Cues' bytes, and the cluster of each video keyframe.
+        let (cues, points) = cue_index(&path).unwrap();
+        assert_eq!(cues, data + cues_at..data + cues_at + cues_len);
+        assert_eq!(points, vec![(0, data + 1000), (2002, data + 3002), (4004, data + 5004)]);
 
         std::fs::write(&path, b"not a matroska file").unwrap();
         assert_eq!(cue_keyframes(&path), None);

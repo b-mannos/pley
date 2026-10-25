@@ -19,6 +19,7 @@ mod matroska;
 mod metrics;
 mod mp4;
 mod plan;
+mod prefetch;
 mod probe;
 mod trickplay;
 mod util;

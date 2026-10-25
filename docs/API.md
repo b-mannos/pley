@@ -390,7 +390,8 @@ may open only some libraries see those, in that order.
 
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
-| GET | `/api/items/{id}` | – | `ItemDetail` |
+| GET | `/api/items/{id}` | – | `ItemDetail`. For a movie or episode, the server also reads its video files ahead from where *Play* starts for the user (as `POST …/prefetch` does), without waiting for it |
+| POST | `/api/items/{id}/prefetch` | – | `202` at once. *Play* is about to be pressed (a card's Play button has the pointer or the focus): the transcoder reads ahead the parts of the video a playback from the user's resume point reads first (see `POST /v1/prefetch` in TRANSCODER.md), so they come from a cache when it starts; worth up to seconds for files on a network share. Movies, episodes and extras; a show or season: its on-deck episode; other kinds: nothing. At most once every two minutes per file. |
 | GET | `/api/items/{id}/children` | – | `{ items: ItemSummary[] }` (seasons of a show, episodes of a season, albums of an artist, tracks of an album), ordered by index |
 | GET | `/api/items/{id}/on-deck` | – | `{ item: ItemSummary \| null }` – for show/season: the episode to play when pressing *Play* (in progress, else next unwatched, else first) |
 | GET | `/api/items/{id}/related` | `limit` (default 20, max 60) | `{ items: ItemSummary[] }` – "More Like This" for movies and shows: the same library's titles sharing collections, directors, creators and top-billed cast, genres and a period, best first (empty for other kinds) |

@@ -17,7 +17,9 @@
 use std::fs::File;
 use std::io::{BufReader, Read, Seek};
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use crate::prefetch::ContainerIndex;
 
 /// Why a file's own index was not used.
 pub type Result<T> = std::result::Result<T, &'static str>;
@@ -144,6 +146,133 @@ fn index<R: Read + Seek>(inner: R, len: u64, deadline: Option<Instant>) -> Resul
         return Err("no keyframes");
     }
     Ok(times)
+}
+
+/// Where a file's movie box is (its bytes) and where the video track's
+/// keyframes are: `(time in ms, offset)`, sorted by time. For reading ahead of
+/// a playback: the times are the samples' presentation times moved by the
+/// usual edit list (a decoding delay hidden), not applied in full as FFmpeg
+/// does (a few frames off at most for a usual file, close enough to read
+/// around), the offsets from the movie box's sample tables (`stco`/`co64`
+/// chunk offsets, `stsc` samples per chunk, `stsz`/`stz2` sample sizes; the
+/// chunk's own offset when the sizes can't be read). A fragmented file lists
+/// no samples there: no keyframes then.
+pub fn chunk_index(path: &Path) -> Result<ContainerIndex> {
+    let file = File::open(path).map_err(|_| "cannot open the file")?;
+    let len = file.metadata().map_err(|_| "cannot read the file's size")?.len();
+    let mut r = Reader { inner: BufReader::with_capacity(16 * 1024, file), pos: 0 };
+    let mut top = TopLevel { pos: 0, len, walked: 0, deadline: Some(Instant::now() + Duration::from_secs(2)) };
+    let (start, moov) = loop {
+        let start = top.pos;
+        let h = top.next(&mut r)?.ok_or("no movie box (moov)")?;
+        if top.walked == 1 && !FIRST_BOXES.contains(&&h.kind) {
+            return Err("not an ISO base media file");
+        }
+        if h.kind == *b"moov" {
+            break (start, h);
+        }
+    };
+    let movie = read_movie(&mut r, &moov)?;
+    let mut points = Vec::new();
+    if let Some(track) = movie.video.filter(|t| t.tables.count > 0) {
+        let tables = &track.tables;
+        let mut budget = TABLE_BUDGET;
+        let offsets = chunk_offsets(&mut r, tables.chunk_table.ok_or("no chunk offsets")?, &mut budget)?;
+        let sizes = match tables.size_table {
+            Some(h) => sample_sizes(&mut r, h, &mut budget).unwrap_or_default(),
+            None => SampleSizes::default(),
+        };
+        let scale = i128::from(track.timescale);
+        // The usual edit list (a decoding delay hidden) moves every time alike.
+        let shift = edit_plan(&track.edits, movie.timescale, track.timescale)
+            .ok()
+            .flatten()
+            .map_or(0, |edit| edit.media_time - edit.empty);
+        let mut samples = Samples::new(tables);
+        let mut number = 0usize;
+        let mut run = 0;
+        'chunks: for (i, &offset) in offsets.iter().enumerate() {
+            let chunk = i as u64 + 1;
+            // The first run starts at chunk 1 whatever it says (as FFmpeg reads it).
+            while tables.stsc.get(run + 1).is_some_and(|next| u64::from(next.0) <= chunk) {
+                run += 1;
+            }
+            let per_chunk = tables.stsc.get(run).map_or(0, |r| r.1);
+            let mut at = offset;
+            for _ in 0..per_chunk {
+                let Some(sample) = samples.next() else { break 'chunks };
+                if sample.key {
+                    let ticks = (sample.cts - shift).max(0);
+                    let ms = i64::try_from((ticks * 1000 + scale / 2) / scale).unwrap_or(i64::MAX);
+                    points.push((ms, at));
+                }
+                at = at.saturating_add(sizes.get(number));
+                number += 1;
+            }
+        }
+    }
+    points.sort_unstable();
+    points.dedup_by_key(|p| p.0);
+    Ok((start..moov.end, points))
+}
+
+/// The chunk offsets of an `stco` or `co64` box.
+fn chunk_offsets<R: Read + Seek>(r: &mut Reader<R>, h: BoxHead, budget: &mut u64) -> Result<Vec<u64>> {
+    let data = table(r, &h, budget)?;
+    let mut f = Fields::new(&data);
+    f.skip(4)?;
+    if h.kind == *b"co64" {
+        let n = f.count(8)?;
+        (0..n).map(|_| f.u64()).collect()
+    } else {
+        let n = f.count(4)?;
+        (0..n).map(|_| f.u32().map(u64::from)).collect()
+    }
+}
+
+/// Sample sizes (`stsz` or `stz2`); 0 for those not known.
+#[derive(Default)]
+struct SampleSizes {
+    all: u32,
+    each: Vec<u32>,
+}
+
+impl SampleSizes {
+    fn get(&self, n: usize) -> u64 {
+        u64::from(if self.all > 0 { self.all } else { self.each.get(n).copied().unwrap_or(0) })
+    }
+}
+
+fn sample_sizes<R: Read + Seek>(r: &mut Reader<R>, h: BoxHead, budget: &mut u64) -> Result<SampleSizes> {
+    let data = table(r, &h, budget)?;
+    let mut f = Fields::new(&data);
+    f.skip(4)?;
+    if h.kind == *b"stsz" {
+        let all = f.u32()?;
+        if all > 0 {
+            return Ok(SampleSizes { all, each: Vec::new() });
+        }
+        let n = f.count(4)?;
+        return Ok(SampleSizes { all, each: (0..n).map(|_| f.u32()).collect::<Result<_>>()? });
+    }
+    // `stz2`: 4, 8 or 16 bits per sample.
+    let bits = f.take::<4>()?[3];
+    let n = f.u32()? as usize;
+    let bytes = match bits {
+        4 => n.div_ceil(2),
+        8 => n,
+        16 => n.checked_mul(2).ok_or("too many samples")?,
+        _ => return Err("unknown sample size field"),
+    };
+    let raw = data.get(12..12 + bytes).ok_or("table lists more entries than it holds")?;
+    let each = (0..n)
+        .map(|i| match bits {
+            4 => u32::from(if i % 2 == 0 { raw[i / 2] >> 4 } else { raw[i / 2] & 0x0F }),
+            8 => u32::from(raw[i]),
+            _ => u32::from(u16::from_be_bytes([raw[2 * i], raw[2 * i + 1]])),
+        })
+        .collect();
+    Ok(SampleSizes { all: 0, each })
 }
 
 /// A time in media ticks, kept in 64 bits.
@@ -489,6 +618,12 @@ struct Tables {
     partial_sync: Vec<u32>,
     /// How much FFmpeg shifts decode times for negative composition offsets.
     dts_shift: i64,
+    /// (first chunk, samples per chunk, description) runs (`stsc`).
+    stsc: Vec<(u32, u32, u32)>,
+    /// The chunk offsets (`stco` or `co64`) and sample sizes (`stsz` or
+    /// `stz2`), not read here.
+    chunk_table: Option<BoxHead>,
+    size_table: Option<BoxHead>,
 }
 
 /// A sample table's payload, charged to what the track's tables may take.
@@ -505,11 +640,16 @@ fn read_tables<R: Read + Seek>(r: &mut Reader<R>, boxes: &[BoxHead]) -> Result<T
     let mut budget = TABLE_BUDGET;
     let mut sizes = None;
     let mut chunks = None;
-    let mut stsc = None;
     for h in boxes {
         match &h.kind {
-            b"stsz" | b"stz2" => sizes = Some(Fields::new(&r.prefix(h, 12)?[8..]).u32()?),
-            b"stco" | b"co64" => chunks = Some(Fields::new(&r.prefix(h, 8)?[4..]).u32()?),
+            b"stsz" | b"stz2" => {
+                sizes = Some(Fields::new(&r.prefix(h, 12)?[8..]).u32()?);
+                t.size_table = Some(*h);
+            }
+            b"stco" | b"co64" => {
+                chunks = Some(Fields::new(&r.prefix(h, 8)?[4..]).u32()?);
+                t.chunk_table = Some(*h);
+            }
             b"stsc" => {
                 let data = table(r, h, &mut budget)?;
                 let mut f = Fields::new(&data);
@@ -521,7 +661,7 @@ fn read_tables<R: Read + Seek>(r: &mut Reader<R>, boxes: &[BoxHead]) -> Result<T
                         Ok((first, per_chunk, description))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                stsc = Some(entries);
+                t.stsc = entries;
             }
             b"stts" => {
                 let data = table(r, h, &mut budget)?;
@@ -572,8 +712,8 @@ fn read_tables<R: Read + Seek>(r: &mut Reader<R>, boxes: &[BoxHead]) -> Result<T
 
     // FFmpeg walks the chunks (`stsc` runs over `stco` entries) and stops at
     // the sample count of `stsz`.
-    let covered = match (stsc, chunks) {
-        (Some(stsc), Some(chunks)) => samples_in_chunks(&stsc, u64::from(chunks))?,
+    let covered = match chunks {
+        Some(chunks) if !t.stsc.is_empty() => samples_in_chunks(&t.stsc, u64::from(chunks))?,
         _ => 0,
     };
     t.count = covered.min(u64::from(sizes.unwrap_or(0)));
@@ -1034,6 +1174,66 @@ mod tests {
 
     fn parse(file: &[u8]) -> Result<Vec<i64>> {
         index(Cursor::new(file), file.len() as u64, None)
+    }
+
+    /// Ten half-second samples, keyframes at 0, 2 and 4 s, in four chunks of
+    /// 2, 2, 3 and 3 samples, the movie box after the media; with an edit
+    /// list starting the media at `edit` ms.
+    fn chunked(co64: bool, edit: Option<u32>) -> Vec<u8> {
+        let offsets = [1_000u64, 2_000, 3_000, 4_000];
+        let chunks = if co64 {
+            let mut entries = vec![offsets.len() as u32];
+            entries.extend(offsets.iter().flat_map(|o| [(o >> 32) as u32, *o as u32]));
+            table(b"co64", &entries)
+        } else {
+            table(b"stco", &[&[offsets.len() as u32][..], &offsets.map(|o| o as u32)].concat())
+        };
+        let stbl = bx(
+            b"stbl",
+            &[
+                &fbx(b"stsd", 0, 0, &[u32s(&[1, 16]), b"avc1".to_vec(), vec![0; 4]].concat()),
+                &pairs(b"stts", &[(10, 500)]),
+                &table(b"stss", &[3, 1, 5, 9]),
+                &table(b"stsc", &[2, 1, 2, 1, 3, 3, 1]),
+                &table(b"stsz", &[0, 10, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109]),
+                &chunks,
+            ],
+        );
+        let mdia = bx(
+            b"mdia",
+            &[
+                &header(b"mdhd", 1000),
+                &fbx(b"hdlr", 0, 0, &[&[0u8; 4][..], b"vide", &[0; 13]].concat()),
+                &bx(b"minf", &[&stbl]),
+            ],
+        );
+        let edts = edit.map(|at| bx(b"edts", &[&table(b"elst", &[1, 5_000 - at, at, 0x1_0000])])).unwrap_or_default();
+        let trak = bx(b"trak", &[&fbx(b"tkhd", 0, 3, &u32s(&[0, 0, 1, 0, 0])), &edts, &mdia]);
+        [ftyp(), bx(b"mdat", &[&[0u8; 5000]]), moov(1000, &[audio_trak(), trak], None)].concat()
+    }
+
+    #[test]
+    fn chunk_index_finds_the_chunks_of_keyframes() {
+        let dir = tempfile::tempdir().unwrap();
+        for co64 in [false, true] {
+            let file = chunked(co64, None);
+            let path = dir.path().join("movie.mp4");
+            std::fs::write(&path, &file).unwrap();
+            let moov = (ftyp().len() + 5008) as u64;
+            let (range, points) = chunk_index(&path).unwrap();
+            assert_eq!(range, moov..file.len() as u64, "co64: {co64}");
+            // Keyframes start chunks 1 and 3, and come second in chunk 4.
+            assert_eq!(points, vec![(0, 1_000), (2_000, 3_000), (4_000, 4_107)], "co64: {co64}");
+        }
+        // An edit list hiding a decoding delay moves the times as FFmpeg does.
+        let path = dir.path().join("delayed.mp4");
+        std::fs::write(&path, chunked(false, Some(250))).unwrap();
+        let (_, points) = chunk_index(&path).unwrap();
+        assert_eq!(points, vec![(0, 1_000), (1_750, 3_000), (3_750, 4_107)]);
+        // Not an MP4 file.
+        let other = dir.path().join("other.mp4");
+        std::fs::write(&other, b"not a movie at all").unwrap();
+        assert!(chunk_index(&other).is_err());
     }
 
     /// 25 fps at 12800 ticks per second with two B-frames, in closed groups of

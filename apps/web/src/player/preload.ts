@@ -38,9 +38,21 @@ export function preloadPlayer(): void {
   if (!androidPlayer()) loadHls().catch(() => undefined);
 }
 
-/** Props for a Play button: hovering or focusing it fetches the player. */
-export function playIntent(kind: ItemKind): { onPointerEnter?: () => void; onFocus?: () => void } {
-  return VIDEO_KINDS.has(kind) ? { onPointerEnter: preloadPlayer, onFocus: preloadPlayer } : {};
+/**
+ * Props for a Play button: hovering or focusing it fetches the player, and
+ * runs `also` (the server reading the video ahead).
+ */
+export function playIntent(
+  kind: ItemKind,
+  also?: () => void,
+): { onPointerEnter?: () => void; onFocus?: () => void } {
+  const video = VIDEO_KINDS.has(kind);
+  if (!video && !also) return {};
+  const intent = () => {
+    if (video) preloadPlayer();
+    also?.();
+  };
+  return { onPointerEnter: intent, onFocus: intent };
 }
 
 /** How long the browser may hold an idle preload back while it is busy. */

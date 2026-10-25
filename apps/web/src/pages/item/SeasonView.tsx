@@ -6,6 +6,7 @@ import { Artwork } from "@/components/Artwork";
 import { Button, SectionTitle, Skeleton } from "@/components/ui";
 import { episodeLabel, formatDate, formatDuration, pluralize, progressFraction, seasonTitle } from "@/lib/format";
 import { thumbCandidates } from "@/lib/images";
+import { prefetchPlay } from "@/lib/prefetchPlay";
 import { usePlayItem } from "@/lib/usePlayItem";
 import { playIntent } from "@/player/preload";
 import { MoreActions } from "./ItemActions";
@@ -31,7 +32,7 @@ function EpisodeRow({ ep }: { ep: ChildItem }) {
           type="button"
           aria-label={`Play ${ep.title}`}
           onClick={() => void play(ep)}
-          {...playIntent(ep.kind)}
+          {...playIntent(ep.kind, () => prefetchPlay(ep))}
           className="absolute left-1/2 top-1/2 flex size-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-accent text-accent-fg opacity-0 shadow-lg transition hover:bg-accent-hover focus-visible:opacity-100 group-hover:opacity-100"
         >
           <Play className="ml-0.5 size-4 fill-current" />

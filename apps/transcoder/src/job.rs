@@ -104,6 +104,10 @@ pub struct JobManager {
     jobs: Mutex<HashMap<String, Arc<Job>>>,
     /// Set on shutdown: no new jobs are accepted.
     closed: AtomicBool,
+    /// Job creations begun so far, and when the last began: reading ahead
+    /// (`prefetch.rs`) keeps out of a starting playback's way.
+    creations: AtomicU64,
+    last_creation: Mutex<Option<Instant>>,
 }
 
 pub struct Job {
@@ -194,7 +198,25 @@ impl JobManager {
             limits,
             jobs: Mutex::default(),
             closed: AtomicBool::new(false),
+            creations: AtomicU64::new(0),
+            last_creation: Mutex::new(None),
         })
+    }
+
+    /// How many job creations have begun so far.
+    pub fn creations(&self) -> u64 {
+        self.creations.load(Relaxed)
+    }
+
+    /// A job creation begins.
+    pub(crate) fn note_creation(&self) {
+        *self.last_creation.lock() = Some(Instant::now());
+        self.creations.fetch_add(1, Relaxed);
+    }
+
+    /// Whether a job creation began within `window`.
+    pub fn created_within(&self, window: Duration) -> bool {
+        self.last_creation.lock().is_some_and(|at| at.elapsed() < window)
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<Job>> {
@@ -214,6 +236,7 @@ impl JobManager {
         if !self.ff.caps.ffmpeg_available {
             return Err(ApiError::Failed("ffmpeg is not available on the transcoder host".into()));
         }
+        self.note_creation();
         let input = PathBuf::from(&req.input);
         match tokio::fs::metadata(&input).await {
             Ok(m) if m.is_file() => {}
