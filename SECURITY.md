@@ -26,6 +26,11 @@ Only the latest release gets fixes.
 - **Two-step sign-in:** turn it on for administrators of a server reachable
   from the internet (Account → Two-step sign-in), and keep the recovery codes
   somewhere safe.
+- **Leave apps by other publishers off** (Settings → Server → Apps) unless
+  you need one.
+- **Behind a reverse proxy, pass the original `Host`** and set
+  `X-Forwarded-Proto`, overwriting what clients send (see
+  [deploy/README.md](deploy/README.md#apps-and-reverse-proxies)).
 
 ## What pley does
 
@@ -48,13 +53,33 @@ code works once; wrong codes are limited like passwords, and after 100 in a
 row only a recovery code signs in. The authenticator secrets are encrypted
 with a key kept in the data folder (`secret.key`), so a copy of the database
 or of its backups can't make codes; recovery codes are stored hashed.
-Switching to a profile with its password takes its code too.
+Switching to a profile with its password takes its code too. Apps sign in
+on the same page, so they take the code as well.
 
 **Sessions.** Random 256-bit tokens, stored hashed. Browsers keep them in an
 `HttpOnly`, `SameSite=Lax` cookie only: no answer gives a page's script the
 token. Event streams end once their session is signed out. Switching from a
 restricted profile to one that can see more (an administrator, a higher age
 limit, other libraries) takes that profile's PIN, or its password (and code).
+
+**Apps signing in.** Apps sign in on pley's own page with OAuth 2.1:
+authorization codes with PKCE (S256 only), return addresses matched exactly
+(only a loopback port may differ), codes that work once within 60 seconds,
+and `iss` in every answer. Tokens are random, stored hashed and go only in
+the `Authorization` header. Access tokens last an hour; refresh tokens are
+rotated on every use, and one used twice ends the app's access. People are
+asked every time, pley's own apps included, on a page that shows the app's
+address first and can't be framed. Apps never get administrator rights:
+every route they may use is listed with the scope it needs, anything else
+is refused, and the Plex-compatible API refuses their tokens. Apps also
+don't see library folders or file paths. pley's own apps are built in and
+sign in without internet access. Descriptions of other publishers' apps are
+read only when an administrator allows those apps, for someone signed in,
+from public addresses only, without redirects, at most 5 KiB; reading one
+tells the app's host that this server is in use. A new password, "Sign out
+everywhere", `pley reset-password` and deleting the account sign its apps
+out with its other sign-ins. App sign-in works over plain HTTP at home, as
+passwords do; beyond the home network it needs HTTPS like the rest of pley.
 
 **Pages.** A `Content-Security-Policy` allows only pley's own scripts and
 styles, no other site may frame pley (`frame-ancestors 'none'`,
@@ -73,7 +98,12 @@ random token. One started on another machine refuses to listen on the
 network without a token of at least 16 characters, since it reads whatever
 files it can open, and keeps its work folder private.
 
-**Apps.** The desktop app hands only web and mail links to the system and
-gives server pages none of its commands. The Android app offers its player
-to the server's own pages only, sends the session token to the server only
-(not across redirects), and keeps WebView file access off.
+**Apps.** The desktop and Android windows show the server's own pages only:
+other sites open in the browser. The desktop app hands only web and mail
+links to the system and gives server pages none of its commands. The
+Android app offers its player to the server's own pages only, sends the
+session token to the server only (not across redirects), and keeps WebView
+file access off. Its native sign-in, not yet used by its screens, opens the
+server's page in the browser and keeps only app tokens, encrypted with a
+key from the Android Keystore and sent to the server's own address only; it
+never sees passwords or the web view's cookie.

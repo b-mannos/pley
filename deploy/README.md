@@ -96,6 +96,27 @@ put pley behind a reverse proxy with TLS (Caddy, nginx, Traefik); it serves
 plain HTTP and works under any host name. Docker publishes ports around host
 firewalls: behind a proxy on the same host, publish pley on `127.0.0.1` only.
 
+## Apps and reverse proxies
+
+Apps sign in on pley's own page (OAuth 2.1), and pley names itself by the
+address each request came to. A reverse proxy must therefore pass the
+original `Host` header and set `X-Forwarded-Proto`, overwriting what
+clients send rather than adding to it (RFC 9700 §4.13). Caddy does both by
+default. With nginx:
+
+```nginx
+proxy_set_header Host $host;
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+Otherwise apps refuse the server: its sign-in description
+(`/.well-known/oauth-authorization-server`) names another address than the
+one they used (RFC 8414 §3.3).
+
+pley's own apps can always sign in. Apps by other publishers are off until
+an administrator turns them on in **Settings → Server → Apps**; pley then
+reads their descriptions from the internet when someone allows one.
+
 ## Upgrading from single sign-on
 
 pley no longer signs people in through an OpenID Connect provider: if you

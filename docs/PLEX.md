@@ -36,8 +36,13 @@ curl -s -X POST http://localhost:7539/api/auth/login \
 ```
 
 The token is accepted the Plex way, as the `X-Plex-Token` header or query
-parameter, and the pley way (`Authorization: Bearer`, the `pley_token` cookie).
-Every endpoint needs it except `/identity`.
+parameter, and the pley way (`Authorization: Bearer`, `X-Pley-Token` or
+`?token=`). The web UI's `pley_token` cookie is refused here: browsers send
+it to this port too, and some Plex endpoints change things on a GET.
+Tokens of apps signed in on pley's own page (`pley_at_…`) are refused as
+well, and so are the HLS session addresses of playback those apps started:
+Plex tools use a token from `POST /api/auth/login`. Every endpoint needs a
+token except `/identity`.
 
 ```python
 from plexapi.server import PlexServer
