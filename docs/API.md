@@ -1045,6 +1045,30 @@ queue.
     audio_codecs: string[];       // e.g. ["aac","mp3","opus","flac","vorbis"]
     hdr?: boolean;                // shows HDR10 / HLG without tone mapping
     dolby_vision?: boolean;       // decodes Dolby Vision (needed for profile 5)
+    // Version 2 (the native Android app); every field optional. Codec
+    // names are ffprobe's.
+    caps_version?: 2;
+    video?: {                     // every video decoder; a stream plays when one entry takes it
+      codec: string;              // "h264", "hevc", "vp9", "av1"…
+      hardware?: boolean;
+      profiles?: string[];        // as ffprobe names them: "Main", "Main 10", "High", "Profile 2"…
+      max_width?: number;         // limits left out aren't checked
+      max_height?: number;
+      max_fps?: number;
+      max_bit_depth?: number;
+      max_level?: number;         // numbered as a stream's `level` (HEVC 5.1 = 153, H.264 5.1 = 51)
+    }[];
+    hdr_types?: ("hdr10" | "hdr10plus" | "hlg" | "dolby_vision")[]; // what the screen shows, a decoder feeding it
+    dolby_vision_profiles?: { profile: number; max_level?: number }[]; // only with a Dolby Vision screen
+    audio_decode?: string[];      // decoded on the device
+    audio_passthrough?: string[]; // sent as they are to a receiver: "ac3", "eac3", "truehd", "dts"
+    audio_channels?: number;      // the most channels the output takes: 2, 6, 8
+    subtitle_codecs?: string[];   // shown by the player itself, pictures included ("hdmv_pgs_subtitle")
+    audio_track_switching?: boolean; // switches a file's audio tracks itself
+    hls?: { master_playlist?: boolean; segments?: string[] }; // "ts", "fmp4"
+    display?: { width: number; height: number; refresh_rates?: number[] };
+    device?: { form?: "phone" | "tablet" | "tv" | "unknown"; tier?: "low" | "mid" | "high";
+               fire_tv?: boolean; model?: string };
   };
 }
 ```
@@ -1057,7 +1081,9 @@ stream copied) or **transcode** (HLS, H.264/AAC).
 - HDR10 and HLG need `caps.hdr`. Dolby Vision profile 5 needs
   `caps.dolby_vision`; profiles 7 and 8 play directly with either, because their
   base layer is HDR10 (8.1) or HLG (8.4). Otherwise the video is tone-mapped to
-  SDR.
+  SDR. (This is version 1. Media3, which the Android app plays with, has no
+  fallback for profile 7: version 2 below decides it differently.)
+- Converted audio is stereo AAC; AAC and MP3 the player decodes are copied.
 - `mode: "direct"` always returns the original file (useful when a browser plays
   more than it reports; image subtitles and alternate audio tracks are then
   unavailable). `"remux"` and `"transcode"` force HLS; `"transcode"` always
@@ -1069,6 +1095,7 @@ stream copied) or **transcode** (HLS, H.264/AAC).
   the same segment layout. When that is impossible, segment requests answer
   `404 not_found` ("playback session expired") and the player should start a
   new session at its current position.
+
 The HLS playlist covers the whole file (VOD) so seeking works natively; the
 server restarts ffmpeg at the right segment on seeks. Audio-only items (tracks)
 use the same endpoint and get either a direct URL or an audio-only HLS stream.
@@ -1076,6 +1103,56 @@ use the same endpoint and get either a direct URL or an audio-only HLS stream.
 The player should send `POST /api/items/{id}/progress` every ~10 s while
 playing (with `session_id`), on pause, and with `state: "stopped"` when closing,
 then `DELETE /api/playback/{session_id}`.
+
+### Version 2
+
+`caps_version: 2` turns on these rules; a report without it (the web app,
+the Android app's web view, Plex clients) decides as above, whatever else it
+sends. Version 2 reports still send the version 1 fields: `containers`
+always counts, and `video_codecs` or `audio_codecs` stand in only when
+`video`, or both `audio_decode` and `audio_passthrough`, are left out.
+
+- **Video.** Direct only when an entry of `video` takes the stream: its
+  codec; its profile, when the entry lists profiles (10-bit HEVC needs
+  `Main 10`); its size (either way round), frame rate (0.01 fps of slack),
+  bit depth and level. A codec may have several entries (4K at 30 fps and
+  1080p at 60): any one will do. `max_bitrate` and `max_height` in the
+  request are only the quality the person picked.
+- **Dynamic range.** HDR10 needs `hdr10` in `hdr_types`; HDR10+ needs
+  `hdr10plus` or `hdr10`; HLG needs `hlg`. Without them the video is
+  tone-mapped to SDR, as for an SDR screen.
+- **Dolby Vision** plays as it is when `hdr_types` has `dolby_vision` and
+  `dolby_vision_profiles` lists the profile at or above its level.
+  Otherwise:
+  - 8.1 and 8.4 (and 9, and 10 on an AV1 entry) play their HDR10, HLG or
+    SDR base layer when the screen shows it, by the rules above;
+  - 7 is **repackaged** when the screen shows HDR10: the video is copied
+    into HLS and plays as its HDR10 base layer (Media3 has no profile 7
+    fallback). Tone-mapped otherwise;
+  - 5, which has no base layer, is tone-mapped, never repackaged: MPEG-TS
+    segments lose the Dolby Vision signalling, which leaves its colours
+    wrong.
+- **Audio** plays as it is when its codec is in `audio_decode` or
+  `audio_passthrough`. With `audio_track_switching`, another track than the
+  file's default no longer needs HLS: the player switches to it itself.
+- **Picture subtitles** (PGS, VobSub, DVB) in `subtitle_codecs` are shown by
+  the player when the file plays as it is; when it doesn't, they are drawn
+  onto the video as for version 1 (HLS segments carry no subtitles).
+  Subtitle files next to the media are always drawn.
+- **Converting.** Video is converted to H.264, no bigger than the player's
+  largest H.264 entry (a 4K file is made in 1080p for a 1080p stick, also
+  when a higher quality is picked). Audio in AAC, MP3, AC-3 or E-AC-3 that
+  the player takes is copied; anything else is converted to:
+  - E-AC-3 5.1 at 640 kbit/s when `audio_channels` is 6 or more, the source
+    has more than two channels, and `eac3` is decoded or passed through;
+  - else AC-3 5.1 at 640 kbit/s when `ac3` is;
+  - else AAC with as many channels as the output takes, up to 5.1 (stereo
+    for stereo outputs; a stereo source stays stereo).
+
+Not yet: Dolby Vision kept in remuxes (a multivariant playlist with
+`CODECS`), profile 7 converted to 8.1 for Dolby Vision players, HDR10+
+removed from Dolby Vision streams that carry both, and HDR (HEVC Main 10)
+transcodes for HDR screens.
 
 ## Intro and credits detection
 
