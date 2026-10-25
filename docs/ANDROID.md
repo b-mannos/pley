@@ -22,6 +22,25 @@ The phone or tablet's launcher opens `MainActivity`; the TV home screen
 shows the 320×180 banner and opens `TvActivity`. A TV that opens
 `MainActivity` (some launchers do) is sent on to `TvActivity`.
 
+## Fire TV
+
+Fire TV runs the same APK and the same TV screens as Android TV; there is
+no Fire TV build. The app tells it apart by Amazon's
+`amazon.hardware.fire_tv` feature and then only changes what Amazon asks
+of a player: decoders queue their buffers asynchronously (Fire TV's
+media guidelines; a per-model switch can turn it off), surround output
+follows Fire OS's own audio setting, Alexa's play and pause reach the
+player's media session, and Fire OS 16 asks for its nearby-devices
+permission before searching the network.
+
+The remote works as on Android TV: Select opens, holding Select or
+pressing Menu (☰) opens a title's actions, Back goes back, and play/pause,
+rewind and fast forward work in the player. Fire OS 7 (Android 9) is the
+oldest supported; an `android-28` Android TV emulator with 1 GB of memory
+stands in for a Fire TV stick (see Emulators), apart from video decoding:
+its decoders are software only, which the app doesn't use on TVs, so it
+can't play video.
+
 ## Updating from the web view app
 
 An update installed over the web view app keeps what matters and nothing
