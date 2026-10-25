@@ -1,6 +1,6 @@
 package app.pley.android.auth
 
-import app.pley.android.Links
+import app.pley.android.common.Addresses
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -37,10 +37,10 @@ data class ServerMetadata(
 
         /**
          * Reads the metadata of the server at [server] (its address, as
-         * Links.address writes it). [http] follows no redirects.
+         * Addresses.origin writes it). [http] follows no redirects.
          */
         suspend fun fetch(http: OkHttpClient, server: String): ServerMetadata = withContext(Dispatchers.IO) {
-            val home = Links.address(server) ?: throw AuthException("that isn't a server address")
+            val home = Addresses.origin(server) ?: throw AuthException("that isn't a server address")
             val request = Request.Builder().url(home + PATH).header("Accept", "application/json").get().build()
             http.newCall(request).execute().use { response ->
                 if (response.isRedirect) {
@@ -59,7 +59,7 @@ data class ServerMetadata(
 
         /** The checks of [fetch], on the answer [text] of the server at [server]. */
         fun parse(text: String, server: String): ServerMetadata {
-            val home = Links.address(server) ?: throw AuthException("that isn't a server address")
+            val home = Addresses.origin(server) ?: throw AuthException("that isn't a server address")
             val o = try {
                 JSONObject(text)
             } catch (_: JSONException) {
@@ -76,7 +76,7 @@ data class ServerMetadata(
             fun endpoint(name: String): String {
                 val url = o.optString(name)
                 if (url.isEmpty()) throw AuthException(TOO_OLD)
-                if (Links.address(url) != issuer || !url.startsWith("$issuer/")) {
+                if (Addresses.origin(url) != issuer || !url.startsWith("$issuer/")) {
                     throw AuthException("this server sends apps to another address to sign in: pley doesn't")
                 }
                 return url

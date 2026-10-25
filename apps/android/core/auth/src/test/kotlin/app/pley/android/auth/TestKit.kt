@@ -1,6 +1,6 @@
 package app.pley.android.auth
 
-import app.pley.android.Links
+import app.pley.android.common.Addresses
 import javax.crypto.KeyGenerator
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockWebServer
@@ -35,7 +35,7 @@ fun testVault(): Vault {
 fun endpointsClient(base: OkHttpClient = OkHttpClient()): OkHttpClient = AuthHttp.endpoints(userAgent = "pleyTest/1", base = base)
 
 /** The address of [server] as the app writes it (its issuer). */
-fun issuerOf(server: MockWebServer): String = Links.address(server.url("/").toString())!!
+fun issuerOf(server: MockWebServer): String = Addresses.origin(server.url("/").toString())!!
 
 /** The form parameters of [request]. */
 fun formOf(request: RecordedRequest): Map<String, String> = request.body.clone().readUtf8().split('&').filter { it.isNotEmpty() }.associate {

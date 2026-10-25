@@ -58,6 +58,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
+import app.pley.android.common.Discovery
+import app.pley.android.common.FoundServer
+import app.pley.android.common.LocalNetwork
+import app.pley.android.common.SavedServer
+import app.pley.android.common.ServerEntry
+import app.pley.android.common.Servers
+import app.pley.android.common.describe
 import java.net.URI
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch

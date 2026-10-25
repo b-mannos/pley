@@ -1,5 +1,6 @@
 package app.pley.android
 
+import app.pley.android.common.Addresses
 import java.net.URI
 import java.net.URISyntaxException
 
@@ -43,13 +44,7 @@ object Links {
     }
 
     /** The origin of [url] as browsers write it (`https://pley.example.com`, `http://nas:7539`). */
-    fun address(url: String): String? {
-        val uri = parse(url) ?: return null
-        val scheme = uri.scheme?.lowercase() ?: return null
-        val host = uri.host?.lowercase() ?: return null
-        val defaultPort = uri.port == -1 || (scheme == "http" && uri.port == 80) || (scheme == "https" && uri.port == 443)
-        return if (defaultPort) "$scheme://$host" else "$scheme://$host:${uri.port}"
-    }
+    fun address(url: String): String? = Addresses.origin(url)
 
     fun navigation(url: String, places: Places): Navigation {
         val target = parse(url) ?: return Navigation.Ignore

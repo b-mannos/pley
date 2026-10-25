@@ -33,13 +33,6 @@
         android:name="android.hardware.faketouch"
         android:required="false" />
 
-    <!-- The browsers that offer Custom Tabs, for signing in (Android 11 and later). -->
-    <queries>
-        <intent>
-            <action android:name="android.support.customtabs.action.CustomTabsService" />
-        </intent>
-    </queries>
-
     <!--
       pley servers on home networks speak plain HTTP, so cleartext traffic is
       allowed. Nothing is backed up or moved to a new device: the web view
@@ -80,25 +73,6 @@
             android:exported="false"
             android:theme="@style/Theme.Pley.Player" />
 
-        <!--
-          Where the browser comes back after signing in on the server's own
-          page: app.pley.android:/oauth/callback (the path is checked in
-          code). Any app can open it; answers count only for a waiting
-          sign-in, from its own server.
-        -->
-        <activity
-            android:name=".auth.SignInRedirectActivity"
-            android:excludeFromRecents="true"
-            android:exported="true"
-            android:launchMode="singleTask"
-            android:noHistory="true"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="app.pley.android" />
-            </intent-filter>
-        </activity>
+        <!-- The sign-in module's return address is in core/auth's manifest. -->
     </application>
 </manifest>

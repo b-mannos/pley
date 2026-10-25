@@ -1,5 +1,7 @@
 package app.pley.android
 
+import app.pley.android.common.UserAgent
+import app.pley.android.common.UserFacing
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -134,21 +136,11 @@ data class NextItem(val id: Long, val startMs: Long, val title: String)
 /** What `/api/server` says. */
 data class ServerInfo(val name: String, val version: String, val setupRequired: Boolean)
 
-class ApiException(val status: Int, message: String) : IOException(message)
+/** The server said no: its message, or the status. */
+class ApiException(val status: Int, message: String) : IOException(message), UserFacing
 
 /** How the app's requests introduce themselves (the server names the device after it). */
-val USER_AGENT = "pleyAndroid/${BuildConfig.VERSION_NAME} (Android ${android.os.Build.VERSION.RELEASE})"
-
-/** Why a request failed, in a few words for people. */
-fun describe(error: Throwable): String = when (error) {
-    is java.net.ConnectException -> "nothing answers there"
-    is java.net.SocketTimeoutException -> "no answer in time"
-    is java.net.UnknownHostException -> "that address isn't known on this network"
-    is javax.net.ssl.SSLException -> "its secure connection failed"
-    is ApiException -> error.message ?: "HTTP ${error.status}"
-    is org.json.JSONException -> "that isn't a pley server"
-    else -> error.message ?: error.javaClass.simpleName
-}
+val USER_AGENT = UserAgent.of(BuildConfig.VERSION_NAME)
 
 /** The few calls the native player makes to the server, with the web view's session. */
 class PleyApi(private val server: String, private val token: String?) {

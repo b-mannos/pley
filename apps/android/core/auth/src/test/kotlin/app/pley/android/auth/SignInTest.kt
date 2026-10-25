@@ -253,8 +253,8 @@ class SignInTest {
 
     @Test
     fun theModuleHoldsAppTokensOnly() {
-        // Unit tests run in the app module's folder.
-        val sources = java.io.File("src/main/java/app/pley/android/auth").listFiles { f -> f.extension == "kt" }.orEmpty()
+        // Unit tests run in the module's folder.
+        val sources = java.io.File("src/main/kotlin/app/pley/android/auth").listFiles { f -> f.extension == "kt" }.orEmpty()
         assertTrue(sources.size >= 8)
         for (file in sources) {
             val text = file.readText()

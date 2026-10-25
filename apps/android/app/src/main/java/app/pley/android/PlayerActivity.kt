@@ -37,6 +37,7 @@ import androidx.media3.ui.PlayerView
 import androidx.media3.ui.SubtitleView
 import androidx.media3.common.VideoSize
 import androidx.media3.common.text.CueGroup
+import app.pley.android.common.describe
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

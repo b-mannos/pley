@@ -1,4 +1,4 @@
-package app.pley.android
+package app.pley.android.common
 
 import android.content.Context
 import android.net.ConnectivityManager

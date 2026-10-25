@@ -76,16 +76,11 @@ dependencies {
     implementation(libs.androidx.media3.datasource.okhttp)
     // The player bridge, offered to the server's own pages only.
     implementation(libs.androidx.webkit)
-    // Signing in happens in the browser (a Custom Tab), never in a web view.
-    implementation(libs.androidx.browser)
     implementation(libs.okhttp)
     implementation(libs.kotlinx.coroutines.android)
 
     // Android's org.json is a stub in local unit tests.
     testImplementation(libs.json)
-    // A real server for the sign-in module's tests, over http and https.
-    testImplementation(libs.okhttp.mockwebserver)
-    testImplementation(libs.okhttp.tls)
 }
 
 // One command for every module (CI and docs/ANDROID.md): the flavors' debug

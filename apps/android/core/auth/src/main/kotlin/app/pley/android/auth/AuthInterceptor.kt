@@ -1,10 +1,7 @@
 package app.pley.android.auth
 
-import androidx.annotation.OptIn
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.okhttp.OkHttpDataSource
-import app.pley.android.Servers
-import app.pley.android.USER_AGENT
+import app.pley.android.common.Addresses
+import app.pley.android.common.Servers
 import java.io.IOException
 import java.net.Inet4Address
 import java.net.Inet6Address
@@ -158,8 +155,9 @@ object AuthHttp {
      * For the metadata, token and revocation endpoints: no redirects at
      * all (codes and tokens go to the address the metadata named, or
      * nowhere), no cookies, plain http to private addresses only.
+     * [userAgent] is the app's (UserAgent.of).
      */
-    fun endpoints(userAgent: String = USER_AGENT, base: OkHttpClient = OkHttpClient()): OkHttpClient = base.newBuilder()
+    fun endpoints(userAgent: String, base: OkHttpClient = OkHttpClient()): OkHttpClient = base.newBuilder()
         .followRedirects(false)
         .followSslRedirects(false)
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -182,11 +180,6 @@ object AuthHttp {
         .addNetworkInterceptor(AuthInterceptor(tokens))
         .authenticator(TokenAuthenticator(tokens))
         .build()
-
-    /** Media3's sources over [client] (from [api]), as the app introduces itself. */
-    @OptIn(UnstableApi::class)
-    fun dataSource(client: OkHttpClient, userAgent: String = USER_AGENT): OkHttpDataSource.Factory =
-        OkHttpDataSource.Factory(client).setUserAgent(userAgent)
 
     private fun userAgentOf(userAgent: String) = Interceptor { chain ->
         chain.proceed(chain.request().newBuilder().header("User-Agent", userAgent).build())

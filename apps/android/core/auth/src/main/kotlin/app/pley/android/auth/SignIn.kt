@@ -7,8 +7,9 @@ import android.content.Intent
 import androidx.browser.customtabs.CustomTabsClient
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.net.toUri
-import app.pley.android.Links
-import app.pley.android.describe
+import app.pley.android.common.Addresses
+import app.pley.android.common.UserAgent
+import app.pley.android.common.describe
 import java.io.IOException
 import java.net.URI
 import java.net.URISyntaxException
@@ -165,7 +166,7 @@ class SignIn(
      * the address of its sign-in page.
      */
     suspend fun start(server: String, returnTo: String? = null): String {
-        val home = Links.address(server) ?: throw AuthException("that isn't a server address")
+        val home = Addresses.origin(server) ?: throw AuthException("that isn't a server address")
         Transport.checkAddress(home)
         val metadata = ServerMetadata.fetch(http, home)
         val flow = PendingFlow(
@@ -330,7 +331,7 @@ object Auth {
         parts ?: run {
             // The application's context only: no activity is kept.
             val app = context.applicationContext
-            val http = AuthHttp.endpoints()
+            val http = AuthHttp.endpoints(UserAgent.of(app))
             val store = TokenStore(PrefsShelf(app), KeystoreVault())
             Parts(http, store, SignIn(http, store, { issuer -> tokens(app, issuer) })).also { parts = it }
         }

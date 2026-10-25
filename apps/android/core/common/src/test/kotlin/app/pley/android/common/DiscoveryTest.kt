@@ -1,4 +1,4 @@
-package app.pley.android
+package app.pley.android.common
 
 import java.net.Inet4Address
 import java.net.InetAddress

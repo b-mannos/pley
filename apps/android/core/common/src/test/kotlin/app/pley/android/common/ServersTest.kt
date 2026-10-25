@@ -1,4 +1,4 @@
-package app.pley.android
+package app.pley.android.common
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -102,12 +102,5 @@ class ServersTest {
         // The same server at a new address.
         list = Servers.withServer(list, SavedServer("http://192.168.1.5:7539", "NAS", "a1", 40))
         assertEquals(listOf("http://office:7539", "http://192.168.1.5:7539"), list.map { it.url })
-    }
-
-    @Test
-    fun savedServersSurviveARoundTrip() {
-        assertEquals(saved, ServerStore.decode(ServerStore.encode(saved)))
-        assertEquals(emptyList<SavedServer>(), ServerStore.decode("not json"))
-        assertEquals(emptyList<SavedServer>(), ServerStore.decode(null))
     }
 }

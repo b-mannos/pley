@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- The browsers that offer Custom Tabs, for signing in (Android 11 and later). -->
+    <queries>
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
+    </queries>
+
+    <application>
+        <!--
+          Where the browser comes back after signing in on the server's own
+          page: app.pley.android:/oauth/callback (the path is checked in
+          code). Any app can open it; answers count only for a waiting
+          sign-in, from its own server.
+        -->
+        <activity
+            android:name=".SignInRedirectActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="app.pley.android" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

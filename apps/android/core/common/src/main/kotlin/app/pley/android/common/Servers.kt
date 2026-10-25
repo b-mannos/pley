@@ -1,4 +1,4 @@
-package app.pley.android
+package app.pley.android.common
 
 import java.net.URI
 import java.net.URISyntaxException
