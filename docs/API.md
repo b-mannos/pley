@@ -329,6 +329,7 @@ turns it off.
 | Method | Path | Body | Response |
 |---|---|---|---|
 | PATCH | `/api/me` | `{ display_name?, avatar_color?, audio_language?, subtitle_language?, subtitle_mode? }` (`null` clears) | `User` |
+| PUT | `/api/me/track-defaults` | `{ audio_language?, subtitle_language?, subtitle_mode? }`: all three at once; a language left out is `null`, a mode left out is `forced` | the profile as [`GET /api/auth/me`](#auth) shows it; `400` for a language that isn't 2 or 3 lower-case letters, or another mode. For apps allowed `play` too |
 | PUT | `/api/me/pin` | `{ pin: string \| null, password }` | `204`; 4–8 digits, `null` removes it (`403` with a wrong password) |
 | PUT | `/api/me/avatar` | raw image bytes (JPEG, PNG, WebP, GIF, BMP; ≤ 10 MB) | `User`; stored as a 256 px square JPEG |
 | DELETE | `/api/me/avatar` | – | `204` |
@@ -344,6 +345,9 @@ dialogue; `foreign` full subtitles in `subtitle_language` (or the audio
 language) when the audio is tagged with another language; `always` in that
 language whenever the file has them. Every mode but `off` falls back to the
 forced ones. A choice made for a show or a movie wins over these.
+
+Apps change these with `PUT /api/me/track-defaults`, never with `PATCH
+/api/me`, which also changes the name and picture: those stay in the web app.
 
 ## Apps (OAuth 2.1)
 
@@ -510,10 +514,19 @@ allowed and who allowed it, and its old tokens stop at once. The rules are
 the web app's [switch](#auth), from the rights of the profile the app acts
 as, without the administrators' exemption. A refusal spends nothing.
 
+The profile the app acts as already, with its `pin`, checks that PIN: a TV
+asks "Who's watching?" as it starts. The rules are a switch's to that
+profile (the same wrong-PIN answers, throttle and lock, counted with the
+switches to it), and a right PIN answers as a switch does, with a new pair,
+the same scope and the old tokens stopped. Without a `pin`, or for a
+profile that has no PIN, it is `invalid_request` without a `reason`, as
+servers before this check answered every switch to the current profile:
+apps take that to mean the server can't check it.
+
 | Answer | When |
 |---|---|
 | `unauthorized_client` | not one of pley's own apps, or not allowed `profiles` |
-| `invalid_request` | `profile` is missing or not an id, or the app acts as that profile already |
+| `invalid_request` | `profile` is missing or not an id, or the app acts as that profile already and there is no PIN to check (none given, or none on the profile) |
 | `invalid_grant`, `"reason": "wrong_pin"` | the profile has a PIN, and it is missing or wrong |
 | `invalid_grant`, `"reason": "pin_locked"` | its PIN stopped working after 100 wrong ones in a row |
 | `invalid_grant`, `"reason": "throttled"` | too many wrong PINs for it lately (5 in 15 minutes) |
@@ -678,6 +691,7 @@ sign-in settings among them.
 | PUT | `/api/items/{id}/streams` | `play` |
 | PUT | `/api/items/{id}/rating` | `play` |
 | DELETE | `/api/history/{id}` | `play` |
+| PUT | `/api/me/track-defaults` | `play` |
 | POST | `/api/playlists` | `playlists` |
 | PATCH | `/api/playlists/{id}` | `playlists` |
 | DELETE | `/api/playlists/{id}` | `playlists` |
@@ -686,7 +700,7 @@ sign-in settings among them.
 | PUT | `/api/playlists/{id}/order` | `playlists` |
 | GET | `/api/oauth/profiles` | `profiles` |
 
-What stays in the web app: name, picture, track defaults, password, PIN,
+What stays in the web app: name, picture (`PATCH /api/me`), password, PIN,
 two-step sign-in, devices, apps, activity, switching profiles by
 `/api/auth/switch`, and all administration.
 
