@@ -1,0 +1,253 @@
+package app.pley.android.fixtures
+
+import app.pley.android.model.CollectionDetail
+import app.pley.android.model.CollectionSort
+import app.pley.android.model.CollectionSummary
+import app.pley.android.model.HistoryEntry
+import app.pley.android.model.HistoryUser
+import app.pley.android.model.ItemDetail
+import app.pley.android.model.ItemKind
+import app.pley.android.model.ItemSummary
+import app.pley.android.model.MediaFile
+import app.pley.android.model.MediaSummary
+import app.pley.android.model.Me
+import app.pley.android.model.PlaylistDetail
+import app.pley.android.model.PlaylistEntry
+import app.pley.android.model.PlaylistKind
+import app.pley.android.model.StreamKind
+import app.pley.android.model.SubtitleMode
+import app.pley.android.model.UserState
+
+/**
+ * The catalogue as a profile sees it: its own positions, watched marks,
+ * ratings and track choices in every item, playlist and collection.
+ */
+internal class Views(private val catalog: Catalog) {
+    /** [item]'s state for [profile]; shows, seasons, artists and albums from their episodes or tracks. */
+    fun state(item: ItemDetail, profile: Profile): UserState {
+        if (item.kind.playable) return profile.state(item.id)
+        val leaves = catalog.leaves(item.id).map(profile::state)
+        return UserState(
+            watched = leaves.isNotEmpty() && leaves.all { it.watched },
+            playCount = leaves.minOfOrNull { it.playCount } ?: 0,
+            lastPlayedAt = leaves.mapNotNull { it.lastPlayedAt }.maxOrNull(),
+            rating = profile.state(item.id).rating,
+        )
+    }
+
+    /**
+     * [item] as listings give it. In library listings ([listing]) the
+     * backdrop and still are left out, and summaries but episodes'; with
+     * [media], the best file's numbers (listings sorted by bitrate).
+     */
+    fun summary(item: ItemDetail, profile: Profile, listing: Boolean = false, media: Boolean = false): ItemSummary {
+        val state = state(item, profile)
+        return item.toSummary().copy(
+            userState = state,
+            viewedLeafCount = viewed(item, profile),
+            backdropUrl = if (listing) null else item.backdropUrl,
+            thumbUrl = if (listing) null else item.thumbUrl,
+            summary = if (listing && item.kind != ItemKind.Episode) null else item.summary,
+            media = if (media) mediaSummary(item) else null,
+        )
+    }
+
+    fun summary(id: Long, profile: Profile): ItemSummary? = catalog.item(id)?.let { summary(it, profile) }
+
+    /** GET /api/items/{id}: with the profile's state and track choices. */
+    fun detail(item: ItemDetail, profile: Profile): ItemDetail = item.copy(
+        userState = state(item, profile),
+        viewedLeafCount = viewed(item, profile),
+        files = item.files.map { file -> withChoices(item, file, profile) },
+        extras = item.extras.map { extra -> extra.copy(userState = profile.state(extra.id)) },
+    )
+
+    private fun viewed(item: ItemDetail, profile: Profile): Int? =
+        if (item.kind.playable || item.leafCount == null) null else catalog.leaves(item.id).count { profile.state(it).watched }
+
+    /** A movie's best file; a show's episodes (an artist's tracks) on average. */
+    fun mediaSummary(item: ItemDetail): MediaSummary? {
+        if (!item.kind.playable) {
+            val files = catalog.leaves(item.id).mapNotNull { catalog.item(it)?.files?.firstOrNull() }
+            if (files.isEmpty()) return null
+            return MediaSummary(
+                bitrate = files.mapNotNull { it.bitrate }.average().toLong(),
+                size = files.sumOf { it.size },
+                width = files.mapNotNull { it.width }.maxOrNull(),
+                height = files.mapNotNull { it.height }.maxOrNull(),
+            )
+        }
+        val best = item.files.maxByOrNull { it.bitrate ?: 0L } ?: return null
+        val video = best.streams.firstOrNull { it.kind == StreamKind.Video }
+        return MediaSummary(best.bitrate, best.size, best.width, best.height, best.videoCodec, video?.dynamicRange)
+    }
+
+    /** The tracks a file starts with for [profile]: its choice for the movie or show, else its defaults. */
+    private fun withChoices(item: ItemDetail, file: MediaFile, profile: Profile): MediaFile {
+        val owner = if (item.kind == ItemKind.Episode) item.grandparentId else item.id
+        val choice = owner?.let { profile.streamChoices[it] }
+        val audio = file.streams.filter { it.kind == StreamKind.Audio }
+        val subtitles = file.streams.filter { it.kind == StreamKind.Subtitle && it.textBased == true }
+        if (choice != null) {
+            return file.copy(
+                selectedAudio = choice.audioIndex?.takeIf { index -> audio.any { it.index == index } },
+                selectedSubtitle = choice.subtitleIndex?.takeIf { index -> file.streams.any { it.index == index } },
+            )
+        }
+        val defaults = profile.trackDefaults
+        val chosenAudio = audio.firstOrNull { it.language == defaults.audioLanguage } ?: audio.firstOrNull { it.default }
+        val wanted = defaults.subtitleLanguage ?: chosenAudio?.language
+        val subtitle = when (defaults.subtitleMode) {
+            SubtitleMode.Always -> subtitles.firstOrNull { it.language == wanted }
+            SubtitleMode.Foreign -> if (chosenAudio?.language != wanted) subtitles.firstOrNull { it.language == wanted } else null
+            SubtitleMode.Forced -> subtitles.firstOrNull { it.forced && it.language == chosenAudio?.language }
+            else -> null
+        }
+        return file.copy(selectedAudio = chosenAudio?.index, selectedSubtitle = subtitle?.index)
+    }
+
+    // ---------------------------------------------------------------- collections
+
+    fun collectionItems(collection: CollectionEntry): List<ItemDetail> {
+        val items = if (collection.smartFilter != null) {
+            filter(collection.libraryId, collection.smartFilter, profile = null)
+        } else {
+            collection.itemIds.mapNotNull(catalog::item)
+        }
+        return when (collection.sort) {
+            CollectionSort.Title -> items.sortedBy { it.sortTitle.lowercase() }
+            CollectionSort.Release -> items.sortedBy { it.releaseDate.orEmpty() }
+            else -> items
+        }
+    }
+
+    fun collectionSummary(collection: CollectionEntry): CollectionSummary {
+        val items = collectionItems(collection)
+        return CollectionSummary(
+            id = collection.id,
+            libraryId = collection.libraryId,
+            title = collection.title,
+            summary = collection.summary,
+            automatic = collection.automatic,
+            sort = collection.sort,
+            smartFilter = collection.smartFilter,
+            itemCount = items.size,
+            posterUrl = "/api/collections/${collection.id}/images/poster?v=${collection.createdAt}",
+            backdropUrl = "/api/collections/${collection.id}/images/backdrop?v=${collection.createdAt}",
+            createdAt = collection.createdAt,
+            updatedAt = collection.createdAt,
+        )
+    }
+
+    fun collectionDetail(collection: CollectionEntry, profile: Profile): CollectionDetail {
+        val s = collectionSummary(collection)
+        return CollectionDetail(
+            id = s.id,
+            libraryId = s.libraryId,
+            title = s.title,
+            summary = s.summary,
+            automatic = s.automatic,
+            sort = s.sort,
+            smartFilter = s.smartFilter,
+            itemCount = s.itemCount,
+            posterUrl = s.posterUrl,
+            backdropUrl = s.backdropUrl,
+            createdAt = s.createdAt,
+            updatedAt = s.updatedAt,
+            items = collectionItems(collection).map { summary(it, profile) },
+        )
+    }
+
+    /**
+     * What a smart filter finds among [libraryId]'s top-level items, in the
+     * Plex-compatible API's syntax as far as the fixtures use it: `genre`,
+     * `year`, `decade`, `unwatched=1` and `sort=<field>[:desc]` (title, year).
+     */
+    fun filter(libraryId: Long, filter: String, profile: Profile?): List<ItemDetail> {
+        val terms = filter.split('&').filter { '=' in it }.associate { it.substringBefore('=') to it.substringAfter('=') }
+        var items = catalog.topLevel[libraryId].orEmpty().mapNotNull(catalog::item)
+        terms["genre"]?.let { genre -> items = items.filter { genre in it.genres } }
+        terms["year"]?.toIntOrNull()?.let { year -> items = items.filter { it.year == year } }
+        terms["decade"]?.toIntOrNull()?.let { decade -> items = items.filter { (it.year ?: 0) / 10 * 10 == decade } }
+        if (terms["unwatched"] == "1" && profile != null) items = items.filter { !state(it, profile).watched }
+        val sort = terms["sort"]
+        if (sort != null) {
+            val field = sort.substringBefore(':')
+            val sorted = when (field) {
+                "year" -> items.sortedBy { it.year ?: 0 }
+                else -> items.sortedBy { it.sortTitle.lowercase() }
+            }
+            items = if (sort.endsWith(":desc")) sorted.reversed() else sorted
+        }
+        return items.take(5_000)
+    }
+
+    // ---------------------------------------------------------------- playlists
+
+    /** A playlist's entries: a smart one's are its filter's leaves, keyed by item. */
+    fun playlistEntries(playlist: Playlist, profile: Profile): List<Pair<Long, Long>> {
+        val filter = playlist.smartFilter ?: return playlist.entries.toList()
+        val library = playlist.libraryId ?: return emptyList()
+        return filter(library, filter, profile).flatMap { catalog.leaves(it.id) }.take(5_000).map { it to it }
+    }
+
+    fun playlistDetail(playlist: Playlist, profile: Profile): PlaylistDetail {
+        val entries = playlistEntries(playlist, profile).mapNotNull { (entry, item) ->
+            catalog.item(item)?.let { PlaylistEntry(entry, summary(it, profile)) }
+        }
+        return PlaylistDetail(
+            id = playlist.id,
+            title = playlist.title,
+            kind = playlist.kind,
+            itemCount = entries.size,
+            durationMs = entries.sumOf { it.item.durationMs ?: 0L },
+            artwork = entries.mapNotNull { it.item.posterUrl }.distinct().take(4),
+            smartFilter = playlist.smartFilter,
+            libraryId = playlist.libraryId,
+            createdAt = playlist.createdAt,
+            updatedAt = playlist.updatedAt,
+            entries = entries,
+        )
+    }
+
+    /** What a playlist of [kind] may hold. */
+    fun fits(kind: PlaylistKind, item: ItemDetail): Boolean = when (kind) {
+        PlaylistKind.Video -> item.kind == ItemKind.Movie || item.kind == ItemKind.Episode
+        PlaylistKind.Audio -> item.kind == ItemKind.Track
+        else -> false
+    }
+
+    // ---------------------------------------------------------------- people, history
+
+    fun me(profile: Profile, scope: String?): Me = Me(
+        id = profile.id,
+        username = profile.username,
+        name = profile.name,
+        displayName = profile.name,
+        isAdmin = false,
+        managed = profile.managed,
+        home = true,
+        hasPin = profile.pin != null,
+        avatarUrl = profile.avatarUrl,
+        avatarColor = profile.avatarColor,
+        allLibraries = true,
+        libraryIds = emptyList(),
+        createdAt = BASE_TIME - 500 * Catalog.DAY,
+        audioLanguage = profile.trackDefaults.audioLanguage,
+        subtitleLanguage = profile.trackDefaults.subtitleLanguage,
+        subtitleMode = profile.trackDefaults.subtitleMode,
+        hasPassword = profile.hasPassword,
+        scope = scope,
+    )
+
+    fun history(record: HistoryRecord, profile: Profile): HistoryEntry? {
+        val item = catalog.item(record.itemId) ?: return null
+        return HistoryEntry(
+            id = record.id,
+            viewedAt = record.viewedAt,
+            device = record.device,
+            user = HistoryUser(profile.id, profile.name, profile.avatarUrl, profile.avatarColor),
+            item = summary(item, profile),
+        )
+    }
+}

@@ -1,0 +1,400 @@
+package app.pley.android.fixtures
+
+import app.pley.android.model.DynamicRange
+import app.pley.android.model.ItemDetail
+import app.pley.android.model.ItemKind
+import app.pley.android.model.JobState
+import app.pley.android.model.MediaFile
+import app.pley.android.model.MediaStream
+import app.pley.android.model.Me
+import app.pley.android.model.PlaybackInfo
+import app.pley.android.model.PlaybackMethod
+import app.pley.android.model.PlaybackMode
+import app.pley.android.model.PlaybackRequest
+import app.pley.android.model.ProgressReport
+import app.pley.android.model.RatingRequest
+import app.pley.android.model.ServerEvent
+import app.pley.android.model.SessionStatus
+import app.pley.android.model.StreamAction
+import app.pley.android.model.StreamChoice
+import app.pley.android.model.StreamKind
+import app.pley.android.model.SubtitleMode
+import app.pley.android.model.SubtitleTrack
+import app.pley.android.model.TrackDefaults
+import app.pley.android.model.TranscodeInfo
+import app.pley.android.model.TrickplayInfo
+import java.util.UUID
+import mockwebserver3.MockResponse
+
+/**
+ * Playing, and what playing writes (docs/API.md, "Playback", "Items"):
+ * sessions answered direct or as HLS, the files with Range, the HLS stream,
+ * subtitles as WebVTT (one track partial the first time), seek previews and
+ * chapter pictures; progress, watched marks, ratings, track choices and
+ * track defaults, which change what the profile reads next.
+ */
+internal class PlayRoutes(private val s: State) {
+    private val catalog get() = s.catalog
+
+    fun routes(): List<Route> = listOf(
+        route("POST", "/api/playback", PLAY) { call, c, _ -> start(call, c) },
+        route("GET", "/api/playback/*", PLAY) { _, c, v ->
+            val session = s.sessions[v[0]]?.takeIf { it.profileId == c.profile.id } ?: return@route Reply.notFound("no such session")
+            Reply.json(SessionStatus.serializer(), status(session))
+        },
+        route("DELETE", "/api/playback/*", PLAY) { _, c, v ->
+            s.sessions[v[0]]?.takeIf { it.profileId == c.profile.id }?.let {
+                s.sessions.remove(it.id)
+                s.events.emit(ServerEvent.SessionsChanged)
+            }
+            Reply.noContent()
+        },
+        route("GET", "/api/playback/*/*", PLAY) { _, c, v -> hls(v[0], v[1], c) },
+        route("GET", "/api/files/*/stream", PLAY, free = true) { call, _, v -> stream(call, v[0]) },
+        route("GET", "/api/files/*/subtitles/*", PLAY) { _, _, v -> subtitles(v[0], v[1]) },
+        route("GET", "/api/files/*/trickplay", PLAY, free = true) { _, _, v ->
+            val file = v[0].toLongOrNull()?.let(catalog::file) ?: return@route Reply.notFound("no such file")
+            Reply.json(TrickplayInfo.serializer(), trickplay(file.second))
+        },
+        route("GET", "/api/files/*/trickplay/*", PLAY, free = true) { _, _, v ->
+            val file = v[0].toLongOrNull()?.let(catalog::file) ?: return@route Reply.notFound("no such file")
+            val info = trickplay(file.second)
+            val sheet = v[1].removeSuffix(".jpg").toIntOrNull()?.takeIf { it in 0 until info.sheets } ?: return@route Reply.notFound("no such sheet")
+            Reply.picture(s.pictures.trickplaySheet(sheet, info.width, info.height, info.columns, info.rows))
+        },
+        route("GET", "/api/files/*/chapters/*", PLAY, free = true) { _, _, v ->
+            val file = v[0].toLongOrNull()?.let(catalog::file) ?: return@route Reply.notFound("no such file")
+            val n = v[1].removeSuffix(".jpg").toIntOrNull()?.takeIf { it in file.second.chapters.indices } ?: return@route Reply.notFound("no such chapter")
+            Reply.picture(s.pictures.artwork(file.first.id * 10 + n, Pictures.Shape.Wide, 320))
+        },
+        route("POST", "/api/items/*/progress", PLAY) { call, c, v -> progress(call, c, v[0]) },
+        route("POST", "/api/items/*/watched", PLAY) { _, c, v -> mark(c, v[0], watched = true) },
+        route("POST", "/api/items/*/unwatched", PLAY) { _, c, v -> mark(c, v[0], watched = false) },
+        route("PUT", "/api/items/*/streams", PLAY) { call, c, v -> streams(call, c, v[0]) },
+        route("PUT", "/api/items/*/rating", PLAY) { call, c, v -> rating(call, c, v[0]) },
+        route("DELETE", "/api/history/*", PLAY) { _, c, v ->
+            val id = v[0].toLongOrNull()
+            if (c.profile.history.removeAll { it.id == id }) Reply.noContent() else Reply.notFound("no such play")
+        },
+        route("PUT", "/api/me/track-defaults", PLAY) { call, c, _ -> trackDefaults(call, c) },
+    )
+
+    // ---------------------------------------------------------------- sessions
+
+    /**
+     * POST /api/playback: direct when the caps play the file as it is
+     * (container, codecs, dynamic range, default audio, nothing burned in,
+     * bitrate), else HLS: remux when the video plays, else transcode.
+     */
+    private fun start(call: Call, caller: Caller): MockResponse {
+        val request = call.body(PlaybackRequest.serializer()) ?: return Reply.badRequest("the body isn't a playback request")
+        val item = catalog.item(request.itemId)?.takeIf { it.kind.playable } ?: return Reply.notFound("no such item")
+        val file = request.fileId?.let { id -> item.files.firstOrNull { it.id == id } ?: return Reply.notFound("no such file") }
+            ?: item.files.firstOrNull() ?: return Reply.notFound("the item has no file")
+        val audio = file.streams.filter { it.kind == StreamKind.Audio }
+        val defaultAudio = audio.firstOrNull { it.default } ?: audio.firstOrNull()
+        val audioIndex = request.audioIndex ?: defaultAudio?.index
+        if (request.audioIndex != null && audio.none { it.index == request.audioIndex }) return Reply.badRequest("no such audio track")
+        val burn = request.subtitleIndex?.let { index -> file.streams.firstOrNull { it.index == index && it.kind == StreamKind.Subtitle && it.textBased == false } }
+
+        val reasons = mutableListOf<String>()
+        val caps = request.caps
+        val video = file.streams.firstOrNull { it.kind == StreamKind.Video }
+        val chosenAudio = audio.firstOrNull { it.index == audioIndex }
+        val containerOk = file.container in caps.containers || (file.container == "mkv" && "matroska" in caps.containers)
+        if (!containerOk) reasons += "The ${file.container?.uppercase()} container isn't supported by this player."
+        val videoOk = video == null || (video.codec in caps.videoCodecs && rangePlays(video, caps.hdr, caps.dolbyVision))
+        if (video != null && video.codec !in caps.videoCodecs) reasons += "${video.codec.uppercase()} video isn't supported by this player."
+        if (video != null && video.codec in caps.videoCodecs && !rangePlays(video, caps.hdr, caps.dolbyVision)) {
+            reasons += "${rangeName(video)} is converted to SDR for this screen."
+        }
+        val audioOk = chosenAudio == null || chosenAudio.codec in caps.audioCodecs
+        if (!audioOk) reasons += "${chosenAudio.codec.uppercase()} audio isn't supported by this player."
+        if (chosenAudio != null && chosenAudio != defaultAudio) reasons += "Another audio track than the file's default is played."
+        if (burn != null) reasons += "Image subtitles are burned in."
+        val bitrateOk = request.maxBitrate == null || (file.bitrate ?: 0L) <= request.maxBitrate!! * 1_000L
+        if (!bitrateOk) reasons += "The file's bitrate is over the quality asked for."
+
+        val method = when (request.mode) {
+            PlaybackMode.Direct -> PlaybackMethod.Direct
+            PlaybackMode.Remux -> PlaybackMethod.Remux
+            PlaybackMode.Transcode -> PlaybackMethod.Transcode
+            else -> when {
+                reasons.isEmpty() -> PlaybackMethod.Direct
+                videoOk && burn == null && bitrateOk -> PlaybackMethod.Remux
+                else -> PlaybackMethod.Transcode
+            }
+        }
+        if (method == PlaybackMethod.Direct) reasons.clear()
+        // Starting with a client id ends that client's earlier sessions.
+        request.clientId?.let { client ->
+            s.sessions.values.removeAll { it.profileId == caller.profile.id && it.clientId == client }
+        }
+        val session = PlaySession(UUID.randomUUID().toString().replace("-", ""), caller.profile.id, item.id, file.id, method, request.clientId)
+        s.sessions[session.id] = session
+        s.events.emit(ServerEvent.SessionsChanged)
+        val hls = method != PlaybackMethod.Direct
+        val info = PlaybackInfo(
+            sessionId = session.id,
+            method = method,
+            url = if (hls) "/api/playback/${session.id}/index.m3u8" else "/api/files/${file.id}/stream",
+            hls = hls,
+            fileId = file.id,
+            durationMs = file.durationMs ?: 0,
+            audioIndex = audioIndex,
+            subtitleIndex = burn?.index,
+            burnSubtitles = burn != null,
+            audioConverted = hls && !audioOk,
+            subtitles = file.streams.filter { it.kind == StreamKind.Subtitle }.map { stream ->
+                SubtitleTrack(
+                    index = stream.index,
+                    codec = stream.codec,
+                    language = stream.language,
+                    title = stream.title,
+                    default = stream.default,
+                    forced = stream.forced,
+                    external = stream.external,
+                    textBased = stream.textBased == true,
+                    url = if (stream.textBased == true) "/api/files/${file.id}/subtitles/${stream.index}.vtt" else null,
+                )
+            },
+            reasons = reasons,
+            reason = reasons.joinToString(" ").ifEmpty { null },
+            autoQuality = if (method == PlaybackMethod.Transcode && request.maxBitrate == null) "8m" else null,
+        )
+        return Reply.json(PlaybackInfo.serializer(), info)
+    }
+
+    private fun rangePlays(video: MediaStream, hdr: Boolean, dolbyVision: Boolean): Boolean = when (video.dynamicRange) {
+        DynamicRange.Hdr10, DynamicRange.Hdr10Plus, DynamicRange.Hlg -> hdr
+        DynamicRange.DolbyVision -> if (video.dvProfile == 5) dolbyVision else hdr || dolbyVision
+        else -> true
+    }
+
+    private fun rangeName(video: MediaStream): String = when (video.dynamicRange) {
+        DynamicRange.DolbyVision -> "Dolby Vision P${video.dvProfile}" + if (video.dvProfile == 8) ".${video.dvBlCompat}" else ""
+        DynamicRange.Hdr10Plus -> "HDR10+"
+        DynamicRange.Hlg -> "HLG"
+        else -> "HDR10"
+    }
+
+    private fun status(session: PlaySession): SessionStatus {
+        if (session.method == PlaybackMethod.Direct) return SessionStatus(session.id, session.method)
+        val file = catalog.file(session.fileId)?.second
+        val video = file?.streams?.firstOrNull { it.kind == StreamKind.Video }
+        val copy = session.method == PlaybackMethod.Remux
+        val segments = HLS_SEGMENTS
+        return SessionStatus(
+            sessionId = session.id,
+            method = session.method,
+            transcode = TranscodeInfo(
+                jobId = "job-${session.id.take(8)}",
+                state = JobState.Finished,
+                video = if (copy) StreamAction.Copy else StreamAction.Transcode,
+                audio = StreamAction.Transcode,
+                videoIn = video?.let { "${it.codec.uppercase()} ${it.width}×${it.height}" },
+                videoOut = if (copy) video?.let { "${it.codec.uppercase()} ${it.width}×${it.height}" } else "H.264 1920×1080",
+                audioIn = file?.audioCodec?.uppercase(),
+                audioOut = "AAC 2.0",
+                encoder = if (copy) null else "libx264",
+                preset = if (copy) null else "veryfast",
+                decoder = "cpu",
+                pipeline = if (copy) "copy" else "cpu",
+                speed = 4.0,
+                fps = 96.0,
+                transcodedMs = Clip.Sdr1080.durationMs,
+                segmentsReady = segments,
+                segmentsTotal = segments,
+                bitrateOut = 2_000_000,
+            ),
+        )
+    }
+
+    /** GET /api/playback/{session}/{file}: the committed HLS stream of the 1080p clip, whatever the item. */
+    private fun hls(sessionId: String, name: String, caller: Caller): MockResponse {
+        s.sessions[sessionId]?.takeIf { it.profileId == caller.profile.id && it.method != PlaybackMethod.Direct }
+            ?: return Reply.notFound("playback session expired")
+        val type = when {
+            name == "index.m3u8" -> "application/vnd.apple.mpegurl"
+            name.endsWith(".ts") && name.removeSuffix(".ts").toIntOrNull() != null -> "video/mp2t"
+            else -> return Reply.notFound("no such file")
+        }
+        val bytes = Media.bytes("hls/$name") ?: return Reply.notFound("no such segment")
+        return Reply.bytes(bytes, type, headers = mapOf("Cache-Control" to "no-cache"))
+    }
+
+    // ---------------------------------------------------------------- files
+
+    /** GET /api/files/{id}/stream: the clip the file streams, with Range. */
+    private fun stream(call: Call, id: String): MockResponse {
+        val entry = id.toLongOrNull()?.let(catalog::file)?.first ?: return Reply.notFound("no such file")
+        val bytes = Media.bytes(entry.clip.resource) ?: return Reply.notFound("no such file")
+        val size = bytes.size.toLong()
+        val headers = mapOf("Accept-Ranges" to "bytes")
+        val range = call.header("Range") ?: return Reply.bytes(bytes, entry.clip.contentType, headers = headers)
+        val span = Ranges.parse(range, size)
+            ?: return MockResponse.Builder().code(416).setHeader("Content-Range", "bytes */$size").build()
+        return Reply.bytes(
+            bytes,
+            span.first.toInt(),
+            (span.last - span.first + 1).toInt(),
+            entry.clip.contentType,
+            206,
+            headers + ("Content-Range" to "bytes ${span.first}-${span.last}/$size"),
+        )
+    }
+
+    /**
+     * GET /api/files/{id}/subtitles/{index}.vtt. The HDR10 sample's embedded
+     * track comes partial (`X-Pley-Complete: 0`) the first time it is asked
+     * for, as a track still being read out of its file, and whole after.
+     */
+    private fun subtitles(id: String, name: String): MockResponse {
+        val (entry, file) = id.toLongOrNull()?.let(catalog::file) ?: return Reply.notFound("no such file")
+        val index = name.removeSuffix(".vtt").toIntOrNull() ?: return Reply.notFound("no such track")
+        val stream = file.streams.firstOrNull { it.index == index && it.kind == StreamKind.Subtitle }
+            ?: return Reply.notFound("no such track")
+        if (stream.textBased != true) return Reply.badRequest("subtitles shown as pictures are burned in")
+        val cues = cues(file, stream)
+        val key = "${entry.id}:$index"
+        val asked = s.subtitleAsks.merge(key, 1, Int::plus)!!
+        val partial = entry.id == FixtureIds.SAMPLE_HDR10_FILE && index == FixtureIds.SAMPLE_HDR10_SUBTITLE && asked == 1
+        val text = vtt(if (partial) cues.take(cues.size / 2) else cues)
+        return if (partial) {
+            Reply.bytes(text.toByteArray(), "text/vtt; charset=utf-8", headers = mapOf("X-Pley-Complete" to "0", "Cache-Control" to "no-store"))
+        } else {
+            Reply.bytes(text.toByteArray(), "text/vtt; charset=utf-8", headers = mapOf("Cache-Control" to "private, max-age=3600"))
+        }
+    }
+
+    /** A track's cues: the sample's own, else one every 30 s. */
+    private fun cues(file: MediaFile, stream: MediaStream): List<Triple<Long, Long, String>> {
+        if (file.id == FixtureIds.SAMPLE_HDR10_FILE) {
+            val french = stream.language == "fre"
+            return listOf(
+                Triple(1_000L, 4_000L, if (french) "Le serveur de test joue ceci." else "The fixture server plays this."),
+                Triple(6_000L, 9_000L, if (french) "Rien ici n'est un film." else "Nothing here is a film."),
+                Triple(11_000L, 14_000L, if (french) "Mire et tonalité seulement." else "Test pattern and tone only."),
+                Triple(16_000L, 19_000L, if (french) "Le générique de fin." else "The end credits."),
+            )
+        }
+        val duration = file.durationMs ?: 0
+        return (0 until (duration / 30_000).toInt().coerceIn(1, 400)).map { n ->
+            Triple(n * 30_000L + 1_000, n * 30_000L + 4_000, "Line ${n + 1} (${stream.language ?: "und"})")
+        }
+    }
+
+    private fun vtt(cues: List<Triple<Long, Long, String>>): String = buildString {
+        append("WEBVTT\n\n")
+        for ((start, end, text) in cues) {
+            append(time(start)).append(" --> ").append(time(end)).append('\n').append(text).append("\n\n")
+        }
+    }
+
+    private fun time(ms: Long) = "%02d:%02d:%02d.%03d".format(ms / 3_600_000, ms / 60_000 % 60, ms / 1_000 % 60, ms % 1_000)
+
+    /** A preview every second for the 20 s clips, every 10 s for the rest. */
+    private fun trickplay(file: MediaFile): TrickplayInfo {
+        val duration = file.durationMs ?: 0
+        val interval = if (duration <= 60_000) 1_000L else 10_000L
+        val count = (duration / interval).toInt().coerceAtLeast(1)
+        val perSheet = 10 * 10
+        return TrickplayInfo(Catalog.trickplayId(file.id), interval, 320, 180, 10, 10, count, (count + perSheet - 1) / perSheet)
+    }
+
+    // ---------------------------------------------------------------- writes
+
+    private fun playable(id: String): ItemDetail? = id.toLongOrNull()?.let(catalog::item)
+
+    /** POST /api/items/{id}/progress: at 90 % the item is watched, its position cleared and the play recorded. */
+    private fun progress(call: Call, caller: Caller, id: String): MockResponse {
+        val item = playable(id)?.takeIf { it.kind.playable } ?: return Reply.notFound("no such item")
+        val report = call.body(ProgressReport.serializer()) ?: return Reply.badRequest("the body isn't a progress report")
+        val duration = report.durationMs ?: item.durationMs ?: 0
+        val now = s.now()
+        val done = duration > 0 && report.positionMs >= duration * 9 / 10
+        val before = caller.profile.state(item.id)
+        // A play counts once: reports after the 90 % mark find it watched with no position.
+        val counts = done && (before.positionMs > 0 || !before.watched)
+        caller.profile.update(item.id) { state ->
+            if (done) {
+                state.copy(positionMs = 0, watched = true, playCount = state.playCount + if (counts) 1 else 0, lastPlayedAt = now)
+            } else {
+                state.copy(positionMs = report.positionMs.coerceAtLeast(0), lastPlayedAt = now)
+            }
+        }
+        if (counts) {
+            s.household.addHistory(caller.profile, item.id, now, call.header("User-Agent"))
+            s.events.emit(ServerEvent.LibraryChanged(item.libraryId))
+        }
+        return Reply.noContent()
+    }
+
+    /** Watched or unwatched by hand (containers: all their episodes or tracks). Not a play. */
+    private fun mark(caller: Caller, id: String, watched: Boolean): MockResponse {
+        val item = playable(id) ?: return Reply.notFound("no such item")
+        for (leaf in catalog.leaves(item.id)) {
+            caller.profile.update(leaf) { it.copy(watched = watched, positionMs = 0) }
+        }
+        s.events.emit(ServerEvent.LibraryChanged(item.libraryId))
+        return Reply.noContent()
+    }
+
+    /** PUT /api/items/{id}/streams: remembered for the movie, or for the whole show. */
+    private fun streams(call: Call, caller: Caller, id: String): MockResponse {
+        val item = playable(id) ?: return Reply.notFound("no such item")
+        val choice = call.body(StreamChoice.serializer()) ?: return Reply.badRequest("the body isn't a track choice")
+        val owner = if (item.kind == ItemKind.Episode) item.grandparentId ?: item.id else item.id
+        caller.profile.streamChoices[owner] = choice
+        caller.profile.version++
+        return Reply.noContent()
+    }
+
+    private fun rating(call: Call, caller: Caller, id: String): MockResponse {
+        val item = playable(id) ?: return Reply.notFound("no such item")
+        val request = call.body(RatingRequest.serializer()) ?: return Reply.badRequest("the body isn't a rating")
+        val rating = request.rating?.let { if (it < 0 || it > 10) return Reply.badRequest("a rating is 0 to 10") else Math.round(it * 2) / 2.0 }
+        caller.profile.update(item.id) { it.copy(rating = rating) }
+        return Reply.noContent()
+    }
+
+    /** PUT /api/me/track-defaults (S3-APP-ROUTES): languages of 2 or 3 lower-case letters; answers the profile. */
+    private fun trackDefaults(call: Call, caller: Caller): MockResponse {
+        val defaults = call.body(TrackDefaults.serializer()) ?: return Reply.badRequest("the body isn't track defaults")
+        val language = Regex("[a-z]{2,3}")
+        if (listOfNotNull(defaults.audioLanguage, defaults.subtitleLanguage).any { !language.matches(it) }) {
+            return Reply.badRequest("a language is 2 or 3 lower-case letters")
+        }
+        if (defaults.subtitleMode == SubtitleMode.Unknown) return Reply.badRequest("subtitle_mode is off, forced, foreign or always")
+        caller.profile.trackDefaults = defaults
+        caller.profile.version++
+        return Reply.json(Me.serializer(), s.views.me(caller.profile, caller.scope))
+    }
+
+    companion object {
+        /** Segments of the committed HLS stream (20 s in 4 s segments). */
+        const val HLS_SEGMENTS = 5
+    }
+}
+
+/** `Range: bytes=…` (one range; RFC 9110 §14.1.2). */
+internal object Ranges {
+    /** The first and last byte asked for in [header], within [size]; `null` when it can't be served. */
+    fun parse(header: String, size: Long): LongRange? {
+        if (!header.startsWith("bytes=") || ',' in header || size == 0L) return null
+        val spec = header.removePrefix("bytes=").trim()
+        val start = spec.substringBefore('-')
+        val end = spec.substringAfter('-', "")
+        return when {
+            start.isEmpty() -> {
+                val suffix = end.toLongOrNull()?.takeIf { it > 0 } ?: return null
+                (size - suffix).coerceAtLeast(0)..(size - 1)
+            }
+            else -> {
+                val first = start.toLongOrNull() ?: return null
+                val last = if (end.isEmpty()) size - 1 else (end.toLongOrNull() ?: return null).coerceAtMost(size - 1)
+                if (first >= size || last < first) null else first..last
+            }
+        }
+    }
+}

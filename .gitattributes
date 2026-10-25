@@ -20,3 +20,6 @@
 *.zip binary
 *.gz binary
 *.br binary
+
+# The Android app's fixture media (scripts/make-android-fixtures.ps1), kept byte for byte.
+apps/android/testing/fixtures/src/main/resources/app/pley/android/fixtures/media/** binary
