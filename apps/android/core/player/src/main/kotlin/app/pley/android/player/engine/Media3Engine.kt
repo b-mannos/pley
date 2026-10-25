@@ -136,9 +136,7 @@ class Media3Engine(
         .setMediaSourceFactory(loading.sources)
         .setAudioAttributes(audioAttributes(music), music)
         .setHandleAudioBecomingNoisy(true)
-        .setVideoChangeFrameRateStrategy(
-            if (profile.isTv) C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF else C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS,
-        )
+        .setVideoChangeFrameRateStrategy(frameRateStrategy())
         .setSeekBackIncrementMs(SEEK_STEP_MS)
         .setSeekForwardIncrementMs(SEEK_STEP_MS)
         .withClock(playerClock)
@@ -195,6 +193,7 @@ class Media3Engine(
         wantPlay = playWhenReady
         loadControl.home = BufferPlan.isHome(source.url)
         applyTrackParameters()
+        player.setVideoChangeFrameRateStrategy(frameRateStrategy())
         struggle.reset()
         analytics.onPrepare(frameRate?.requestedModeId?.takeIf { it != 0 })
         mutableState.update { EngineState(stats = it.stats) }
@@ -232,6 +231,16 @@ class Media3Engine(
         hdmi?.stop()
         focus?.release()
         player.release()
+    }
+
+    /**
+     * Media3's own refresh-rate switching: TVs match the display mode
+     * themselves (FrameRateController); phones let Media3 switch when it
+     * is seamless, unless the setting is Off. Read again for each video.
+     */
+    private fun frameRateStrategy(): Int = when {
+        profile.isTv || settings().refreshRate == RefreshRateMatching.Off -> C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF
+        else -> C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS
     }
 
     /** The display match a video on a TV needs; `null` when nothing is to match. */
