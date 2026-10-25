@@ -265,8 +265,8 @@ fn shown_name(name: &str) -> Option<&str> {
 }
 
 /// `POST /api/oauth/requests`: the consent page hands over the app's
-/// request (its query). Checked in this order (endpoint 4 of the design):
-/// a. every parameter at most once;
+/// request (its query). Checked in this order (OAuth 2.1 §4.1.2.1):
+/// a. every parameter pley reads at most once;
 /// b. the app (built in, or read from its description when allowed);
 /// c. the return address, registered (exact, but for a loopback port).
 ///
@@ -1089,7 +1089,7 @@ async fn issue_for_device(
 // ------------------------------------------------------------------ profiles (pley's own apps)
 
 /// grant_type=urn:pley:params:oauth:grant-type:switch-profile (an
-/// extension grant, RFC 6749 §4.5; flow D of the design): one of pley's own
+/// extension grant, RFC 6749 §4.5; see docs/API.md): one of pley's own
 /// apps, allowed `profiles`, moves to another profile of the household.
 ///
 /// It shows its refresh token, never an access token, so a stolen one-hour

@@ -1,6 +1,6 @@
-//! pley's own apps switch the household profile they act as (flow D of the
-//! OAuth design; src/api/oauth.rs, `GET /api/oauth/profiles` and the
-//! switch-profile grant): by the web app's rules, without the
+//! pley's own apps switch the household profile they act as
+//! (src/api/oauth.rs, `GET /api/oauth/profiles` and the switch-profile
+//! grant; docs/API.md): by the web app's rules, without the
 //! administrators' exemption, never with a password or a two-step code, and
 //! keeping exactly what they were allowed.
 

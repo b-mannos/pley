@@ -253,8 +253,9 @@ pub async fn issue(db: &Db, grant: NewGrant) -> Result<(Issued, Vec<i64>), Issue
     Ok((issued, dropped))
 }
 
-/// Exchanges a refresh token for a new pair (flow B of the design): the
-/// token is spent, and a spent one shown again ends its grant.
+/// Exchanges a refresh token for a new pair (OAuth 2.1 §4.3.1, rotated as
+/// RFC 9700 §4.14.2 says): the token is spent, and a spent one shown again
+/// ends its grant.
 pub async fn refresh(db: &Db, input: RefreshInput) -> Result<Issued, RefreshError> {
     if !input.token.starts_with(REFRESH_PREFIX) {
         return Err(RefreshError::Invalid("unknown refresh token"));
@@ -365,7 +366,7 @@ pub struct Holder {
 }
 
 /// Reads the grant of refresh token `token` of app `client_id`, as a
-/// refresh would (flow B of the design), without spending it: unknown,
+/// refresh would ([`refresh`]), without spending it: unknown,
 /// another app's, expired, a disabled profile or approver, or a grant past
 /// its refresh limit get nothing. A spent one ends its grant, as a refresh
 /// does: someone has a copy.
@@ -452,7 +453,8 @@ pub async fn holder(db: &Db, token: &str, client_id: &str) -> Result<Holder, Ref
     Ok(Holder { grant_id, client_id: owner, scopes, approved_by, user })
 }
 
-/// A profile switch (flow D of the design), once the switch is allowed.
+/// A profile switch (pley's switch-profile grant, an extension grant of RFC
+/// 6749 §4.5), once the switch is allowed.
 #[derive(Debug, Clone)]
 pub struct SwitchInput {
     /// The refresh token shown: spent by the switch.
