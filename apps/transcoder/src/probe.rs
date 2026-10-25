@@ -157,6 +157,7 @@ struct RawStream {
     pix_fmt: Option<String>,
     level: Option<i64>,
     field_order: Option<String>,
+    has_b_frames: Option<i64>,
     bits_per_raw_sample: Option<String>,
     r_frame_rate: Option<String>,
     avg_frame_rate: Option<String>,
@@ -231,6 +232,7 @@ pub fn parse_ffprobe_json(json: &[u8], path: &Path) -> anyhow::Result<MediaInfo>
                 stream.bit_depth = bit_depth(s.pix_fmt.as_deref(), s.bits_per_raw_sample.as_deref());
                 stream.level = s.level.filter(|l| *l > 0);
                 stream.interlaced = s.field_order.as_deref().map(|f| !matches!(f, "progressive" | "unknown"));
+                stream.has_b_frames = s.has_b_frames.map(|n| n > 0);
                 stream.color_transfer = s.color_transfer.clone();
                 stream.color_primaries = s.color_primaries.clone();
                 stream.color_space = s.color_space.clone();

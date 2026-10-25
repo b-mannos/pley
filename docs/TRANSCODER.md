@@ -117,6 +117,15 @@ following status codes:
      `-output_ts_offset`, `-segment_times` and `-segment_start_number`, so
      timestamps stay on the absolute timeline. `avoid_negative_ts` is disabled
      so B-frame delay can't shift one process's segments relative to another.
+   - A remux process seeks a little past its boundary keyframe. With B-frames,
+     FFmpeg moves a seek back by 3/23 s (130 ms) in every container that
+     doesn't seek by presentation time (all but MP4 and MOV): a seek right at
+     the keyframe would land on the one before it, and every segment of the
+     process would hold the GOP before its own. The seek goes 140 ms past the
+     boundary there (at most halfway to the next keyframe), 1 ms elsewhere.
+     Remuxes seek with `-noaccurate_seek`, so converted audio starts at the
+     keyframe like the copied video, not at the seek point, which would leave
+     a hole where an older process's segment plays into the new one's.
    - A new process stops right before the next segment that already exists,
      so segments being served are never rewritten.
    - A process started less than 3 s ago is not replaced while another request

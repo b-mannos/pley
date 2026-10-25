@@ -1041,6 +1041,7 @@ mod tests {
             plan: Plan {
                 duration_ms: *boundaries.last().unwrap(),
                 split_at: boundaries.clone(),
+                seek_at: boundaries.clone(),
                 boundaries,
                 segment_seconds: 4.0,
                 video: None,

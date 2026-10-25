@@ -145,6 +145,11 @@ pub struct MediaStream {
     pub level: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interlaced: Option<bool>,
+    /// Frames are stored out of order (B-frames). FFmpeg then seeks a little
+    /// before the point asked for in containers that don't seek by
+    /// presentation time (Matroska, MPEG-TS).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_b_frames: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hdr: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

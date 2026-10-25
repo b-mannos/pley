@@ -4,7 +4,8 @@
 //! any window of segments.
 //!
 //! Segment alignment: every process is started with `-ss <boundary>` and
-//! `-output_ts_offset <boundary>`, so segment timestamps stay on the absolute
+//! `-output_ts_offset <boundary>` (a remux a little past its boundary
+//! keyframe, see [`remux_seek_points`]), so segment timestamps stay on the absolute
 //! timeline no matter where ffmpeg was (re)started. Split points are passed via
 //! the segment muxer's `-segment_times`; when transcoding, keyframes are forced
 //! on the same grid, when remuxing the grid *is* the source keyframes.
@@ -151,6 +152,10 @@ pub struct Plan {
     /// Absolute split times passed to the segment muxer (slightly before each
     /// boundary to absorb timestamp jitter). `split_at[k]` belongs to boundary k.
     pub split_at: Vec<i64>,
+    /// Where a process starting at boundary k seeks (`-ss`): the boundary
+    /// itself when transcoding, a little past the boundary keyframe when
+    /// remuxing (see [`remux_seek_points`]).
+    pub seek_at: Vec<i64>,
     pub segment_seconds: f64,
     pub video: Option<VideoOut>,
     pub audio: Option<AudioOut>,
@@ -328,22 +333,28 @@ impl Plan {
         }
 
         // ---- segment layout ----
-        let (boundaries, split_at) = match (&video, keyframes) {
+        let (boundaries, split_at, seek_at) = match (&video, keyframes) {
             (Some(v), Some(kf)) if v.copy => {
                 // Keyframe times are packet timestamps; `-ss` and the output
                 // timeline count from the container's start time (often far
                 // from zero in MPEG-TS).
                 let offset = media.start_ms.unwrap_or(0);
                 let relative: Vec<i64> = kf.iter().map(|t| t.saturating_sub(offset)).collect();
-                keyframe_layout(&relative, duration_ms, target_ms)
+                let (boundaries, split_at) = keyframe_layout(&relative, duration_ms, target_ms);
+                let seek_at = remux_seek_points(&boundaries, &relative, seeks_back(media));
+                (boundaries, split_at, seek_at)
             }
-            _ => uniform_layout(duration_ms, target_ms),
+            _ => {
+                let (boundaries, split_at) = uniform_layout(duration_ms, target_ms);
+                (boundaries.clone(), split_at, boundaries)
+            }
         };
 
         Ok(Plan {
             duration_ms,
             boundaries,
             split_at,
+            seek_at,
             segment_seconds,
             video,
             audio,
@@ -415,9 +426,10 @@ impl Plan {
         let start_ms = self.boundaries[start as usize];
         let end_ms = self.boundaries[end as usize];
         let copy = self.video.as_ref().is_some_and(|v| v.copy);
-        // Remux seeks land on the keyframe at or before the seek point; nudge
-        // past the boundary so rounding never selects the previous keyframe.
-        let seek_ms = if copy && start_ms > 0 { start_ms + 1 } else { start_ms };
+        // Remux seeks land on the keyframe at or before the seek point, which
+        // sits a little past the boundary keyframe. The output starts at that
+        // keyframe (the boundary), so the split times count from there.
+        let seek_ms = if copy { self.seek_at[start as usize] } else { start_ms };
         let encoder = ctx.encoder.or_else(|| self.video.as_ref().and_then(|v| v.encoder.as_ref()));
         let pipeline = self.video.as_ref().map_or(Pipeline::Software, |v| {
             if ctx.encoder.is_some() { v.pipeline.for_software_encoder() } else { v.pipeline }
@@ -481,6 +493,12 @@ impl Plan {
             a.push_all(["-readrate", READRATE, "-readrate_initial_burst", READRATE_BURST]);
         }
         if seek_ms > 0 {
+            // Converted audio starts at the keyframe like the copied video,
+            // instead of at the seek point: no hole where an older process's
+            // segment plays into this one's first.
+            if copy {
+                a.push("-noaccurate_seek");
+            }
             a.push_all(["-ss", &secs(seek_ms)]);
         }
         a.push_all(MEDIA_INPUT_OPTIONS);
@@ -546,14 +564,16 @@ impl Plan {
         // process that starts at 0), so every process shares one timeline.
         a.push_all(["-avoid_negative_ts", "disabled"]);
         if end < self.segment_count() {
+            // (Counted from the seek point.)
             a.push_all(["-t", &secs(end_ms - seek_ms)]);
         }
 
-        // Segmenting.
+        // Segmenting. Relative split times count from the first video packet,
+        // which is the boundary (a remux's seek point lies past it).
         let times: Vec<String> = ((start + 1)..end)
             .map(|k| {
                 let at = self.split_at[k as usize];
-                secs(if ctx.relative_split_times { at - seek_ms } else { at })
+                secs(if ctx.relative_split_times { at - start_ms } else { at })
             })
             .collect();
         a.push_all([
@@ -938,6 +958,48 @@ pub fn keyframe_layout(keyframes: &[i64], duration_ms: i64, target_ms: i64) -> (
     (boundaries, split_at)
 }
 
+/// Longest nudge past a remux boundary: just more than FFmpeg's back-off of
+/// 3/23 s (130 ms).
+const SEEK_NUDGE_MS: i64 = 140;
+
+/// Whether FFmpeg seeks this file 3/23 s before the point asked for: it does
+/// when a stream has B-frames and the demuxer doesn't seek by presentation
+/// time (all but MP4 and MOV), to be sure to land on a keyframe whose
+/// decoding timestamp comes first. Unknown B-frames (media info from an
+/// older probe) count as B-frames.
+pub fn seeks_back(media: &MediaInfo) -> bool {
+    let seeks_by_pts = match media.format_name.as_deref() {
+        Some(name) => name.split(',').any(|n| n == "mov"),
+        None => matches!(media.container.as_deref(), Some("mp4" | "mov" | "m4v")),
+    };
+    !seeks_by_pts && media.streams.iter().any(|s| s.kind == StreamKind::Video && s.has_b_frames != Some(false))
+}
+
+/// Where processes starting at each remux boundary seek. A seek lands on the
+/// keyframe at or before its point, and stream copy keeps everything from
+/// there, so a seek right at a boundary keyframe that FFmpeg moves back
+/// (see [`seeks_back`]) would start one GOP early, in the previous segment.
+/// It goes past the back-off then, but no further than halfway to the next
+/// keyframe, which must not be the one found. Otherwise 1 ms past the
+/// boundary is enough: rounding never selects the previous keyframe.
+pub fn remux_seek_points(boundaries: &[i64], keyframes: &[i64], seeks_back: bool) -> Vec<i64> {
+    let last = boundaries.len().saturating_sub(1);
+    boundaries
+        .iter()
+        .enumerate()
+        .map(|(k, &b)| {
+            if k == 0 || k == last {
+                return b;
+            }
+            if !seeks_back {
+                return b + 1;
+            }
+            let next = keyframes.get(keyframes.partition_point(|&kf| kf <= b)).copied().unwrap_or(boundaries[last]);
+            b + ((next - b) / 2).clamp(1, SEEK_NUDGE_MS)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1088,6 +1150,7 @@ mod tests {
         let (boundaries, split_at) = uniform_layout(10_000, 4_000);
         let plan = Plan {
             duration_ms: 10_000,
+            seek_at: boundaries.clone(),
             boundaries,
             split_at,
             segment_seconds: 4.0,
@@ -1290,9 +1353,26 @@ mod tests {
         assert!(plan.video.as_ref().unwrap().copy);
         assert!(plan.audio.as_ref().unwrap().copy, "eac3 can be copied into MPEG-TS");
         let args = args_string(&plan, 2, 4);
-        assert!(args.contains("-ss 8.001"), "{args}");
+        // Matroska with B-frames (or none known): past FFmpeg's back-off,
+        // with the split for 12 s counted from the 8 s keyframe.
+        assert!(args.contains("-noaccurate_seek -ss 8.140"), "{args}");
+        assert!(args.contains("-output_ts_offset 8.140"), "{args}");
+        assert!(args.contains("-segment_times 3.500 "), "{args}");
+        assert!(args.contains("-t 7.860"), "ends at the 16 s boundary: {args}");
         assert!(args.contains("-c:v copy"));
         assert!(!args.contains("-force_key_frames"));
+        assert!(!args_string(&plan, 0, 2).contains("-ss"), "nothing to seek at the start");
+
+        // MP4 seeks by presentation time: no back-off to get past.
+        let mut mp4 = media(DynamicRange::Sdr, None);
+        mp4.format_name = Some("mov,mp4,m4a,3gp,3g2,mj2".into());
+        let plan = Plan::build(&req, &mp4, &ff, Some(&kf)).unwrap();
+        assert!(args_string(&plan, 2, 4).contains("-noaccurate_seek -ss 8.001"));
+        // Neither does Matroska without B-frames.
+        let mut no_b = media(DynamicRange::Sdr, None);
+        no_b.streams[0].has_b_frames = Some(false);
+        let plan = Plan::build(&req, &no_b, &ff, Some(&kf)).unwrap();
+        assert!(args_string(&plan, 2, 4).contains("-ss 8.001"));
 
         // MPEG-TS style start time: keyframe timestamps are absolute, the layout is not.
         let mut ts = media(DynamicRange::Sdr, None);
@@ -1302,6 +1382,110 @@ mod tests {
         assert!(plan.video.as_ref().unwrap().copy);
         assert_eq!(&plan.boundaries[..3], &[0, 4_000, 8_000]);
         assert_eq!(plan.segment_count(), 15);
+    }
+
+    #[test]
+    fn remux_seeks_stay_between_the_boundary_and_the_next_keyframe() {
+        let kf = [0, 1_000, 1_100, 1_200, 4_000, 4_200, 9_000];
+        let boundaries = [0, 1_000, 4_000, 9_000, 10_000];
+        // Past the 130 ms back-off where the next keyframe allows it,
+        // halfway to it where it is closer.
+        assert_eq!(remux_seek_points(&boundaries, &kf, true), vec![0, 1_050, 4_100, 9_140, 10_000]);
+        assert_eq!(remux_seek_points(&boundaries, &kf, false), vec![0, 1_001, 4_001, 9_001, 10_000]);
+
+        let mut m = media(DynamicRange::Sdr, None);
+        assert!(seeks_back(&m), "Matroska, B-frames unknown");
+        m.streams[0].has_b_frames = Some(true);
+        m.format_name = Some("mpegts".into());
+        assert!(seeks_back(&m));
+        m.format_name = Some("mov,mp4,m4a,3gp,3g2,mj2".into());
+        assert!(!seeks_back(&m), "MP4 seeks by presentation time");
+        m.format_name = None;
+        m.container = Some("mp4".into());
+        assert!(!seeks_back(&m));
+        m.container = Some("mkv".into());
+        m.streams[0].has_b_frames = Some(false);
+        assert!(!seeks_back(&m), "no B-frames, no back-off");
+    }
+
+    /// FFmpeg, when it is on the PATH (it isn't in CI).
+    fn real_ffmpeg() -> bool {
+        let found = std::process::Command::new("ffmpeg").arg("-version").output().is_ok_and(|o| o.status.success());
+        if !found {
+            eprintln!("ffmpeg not found: skipped");
+        }
+        found
+    }
+
+    /// First packet time of each stream kind (`v`, `a`) in an MPEG-TS file.
+    fn first_packet(file: &Path, stream: &str) -> f64 {
+        let out = std::process::Command::new("ffprobe")
+            .args(["-v", "error", "-select_streams", stream, "-show_entries", "packet=pts_time", "-of", "csv=p=0"])
+            .arg(file)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|l| l.trim().trim_end_matches(',').parse::<f64>().ok())
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    #[test]
+    fn remux_restarts_start_their_segments_on_their_boundaries() {
+        if !real_ffmpeg() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("b-frames.mkv");
+        // H.264 with B-frames and a keyframe every second, AC3 audio.
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-y"])
+            .args(["-f", "lavfi", "-i", "testsrc2=s=320x240:r=24:d=12", "-f", "lavfi", "-i", "sine=r=48000:d=12"])
+            .args(["-c:v", "libx264", "-preset", "ultrafast", "-bf", "2", "-g", "24", "-sc_threshold", "0"])
+            .args(["-c:a", "ac3"])
+            .arg(&input)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let probed = std::process::Command::new("ffprobe")
+            .args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"])
+            .arg(&input)
+            .output()
+            .unwrap();
+        let m = crate::probe::parse_ffprobe_json(&probed.stdout, &input).unwrap();
+        assert_eq!(m.video().unwrap().has_b_frames, Some(true));
+
+        let ff = ffmpeg_with(vec![x264()], vec![]);
+        let mut req = request();
+        req.video = Some(VideoRequest { mode: VideoMode::Copy, ..Default::default() });
+        req.audio = Some(AudioRequest { mode: AudioMode::Transcode, ..Default::default() });
+        req.segment_seconds = Some(2.0);
+        req.options.throttle = false;
+        let kf: Vec<i64> = (0..12).map(|s| s * 1_000).collect();
+        let plan = Plan::build(&req, &m, &ff, Some(&kf)).unwrap();
+        assert_eq!(&plan.boundaries[..4], &[0, 2_000, 4_000, 6_000]);
+
+        // The whole file from the start, then from the boundary at 4 s.
+        let ctx = ArgsContext { input: &input, encoder: None, relative_split_times: true, preset: None };
+        let run = |name: &str, start: u32| {
+            let out = dir.path().join(name);
+            std::fs::create_dir(&out).unwrap();
+            let args = plan.ffmpeg_args(&ctx, start, plan.segment_count());
+            let ok = std::process::Command::new("ffmpeg").args(&args).current_dir(&out).output().unwrap();
+            assert!(ok.status.success(), "{}", String::from_utf8_lossy(&ok.stderr));
+            out
+        };
+        let whole = run("whole", 0);
+        let resumed = run("resumed", 2);
+        for n in 2..plan.segment_count() {
+            let (a, b) = (whole.join(format!("{n}.ts")), resumed.join(format!("{n}.ts")));
+            let (expected, got) = (first_packet(&a, "v"), first_packet(&b, "v"));
+            assert!((expected - got).abs() < 0.001, "segment {n} starts at {got}, not {expected}");
+        }
+        // The converted audio starts with the video, not at the seek point.
+        let first = resumed.join("2.ts");
+        let (video, audio) = (first_packet(&first, "v"), first_packet(&first, "a"));
+        assert!((audio - video).abs() < 0.1, "audio at {audio}, video at {video}");
     }
 
     #[test]
