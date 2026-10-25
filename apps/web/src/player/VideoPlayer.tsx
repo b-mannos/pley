@@ -371,6 +371,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             } else {
               const hls = new Hls({
                 startPosition: hlsStartPosition(startSec),
+                // The first segment is asked for as soon as the playlist is
+                // in, not once the element's MediaSource has opened (~0.1 s later).
+                startFragPrefetch: true,
                 maxBufferLength: 30,
                 maxMaxBufferLength: 120,
                 backBufferLength: 60,

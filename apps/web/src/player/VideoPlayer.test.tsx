@@ -149,4 +149,11 @@ describe("VideoPlayer with hls.js", () => {
     await waitFor(() => expect(hlsInstances).toHaveLength(1));
     expect(hlsInstances[0]?.config.startPosition).toBe(90);
   });
+
+  it("asks for the first segment without waiting for the video element", async () => {
+    serve([session("s1")]);
+    renderPlayer(0);
+    await waitFor(() => expect(hlsInstances[0]?.calls).toContain("attachMedia"));
+    expect(hlsInstances[0]?.config.startFragPrefetch).toBe(true);
+  });
 });
