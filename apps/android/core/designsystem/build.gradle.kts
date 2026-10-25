@@ -7,6 +7,14 @@ plugins {
 
 android {
     namespace = "app.pley.android.designsystem"
+    // Robolectric on Android Studio's JDK 21 reaches into java.base for file
+    // descriptors; without these every Robolectric test fails at setup.
+    testOptions.unitTests.all {
+        it.jvmArgs(
+            "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED",
+            "--add-opens=java.base/java.io=ALL-UNNAMED",
+        )
+    }
 }
 
 dependencies {
@@ -19,8 +27,13 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     implementation(libs.androidx.tracing.ktx)
 
+    // The debug gallery (src/debug): every token and tile on one screen, phone or TV.
+    debugImplementation(libs.androidx.activity.compose)
+
     testImplementation(libs.robolectric)
     testImplementation(libs.coil.test)
     testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.kotlinx.coroutines.test)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

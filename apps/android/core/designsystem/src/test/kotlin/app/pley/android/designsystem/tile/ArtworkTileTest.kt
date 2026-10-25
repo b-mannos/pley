@@ -1,0 +1,200 @@
+package app.pley.android.designsystem.tile
+
+import android.content.Context
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.test.core.app.ApplicationProvider
+import app.pley.android.common.Tier
+import app.pley.android.designsystem.image.ArtworkImage
+import app.pley.android.designsystem.image.ArtworkInterceptor
+import app.pley.android.designsystem.image.ArtworkPolicy
+import app.pley.android.designsystem.image.LocalArtworkImageLoader
+import app.pley.android.designsystem.image.Placeholder
+import app.pley.android.model.ItemKind
+import app.pley.android.model.ItemSummary
+import app.pley.android.model.UserState
+import coil3.ImageLoader
+import coil3.network.HttpException
+import coil3.network.NetworkResponse
+import coil3.request.ErrorResult
+import coil3.test.FakeImage
+import coil3.test.FakeImageLoaderEngine
+import kotlinx.coroutines.Dispatchers
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import kotlin.math.abs
+
+@RunWith(RobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(qualifiers = "w960dp-h540dp-xhdpi")
+class ArtworkTileTest {
+    @get:Rule
+    val compose = createComposeRule()
+
+    private val context: Context = ApplicationProvider.getApplicationContext()
+    private val origin = "http://192.168.1.20:7539"
+    private val red = 0xFFE5484D.toInt()
+
+    @After
+    fun forgetProbe() {
+        TileProbe.listener = null
+    }
+
+    /** A loader that has only [present] (as a solid [red] picture) and a 404 for anything else. */
+    private fun loader(vararg present: String): ImageLoader {
+        val engine = FakeImageLoaderEngine.Builder()
+            .intercept({ it in present }, FakeImage(width = 248, height = 372, color = red))
+            .default { chain -> ErrorResult(null, chain.request, HttpException(NetworkResponse(code = 404))) }
+            .build()
+        return ImageLoader.Builder(context)
+            .components {
+                add(ArtworkInterceptor(ArtworkPolicy(Tier.T0, 1920)))
+                add(engine)
+            }
+            .memoryCache(null)
+            .diskCache(null)
+            .coroutineContext(Dispatchers.Unconfined)
+            .build()
+    }
+
+    private fun model(id: Long = 1, title: String = "Northern Lights", progress: Float = 0f) = ArtworkTileModel(
+        id = id,
+        title = title,
+        subtitle = "2024",
+        image = ArtworkImage(listOf("$origin/api/items/$id/images/poster?v=1", "$origin/api/items/9/images/poster")),
+        progress = progress,
+        description = "$title, 2024",
+    )
+
+    private fun pixel(tag: String, x: Int, y: Int): Color = compose.onNodeWithTag(tag).captureToImage().toPixelMap()[x, y]
+
+    private fun assertNear(expected: Color, actual: Color) {
+        val close = abs(expected.red - actual.red) < 0.04f && abs(expected.green - actual.green) < 0.04f &&
+            abs(expected.blue - actual.blue) < 0.04f
+        assertTrue("expected about $expected, got $actual", close)
+    }
+
+    @Test
+    fun theGradientStaysWhenNoAddressLoads() {
+        val model = model()
+        compose.setContent {
+            CompositionLocalProvider(LocalArtworkImageLoader provides loader()) {
+                ArtworkTile(model, TileKind.Poster, TileStyle.Tv, Modifier.tvTileSize(TileKind.Poster).testTag("tile"))
+            }
+        }
+        compose.waitForIdle()
+        // Near the top left corner the 135° gradient is at its first colour.
+        assertNear(Placeholder.colors(model.title).first, pixel("tile", 14, 14))
+    }
+
+    @Test
+    fun aFallbackAddressThatLoadsReplacesTheGradient() {
+        compose.setContent {
+            CompositionLocalProvider(LocalArtworkImageLoader provides loader("$origin/api/items/9/images/poster?w=320")) {
+                ArtworkTile(model(), TileKind.Poster, TileStyle.Tv, Modifier.tvTileSize(TileKind.Poster).testTag("tile"))
+            }
+        }
+        compose.waitForIdle()
+        assertNear(Color(red), pixel("tile", 124, 186))
+    }
+
+    @Test
+    fun progressIsDrawnAlongTheBottom() {
+        compose.setContent {
+            CompositionLocalProvider(LocalArtworkImageLoader provides loader("$origin/api/items/9/images/poster?w=320")) {
+                ArtworkTile(model(progress = 0.5f), TileKind.Poster, TileStyle.Tv, Modifier.tvTileSize(TileKind.Poster).testTag("tile"))
+            }
+        }
+        compose.waitForIdle()
+        // 248 by 372 px at xhdpi; the bar is the bottom 8 px: accent to half, then the dark track.
+        assertNear(Color(0xFF38BDF8), pixel("tile", 60, 368))
+        val track = pixel("tile", 190, 368)
+        assertTrue("track $track", track.red < 0.45f)
+    }
+
+    @Test
+    fun aTileIsOneNodeThatAParentMerges() {
+        compose.setContent {
+            CompositionLocalProvider(LocalArtworkImageLoader provides loader()) {
+                Column {
+                    ArtworkTile(model(1, "Glasshouse"), TileKind.Landscape, TileStyle.Tv, Modifier.tvTileSize(TileKind.Landscape))
+                    Box(Modifier.clickable {}) {
+                        ArtworkTile(model(2, "Saltwind"), TileKind.Landscape, TileStyle.Tv, Modifier.tvTileSize(TileKind.Landscape))
+                        TileCaption("Saltwind", "2024", TileStyle.Tv)
+                    }
+                }
+            }
+        }
+        compose.onNode(hasContentDescription("Glasshouse, 2024")).assertExists()
+        // The clickable parent reads the tile's description, and the caption adds nothing to it.
+        compose.onNode(hasClickAction() and hasContentDescription("Saltwind, 2024")).assertExists()
+        val merged = compose.onNode(hasClickAction()).fetchSemanticsNode()
+        assertEquals(listOf("Saltwind, 2024"), merged.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription])
+    }
+
+    @Test
+    fun tilesSkipWhenAnotherItemChanges() {
+        val models = mutableStateListOf(model(1, "A"), model(2, "B"), model(3, "C"))
+        val compositions = mutableMapOf<Long, Int>()
+        TileProbe.listener = { id -> compositions[id] = (compositions[id] ?: 0) + 1 }
+        compose.setContent {
+            CompositionLocalProvider(LocalArtworkImageLoader provides loader()) {
+                Column {
+                    for (m in models) {
+                        key(m.id) { ArtworkTile(m, TileKind.Poster, TileStyle.Tv, Modifier.tvTileSize(TileKind.Poster)) }
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        val before = compositions.toMap()
+
+        compose.runOnIdle { models[1] = models[1].copy(progress = 0.4f) }
+        compose.waitForIdle()
+
+        assertEquals(before[1L], compositions[1L])
+        assertEquals(before[3L], compositions[3L])
+        assertEquals((before[2L] ?: 0) + 1, compositions[2L])
+    }
+
+    @Test
+    fun modelsSayWhatTheItemIs() {
+        val episode = ItemSummary(
+            id = 30, libraryId = 1, kind = ItemKind.Episode, title = "Glasshouse", index = 5, parentIndex = 2,
+            grandparentTitle = "Driftline", grandparentId = 10, durationMs = 3_480_000,
+            userState = UserState(positionMs = 1_920_000), thumbUrl = "/api/items/30/images/thumb?v=1",
+        )
+        val wide = ArtworkTileModel.of(episode, TileKind.Landscape, origin, locale = java.util.Locale.US)
+        assertEquals("Driftline", wide.title)
+        assertEquals("S2 · E5 · 26 min left", wide.subtitle)
+        assertEquals(1_920_000f / 3_480_000f, wide.progress, 0.0001f)
+        assertEquals("Glasshouse, Driftline, Season 2 Episode 5, 26 minutes left", wide.description)
+        val row = ArtworkTileModel.of(episode, TileKind.Episode, origin, locale = java.util.Locale.US)
+        assertEquals("5. Glasshouse", row.title)
+        assertEquals("26 min left", row.subtitle)
+        val show = ItemSummary(id = 2, libraryId = 1, kind = ItemKind.Show, title = "Severance", childCount = 2, leafCount = 19, viewedLeafCount = 13)
+        val poster = ArtworkTileModel.of(show, TileKind.Poster, origin, locale = java.util.Locale.US)
+        assertEquals(6, poster.unwatched)
+        assertEquals("2 seasons", poster.subtitle)
+    }
+}
