@@ -1,0 +1,1423 @@
+{
+  "name": "Galaxy Note20 Ultra (adb, 2026-10-25)",
+  "device": {
+    "model": "SM-N986W",
+    "manufacturer": "samsung",
+    "sdk": 33,
+    "fingerprint": "samsung/c2qcsx/c2q:13/TP1A.220624.014/N986WVLSEHYH1:user/release-keys",
+    "form": "phone",
+    "fire_tv": false,
+    "total_ram_bytes": 11114950656,
+    "low_ram": false
+  },
+  "decoders": [
+    {
+      "name": "c2.dolby.eac3.decoder",
+      "mime": "audio/ac3",
+      "hardware": false,
+      "vendor": true,
+      "max_channels": 6
+    },
+    {
+      "name": "c2.dolby.ac4.decoder",
+      "mime": "audio/ac4",
+      "hardware": false,
+      "vendor": true,
+      "max_channels": 16
+    },
+    {
+      "name": "c2.dolby.eac3.decoder",
+      "mime": "audio/eac3",
+      "hardware": false,
+      "vendor": false,
+      "max_channels": 8
+    },
+    {
+      "name": "c2.dolby.eac3.decoder",
+      "mime": "audio/eac3-joc",
+      "hardware": false,
+      "vendor": false,
+      "max_channels": 16
+    },
+    {
+      "name": "c2.sec.flac.decoder",
+      "mime": "audio/flac",
+      "hardware": false,
+      "vendor": false,
+      "max_channels": 8
+    },
+    {
+      "name": "c2.android.flac.decoder",
+      "mime": "audio/flac",
+      "hardware": false,
+      "vendor": false,
+      "max_channels": 8
+    },
+    {
+      "name": "c2.android.aac.decoder",
+      "mime": "audio/mp4a-latm",
+      "hardware": false,
+      "vendor": false,
+      "profile_levels": [
+        {
+          "profile": 2,
+          "level": 0
+        },
+        {
+          "profile": 5,
+          "level": 0
+        },
+        {
+          "profile": 29,
+          "level": 0
+        },
+        {
+          "profile": 23,
+          "level": 0
+        },
+        {
+          "profile": 39,
+          "level": 0
+        },
+        {
+          "profile": 20,
+          "level": 0
+        },
+        {
+          "profile": 42,
+          "level": 0
+        }
+      ],
+      "max_channels": 8
+    },
+    {
+      "name": "c2.sec.mp3.decoder",
+      "mime": "audio/mpeg",
+      "hardware": false,
+      "vendor": false,
+      "max_channels": 2
+    },
+    {
+      "name": "c2.android.mp3.decoder",
+      "mime": "audio/mpeg",
+      "hardware": false,
+      "vendor": false,
+      "max_channels": 2
+    },
+    {
+      "name": "c2.android.opus.decoder",
+      "mime": "audio/opus",
+      "hardware": false,
+      "vendor": false,
+      "max_channels": 8
+    },
+    {
+      "name": "c2.android.raw.decoder",
+      "mime": "audio/raw",
+      "hardware": false,
+      "vendor": false,
+      "max_channels": 12
+    },
+    {
+      "name": "c2.android.vorbis.decoder",
+      "mime": "audio/vorbis",
+      "hardware": false,
+      "vendor": false,
+      "max_channels": 8
+    },
+    {
+      "name": "c2.android.av1-dav1d.decoder",
+      "mime": "video/av01",
+      "hardware": false,
+      "vendor": false,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 32768
+        },
+        {
+          "profile": 8,
+          "level": 5
+        },
+        {
+          "profile": 4096,
+          "level": 32768
+        },
+        {
+          "profile": 10,
+          "level": 5
+        },
+        {
+          "profile": 8192,
+          "level": 32768
+        },
+        {
+          "profile": 2,
+          "level": 32768
+        },
+        {
+          "profile": 10,
+          "level": 5
+        }
+      ],
+      "max_width": 2048,
+      "max_height": 2048,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        }
+      ]
+    },
+    {
+      "name": "c2.android.av1.decoder",
+      "mime": "video/av01",
+      "hardware": false,
+      "vendor": false,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 32768
+        },
+        {
+          "profile": 8,
+          "level": 5
+        },
+        {
+          "profile": 4096,
+          "level": 32768
+        },
+        {
+          "profile": 10,
+          "level": 5
+        },
+        {
+          "profile": 8192,
+          "level": 32768
+        },
+        {
+          "profile": 2,
+          "level": 32768
+        },
+        {
+          "profile": 10,
+          "level": 5
+        }
+      ],
+      "max_width": 2048,
+      "max_height": 2048,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        }
+      ]
+    },
+    {
+      "name": "OMX.qcom.video.decoder.avc",
+      "mime": "video/avc",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 65536,
+          "level": 262144
+        },
+        {
+          "profile": 1,
+          "level": 262144
+        },
+        {
+          "profile": 2,
+          "level": 262144
+        },
+        {
+          "profile": 524288,
+          "level": 262144
+        },
+        {
+          "profile": 8,
+          "level": 262144
+        }
+      ],
+      "max_width": 8192,
+      "max_height": 8192,
+      "max_fps": 960.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.android.avc.decoder",
+      "mime": "video/avc",
+      "hardware": false,
+      "vendor": false,
+      "profile_levels": [
+        {
+          "profile": 65536,
+          "level": 65536
+        },
+        {
+          "profile": 1,
+          "level": 65536
+        },
+        {
+          "profile": 2,
+          "level": 65536
+        },
+        {
+          "profile": 524288,
+          "level": 65536
+        },
+        {
+          "profile": 8,
+          "level": 65536
+        }
+      ],
+      "max_width": 4096,
+      "max_height": 4096,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "OMX.qcom.video.decoder.hevc",
+      "mime": "video/hevc",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 8388608
+        },
+        {
+          "profile": 2,
+          "level": 8388608
+        },
+        {
+          "profile": 4,
+          "level": 8388608
+        },
+        {
+          "profile": 4096,
+          "level": 8388608
+        },
+        {
+          "profile": 8192,
+          "level": 8388608
+        }
+      ],
+      "max_width": 8192,
+      "max_height": 8192,
+      "max_fps": 960.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.android.hevc.decoder",
+      "mime": "video/hevc",
+      "hardware": false,
+      "vendor": false,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 524288
+        },
+        {
+          "profile": 4,
+          "level": 524288
+        }
+      ],
+      "max_width": 4096,
+      "max_height": 4096,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "OMX.qcom.video.decoder.vp8",
+      "mime": "video/x-vnd.on2.vp8",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 8
+        }
+      ],
+      "max_width": 4096,
+      "max_height": 4096,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        }
+      ]
+    },
+    {
+      "name": "c2.android.vp8.decoder",
+      "mime": "video/x-vnd.on2.vp8",
+      "hardware": false,
+      "vendor": false,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 1
+        }
+      ],
+      "max_width": 2048,
+      "max_height": 2048,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "OMX.qcom.video.decoder.vp9",
+      "mime": "video/x-vnd.on2.vp9",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 4096
+        },
+        {
+          "profile": 0,
+          "level": 6
+        },
+        {
+          "profile": 4,
+          "level": 4096
+        },
+        {
+          "profile": 2,
+          "level": 6
+        },
+        {
+          "profile": 4096,
+          "level": 4096
+        },
+        {
+          "profile": 16384,
+          "level": 4096
+        }
+      ],
+      "max_width": 8192,
+      "max_height": 8192,
+      "max_fps": 960.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.android.vp9.decoder",
+      "mime": "video/x-vnd.on2.vp9",
+      "hardware": false,
+      "vendor": false,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 256
+        },
+        {
+          "profile": 0,
+          "level": 5
+        },
+        {
+          "profile": 4,
+          "level": 256
+        },
+        {
+          "profile": 2,
+          "level": 5
+        },
+        {
+          "profile": 4096,
+          "level": 256
+        },
+        {
+          "profile": 16384,
+          "level": 256
+        }
+      ],
+      "max_width": 2048,
+      "max_height": 2048,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        }
+      ]
+    }
+  ],
+  "display": {
+    "modes": [
+      {
+        "id": 1,
+        "width": 1440,
+        "height": 3088,
+        "refresh_rate": 60.000004,
+        "alternative_refresh_rates": [
+          48.000004
+        ]
+      },
+      {
+        "id": 2,
+        "width": 1440,
+        "height": 3088,
+        "refresh_rate": 48.000004,
+        "alternative_refresh_rates": [
+          60.000004
+        ]
+      },
+      {
+        "id": 3,
+        "width": 1080,
+        "height": 2316,
+        "refresh_rate": 120.00001,
+        "alternative_refresh_rates": [
+          48.000004,
+          60.000004,
+          96.00001
+        ]
+      },
+      {
+        "id": 4,
+        "width": 1080,
+        "height": 2316,
+        "refresh_rate": 96.00001,
+        "alternative_refresh_rates": [
+          48.000004,
+          60.000004,
+          120.00001
+        ]
+      },
+      {
+        "id": 5,
+        "width": 1080,
+        "height": 2316,
+        "refresh_rate": 60.000004,
+        "alternative_refresh_rates": [
+          48.000004,
+          96.00001,
+          120.00001
+        ]
+      },
+      {
+        "id": 6,
+        "width": 1080,
+        "height": 2316,
+        "refresh_rate": 48.000004,
+        "alternative_refresh_rates": [
+          60.000004,
+          96.00001,
+          120.00001
+        ]
+      },
+      {
+        "id": 7,
+        "width": 720,
+        "height": 1544,
+        "refresh_rate": 120.00001,
+        "alternative_refresh_rates": [
+          48.000004,
+          60.000004,
+          96.00001
+        ]
+      },
+      {
+        "id": 8,
+        "width": 720,
+        "height": 1544,
+        "refresh_rate": 96.00001,
+        "alternative_refresh_rates": [
+          48.000004,
+          60.000004,
+          120.00001
+        ]
+      },
+      {
+        "id": 9,
+        "width": 720,
+        "height": 1544,
+        "refresh_rate": 60.000004,
+        "alternative_refresh_rates": [
+          48.000004,
+          96.00001,
+          120.00001
+        ]
+      },
+      {
+        "id": 10,
+        "width": 720,
+        "height": 1544,
+        "refresh_rate": 48.000004,
+        "alternative_refresh_rates": [
+          60.000004,
+          96.00001,
+          120.00001
+        ]
+      }
+    ],
+    "active_mode_id": 5,
+    "hdr_capabilities": [
+      2,
+      3,
+      4
+    ],
+    "match_content": "seamless_only"
+  },
+  "audio": {
+    "passthrough_encodings": [],
+    "max_channels": 2,
+    "route": "speaker"
+  }
+}

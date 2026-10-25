@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "quirks": [
+    {
+      "id": "shield-dv-p7",
+      "why": "Decodes Dolby Vision profile 7 (UHD Blu-ray remuxes) without listing it.",
+      "models": ["SHIELD Android TV"],
+      "add": { "dolby_vision_profiles": [7] }
+    },
+    {
+      "id": "fire-tv-dv-hdr10plus-hybrids",
+      "why": "Dolby Vision streams that also carry HDR10+ show a black screen or freeze (androidx/media#1895).",
+      "models": ["AFTMM", "AFTKA", "AFTKM", "AFTKRT", "AFTMA08C15"],
+      "flags": { "dv_hdr10_plus_hybrids_broken": true }
+    },
+    {
+      "id": "google-tv-streamer-dv-hdr10plus-hybrids",
+      "why": "Dolby Vision streams that also carry HDR10+ show a black screen or freeze (androidx/media#1895).",
+      "models": ["Google TV Streamer"],
+      "flags": { "dv_hdr10_plus_hybrids_broken": true }
+    },
+    {
+      "id": "tcl-tv-dv-hdr10plus-hybrids",
+      "why": "Dolby Vision streams that also carry HDR10+ show a black screen or freeze (androidx/media#1895).",
+      "manufacturers": ["TCL"],
+      "tv_only": true,
+      "flags": { "dv_hdr10_plus_hybrids_broken": true }
+    },
+    {
+      "id": "google-tv-lossless-passthrough",
+      "why": "Advertises TrueHD, DTS-HD and DTS:X passthrough but doesn't deliver them.",
+      "models": ["Google TV Streamer", "Chromecast", "onn. 4K Pro Streaming Device"],
+      "remove": { "passthrough": ["truehd", "dts_hd"] }
+    }
+  ]
+}

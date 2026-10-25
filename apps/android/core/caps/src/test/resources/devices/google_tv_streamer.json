@@ -1,0 +1,3206 @@
+{
+  "name": "Google TV Streamer on an HDR10 monitor (adb, 2026-10-25)",
+  "device": {
+    "model": "Google TV Streamer",
+    "manufacturer": "Google",
+    "sdk": 34,
+    "fingerprint": "google/kirkwood/kirkwood:14/UTTK.260317.003/15205007:user/release-keys",
+    "form": "tv",
+    "fire_tv": false,
+    "total_ram_bytes": 4057292800,
+    "low_ram": false
+  },
+  "decoders": [
+    {
+      "name": "c2.dolby.ac3.decoder",
+      "mime": "audio/ac3",
+      "hardware": true,
+      "vendor": true,
+      "max_channels": 6
+    },
+    {
+      "name": "c2.dolby.eac3.decoder",
+      "mime": "audio/eac3",
+      "hardware": true,
+      "vendor": true,
+      "max_channels": 8
+    },
+    {
+      "name": "c2.android.flac.decoder",
+      "mime": "audio/flac",
+      "hardware": false,
+      "vendor": false,
+      "max_channels": 8
+    },
+    {
+      "name": "c2.android.aac.decoder",
+      "mime": "audio/mp4a-latm",
+      "hardware": false,
+      "vendor": false,
+      "profile_levels": [
+        {
+          "profile": 2,
+          "level": 0
+        },
+        {
+          "profile": 5,
+          "level": 0
+        },
+        {
+          "profile": 29,
+          "level": 0
+        },
+        {
+          "profile": 23,
+          "level": 0
+        },
+        {
+          "profile": 39,
+          "level": 0
+        },
+        {
+          "profile": 20,
+          "level": 0
+        },
+        {
+          "profile": 42,
+          "level": 0
+        }
+      ],
+      "max_channels": 8
+    },
+    {
+      "name": "c2.android.mp3.decoder",
+      "mime": "audio/mpeg",
+      "hardware": false,
+      "vendor": false,
+      "max_channels": 2
+    },
+    {
+      "name": "c2.android.opus.decoder",
+      "mime": "audio/opus",
+      "hardware": false,
+      "vendor": false,
+      "max_channels": 8
+    },
+    {
+      "name": "c2.android.raw.decoder",
+      "mime": "audio/raw",
+      "hardware": false,
+      "vendor": false,
+      "max_channels": 8
+    },
+    {
+      "name": "c2.android.vorbis.decoder",
+      "mime": "audio/vorbis",
+      "hardware": false,
+      "vendor": false,
+      "max_channels": 8
+    },
+    {
+      "name": "c2.mtk.av1.decoder",
+      "mime": "video/av01",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 8192
+        },
+        {
+          "profile": 8,
+          "level": 5
+        },
+        {
+          "profile": 4096,
+          "level": 8192
+        },
+        {
+          "profile": 10,
+          "level": 5
+        },
+        {
+          "profile": 8192,
+          "level": 8192
+        },
+        {
+          "profile": 2,
+          "level": 8192
+        },
+        {
+          "profile": 10,
+          "level": 5
+        }
+      ],
+      "max_width": 4096,
+      "max_height": 2304,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.mtk.av1.decoder.lowlatency",
+      "mime": "video/av01",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 8192
+        },
+        {
+          "profile": 8,
+          "level": 5
+        },
+        {
+          "profile": 4096,
+          "level": 8192
+        },
+        {
+          "profile": 10,
+          "level": 5
+        },
+        {
+          "profile": 8192,
+          "level": 8192
+        },
+        {
+          "profile": 2,
+          "level": 8192
+        },
+        {
+          "profile": 10,
+          "level": 5
+        }
+      ],
+      "max_width": 4096,
+      "max_height": 2304,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.android.av1.decoder",
+      "mime": "video/av01",
+      "hardware": false,
+      "vendor": false,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 32768
+        },
+        {
+          "profile": 8,
+          "level": 5
+        },
+        {
+          "profile": 4096,
+          "level": 32768
+        },
+        {
+          "profile": 10,
+          "level": 5
+        },
+        {
+          "profile": 8192,
+          "level": 32768
+        },
+        {
+          "profile": 2,
+          "level": 32768
+        },
+        {
+          "profile": 10,
+          "level": 5
+        }
+      ],
+      "max_width": 1920,
+      "max_height": 1080,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.mtk.avc.decoder",
+      "mime": "video/avc",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 65536
+        },
+        {
+          "profile": 65536,
+          "level": 65536
+        },
+        {
+          "profile": 2,
+          "level": 65536
+        },
+        {
+          "profile": 8,
+          "level": 65536
+        },
+        {
+          "profile": 16,
+          "level": 65536
+        },
+        {
+          "profile": 10,
+          "level": 5
+        }
+      ],
+      "max_width": 4096,
+      "max_height": 2304,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.mtk.avc.decoder.lowlatency",
+      "mime": "video/avc",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 65536
+        },
+        {
+          "profile": 65536,
+          "level": 65536
+        },
+        {
+          "profile": 2,
+          "level": 65536
+        },
+        {
+          "profile": 8,
+          "level": 65536
+        },
+        {
+          "profile": 16,
+          "level": 65536
+        },
+        {
+          "profile": 10,
+          "level": 5
+        }
+      ],
+      "max_width": 4096,
+      "max_height": 2304,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.android.avc.decoder",
+      "mime": "video/avc",
+      "hardware": false,
+      "vendor": false,
+      "profile_levels": [
+        {
+          "profile": 65536,
+          "level": 65536
+        },
+        {
+          "profile": 1,
+          "level": 65536
+        },
+        {
+          "profile": 2,
+          "level": 65536
+        },
+        {
+          "profile": 524288,
+          "level": 65536
+        },
+        {
+          "profile": 8,
+          "level": 65536
+        }
+      ],
+      "max_width": 1920,
+      "max_height": 1088,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.mtk.dvav.ser.decoder",
+      "mime": "video/dolby-vision",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 512,
+          "level": 256
+        }
+      ],
+      "max_width": 3840,
+      "max_height": 2176,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.mtk.dvav1.decoder",
+      "mime": "video/dolby-vision",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 1024,
+          "level": 256
+        }
+      ],
+      "max_width": 3840,
+      "max_height": 2176,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.mtk.dvhe.dtr.decoder",
+      "mime": "video/dolby-vision",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 16,
+          "level": 256
+        }
+      ],
+      "max_width": 3840,
+      "max_height": 2176,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.mtk.dvhe.sth.decoder",
+      "mime": "video/dolby-vision",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 256,
+          "level": 256
+        }
+      ],
+      "max_width": 3840,
+      "max_height": 2176,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.mtk.dvhe.stn.decoder",
+      "mime": "video/dolby-vision",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 32,
+          "level": 256
+        }
+      ],
+      "max_width": 3840,
+      "max_height": 2176,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.mtk.hevc.decoder",
+      "mime": "video/hevc",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 131072
+        },
+        {
+          "profile": 4,
+          "level": 131072
+        },
+        {
+          "profile": 2,
+          "level": 131072
+        },
+        {
+          "profile": 4096,
+          "level": 131072
+        }
+      ],
+      "max_width": 4096,
+      "max_height": 2304,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.mtk.hevc.decoder.lowlatency",
+      "mime": "video/hevc",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 131072
+        },
+        {
+          "profile": 4,
+          "level": 131072
+        },
+        {
+          "profile": 2,
+          "level": 131072
+        },
+        {
+          "profile": 4096,
+          "level": 131072
+        }
+      ],
+      "max_width": 4096,
+      "max_height": 2304,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.android.hevc.decoder",
+      "mime": "video/hevc",
+      "hardware": false,
+      "vendor": false,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 524288
+        },
+        {
+          "profile": 4,
+          "level": 524288
+        }
+      ],
+      "max_width": 1920,
+      "max_height": 1088,
+      "size_rates": []
+    },
+    {
+      "name": "c2.mtk.mpeg2.decoder",
+      "mime": "video/mpeg2",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 3
+        }
+      ],
+      "max_width": 1920,
+      "max_height": 1088,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.mtk.vpx.decoder",
+      "mime": "video/x-vnd.on2.vp8",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 1
+        }
+      ],
+      "max_width": 1920,
+      "max_height": 1088,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.android.vp8.decoder",
+      "mime": "video/x-vnd.on2.vp8",
+      "hardware": false,
+      "vendor": false,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 1
+        }
+      ],
+      "max_width": 2048,
+      "max_height": 2048,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.mtk.vp9.decoder",
+      "mime": "video/x-vnd.on2.vp9",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 512
+        },
+        {
+          "profile": 0,
+          "level": 5
+        },
+        {
+          "profile": 2,
+          "level": 512
+        },
+        {
+          "profile": 1,
+          "level": 5
+        },
+        {
+          "profile": 4,
+          "level": 512
+        },
+        {
+          "profile": 2,
+          "level": 5
+        },
+        {
+          "profile": 4096,
+          "level": 512
+        }
+      ],
+      "max_width": 4096,
+      "max_height": 2304,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.mtk.vp9.decoder.lowlatency",
+      "mime": "video/x-vnd.on2.vp9",
+      "hardware": true,
+      "vendor": true,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 512
+        },
+        {
+          "profile": 0,
+          "level": 5
+        },
+        {
+          "profile": 2,
+          "level": 512
+        },
+        {
+          "profile": 1,
+          "level": 5
+        },
+        {
+          "profile": 4,
+          "level": 512
+        },
+        {
+          "profile": 2,
+          "level": 5
+        },
+        {
+          "profile": 4096,
+          "level": 512
+        }
+      ],
+      "max_width": 4096,
+      "max_height": 2304,
+      "max_fps": 120.0,
+      "size_rates": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ],
+      "performance_points": [
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 23.976
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 24.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 25.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 29.97
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 30.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 50.0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 59.94
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 23.976
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 24.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 25.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 29.97
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 30.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 50.0
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 59.94
+        },
+        {
+          "width": 3840,
+          "height": 2160,
+          "fps": 60.0
+        }
+      ]
+    },
+    {
+      "name": "c2.android.vp9.decoder",
+      "mime": "video/x-vnd.on2.vp9",
+      "hardware": false,
+      "vendor": false,
+      "profile_levels": [
+        {
+          "profile": 1,
+          "level": 256
+        },
+        {
+          "profile": 0,
+          "level": 5
+        },
+        {
+          "profile": 4,
+          "level": 256
+        },
+        {
+          "profile": 2,
+          "level": 5
+        },
+        {
+          "profile": 4096,
+          "level": 256
+        },
+        {
+          "profile": 16384,
+          "level": 256
+        }
+      ],
+      "max_width": 1280,
+      "max_height": 1280,
+      "size_rates": []
+    }
+  ],
+  "display": {
+    "modes": [
+      {
+        "id": 40,
+        "width": 720,
+        "height": 480,
+        "refresh_rate": 60.000004,
+        "hdr_types": [
+          2
+        ]
+      },
+      {
+        "id": 41,
+        "width": 720,
+        "height": 576,
+        "refresh_rate": 50.0,
+        "hdr_types": [
+          2
+        ]
+      },
+      {
+        "id": 42,
+        "width": 1280,
+        "height": 720,
+        "refresh_rate": 60.000004,
+        "hdr_types": [
+          2
+        ]
+      },
+      {
+        "id": 43,
+        "width": 1280,
+        "height": 720,
+        "refresh_rate": 50.0,
+        "hdr_types": [
+          2
+        ]
+      },
+      {
+        "id": 44,
+        "width": 1920,
+        "height": 1080,
+        "refresh_rate": 60.000004,
+        "hdr_types": [
+          2
+        ]
+      },
+      {
+        "id": 45,
+        "width": 1920,
+        "height": 1080,
+        "refresh_rate": 50.0,
+        "hdr_types": [
+          2
+        ]
+      },
+      {
+        "id": 46,
+        "width": 3840,
+        "height": 2160,
+        "refresh_rate": 23.976,
+        "hdr_types": [
+          2
+        ]
+      },
+      {
+        "id": 47,
+        "width": 3840,
+        "height": 2160,
+        "refresh_rate": 24.000002,
+        "hdr_types": [
+          2
+        ]
+      },
+      {
+        "id": 48,
+        "width": 3840,
+        "height": 2160,
+        "refresh_rate": 25.0,
+        "hdr_types": [
+          2
+        ]
+      },
+      {
+        "id": 49,
+        "width": 3840,
+        "height": 2160,
+        "refresh_rate": 29.97,
+        "hdr_types": [
+          2
+        ]
+      },
+      {
+        "id": 50,
+        "width": 3840,
+        "height": 2160,
+        "refresh_rate": 30.000002,
+        "hdr_types": [
+          2
+        ]
+      },
+      {
+        "id": 51,
+        "width": 3840,
+        "height": 2160,
+        "refresh_rate": 60.000004,
+        "hdr_types": [
+          2
+        ]
+      },
+      {
+        "id": 52,
+        "width": 3840,
+        "height": 2160,
+        "refresh_rate": 50.0,
+        "hdr_types": [
+          2
+        ]
+      },
+      {
+        "id": 53,
+        "width": 1280,
+        "height": 720,
+        "refresh_rate": 59.94,
+        "hdr_types": [
+          2
+        ]
+      },
+      {
+        "id": 54,
+        "width": 1920,
+        "height": 1080,
+        "refresh_rate": 59.94,
+        "hdr_types": [
+          2
+        ]
+      },
+      {
+        "id": 55,
+        "width": 3840,
+        "height": 2160,
+        "refresh_rate": 59.94,
+        "hdr_types": [
+          2
+        ]
+      }
+    ],
+    "active_mode_id": 51,
+    "hdr_capabilities": [
+      2
+    ],
+    "match_content": "never"
+  },
+  "audio": {
+    "passthrough_encodings": [],
+    "max_channels": 2,
+    "route": "hdmi"
+  }
+}
