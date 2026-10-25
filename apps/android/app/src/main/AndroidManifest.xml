@@ -1,8 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<!--
+  No TV launcher yet: the web app has no remote control, so TVs get the
+  native app's own launcher once it replaces the web view.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="MissingLeanbackLauncher">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Android 17: servers at home, found and opened (asked for before either). -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+    <!-- Fire OS 16: finding servers on the network; never for location. -->
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+    <!-- Fire TV below Fire OS 14: Alexa's play, pause and seek. -->
+    <uses-permission android:name="com.amazon.permission.media.session.voicecommandcontrol" />
+
+    <!--
+      One app for phones, tablets and TVs: no remote, touchscreen or
+      pointer is required, so Google Play and the Amazon Appstore offer it
+      to TVs too.
+    -->
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.faketouch"
+        android:required="false" />
 
     <!-- The browsers that offer Custom Tabs, for signing in (Android 11 and later). -->
     <queries>
@@ -14,10 +43,12 @@
     <!--
       pley servers on home networks speak plain HTTP, so cleartext traffic is
       allowed. Nothing is backed up or moved to a new device: the web view
-      holds session tokens, and the sign-in module the app's tokens.
+      holds session tokens, and the sign-in module the app's tokens. Back
+      goes through the system's callbacks (Fire OS 16 can skip onBackPressed).
     -->
     <application
         android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"

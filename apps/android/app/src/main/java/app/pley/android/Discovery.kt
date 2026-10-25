@@ -14,6 +14,13 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
+ * What a search of the local network found. [blocked]: the system refused
+ * the app the network (Android 17's local network access, Fire OS 16's
+ * nearby devices), so no answer says nothing about the servers.
+ */
+data class Search(val servers: List<FoundServer>, val blocked: Boolean)
+
+/**
  * Finding pley servers on the local network: `pley?` broadcast to UDP port
  * 7539, the answers collected for a moment (the server side is
  * apps/server/src/discovery.rs).
@@ -69,16 +76,18 @@ object Discovery {
     }
 
     /** Servers that answered, one entry per server, by name. */
-    suspend fun search(context: Context): List<FoundServer> = withContext(Dispatchers.IO) {
+    suspend fun search(context: Context): Search = withContext(Dispatchers.IO) {
         val found = linkedMapOf<String, FoundServer>()
+        var blocked = false
         try {
             DatagramSocket().use { socket ->
                 socket.broadcast = true
                 for (target in targets(context)) {
                     try {
                         socket.send(DatagramPacket(REQUEST, REQUEST.size, InetSocketAddress(target, DEFAULT_PORT)))
-                    } catch (_: java.io.IOException) {
+                    } catch (e: java.io.IOException) {
                         // That network doesn't take broadcasts: the others may.
+                        if (LocalNetwork.isPermissionBlock(e)) blocked = true
                     }
                 }
                 val deadline = System.currentTimeMillis() + WAIT_MS
@@ -97,9 +106,10 @@ object Discovery {
                     found.putIfAbsent(server.id ?: server.url, server)
                 }
             }
-        } catch (_: java.io.IOException) {
-            // No network: nothing found.
+        } catch (e: java.io.IOException) {
+            // No network: nothing found. No permission: nothing found either, and the screen says why.
+            if (LocalNetwork.isPermissionBlock(e)) blocked = true
         }
-        found.values.sortedBy { it.name.lowercase() }
+        Search(found.values.sortedBy { it.name.lowercase() }, blocked = blocked && found.isEmpty())
     }
 }
