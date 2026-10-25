@@ -3,6 +3,7 @@ package app.pley.android.ui.phone.shell
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -33,10 +34,20 @@ class PhoneShellTest {
     private fun placeholder(name: String) = compose.onNodeWithText("$name isn't built yet")
 
     /** Home, over a library with nothing in it yet. */
-    private fun home() = compose.onNodeWithText("Nothing here yet")
+    private fun showsHome() = shows("Nothing here yet")
 
     /** The Libraries tab, listing the one library. */
-    private fun libraries() = compose.onNodeWithText(TestGraph.FILMS.name)
+    private fun showsLibraries() = shows(TestGraph.FILMS.name)
+
+    /**
+     * Home and Libraries work their state out off the main thread, which
+     * waiting for the main thread to be idle doesn't wait for: [text] is
+     * waited for, then there once.
+     */
+    private fun shows(text: String) {
+        compose.waitUntil(SHOWN_WITHIN_MS) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText(text).assertExists()
+    }
 
     private fun tab(tab: PhoneTab) = compose.onNodeWithTag(TAB_TAG + tab.name)
 
@@ -78,7 +89,7 @@ class PhoneShellTest {
     @Test
     fun signedInItStartsAtHomeWithTheTabs() {
         show(PhoneStart(server = TestGraph.SERVER, signedIn = true))
-        home().assertExists()
+        showsHome()
         tab(PhoneTab.Home).assertIsSelected()
         tab(PhoneTab.Me).assertExists()
     }
@@ -109,7 +120,7 @@ class PhoneShellTest {
             PhoneTheme { PhoneShell(PhoneStart(TestGraph.SERVER, signedIn = true), { graph }) { _, it -> navigation = it } }
         }
         tab(PhoneTab.Libraries).performClick()
-        libraries().assertExists()
+        showsLibraries()
         compose.runOnIdle { navigation.open(PleyKey.Item(101)) }
         placeholder("Item 101").assertExists()
 
@@ -126,7 +137,7 @@ class PhoneShellTest {
         placeholder("Item 101").assertExists()
         // Choosing the tab shown takes it back to its first screen.
         tab(PhoneTab.Libraries).performClick()
-        libraries().assertExists()
+        showsLibraries()
     }
 
     @Test
@@ -134,7 +145,7 @@ class PhoneShellTest {
         val shell = show(PhoneStart(TestGraph.SERVER, signedIn = true))
         tab(PhoneTab.Playlists).performClick()
         compose.runOnIdle { shell.navigation.back() }
-        home().assertExists()
+        showsHome()
         tab(PhoneTab.Home).assertIsSelected()
     }
 
@@ -167,7 +178,7 @@ class PhoneShellTest {
         compose.runOnIdle { shell.graph.fakeAuth.signOut("http://10.0.0.9:7539") }
         compose.waitForIdle()
         assertTrue(shell.navigation.inside)
-        home().assertExists()
+        showsHome()
     }
 
     @Test
@@ -178,8 +189,12 @@ class PhoneShellTest {
         compose.runOnIdle { shell.navigation.restart(PleyKey.SignIn(TestGraph.SERVER)) }
         placeholder("Sign in").assertExists()
         compose.runOnIdle { shell.navigation.restart(PleyKey.Home) }
-        home().assertExists()
+        showsHome()
         tab(PhoneTab.Libraries).performClick()
-        libraries().assertExists()
+        showsLibraries()
+    }
+
+    private companion object {
+        const val SHOWN_WITHIN_MS = 5_000L
     }
 }

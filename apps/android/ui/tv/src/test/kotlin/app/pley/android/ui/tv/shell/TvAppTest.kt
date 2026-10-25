@@ -56,7 +56,9 @@ class TvAppTest {
         compose.setContent {
             TvApp(FakeSource(facts, threeLibraries), onExit = { exits++ }, reducedMotion = true, placeholder = placeholder)
         }
-        compose.waitForIdle()
+        // Every screen starts with focus (D-pad rule 1): Home once its rows are shaped, off the
+        // main thread, which waiting for the main thread to be idle doesn't wait for.
+        compose.waitUntil(STARTS_WITHIN_MS) { compose.onAllNodes(isFocused()).fetchSemanticsNodes().isNotEmpty() }
     }
 
     private fun back() {
@@ -164,6 +166,8 @@ class TvAppTest {
     }
 
     private companion object {
+        const val STARTS_WITHIN_MS = 5_000L
+
         /** What the fixtures' tiles say to screen readers. */
         const val HALF_LOOP = "Half Loop, Severance, Season 1 Episode 2, 34 minutes left"
         const val DUNE = "Dune: Part Two, 2024"
