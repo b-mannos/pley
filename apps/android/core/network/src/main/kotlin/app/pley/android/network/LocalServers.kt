@@ -28,7 +28,9 @@ fun interface Discovery {
 /**
  * "Search this network": asking every address of the device's network for
  * GET /api/server, for servers that never hear broadcasts (Docker on a
- * bridge network). Servers come as they answer; the flow ends when all did.
+ * bridge network). Servers come as they answer; the flow ends when all did
+ * (within 5 s), or fails with an [OfflineException] whose `blocked` is true
+ * when the system keeps the app off the network.
  */
 fun interface NetworkSweep {
     fun sweep(): Flow<FoundServer>
@@ -64,4 +66,15 @@ interface LocalNetworkAccess {
     fun missing(): List<String>
 
     fun isPermissionBlock(error: Throwable): Boolean
+
+    /** Those this device asks for at all, held or not: none below Android 17 (or Fire OS 16). */
+    fun required(): List<String> = missing()
+
+    /**
+     * Those still to ask for before connecting to [url]: Android 17's
+     * local network access for an address at home; nothing for this device
+     * itself, Tailscale's addresses or the internet. Searching the network
+     * takes all of [missing].
+     */
+    fun missingFor(url: String): List<String> = missing()
 }

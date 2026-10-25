@@ -53,7 +53,9 @@ data class SubtitleText(
  * rules of each.
  *
  * JSON routes are suspending functions answering the model's types; a
- * refusal throws [ApiException], a network failure its IOException.
+ * refusal throws [ApiException], a network failure [OfflineException], an
+ * answer that isn't pley's [UnreadableAnswerException] (all IOExceptions).
+ * Cancelling the coroutine cancels the request.
  * Routes answering bytes for Coil or Media3 (pictures, streams, HLS files,
  * seek-preview sheets) are address builders instead: absolute addresses
  * on the server in use, without the token, which goes in the
@@ -193,8 +195,12 @@ interface PleyApi {
     /** GET /api/hubs/home: Continue Watching, then Recently Added of each library. */
     suspend fun homeHubs(): Hubs
 
-    /** GET /api/search: titles by relevance, and people. [limit] at most 200. */
-    suspend fun search(query: String, limit: Int = 40): SearchResults
+    /**
+     * GET /api/search: titles by relevance, and people. [limit] at most
+     * 200; 60 by default, a few rows of a grid (the server's own default
+     * is 40).
+     */
+    suspend fun search(query: String, limit: Int = 60): SearchResults
 
     // ---------------------------------------------------------------- playback (scope play)
 

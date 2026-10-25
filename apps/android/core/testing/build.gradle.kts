@@ -20,4 +20,6 @@ dependencies {
     api(libs.junit)
     api(libs.kotlinx.coroutines.test)
     api(libs.turbine)
+    // The network fakes' MockWebServer helpers (testing/network).
+    api(libs.okhttp.mockwebserver3)
 }

@@ -8,8 +8,8 @@ sealed interface LiveEvent {
     data class Event(val event: ServerEvent) : LiveEvent
 
     /**
-     * Connected again after a break. The server replays nothing, so
-     * whatever was shown may be stale: refresh it.
+     * Connected, the first time or again after a break. The server replays
+     * nothing, so whatever was shown may be stale: refresh it.
      */
     data object Reconnected : LiveEvent
 }
@@ -17,8 +17,9 @@ sealed interface LiveEvent {
 /**
  * The server's events (GET /api/events, server-sent events): library
  * changes and scans, while collected. It reconnects by itself, waiting
- * longer after each failure, and with a fresh token when the stream ends
- * with the old one.
+ * longer after each failure (2 s doubling to 30 s), and with a fresh token
+ * when the stream ends with the old one. It ends with an [ApiException]
+ * when the server refuses the app (401 signed out, 403 not allowed).
  */
 fun interface ServerEvents {
     fun events(): Flow<LiveEvent>
