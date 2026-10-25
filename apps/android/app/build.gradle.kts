@@ -45,6 +45,12 @@ baselineProfile {
     automaticGenerationDuringBuild = false
 }
 
+// Benchmark builds too: the journeys walk the app against the demo server.
+// Their build types come from the baselineprofile plugin, so their
+// configurations exist only once it has added them.
+configurations.matching { it.name == "benchmarkReleaseImplementation" || it.name == "nonMinifiedReleaseImplementation" }
+    .configureEach { dependencies.add(project.dependencies.project(":testing:fixtures")) }
+
 dependencies {
     implementation(project(":core:common"))
     implementation(project(":core:model"))

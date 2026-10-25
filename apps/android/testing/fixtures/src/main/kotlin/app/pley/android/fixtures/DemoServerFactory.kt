@@ -24,17 +24,34 @@ interface DemoServerFactory : Callable<String> {
     override fun call(): String = start()
 }
 
-/** The demo server: the FixtureServer with its defaults, signing in for real. */
+/**
+ * The demo server: the FixtureServer with its defaults, signing in for real.
+ * It listens on [PORT] when it can, so the address a device saved still
+ * answers after the app restarts (the app starts it again then); on any
+ * free port when that one is taken.
+ */
 class FixtureDemoServerFactory : DemoServerFactory {
     override fun start(): String = synchronized(FixtureDemoServerFactory::class.java) {
-        val running = server ?: FixtureServer().also {
-            it.start()
+        val running = server ?: run {
+            val fixed = FixtureServer()
+            try {
+                fixed.start(PORT)
+                fixed
+            } catch (_: java.io.IOException) {
+                FixtureServer().also { it.start() }
+            }
+        }.also {
+            // A new process forgets the grants; the app keeps its tokens.
+            it.adoptUnknownTokens = true
             server = it
         }
         running.url
     }
 
-    private companion object {
-        var server: FixtureServer? = null
+    companion object {
+        /** The port the demo server asks for first. */
+        const val PORT = 7740
+
+        private var server: FixtureServer? = null
     }
 }

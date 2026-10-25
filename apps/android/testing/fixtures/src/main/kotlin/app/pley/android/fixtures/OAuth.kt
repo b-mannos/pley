@@ -62,6 +62,17 @@ internal class OAuth(private val state: State) {
     /** How the person answers a TV's code. */
     var deviceApproval: FixtureServer.DeviceApproval = FixtureServer.DeviceApproval.Allow
 
+    /**
+     * The demo server only: tokens this process never issued are taken as
+     * [signInAs]'s, with every scope. The demo server lives in the app's
+     * process, so it forgets its grants when the app restarts while the app
+     * keeps its tokens; this keeps a device signed in to it. Tests leave it off.
+     */
+    var adoptUnknownTokens: Boolean = false
+
+    /** A grant for a token this process never issued ([adoptUnknownTokens]). */
+    private fun adopt(): Grant = Grant(nextGrant++, signInAs, SCOPES.toSet())
+
     // ---------------------------------------------------------------- the token check of every route
 
     /**
@@ -81,6 +92,11 @@ internal class OAuth(private val state: State) {
             return null to Reply.error(401, "unauthorized", "sign in first", "Bearer")
         }
         val token = header.removePrefix("Bearer ").trim()
+        if (adoptUnknownTokens && token.startsWith("pley_at_") && token !in accessTokens) {
+            val adopted = adopt()
+            adopted.access[token] = state.nowMs() + ACCESS_LIFETIME_S * 1_000
+            accessTokens[token] = adopted
+        }
         val grant = accessTokens[token]
         val expiresAt = grant?.access?.get(token)
         if (!header.startsWith("Bearer ") || grant == null || grant.ended || expiresAt == null || expiresAt <= state.nowMs()) {
@@ -368,6 +384,11 @@ internal class OAuth(private val state: State) {
      * work. One shown again ends its grant.
      */
     private fun spend(refreshToken: String?): Grant? {
+        if (adoptUnknownTokens && refreshToken != null && refreshToken.startsWith("pley_rt_") && refreshToken !in refreshTokens) {
+            val adopted = adopt()
+            adopted.refresh = refreshToken
+            refreshTokens[refreshToken] = RefreshToken(adopted)
+        }
         val token = refreshTokens[refreshToken] ?: return null
         if (token.spent) {
             end(token.grant)

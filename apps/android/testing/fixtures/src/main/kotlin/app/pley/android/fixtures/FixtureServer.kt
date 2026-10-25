@@ -116,6 +116,11 @@ class FixtureServer(private val options: Options = Options()) : Closeable {
         get() = synchronized(state.lock) { state.oauth.deviceApproval }
         set(value) = synchronized(state.lock) { state.oauth.deviceApproval = value }
 
+    /** The demo server only: tokens it never issued sign in as [signInAs] (OAuth.adoptUnknownTokens). */
+    var adoptUnknownTokens: Boolean
+        get() = synchronized(state.lock) { state.oauth.adoptUnknownTokens }
+        set(value) = synchronized(state.lock) { state.oauth.adoptUnknownTokens = value }
+
     /** Event streams open now. */
     val eventListeners: Int get() = state.events.listeners
 
