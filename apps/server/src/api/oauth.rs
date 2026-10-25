@@ -1354,12 +1354,27 @@ impl From<GrantRow> for AppGrant {
             scopes: row.scopes.names(),
             profile: Person { id: row.user_id, name: row.user_name },
             approved_by: Person { id: row.approved_by, name: row.approved_by_name },
-            device: row.user_agent.as_deref().map(|ua| crate::accounts::device_name(Some(ua))),
+            device: row.user_agent.as_deref().map(grant_device),
             ip: row.last_ip,
             created_at: row.created_at,
             last_used_at: row.last_used_at,
         }
     }
+}
+
+/// What an app's grant was last used from, by the User-Agent of its token
+/// requests. pley's Android app says "pleyAndroid/1.0 (Android 15)": the
+/// row names the app already, so the platform it gives in brackets.
+fn grant_device(user_agent: &str) -> String {
+    if user_agent.contains("pleyAndroid/") {
+        let platform = user_agent
+            .split_once('(')
+            .and_then(|(_, rest)| rest.split_once(')'))
+            .map(|(inside, _)| inside.trim())
+            .filter(|inside| !inside.is_empty());
+        return platform.unwrap_or("Android").chars().take(60).collect();
+    }
+    crate::accounts::device_name(Some(user_agent))
 }
 
 async fn apps_of(state: &AppState, user_id: i64) -> ApiResult<Vec<AppGrant>> {

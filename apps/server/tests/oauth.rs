@@ -839,6 +839,28 @@ async fn turning_other_publishers_off_leaves_pleys_own_apps_signed_in() {
 // ------------------------------------------------------------------ apps lists
 
 #[tokio::test]
+async fn apps_rows_name_the_device_rather_than_the_app_again() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    for (agent, device) in [
+        ("pleyAndroid/0.1 (Android 15)", "Android 15"),
+        ("pleyAndroid/0.1 (Android 15; Pixel 8)", "Android 15; Pixel 8"),
+        ("pleyAndroid/0.1", "Android"),
+    ] {
+        let code = code_for(&app, &admin, ANDROID_APP, ANDROID_BACK).await;
+        let body = form(&[
+            ("grant_type", "authorization_code"),
+            ("code", &code),
+            ("client_id", ANDROID_APP),
+            ("code_verifier", VERIFIER),
+        ]);
+        pair(&app.form_post("/api/oauth/token", &body, &[("user-agent", agent)]).await);
+        let listed = app.get("/api/me/apps", &admin).await.body;
+        assert_eq!(listed[0]["device"], device, "{agent}");
+    }
+}
+
+#[tokio::test]
 async fn apps_lists_show_and_end_grants() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;
