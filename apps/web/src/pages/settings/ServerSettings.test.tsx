@@ -2,7 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { ServiceTestResult, Settings } from "@/api/types";
-import { mockApi, renderWithProviders } from "@/test/render";
+import { mockApi, renderWithProviders, testQueryClient } from "@/test/render";
 import { ServerSettings, TestButton } from "./ServerSettings";
 
 const SETTINGS = {
@@ -55,6 +55,26 @@ describe("ServerSettings", () => {
     expect(await screen.findByText("Settings saved")).toBeInTheDocument();
     await waitFor(() => expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ third_party_apps: true }));
     expect(screen.getByRole("switch", { name: "Apps by other publishers" })).toBeChecked();
+  });
+
+  it("lists apps again once turning other publishers off signed them out", async () => {
+    const user = userEvent.setup();
+    mockApi({
+      "GET /api/settings": () => ({ ...SETTINGS, third_party_apps: true }),
+      "GET /api/system": () => ({}),
+      "PUT /api/settings": (req) => ({ ...SETTINGS, ...(req.body as Partial<Settings>) }),
+    });
+    const client = testQueryClient();
+    // What the account page and the users dialog showed before.
+    client.setQueryData(["me", "apps"], []);
+    client.setQueryData(["users", 2, "apps"], []);
+    renderWithProviders(<ServerSettings />, { client });
+
+    await user.click(await screen.findByRole("switch", { name: "Apps by other publishers" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Settings saved")).toBeInTheDocument();
+    await waitFor(() => expect(client.getQueryState(["me", "apps"])?.isInvalidated).toBe(true));
+    expect(client.getQueryState(["users", 2, "apps"])?.isInvalidated).toBe(true);
   });
 
   it("keeps apps by other publishers off when the server doesn't say", async () => {

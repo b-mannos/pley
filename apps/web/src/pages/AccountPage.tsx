@@ -37,7 +37,7 @@ import { useToast } from "@/components/Toast";
 import { HistoryList } from "@/components/HistoryList";
 import { Badge, Button, buttonClass, Card, CardTitle, Field, Select, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { formatDay, formatRelative } from "@/lib/format";
+import { formatAgo, formatDay } from "@/lib/format";
 import { LANGUAGES } from "@/lib/languages";
 import { useDocumentTitle } from "@/lib/hooks";
 import { passwordProblem } from "@/lib/passwords";
@@ -525,7 +525,7 @@ function DevicesCard() {
                     {d.current ? <Badge tone="accent">This device</Badge> : null}
                   </div>
                   <div className="truncate text-xs text-subtle">
-                    {[d.ip, d.current ? "active now" : `last active ${formatRelative(d.last_seen_at)}`, `signed in ${formatRelative(d.created_at)}`]
+                    {[d.ip, d.current ? "active now" : `last active ${formatAgo(d.last_seen_at)}`, `signed in ${formatAgo(d.created_at)}`]
                       .filter(Boolean)
                       .join(" · ")}
                   </div>
@@ -607,7 +607,7 @@ function AppsCard() {
                       .join(" · ")}
                   </div>
                   <div className="truncate text-xs text-subtle">
-                    {[a.device, a.ip, `last active ${formatRelative(a.last_used_at)}`, `allowed ${formatRelative(a.created_at)}`]
+                    {[a.device, a.ip, `last active ${formatAgo(a.last_used_at)}`, `allowed ${formatAgo(a.created_at)}`]
                       .filter(Boolean)
                       .join(" · ")}
                   </div>

@@ -68,7 +68,17 @@ export function formatBitrate(bps: number | null | undefined): string {
 
 const rtf = typeof Intl !== "undefined" && "RelativeTimeFormat" in Intl ? new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }) : null;
 
-/** Unix seconds → "3 minutes ago". */
+/**
+ * Unix seconds of something that already happened → "3 minutes ago". A
+ * time the server gave that this device's clock, a little behind, puts in
+ * the future reads as now, never "in 2 seconds".
+ */
+export function formatAgo(ts: number | null | undefined): string {
+  if (!ts) return "never";
+  return formatRelative(Math.min(ts, Date.now() / 1000));
+}
+
+/** Unix seconds → "3 minutes ago", or "in 3 days" for a time to come. */
 export function formatRelative(ts: number | null | undefined): string {
   if (!ts) return "never";
   const diff = ts - Date.now() / 1000;

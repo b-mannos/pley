@@ -24,7 +24,7 @@ import { Badge, Button, EmptyState, Field, PageSpinner, TextInput, Toggle } from
 import { ageBadge, librariesLabel } from "@/lib/access";
 import { cn } from "@/lib/cn";
 import { passwordProblem } from "@/lib/passwords";
-import { formatRelative } from "@/lib/format";
+import { formatAgo } from "@/lib/format";
 import { useDocumentTitle, useOnChange } from "@/lib/hooks";
 
 const PIN_RE = /^\d{4,8}$/;
@@ -148,7 +148,7 @@ function UserDevices({ user, self }: { user: User; self: boolean }) {
       {devices.isPending ? (
         <p className="text-sm text-subtle">Loading…</p>
       ) : list.length === 0 ? (
-        <p className="text-sm text-subtle">Not signed in anywhere.</p>
+        <p className="text-sm text-subtle">No signed-in devices.</p>
       ) : (
         <ul className="divide-y divide-white/[0.05] rounded-md border border-border">
           {list.map((d) => {
@@ -160,7 +160,7 @@ function UserDevices({ user, self }: { user: User; self: boolean }) {
                   {d.name}
                 </span>
                 <span className="shrink-0 text-xs text-subtle">
-                  {[d.ip, formatRelative(d.last_seen_at)].filter(Boolean).join(" · ")}
+                  {[d.ip, formatAgo(d.last_seen_at)].filter(Boolean).join(" · ")}
                 </span>
               </li>
             );
@@ -204,17 +204,17 @@ function UserApps({ user }: { user: User }) {
                       <span className="truncate text-xs text-subtle">calls itself “{a.name}”</span>
                     ) : null}
                   </div>
-                  <div className="truncate text-xs text-subtle">
+                  <div className="truncate text-xs text-muted">
                     {[
                       a.profile.id !== user.id ? `Using ${a.profile.name}` : null,
                       a.approved_by.id !== user.id ? `Allowed by ${a.approved_by.name}` : null,
                       scopesLabel(a.scopes),
-                      a.device,
-                      a.ip,
-                      `last active ${formatRelative(a.last_used_at)}`,
                     ]
                       .filter(Boolean)
                       .join(" · ")}
+                  </div>
+                  <div className="truncate text-xs text-subtle">
+                    {[a.device, a.ip, `last active ${formatAgo(a.last_used_at)}`].filter(Boolean).join(" · ")}
                   </div>
                 </div>
                 <Button

@@ -69,6 +69,11 @@ function renderAccount(user: User, apps: AppGrant[] = []) {
     "GET /api/history": () => ({ total: 0, entries: [] }),
     "GET /api/me/devices": () => [],
     "GET /api/me/apps": () => list,
+    // A new password signs the account's apps out.
+    "PUT /api/auth/password": () => {
+      list = [];
+      return undefined;
+    },
     "DELETE /api/me/apps/7": () => {
       list = list.filter((a) => a.id !== 7);
       return undefined;
@@ -94,7 +99,7 @@ const android: AppGrant = {
   scopes: ["library", "play", "playlists", "profiles"],
   profile: { id: 1, name: "Admin" },
   approved_by: { id: 1, name: "Admin" },
-  device: "Android",
+  device: "Android 15",
   ip: "192.0.2.8",
   created_at: NOW - 86400 * 3,
   last_used_at: NOW - 3600,
@@ -144,7 +149,7 @@ describe("AccountPage", () => {
 
     expect(own).toHaveTextContent("pley's own app");
     expect(own).toHaveTextContent("Libraries · Play · Playlists · Profiles");
-    expect(own).toHaveTextContent(/Android · 192\.0\.2\.8 · last active 1 hour ago · allowed 3 days ago/);
+    expect(own).toHaveTextContent(/Android 15 · 192\.0\.2\.8 · last active 1 hour ago · allowed 3 days ago/);
     expect(own).not.toHaveTextContent(/Using|Allowed by/);
 
     // Others by host first; the name is only what the app calls itself.
@@ -177,6 +182,28 @@ describe("AccountPage", () => {
     renderAccount(testUser, [android]);
     await screen.findByText("pley for Android");
     expect(screen.getByRole("link", { name: "Sign in on a TV" })).toHaveAttribute("href", "/link");
+  });
+
+  it("lists the apps again once a new password signed them out", async () => {
+    const user = userEvent.setup();
+    renderAccount(testUser, [android]);
+    await screen.findByText("pley for Android");
+    await user.type(screen.getByLabelText("Current password"), "old-password-1");
+    await user.type(screen.getByLabelText("New password"), "new-password-2");
+    await user.type(screen.getByLabelText("Confirm new password"), "new-password-2");
+    await user.click(screen.getByRole("button", { name: "Update password" }));
+    expect(await screen.findByText("Password changed")).toBeInTheDocument();
+    expect(
+      await screen.findByText("No apps use your account. Apps ask on a pley page before they get access."),
+    ).toBeInTheDocument();
+  });
+
+  it("never says an app was used in the future when this device's clock is behind", async () => {
+    const ahead = Math.floor(Date.now() / 1000) + 5;
+    renderAccount(testUser, [{ ...android, created_at: ahead, last_used_at: ahead }]);
+    const row = (await screen.findByText("pley for Android")).closest("li");
+    expect(row).toHaveTextContent(/last active now · allowed now/);
+    expect(row).not.toHaveTextContent(/\bin \d+ seconds?/);
   });
 
   it("says how apps get access when none has it", async () => {

@@ -8,6 +8,7 @@ import {
   dynamicRangeBadge,
   dynamicRangeLabel,
   episodeLabel,
+  formatAgo,
   formatBitrate,
   formatBytes,
   formatClock,
@@ -132,6 +133,14 @@ describe("formatRelative", () => {
     expect(formatRelative(now - 60 * 86_400)).toBe(rtf.format(-2, "month"));
     expect(formatRelative(now - 2 * 365 * 86_400)).toBe(rtf.format(-2, "year"));
     expect(formatRelative(now + 5 * 3600)).toBe(rtf.format(5, "hour"));
+  });
+
+  it("reads a past time a clock behind the server's puts ahead as now", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now * 1000);
+    expect(formatAgo(now + 2)).toBe(rtf.format(0, "second"));
+    expect(formatAgo(now - 180)).toBe(rtf.format(-3, "minute"));
+    expect(formatAgo(null)).toBe("never");
   });
 
   it("says never without a time", () => {
