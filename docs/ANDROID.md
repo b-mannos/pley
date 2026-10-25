@@ -1,20 +1,60 @@
 # Android and TV apps
 
 One app, `app.pley.android`, for phones, tablets, Android TV, Google TV and
-Fire TV (Fire OS 7 and later; Android 8 is the minimum). It is being rebuilt
-as a native app in Kotlin and Compose. Until the native app replaces it,
-release builds are still the web view app: a list of servers
-(`ServersActivity`), the server's web app (`WebActivity`) and a Media3 player
-(`PlayerActivity`). Debug builds carry both.
+Fire TV (Fire OS 7 and later; Android 8 is the minimum), native in Kotlin
+and Compose: `MainActivity` on phones and tablets, `TvActivity` on TVs. It
+replaced a web view app (0.1: a list of servers, the server's web app and
+a Media3 player), which an update clears up after (below).
+
+## Installing
+
+Release builds aren't signed yet, and no store carries the
+app. Until then it is sideloaded, a debug or self-signed build:
+
+- From a computer: `adb install -r app-store-debug.apk` (`adb connect
+  <ip>:5555` first for a TV or Fire TV, see Emulators).
+- On a phone: open the APK in a file manager and allow that app to install
+  apps when asked.
+- On a Fire TV: turn on the developer options (below) and "Install unknown
+  apps" for the Downloader app, then open the APK's address in Downloader.
+
+The phone or tablet's launcher opens `MainActivity`; the TV home screen
+shows the 320×180 banner and opens `TvActivity`. A TV that opens
+`MainActivity` (some launchers do) is sent on to `TvActivity`.
+
+## Updating from the web view app
+
+An update installed over the web view app keeps what matters and nothing
+else:
+
+- Its saved servers and its install id (the player's `client_id`, so the
+  server sees the same player) are read once into the native app's store
+  (`:core:data`, `WebViewMigration`). The last server used stays selected.
+- Its sign-in doesn't carry over: the web view held a full-rights browser
+  session, the native app holds app tokens with viewer rights only. The app
+  opens at sign-in, on the server it had.
+- Once, after the first frame and off the main thread
+  (`app/.../migration/WebViewCleanup`, run by AndroidX Startup): the web
+  view's session cookie on each saved server is sent to
+  `POST /api/auth/logout` as a Bearer token, which ends that 90-day session
+  (best effort: a server out of reach keeps it until it expires); then its
+  cookies, web storage and folders (`app_webview`, `app_textures`, its
+  caches and preferences) are deleted. On a fresh install the folder isn't
+  there and no web view ever starts. Nothing else in the app reads cookies
+  (`CutoverTest`).
+
+The web app keeps its hooks for the Android web view (`apps/web/src/lib/shell.ts`
+and the player hand-off) for one more release, then they go.
 
 ## Modules
 
-Everything is in `apps/android`, sources in `src/main/kotlin` (the web view
-app's in `src/main/java`). Each module sees only what it builds on.
+Everything is in `apps/android`, sources in `src/main/kotlin` (`:app` keeps
+the old saved-servers format, `ServerStore`, in `src/main/java` for the
+startup read). Each module sees only what it builds on.
 
 | Module | What it holds | Builds on |
 |---|---|---|
-| `:app` | `PleyApplication`, the app's parts made by hand (`AppGraph`), `MainActivity` (phones), `TvActivity` (TVs), the web view app until it goes | everything |
+| `:app` | `PleyApplication`, the app's parts made by hand (`AppGraph`), `MainActivity` (phones), `TvActivity` (TVs), the clean-up after the web view app (`migration/`) | everything |
 | `:core:common` | server address rules, discovery, local network access, the device's profile and tier, picture sizes, trace names, test tags | nothing |
 | `:core:model` | the server's answers and request bodies (kotlinx.serialization), server events, the capability report; plain Kotlin, no Android | nothing |
 | `:core:auth` | signing in (`app.pley.android.auth`): the server's page in the browser, the TV's code, tokens and where they may go | common |
@@ -52,12 +92,12 @@ Two flavors, `store` (Google Play and the Amazon Appstore, no self-updater)
 and `direct` (the download the pley server will offer, which may hand an
 update to the installer).
 
-Launchers:
-
-- Release: the web view app's `ServersActivity` only.
-- Debug: also "pley (native)" (`MainActivity`) and, on TV home screens,
-  "pley (TV)" (`TvActivity`, with the 320×180 banner), from
-  `app/src/debug/AndroidManifest.xml`.
+Launchers, the same in every build: "pley" on phones and tablets
+(`MainActivity`, `LAUNCHER`) and on TV home screens (`TvActivity`,
+`LEANBACK_LAUNCHER`, with the 320×180 banner). Exported, beside these two,
+are only the sign-in's return address (`SignInRedirectActivity`) and the
+music service (`MusicService`); `CutoverTest` holds the project's manifests
+to that.
 
 ## Commands
 
