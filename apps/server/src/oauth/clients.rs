@@ -76,7 +76,7 @@ pub enum RedirectKind {
 pub enum ClientError {
     #[error(
         "only pley's own apps can sign in to this server: an administrator can allow apps by other publishers in \
-         Settings → Server"
+         Settings → Server → Apps"
     )]
     NotAllowed,
     #[error("pley can't read app descriptions here: only pley's own apps can sign in to this server")]
@@ -92,7 +92,11 @@ pub enum ClientError {
     Document(String),
     #[error("pley couldn't read the app's description ({0}): try again later, or ask the app's publisher")]
     Unreachable(String),
-    #[error("too many apps were looked up just now: wait a minute and try again")]
+    /// Its address is on a private network (it resolves to no public
+    /// address), which pley never reads from: trying again doesn't help.
+    #[error("the app's description is on a private network, which pley never reads from: ask the app's publisher")]
+    Private,
+    #[error("too many app descriptions read: try again in a minute")]
     Busy,
     #[error("the app asked to send you back to an address it didn't register ({0}): ask the app's publisher to fix it")]
     Redirect(&'static str),
@@ -846,6 +850,7 @@ mod tests {
             ClientError::Reserved,
             ClientError::Document("why".into()),
             ClientError::Unreachable("why".into()),
+            ClientError::Private,
             ClientError::Busy,
             ClientError::Redirect("why"),
         ];
@@ -858,7 +863,7 @@ mod tests {
         assert_eq!(
             ClientError::NotAllowed.to_string(),
             "only pley's own apps can sign in to this server: an administrator can allow apps by other publishers in \
-             Settings → Server"
+             Settings → Server → Apps"
         );
     }
 }

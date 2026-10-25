@@ -782,7 +782,7 @@ async fn apps_by_other_publishers_need_the_setting() {
     assert_eq!(
         refused.body["message"],
         "only pley's own apps can sign in to this server: an administrator can allow apps by other publishers in \
-         Settings → Server"
+         Settings → Server → Apps"
     );
 
     // On: the app is shown by its host, and its name only as what it calls itself.

@@ -297,9 +297,7 @@ pub async fn create_request(
     let client =
         state.oauth.documents.get(client_id, web.user.id, third_party_allowed, &issuer_host(&issuer)).await.map_err(
             |err| match err {
-                ClientError::Busy => {
-                    AppError::TooManyRequests("too many app descriptions read: try again in a minute".into())
-                }
+                ClientError::Busy => AppError::TooManyRequests(err.to_string()),
                 err => AppError::bad_request(err.to_string()),
             },
         )?;

@@ -129,6 +129,18 @@ fn within(ip: u128, network: u128, len: u32, bits: u32) -> bool {
 /// connection for a rebinding name to change its answer.
 pub struct PublicOnly;
 
+/// A name [`PublicOnly`] refused: it resolves to no public address.
+#[derive(Debug)]
+pub struct NoPublicAddress(String);
+
+impl std::fmt::Display for NoPublicAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} has no public address", self.0)
+    }
+}
+
+impl std::error::Error for NoPublicAddress {}
+
 impl Resolve for PublicOnly {
     fn resolve(&self, name: Name) -> Resolving {
         let name = name.as_str().to_owned();
@@ -136,7 +148,7 @@ impl Resolve for PublicOnly {
             let public: Vec<SocketAddr> =
                 tokio::net::lookup_host((name.as_str(), 443)).await?.filter(|addr| is_public(addr.ip())).collect();
             if public.is_empty() {
-                return Err(format!("{name} has no public address").into());
+                return Err(Box::new(NoPublicAddress(name)) as Box<dyn std::error::Error + Send + Sync>);
             }
             Ok(Box::new(public.into_iter()) as Addrs)
         })
@@ -235,9 +247,19 @@ fn lifetime(headers: &HeaderMap) -> Option<Duration> {
     Some(max_age.map_or(USUAL, Duration::from_secs).clamp(SHORTEST, LONGEST))
 }
 
-/// A fetch that didn't get an answer. The address is left out of the log:
-/// the client ID is logged on its own where it is known.
+/// A fetch that didn't get an answer, logged with every cause (the
+/// resolver's, DNS's, TLS's), but not the address: the client ID is logged
+/// on its own where it is known. An address on a private network is
+/// refused for good; anything else may work later.
 fn failed(e: reqwest::Error) -> ClientError {
+    let e = e.without_url();
+    let causes: Vec<&(dyn std::error::Error + 'static)> =
+        std::iter::successors(Some(&e as &(dyn std::error::Error + 'static)), |e| e.source()).collect();
+    let chain: Vec<String> = causes.iter().map(ToString::to_string).collect();
+    tracing::info!("an app's description couldn't be read: {}", chain.join(": "));
+    if causes.iter().any(|cause| cause.is::<NoPublicAddress>()) {
+        return ClientError::Private;
+    }
     let why = if e.is_timeout() {
         "its address took too long to answer"
     } else if e.is_connect() {
@@ -245,7 +267,6 @@ fn failed(e: reqwest::Error) -> ClientError {
     } else {
         "its address didn't answer"
     };
-    tracing::info!("an app's description couldn't be read: {}", e.without_url());
     ClientError::Unreachable(why.to_owned())
 }
 
@@ -1051,6 +1072,8 @@ mod tests {
             .collect();
         assert!(chain.iter().any(|e| e.contains("has no public address")), "{chain:?}");
         assert_eq!(accepted.load(Ordering::SeqCst), 0, "connected to a loopback address");
+        // For good, and said so: trying again later wouldn't help.
+        assert!(matches!(failed(err), ClientError::Private));
         // https only, refused before any lookup.
         let err = http.get("http://apps.example.com/pley.json").send().await.unwrap_err();
         assert!(err.is_builder(), "{err:?}");
