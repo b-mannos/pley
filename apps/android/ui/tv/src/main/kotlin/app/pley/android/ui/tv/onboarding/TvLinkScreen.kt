@@ -188,7 +188,8 @@ internal fun TvLinkContent(
             }
             Status(status, Modifier.padding(start = 96.dp, top = 478.dp))
         }
-        Column(
+        // Signed in, the code and the way back go: only the success shows.
+        if (status !is LinkStatus.SignedIn) Column(
             Modifier.padding(start = 600.dp, top = 120.dp).width(268.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {

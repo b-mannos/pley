@@ -201,6 +201,8 @@ class TvOnboardingUiTest {
     fun signedInSaysWho() {
         link(LinkStatus.SignedIn("Anna"))
         compose.onNodeWithText("Signed in as Anna").assertExists()
+        compose.onNodeWithTag(QR_TAG).assertDoesNotExist()
+        compose.onNodeWithTag(BACK_TAG).assertDoesNotExist()
     }
 
     // ---------------------------------------------------------------- the servers
