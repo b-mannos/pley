@@ -40,6 +40,7 @@ import androidx.compose.material3.SwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -186,9 +187,11 @@ internal fun PlaylistContent(state: Loadable<PlaylistPage<ArtworkTileModel>>, ac
     val list = rememberLazyListState()
     var renaming by rememberSaveable { mutableStateOf(false) }
     var deleting by rememberSaveable { mutableStateOf(false) }
+    // The top bar shows the title once the header has scrolled away.
+    val pastHeader by remember(list) { derivedStateOf { list.firstVisibleItemIndex > 0 } }
     Column(Modifier.fillMaxSize().testTag(PLAYLIST_PAGE)) {
         PleyTopAppBar(
-            title = if (page != null && list.firstVisibleItemIndex > 0) page.title else "",
+            title = if (page != null && pastHeader) page.title else "",
             onBack = actions.back,
             scrolled = { list.canScrollBackward },
         )
@@ -304,17 +307,7 @@ private fun Entries(
                         val from = rows.indexOfFirst { it.entryId == row.entryId }
                         if (from >= 0) actions.move(from, from + by)
                     },
-                    handle = Modifier.pointerInput(row.entryId) {
-                        detectDragGestures(
-                            onDragStart = { drag.start(row.entryId) },
-                            onDragEnd = drag::end,
-                            onDragCancel = drag::end,
-                            onDrag = { change, amount ->
-                                change.consume()
-                                drag.by(amount.y)
-                            },
-                        )
-                    },
+                    drag = drag,
                 )
             }
         }
@@ -390,7 +383,7 @@ private fun RoundAction(icon: app.pley.android.designsystem.icon.PleyIcon, label
 }
 
 /**
- * One entry: its drag [handle], number, thumbnail, two lines and length.
+ * One entry: its drag handle, number, thumbnail, two lines and length.
  * The thumbnail plays, the words open the item, a long press opens its
  * actions; editable entries swipe away to the left.
  */
@@ -406,7 +399,7 @@ private fun EntryRow(
     actions: PlaylistActions,
     onPlay: () -> Unit,
     onMoveBy: (Int) -> Unit,
-    handle: Modifier,
+    drag: RowDrag,
 ) {
     val margin = LocalPhoneMetrics.current.margin
     val moveUp = stringResource(R.string.playlist_move_up)
@@ -433,6 +426,17 @@ private fun EntryRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (editable) {
+                val handle = Modifier.pointerInput(row.entryId) {
+                    detectDragGestures(
+                        onDragStart = { drag.start(row.entryId) },
+                        onDragEnd = drag::end,
+                        onDragCancel = drag::end,
+                        onDrag = { change, amount ->
+                            change.consume()
+                            drag.by(amount.y)
+                        },
+                    )
+                }
                 Box(handle.size(48.dp).testTag(HANDLE_TAG + row.entryId), contentAlignment = Alignment.Center) {
                     Icon(PleyIcons.GripVertical, contentDescription = null, size = 20.dp, tint = PleyColors.Subtle)
                 }
