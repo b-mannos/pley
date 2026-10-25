@@ -14,7 +14,8 @@ Only the latest release gets fixes.
 - **Use HTTPS beyond your home network.** pley speaks plain HTTP. When it can
   be reached from outside, put it behind a reverse proxy with TLS that sets
   `X-Forwarded-Proto: https` (pley then marks its cookies `Secure`). The
-  apps warn before connecting to an unencrypted address on the internet.
+  desktop app warns before connecting to an unencrypted address on the
+  internet, and the Android app refuses one.
 - **Set it up before exposing it.** A new server is set up with the one-time
   code pley prints in its log (the tray icon's "Open pley" fills it in).
 - **Keep what doesn't need to be public off the internet:** the
@@ -112,12 +113,37 @@ random token. One started on another machine refuses to listen on the
 network without a token of at least 16 characters, since it reads whatever
 files it can open, and keeps its work folder private.
 
-**Apps.** The desktop and Android windows show the server's own pages only:
-other sites open in the browser. The desktop app hands only web and mail
-links to the system and gives server pages none of its commands. The
-Android app offers its player to the server's own pages only, sends the
-session token to the server only (not across redirects), and keeps WebView
-file access off. Its native sign-in, not yet used by its screens, opens the
-server's page in the browser and keeps only app tokens, encrypted with a
-key from the Android Keystore and sent to the server's own address only; it
-never sees passwords or the web view's cookie.
+**The desktop app.** Its window shows the server's own pages only: other
+sites open in the browser. It hands only web and mail links to the system
+and gives server pages none of its commands.
+
+**The Android app** is native and shows no web pages. It holds app tokens
+only, with a viewer's rights whoever signs in: never a session or a
+password. Phones sign in on the server's own page in a Custom Tab, with
+PKCE (a private tab where the browser offers one, unless turned off in
+settings); TVs show a code that is typed on the server's `/link` page. A
+token answer with more than the app asked for is revoked at once and never
+used.
+
+Its tokens are encrypted with AES-GCM under a 256-bit key that the Android
+Keystore makes and keeps, bound to their server's address, in the app's
+private storage. Backups and transfers to a new device are off, so they
+never leave the device; when the key is lost (a reset), the app is signed
+out. Signing out revokes them on the server.
+
+Tokens go in the `Authorization` header only, to the server's own origin
+(scheme, host and port) only, checked on every hop: a redirect or a playlist
+pointing elsewhere gets none, and redirects never switch between https and
+http. Over plain http, codes and tokens go only to private addresses
+(loopback, RFC 1918, link-local, CGNAT, IPv6 unique local), checked on the
+connection itself, so a name that turns out to be on the internet is
+refused too; a server on the internet needs https. Only the system's
+certificate authorities are trusted.
+
+It replaced a web view app, whose session had the account's full rights.
+An update over it ends that session once: the cookie it kept for each saved
+server goes to `POST /api/auth/logout` (best effort: a server out of reach
+keeps it until it expires), then the web view's cookies, storage and files
+are deleted. Nothing else in the app reads cookies. Besides its two
+launchers, the app exports only the sign-in's return address and the music
+service.
