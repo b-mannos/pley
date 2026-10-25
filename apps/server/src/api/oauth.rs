@@ -287,6 +287,16 @@ pub async fn create_request(
         return Err(unlisted());
     }
     let kind = clients::redirect_kind(&client, redirect_uri).map_err(|_| unlisted())?;
+    // Where the answer goes, shown before any click: with consent, and with
+    // a mistake that goes back to the app (RFC 9700 §4.11.2).
+    let redirect = match kind {
+        RedirectKind::Web { host } => json!({"kind": "web", "to": host}),
+        RedirectKind::App { scheme } => json!({"kind": "app", "to": scheme}),
+        RedirectKind::Loopback => {
+            let host = Url::parse(redirect_uri).ok().and_then(|url| url.host_str().map(str::to_owned));
+            json!({"kind": "loopback", "to": host.unwrap_or_default()})
+        }
+    };
 
     let checked = check_request(&params, &client, &issuer);
     let (scopes, error) = match checked {
@@ -320,16 +330,9 @@ pub async fn create_request(
             "message": error.description,
             "back_url": format!("/api/oauth/requests/{id}/continue"),
             "client": client_dto,
+            "redirect": redirect,
         })));
     }
-    let redirect = match kind {
-        RedirectKind::Web { host } => json!({"kind": "web", "to": host}),
-        RedirectKind::App { scheme } => json!({"kind": "app", "to": scheme}),
-        RedirectKind::Loopback => {
-            let host = Url::parse(redirect_uri).ok().and_then(|url| url.host_str().map(str::to_owned));
-            json!({"kind": "loopback", "to": host.unwrap_or_default()})
-        }
-    };
     Ok(Json(json!({
         "status": "consent",
         "id": id,
@@ -456,9 +459,12 @@ pub async fn decide(
 /// code, state and iss when allowed; error (access_denied, or the request's
 /// mistake), state and iss otherwise (RFC 9207: iss in every answer).
 /// It repeats while the code works and wasn't exchanged, and for a minute
-/// after a refusal or a mistake.
+/// after a refusal or a mistake. After that, a browser that follows the
+/// link (the "Open the app" link of a tab left open, say) is sent to the
+/// web app's page saying the request is over, and a script gets 404.
 pub async fn continue_to_app(
     State(state): State<AppState>,
+    headers: HeaderMap,
     web: WebUser,
     Path(id): Path<String>,
 ) -> ApiResult<Response> {
@@ -466,14 +472,27 @@ pub async fn continue_to_app(
         .oauth
         .pending
         .location(&id, web.user.id, &web.session_hash)
-        .filter(|back| back.code.as_deref().is_none_or(|code| state.oauth.codes.unredeemed(code)))
-        .ok_or_else(|| AppError::not_found(OVER))?;
-    let location = HeaderValue::from_str(&back.location).map_err(|e| AppError::Internal(e.into()))?;
+        .filter(|back| back.code.as_deref().is_none_or(|code| state.oauth.codes.unredeemed(code)));
+    let location = match back {
+        Some(back) => HeaderValue::from_str(&back.location).map_err(|e| AppError::Internal(e.into()))?,
+        None if is_navigation(&headers) => HeaderValue::from_static(OVER_PAGE),
+        None => return Err(AppError::not_found(OVER)),
+    };
     Ok((
         StatusCode::SEE_OTHER,
         [(header::LOCATION, location), (header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
     )
         .into_response())
+}
+
+/// The web app's page for a request that is over.
+const OVER_PAGE: &str = "/oauth/over";
+
+/// Whether the browser asked for a page to show (it followed a link),
+/// rather than a script for data.
+fn is_navigation(headers: &HeaderMap) -> bool {
+    let value = |name| headers.get(name).and_then(|v: &HeaderValue| v.to_str().ok()).unwrap_or_default();
+    value("sec-fetch-mode") == "navigate" || value(header::ACCEPT.as_str()).contains("text/html")
 }
 
 // ------------------------------------------------------------------ token and revocation (apps)

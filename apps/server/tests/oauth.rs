@@ -451,6 +451,8 @@ async fn other_mistakes_go_back_to_the_app_only_when_asked() {
         let body = &reply.body;
         assert_eq!((&body["status"], &body["error"]), (&json!("error"), &json!(error)), "{changes:?}");
         assert_eq!(body["client"]["id"], ANDROID_APP);
+        // Where the click goes is shown before it (RFC 9700 §4.11.2).
+        assert_eq!(body["redirect"], json!({"kind": "app", "to": "app.pley.android"}));
         let message = body["message"].as_str().unwrap();
         assert!(message.is_ascii() && !message.contains('"') && !message.contains('\\'), "{message}");
         let back_url = body["back_url"].as_str().unwrap();
@@ -947,6 +949,32 @@ async fn consent_answers_are_json_without_cors() {
     assert!(reply.headers[header::CONTENT_TYPE].to_str().unwrap().starts_with("application/json"));
     assert!(!reply.headers.contains_key("access-control-allow-origin"));
     assert_eq!(reply.headers[header::CACHE_CONTROL], "no-store");
+}
+
+#[tokio::test]
+async fn a_late_link_back_to_the_app_leads_to_a_page_saying_it_is_over() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let id = consent(&app, &admin, &query(&request_params(ANDROID_APP, ANDROID_BACK))).await;
+    assert_eq!(decide(&app, &admin, &id, true).await.status, StatusCode::OK);
+    let back = format!("/api/oauth/requests/{id}/continue");
+    let code = params_of(&location(&back_with(&app, &admin, &back, &[]).await))["code"].clone();
+    assert_eq!(exchange(&app, &code, ANDROID_APP, ANDROID_BACK, VERIFIER).await.status, StatusCode::OK);
+
+    // The tab left open on "Open pley for Android": a page, not JSON.
+    for followed in [&[("sec-fetch-mode", "navigate")][..], &[("accept", "text/html,application/xhtml+xml")]] {
+        let reply = back_with(&app, &admin, &back, followed).await;
+        assert_eq!(location(&reply), "/oauth/over", "{followed:?}");
+        assert_eq!(reply.headers[header::CACHE_CONTROL], "no-store");
+    }
+    // A script still hears it is over.
+    let fetched = back_with(&app, &admin, &back, &[("sec-fetch-mode", "cors")]).await;
+    assert_eq!(fetched.status, StatusCode::NOT_FOUND);
+    assert_eq!(fetched.body["message"], "this request is over: start again from the app or the TV");
+}
+
+async fn back_with(app: &TestApp, cookie: &str, back: &str, extra: &[(&str, &str)]) -> Reply {
+    app.browser_call(Method::GET, back, cookie, None, extra).await
 }
 
 #[tokio::test]
