@@ -1,11 +1,13 @@
 import { renderHook, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ItemKind } from "@/api/types";
 import { MediaCard } from "@/components/cards";
+import { encodeId } from "@/lib/ids";
 import { makeItem } from "@/test/fixtures";
-import { mockApi, renderWithProviders } from "@/test/render";
-import { playIntent, usePreloadPlayerWhenIdle } from "./preload";
+import { apiError, mockApi, renderWithProviders, testQueryClient } from "@/test/render";
+import { playerData, playIntent, usePreloadPlayerWhenIdle } from "./preload";
 
 const { loadHls, page } = vi.hoisted(() => ({
   loadHls: vi.fn(() => Promise.resolve({})),
@@ -112,5 +114,33 @@ describe("preloading the player", () => {
     const { unmount } = renderHook(() => usePreloadPlayerWhenIdle("movie"));
     unmount();
     expect(cancel).toHaveBeenCalledWith(42);
+  });
+});
+
+describe("the player's route data", () => {
+  it("is the item, fetched with the player's code", async () => {
+    const requests = mockApi({ "GET /api/items/7": () => makeItem({ id: 7, title: "Heat" }) });
+    const client = testQueryClient();
+    await Promise.all(playerData(client.prefetchQuery.bind(client), { id: encodeId(7) }));
+    expect(requests.map((r) => r.path)).toEqual(["/api/items/7"]);
+    expect(client.getQueryData<{ title: string }>(["item", 7])?.title).toBe("Heat");
+  });
+
+  it("doesn't hold the player back for an item already there", async () => {
+    const requests = mockApi({ "GET /api/items/7": () => makeItem({ id: 7 }) });
+    const client = testQueryClient();
+    client.setQueryData(["item", 7], makeItem({ id: 7, title: "Heat" }), { updatedAt: Date.now() - 3_600_000 });
+    await Promise.all(playerData(client.prefetchQuery.bind(client), { id: encodeId(7) }));
+    expect(requests).toEqual([]);
+  });
+
+  it("leaves a failure to the player page, and a bad id to the route", async () => {
+    const requests = mockApi({ "GET /api/items/7": () => apiError(500, "internal", "boom") });
+    // The app's client retries server errors; the route doesn't wait for that.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: 2, gcTime: Infinity } } });
+    await expect(Promise.all(playerData(client.prefetchQuery.bind(client), { id: encodeId(7) }))).resolves.toBeDefined();
+    expect(requests).toHaveLength(1);
+    expect(playerData(client.prefetchQuery.bind(client), { id: "nope!" })).toEqual([]);
+    expect(playerData(client.prefetchQuery.bind(client), {})).toEqual([]);
   });
 });

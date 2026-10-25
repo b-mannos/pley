@@ -1,10 +1,27 @@
 import { useEffect } from "react";
+import type { QueryClient } from "@tanstack/react-query";
+import type { Params } from "react-router";
+import { queries } from "@/api/hooks";
 import type { ItemKind } from "@/api/types";
 import { loadHls } from "@/lib/hls";
+import { decodeId } from "@/lib/ids";
 import { androidPlayer } from "@/lib/shell";
 
 /** The player page's code (the /play route loads it on demand). */
 export const loadPlayerPage = () => import("./PlayerPage");
+
+/**
+ * The /play route's data, fetched together with the page's code: the item.
+ * Continue Watching and links straight to the player skip the item page
+ * that would have fetched it, and the player waits for it. An item already
+ * there, even an older copy, opens the player right away (the player
+ * updates it as any page does). A failure isn't retried here, holding the
+ * click up: the player page shows it and retries itself.
+ */
+export function playerData(prefetch: QueryClient["prefetchQuery"], params: Params): Promise<void>[] {
+  const id = decodeId(params.id);
+  return id ? [prefetch({ ...queries.item(id), staleTime: Infinity, retry: false })] : [];
+}
 
 /** What plays in the video player (shows and seasons through an episode). */
 const VIDEO_KINDS = new Set<ItemKind>(["movie", "episode", "extra", "show", "season"]);

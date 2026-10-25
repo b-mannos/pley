@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { createBrowserRouter, Navigate, RouterProvider, type RouteObject } from "react-router";
+import { createBrowserRouter, Navigate, RouterProvider, type Params, type RouteObject } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { LoaderCircle } from "lucide-react";
 import { ApiError, setUnauthorizedHandler } from "@/api/client";
@@ -19,7 +19,7 @@ import { PersonPage } from "@/pages/PersonPage";
 import { ProfilesPage } from "@/pages/ProfilesPage";
 import { SearchPage } from "@/pages/SearchPage";
 import { SetupPage } from "@/pages/SetupPage";
-import { loadPlayerPage } from "@/player/preload";
+import { loadPlayerPage, playerData } from "@/player/preload";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,14 +53,14 @@ function PlayerFallback() {
 function onDemand<M>(
   load: () => Promise<M>,
   component: (module: M) => ComponentType,
-  data: (prefetch: QueryClient["prefetchQuery"]) => Promise<void>[] = () => [],
+  data: (prefetch: QueryClient["prefetchQuery"], params: Params) => Promise<void>[] = () => [],
   fallback = <PageSpinner />,
 ): Pick<RouteObject, "lazy" | "loader" | "hydrateFallbackElement"> {
   return {
     lazy: async () => ({ Component: component(await load()) }),
     // Failures are the page's to show (or RequireAdmin's): prefetching never throws.
-    loader: async () => {
-      await Promise.all(data(queryClient.prefetchQuery.bind(queryClient)));
+    loader: async ({ params }) => {
+      await Promise.all(data(queryClient.prefetchQuery.bind(queryClient), params));
       return null;
     },
     hydrateFallbackElement: fallback,
@@ -81,7 +81,7 @@ const router = createBrowserRouter([
         ...onDemand(
           loadPlayerPage,
           (m) => m.PlayerPage,
-          () => [],
+          playerData,
           <PlayerFallback />,
         ),
       },

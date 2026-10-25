@@ -349,6 +349,7 @@ export const queries = {
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => api.get<Settings>("/api/settings") }),
   system: () => queryOptions({ queryKey: keys.system, queryFn: () => api.get<SystemInfo>("/api/system"), staleTime: 10_000 }),
   activity: () => queryOptions({ queryKey: keys.activity, queryFn: () => api.get<Activity>("/api/activity"), staleTime: 2_000 }),
+  item: (id: Id) => queryOptions({ queryKey: keys.item(id), queryFn: ({ signal }) => api.get<ItemDetail>(`/api/items/${id}`, { signal }) }),
 };
 
 /** The key of {@link useReorderLibraries}'s moves. */
@@ -551,11 +552,7 @@ export function useScanAll() {
 // ---------------------------------------------------------------------------
 
 export function useItem(id: Id | null | undefined) {
-  return useQuery({
-    queryKey: keys.item(id ?? 0),
-    queryFn: ({ signal }) => api.get<ItemDetail>(`/api/items/${id}`, { signal }),
-    enabled: id != null && Number.isFinite(id) && id > 0,
-  });
+  return useQuery({ ...queries.item(id ?? 0), enabled: id != null && Number.isFinite(id) && id > 0 });
 }
 
 /** Seek previews of a file. They are made in the background on first use, so keep asking until they exist. */
