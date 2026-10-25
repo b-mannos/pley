@@ -26,6 +26,13 @@ use crate::playback::{
 };
 use crate::state::AppState;
 
+/// Length of HLS segments. Nothing plays before FFmpeg has written a whole
+/// segment, and every start, seek and quality switch starts a process that
+/// writes one first: 2 s ones come sooner than the transcoder's default of
+/// 4 s (by 0.35 s for 4K at 60 fps tone mapped, less for lighter video), for
+/// a keyframe every 2 s.
+const SEGMENT_SECONDS: f64 = 2.0;
+
 fn label(row: &ItemRow) -> String {
     match row.kind.as_str() {
         "episode" => format!(
@@ -125,7 +132,7 @@ pub async fn start(
         video: decision.video.clone(),
         audio: decision.audio.clone(),
         subtitle: decision.subtitle.clone(),
-        segment_seconds: None,
+        segment_seconds: Some(SEGMENT_SECONDS),
         start_ms: Some(start_ms),
         options: settings.transcode_options(),
     };

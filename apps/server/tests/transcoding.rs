@@ -550,6 +550,7 @@ async fn remux_sessions_stream_hls_from_the_transcoder() {
     let audio = job.audio.as_ref().unwrap();
     assert_eq!((audio.mode, audio.stream_index), (AudioMode::Transcode, Some(1)));
     assert_eq!(job.media.as_ref().and_then(|m| m.duration_ms), Some(60_000), "probe data is passed on");
+    assert_eq!(job.segment_seconds, Some(2.0), "short segments: the first one is ready sooner");
 
     let playlist = app.get(&format!("/api/playback/{session}/index.m3u8"), admin).await;
     assert_eq!(playlist.status, StatusCode::OK);
@@ -602,6 +603,7 @@ async fn a_lost_job_is_recreated_once_with_the_same_layout() {
     let replacement = w.fake.last_request();
     assert_eq!(replacement.start_ms, Some(20_000), "pre-started at the playhead");
     assert_eq!(replacement.video.unwrap().mode, VideoMode::Copy, "the same effective mode");
+    assert_eq!(replacement.segment_seconds, Some(2.0), "the same segments");
     assert_eq!(app.get(&format!("/api/playback/{session}/index.m3u8"), admin).await.status, StatusCode::OK);
 
     // This time it can't give the same segments: the session is over.

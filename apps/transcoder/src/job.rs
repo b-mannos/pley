@@ -34,15 +34,16 @@ use crate::probe::Prober;
 use crate::util::now_ms;
 
 /// Wait for the running process instead of restarting when the requested
-/// segment is at most this many segments ahead of it.
-const LOOKAHEAD: u32 = 3;
+/// segment is at most this far ahead of it (3 segments of 4 s, 6 of 2 s).
+const LOOKAHEAD: Duration = Duration::from_secs(12);
 const SEGMENT_WAIT: Duration = Duration::from_secs(45);
 /// Stop ffmpeg when nobody requested anything for this long (paused player).
 const PROCESS_IDLE_MS: i64 = 60_000;
 /// Forget jobs nobody touched for this long.
 const JOB_EXPIRE_MS: i64 = 20 * 60_000;
-/// Segments kept behind the most recently requested one.
-const KEEP_BEHIND: u32 = 90;
+/// Segments kept behind the most recently requested one: this long of them
+/// (90 segments of 4 s, 180 of 2 s).
+const KEEP_BEHIND: Duration = Duration::from_secs(6 * 60);
 /// Give up on a segment after this many failed process starts at it.
 const MAX_FAILURES: u32 = 2;
 /// A process younger than this is not killed for a far-away request while
@@ -154,6 +155,8 @@ struct Proc {
     end: u32,
     started: Instant,
     next: Arc<AtomicU32>,
+    /// [`LOOKAHEAD`] in the job's segments.
+    lookahead: u32,
     exited: watch::Receiver<bool>,
     kill: Option<oneshot::Sender<()>>,
 }
@@ -168,7 +171,7 @@ impl Proc {
     /// passed (pruned or skipped) are not coming back.
     fn will_produce(&self, n: u32) -> bool {
         let next = self.next.load(Relaxed);
-        n >= next && n < self.end && n <= next + LOOKAHEAD
+        n >= next && n < self.end && n <= next + self.lookahead
     }
 
     async fn stop(mut self) {
@@ -574,7 +577,14 @@ impl JobManager {
             job_ref.notify.notify_waiters();
         });
 
-        Ok(Proc { end, started: Instant::now(), next, exited: exit_rx, kill: Some(kill_tx) })
+        Ok(Proc {
+            end,
+            started: Instant::now(),
+            next,
+            lookahead: job.segments_in(LOOKAHEAD),
+            exited: exit_rx,
+            kill: Some(kill_tx),
+        })
     }
 
     pub async fn remove(&self, id: &str) -> bool {
@@ -670,6 +680,11 @@ impl Job {
             && self.plan.video.as_ref().is_some_and(|v| !v.copy)
     }
 
+    /// How many of this job's segments last `span` (at least one).
+    fn segments_in(&self, span: Duration) -> u32 {
+        (span.as_secs_f64() / self.plan.segment_seconds).round().max(1.0) as u32
+    }
+
     /// Seconds of video ready past the segment the player asked for last,
     /// with `next` the first segment not ready (negative: it is waiting).
     fn lead_secs(&self, next: u32) -> f64 {
@@ -763,10 +778,11 @@ impl Job {
     /// long, and a segment is only marked missing once its file is gone.
     fn prune(&self) {
         let last = self.last_requested.load(Relaxed);
-        if last <= KEEP_BEHIND {
+        let keep = self.segments_in(KEEP_BEHIND);
+        if last <= keep {
             return;
         }
-        let cutoff = (last - KEEP_BEHIND) as usize;
+        let cutoff = (last - keep) as usize;
         let mut n = 0;
         loop {
             let mut ready = self.ready.lock();
@@ -1011,7 +1027,14 @@ mod tests {
     #[test]
     fn waits_only_for_segments_ahead_of_the_process() {
         let (_exit_tx, exited) = watch::channel(false);
-        let p = Proc { end: 20, started: Instant::now(), next: Arc::new(AtomicU32::new(10)), exited, kill: None };
+        let p = Proc {
+            end: 20,
+            started: Instant::now(),
+            next: Arc::new(AtomicU32::new(10)),
+            lookahead: 3,
+            exited,
+            kill: None,
+        };
         assert!(!p.will_produce(9), "already passed (pruned or skipped): must restart");
         assert!(p.will_produce(10));
         assert!(p.will_produce(13));
@@ -1243,6 +1266,19 @@ mod tests {
     }
 
     #[test]
+    fn segment_counted_limits_keep_their_length_in_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut job = job(dir.path(), vec![0, 4_000, 8_000]);
+        assert_eq!((job.segments_in(LOOKAHEAD), job.segments_in(KEEP_BEHIND)), (3, 90));
+        job.plan.segment_seconds = 2.0;
+        assert_eq!((job.segments_in(LOOKAHEAD), job.segments_in(KEEP_BEHIND)), (6, 180));
+        job.plan.segment_seconds = 10.0;
+        assert_eq!((job.segments_in(LOOKAHEAD), job.segments_in(KEEP_BEHIND)), (1, 36));
+        job.plan.segment_seconds = 30.0;
+        assert_eq!(job.segments_in(LOOKAHEAD), 1, "at least the next one");
+    }
+
+    #[test]
     fn segments_far_behind_the_playhead_are_deleted() {
         let dir = tempfile::tempdir().unwrap();
         let job = job(dir.path(), (0..=200).map(|i| i * 4_000).collect());
@@ -1250,7 +1286,7 @@ mod tests {
             std::fs::write(job.segment_path(n), b"ts").unwrap();
             job.mark_ready(n);
         }
-        job.last_requested.store(KEEP_BEHIND, Relaxed);
+        job.last_requested.store(90, Relaxed);
         job.prune();
         assert_eq!(job.ready_count.load(Relaxed), 6, "nothing is that far behind yet");
 

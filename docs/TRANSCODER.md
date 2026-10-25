@@ -91,10 +91,14 @@ following status codes:
 
 1. **Layout first.** When a job is created, its segment layout is fixed and the
    whole VOD playlist is known up front, so players can seek anywhere.
-   - When transcoding, segments are every 4 s and keyframes are forced on that
-     grid.
+   - Segments are as long as the request's `segment_seconds` (1 to 10 s, 4 s
+     by default). The pley server asks for 2 s: nothing plays before FFmpeg
+     has written a whole segment, so shorter ones start playback, seeks and
+     quality switches sooner, for a keyframe every 2 s.
+   - When transcoding, keyframes are forced on that grid.
    - When remuxing (`video.mode = copy`), segments start on the source's
-     keyframes, taken from the keyframe index. Keyframe timestamps are made
+     keyframes (as many as make at least the segment length), taken from the
+     keyframe index. Keyframe timestamps are made
      relative to the container start time (`MediaInfo.start_ms`, often far from
      zero in MPEG-TS), because that is what `-ss` and the output timeline use.
 
@@ -110,7 +114,7 @@ following status codes:
    enough to need it get segments longer than requested instead of more.
 2. **Segments on demand.** A segment request is answered from disk if that
    segment already exists. If it doesn't:
-   - When a running ffmpeg process is about to produce it (at most three
+   - When a running ffmpeg process is about to produce it (at most 12 s of
      segments ahead of the process, never behind it), the request waits for
      that process.
    - Otherwise a new process starts exactly at that segment, using `-ss`,
@@ -141,8 +145,8 @@ following status codes:
 5. **Housekeeping.**
    - A process idle for 60 s (paused player) is stopped.
    - A job idle for 20 minutes expires.
-   - Segments more than 90 behind the playhead are deleted (in small batches,
-     off the async runtime).
+   - Segments more than 6 minutes behind the playhead are deleted (in small
+     batches, off the async runtime).
    - On startup, segments left over from an earlier run are removed.
    - The caches in the work directory are pruned an hour apart (the first
      time two minutes after start-up). Entries unused for longer than their
