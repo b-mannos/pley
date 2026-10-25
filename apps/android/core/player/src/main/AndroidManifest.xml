@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Music in the background: a Media3 media session service, in the
+  foreground with type mediaPlayback while it plays (Android 17 plays
+  background audio only from a foreground service). Its notification is a
+  media session's, which needs no POST_NOTIFICATIONS.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- The music player keeps the CPU and Wi-Fi awake while it streams with the screen off. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <application>
+        <!-- Exported for the system's media controllers; the session refuses other apps (onConnect). -->
+        <service
+            android:name="app.pley.android.player.music.MusicService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

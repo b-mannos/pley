@@ -1,0 +1,78 @@
+package app.pley.android.player.music
+
+import app.pley.android.player.EngineSource
+
+/** What the notification and the lock screen show of a track. */
+data class TrackInfo(
+    val title: String,
+    val artist: String?,
+    val album: String?,
+    /** The album art's full address, sized for the notification; `null` without one. */
+    val artUrl: String?,
+)
+
+/**
+ * The sound side of music: one track at a time from the server, and what
+ * it does. The app's is the engine's audio-only player ([EngineMusicOutput]);
+ * tests drive a fake. Main thread only.
+ */
+interface MusicOutput {
+    /** Loads [source] at [startMs] with [info] for the notification, and plays it when [play]. */
+    fun load(source: EngineSource, startMs: Long, play: Boolean, info: TrackInfo)
+
+    fun play()
+
+    fun pause()
+
+    fun seekTo(positionMs: Long)
+
+    /** Stops and lets go of the track, keeping the player for the next. */
+    fun stop()
+
+    /** Lets go of the player, its decoder and its audio output. */
+    fun release()
+
+    val positionMs: Long
+
+    /** The track's length as the player knows it; 0 before it does. */
+    val durationMs: Long
+
+    val bufferedMs: Long
+
+    /** Whether it wants to play (playing, or waiting for data to). */
+    val playWhenReady: Boolean
+
+    fun setListener(listener: Listener?)
+
+    /** What the output tells the queue. */
+    interface Listener {
+        /** Sound comes out, or stopped coming out. */
+        fun onPlayingChanged(playing: Boolean)
+
+        /** Waiting for data, or not anymore. */
+        fun onBuffering(buffering: Boolean) {}
+
+        /** Asked to play or pause (by the person, the notification or audio focus). */
+        fun onPlayWhenReadyChanged(playWhenReady: Boolean) {}
+
+        /** The track played to its end. */
+        fun onEnded()
+
+        fun onError(error: OutputError)
+    }
+}
+
+/** Why a track stopped. */
+enum class OutputError {
+    /** The device can't decode it: the server should convert it. */
+    Decode,
+
+    /** The server's session is gone (404, 410): a new one is needed. */
+    Gone,
+
+    /** The network failed on the way. */
+    Network,
+
+    /** Anything else. */
+    Other,
+}

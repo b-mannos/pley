@@ -1,0 +1,109 @@
+package app.pley.android.player.music
+
+import app.pley.android.model.ItemKind
+import app.pley.android.model.ItemSummary
+import kotlin.random.Random
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class MusicQueueTest {
+    private val album = (1..12L).map { track(it) }
+
+    @Test
+    fun aQueuePlaysInTheOrderGivenFromTheTrackChosen() {
+        val queue = MusicQueue()
+        queue.start(album, startIndex = 4)
+        assertEquals(album, queue.tracks)
+        assertEquals(5L, queue.current?.id)
+        assertTrue(queue.next())
+        assertEquals(6L, queue.current?.id)
+    }
+
+    @Test
+    fun shufflingIsAPermutationThatStartsWithTheChosenTrack() {
+        repeat(50) { seed ->
+            val queue = MusicQueue(Random(seed))
+            queue.start(album, startIndex = 7, shuffle = true)
+            assertEquals(0, queue.index)
+            assertEquals(8L, queue.current?.id)
+            assertEquals(album.map { it.id }.sorted(), queue.tracks.map { it.id }.sorted())
+        }
+    }
+
+    @Test
+    fun shufflingHalfwayKeepsTheTrackAndUnshufflingFindsItsPlace() {
+        // Shuffling halfway keeps the track playing and what is left, in some order after it.
+        val queue = MusicQueue(Random(3))
+        queue.start(album, startIndex = 0)
+        queue.next()
+        queue.next()
+        queue.setShuffle(true)
+        assertEquals(3L, queue.current?.id)
+        assertEquals(0, queue.index)
+        assertEquals(album.size, queue.tracks.toSet().size)
+
+        // Back in order: the same track, at its place in the album.
+        queue.next()
+        val playing = queue.current
+        queue.setShuffle(false)
+        assertEquals(album, queue.tracks)
+        assertEquals(playing, queue.current)
+        assertEquals(album.indexOf(playing), queue.index)
+    }
+
+    @Test
+    fun shufflesDifferOverSeeds() {
+        val orders = (0 until 20).map { seed ->
+            MusicQueue(Random(seed)).apply { start(album, 0, shuffle = true) }.tracks.map { it.id }
+        }.toSet()
+        assertTrue("Fisher-Yates gives many orders, got ${orders.size}", orders.size > 15)
+    }
+
+    @Test
+    fun theSameTrackTwiceIsTwoPlaces() {
+        val twice = listOf(track(1), track(2), track(1))
+        val queue = MusicQueue(Random(1))
+        queue.start(twice, startIndex = 2)
+        queue.setShuffle(true)
+        queue.setShuffle(false)
+        assertEquals(2, queue.index)
+    }
+
+    @Test
+    fun previousRestartsAfterThreeSecondsOrOnTheFirstTrack() {
+        val queue = MusicQueue()
+        queue.start(album, startIndex = 3)
+        assertEquals(MusicQueue.Previous.Restart, queue.previous(positionMs = 3_001))
+        assertEquals(3, queue.index)
+        assertEquals(MusicQueue.Previous.Moved, queue.previous(positionMs = 3_000))
+        assertEquals(2, queue.index)
+
+        queue.start(album, startIndex = 0)
+        assertEquals(MusicQueue.Previous.Restart, queue.previous(positionMs = 0))
+        assertEquals(0, queue.index)
+    }
+
+    @Test
+    fun nextStopsAtTheEndAndJumpsStayInside() {
+        val queue = MusicQueue()
+        queue.start(album, startIndex = album.lastIndex)
+        assertFalse(queue.hasNext)
+        assertFalse(queue.next())
+        assertFalse(queue.jumpTo(album.size))
+        assertTrue(queue.jumpTo(0))
+        assertEquals(1L, queue.current?.id)
+    }
+
+    @Test
+    fun anEmptyQueueHasNothing() {
+        val queue = MusicQueue()
+        queue.start(emptyList(), startIndex = 3, shuffle = true)
+        assertTrue(queue.isEmpty)
+        assertEquals(null, queue.current)
+        assertFalse(queue.shuffle)
+    }
+
+    private fun track(id: Long) = ItemSummary(id, 3, ItemKind.Track, "Track $id", index = id.toInt(), parentId = 50, durationMs = 180_000)
+}

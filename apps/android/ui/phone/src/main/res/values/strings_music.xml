@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Artist and album pages (apps/web/src/pages/item/MusicViews.tsx). -->
+    <string name="music_artist">Artist</string>
+    <string name="music_album">Album</string>
+    <string name="music_albums">Albums</string>
+    <string name="music_play">Play</string>
+    <string name="music_pause">Pause</string>
+    <string name="music_shuffle">Shuffle</string>
+    <string name="music_more">More</string>
+    <string name="music_less">Less</string>
+    <string name="music_disc">Disc %1$d</string>
+    <string name="music_no_albums">No albums found.</string>
+    <string name="music_no_tracks">No tracks found</string>
+    <string name="music_nothing_to_play">Nothing to play: it has no tracks.</string>
+    <string name="music_artist_not_found">Artist not found</string>
+    <string name="music_album_not_found">Album not found</string>
+    <string name="music_not_found_body">It may have been removed, or this profile can\'t see it.</string>
+    <string name="music_artist_failed">Couldn\'t load this artist</string>
+    <string name="music_album_failed">Couldn\'t load this album</string>
+
+    <!-- Now Playing and the mini player (design spec §3.6, §4.10). -->
+    <string name="music_now_playing">Now playing</string>
+    <string name="music_close_now_playing">Close Now Playing</string>
+    <string name="music_queue">Queue</string>
+    <string name="music_next">Next</string>
+    <string name="music_previous">Previous</string>
+    <string name="music_shuffle_on">Shuffle</string>
+    <string name="music_shuffle_off">Stop shuffling</string>
+    <string name="music_position">Position in the track</string>
+    <string name="music_loading">Loading…</string>
+    <string name="music_nothing_playing">Nothing is playing</string>
+    <string name="music_nothing_playing_body">Play an album or an artist and it shows here.</string>
+    <string name="music_error_offline">Can\'t reach the server.</string>
+    <string name="music_error_signed_out">Sign in again to play.</string>
+    <string name="music_error_unplayable">This track can\'t be played.</string>
+</resources>

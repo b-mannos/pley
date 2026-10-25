@@ -58,8 +58,9 @@ sealed interface PleyKey : NavKey {
     @Serializable
     data class Artist(val itemId: Long) : PleyKey
 
+    /** An album; [trackId] is the track it was opened from, highlighted in its list. */
     @Serializable
-    data class Album(val itemId: Long) : PleyKey
+    data class Album(val itemId: Long, val trackId: Long? = null) : PleyKey
 
     @Serializable
     data class Search(val query: String = "") : PleyKey

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Artist and album pages (apps/web/src/pages/item/MusicViews.tsx). -->
+    <string name="tv_music_artist">Artist</string>
+    <string name="tv_music_albums">Albums</string>
+    <string name="tv_music_play">Play</string>
+    <string name="tv_music_pause">Pause</string>
+    <string name="tv_music_shuffle">Shuffle</string>
+    <string name="tv_music_shuffle_off">Stop shuffling</string>
+    <string name="tv_music_now_playing">Now playing</string>
+    <string name="tv_music_disc">Disc %1$d</string>
+    <string name="tv_music_no_albums">No albums found.</string>
+    <string name="tv_music_no_tracks">No tracks found</string>
+    <string name="tv_music_nothing_to_play">Nothing to play: it has no tracks.</string>
+    <string name="tv_music_artist_not_found">Artist not found</string>
+    <string name="tv_music_album_not_found">Album not found</string>
+    <string name="tv_music_not_found_body">It may have been removed, or this profile can\'t see it.</string>
+    <string name="tv_music_artist_failed">Couldn\'t load this artist</string>
+    <string name="tv_music_album_failed">Couldn\'t load this album</string>
+    <string name="tv_music_retry">Try again</string>
+    <string name="tv_music_back">Back</string>
+
+    <!-- Now Playing (design spec §4.10). -->
+    <string name="tv_music_queue">Up next</string>
+    <string name="tv_music_next">Next</string>
+    <string name="tv_music_previous">Previous</string>
+    <string name="tv_music_position">Position in the track</string>
+    <string name="tv_music_loading">Loading…</string>
+    <string name="tv_music_nothing_playing">Nothing is playing</string>
+    <string name="tv_music_nothing_playing_body">Play an album or an artist and it shows here.</string>
+    <string name="tv_music_error_offline">Can\'t reach the server.</string>
+    <string name="tv_music_error_signed_out">Sign in again to play.</string>
+    <string name="tv_music_error_unplayable">This track can\'t be played.</string>
+</resources>
