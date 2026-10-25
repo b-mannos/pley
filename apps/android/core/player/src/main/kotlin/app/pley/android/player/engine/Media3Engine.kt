@@ -220,7 +220,7 @@ class Media3Engine(
         frameRate?.clear()
         frameRate = null
         window = null
-        mutableState.update { it.copy(switchingDisplayMode = false) }
+        mutableState.update { it.copy(switchingDisplayMode = false, switchingToHz = null) }
     }
 
     override fun release() {
@@ -256,9 +256,11 @@ class Media3Engine(
         }
         matchJob?.cancel()
         matchJob = scope.launch {
-            val outcome = controller.match(asked) { mutableState.update { it.copy(switchingDisplayMode = true) } }
+            val outcome = controller.match(asked) { hz -> mutableState.update { it.copy(switchingDisplayMode = true, switchingToHz = hz) } }
             matchPending = false
-            mutableState.update { it.copy(switchingDisplayMode = false, frameRateHint = it.frameRateHint || outcome.showHint) }
+            mutableState.update {
+                it.copy(switchingDisplayMode = false, switchingToHz = null, frameRateHint = it.frameRateHint || outcome.showHint)
+            }
             analytics.onDisplayMode(controller.requestedModeId.takeIf { it != 0 })
             // The screen's HDR types and the receiver's formats may have changed with the mode.
             if (outcome.switched) applyTrackParameters()

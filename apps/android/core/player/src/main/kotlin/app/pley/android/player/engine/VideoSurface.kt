@@ -78,18 +78,25 @@ data class SubtitleStyle(
  * Subtitles over the video, text and pictures alike (PGS, VobSub), drawn by
  * Media3's SubtitleView in [style]. They come from [player]'s own tracks,
  * or from [cues] when given (the session's subtitles from the server).
+ * With [system] (captions turned on in the device's accessibility
+ * settings), the device's caption style and size win over [style].
  */
 @OptIn(markerClass = [UnstableApi::class])
 @Composable
-fun Subtitles(player: Player?, style: SubtitleStyle, modifier: Modifier = Modifier, cues: List<Cue>? = null) {
+fun Subtitles(player: Player?, style: SubtitleStyle, modifier: Modifier = Modifier, cues: List<Cue>? = null, system: Boolean = false) {
     val listener = remember { SubtitleListener() }
     Box(modifier.fillMaxSize()) {
         AndroidView(
             factory = { context -> SubtitleView(context).also { listener.view = it } },
             modifier = Modifier.fillMaxSize(),
             update = { view ->
-                view.setStyle(style.captionStyle())
-                view.setFractionalTextSize(style.textFraction)
+                if (system) {
+                    view.setUserDefaultStyle()
+                    view.setUserDefaultTextSize()
+                } else {
+                    view.setStyle(style.captionStyle())
+                    view.setFractionalTextSize(style.textFraction)
+                }
                 view.setApplyEmbeddedFontSizes(false)
                 listener.override = cues
                 view.setCues(cues ?: player?.currentCues?.cues.orEmpty())

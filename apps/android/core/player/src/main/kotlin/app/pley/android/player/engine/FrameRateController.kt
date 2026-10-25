@@ -72,8 +72,11 @@ class FrameRateController(
     var requestedModeId: Int = 0
         private set
 
-    /** Matches the display to [request]; [onSwitching] runs once a change is asked for, before the wait. */
-    suspend fun match(request: MatchRequest, onSwitching: () -> Unit = {}): MatchOutcome {
+    /**
+     * Matches the display to [request]; [onSwitching] runs once a change is
+     * asked for, before the wait, with the refresh rate asked for.
+     */
+    suspend fun match(request: MatchRequest, onSwitching: (refreshRate: Float) -> Unit = {}): MatchOutcome {
         val key = host.displayKey
         val timeouts = memory.timeouts(key)
         val asked = request.copy(gaveUp = timeouts >= GIVE_UP_AFTER)
@@ -82,7 +85,7 @@ class FrameRateController(
             is ModeDecision.Switch -> {
                 requestedModeId = decision.modeId
                 host.request(decision.modeId)
-                onSwitching()
+                onSwitching(decision.refreshRate)
                 if (host.awaitMode(decision.modeId, switchTimeoutMs)) {
                     if (timeouts != 0) memory.setTimeouts(key, 0)
                     delay(settleMs)

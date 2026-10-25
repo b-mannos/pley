@@ -215,6 +215,7 @@ class Media3EngineTest {
         engine.attachWindow(window)
         assertEquals(listOf(46), host.requested)
         assertTrue(engine.state.value.switchingDisplayMode)
+        assertEquals("the screen says which rate", 23.976f, engine.state.value.switchingToHz!!, 0.01f)
         assertFalse(engine.player.playWhenReady)
 
         // Play pressed again while switching: still waits.
@@ -223,6 +224,7 @@ class Media3EngineTest {
 
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(FrameRateController.SETTLE_MS))
         assertFalse(engine.state.value.switchingDisplayMode)
+        assertNull(engine.state.value.switchingToHz)
         assertTrue(engine.player.playWhenReady)
         assertEquals(46, engine.state.value.stats.displayModeId)
 

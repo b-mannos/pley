@@ -8,6 +8,8 @@ package app.pley.android.player.engine
 data class EngineState(
     /** The TV is changing its display mode for the video: playback waits, the picture may go dark. */
     val switchingDisplayMode: Boolean = false,
+    /** The refresh rate the display is switching to (23.976…), while [switchingDisplayMode]. */
+    val switchingToHz: Float? = null,
     /**
      * The TV didn't change its mode twice in a row on this display, so Auto
      * stopped asking: show once where the device's own setting is.

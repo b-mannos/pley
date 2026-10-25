@@ -11,6 +11,7 @@ import app.pley.android.model.Marker
 import app.pley.android.model.MarkerKind
 import app.pley.android.model.MediaFile
 import app.pley.android.model.MediaStream
+import app.pley.android.model.PlaybackMethod
 import app.pley.android.model.PlaybackMode
 import app.pley.android.model.ProgressState
 import app.pley.android.model.StreamChoice
@@ -292,10 +293,18 @@ class SessionPlaybackController(
         publishChoices()
         refreshDetails()
         val engineLink = link ?: return
+        // The video as it arrives, so a TV matches its display mode before the
+        // first frame: the file's stream when it is copied; a transcode keeps
+        // the frame rate, but its dynamic range is the server's to choose.
+        val video = PlaybackPlan.videoStream(chosen)?.let { v ->
+            if (info.method == PlaybackMethod.Transcode) v.copy(dynamicRange = null, dvProfile = null, dvBlCompat = null) else v
+        }
         val source = EngineSource(
             url = env.api.url(info.url),
             hls = info.hls,
             mimeType = if (info.hls) null else PlaybackPlan.mimeTypeOf(chosen.container),
+            video = video,
+            durationMs = info.durationMs.takeIf { it > 0 } ?: chosen.durationMs ?: detail.durationMs,
         )
         engineLink.prepare(source, atMs, wantPlay.value)
         applyTracks()
