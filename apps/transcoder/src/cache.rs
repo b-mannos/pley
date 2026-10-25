@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Restricted
 //! Pruning of the work directory's caches (keyframe indexes, converted
-//! subtitles, seek-preview sheets), which would otherwise grow with every file
+//! subtitles, seek-preview sheets, libplacebo's shaders), which would otherwise grow with every file
 //! ever played. Entries unused for too long go, then the least recently used
 //! ones until a folder fits its budget; "used" is the modification time,
 //! which readers refresh ([`crate::util::touch`]). Temporaries left by a crash
@@ -39,6 +39,10 @@ pub fn policies(work_dir: &Path) -> Vec<(PathBuf, Policy)> {
         // are deleted once every one has been fetched); what's left is only
         // there for a retry.
         (work_dir.join("trickplay"), Policy { max_age: DAY, max_bytes: 1 << 30 }),
+        // libplacebo's compiled shaders, a few MB for each kind of tone
+        // mapping: rebuilt in a fraction of a second by the next process
+        // that needs them.
+        (work_dir.join("libplacebo"), Policy { max_age: 30 * DAY, max_bytes: 128 << 20 }),
     ]
 }
 

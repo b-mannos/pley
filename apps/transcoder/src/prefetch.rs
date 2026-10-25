@@ -420,6 +420,7 @@ mod tests {
             extractor,
             metrics,
             dir.join("jobs"),
+            None,
             Limits { max_jobs: 1, max_hw_jobs: 0 },
         );
         (Prefetcher::new(jobs.clone(), keyframes.clone()), jobs, keyframes)

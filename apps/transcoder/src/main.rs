@@ -176,6 +176,20 @@ fn keep_private(dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The folder libplacebo keeps compiled shaders in. Its path is absolute:
+/// FFmpeg runs in a job's folder, which goes with the job. It is made now,
+/// since libplacebo makes none and then silently caches nothing.
+fn shader_cache(work_dir: &Path) -> Option<PathBuf> {
+    let dir = std::path::absolute(work_dir).ok()?.join("libplacebo");
+    match std::fs::create_dir_all(&dir) {
+        Ok(()) => Some(dir),
+        Err(err) => {
+            tracing::warn!("no shader cache for tone mapping: {}: {err}", dir.display());
+            None
+        }
+    }
+}
+
 async fn run(args: Args) -> anyhow::Result<()> {
     util::kill_children_on_exit();
     check_token(args.token.as_deref(), args.listen)?;
@@ -209,6 +223,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         extractor.clone(),
         metrics.clone(),
         jobs_dir.clone(),
+        shader_cache(&work_dir),
         limits.clone(),
     );
     jobs.spawn_reaper();
@@ -329,6 +344,16 @@ mod tests {
         assert!(check_token(Some("CHANGE-ME"), network).is_err());
         assert!(check_token(Some("short"), network).is_err());
         assert!(check_token(Some("9f2c5a7e1b3d4c6a8e0f1a2b3c4d5e6f"), network).is_ok());
+    }
+
+    #[test]
+    fn the_shader_cache_is_made_at_start_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = shader_cache(&dir.path().join("work")).unwrap();
+        assert!(cache.is_absolute() && cache.is_dir() && cache.ends_with("libplacebo"));
+        // Not where a file is in the way: tone mapping goes on without it.
+        std::fs::write(dir.path().join("file"), b"").unwrap();
+        assert_eq!(shader_cache(&dir.path().join("file")), None);
     }
 
     #[test]

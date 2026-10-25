@@ -156,6 +156,7 @@ following status codes:
      | `keyframes/` | keyframe indexes | 90 days | 256 MB |
      | `subtitles/` | converted and extracted subtitles | 60 days | 512 MB |
      | `trickplay/` | seek-preview sheets | 1 day | 1 GB |
+     | `libplacebo/` | libplacebo's compiled shaders | 30 days | 128 MB |
 
      A set of seek-preview sheets is also deleted as soon as every sheet in
      it has been fetched: the server stores the sheets it fetches.
@@ -190,6 +191,13 @@ following status codes:
     reshaping, so **profile 5** (IPTPQc2) renders with correct colors.
   - `tonemap_opencl` on the GPU.
   - `zscale` plus `tonemap` on the CPU.
+
+  libplacebo keeps the shaders it compiles in the work directory's
+  `libplacebo/` folder (made at start-up, with an absolute path, since FFmpeg
+  runs in a job's folder), so later processes skip about 0.2 s of compiling:
+  every start, seek and quality switch of a tone-mapped job. A work directory
+  whose path holds a character FFmpeg's filter syntax reads (`, ; [ ] ' :`
+  other than a drive's colon) goes without it.
 
   Profiles 7 and 8 have an HDR10- or HLG-compatible base layer and work with any
   of these. Profile 5 without libplacebo produces a warning: its frames carry

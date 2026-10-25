@@ -99,6 +99,8 @@ pub struct JobManager {
     extractor: Arc<Extractor>,
     metrics: Arc<Metrics>,
     jobs_dir: PathBuf,
+    /// libplacebo's shader cache (see [`crate::plan::shader_cache_option`]).
+    shader_cache: Option<PathBuf>,
     pub limits: Limits,
     pub slots: Arc<Slots>,
     jobs: Mutex<HashMap<String, Arc<Job>>>,
@@ -178,6 +180,7 @@ impl Proc {
 }
 
 impl JobManager {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ff: Arc<Ffmpeg>,
         prober: Arc<Prober>,
@@ -185,6 +188,7 @@ impl JobManager {
         extractor: Arc<Extractor>,
         metrics: Arc<Metrics>,
         jobs_dir: PathBuf,
+        shader_cache: Option<PathBuf>,
         limits: Limits,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -195,6 +199,7 @@ impl JobManager {
             extractor,
             metrics,
             jobs_dir,
+            shader_cache,
             limits,
             jobs: Mutex::default(),
             closed: AtomicBool::new(false),
@@ -500,6 +505,7 @@ impl JobManager {
             encoder: fallback,
             relative_split_times: self.ff.segment_times_relative,
             preset: preset_name.as_deref(),
+            shader_cache: self.shader_cache.as_deref(),
         };
         let args = plan.ffmpeg_args(&ctx, start, end);
         tracing::debug!(job = %job.id, "ffmpeg {}", args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "));
@@ -1080,7 +1086,7 @@ mod tests {
         let keyframes = KeyframeStore::new(ff.clone(), metrics.clone(), dir.join("keyframes"));
         let extractor = Arc::new(Extractor::new(ff.clone(), prober.clone(), metrics.clone(), dir.join("subtitles"), 1));
         let limits = Limits { max_jobs: 2, max_hw_jobs: 0 };
-        JobManager::new(ff, prober, keyframes, extractor, metrics, dir.join("jobs"), limits)
+        JobManager::new(ff, prober, keyframes, extractor, metrics, dir.join("jobs"), None, limits)
     }
 
     #[tokio::test]

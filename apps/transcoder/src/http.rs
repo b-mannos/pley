@@ -353,6 +353,7 @@ mod tests {
             extractor.clone(),
             metrics.clone(),
             dir.join("jobs"),
+            None,
             limits.clone(),
         );
         let info =

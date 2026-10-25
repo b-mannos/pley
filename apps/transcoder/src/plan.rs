@@ -525,7 +525,7 @@ impl Plan {
                 a.push_all(["-map", &format!("0:{}", v.stream_index), "-c:v", "copy"]);
             }
             Some(v) => {
-                let graph = self.filter_graph(v, encoder, pipeline, start_ms);
+                let graph = self.filter_graph(v, encoder, pipeline, start_ms, ctx.shader_cache);
                 a.push_all(["-filter_complex", &graph, "-map", "[vout]"]);
                 if let Some(enc) = encoder {
                     a.extend(encoder_args(enc, v, ctx.preset));
@@ -602,7 +602,14 @@ impl Plan {
         a.0
     }
 
-    fn filter_graph(&self, v: &VideoOut, encoder: Option<&EncoderInfo>, pipeline: Pipeline, start_ms: i64) -> String {
+    fn filter_graph(
+        &self,
+        v: &VideoOut,
+        encoder: Option<&EncoderInfo>,
+        pipeline: Pipeline,
+        start_ms: i64,
+        shader_cache: Option<&Path>,
+    ) -> String {
         let input = format!("[0:{}]", v.stream_index);
         let (w, h) = (v.width, v.height);
         // Zero-copy: one GPU scaler converts to 8-bit NV12 for the encoder.
@@ -629,8 +636,11 @@ impl Plan {
                 // libplacebo scales too, unless a bitmap overlay needs source size first.
                 let (w, h) = if overlay_needed { (v.src_width, v.src_height) } else { (v.width, v.height) };
                 let format = if matches!(pipeline, Pipeline::Vulkan { .. }) { "nv12" } else { "yuv420p" };
+                // Shaders compiled by earlier processes save ~0.2 s at the
+                // start of each one.
+                let cache = shader_cache.and_then(shader_cache_option).map(|o| format!(":{o}")).unwrap_or_default();
                 pre.push(format!(
-                    "libplacebo=w={w}:h={h}:format={format}:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=auto"
+                    "libplacebo=w={w}:h={h}:format={format}:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=auto{cache}"
                 ));
                 match pipeline {
                     // Frames stay in Vulkan memory all the way into h264_vulkan.
@@ -710,6 +720,8 @@ pub struct ArgsContext<'a> {
     pub relative_split_times: bool,
     /// The software encoder's preset for this process (see [`crate::adaptive`]).
     pub preset: Option<&'a str>,
+    /// Folder for libplacebo's compiled shaders (see [`shader_cache_option`]).
+    pub shader_cache: Option<&'a Path>,
 }
 
 #[derive(Default)]
@@ -917,6 +929,26 @@ fn is_x264_preset(p: &str) -> bool {
     matches!(p, "ultrafast" | "superfast" | "veryfast" | "faster" | "fast" | "medium" | "slow" | "slower" | "veryslow")
 }
 
+/// libplacebo's `shader_cache` option for a folder, written for a
+/// filtergraph. The value is a prefix of file names, hence the trailing
+/// separator. A drive's colon is escaped twice: once for the filter's
+/// options, once for the graph. Folders whose names hold other characters
+/// that either level reads (`, ; [ ] ' : \`) are left without a cache.
+pub fn shader_cache_option(dir: &Path) -> Option<String> {
+    let path = dir.to_str()?;
+    let path = if cfg!(windows) { path.replace('\\', "/") } else { path.to_owned() };
+    let (drive, rest) = match path.as_bytes() {
+        [letter, b':', ..] if letter.is_ascii_alphabetic() => (&path[..1], &path[2..]),
+        _ => ("", path.as_str()),
+    };
+    if rest.is_empty() || rest.contains([',', ';', '[', ']', '\'', '"', ':', '\\']) {
+        return None;
+    }
+    let drive = if drive.is_empty() { String::new() } else { format!("{drive}\\\\:") };
+    let slash = if rest.ends_with('/') { "" } else { "/" };
+    Some(format!("shader_cache={drive}{rest}{slash}"))
+}
+
 fn trim_float(v: f64) -> String {
     let s = format!("{v:.3}");
     s.trim_end_matches('0').trim_end_matches('.').to_owned()
@@ -1092,6 +1124,7 @@ mod tests {
             encoder: None,
             relative_split_times: true,
             preset: None,
+            shader_cache: None,
         };
         plan.ffmpeg_args(&ctx, start, end)
             .iter()
@@ -1206,6 +1239,54 @@ mod tests {
         assert!(args.contains("-readrate 2 -readrate_initial_burst 60"));
     }
 
+    #[test]
+    fn libplacebo_reuses_compiled_shaders() {
+        // A prefix of file names in the folder; the drive's colon escaped for
+        // the filter's options and again for the graph.
+        assert_eq!(
+            shader_cache_option(Path::new("C:/Users/Jo Smith/pley-transcoder/libplacebo")).as_deref(),
+            Some(r"shader_cache=C\\:/Users/Jo Smith/pley-transcoder/libplacebo/")
+        );
+        assert_eq!(
+            shader_cache_option(Path::new("/var/cache/pley-transcoder/libplacebo/")).as_deref(),
+            Some("shader_cache=/var/cache/pley-transcoder/libplacebo/")
+        );
+        if cfg!(windows) {
+            assert_eq!(
+                shader_cache_option(Path::new(r"D:\cache\libplacebo")).as_deref(),
+                Some(r"shader_cache=D\\:/cache/libplacebo/")
+            );
+        }
+        // What the graph or the options would read: no cache rather than a failed job.
+        for odd in ["/a,b/libplacebo", "/a;b", "/[x]", "/it's", "/a:b", "C:/a:b", ""] {
+            assert_eq!(shader_cache_option(Path::new(odd)), None, "{odd}");
+        }
+        if !cfg!(windows) {
+            assert_eq!(shader_cache_option(Path::new(r"/a\b")), None, "a backslash in a name");
+        }
+
+        let ff = ffmpeg_with(vec![nvenc(), x264()], vec![Tonemapper::Libplacebo]);
+        let plan = Plan::build(&request(), &media(DynamicRange::Hdr10, None), &ff, None).unwrap();
+        let cache = Path::new("/var/cache/pley-transcoder/libplacebo");
+        let ctx = ArgsContext {
+            input: Path::new("/media/movie.mkv"),
+            encoder: None,
+            relative_split_times: true,
+            preset: None,
+            shader_cache: Some(cache),
+        };
+        let args: Vec<String> = plan.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert!(
+            args.join(" ").contains("tonemapping=auto:shader_cache=/var/cache/pley-transcoder/libplacebo/,"),
+            "{args:?}"
+        );
+        // Other tone mappers have no such cache.
+        let ff = ffmpeg_with(vec![x264()], vec![Tonemapper::Zscale]);
+        let plan = Plan::build(&request(), &media(DynamicRange::Hdr10, None), &ff, None).unwrap();
+        let args: Vec<String> = plan.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert!(!args.join(" ").contains("shader_cache"));
+    }
+
     fn ten_bit(mut m: MediaInfo) -> MediaInfo {
         m.streams[0].bit_depth = Some(10);
         m
@@ -1276,6 +1357,7 @@ mod tests {
             encoder: Some(&ff.caps.encoders[1]),
             relative_split_times: true,
             preset: None,
+            shader_cache: None,
         };
         let args: Vec<String> = plan.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect();
         let args = args.join(" ");
@@ -1466,7 +1548,8 @@ mod tests {
         assert_eq!(&plan.boundaries[..4], &[0, 2_000, 4_000, 6_000]);
 
         // The whole file from the start, then from the boundary at 4 s.
-        let ctx = ArgsContext { input: &input, encoder: None, relative_split_times: true, preset: None };
+        let ctx =
+            ArgsContext { input: &input, encoder: None, relative_split_times: true, preset: None, shader_cache: None };
         let run = |name: &str, start: u32| {
             let out = dir.path().join(name);
             std::fs::create_dir(&out).unwrap();
