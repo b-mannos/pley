@@ -1,0 +1,433 @@
+package app.pley.android.ui.phone.search
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import app.pley.android.common.describe
+import app.pley.android.designsystem.PleyColors
+import app.pley.android.designsystem.PleyPhone
+import app.pley.android.designsystem.PleyShape
+import app.pley.android.designsystem.icon.Icon
+import app.pley.android.designsystem.icon.PleyIcon
+import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.image.ArtworkImage
+import app.pley.android.designsystem.tile.ArtworkTileModel
+import app.pley.android.designsystem.tile.SkeletonState
+import app.pley.android.designsystem.tile.SkeletonTile
+import app.pley.android.designsystem.tile.TileKind
+import app.pley.android.designsystem.tile.TileStyle
+import app.pley.android.designsystem.tile.rememberSkeleton
+import app.pley.android.screens.PleyKey
+import app.pley.android.screens.library.TileLook
+import app.pley.android.screens.screensGraph
+import app.pley.android.screens.search.SearchDeps
+import app.pley.android.screens.search.SearchGroup
+import app.pley.android.screens.search.SearchGroupKind
+import app.pley.android.screens.search.SearchResultsState
+import app.pley.android.screens.search.SearchTiles
+import app.pley.android.screens.search.SearchUiState
+import app.pley.android.screens.search.SearchViewModel
+import app.pley.android.ui.phone.R
+import app.pley.android.ui.phone.kit.DelayedSpinner
+import app.pley.android.ui.phone.kit.EmptyState
+import app.pley.android.ui.phone.kit.MediaCard
+import app.pley.android.ui.phone.kit.OfflineBanner
+import app.pley.android.ui.phone.kit.PleyIconButton
+import app.pley.android.ui.phone.kit.PleyTextButton
+import app.pley.android.ui.phone.kit.rememberHubRowState
+import app.pley.android.ui.phone.kit.rowCardWidth
+import app.pley.android.ui.phone.library.PhoneTiles
+import app.pley.android.ui.phone.shell.LocalPhoneNavigator
+import app.pley.android.ui.phone.theme.LocalPhoneMetrics
+
+/**
+ * Search on the phone (design spec §4.5; the web's SearchPage): a search
+ * bar docked at the top with the keyboard up when the tab opens empty.
+ * Before typing, the profile's recent searches with Clear; while typing,
+ * the results as rows, grouped and counted (People, Movies, Shows…),
+ * the ones shown staying while the next load.
+ */
+@Composable
+internal fun PhoneSearchScreen(key: PleyKey.Search) {
+    val resources = LocalResources.current
+    val vm: SearchViewModel<ArtworkTileModel> = viewModel {
+        SearchViewModel(key.query, SearchDeps.of(screensGraph()), phoneSearchTiles(PhoneTiles(resources)))
+    }
+    val state by vm.state.collectAsStateWithLifecycle()
+    val field = rememberTextFieldState(key.query)
+    LaunchedEffect(field, vm) {
+        snapshotFlow { field.text.toString() }.collect(vm::onQueryChange)
+    }
+    SearchContent(
+        state = state,
+        field = field,
+        onSubmit = vm::submit,
+        onRecent = { query ->
+            field.setTextAndPlaceCursorAtEnd(query)
+            vm.searchAgain(query)
+        },
+        onClearRecent = vm::clearRecent,
+        open = vm::open,
+    )
+}
+
+/** The phone's search tiles: library tiles for items, a circle with the photo for people. */
+internal fun phoneSearchTiles(items: PhoneTiles): SearchTiles<ArtworkTileModel> = SearchTiles.of(items) { person, origin ->
+    ArtworkTileModel(id = person.id, title = person.name, image = ArtworkImage.of(person.photoUrl, origin), description = person.name)
+}
+
+@Composable
+internal fun SearchContent(
+    state: SearchUiState<ArtworkTileModel>,
+    field: TextFieldState,
+    onSubmit: () -> Unit,
+    onRecent: (String) -> Unit,
+    onClearRecent: () -> Unit,
+    open: (SearchGroupKind, Long) -> PleyKey?,
+) {
+    val navigator = LocalPhoneNavigator.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    // Scrolling the results puts the keyboard away.
+    val hideOnScroll = remember(keyboard) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && available.y != 0f) keyboard?.hide()
+                return Offset.Zero
+            }
+        }
+    }
+    Column(Modifier.fillMaxSize().testTag(SEARCH_PAGE)) {
+        SearchBar(
+            field = field,
+            onSubmit = {
+                onSubmit()
+                keyboard?.hide()
+                focusManager.clearFocus()
+            },
+            autoFocus = state.query.isEmpty(),
+        )
+        OfflineBanner()
+        Box(Modifier.weight(1f).fillMaxWidth().nestedScroll(hideOnScroll)) {
+            when (val results = state.results) {
+                SearchResultsState.Idle -> Recent(state.recent, onRecent, onClearRecent)
+                is SearchResultsState.Loading -> Skeletons()
+                is SearchResultsState.Empty -> Message(
+                    title = stringResource(R.string.search_none_title, results.query),
+                    body = stringResource(R.string.search_none_body),
+                    icon = PleyIcons.Search,
+                )
+                is SearchResultsState.Failed -> Message(
+                    title = stringResource(R.string.search_failed),
+                    body = describe(results.error).replaceFirstChar { it.uppercase() },
+                    icon = PleyIcons.CircleAlert,
+                )
+                is SearchResultsState.Ready -> Results(
+                    results,
+                    onOpen = { group, id -> open(group, id)?.let(navigator::open) },
+                    onActions = { id -> navigator.open(PleyKey.ItemActions(id)) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The search bar docked at the top: a 56 dp pill in [surface3][PleyColors.Surface3]
+ * with the search glyph, the field and Clear. The keyboard's action is
+ * Search. [autoFocus] raises the keyboard the first time the page shows.
+ */
+@Composable
+private fun SearchBar(field: TextFieldState, onSubmit: () -> Unit, autoFocus: Boolean) {
+    val metrics = LocalPhoneMetrics.current
+    val focus = remember { FocusRequester() }
+    var focusedOnce by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (autoFocus && !focusedOnce) runCatching { focus.requestFocus() }
+        focusedOnce = true
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(horizontal = metrics.margin, vertical = 8.dp)
+            .height(56.dp)
+            .background(PleyColors.Surface3, PleyShape.Pill)
+            .padding(start = 16.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(PleyIcons.Search, contentDescription = null, size = 22.dp, tint = PleyColors.Muted)
+        Spacer(Modifier.width(12.dp))
+        val label = stringResource(R.string.search_field)
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            if (field.text.isEmpty()) {
+                Text(label, style = MaterialTheme.typography.bodyLarge, color = PleyColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            BasicTextField(
+                state = field,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focus)
+                    .semantics { contentDescription = label }
+                    .testTag(SEARCH_FIELD),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = PleyColors.Fg),
+                cursorBrush = SolidColor(PleyColors.AccentBright),
+                lineLimits = TextFieldLineLimits.SingleLine,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, imeAction = ImeAction.Search),
+                onKeyboardAction = { onSubmit() },
+            )
+        }
+        if (field.text.isNotEmpty()) {
+            PleyIconButton(PleyIcons.X, stringResource(R.string.search_clear_field), onClick = { field.clearText() }, tint = PleyColors.Muted)
+        } else {
+            Spacer(Modifier.width(12.dp))
+        }
+    }
+}
+
+/** Before typing: the recent searches with Clear, or what search finds. */
+@Composable
+private fun Recent(recent: List<String>, onRecent: (String) -> Unit, onClear: () -> Unit) {
+    if (recent.isEmpty()) {
+        Message(stringResource(R.string.search_empty_title), stringResource(R.string.search_empty_body), icon = PleyIcons.Search)
+        return
+    }
+    val margin = LocalPhoneMetrics.current.margin
+    LazyColumn(Modifier.fillMaxSize().testTag(SEARCH_RECENT), contentPadding = PaddingValues(bottom = 24.dp)) {
+        item(key = "header", contentType = "header") {
+            Row(
+                Modifier.fillMaxWidth().padding(start = margin, end = margin - 8.dp, top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.search_recent),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = PleyColors.Fg,
+                    modifier = Modifier.weight(1f).semantics { heading() },
+                )
+                PleyTextButton(stringResource(R.string.search_recent_clear), onClick = onClear)
+            }
+        }
+        items(recent, key = { it }, contentType = { "recent" }) { query ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .clickable(role = Role.Button) { onRecent(query) }
+                    .padding(horizontal = margin),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(PleyIcons.History, contentDescription = null, size = 20.dp, tint = PleyColors.Muted)
+                Spacer(Modifier.width(16.dp))
+                Text(query, style = MaterialTheme.typography.bodyLarge, color = PleyColors.Fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/** The results: a line saying what they are for (with a spinner while newer ones load), then a row per group. */
+@Composable
+private fun Results(
+    results: SearchResultsState.Ready<ArtworkTileModel>,
+    onOpen: (SearchGroupKind, Long) -> Unit,
+    onActions: (Long) -> Unit,
+) {
+    val margin = LocalPhoneMetrics.current.margin
+    val list = rememberLazyListState()
+    LazyColumn(
+        state = list,
+        modifier = Modifier.fillMaxSize().testTag(SEARCH_RESULTS),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(PleyPhone.SectionGap),
+    ) {
+        item(key = "for", contentType = "for") {
+            Row(Modifier.padding(horizontal = margin), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(R.string.search_results_for, results.query),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = PleyColors.Muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (results.loading) {
+                    Spacer(Modifier.width(8.dp))
+                    DelayedSpinner(stringResource(R.string.search_loading), size = 16.dp)
+                }
+            }
+        }
+        items(results.groups, key = { it.kind.name }, contentType = { it.kind.tileKind }) { group ->
+            ResultRow(group, onOpen = { onOpen(group.kind, it) }, onActions = if (group.kind == SearchGroupKind.People) null else onActions)
+        }
+    }
+}
+
+/** One group: its name and count, then its cards in a row that scrolls sideways. */
+@Composable
+private fun ResultRow(group: SearchGroup<ArtworkTileModel>, onOpen: (Long) -> Unit, onActions: ((Long) -> Unit)?) {
+    val metrics = LocalPhoneMetrics.current
+    val kind = group.kind.tileKind
+    val width = rowCardWidth(kind, metrics.contentWidth - metrics.margin * 2)
+    val name = groupName(group.kind)
+    val spoken = pluralStringResource(R.plurals.search_group_count, group.count, name, group.count.toString())
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .padding(horizontal = metrics.margin)
+                .heightIn(min = 32.dp)
+                .clearAndSetSemantics {
+                    contentDescription = spoken
+                    heading()
+                },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(name, style = MaterialTheme.typography.titleLarge, color = PleyColors.Fg)
+            Spacer(Modifier.width(8.dp))
+            Text(group.count.toString(), style = MaterialTheme.typography.bodyMedium, color = PleyColors.Subtle)
+        }
+        Spacer(Modifier.height(PleyPhone.HeaderToContent - PRESS_ROOM))
+        LazyRow(
+            state = rememberHubRowState(),
+            modifier = Modifier.fillMaxWidth().testTag(SEARCH_ROW + group.kind.name),
+            contentPadding = PaddingValues(horizontal = metrics.margin, vertical = PRESS_ROOM),
+            horizontalArrangement = Arrangement.spacedBy(PleyPhone.TileGap),
+        ) {
+            items(group.tiles, key = { it.id }, contentType = { kind }) { tile ->
+                MediaCard(
+                    model = tile,
+                    kind = kind,
+                    onClick = { onOpen(tile.id) },
+                    onLongClick = onActions?.let { { it(tile.id) } },
+                    modifier = Modifier.width(width),
+                )
+            }
+        }
+    }
+}
+
+/** Two rows of skeleton cards while the first answer comes. */
+@Composable
+private fun Skeletons() {
+    val skeleton = rememberSkeleton(animated = true)
+    val metrics = LocalPhoneMetrics.current
+    Column(Modifier.fillMaxSize().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(PleyPhone.SectionGap)) {
+        repeat(2) {
+            SkeletonRow(skeleton, TileKind.Poster, metrics.margin, rowCardWidth(TileKind.Poster, metrics.contentWidth - metrics.margin * 2))
+        }
+    }
+}
+
+@Composable
+private fun SkeletonRow(skeleton: SkeletonState, kind: TileKind, margin: androidx.compose.ui.unit.Dp, width: androidx.compose.ui.unit.Dp) {
+    Column(Modifier.fillMaxWidth()) {
+        Box(Modifier.padding(horizontal = margin).size(120.dp, 22.dp).background(PleyColors.Surface2, PleyShape.Badge))
+        Spacer(Modifier.height(PleyPhone.HeaderToContent))
+        Row(Modifier.padding(horizontal = margin), horizontalArrangement = Arrangement.spacedBy(PleyPhone.TileGap)) {
+            repeat(4) { SkeletonTile(skeleton, kind, TileStyle.Phone, width = width) }
+        }
+    }
+}
+
+@Composable
+private fun Message(title: String, body: String, icon: PleyIcon? = null) {
+    Column(Modifier.fillMaxSize().padding(top = 48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        EmptyState(title = title, body = body, icon = icon)
+    }
+}
+
+@Composable
+private fun groupName(kind: SearchGroupKind): String = stringResource(
+    when (kind) {
+        SearchGroupKind.People -> R.string.search_group_people
+        SearchGroupKind.Movies -> R.string.search_group_movies
+        SearchGroupKind.Shows -> R.string.search_group_shows
+        SearchGroupKind.Seasons -> R.string.search_group_seasons
+        SearchGroupKind.Episodes -> R.string.search_group_episodes
+        SearchGroupKind.Artists -> R.string.search_group_artists
+        SearchGroupKind.Albums -> R.string.search_group_albums
+        SearchGroupKind.Tracks -> R.string.search_group_tracks
+    },
+)
+
+/** How a group's cards are drawn: people as circles, the rest by their look. */
+internal val SearchGroupKind.tileKind: TileKind
+    get() = if (this == SearchGroupKind.People) {
+        TileKind.Person
+    } else {
+        when (look) {
+            TileLook.Landscape -> TileKind.Landscape
+            TileLook.Square -> TileKind.Square
+            else -> TileKind.Poster
+        }
+    }
+
+/** Room above and below cards for a pressed card's growth and ring (the kit's rows keep the same). */
+private val PRESS_ROOM = 6.dp
+
+internal const val SEARCH_PAGE = "pley.search"
+internal const val SEARCH_FIELD = "pley.search.field"
+internal const val SEARCH_RECENT = "pley.search.recent"
+internal const val SEARCH_RESULTS = "pley.search.results"
+internal const val SEARCH_ROW = "pley.search.row."

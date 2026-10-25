@@ -188,15 +188,25 @@ class PlaylistViewModel<T : Any>(
      * [send] is false (a TV's move mode sends once, when it ends).
      */
     fun move(from: Int, to: Int, send: Boolean = true) {
-        val page = page ?: return
-        if (!page.editable) return
-        // The order shown, including moves the page hasn't drawn yet.
-        val gone = hidden.value
-        val ids = (order.value ?: page.rows.map { it.entryId }).filterNot { it in gone }
+        val ids = shownOrder() ?: return
         if (from !in ids.indices || to !in ids.indices || from == to) return
         val next = Playlists.moved(ids, from, to)
         order.value = next
         if (send) orders.trySend(next)
+    }
+
+    /** Moves [entryId] [by] places (-1 up, 1 down), from where it is now, moves not yet drawn included. */
+    fun moveBy(entryId: Long, by: Int, send: Boolean = true) {
+        val from = shownOrder()?.indexOf(entryId) ?: return
+        if (from >= 0) move(from, from + by, send)
+    }
+
+    /** The entries' order shown, including moves the page hasn't drawn yet; `null` when they can't move. */
+    private fun shownOrder(): List<Long>? {
+        val page = page ?: return null
+        if (!page.editable) return null
+        val gone = hidden.value
+        return (order.value ?: page.rows.map { it.entryId }).filterNot { it in gone }
     }
 
     /** Sends the order shown now (after moves made with `send = false`). */

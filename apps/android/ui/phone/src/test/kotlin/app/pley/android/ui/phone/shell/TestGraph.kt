@@ -34,6 +34,10 @@ import app.pley.android.data.TrackDefaultsRepository
 import app.pley.android.data.WatchStateRepository
 import app.pley.android.model.CollectionSummary
 import app.pley.android.model.Hubs
+import app.pley.android.model.PlaylistKind
+import app.pley.android.model.PlaylistDetail
+import app.pley.android.model.PlaylistSummary
+import app.pley.android.model.SearchResults
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ItemSummary
 import app.pley.android.model.Library
@@ -139,10 +143,25 @@ class TestGraph(server: String? = SERVER) : ScreensGraph {
             override suspend fun next(itemId: Long): ItemSummary? = unused("next")
             override fun prefetch(itemId: Long) = Unit
         }
-        override val search: SearchRepository get() = unused("search")
+        // The Search tab: nothing searched yet, no recent searches.
+        override val search = object : SearchRepository {
+            override fun search(query: String): Flow<Loadable<SearchResults>> = flowOf(Loadable.Ready(SearchResults(), fresh = true))
+            override val recent: Flow<List<String>> = flowOf(emptyList())
+        }
         override val people: PeopleRepository get() = unused("people")
         override val collections: CollectionsRepository get() = unused("collections")
-        override val playlists: PlaylistsRepository get() = unused("playlists")
+        // The Playlists tab: none yet.
+        override val playlists = object : PlaylistsRepository {
+            override fun playlists(): Flow<Loadable<List<PlaylistSummary>>> = flowOf(Loadable.Ready(emptyList(), fresh = true))
+            override fun playlist(playlistId: Long): Flow<Loadable<PlaylistDetail>> = flowOf(Loadable.Loading)
+            override suspend fun create(title: String, kind: PlaylistKind?, itemIds: List<Long>): Long = unused("create")
+            override suspend fun createSmart(title: String, libraryId: Long, query: String): Long = unused("createSmart")
+            override suspend fun rename(playlistId: Long, title: String) = unused("rename")
+            override suspend fun delete(playlistId: Long) = unused("delete")
+            override suspend fun add(playlistId: Long, itemIds: List<Long>) = unused("add")
+            override suspend fun remove(playlistId: Long, entryIds: List<Long>) = unused("remove")
+            override suspend fun reorder(playlistId: Long, entryIds: List<Long>) = unused("reorder")
+        }
         override val history: HistoryRepository get() = unused("history")
         override val watchState: WatchStateRepository get() = unused("watchState")
         override val trackDefaults: TrackDefaultsRepository get() = unused("trackDefaults")

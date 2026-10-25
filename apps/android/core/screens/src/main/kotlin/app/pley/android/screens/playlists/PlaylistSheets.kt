@@ -43,6 +43,10 @@ data class AddToPlaylistUiState(
     val playlists: Loadable<List<PlaylistCard>>,
     /** A change is on its way: the sheet's buttons wait. */
     val busy: Boolean,
+    /** The first item, whose backdrop the TV shows behind its panel; `null` while it loads. */
+    val lead: ItemSummary? = null,
+    /** The server's address, for the pictures. */
+    val origin: String = "",
 )
 
 /** The outcome of adding, for the toast the sheet leaves behind. */
@@ -102,6 +106,8 @@ class AddToPlaylistViewModel(
                 list.filter { it.smartFilter.isNullOrEmpty() && (kind == null || it.kind == kind) }.map { Playlists.card(it, origin) }
             },
             busy = busy,
+            lead = known?.firstOrNull(),
+            origin = origin,
         )
     }
         .flowOn(deps.compute)

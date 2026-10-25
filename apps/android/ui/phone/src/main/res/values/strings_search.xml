@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Search (apps/web/src/pages/SearchPage.tsx, design spec §4.5). -->
+    <string name="search_field">Search movies, shows, people…</string>
+    <string name="search_clear_field">Clear</string>
+    <string name="search_recent">Recent searches</string>
+    <string name="search_recent_clear">Clear</string>
+    <string name="search_empty_title">Search your libraries</string>
+    <string name="search_empty_body">Find movies, shows, episodes, people, artists, albums and tracks.</string>
+    <string name="search_results_for">Results for “%1$s”</string>
+    <string name="search_loading">Searching…</string>
+    <string name="search_none_title">No results for “%1$s”</string>
+    <string name="search_none_body">Try a different spelling or fewer words.</string>
+    <string name="search_failed">Search failed</string>
+
+    <!-- The groups results come in, in their order. -->
+    <string name="search_group_people">People</string>
+    <string name="search_group_movies">Movies</string>
+    <string name="search_group_shows">Shows</string>
+    <string name="search_group_seasons">Seasons</string>
+    <string name="search_group_episodes">Episodes</string>
+    <string name="search_group_artists">Artists</string>
+    <string name="search_group_albums">Albums</string>
+    <string name="search_group_tracks">Tracks</string>
+    <!-- "Movies, 12 results", for screen readers. -->
+    <plurals name="search_group_count">
+        <item quantity="one">%1$s, %2$s result</item>
+        <item quantity="other">%1$s, %2$s results</item>
+    </plurals>
+</resources>

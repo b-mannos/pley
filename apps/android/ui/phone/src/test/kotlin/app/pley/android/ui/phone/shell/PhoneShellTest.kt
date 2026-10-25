@@ -35,8 +35,6 @@ class PhoneShellTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private fun placeholder(name: String) = compose.onNodeWithText("$name isn't built yet")
-
     /** Home, over a library with nothing in it yet. */
     private fun showsHome() = shows("Nothing here yet")
 
@@ -138,13 +136,13 @@ class PhoneShellTest {
         itemPage().assertExists()
 
         tab(PhoneTab.Search).performClick()
-        placeholder("Search").assertExists()
+        shows("Search your libraries")
         tab(PhoneTab.Libraries).performClick()
         itemPage().assertExists()
 
         tab(PhoneTab.Search).performClick()
         restore.emulateSavedInstanceStateRestore()
-        placeholder("Search").assertExists()
+        shows("Search your libraries")
         tab(PhoneTab.Search).assertIsSelected()
         tab(PhoneTab.Libraries).performClick()
         itemPage().assertExists()

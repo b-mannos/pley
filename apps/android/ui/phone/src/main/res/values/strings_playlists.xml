@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The playlists page (apps/web/src/pages/playlists/PlaylistsPage.tsx). -->
+    <string name="playlists_title">Playlists</string>
+    <string name="playlists_new">New playlist</string>
+    <string name="playlists_failed">Couldn\'t load your playlists</string>
+    <string name="playlists_none_title">No playlists yet</string>
+    <string name="playlists_none_body">Make one here, or use “Add to playlist” on a movie, show, album or episode (also when long-pressing a poster).</string>
+    <string name="playlists_smart">Smart</string>
+
+    <!-- A playlist's page (PlaylistPage.tsx, design spec §4.9). -->
+    <string name="playlist_video">Video playlist</string>
+    <string name="playlist_music">Music playlist</string>
+    <string name="playlist_play">Play</string>
+    <string name="playlist_shuffle">Shuffle</string>
+    <string name="playlist_rename">Rename playlist</string>
+    <string name="playlist_delete">Delete playlist</string>
+    <string name="playlist_failed">Couldn\'t load this playlist</string>
+    <string name="playlist_not_found">Playlist not found</string>
+    <string name="playlist_not_found_body">It was deleted, or it belongs to another profile.</string>
+    <string name="playlist_empty_smart">Nothing matches this playlist\'s filter yet.</string>
+    <string name="playlist_empty_video">This playlist is empty. Use “Add to playlist” on a movie, show or episode, or long-press a poster.</string>
+    <string name="playlist_empty_music">This playlist is empty. Use “Add to playlist” on an artist or album, or long-press a cover.</string>
+    <string name="playlist_play_entry">Play %1$s</string>
+    <string name="playlist_move_up">Move up</string>
+    <string name="playlist_move_down">Move down</string>
+    <string name="playlist_remove">Remove from playlist</string>
+    <string name="playlist_removed">Removed “%1$s”</string>
+    <string name="playlist_undo">Undo</string>
+    <string name="playlist_deleted">Playlist deleted</string>
+    <string name="playlist_delete_title">Delete playlist?</string>
+    <string name="playlist_delete_body">“%1$s” will be deleted. What\'s in it stays in your libraries.</string>
+    <string name="playlist_delete_confirm">Delete</string>
+    <string name="playlist_rename_save">Save</string>
+
+    <!-- New playlist and Save these filters (PlaylistFormModal, SaveFiltersModal). -->
+    <string name="playlist_form_title">Title</string>
+    <string name="playlist_form_for">For</string>
+    <string name="playlist_form_video">Movies &amp; TV</string>
+    <string name="playlist_form_music">Music</string>
+    <string name="playlist_form_create">Create</string>
+    <string name="playlist_form_save">Save</string>
+    <string name="playlist_smart_title">Save these filters</string>
+    <string name="playlist_smart_body">%1$s. It keeps up with the library by itself.</string>
+    <string name="playlist_smart_body_plain">It keeps up with the library by itself.</string>
+
+    <!-- Add to playlist (AddToPlaylistModal.tsx). -->
+    <string name="add_to_playlist">Add to playlist</string>
+    <string name="add_new_video">New video playlist</string>
+    <string name="add_new_music">New music playlist</string>
+    <string name="add_create">Create</string>
+    <string name="add_none_video">No video playlists yet: name one above.</string>
+    <string name="add_none_music">No music playlists yet: name one above.</string>
+    <string name="add_added">Added to %1$s</string>
+    <string name="add_added_many">Added %1$s items to %2$s</string>
+    <string name="add_nothing">Nothing to add</string>
+</resources>
