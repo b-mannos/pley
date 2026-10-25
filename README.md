@@ -196,9 +196,15 @@ Archive belong to their owners.
 - `npm run desktop` runs the desktop app (Rust, and on Linux WebKitGTK:
   `libwebkit2gtk-4.1-dev`); `npm run build -w apps/desktop` makes its
   installers.
-- The Android app builds with the Android SDK and JDK 17 or newer:
-  `./gradlew testDebugUnitTest assembleDebug` in `apps/android`, then
-  `adb install app/build/outputs/apk/debug/app-debug.apk`.
+- The Android app builds with the Android SDK and JDK 17 or newer (on
+  Windows, Android Studio's: `JAVA_HOME=C:\Program Files\Android\Android
+  Studio\jbr`). In `apps/android`, `./gradlew testDebugUnitTest lintDebug
+  assembleDebug assembleStoreRelease` tests, lints and builds every module,
+  as CI does, then `pwsh ../../scripts/check-android.ps1` checks the
+  release's libraries, native code and size. Builds come in two flavors,
+  `store` and `direct`: `adb install
+  app/build/outputs/apk/store/debug/app-store-debug.apk` installs the debug
+  app. [docs/ANDROID.md](docs/ANDROID.md) has the modules and the rest.
 - `cargo clippy --workspace --all-targets` and `cargo fmt --all` lint and
   format the Rust code; `scripts/check-licenses.ps1` checks the license
   boundary.

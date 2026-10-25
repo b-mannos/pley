@@ -151,7 +151,7 @@ jobs:
   android:
     name: Android app
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: apps/android
@@ -168,12 +168,36 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/master' }}
-      - run: ./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon
+      # Every module's unit tests and lint, the debug app, and the store
+      # release through R8 (minified and shrunk, unsigned).
+      - name: Test, lint and build
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleStoreRelease --no-daemon
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pley-android-debug
           path: apps/android/app/build/outputs/apk/store/debug/app-store-debug.apk
           if-no-files-found: error
+          retention-days: 14
+      # R8's mapping turns the release's stack traces back into names.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pley-android-release
+          path: |
+            apps/android/app/build/outputs/apk/store/release/app-store-release-unsigned.apk
+            apps/android/app/build/outputs/mapping/storeRelease/mapping.txt
+          if-no-files-found: error
+          retention-days: 14
+      # Allowed libraries only (no FFmpeg, mpv or GPL code), no native code
+      # but AndroidX's own, and the APK's size, which goes to the job summary.
+      - name: Licences, native code and size of the release
+        shell: pwsh
+        run: ../../scripts/check-android.ps1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: pley-android-reports
+          path: apps/android/**/build/reports/
+          if-no-files-found: ignore
           retention-days: 14
 
   licenses:

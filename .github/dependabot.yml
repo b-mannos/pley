@@ -33,6 +33,34 @@ updates:
       npm:
         update-types: [minor, patch]
 
+  # The Android app's libraries and plugins (gradle/libs.versions.toml).
+  - package-ecosystem: gradle
+    directory: /apps/android
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      androidx:
+        patterns: ["androidx.*"]
+        exclude-patterns: ["androidx.compose*", "androidx.media3*"]
+        update-types: [minor, patch]
+      compose:
+        patterns: ["androidx.compose*"]
+        update-types: [minor, patch]
+      media3:
+        patterns: ["androidx.media3*"]
+        update-types: [minor, patch]
+      kotlin:
+        patterns: ["org.jetbrains.kotlin*", "org.jetbrains.kotlinx*"]
+        update-types: [minor, patch]
+      square:
+        patterns: ["com.squareup*"]
+        update-types: [minor, patch]
+      coil:
+        patterns: ["io.coil-kt*"]
+        update-types: [minor, patch]
+
   - package-ecosystem: docker
     directory: /deploy/docker
     schedule:
