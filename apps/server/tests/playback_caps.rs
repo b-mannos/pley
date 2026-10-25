@@ -288,8 +288,12 @@ fn why_each_row_is_not_played_as_it_is() {
     // Profile 5 has no base layer: tone-mapped, never repackaged.
     assert_eq!(reasons(fire_tv_lite(), "P5"), ["Dolby Vision P5 needs a Dolby Vision screen: it's converted to SDR."]);
     // Profile 7: its HDR10 base layer, repackaged; tone-mapped on an SDR
-    // screen.
-    assert_eq!(reasons(fire_tv_4k_max(), "P7"), ["Dolby Vision P7 plays as its HDR10 base layer, repackaged."]);
+    // screen. (Made 8.1 for Dolby Vision players that read master
+    // playlists: playback_dv.rs.)
+    let mut no_master = fire_tv_4k_max();
+    no_master["hls"]["master_playlist"] = json!(false);
+    assert_eq!(reasons(no_master, "P7"), ["Dolby Vision P7 plays as its HDR10 base layer, repackaged."]);
+    assert_eq!(reasons(fire_tv_4k_max(), "P7"), ["Dolby Vision P7 is converted to profile 8.1 for this player."]);
     assert_eq!(reasons(sdr_phone(), "P7"), ["Dolby Vision P7 is converted to SDR for this screen."]);
     assert_eq!(reasons(sdr_phone(), "HDR10+"), ["HDR10+ is converted to SDR for this screen."]);
     // Profile 10 is AV1 underneath: no 10-bit AV1 decoder, no play.

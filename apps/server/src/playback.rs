@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use pley_transcoder_api::{
-    AudioCodec, AudioMode, AudioRequest, DynamicRange, JobRequest, JobStatus, MediaInfo, MediaStream, StreamKind,
-    SubtitleBurnRequest, VideoCodec, VideoMode, VideoRequest, dynamic_range_label,
+    AudioCodec, AudioMode, AudioRequest, DolbyVisionMode, DynamicRange, JobRequest, JobStatus, MediaInfo, MediaStream,
+    StreamKind, SubtitleBurnRequest, VideoCodec, VideoMode, VideoRequest, dynamic_range_label,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
@@ -183,6 +183,14 @@ impl Caps {
     /// The version 2 player shows these subtitles itself.
     fn shows_subtitles(&self, codec: &str) -> bool {
         self.is_v2() && self.subtitle_codecs.as_deref().is_some_and(|list| listed(list, codec))
+    }
+
+    /// A version 2 player that reads multivariant playlists: its HLS
+    /// sessions start at `master.m3u8`, whose `CODECS` can name Dolby
+    /// Vision, so its remuxes keep it (docs/API.md, "Dolby Vision
+    /// remuxes").
+    pub fn master_playlist(&self) -> bool {
+        self.is_v2() && self.hls.as_ref().is_some_and(|hls| hls.master_playlist)
     }
 }
 
@@ -378,15 +386,19 @@ struct VideoVerdict {
     /// The stream can be copied into HLS and play right (Dolby Vision
     /// profile 7 as its HDR10 base layer, say).
     copy: bool,
+    /// What a copy does with Dolby Vision.
+    dolby_vision: DolbyVisionMode,
+    /// A copy leaves HDR10+ out.
+    strip_hdr10plus: bool,
     reasons: Vec<String>,
 }
 
 impl VideoVerdict {
     fn plays() -> Self {
-        VideoVerdict { direct: true, copy: true, reasons: Vec::new() }
+        VideoVerdict { direct: true, copy: true, ..Default::default() }
     }
     fn no(reason: String) -> Self {
-        VideoVerdict { direct: false, copy: false, reasons: vec![reason] }
+        VideoVerdict { direct: false, copy: false, reasons: vec![reason], ..Default::default() }
     }
 }
 
@@ -408,6 +420,14 @@ const DV_BL_HLG: i64 = 4;
 ///   layer plays; profile 5, with no base layer, is tone-mapped, never
 ///   repackaged (an MPEG-TS remux loses the Dolby Vision signalling, which
 ///   leaves its colours wrong).
+///
+/// Players that read multivariant playlists ([`Caps::master_playlist`])
+/// get Dolby Vision kept in remuxes, named in the playlist's `CODECS`:
+/// profile 5 too when the player lists it; profile 7 converted to 8.1 for
+/// a player listing 8 but not 7; and Dolby Vision + HDR10+ streams
+/// repackaged without their HDR10+ for any player that would decode them
+/// as Dolby Vision, never played as they are (androidx/media#1895). Without
+/// a master playlist, those are repackaged as their base layer.
 fn video_v2(v: &MediaStream, caps: &Caps) -> VideoVerdict {
     let label = v.dynamic_range_label();
     let to_sdr = || format!("{label} is converted to SDR for this screen.");
@@ -419,16 +439,22 @@ fn video_v2(v: &MediaStream, caps: &Caps) -> VideoVerdict {
         DynamicRange::Hdr10 | DynamicRange::Hdr10plus | DynamicRange::Hlg => VideoVerdict::no(to_sdr()),
         DynamicRange::DolbyVision => {
             let profile = v.dv_profile.unwrap_or(0);
-            let decoder = caps
-                .dolby_vision_profiles
-                .iter()
-                .flatten()
-                .find(|d| d.profile == profile)
-                .filter(|_| caps.shows("dolby_vision"));
-            let level_ok = match (v.dv_level, decoder.and_then(|d| d.max_level)) {
+            let decoder_of = |profile: i64| {
+                caps.dolby_vision_profiles
+                    .iter()
+                    .flatten()
+                    .find(|d| d.profile == profile)
+                    .filter(|_| caps.shows("dolby_vision"))
+            };
+            let takes_level = |d: &DolbyVisionDecoder| match (v.dv_level, d.max_level) {
                 (Some(level), Some(max)) => level <= max,
                 _ => true,
             };
+            let decoder = decoder_of(profile);
+            let level_ok = decoder.is_none_or(takes_level);
+            // Remuxes keep Dolby Vision only where a master playlist names it.
+            let signal = caps.master_playlist() && v.codec == "hevc";
+            let hybrid = v.hdr10plus == Some(true);
             // What plays when Dolby Vision itself doesn't: the base layer.
             let compat = v.dv_bl_compat.or((profile == 8).then_some(DV_BL_HDR10));
             let base = match (profile, compat) {
@@ -449,7 +475,37 @@ fn video_v2(v: &MediaStream, caps: &Caps) -> VideoVerdict {
                 _ => VideoVerdict::no(format!("{label} needs a Dolby Vision screen: it's converted to SDR.")),
             };
             match decoder {
-                Some(_) if level_ok => VideoVerdict { direct: true, copy: base.copy, reasons: Vec::new() },
+                // Dolby Vision decoders show black, or freeze, when HDR10+
+                // comes with it (androidx/media#1895): never as it is.
+                Some(_) if level_ok && hybrid => {
+                    if signal {
+                        return VideoVerdict {
+                            direct: false,
+                            copy: true,
+                            dolby_vision: DolbyVisionMode::Signal,
+                            strip_hdr10plus: true,
+                            reasons: vec![format!(
+                                "{label} plays without its HDR10+ metadata, which this player's Dolby Vision \
+                                 decoder can't take with it."
+                            )],
+                        };
+                    }
+                    let mut base = base;
+                    if base.direct {
+                        base.direct = false;
+                        base.reasons.push(format!(
+                            "{label} with HDR10+ plays as its base layer, repackaged: this player's Dolby Vision \
+                             decoder can't take both."
+                        ));
+                    }
+                    base
+                }
+                Some(_) if level_ok => VideoVerdict {
+                    direct: true,
+                    copy: base.copy || signal,
+                    dolby_vision: if signal { DolbyVisionMode::Signal } else { DolbyVisionMode::Copy },
+                    ..Default::default()
+                },
                 Some(d) if !base.direct => {
                     let mut base = base;
                     let max = d.max_level.unwrap_or_default();
@@ -459,6 +515,15 @@ fn video_v2(v: &MediaStream, caps: &Caps) -> VideoVerdict {
                     );
                     base
                 }
+                // Profile 7 for a player that decodes 8.1: converted while
+                // repackaged (rather than its base layer alone).
+                _ if profile == 7 && signal && decoder_of(8).is_some_and(takes_level) => VideoVerdict {
+                    direct: false,
+                    copy: true,
+                    dolby_vision: DolbyVisionMode::To81,
+                    strip_hdr10plus: hybrid,
+                    reasons: vec![format!("{label} is converted to profile 8.1 for this player.")],
+                },
                 _ => base,
             }
         }
@@ -665,12 +730,17 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     // copied into HLS (a profile 7 base layer, say), which version 1 takes
     // to be the same.
     let mut video_copy_ok = true;
+    // What a copy does with Dolby Vision and HDR10+ (version 2).
+    let mut copy_dolby_vision = DolbyVisionMode::Copy;
+    let mut copy_strip_hdr10plus = false;
     let video_ok = match video {
         None => true,
         Some(v) if v2 => {
             let verdict = video_v2(v, caps);
             reasons.extend(verdict.reasons);
             video_copy_ok = verdict.copy;
+            copy_dolby_vision = verdict.dolby_vision;
+            copy_strip_hdr10plus = verdict.strip_hdr10plus;
             verdict.direct
         }
         Some(v) => {
@@ -790,7 +860,8 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             max_width: None,
             max_height,
             max_bitrate_kbps: max_bitrate.map(|b| b.saturating_sub(192).max(500)),
-            ..Default::default()
+            dolby_vision: if copy { copy_dolby_vision } else { DolbyVisionMode::Copy },
+            strip_hdr10plus: copy && copy_strip_hdr10plus,
         }
     });
     let audio_req = audio.map(|a| {
@@ -1256,6 +1327,11 @@ pub struct TranscodeInfo {
     /// `gpu` (decode → filters → encode on one GPU), `hybrid`, `cpu` or `copy`.
     pub pipeline: Option<String>,
     pub tonemap: Option<String>,
+    /// What a remux does with Dolby Vision: `kept` (named in the master
+    /// playlist), `converted to 8.1` (profile 7); `None` otherwise.
+    pub dolby_vision: Option<&'static str>,
+    /// A remux leaves out the stream's HDR10+ metadata.
+    pub hdr10plus_stripped: bool,
     pub subtitle_burn: bool,
     pub speed: Option<f64>,
     pub fps: Option<f64>,
@@ -1360,6 +1436,12 @@ pub fn transcode_info(job: &JobStatus) -> TranscodeInfo {
         decoder: video.and_then(|v| v.decoder.clone()),
         pipeline: video.and_then(|v| v.pipeline.clone()),
         tonemap: video.and_then(|v| v.tonemap).map(|t| t.as_str().to_owned()),
+        dolby_vision: video.and_then(|v| v.dolby_vision).and_then(|m| match m {
+            DolbyVisionMode::Copy => None,
+            DolbyVisionMode::Signal => Some("kept"),
+            DolbyVisionMode::To81 => Some("converted to 8.1"),
+        }),
+        hdr10plus_stripped: video.is_some_and(|v| v.hdr10plus_stripped),
         subtitle_burn: video.is_some_and(|v| v.subtitle_burn.is_some()),
         speed: process.and_then(|p| p.speed),
         fps: process.and_then(|p| p.fps),
