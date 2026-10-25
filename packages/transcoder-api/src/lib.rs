@@ -453,6 +453,31 @@ pub struct VideoRequest {
     pub max_bitrate_kbps: Option<u32>,
 }
 
+/// The codec converted audio is encoded to.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum AudioCodec {
+    /// AAC-LC: every player decodes it.
+    #[default]
+    Aac,
+    /// Dolby Digital, up to 5.1 at 640 kbit/s.
+    Ac3,
+    /// Dolby Digital Plus (E-AC-3), for players that decode it or pass it
+    /// through to a receiver.
+    Eac3,
+}
+
+impl AudioCodec {
+    /// FFmpeg's name for the codec (and its encoder).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AudioCodec::Aac => "aac",
+            AudioCodec::Ac3 => "ac3",
+            AudioCodec::Eac3 => "eac3",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AudioRequest {
     /// Audio stream to use (default: the default audio stream).
@@ -460,9 +485,15 @@ pub struct AudioRequest {
     pub stream_index: Option<i64>,
     #[serde(default)]
     pub mode: AudioMode,
-    /// Output channels when transcoding (default 2).
+    /// Codec when transcoding (default AAC).
+    #[serde(default)]
+    pub codec: AudioCodec,
+    /// Output channels when transcoding (default 2), never more than the
+    /// source has.
     #[serde(default)]
     pub channels: Option<u32>,
+    /// Default: 192 kbit/s for stereo AAC, 64 per channel for more; 640 for
+    /// AC-3 and E-AC-3 above stereo.
     #[serde(default)]
     pub bitrate_kbps: Option<u32>,
 }
@@ -854,7 +885,10 @@ mod tests {
         let req: JobRequest =
             serde_json::from_str(r#"{"input":"/m/a.mkv","video":{},"audio":{"mode":"copy"}}"#).unwrap();
         assert_eq!(req.video.unwrap().mode, VideoMode::Transcode);
-        assert_eq!(req.audio.unwrap().mode, AudioMode::Copy);
+        let audio = req.audio.unwrap();
+        assert_eq!((audio.mode, audio.codec), (AudioMode::Copy, AudioCodec::Aac), "AAC unless asked");
+        let audio: AudioRequest = serde_json::from_str(r#"{"codec":"eac3","channels":6}"#).unwrap();
+        assert_eq!((audio.codec, audio.codec.as_str()), (AudioCodec::Eac3, "eac3"));
         assert!(req.options.hardware_decoding);
         assert!(req.options.throttle);
         assert_eq!(req.options.hwaccel, HwAccel::Auto);

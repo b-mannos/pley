@@ -232,9 +232,22 @@ following status codes:
     track's extraction reads the whole file, so it gives up after 20
     minutes, inside the 25 the server waits for the job; a job folder whose
     job isn't made after all (an error, or the request gone) is removed.
-- **Audio.** Copied when the client supports the codec. Otherwise it's
-  transcoded to AAC, downmixed to stereo by default, and resampled to 48 kHz
-  when needed.
+- **Audio.** Copied (`audio.mode = copy`) when the source is AAC, MP3, AC-3
+  or E-AC-3, which MPEG-TS carries; anything else asked to be copied is
+  converted, with a warning. Converted audio is encoded to `audio.codec`:
+  - `aac` (the default): `-c:a aac`, stereo unless `channels` says more (up
+    to 7.1), 192 kbit/s for stereo and 64 per channel above;
+  - `eac3` (Dolby Digital Plus) or `ac3` (Dolby Digital): `-c:a eac3` or
+    `-c:a ac3`, at most 5.1 (`-ac 6`), 640 kbit/s above stereo, 192 for
+    stereo. FFmpeg's own encoders, in every build.
+
+  `channels` never goes above the source's (a stereo track stays stereo),
+  `bitrate_kbps` overrides the defaults within 64 to 640, and audio that
+  isn't at 44.1 or 48 kHz is resampled to 48 kHz (the AC-3 encoders take
+  nothing above 48 kHz). The pley server asks for E-AC-3 5.1 for players
+  whose output has 6 channels or more and that decode E-AC-3 or pass it
+  through, AC-3 5.1 when they take only AC-3, and AAC otherwise (docs/API.md,
+  *Version 2*). The job's audio plan reports the codec as `codec_out`.
 - **Remux.** H.264 video is copied into HLS, with segments cut exactly on the
   source's keyframes.
   - Matroska and WebM: the keyframe index is read instantly from the file's
