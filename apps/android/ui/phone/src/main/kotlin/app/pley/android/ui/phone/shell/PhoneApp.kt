@@ -1,88 +1,350 @@
 package app.pley.android.ui.phone.shell
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
+import androidx.activity.compose.ReportDrawn
+import androidx.activity.compose.ReportDrawnWhen
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.ShortNavigationBarItemDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.WideNavigationRailDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteItem
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
+import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
+import androidx.navigation3.runtime.rememberDecoratedNavEntries
 import androidx.navigation3.runtime.rememberNavBackStack
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
+import androidx.navigation3.scene.DialogSceneStrategy
+import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
 import app.pley.android.common.TestTags
+import app.pley.android.common.perf.StartupSignals
 import app.pley.android.designsystem.PleyColors
-import app.pley.android.screens.PleyKey
-import app.pley.android.ui.phone.R
+import app.pley.android.designsystem.PleyMotion
+import app.pley.android.designsystem.icon.Icon
+import app.pley.android.designsystem.reducedMotion
+import app.pley.android.screens.ScreensGraph
 import app.pley.android.ui.phone.account.accountEntries
 import app.pley.android.ui.phone.home.homeEntries
 import app.pley.android.ui.phone.item.itemEntries
+import app.pley.android.ui.phone.kit.LocalOffline
+import app.pley.android.ui.phone.kit.LocalPhoneDeviceTier
+import app.pley.android.ui.phone.kit.ToastHost
 import app.pley.android.ui.phone.library.libraryEntries
 import app.pley.android.ui.phone.music.musicEntries
 import app.pley.android.ui.phone.onboarding.onboardingEntries
 import app.pley.android.ui.phone.playlists.playlistsEntries
 import app.pley.android.ui.phone.search.searchEntries
+import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 import app.pley.android.ui.phone.theme.PhoneTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
- * The phone and tablet app. A placeholder for now: one back stack whose
- * screens each area adds (its <Area>Entries), and a placeholder for any
- * screen not built yet.
+ * The phone and tablet app (design spec §3.1, architecture.md).
+ *
+ * The first screen comes from [start], read from this device before the
+ * first frame (no server: Servers; no tokens: signing in; otherwise
+ * Home, drawn from what was saved). When the read hasn't finished by the
+ * time the splash screen gives up, [awaitStart] waits for it behind a
+ * blank page. Nothing touches the network, the Keystore or the [graph]'s
+ * data before the first frame; after it, the shell listens for sign-outs,
+ * follows live updates while the app is started, and warms up the
+ * capability probe.
+ *
+ * Once in, the navigation bar (a rail from medium widths) switches
+ * between Home, Libraries, Search, Playlists and Me, each with its own
+ * saved back stack. Getting in is full screen.
  */
 @Composable
-fun PhoneApp() {
+fun PhoneApp(
+    start: PhoneStart?,
+    awaitStart: suspend () -> PhoneStart,
+    graph: () -> ScreensGraph,
+) {
     PhoneTheme {
-        Surface(color = PleyColors.Bg, modifier = Modifier.fillMaxSize().testTag(TestTags.PHONE_ROOT)) {
-            val backStack = rememberNavBackStack(PleyKey.Home)
-            NavDisplay(
-                backStack = backStack,
-                onBack = { backStack.removeLastOrNull() },
-                entryProvider = entryProvider(fallback = { key -> NavEntry(key) { Placeholder(it) { next -> backStack.add(next) } } }) {
-                    onboardingEntries()
-                    homeEntries()
-                    libraryEntries()
-                    itemEntries()
-                    searchEntries()
-                    playlistsEntries()
-                    accountEntries()
-                    musicEntries()
-                },
-            )
+        Box(Modifier.fillMaxSize().background(PleyColors.Bg).testTag(TestTags.PHONE_ROOT)) {
+            val known by produceState(start) { if (value == null) value = awaitStart() }
+            known?.let { PhoneShell(it, graph) }
         }
     }
 }
 
-/** A screen that isn't built yet: its name, and a way to the next placeholder. */
 @Composable
-private fun Placeholder(key: NavKey, open: (NavKey) -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .padding(24.dp)
-            .testTag(TestTags.PLACEHOLDER),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+internal fun PhoneShell(
+    start: PhoneStart,
+    graph: () -> ScreensGraph,
+    onReady: (PhoneShellState, PhoneNavigation) -> Unit = { _, _ -> },
+) {
+    val activity = LocalActivity.current
+    val first = remember { startKey(start) }
+    val navigation = rememberPhoneNavigation(first) { activity?.finish() }
+    val resources = LocalResources.current
+    val shell = remember(navigation) { PhoneShellState(navigation, resources, start.server) }
+    val graphs by rememberUpdatedState(graph)
+    LaunchedEffect(shell) { onReady(shell, navigation) }
+    AfterFirstFrame(shell, graphs)
+
+    if (first == app.pley.android.screens.PleyKey.Home) {
+        val homeDrawn by StartupSignals.homeDrawn.collectAsStateWithLifecycle()
+        ReportDrawnWhen { homeDrawn }
+    } else {
+        ReportDrawn()
+    }
+
+    val tier = remember { graph().device.tier }
+    val entries = remember { shellEntries() }
+    CompositionLocalProvider(
+        LocalPhoneNavigator provides navigation,
+        LocalPhoneShell provides shell,
+        LocalOffline provides shell.offlineState,
+        LocalPhoneDeviceTier provides tier,
     ) {
-        Text("pley", fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = PleyColors.Fg)
-        Text(
-            stringResource(R.string.shell_placeholder_title, key.javaClass.simpleName),
-            style = MaterialTheme.typography.titleLarge,
-            color = PleyColors.Fg,
-        )
-        Text(stringResource(R.string.shell_placeholder_body), color = PleyColors.Muted)
-        if (key == PleyKey.Home) {
-            Button(onClick = { open(PleyKey.Libraries) }) { Text(stringResource(R.string.shell_placeholder_next)) }
+        if (navigation.inside) {
+            key(navigation.generation) { Tabs(navigation, shell, entries) }
+        } else {
+            GettingIn(navigation, shell, entries)
         }
     }
 }
+
+/**
+ * Work that waits for the first frame: the sign-in module's events
+ * (signed out by the server), the server in use, live updates while the
+ * app is started, the music playing, and the capability probe. The
+ * graph's parts are made off the main thread.
+ */
+@Composable
+private fun AfterFirstFrame(shell: PhoneShellState, graph: () -> ScreensGraph) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(shell) {
+        withFrameNanos { }
+        val g = withContext(Dispatchers.Default) { graph() }
+        launch {
+            val events = withContext(Dispatchers.Default) { g.auth.events }
+            events.collect(shell::on)
+        }
+        launch {
+            val active = withContext(Dispatchers.Default) { g.data.servers.active }
+            active.collect { server -> if (server != null) shell.server = server }
+        }
+        launch {
+            val scans = withContext(Dispatchers.Default) { g.data.liveUpdates.scans }
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                scans.collect { shell.scanning = it.isNotEmpty() }
+            }
+        }
+        launch {
+            val music = withContext(Dispatchers.Default) { g.player.music.nowPlaying }
+            music.collect { shell.nowPlaying = it }
+        }
+        launch(Dispatchers.Default) {
+            runCatching { g.caps.capabilities.warmUp() }
+        }
+    }
+}
+
+/** Every screen the phone has, a placeholder for those not built yet, sheets marked as sheets. */
+private fun shellEntries(): (NavKey) -> NavEntry<NavKey> {
+    val provider = entryProvider(fallback = { key -> NavEntry(key) { Placeholder(it) } }) {
+        onboardingEntries()
+        homeEntries()
+        libraryEntries()
+        itemEntries()
+        searchEntries()
+        playlistsEntries()
+        accountEntries()
+        musicEntries()
+    }
+    return { key -> asSheetIfOne(key, provider(key)) }
+}
+
+/** The steps of getting in, full screen, one back stack. */
+@Composable
+private fun GettingIn(navigation: PhoneNavigation, shell: PhoneShellState, entries: (NavKey) -> NavEntry<NavKey>) {
+    Box(Modifier.fillMaxSize()) {
+        Screens(
+            entries = rememberDecoratedNavEntries(navigation.root, rememberDecorators(), entries),
+            onBack = navigation::back,
+        )
+        ToastHost(
+            shell.toasts,
+            Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)),
+        )
+    }
+}
+
+/** In: the navigation bar or rail, each tab's back stack, the mini player and the toasts above the bar. */
+@Composable
+private fun Tabs(navigation: PhoneNavigation, shell: PhoneShellState, entries: (NavKey) -> NavEntry<NavKey>) {
+    val stacks: Map<PhoneTab, NavBackStack<NavKey>> = PhoneTab.entries.associateWith { rememberNavBackStack(it.root) }
+    DisposableEffect(stacks) {
+        navigation.attach(stacks)
+        onDispose { navigation.detach(stacks) }
+    }
+    val decorated: Map<PhoneTab, List<NavEntry<NavKey>>> = PhoneTab.entries.associateWith { tab ->
+        rememberDecoratedNavEntries(stacks.getValue(tab), rememberDecorators(), entries)
+    }
+    val metrics = LocalPhoneMetrics.current
+    val rail = metrics.rail
+    val tab = navigation.tab
+    val itemColors = ShortNavigationBarItemDefaults.colors(
+        selectedIconColor = PleyColors.AccentBright,
+        selectedTextColor = PleyColors.Fg,
+        selectedIndicatorColor = PleyColors.PrimaryContainer,
+        unselectedIconColor = PleyColors.Muted,
+        unselectedTextColor = PleyColors.Muted,
+    )
+    NavigationSuiteScaffold(
+        navigationItems = {
+            PhoneTab.entries.forEach { item ->
+                NavigationSuiteItem(
+                    selected = item == tab,
+                    onClick = { navigation.select(item) },
+                    icon = { Icon(item.icon, contentDescription = null, tint = LocalContentColor.current) },
+                    label = { Text(stringResource(item.label)) },
+                    colors = itemColors,
+                    modifier = Modifier.testTag(TAB_TAG + item.name),
+                )
+            }
+        },
+        navigationSuiteType = if (rail) NavigationSuiteType.WideNavigationRailCollapsed else NavigationSuiteType.ShortNavigationBarCompact,
+        navigationSuiteColors = NavigationSuiteDefaults.colors(
+            shortNavigationBarContainerColor = PleyColors.Bg,
+            shortNavigationBarContentColor = PleyColors.Muted,
+            wideNavigationRailColors = WideNavigationRailDefaults.colors(
+                containerColor = PleyColors.Bg,
+                contentColor = PleyColors.Muted,
+            ),
+        ),
+        containerColor = PleyColors.Bg,
+        contentColor = PleyColors.Fg,
+    ) {
+        val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+        Column(
+            Modifier
+                .fillMaxSize()
+                .drawWithContent {
+                    drawContent()
+                    // The 1 dp hairline between the page and the bar (or the rail).
+                    val hair = 1.dp.toPx()
+                    if (rail) {
+                        val x = if (rtl) size.width - hair / 2f else hair / 2f
+                        drawLine(PleyColors.Surface4, Offset(x, 0f), Offset(x, size.height), hair)
+                    } else {
+                        drawLine(PleyColors.Surface4, Offset(0f, size.height - hair / 2f), Offset(size.width, size.height - hair / 2f), hair)
+                    }
+                },
+        ) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                key(tab) {
+                    Screens(entries = decorated.getValue(tab), onBack = navigation::back)
+                }
+                ToastHost(
+                    shell.toasts,
+                    Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)),
+                )
+            }
+            MiniPlayerSlot(shell.nowPlaying)
+        }
+    }
+    // Back from another tab's first screen goes to Home, then out of the app.
+    BackHandler(enabled = tab != PhoneTab.Home && stacks.getValue(tab).size == 1) { navigation.select(PhoneTab.Home) }
+}
+
+@Composable
+private fun rememberDecorators() = listOf(
+    rememberSaveableStateHolderNavEntryDecorator<NavKey>(),
+    rememberViewModelStoreNavEntryDecorator<NavKey>(),
+)
+
+/**
+ * One back stack's screens: sheets over the screen under them, dialogs as
+ * dialogs, and Material's shared-axis X between screens (design spec §5.1),
+ * following the finger on a predictive back. With reduced motion screens
+ * swap in place.
+ */
+@Composable
+private fun Screens(entries: List<NavEntry<NavKey>>, onBack: () -> Unit) {
+    val reduced = reducedMotion()
+    val strategies = remember { listOf(SheetSceneStrategy(), DialogSceneStrategy<NavKey>()) }
+    NavDisplay(
+        entries = entries,
+        modifier = Modifier.fillMaxSize(),
+        sceneStrategies = strategies,
+        transitionSpec = { sharedAxis(forward = true, reduced) },
+        popTransitionSpec = { sharedAxis(forward = false, reduced) },
+        predictivePopTransitionSpec = { sharedAxis(forward = false, reduced) },
+        onBack = onBack,
+    )
+}
+
+/** Material's shared axis on X in pley's 220 ms: the old screen fades out over the first third, the new one in after it, both sliding 30 dp. */
+private fun AnimatedContentTransitionScope<Scene<NavKey>>.sharedAxis(forward: Boolean, reduced: Boolean): ContentTransform {
+    if (reduced) return EnterTransition.None togetherWith ExitTransition.None
+    val move = tween<androidx.compose.ui.unit.IntOffset>(PleyMotion.SCREEN_MS, easing = FastOutSlowInEasing)
+    val out = PleyMotion.SCREEN_MS / 3
+    val sign = if (forward) 1 else -1
+    val shift = { width: Int -> (width * SHIFT).toInt() }
+    return (slideInHorizontally(move) { sign * shift(it) } + fadeIn(tween(PleyMotion.SCREEN_MS - out, delayMillis = out, easing = LinearEasing))) togetherWith
+        (slideOutHorizontally(move) { -sign * shift(it) } + fadeOut(tween(out, easing = LinearEasing)))
+}
+
+/** 30 dp of a 412 dp phone, as a share of the width, so it needs no density here. */
+private const val SHIFT = 0.073f
+
+/** The test tag of each tab's item in the bar or rail: this and the tab's name. */
+internal const val TAB_TAG = "pley.phone.tab."

@@ -1,0 +1,172 @@
+package app.pley.android.ui.phone.shell
+
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.junit4.StateRestorationTester
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import app.pley.android.auth.SignOutReason
+import app.pley.android.network.ApiException
+import app.pley.android.screens.PleyKey
+import app.pley.android.ui.phone.theme.PhoneTheme
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+
+/**
+ * The phone's shell over placeholder screens: the start gate, nothing
+ * reached before the first frame, the tabs' back stacks, and what happens
+ * when the server refuses or signs the app out.
+ */
+@RunWith(RobolectricTestRunner::class)
+class PhoneShellTest {
+    @get:Rule
+    val compose = createComposeRule()
+
+    private fun placeholder(name: String) = compose.onNodeWithText("$name isn't built yet")
+
+    private fun tab(tab: PhoneTab) = compose.onNodeWithTag(TAB_TAG + tab.name)
+
+    private fun show(start: PhoneStart, graph: TestGraph = TestGraph(start.server)): Shell {
+        val shell = Shell(graph)
+        compose.setContent {
+            PhoneTheme {
+                PhoneShell(start, { graph }) { state, navigation ->
+                    shell.state = state
+                    shell.navigation = navigation
+                }
+            }
+        }
+        compose.waitForIdle()
+        return shell
+    }
+
+    class Shell(val graph: TestGraph) {
+        lateinit var state: PhoneShellState
+        lateinit var navigation: PhoneNavigation
+    }
+
+    @Test
+    fun withoutAServerItStartsAtServersFullScreen() {
+        show(PhoneStart(server = null, signedIn = false))
+        placeholder("Servers").assertExists()
+        tab(PhoneTab.Home).assertDoesNotExist()
+    }
+
+    @Test
+    fun withAServerButNoTokensItStartsSigningInToIt() {
+        val shell = show(PhoneStart(server = TestGraph.SERVER, signedIn = false))
+        placeholder("Sign in").assertExists()
+        tab(PhoneTab.Home).assertDoesNotExist()
+        assertEquals(listOf(PleyKey.SignIn(TestGraph.SERVER)), shell.navigation.root.toList())
+    }
+
+    @Test
+    fun signedInItStartsAtHomeWithTheTabs() {
+        show(PhoneStart(server = TestGraph.SERVER, signedIn = true))
+        placeholder("Home").assertExists()
+        tab(PhoneTab.Home).assertIsSelected()
+        tab(PhoneTab.Me).assertExists()
+    }
+
+    @Test
+    fun nothingIsAskedOfTheDataOrSignInBeforeTheFirstFrame() {
+        val graph = TestGraph()
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            PhoneTheme { PhoneShell(PhoneStart(TestGraph.SERVER, signedIn = true), { graph }) }
+        }
+        // Composed and laid out, but no frame has gone by.
+        assertEquals(emptyList<String>(), graph.touched.toList())
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitUntil(5_000) { graph.fakeCaps.warmUps == 1 && "auth" in graph.touched && "data" in graph.touched }
+        compose.mainClock.autoAdvance = true
+    }
+
+    @Test
+    fun eachTabKeepsItsBackStackAcrossTabsAndRecreation() {
+        val graph = TestGraph()
+        val restore = StateRestorationTester(compose)
+        restore.setContent {
+            PhoneTheme { PhoneShell(PhoneStart(TestGraph.SERVER, signedIn = true), { graph }) }
+        }
+        tab(PhoneTab.Libraries).performClick()
+        placeholder("Libraries").assertExists()
+        compose.onNodeWithText("Open another screen").performClick()
+        placeholder("Item 101").assertExists()
+
+        tab(PhoneTab.Search).performClick()
+        placeholder("Search").assertExists()
+        tab(PhoneTab.Libraries).performClick()
+        placeholder("Item 101").assertExists()
+
+        tab(PhoneTab.Search).performClick()
+        restore.emulateSavedInstanceStateRestore()
+        placeholder("Search").assertExists()
+        tab(PhoneTab.Search).assertIsSelected()
+        tab(PhoneTab.Libraries).performClick()
+        placeholder("Item 101").assertExists()
+        // Choosing the tab shown takes it back to its first screen.
+        tab(PhoneTab.Libraries).performClick()
+        placeholder("Libraries").assertExists()
+    }
+
+    @Test
+    fun backFromAnotherTabsFirstScreenGoesHome() {
+        val shell = show(PhoneStart(TestGraph.SERVER, signedIn = true))
+        tab(PhoneTab.Playlists).performClick()
+        compose.runOnIdle { shell.navigation.back() }
+        placeholder("Home").assertExists()
+        tab(PhoneTab.Home).assertIsSelected()
+    }
+
+    @Test
+    fun aMissingScopeOffersToSignInAgainKeepingTheServer() {
+        val shell = show(PhoneStart(TestGraph.SERVER, signedIn = true))
+        compose.runOnIdle { shell.state.report(ApiException(403, "insufficient_scope", "not allowed", scope = "play")) }
+        compose.onNodeWithText("pley wasn't allowed to do that: sign in again to allow it").assertExists()
+        compose.onNodeWithText("Sign in").performClick()
+        placeholder("Sign in").assertExists()
+        tab(PhoneTab.Home).assertDoesNotExist()
+        assertEquals(listOf(PleyKey.SignIn(TestGraph.SERVER)), shell.navigation.root.toList())
+    }
+
+    @Test
+    fun signedOutByTheServerItGoesBackToSigningInThere() {
+        val shell = show(PhoneStart(TestGraph.SERVER, signedIn = true))
+        compose.waitUntil(5_000) { "auth" in shell.graph.touched }
+        compose.runOnIdle { shell.graph.fakeAuth.signOut(TestGraph.SERVER, SignOutReason.ENDED) }
+        compose.waitUntil(5_000) { !shell.navigation.inside }
+        placeholder("Sign in").assertExists()
+        assertEquals(listOf(PleyKey.SignIn(TestGraph.SERVER)), shell.navigation.root.toList())
+        compose.onNodeWithText("You were signed out: sign in again.").assertExists()
+    }
+
+    @Test
+    fun aSignOutElsewhereLeavesThisServerAlone() {
+        val shell = show(PhoneStart(TestGraph.SERVER, signedIn = true))
+        compose.waitUntil(5_000) { "auth" in shell.graph.touched }
+        compose.runOnIdle { shell.graph.fakeAuth.signOut("http://10.0.0.9:7539") }
+        compose.waitForIdle()
+        assertTrue(shell.navigation.inside)
+        placeholder("Home").assertExists()
+    }
+
+    @Test
+    fun signingInAgainStartsTheTabsOver() {
+        val shell = show(PhoneStart(TestGraph.SERVER, signedIn = true))
+        tab(PhoneTab.Libraries).performClick()
+        compose.onNodeWithText("Open another screen").performClick()
+        compose.runOnIdle { shell.navigation.restart(PleyKey.SignIn(TestGraph.SERVER)) }
+        placeholder("Sign in").assertExists()
+        compose.runOnIdle { shell.navigation.restart(PleyKey.Home) }
+        placeholder("Home").assertExists()
+        tab(PhoneTab.Libraries).performClick()
+        placeholder("Libraries").assertExists()
+    }
+}

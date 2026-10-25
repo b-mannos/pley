@@ -1,0 +1,125 @@
+package app.pley.android.ui.phone.shell
+
+import app.pley.android.auth.AuthGraph
+import app.pley.android.caps.CapsGraph
+import app.pley.android.caps.DefaultPlaybackCapsPolicy
+import app.pley.android.caps.DeviceCapabilities
+import app.pley.android.caps.PlaybackCapsPolicy
+import app.pley.android.common.DeviceProfile
+import app.pley.android.common.FormFactor
+import app.pley.android.common.SavedServer
+import app.pley.android.common.Tier
+import app.pley.android.data.AppSettings
+import app.pley.android.data.CollectionsRepository
+import app.pley.android.data.DataGraph
+import app.pley.android.data.HistoryRepository
+import app.pley.android.data.HubsRepository
+import app.pley.android.data.ItemRepository
+import app.pley.android.data.LibrariesRepository
+import app.pley.android.data.LibraryItemsRepository
+import app.pley.android.data.LiveUpdates
+import app.pley.android.data.PeopleRepository
+import app.pley.android.data.PlayItem
+import app.pley.android.data.PlaylistsRepository
+import app.pley.android.data.ScanState
+import app.pley.android.data.SearchRepository
+import app.pley.android.data.ServersRepository
+import app.pley.android.data.SessionRepository
+import app.pley.android.data.SnapshotStore
+import app.pley.android.data.TrackDefaultsRepository
+import app.pley.android.data.WatchStateRepository
+import app.pley.android.player.MusicControl
+import app.pley.android.player.NowPlaying
+import app.pley.android.player.PlaybackServices
+import app.pley.android.player.PlayerEngine
+import app.pley.android.player.PlayerGraph
+import app.pley.android.screens.PlayerLauncher
+import app.pley.android.screens.ScreensGraph
+import app.pley.android.testing.auth.FakeAuthGraph
+import app.pley.android.testing.caps.FakeDeviceCapabilities
+import java.util.Collections
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOf
+
+/**
+ * The app's graph for the shell's tests: the fake sign-in module, fake
+ * capabilities, and data whose servers, live updates and music the test
+ * drives. Each part records when it is first asked for ([touched]), so a
+ * test can tell what the shell reached before the first frame. Repositories
+ * the shell never uses fail when asked.
+ */
+class TestGraph(server: String? = SERVER) : ScreensGraph {
+    val touched: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    val fakeAuth = FakeAuthGraph().apply { if (server != null) signedInTo += server }
+    val fakeCaps = FakeDeviceCapabilities()
+    val active = MutableStateFlow(server)
+    val scans = MutableStateFlow<List<ScanState>>(emptyList())
+    val music = MutableStateFlow<NowPlaying?>(null)
+
+    override val device = DeviceProfile(FormFactor.Phone, fireTv = false, tier = Tier.T2, model = "test", totalRamBytes = 8L shl 30, lowRam = false)
+
+    override val auth: AuthGraph
+        get() = fakeAuth.also { touched += "auth" }
+
+    override val caps: CapsGraph
+        get() = object : CapsGraph {
+            override val capabilities: DeviceCapabilities = fakeCaps
+            override val policy: PlaybackCapsPolicy = DefaultPlaybackCapsPolicy
+        }.also { touched += "caps" }
+
+    override val player: PlayerGraph
+        get() = object : PlayerGraph {
+            override val engines = PlayerEngine.Factory { _, _, _ -> error("no engines in shell tests") }
+            override val services: PlaybackServices get() = error("no playback in shell tests")
+            override val music = object : MusicControl {
+                override val nowPlaying: StateFlow<NowPlaying?> = this@TestGraph.music
+                override fun pauseForVideo() = Unit
+            }
+        }.also { touched += "player" }
+
+    override val playerLauncher: PlayerLauncher
+        get() = object : PlayerLauncher {
+            override fun play(request: app.pley.android.player.PlayRequest) {
+                touched += "play"
+            }
+        }
+
+    override val data: DataGraph
+        get() = testData.also { touched += "data" }
+
+    private val testData = object : DataGraph {
+        override val servers = object : ServersRepository {
+            override val saved: Flow<List<SavedServer>> = flowOf(emptyList())
+            override val active: StateFlow<String?> = this@TestGraph.active
+            override suspend fun use(server: SavedServer) = Unit
+            override suspend fun forget(origin: String) = Unit
+            override suspend fun clientId(): String = "android-test"
+        }
+        override val liveUpdates = object : LiveUpdates {
+            override val scans: StateFlow<List<ScanState>> = this@TestGraph.scans
+        }
+        override val session: SessionRepository get() = unused("session")
+        override val snapshots: SnapshotStore get() = unused("snapshots")
+        override val libraries: LibrariesRepository get() = unused("libraries")
+        override val hubs: HubsRepository get() = unused("hubs")
+        override val libraryItems: LibraryItemsRepository get() = unused("libraryItems")
+        override val items: ItemRepository get() = unused("items")
+        override val search: SearchRepository get() = unused("search")
+        override val people: PeopleRepository get() = unused("people")
+        override val collections: CollectionsRepository get() = unused("collections")
+        override val playlists: PlaylistsRepository get() = unused("playlists")
+        override val history: HistoryRepository get() = unused("history")
+        override val watchState: WatchStateRepository get() = unused("watchState")
+        override val trackDefaults: TrackDefaultsRepository get() = unused("trackDefaults")
+        override val playItem: PlayItem get() = unused("playItem")
+        override val settings: AppSettings get() = unused("settings")
+    }
+
+    private fun unused(what: String): Nothing = error("the shell doesn't use $what")
+
+    companion object {
+        const val SERVER = "http://192.168.1.20:7539"
+    }
+}
