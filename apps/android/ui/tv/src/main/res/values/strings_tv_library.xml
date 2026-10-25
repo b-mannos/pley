@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- A library's page on TV (apps/web/src/pages/LibraryPage.tsx, design spec §4.2). -->
+    <string name="tv_library_tab_recommended">Recommended</string>
+    <string name="tv_library_tab_library">Library</string>
+    <string name="tv_library_tab_collections">Collections</string>
+
+    <string name="tv_library_sort_title">Title</string>
+    <string name="tv_library_sort_year">Year</string>
+    <string name="tv_library_sort_added">Date added</string>
+    <string name="tv_library_sort_rating">Rating</string>
+    <string name="tv_library_sort_user_rating">Your rating</string>
+    <string name="tv_library_sort_release">Release date</string>
+    <string name="tv_library_sort_duration">Duration</string>
+    <string name="tv_library_sort_last_played">Last played</string>
+    <string name="tv_library_sort_bitrate">Bitrate</string>
+    <string name="tv_library_sort_by">Sort by</string>
+    <string name="tv_library_order">Order</string>
+    <string name="tv_library_ascending">Ascending</string>
+    <string name="tv_library_descending">Descending</string>
+
+    <string name="tv_library_filter">Filter</string>
+    <string name="tv_library_show">Show</string>
+    <string name="tv_library_show_all">All</string>
+    <string name="tv_library_unwatched">Unwatched</string>
+    <string name="tv_library_watched">Watched</string>
+    <string name="tv_library_genre">Genre</string>
+    <string name="tv_library_all_genres">All genres</string>
+    <string name="tv_library_year">Year</string>
+    <string name="tv_library_all_years">All years</string>
+    <string name="tv_library_clear_filters">Clear filters</string>
+    <string name="tv_library_save_as">Save as…</string>
+
+    <plurals name="tv_library_count_movies">
+        <item quantity="one">%s movie</item>
+        <item quantity="other">%s movies</item>
+    </plurals>
+    <plurals name="tv_library_count_shows">
+        <item quantity="one">%s show</item>
+        <item quantity="other">%s shows</item>
+    </plurals>
+    <plurals name="tv_library_count_artists">
+        <item quantity="one">%s artist</item>
+        <item quantity="other">%s artists</item>
+    </plurals>
+    <plurals name="tv_library_count_collections">
+        <item quantity="one">%s collection</item>
+        <item quantity="other">%s collections</item>
+    </plurals>
+
+    <!-- The A to Z jump control. -->
+    <string name="tv_library_jump">Jump to a letter: %s</string>
+
+    <!-- States (design spec §8). -->
+    <string name="tv_library_failed">Couldn\'t load this library</string>
+    <string name="tv_library_missing_title">This library isn\'t here</string>
+    <string name="tv_library_missing_body">It may have been removed, or this profile may not see it.</string>
+    <string name="tv_library_empty_title">This library is empty</string>
+    <string name="tv_library_empty_body">pley hasn\'t found anything in it yet. Titles show up here as soon as the server adds them.</string>
+    <string name="tv_library_no_matches_title">No matches</string>
+    <string name="tv_library_no_matches_body">Nothing in this library matches the current filters.</string>
+    <string name="tv_library_recommended_failed">Couldn\'t load recommendations</string>
+    <string name="tv_library_recommended_empty_title">Nothing to recommend yet</string>
+    <string name="tv_library_recommended_empty_body">Recommendations appear once the library has some items.</string>
+    <string name="tv_library_collections_failed">Couldn\'t load collections</string>
+    <string name="tv_library_collections_empty_title">No collections yet</string>
+    <string name="tv_library_collections_empty_movies">Movies of the same TMDB collection are grouped here once two of them are in this library.</string>
+    <string name="tv_library_collections_empty_shows">There are no collections in this library yet.</string>
+    <string name="tv_library_retry">Retry</string>
+    <string name="tv_library_see_all">See all</string>
+
+    <!-- Collections and a collection's page (design spec §4.9). -->
+    <string name="tv_collections_title">Collections</string>
+    <string name="tv_collections_none">No collections yet</string>
+    <string name="tv_collections_none_body">Movies of the same TMDB collection are grouped here once two of them are in a library.</string>
+    <string name="tv_collection_label">Collection</string>
+    <string name="tv_collection_tmdb" translatable="false">TMDB</string>
+    <string name="tv_collection_smart">Smart</string>
+    <string name="tv_collection_play">Play</string>
+    <string name="tv_collection_shuffle">Shuffle</string>
+    <string name="tv_collection_empty">Nothing in this collection yet.</string>
+    <string name="tv_collection_failed">Couldn\'t load this collection</string>
+    <string name="tv_collection_nothing_to_play">Nothing to play: this show has no episodes yet</string>
+</resources>

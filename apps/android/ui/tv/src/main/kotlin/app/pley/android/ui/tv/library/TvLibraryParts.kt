@@ -1,0 +1,321 @@
+package app.pley.android.ui.tv.library
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import app.pley.android.common.describe
+import app.pley.android.data.Loadable
+import app.pley.android.data.valueOrNull
+import app.pley.android.designsystem.PleyColors
+import app.pley.android.designsystem.PleyShape
+import app.pley.android.designsystem.PleyTv
+import app.pley.android.designsystem.PleyType
+import app.pley.android.designsystem.tile.ArtworkTileModel
+import app.pley.android.designsystem.tile.TileKind
+import app.pley.android.designsystem.tile.rememberSkeleton
+import app.pley.android.designsystem.tile.skeleton
+import app.pley.android.model.LibraryKind
+import app.pley.android.model.SortOrder
+import app.pley.android.screens.LibraryTab
+import app.pley.android.screens.PleyKey
+import app.pley.android.screens.library.LibraryUiState
+import app.pley.android.screens.library.LibraryViewModel
+import app.pley.android.screens.library.TileLook
+import app.pley.android.screens.library.TileRow
+import app.pley.android.ui.tv.R
+import app.pley.android.ui.tv.kit.FocusMemory
+import app.pley.android.ui.tv.kit.SeeAll
+import app.pley.android.ui.tv.kit.TvPillButton
+import app.pley.android.ui.tv.kit.TvRow
+import app.pley.android.ui.tv.kit.TvRowColumn
+import app.pley.android.ui.tv.kit.TvSidePanel
+import app.pley.android.ui.tv.kit.initialFocus
+import app.pley.android.ui.tv.shell.LocalTvNavigator
+
+/**
+ * A page or tab with nothing to show (design spec §8): the title in
+ * tvSection, the sentence under it in tvBody [muted][PleyColors.Muted], and
+ * the one thing to do ("Retry", "Clear filters") as a pill with focus.
+ */
+@Composable
+internal fun TvMessage(
+    title: String,
+    body: String,
+    action: String? = null,
+    onAction: () -> Unit = {},
+    top: Dp = 140.dp,
+) {
+    Column(
+        Modifier.fillMaxWidth().padding(start = PleyTv.Gutter, top = top, end = PleyTv.Gutter),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        BasicText(title, style = PleyType.Tv.Section.copy(color = PleyColors.Fg), modifier = Modifier.semantics { heading() })
+        BasicText(body, style = PleyType.Tv.Body.copy(color = PleyColors.Muted), modifier = Modifier.widthIn(max = 520.dp))
+        if (action != null) {
+            Spacer(Modifier.height(16.dp))
+            TvPillButton(action, onClick = onAction, modifier = Modifier.initialFocus())
+        }
+    }
+}
+
+/** An error's sentence, capitalised and ended. */
+internal fun sentence(error: Throwable): String =
+    describe(error).replaceFirstChar { it.uppercase() }.let { if (it.endsWith('.')) it else "$it." }
+
+/**
+ * The Recommended tab (the web's RecommendedTab): the library's hubs as
+ * rows from y = 80, Continue Watching as stills and the rest as posters,
+ * then the collections, whose "See all" opens the Collections tab. The
+ * focused row's header comes up to y = 80 as focus moves down.
+ */
+@Composable
+internal fun TvRecommendedTab(
+    state: LibraryUiState<ArtworkTileModel>,
+    vm: LibraryViewModel<ArtworkTileModel>,
+    memory: FocusMemory,
+    initial: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val navigator = LocalTvNavigator.current
+    val recommended = state.recommended
+    val rows = recommended.valueOrNull
+    when {
+        rows == null && recommended is Loadable.Failed -> TvMessage(
+            title = stringResource(R.string.tv_library_recommended_failed),
+            body = sentence(recommended.error),
+            action = stringResource(R.string.tv_library_retry),
+            onAction = vm::retry,
+            top = RowsTop,
+        )
+        rows == null -> SkeletonRows()
+        rows.isEmpty() -> TvMessage(
+            title = stringResource(R.string.tv_library_recommended_empty_title),
+            body = stringResource(R.string.tv_library_recommended_empty_body),
+            top = RowsTop,
+        )
+        else -> {
+            val collections = stringResource(R.string.tv_library_tab_collections)
+            val seeAll = stringResource(R.string.tv_library_see_all)
+            TvRowColumn(
+                modifier = modifier.fillMaxSize(),
+                headerY = RowsTop,
+                contentPadding = PaddingValues(top = RowsTop, bottom = RowsBottom),
+            ) {
+                rows.forEachIndexed { at, row ->
+                    item(key = row.key, contentType = row.look) {
+                        TvRow(
+                            rowKey = row.key,
+                            title = row.title ?: collections,
+                            tiles = row.tiles,
+                            kind = row.tileKind,
+                            onOpen = { tile -> row.opens.getOrNull(row.tiles.indexOf(tile))?.let(navigator::open) },
+                            onActions = if (row.key == TileRow.COLLECTIONS) null else ({ tile -> navigator.open(PleyKey.ItemActions(tile.id)) }),
+                            memory = memory,
+                            initialFocus = initial && at == 0,
+                            seeAll = if (row.key == TileRow.COLLECTIONS) SeeAll(seeAll) { vm.select(LibraryTab.Collections) } else null,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private val TileRow<ArtworkTileModel>.tileKind: TileKind
+    get() = when (look) {
+        TileLook.Landscape -> TileKind.Landscape
+        TileLook.Square -> TileKind.Square
+        else -> TileKind.Poster
+    }
+
+/** Two rows' still skeletons, while the tab's rows load (design spec §8). */
+@Composable
+private fun SkeletonRows() {
+    val skeleton = rememberSkeleton(animated = false)
+    Column(Modifier.padding(start = PleyTv.Gutter, top = RowsTop), verticalArrangement = Arrangement.spacedBy(PleyTv.RowGap)) {
+        repeat(2) {
+            Column {
+                Box(Modifier.size(180.dp, 18.dp).skeleton(skeleton, PleyShape.Badge))
+                Spacer(Modifier.height(PleyTv.HeaderToTiles + 8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(PleyTv.TileGap)) {
+                    repeat(7) { Box(Modifier.size(TileKind.Poster.tvWidth, TileKind.Poster.tvHeight).skeleton(skeleton, PleyShape.TileTv)) }
+                }
+            }
+        }
+    }
+}
+
+/** The side panels the chips open. */
+internal enum class TvPanel { Sort, Filter, Genre, Year }
+
+/**
+ * The side panel (design spec §2.7) of the chip pressed: the sorts and
+ * the order; the filters (which titles to show, genre, year, Clear
+ * filters, Save as…); or the genres or years. The choice in force has the
+ * check and the focus. A choice applies at once; picking a sort, order,
+ * genre or year closes the panel, and Back closes it too.
+ */
+@Composable
+internal fun TvLibraryPanel(
+    panel: TvPanel?,
+    state: LibraryUiState<ArtworkTileModel>,
+    vm: LibraryViewModel<ArtworkTileModel>,
+    onPanel: (TvPanel?) -> Unit,
+) {
+    val navigator = LocalTvNavigator.current
+    var last by remember { mutableStateOf(panel) }
+    if (panel != null) last = panel
+    val params = state.params
+    val close = { onPanel(null) }
+    TvSidePanel(visible = panel != null, onDismiss = close) {
+        when (last) {
+            TvPanel.Sort -> PanelList(stringResource(R.string.tv_library_sort_by)) {
+                items(state.sorts, key = { it.name }) { sort ->
+                    val on = sort == params.sort
+                    PanelRow(
+                        stringResource(tvSortLabel(sort)),
+                        checked = on,
+                        onClick = {
+                            vm.sortBy(sort)
+                            close()
+                        },
+                        modifier = if (on) Modifier.initialFocus() else Modifier,
+                    )
+                }
+                item(key = "order") { PanelHeading(stringResource(R.string.tv_library_order)) }
+                items(SortOrder.entries, key = { it.name }) { order ->
+                    PanelRow(
+                        stringResource(if (order == SortOrder.Ascending) R.string.tv_library_ascending else R.string.tv_library_descending),
+                        checked = order == params.effectiveOrder,
+                        onClick = {
+                            vm.order(order)
+                            close()
+                        },
+                    )
+                }
+            }
+            TvPanel.Filter -> PanelList(stringResource(R.string.tv_library_filter)) {
+                item(key = "show") { PanelHeading(stringResource(R.string.tv_library_show)) }
+                val shows = listOf(null to R.string.tv_library_show_all, false to R.string.tv_library_unwatched, true to R.string.tv_library_watched)
+                items(shows, key = { "show/${it.first}" }) { (watched, label) ->
+                    val on = params.watched == watched
+                    PanelRow(stringResource(label), checked = on, onClick = { vm.watched(watched) }, modifier = if (on) Modifier.initialFocus() else Modifier)
+                }
+                if (state.kind != LibraryKind.Music) {
+                    item(key = "genre") {
+                        PanelRow(
+                            stringResource(R.string.tv_library_genre),
+                            value = params.genre ?: stringResource(R.string.tv_library_all_genres),
+                            opens = true,
+                            onClick = { onPanel(TvPanel.Genre) },
+                        )
+                    }
+                    item(key = "year") {
+                        PanelRow(
+                            stringResource(R.string.tv_library_year),
+                            value = params.year?.toString() ?: stringResource(R.string.tv_library_all_years),
+                            opens = true,
+                            onClick = { onPanel(TvPanel.Year) },
+                        )
+                    }
+                }
+                if (params.filtered) {
+                    item(key = "clear") {
+                        PanelRow(stringResource(R.string.tv_library_clear_filters), onClick = {
+                            vm.clearFilters()
+                            close()
+                        })
+                    }
+                    item(key = "save") {
+                        PanelRow(stringResource(R.string.tv_library_save_as), onClick = {
+                            close()
+                            navigator.open(vm.saveAs())
+                        })
+                    }
+                }
+            }
+            TvPanel.Genre -> PanelList(stringResource(R.string.tv_library_genre)) {
+                item(key = "all") {
+                    PanelRow(
+                        stringResource(R.string.tv_library_all_genres),
+                        checked = params.genre == null,
+                        onClick = {
+                            vm.genre(null)
+                            close()
+                        },
+                        modifier = if (params.genre == null) Modifier.initialFocus() else Modifier,
+                    )
+                }
+                items(state.filters.genres, key = { "g/$it" }) { genre ->
+                    val on = genre == params.genre
+                    PanelRow(genre, checked = on, onClick = {
+                        vm.genre(genre)
+                        close()
+                    }, modifier = if (on) Modifier.initialFocus() else Modifier)
+                }
+            }
+            TvPanel.Year -> PanelList(stringResource(R.string.tv_library_year)) {
+                item(key = "all") {
+                    PanelRow(
+                        stringResource(R.string.tv_library_all_years),
+                        checked = params.year == null,
+                        onClick = {
+                            vm.year(null)
+                            close()
+                        },
+                        modifier = if (params.year == null) Modifier.initialFocus() else Modifier,
+                    )
+                }
+                items(state.filters.years, key = { "y/$it" }) { year ->
+                    val on = year == params.year
+                    PanelRow(year.toString(), checked = on, onClick = {
+                        vm.year(year)
+                        close()
+                    }, modifier = if (on) Modifier.initialFocus() else Modifier)
+                }
+            }
+            null -> Unit
+        }
+    }
+}
+
+@Composable
+private fun PanelList(title: String, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        BasicText(
+            title,
+            style = PleyType.Tv.Title.copy(color = PleyColors.Fg),
+            modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 12.dp).semantics { heading() },
+        )
+        LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp), content = content)
+    }
+}
+
+/** Where the Recommended tab's rows begin, and their focused row's header line. */
+private val RowsTop = 80.dp
+
+/** Room under the last row, so it too comes up to [RowsTop]. */
+private val RowsBottom = 180.dp

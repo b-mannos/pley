@@ -104,8 +104,11 @@ class TvAppTest {
         compose.press(Key.DirectionLeft)
         compose.press(Key.DirectionDown)
         railEntry("library:1").assertIsFocused()
+        // Library pages are built (they need the app's graph): a page still to come instead.
+        compose.press(Key.DirectionDown, 3)
+        railEntry("playlists").assertIsFocused()
         compose.press(Key.DirectionCenter)
-        compose.onNodeWithText("Library isn't built yet").assertExists()
+        compose.onNodeWithText("Playlists isn't built yet").assertExists()
         compose.onNodeWithText("Open another screen").assertIsFocused()
     }
 
