@@ -2,6 +2,7 @@ package app.pley.android.ui.tv.shell
 
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsFocused
@@ -14,6 +15,8 @@ import androidx.navigation3.runtime.NavKey
 import app.pley.android.common.TestTags
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryKind
+import app.pley.android.testing.screens.onboarding.FakeOnboardingSource
+import app.pley.android.ui.tv.onboarding.LocalOnboardingSource
 import app.pley.android.ui.tv.kit.focused
 import app.pley.android.ui.tv.kit.press
 import kotlinx.coroutines.flow.Flow
@@ -49,12 +52,20 @@ class TvAppTest {
         override suspend fun keepUpdated() = Unit
     }
 
+    private val onboarding = FakeOnboardingSource().apply {
+        active.value = "http://s"
+        profiles = FakeOnboardingSource.household()
+    }
+
     private val home = StartFacts(server = "http://192.168.1.20:7539", signedIn = true)
     private val threeLibraries = listOf(Library(1, "Movies", LibraryKind.Movies), Library(2, "Shows", LibraryKind.Shows), Library(3, "Music", LibraryKind.Music))
 
     private fun app(facts: StartFacts = home, placeholder: @androidx.compose.runtime.Composable (NavKey) -> Unit = { Placeholder(it) }) {
         compose.setContent {
-            TvApp(FakeSource(facts, threeLibraries), onExit = { exits++ }, reducedMotion = true, placeholder = placeholder)
+            // Getting in reads a fake server: a household of four, a code to show, nobody on the network.
+            CompositionLocalProvider(LocalOnboardingSource provides onboarding) {
+                TvApp(FakeSource(facts, threeLibraries), onExit = { exits++ }, reducedMotion = true, placeholder = placeholder)
+            }
         }
         // Every screen starts with focus (D-pad rule 1): Home once its rows are shaped, off the
         // main thread, which waiting for the main thread to be idle doesn't wait for.
@@ -68,20 +79,27 @@ class TvAppTest {
 
     private fun railEntry(id: String) = compose.onNodeWithTag("${TestTags.TV_RAIL}.$id")
 
-    private fun startsFocusedOn(facts: StartFacts, name: String) {
-        app(facts)
-        compose.onNodeWithText("$name isn't built yet").assertExists()
-        compose.onNodeWithText("Open another screen").assertIsFocused()
+    @Test
+    fun serversStartsFocused() {
+        app(StartFacts(null, false))
+        compose.onNodeWithText("Choose your server").assertExists()
+        compose.onNodeWithText("Enter an address").assertIsFocused()
     }
 
     @Test
-    fun serversStartsFocused() = startsFocusedOn(StartFacts(null, false), "Servers")
+    fun linkStartsFocused() {
+        app(StartFacts("http://s", false))
+        compose.onNodeWithText("Sign in to pley").assertExists()
+        compose.onNodeWithText("Change server").assertIsFocused()
+    }
 
     @Test
-    fun linkStartsFocused() = startsFocusedOn(StartFacts("http://s", false), "Link")
-
-    @Test
-    fun whoIsWatchingStartsFocused() = startsFocusedOn(StartFacts("http://s", true, profiles = 2), "Profiles")
+    fun whoIsWatchingStartsFocused() {
+        app(StartFacts("http://s", true, profiles = 2))
+        compose.onNodeWithText("Who's watching?").assertExists()
+        // The profile in use, so one OK continues.
+        compose.onNodeWithTag("pley.profiles.profile.1").assertIsFocused()
+    }
 
     @Test
     fun homeStartsFocused() {
@@ -138,7 +156,7 @@ class TvAppTest {
         app(StartFacts(null, false))
         compose.onNode(hasTestTag(TestTags.TV_RAIL)).assertDoesNotExist()
         compose.press(Key.DirectionLeft)
-        compose.onNodeWithText("Open another screen").assertIsFocused()
+        compose.onNodeWithText("Enter an address").assertIsFocused()
         back()
         assertEquals(1, exits)
     }
