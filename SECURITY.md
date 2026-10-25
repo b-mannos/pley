@@ -72,14 +72,28 @@ asked every time, pley's own apps included, on a page that shows the app's
 address first and can't be framed. Apps never get administrator rights:
 every route they may use is listed with the scope it needs, anything else
 is refused, and the Plex-compatible API refuses their tokens. Apps also
-don't see library folders or file paths. pley's own apps are built in and
-sign in without internet access. Descriptions of other publishers' apps are
-read only when an administrator allows those apps, for someone signed in,
-from public addresses only, without redirects, at most 5 KiB; reading one
-tells the app's host that this server is in use. A new password, "Sign out
-everywhere", `pley reset-password` and deleting the account sign its apps
-out with its other sign-ins. App sign-in works over plain HTTP at home, as
-passwords do; beyond the home network it needs HTTPS like the rest of pley.
+don't see library folders or file paths, the transcoder's error messages
+included. pley's own apps are built in and sign in without internet access.
+Descriptions of other publishers' apps are read only when an administrator
+allows those apps, for someone signed in, from public addresses only,
+without redirects, at most 5 KiB; reading one tells the app's host that this
+server is in use. A new password, "Sign out everywhere", `pley reset-password`
+and deleting the account sign its apps out with its other sign-ins, and the
+apps it was signing in get nothing: a code is exchanged only while the
+browser session that allowed it is signed in, and codes not exchanged yet
+end with the account's sign-ins. App sign-in works over plain HTTP at home,
+as passwords do; beyond the home network it needs HTTPS like the rest of
+pley.
+
+**TVs signing in.** pley's own apps on a TV show a code of 8 letters (about
+2.6 × 10¹⁰ of them) that someone signed in types on pley's `/link` page,
+where they see the same consent as other apps and are told to allow only a
+code on a screen in front of them (RFC 8628 §5.4). Only pley's own apps can
+start one. At most 20 are in progress from one address and 1,000 in all,
+and none is dropped to make room; past 10 wrong codes from one person or 300
+from everyone in 10 minutes, no code is looked up. A TV asking too often is
+slowed down. Its answer comes once, and a TV allowed before the account's
+sign-ins end, or from a session signed out since, gets nothing.
 
 **Pages.** A `Content-Security-Policy` allows only pley's own scripts and
 styles, no other site may frame pley (`frame-ancestors 'none'`,

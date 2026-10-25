@@ -53,7 +53,8 @@ web app in React and TypeScript.
 - Apps sign in on pley's own page and get only what you allow (browsing,
   playing, playlists), never administration: OAuth 2.1 with client metadata
   documents. pley's own apps work without internet access; apps by other
-  publishers are off until an administrator allows them. See
+  publishers are off until an administrator allows them. On a TV, pley's
+  app shows a code to type on pley's `/link` page. See
   [docs/API.md](docs/API.md#apps-oauth-21).
 - First-run setup with a one-time code from the server's log, which the
   tray icon fills in. Passwords have at least 8 characters and can't be

@@ -369,10 +369,12 @@ everything is, for the address it was asked at (`Cache-Control: no-store`):
   "authorization_endpoint": "http://pley.local:7539/oauth/authorize",
   "token_endpoint": "http://pley.local:7539/api/oauth/token",
   "revocation_endpoint": "http://pley.local:7539/api/oauth/revoke",
+  "device_authorization_endpoint": "http://pley.local:7539/api/oauth/device",
   "response_types_supported": ["code"],
   "response_modes_supported": ["query"],
   "grant_types_supported": ["authorization_code", "refresh_token",
-                            "urn:pley:params:oauth:grant-type:switch-profile"],
+                            "urn:pley:params:oauth:grant-type:switch-profile",
+                            "urn:ietf:params:oauth:grant-type:device_code"],
   "token_endpoint_auth_methods_supported": ["none"],
   "revocation_endpoint_auth_methods_supported": ["none"],
   "code_challenge_methods_supported": ["S256"],
@@ -396,7 +398,8 @@ publishers. Every other `/.well-known/` path answers `404`.
 ### Signing in
 
 1. The app opens `/oauth/authorize`, a page of the web app, in the browser,
-   with these query parameters, each at most once:
+   with these query parameters, each at most once (one sent without a value
+   is as if left out, OAuth 2.1 §3.1):
 
    | Parameter | |
    |---|---|
@@ -410,8 +413,8 @@ publishers. Every other `/.well-known/` path answers `404`.
    | `resource` | optional: this server's issuer, with or without a trailing `/` (RFC 8707) |
    | `response_mode` | optional: `query` |
 
-   Other parameters are ignored, but `request` and `request_uri` are
-   refused.
+   Other parameters are ignored, given twice or not, but `request` and
+   `request_uri` are refused.
 2. The page signs the person in first when they aren't (two-step sign-in
    included), then shows the app, the profile it will act as (with "Use
    another profile"), what it will be able to do and where it goes back to.
@@ -429,28 +432,31 @@ An app pley can't accept (unknown, refused, or apps by other publishers
 off) or a return address it didn't register is shown on the page and never
 sent to the app: pley can't know the address is the app's. Other mistakes go
 back to the app, with `error`, `error_description`, `state` and `iss`, but
-only when the person clicks "Back to the app":
+only when the person clicks "Back to the app", on a page that says where
+that goes (RFC 9700 §4.11.2):
 
 | `error` | When |
 |---|---|
-| `unsupported_response_type` | `response_type` isn't `code` |
-| `invalid_request` | `response_mode` isn't `query`; `request` or `request_uri` is given; the challenge is missing or not S256; `state` is longer than 1,024 bytes |
+| `unsupported_response_type` | `response_type` is something other than `code` |
+| `invalid_request` | `response_type` is missing; `response_mode` isn't `query`; `request` or `request_uri` is given; the challenge is missing or not S256; `state` is longer than 1,024 bytes |
 | `invalid_scope` | a scope pley doesn't offer (`openid` among them); `profiles` for an app that isn't pley's own; more than the app's description allows |
 | `invalid_target` | `resource` names another server |
 
 ### Tokens
 
-`POST /api/oauth/token` and `POST /api/oauth/revoke` take a form
-(`application/x-www-form-urlencoded`) of at most 16 KiB, each parameter at
-most once, and never read cookies. They answer with
-`Cache-Control: no-store` and `Pragma: no-cache`, and errors as
+`POST /api/oauth/token`, `POST /api/oauth/revoke` and
+[`POST /api/oauth/device`](#tvs) take a form
+(`application/x-www-form-urlencoded`) of at most 16 KiB and never read
+cookies. Each parameter pley reads comes at most once; one sent without a
+value is as if left out, and others are ignored (OAuth 2.1 §3.2). They
+answer with `Cache-Control: no-store` and `Pragma: no-cache`, and errors as
 `{ "error": "invalid_grant", "error_description": "…" }` (RFC 6749 §5.2),
-`400` unless said otherwise. `client_secret`, or an `Authorization: Basic`
-header, answers `401` `invalid_client` (with
-`WWW-Authenticate: Basic realm="pley"` for the header): pley's apps have no
-secrets. `resource`, when sent, must be this server (`invalid_target`). A
-missing `grant_type` is `invalid_request`; another one is
-`unsupported_grant_type`.
+`400` unless said otherwise. A `client_secret` answers `400`
+`invalid_client`, and an `Authorization: Basic` header `401`
+`invalid_client` with `WWW-Authenticate: Basic realm="pley"`: pley's apps
+have no secrets. `resource`, when sent, must be this server
+(`invalid_target`). A missing `grant_type` is `invalid_request`; another one
+is `unsupported_grant_type`.
 
 Tokens look like this:
 
@@ -477,7 +483,11 @@ another app's, another return address or a wrong verifier is
 time with everything right is `invalid_grant` ("the code was used
 already"), and the access the first exchange got ends: someone else has the
 code. A code whose account was disabled in the meantime, or of an app by
-another publisher once they were turned off, is `invalid_grant` too.
+another publisher once they were turned off, is `invalid_grant` too. So is a
+code whose browser session has signed out since, or whose account's
+sign-ins ended (a new password, "Sign out everywhere"): `invalid_grant`,
+"the person who allowed it signed out since". Nothing allowed before
+those signs an app in after them.
 
 **`grant_type=refresh_token`**: `refresh_token` and `client_id`; `scope`
 optional. Each refresh token works once: the answer has a new one. One used
@@ -513,13 +523,78 @@ as, without the administrators' exemption. A refusal spends nothing.
 
 **`POST /api/oauth/revoke`** (RFC 7009): `token` and `client_id`
 (`invalid_request` without them; `token_type_hint` is ignored). An access or
-refresh token of that app, current, spent or expired, ends its whole grant.
-Every well-formed request gets `200` with an empty body, whatever the token.
-`POST /api/auth/logout` with an app's token does the same.
+refresh token of that app, current, spent or expired, ends its whole grant,
+and the answer is `200` with an empty body, as it is for a token pley
+doesn't know. Another app's token is refused with `400`
+`unauthorized_client` and stays (§2.1). When the database fails, `503`
+`temporarily_unavailable` with `Retry-After`: the token still works, and the
+app tries again later (§2.2.1). `POST /api/auth/logout` with an app's token
+ends its grant too.
 
-There is no rate limit on these endpoints: codes and tokens carry 256 random
-bits, and a limit per address behind a reverse proxy would lock every app
-out.
+There is no rate limit on the token and revocation endpoints: codes and
+tokens carry 256 random bits, and a limit per address behind a reverse
+proxy would lock every app out. TVs have [their own limits](#tvs).
+
+### TVs
+
+TVs and other devices without a usable browser sign in with a code they
+show (OAuth 2.0 Device Authorization Grant, RFC 8628). pley's own apps only:
+anyone may start one, and pley reads no app's description for someone who
+isn't signed in. Today that is pley for Android, which also runs on Android
+TV and Fire TV.
+
+1. The TV asks **`POST /api/oauth/device`** with `client_id` and an optional
+   `scope` (as at `/oauth/authorize`: none means `library`). The answer:
+
+   ```json
+   {
+     "device_code": "…",
+     "user_code": "BCDF-GHJK",
+     "verification_uri": "http://pley.local:7539/link",
+     "verification_uri_complete": "http://pley.local:7539/link?code=BCDFGHJK",
+     "expires_in": 600,
+     "interval": 5
+   }
+   ```
+
+   The TV keeps `device_code` (256 random bits) to itself and shows
+   `user_code` and `verification_uri`, or a QR code of
+   `verification_uri_complete`. User codes are 8 of RFC 8628 §6.1's 20
+   consonants (`BCDFGHJKLMNPQRSTVWXZ`, about 2.6 × 10¹⁰ codes), without
+   vowels or digits so they spell nothing and look like nothing else.
+   `invalid_client` for an app that isn't pley's own, `unauthorized_client`
+   for one of pley's own that doesn't sign in this way (the desktop app),
+   `invalid_scope` as at `/oauth/authorize`, `429`
+   `temporarily_unavailable` past the limits below.
+2. The person opens **`/link`**, a page of the web app, on a phone or
+   computer, signs in there if they aren't, and types the code (in any
+   case, with or without the dash and spaces). From the QR code it comes
+   filled in, and is sent only once they continue. The page shows the same
+   consent as `/oauth/authorize`, saying the answer goes to the TV showing
+   that code, and to allow it only when the code is on a screen in front of
+   them. Nothing goes back through the browser.
+3. Meanwhile the TV asks the token endpoint every `interval` seconds with
+   **`grant_type=urn:ietf:params:oauth:grant-type:device_code`**,
+   `device_code` and `client_id`:
+
+   | Answer | When |
+   |---|---|
+   | `authorization_pending` | nobody has answered yet |
+   | `slow_down` | it asked sooner than its interval, which is now 5 seconds longer, for good |
+   | tokens | the person allowed it: as for a code, acting as the profile they use; once |
+   | `access_denied` | the person didn't allow it, their sign-ins ended before the TV had its tokens (a new password, "Sign out everywhere", disabling, deletion), or the browser session that allowed it signed out since; once |
+   | `expired_token` | 10 minutes went by; once |
+   | `invalid_grant` | an unknown device code, another app's, one whose answer was given already, or a disabled account |
+
+A device code never appears in an address or a page, so one shown again
+after its answer is only unknown: nothing has to end, unlike a code.
+
+Limits: at most 20 sign-ins in progress from one address (an IPv6 /64
+counts as one) and 1,000 in all, and nothing in progress is dropped to make
+room. The address is the connection's, or the client's a reverse proxy on
+the same computer or network names last in `X-Forwarded-For`, never one a
+caller on the internet writes. Wrong codes count: past 10 by one person, or
+300 by everyone, in 10 minutes, no code is looked up (`429`).
 
 ### Lifetimes and limits
 
@@ -529,7 +604,8 @@ out.
 | Refresh tokens | rotated on every use; the app's access ends 90 days after its last token request |
 | Apps by other publishers | asked about again a year after they were allowed |
 | Code | 60 seconds, once |
-| A request on the consent page | 10 minutes |
+| A request on the consent page | 10 minutes (a TV's: no longer than the TV's own) |
+| A TV's code | 10 minutes, once |
 
 An access token never outlasts its grant. A grant keeps its 10 newest access
 tokens (older ones stop working) and ends with 10,000 refresh tokens on
@@ -539,9 +615,12 @@ recently used is signed out.
 Apps are signed out when they or the person sign them out (the
 [Apps](#signed-in-apps) lists), with a new password, "Sign out everywhere",
 `pley reset-password` and when the account is deleted: every app acting as
-the account or allowed by it. The apps of a disabled account, or allowed by
-one, don't work while it is disabled. Turning apps by other publishers off signs all of them
-out.
+the account or allowed by it, and the apps it was signing in (codes not
+exchanged yet, TVs allowed that haven't asked for their answer yet). A
+running server honors app tokens it checked in the last minute for up to a
+minute after `pley reset-password`, as it does sessions. The apps of a
+disabled account, or allowed by one, don't work while it is disabled.
+Turning apps by other publishers off signs all of them out.
 
 ### Scopes
 
@@ -615,8 +694,11 @@ An app's token never has administrator rights. On an administrator's
 account it sees every library without an age limit, as the account does, and
 administers nothing: history, sessions and collections answer it as they
 would anyone else. Apps also see less: libraries' `paths` are empty, files'
-`path` is the file name only, and `/api/users/{id}/avatar` shows only the
-pictures of the app's own profile and its household. No address pley hands out carries a token:
+`path` is the file name only, `/api/users/{id}/avatar` shows only the
+pictures of the app's own profile and its household, and when the
+transcoder can't read a file, its words (which name the file) are replaced
+by pley's own ("this title's file can't be read right now", and "the
+conversion failed" for a session's `last_error`). No address pley hands out carries a token:
 players send the header with every request, HLS playlists and segments
 included. The event stream ends when its token expires or the app is signed
 out; the app connects again with a new token.
@@ -642,7 +724,7 @@ interface AppGrant {
   scopes: string[];
   profile: { id: Id; name: string };     // the profile it acts as
   approved_by: { id: Id; name: string };
-  device: string | null;            // of its last token request, e.g. "Chrome on Windows"
+  device: string | null;            // of its last token request, e.g. "Chrome on Windows"; pley for Android: its platform, e.g. "Android 15"
   ip: string | null;
   created_at: Timestamp;
   last_used_at: Timestamp;
@@ -668,7 +750,8 @@ Usernames, roles, libraries, age limits and sign-in settings are left out.
 
 Their descriptions are built into the server and never fetched, so they
 sign in to servers without internet access. Both get refresh tokens and may
-ask for every scope. The consent page marks them "pley's own app"; no other
+ask for every scope; pley for Android may also sign in with a code, on a TV
+(see [TVs](#tvs)). The consent page marks them "pley's own app"; no other
 app may use a client ID on their host.
 
 ### Apps by other publishers
@@ -728,13 +811,15 @@ of them answers CORS.
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| POST | `/api/oauth/requests` | `{ query }`: the page's query without `?`, at most 8 KiB | `{ status: "consent", id, expires_at, client: { id, host, name, first_party }, redirect: { kind: "web" \| "app" \| "loopback", to }, scopes }`; or a mistake that goes back to the app, `{ status: "error", error, message, back_url, client }`. `400` for an app or return address pley can't accept, `429` with too many descriptions read, `503` with too many sign-ins in progress |
-| POST | `/api/oauth/requests/{id}` | `{ allow: boolean }` | `{ continue_url }`. The same answer again gets the same reply, the other one `409`; `404` when the request is over |
-| GET | `/api/oauth/requests/{id}/continue` | – | `303` to the app with the answer. It repeats while the code works and wasn't exchanged, and for a minute after a refusal or a mistake; `404` after |
+| POST | `/api/oauth/requests` | `{ query }`: the page's query without `?`, at most 8 KiB | `{ status: "consent", id, expires_at, client: { id, host, name, first_party }, redirect: { kind: "web" \| "app" \| "loopback", to }, scopes }`; or a mistake that goes back to the app, `{ status: "error", error, message, back_url, client, redirect }`, `redirect` saying where "Back to the app" goes. `400` for an app or return address pley can't accept, `429` with too many descriptions read, `503` with too many sign-ins in progress |
+| POST | `/api/oauth/device/verify` | `{ user_code }`: the code a TV shows, as typed | the consent as above, with `redirect: { kind: "device", to: "BCDF-GHJK" }`. `400` for something that can't be a code, `404` for a code no TV shows (it counts as a wrong one), `409` for one answered already or shown on another session's page, `429` past the wrong codes' limit, `503` with too many sign-ins in progress. A code shown on a page whose session ended since (signed out, or switched profile) goes to whoever types it next; typed again in the same session, the page before can't answer any more |
+| POST | `/api/oauth/requests/{id}` | `{ allow: boolean }` | `{ continue_url }`, or `{ done: true }` for a TV's request, whose answer the TV gets when it next asks. The same answer again gets the same reply, the other one `409`; `404` when the request is over (a TV's too once the TV's code expired) |
+| GET | `/api/oauth/requests/{id}/continue` | – | `303` to the app with the answer. It repeats while the code works and wasn't exchanged, and for a minute after a refusal or a mistake. After that a browser following the link is sent (`303`) to the web app's `/oauth/over` page, which says the request is over; a script gets `404`. Never for a TV's request |
 
 A request belongs to the person and the browser session that opened the
 page, and lasts 10 minutes. Each person has at most 10 waiting (the oldest
-goes), the server 1,000.
+goes), the server 1,000. They end with the account's sign-ins (a new
+password, "Sign out everywhere", disabling, deletion).
 
 ## Access rules
 

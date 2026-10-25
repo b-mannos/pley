@@ -107,7 +107,13 @@ default. With nginx:
 ```nginx
 proxy_set_header Host $host;
 proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 ```
+
+TVs signing in with a code are limited per address. Behind a proxy on the
+same computer or network, pley counts the address the proxy adds last to
+`X-Forwarded-For` (Caddy and the line above add it); without it, every TV
+counts as the proxy.
 
 Otherwise apps refuse the server: its sign-in description
 (`/.well-known/oauth-authorization-server`) names another address than the
