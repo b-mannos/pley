@@ -12,6 +12,12 @@
 //! someone else has the code, so the access the first one got ends
 //! (OAuth 2.1 -16 §4.1.3, §7.5.3), even when it is still being issued.
 //! Codes are kept for their 60 seconds after they are used, to notice that.
+//!
+//! A code works only while the browser session that allowed the app is
+//! signed in (checked as the grant is recorded), and when the account's
+//! sign-ins end (a new password, signing out everywhere, disabling,
+//! deletion), its codes end with them ([`Codes::forget_user`]): nothing
+//! allowed before can sign an app in after.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -41,12 +47,26 @@ pub struct CodeGrant {
     pub code_challenge: String,
     /// The profile the app acts as, who allowed it.
     pub user_id: i64,
+    /// SHA-256 of the token of the browser session that allowed it.
+    pub session_hash: String,
     pub scopes: Scopes,
 }
 
 /// Too many codes are waiting to be exchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Full;
+
+/// What becomes of the grant the first exchange of a code made (see
+/// [`Codes::issued`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Issued {
+    /// Nothing happened meanwhile: the app keeps it.
+    Kept,
+    /// The code was exchanged again meanwhile: someone else has it. End it.
+    Replayed,
+    /// The account's sign-ins ended meanwhile. End it.
+    SignedOut,
+}
 
 /// What an exchange of a code gets.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,7 +86,12 @@ pub enum Redeem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Redeemed {
     No,
-    InProgress { replayed: bool },
+    /// Its tokens are being issued; meanwhile it was exchanged again, or
+    /// the account's sign-ins ended.
+    InProgress {
+        replayed: bool,
+        signed_out: bool,
+    },
     Grant(i64),
 }
 
@@ -144,25 +169,51 @@ impl Codes {
         }
         match entry.redeemed {
             Redeemed::No => {
-                entry.redeemed = Redeemed::InProgress { replayed: false };
+                entry.redeemed = Redeemed::InProgress { replayed: false, signed_out: false };
                 Redeem::First(entry.grant.clone())
             }
-            Redeemed::InProgress { .. } => {
-                entry.redeemed = Redeemed::InProgress { replayed: true };
+            Redeemed::InProgress { signed_out, .. } => {
+                entry.redeemed = Redeemed::InProgress { replayed: true, signed_out };
                 Redeem::Replay(None)
             }
             Redeemed::Grant(grant_id) => Redeem::Replay(Some(grant_id)),
         }
     }
 
-    /// The first exchange of `code` made the grant `grant_id`. True when
-    /// the code was exchanged again meanwhile: end that grant now.
-    pub fn issued(&self, code: &str, grant_id: i64) -> bool {
+    /// The first exchange of `code` made the grant `grant_id`: whether the
+    /// app keeps it, or it must end now because the code was exchanged
+    /// again meanwhile, or the account's sign-ins ended.
+    pub fn issued(&self, code: &str, grant_id: i64) -> Issued {
         let mut codes = self.codes.lock();
-        let Some(entry) = codes.get_mut(&hash_token(code)) else { return false };
-        let replayed = entry.redeemed == Redeemed::InProgress { replayed: true };
+        let Some(entry) = codes.get_mut(&hash_token(code)) else { return Issued::Kept };
+        let issued = match entry.redeemed {
+            Redeemed::InProgress { replayed: true, .. } => Issued::Replayed,
+            Redeemed::InProgress { signed_out: true, .. } => Issued::SignedOut,
+            _ => Issued::Kept,
+        };
         entry.redeemed = Redeemed::Grant(grant_id);
-        replayed
+        issued
+    }
+
+    /// The sign-ins of `user_id` ended (a new password, signing out
+    /// everywhere, disabling, deletion): the codes they were given and
+    /// nobody exchanged are gone, and one whose tokens are being issued
+    /// right now gets nothing ([`Codes::issued`]). Used ones stay, to
+    /// notice replays: the grants they made end with the account's apps.
+    pub fn forget_user(&self, user_id: i64) {
+        self.codes.lock().retain(|_, entry| {
+            if entry.grant.user_id != user_id {
+                return true;
+            }
+            match &mut entry.redeemed {
+                Redeemed::No => false,
+                Redeemed::InProgress { signed_out, .. } => {
+                    *signed_out = true;
+                    true
+                }
+                Redeemed::Grant(_) => true,
+            }
+        });
     }
 
     /// The first exchange of `code` got no tokens (the account was disabled
@@ -215,6 +266,7 @@ mod tests {
             redirect_uri: BACK.into(),
             code_challenge: CHALLENGE.into(),
             user_id: 7,
+            session_hash: "session-of-7".into(),
             scopes: Scopes::parse("library play").unwrap(),
         }
     }
@@ -259,7 +311,7 @@ mod tests {
         let code = codes.new_code(grant()).unwrap();
         assert!(matches!(codes.redeem(&code, APP, None, VERIFIER), Redeem::First(_)));
         // Nobody came again: the grant stays.
-        assert!(!codes.issued(&code, 3));
+        assert_eq!(codes.issued(&code, 3), Issued::Kept);
         assert_eq!(codes.redeem(&code, APP, None, VERIFIER), Redeem::Replay(Some(3)));
         // Wrong ones are no replays.
         assert!(matches!(codes.redeem(&code, APP, None, &"b".repeat(43)), Redeem::Invalid(_)));
@@ -267,8 +319,31 @@ mod tests {
         let code = codes.new_code(grant()).unwrap();
         assert!(matches!(codes.redeem(&code, APP, None, VERIFIER), Redeem::First(_)));
         assert_eq!(codes.redeem(&code, APP, None, VERIFIER), Redeem::Replay(None));
-        assert!(codes.issued(&code, 4), "the replay came during issuance");
+        assert_eq!(codes.issued(&code, 4), Issued::Replayed, "the replay came during issuance");
         assert_eq!(codes.redeem(&code, APP, None, VERIFIER), Redeem::Replay(Some(4)));
+    }
+
+    #[test]
+    fn codes_end_with_the_sign_ins_of_whoever_allowed_them() {
+        let codes = Codes::default();
+        let waiting = codes.new_code(grant()).unwrap();
+        let issuing = codes.new_code(grant()).unwrap();
+        let used = codes.new_code(grant()).unwrap();
+        let someone_elses = codes.new_code(CodeGrant { user_id: 8, ..grant() }).unwrap();
+        assert!(matches!(codes.redeem(&issuing, APP, None, VERIFIER), Redeem::First(_)));
+        assert!(matches!(codes.redeem(&used, APP, None, VERIFIER), Redeem::First(_)));
+        assert_eq!(codes.issued(&used, 5), Issued::Kept);
+
+        codes.forget_user(7);
+        // Nobody exchanged it: it is gone.
+        assert_eq!(codes.redeem(&waiting, APP, None, VERIFIER), Redeem::Invalid("unknown code"));
+        // Being issued: what it gets ends at once.
+        assert_eq!(codes.issued(&issuing, 6), Issued::SignedOut);
+        // Used: its grant ends with the account's apps; a replay is still
+        // noticed.
+        assert_eq!(codes.redeem(&used, APP, None, VERIFIER), Redeem::Replay(Some(5)));
+        // Others' codes stay.
+        assert!(codes.unredeemed(&someone_elses));
     }
 
     #[test]
@@ -292,7 +367,7 @@ mod tests {
         // A used one is kept as long, to notice replays, then forgotten.
         let used = codes.new_code(grant()).unwrap();
         assert!(matches!(codes.redeem(&used, APP, None, VERIFIER), Redeem::First(_)));
-        codes.issued(&used, 1);
+        assert_eq!(codes.issued(&used, 1), Issued::Kept);
         codes.sweep();
         assert_eq!(codes.codes.lock().len(), 1, "the expired one goes, the used one stays");
         codes.age(&used, Duration::from_secs(61));

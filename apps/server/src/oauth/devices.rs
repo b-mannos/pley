@@ -19,9 +19,10 @@
 //!   be given all of it. Nothing in progress is dropped to make room, so a
 //!   flood can hold up sign-ins with a code but never cancel one.
 //! * Allowed, a request waits for the device's next question. When the
-//!   account's sign-ins end before that (a new password, signing out
-//!   everywhere, disabling, deletion), the answer becomes a refusal
-//!   ([`Devices::forget_user`]).
+//!   account's sign-ins end before the device has its tokens (a new
+//!   password, signing out everywhere, disabling, deletion), the answer
+//!   becomes a refusal ([`Devices::forget_user`]), and the tokens are made
+//!   only while the browser session that allowed it is signed in.
 //! * Only signed-in people can try codes, and wrong ones count: past 10 by
 //!   one person or 300 by everyone in 10 minutes, no code is looked up.
 //! * A device asking sooner than its interval is told to slow down, and
@@ -118,11 +119,21 @@ enum Status {
     /// [`super::pending`]), by its id: that page answers.
     Deciding(String),
     /// Allowed: the app acts as `user_id`, allowed by `approved_by`, the
-    /// same person (a TV gets the profile of whoever allowed it).
+    /// same person (a TV gets the profile of whoever allowed it), from the
+    /// browser session whose token has the SHA-256 `session_hash`.
     Allowed {
         user_id: i64,
         approved_by: i64,
+        session_hash: String,
         scopes: Scopes,
+    },
+    /// Allowed, and the device's tokens are being made: no other question
+    /// gets anything. `signed_out` once the account's sign-ins ended
+    /// meanwhile.
+    Issuing {
+        user_id: i64,
+        approved_by: i64,
+        signed_out: bool,
     },
     Denied,
 }
@@ -230,7 +241,8 @@ pub enum Poll {
     Denied,
     /// Ten minutes went by. The request is over.
     Expired,
-    /// Allowed. The request is over: this answer comes once.
+    /// Allowed: this answer comes once. Once its tokens are made (or not),
+    /// [`Devices::issued`] ends the request.
     Allowed(DeviceGrant),
 }
 
@@ -242,6 +254,8 @@ pub struct DeviceGrant {
     pub user_id: i64,
     /// Who allowed it.
     pub approved_by: i64,
+    /// SHA-256 of the token of the browser session that allowed it.
+    pub session_hash: String,
     pub scopes: Scopes,
 }
 
@@ -336,7 +350,7 @@ impl Devices {
                 let deciding = match &entry.status {
                     Status::Pending => None,
                     Status::Deciding(id) => Some(id.clone()),
-                    Status::Allowed { .. } | Status::Denied => return Err(Refused::Used),
+                    Status::Allowed { .. } | Status::Issuing { .. } | Status::Denied => return Err(Refused::Used),
                 };
                 Ok(Found {
                     key: key.clone(),
@@ -374,45 +388,84 @@ impl Devices {
     }
 
     /// The answer of the consent page of pending request `pending_id` to
-    /// request `key`: allowed by `user_id`, for the profile they use, with
+    /// request `key`: allowed by `user_id` from the browser session whose
+    /// token has the SHA-256 `session_hash`, for the profile they use, with
     /// `scopes`, or refused. The device gets it when it next asks.
-    pub fn decide(&self, key: &str, pending_id: &str, allow: bool, user_id: i64, scopes: Scopes) -> Result<(), Over> {
+    pub fn decide(
+        &self,
+        key: &str,
+        pending_id: &str,
+        allow: bool,
+        user_id: i64,
+        session_hash: &str,
+        scopes: Scopes,
+    ) -> Result<(), Over> {
         let now = self.now();
         let mut state = self.state.lock();
         let entry = state.requests.get_mut(key).filter(|entry| entry.alive(now)).ok_or(Over)?;
         if !matches!(&entry.status, Status::Deciding(id) if id == pending_id) {
             return Err(Over);
         }
-        entry.status = if allow { Status::Allowed { user_id, approved_by: user_id, scopes } } else { Status::Denied };
+        entry.status = if allow {
+            Status::Allowed { user_id, approved_by: user_id, session_hash: session_hash.to_owned(), scopes }
+        } else {
+            Status::Denied
+        };
         Ok(())
     }
 
     /// The sign-ins of `user_id` ended (a new password, signing out
-    /// everywhere, disabling, deletion): the devices they allowed that haven't asked
-    /// for their answer yet are refused instead, as the apps already signed
-    /// in are signed out. Such a device isn't among the account's apps yet,
-    /// so nothing else could stop it.
+    /// everywhere, disabling, deletion): the devices they allowed that
+    /// haven't asked for their answer yet are refused instead, as the apps
+    /// already signed in are signed out, and one whose tokens are being made
+    /// right now gets nothing ([`Devices::issued`]). Such a device isn't
+    /// among the account's apps yet, so nothing else could stop it.
     pub fn forget_user(&self, user_id: i64) {
         let mut state = self.state.lock();
         for entry in state.requests.values_mut() {
-            let theirs = match entry.status {
-                Status::Allowed { user_id: acting, approved_by, .. } => acting == user_id || approved_by == user_id,
-                _ => false,
-            };
-            if theirs {
-                entry.status = Status::Denied;
+            match &mut entry.status {
+                Status::Allowed { user_id: acting, approved_by, .. }
+                    if *acting == user_id || *approved_by == user_id =>
+                {
+                    entry.status = Status::Denied;
+                }
+                Status::Issuing { user_id: acting, approved_by, signed_out }
+                    if *acting == user_id || *approved_by == user_id =>
+                {
+                    *signed_out = true;
+                }
+                _ => {}
             }
         }
     }
 
+    /// The device of `device_code` got its tokens, or didn't: its request is
+    /// over. True when the account's sign-ins ended while they were being
+    /// made: end what it got.
+    pub fn issued(&self, device_code: &str) -> bool {
+        let key = hash_token(device_code);
+        let mut state = self.state.lock();
+        let signed_out = matches!(
+            state.requests.get(&key).map(|entry| &entry.status),
+            Some(Status::Issuing { signed_out: true, .. })
+        );
+        state.remove(&key);
+        signed_out
+    }
+
     /// The answer for a device asking with `device_code` as `client_id`
     /// (RFC 8628 §3.4-3.5). Decided under the lock, so of two questions at
-    /// once only one gets an allowed request.
+    /// once only one gets an allowed request; the others are told it is
+    /// unknown, as the request is over for them.
     pub fn poll(&self, device_code: &str, client_id: &str) -> Poll {
         let now = self.now();
         let key = hash_token(device_code);
         let mut state = self.state.lock();
-        let Some(entry) = state.requests.get_mut(&key).filter(|entry| entry.app.id == client_id) else {
+        let Some(entry) = state
+            .requests
+            .get_mut(&key)
+            .filter(|entry| entry.app.id == client_id && !matches!(entry.status, Status::Issuing { .. }))
+        else {
             return Poll::Unknown;
         };
         let answer = if entry.alive(now) {
@@ -427,17 +480,25 @@ impl Devices {
                 }
                 Status::Pending | Status::Deciding(_) => Poll::Pending,
                 Status::Denied => Poll::Denied,
-                Status::Allowed { user_id, approved_by, scopes } => Poll::Allowed(DeviceGrant {
-                    app: entry.app.clone(),
-                    user_id: *user_id,
-                    approved_by: *approved_by,
-                    scopes: *scopes,
-                }),
+                Status::Allowed { user_id, approved_by, session_hash, scopes } => {
+                    let grant = DeviceGrant {
+                        app: entry.app.clone(),
+                        user_id: *user_id,
+                        approved_by: *approved_by,
+                        session_hash: session_hash.clone(),
+                        scopes: *scopes,
+                    };
+                    entry.status =
+                        Status::Issuing { user_id: grant.user_id, approved_by: grant.approved_by, signed_out: false };
+                    Poll::Allowed(grant)
+                }
+                // Left out above.
+                Status::Issuing { .. } => Poll::Unknown,
             }
         } else {
             Poll::Expired
         };
-        if matches!(answer, Poll::Denied | Poll::Expired | Poll::Allowed(_)) {
+        if matches!(answer, Poll::Denied | Poll::Expired) {
             state.remove(&key);
         }
         answer
@@ -607,7 +668,7 @@ mod tests {
         let late = start(&devices);
         let key = on_page(&devices, &late, 1, "page");
         devices.wait(LIFETIME);
-        assert_eq!(devices.decide(&key, "page", true, 1, library()), Err(Over));
+        assert_eq!(devices.decide(&key, "page", true, 1, "session", library()), Err(Over));
         assert!(!devices.link(&key, Some("page"), "another page"));
         assert_eq!(devices.poll(&late.device_code, TV), Poll::Expired);
     }
@@ -644,7 +705,7 @@ mod tests {
         assert_eq!(interval(), 20);
 
         // Answered: the answer comes at once, however soon.
-        devices.decide(&key, "page", true, 1, library()).unwrap();
+        devices.decide(&key, "page", true, 1, "session", library()).unwrap();
         assert!(matches!(poll(), Poll::Allowed(_)));
     }
 
@@ -663,16 +724,21 @@ mod tests {
         assert!(devices.link(&found.key, Some("page-1"), "page-2"));
 
         // Only that page's answer counts, and only once.
-        assert_eq!(devices.decide(&found.key, "page-1", true, 1, library()), Err(Over));
-        assert_eq!(devices.decide("made-up", "page-2", true, 1, library()), Err(Over));
-        assert_eq!(devices.decide(&found.key, "page-2", true, 7, library()), Ok(()));
-        assert_eq!(devices.decide(&found.key, "page-2", false, 7, library()), Err(Over));
+        assert_eq!(devices.decide(&found.key, "page-1", true, 1, "session", library()), Err(Over));
+        assert_eq!(devices.decide("made-up", "page-2", true, 1, "session", library()), Err(Over));
+        assert_eq!(devices.decide(&found.key, "page-2", true, 7, "session", library()), Ok(()));
+        assert_eq!(devices.decide(&found.key, "page-2", false, 7, "session", library()), Err(Over));
         assert_eq!(devices.find(&started.user_code, 1), Err(Refused::Used));
         assert!(!devices.link(&found.key, Some("page-2"), "page-3"));
 
-        // The device gets it once, acting as whoever allowed it.
-        let grant = DeviceGrant { app: app(), user_id: 7, approved_by: 7, scopes: library() };
+        // The device gets it once, acting as whoever allowed it, from their
+        // session.
+        let grant =
+            DeviceGrant { app: app(), user_id: 7, approved_by: 7, session_hash: "session".into(), scopes: library() };
         assert_eq!(devices.poll(&started.device_code, TV), Poll::Allowed(grant));
+        assert_eq!(devices.poll(&started.device_code, TV), Poll::Unknown, "while its tokens are made");
+        assert_eq!(devices.find(&started.user_code, 1), Err(Refused::Used));
+        assert!(!devices.issued(&started.device_code), "nothing ended meanwhile");
         assert_eq!(devices.poll(&started.device_code, TV), Poll::Unknown);
         assert_eq!(devices.find(&started.user_code, 1), Err(Refused::Unknown), "gone with its answer");
 
@@ -680,7 +746,7 @@ mod tests {
         let refused = start(&devices);
         let key = on_page(&devices, &refused, 1, "page");
         assert_eq!(devices.poll(&refused.device_code, DESKTOP), Poll::Unknown, "another app's");
-        devices.decide(&key, "page", false, 1, library()).unwrap();
+        devices.decide(&key, "page", false, 1, "session", library()).unwrap();
         assert_eq!(devices.find(&refused.user_code, 1), Err(Refused::Used));
         assert_eq!(devices.poll(&refused.device_code, TV), Poll::Denied);
         assert_eq!(devices.poll(&refused.device_code, TV), Poll::Unknown);
@@ -694,10 +760,12 @@ mod tests {
         let allowed_by = |user_id: i64| {
             let started = start(&devices);
             let key = on_page(&devices, &started, user_id, "page");
-            devices.decide(&key, "page", true, user_id, library()).unwrap();
+            devices.decide(&key, "page", true, user_id, "session", library()).unwrap();
             started
         };
         let bobs = allowed_by(2);
+        let bobs_issuing = allowed_by(2);
+        assert!(matches!(devices.poll(&bobs_issuing.device_code, TV), Poll::Allowed(_)));
         let carols = allowed_by(3);
         let waiting = start(&devices);
         let deciding = start(&devices);
@@ -708,8 +776,11 @@ mod tests {
         assert_eq!(devices.find(&bobs.user_code, 1), Err(Refused::Used));
         assert_eq!(devices.poll(&bobs.device_code, TV), Poll::Denied);
         assert_eq!(devices.poll(&bobs.device_code, TV), Poll::Unknown);
+        // ...and what the one being signed in got ends at once...
+        assert!(devices.issued(&bobs_issuing.device_code));
         // ...while others' answers, and requests nobody answered, stay.
         assert!(matches!(devices.poll(&carols.device_code, TV), Poll::Allowed(grant) if grant.user_id == 3));
+        assert!(!devices.issued(&carols.device_code));
         assert_eq!(devices.poll(&waiting.device_code, TV), Poll::Pending);
         assert_eq!(devices.poll(&deciding.device_code, TV), Poll::Pending);
     }
@@ -768,7 +839,7 @@ mod tests {
         assert!(devices.find(&started.user_code, 2).is_ok());
         // Right codes and used ones don't count.
         let key = on_page(&devices, &started, 2, "page");
-        devices.decide(&key, "page", false, 2, library()).unwrap();
+        devices.decide(&key, "page", false, 2, "session", library()).unwrap();
         for _ in 0..MAX_WRONG_PER_PERSON {
             assert_eq!(devices.find(&started.user_code, 3), Err(Refused::Used));
         }

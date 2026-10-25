@@ -303,6 +303,13 @@ impl Pending {
         entry.answer.clone()
     }
 
+    /// The sign-ins of `user_id` ended (a new password, signing out
+    /// everywhere, disabling, deletion): their requests are over, answered
+    /// or not.
+    pub fn forget_user(&self, user_id: i64) {
+        self.requests.lock().retain(|_, entry| entry.request.user_id != user_id);
+    }
+
     /// Forgets requests that are over.
     pub fn sweep(&self) {
         let now = Instant::now();
@@ -476,6 +483,18 @@ mod tests {
         assert_eq!(pending.decide(&id, 1, "session-of-1", true, code), Err(DecideError::NotFound));
         pending.sweep();
         assert_eq!(pending.len(), 0);
+
+        // With the sign-ins of their person, answered or not.
+        let waiting = pending.create(request(1)).unwrap();
+        let answered = pending.create(request(1)).unwrap();
+        assert_eq!(pending.decide(&answered, 1, "session-of-1", true, code), Ok(()));
+        let tv = pending.create(tv_request(1)).unwrap();
+        let someone_elses = pending.create(request(2)).unwrap();
+        pending.forget_user(1);
+        assert_eq!(pending.get(&waiting, 1, "session-of-1"), None);
+        assert_eq!(pending.location(&answered, 1, "session-of-1"), None);
+        assert_eq!(pending.owner(&tv), None);
+        assert!(pending.get(&someone_elses, 2, "session-of-2").is_some());
     }
 
     #[test]

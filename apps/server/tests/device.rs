@@ -661,6 +661,28 @@ async fn a_tv_allowed_but_not_signed_in_yet_ends_with_the_accounts_sign_ins() {
 }
 
 #[tokio::test]
+async fn a_tv_allowed_from_a_session_that_signed_out_since_gets_nothing() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (bob, _) = app.user(&admin, "bob", json!({})).await;
+    let other = app.login("bob", "test-pass-1").await;
+    let (device_code, _) = allowed_tv(&app, &other).await;
+    let out = app.browser_call(Method::POST, "/api/auth/logout", &other, None, &[]).await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT);
+    let refused = poll(&app, &device_code, &[]).await;
+    assert_eq!(oauth_error(&refused), (StatusCode::BAD_REQUEST, "access_denied"));
+    assert_eq!(refused.body["error_description"], "the person who allowed it signed out since: sign in again");
+    assert_eq!(grants(&app).await, 0);
+    // The request is over.
+    assert_eq!(oauth_error(&poll(&app, &device_code, &[]).await).1, "invalid_grant");
+
+    // From a session still signed in, it gets in.
+    let (device_code, _) = allowed_tv(&app, &bob).await;
+    let (access, _) = pair(&poll(&app, &device_code, &[]).await);
+    assert_eq!(app.get("/api/auth/me", &access).await.body["username"], "bob");
+}
+
+#[tokio::test]
 async fn device_grants_act_like_other_app_grants() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;

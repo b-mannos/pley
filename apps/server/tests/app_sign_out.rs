@@ -1,15 +1,79 @@
 //! Every way pley signs an account out also ends, at once, the apps acting
 //! as it or allowed by it: a password set by an administrator, signing out
 //! everywhere, deleting the account and `pley reset-password`. Disabling an
-//! account pauses its apps, and enabling it brings them back.
+//! account pauses its apps, and enabling it brings them back. Codes not
+//! exchanged yet end with the sign-ins too, and with the session that got
+//! them.
 
 mod common;
 
-use axum::http::{Method, StatusCode};
+use axum::http::{Method, StatusCode, header};
 use pley::auth::grants::{RefreshError, RefreshInput};
 use serde_json::json;
 
-use common::TestApp;
+use common::{ANDROID_APP, Reply, TestApp};
+
+/// RFC 7636 appendix B.
+const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+const ANDROID_BACK: &str = "app.pley.android:/oauth/callback";
+
+fn form(pairs: &[(&str, &str)]) -> String {
+    url::form_urlencoded::Serializer::new(String::new()).extend_pairs(pairs).finish()
+}
+
+/// pley's page asks the person signed in with `cookie` to allow pley's
+/// Android app: the request's id.
+async fn consent(app: &TestApp, cookie: &str) -> String {
+    let query = form(&[
+        ("response_type", "code"),
+        ("client_id", ANDROID_APP),
+        ("redirect_uri", ANDROID_BACK),
+        ("scope", "library play"),
+        ("code_challenge", CHALLENGE),
+        ("code_challenge_method", "S256"),
+    ]);
+    let started =
+        app.browser_call(Method::POST, "/api/oauth/requests", cookie, Some(json!({"query": query})), &[]).await;
+    assert_eq!(started.body["status"], "consent", "{}", started.text());
+    started.body["id"].as_str().unwrap().to_owned()
+}
+
+/// The person signed in with `cookie` allows pley's Android app on pley's
+/// page: the code the app is sent back with.
+async fn code_from(app: &TestApp, cookie: &str) -> String {
+    let id = consent(app, cookie).await;
+    let allow = Some(json!({"allow": true}));
+    let decided = app.browser_call(Method::POST, &format!("/api/oauth/requests/{id}"), cookie, allow, &[]).await;
+    assert_eq!(decided.status, StatusCode::OK, "{}", decided.text());
+    let back = app.browser_call(Method::GET, &format!("/api/oauth/requests/{id}/continue"), cookie, None, &[]).await;
+    let location = url::Url::parse(back.headers[header::LOCATION].to_str().unwrap()).unwrap();
+    location.query_pairs().find(|(name, _)| name == "code").unwrap().1.into_owned()
+}
+
+/// The app exchanges `code` for its tokens.
+async fn exchange(app: &TestApp, code: &str) -> Reply {
+    let body = form(&[
+        ("grant_type", "authorization_code"),
+        ("code", code),
+        ("client_id", ANDROID_APP),
+        ("redirect_uri", ANDROID_BACK),
+        ("code_verifier", VERIFIER),
+    ]);
+    app.form_post("/api/oauth/token", &body, &[]).await
+}
+
+async fn grants(app: &TestApp) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM app_grants").fetch_one(&app.state.db.read).await.unwrap()
+}
+
+/// `code` gets nothing, and no app is signed in.
+async fn signs_nothing_in(app: &TestApp, code: &str) {
+    let reply = exchange(app, code).await;
+    let refusal = (reply.status, reply.body["error"].as_str());
+    assert_eq!(refusal, (StatusCode::BAD_REQUEST, Some("invalid_grant")), "{}", reply.text());
+    assert_eq!(grants(app).await, 0);
+}
 
 /// Whether the app's next request gets through.
 async fn works(app: &TestApp, access: &str) -> bool {
@@ -84,6 +148,67 @@ async fn signing_out_everywhere_ends_apps_too() {
     assert_eq!(out.status, StatusCode::NO_CONTENT, "{:?}", out.body);
     assert_eq!(app.get("/api/auth/me", &session).await.status, StatusCode::UNAUTHORIZED, "the session ends");
     assert_ended(&app, &tokens).await;
+}
+
+#[tokio::test]
+async fn codes_from_before_a_sign_out_sign_nothing_in_after_it() {
+    // Someone with a copy of a session keeps a fresh code ready, to sign an
+    // app in after the account's sign-ins end: nothing allowed before gets
+    // in after.
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (bob, bob_id) = app.user(&admin, "bob", json!({})).await;
+
+    // Bob changes his password: the copy's code ends with its session, and
+    // his own codes end with his apps.
+    let copy = app.login("bob", "test-pass-1").await;
+    let copys = code_from(&app, &copy).await;
+    let his = code_from(&app, &bob).await;
+    let password = json!({"current_password": "test-pass-1", "new_password": "test-pass-2"});
+    let changed = app.put("/api/auth/password", &bob, password).await;
+    assert_eq!(changed.status, StatusCode::NO_CONTENT, "{}", changed.text());
+    signs_nothing_in(&app, &copys).await;
+    signs_nothing_in(&app, &his).await;
+
+    // An administrator signs him out everywhere.
+    let bob = app.login("bob", "test-pass-2").await;
+    let code = code_from(&app, &bob).await;
+    let out = app.delete(&format!("/api/users/{bob_id}/devices"), &admin).await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT, "{}", out.text());
+    signs_nothing_in(&app, &code).await;
+
+    // An administrator gives him a new password.
+    let bob = app.login("bob", "test-pass-2").await;
+    let code = code_from(&app, &bob).await;
+    let set = app.patch(&format!("/api/users/{bob_id}"), &admin, json!({"password": "test-pass-3"})).await;
+    assert_eq!(set.status, StatusCode::OK, "{}", set.text());
+    signs_nothing_in(&app, &code).await;
+
+    // An administrator sets their own password on the users page: their
+    // sessions stay, but their codes end with their apps, and so do the
+    // requests their consent page shows.
+    let code = code_from(&app, &admin).await;
+    let shown = consent(&app, &admin).await;
+    let me = app.get("/api/auth/me", &admin).await.body["id"].as_i64().unwrap();
+    let set = app.patch(&format!("/api/users/{me}"), &admin, json!({"password": "secret-two"})).await;
+    assert_eq!(set.status, StatusCode::OK, "{}", set.text());
+    assert_eq!(app.get("/api/auth/me", &admin).await.status, StatusCode::OK, "the session stays");
+    signs_nothing_in(&app, &code).await;
+    let allow = Some(json!({"allow": true}));
+    let late = app.browser_call(Method::POST, &format!("/api/oauth/requests/{shown}"), &admin, allow, &[]).await;
+    assert_eq!(late.status, StatusCode::NOT_FOUND, "{}", late.text());
+
+    // One session signs out: its codes end, other sessions' work.
+    let bob = app.login("bob", "test-pass-3").await;
+    let other = app.login("bob", "test-pass-3").await;
+    let others = code_from(&app, &other).await;
+    let his = code_from(&app, &bob).await;
+    let out = app.browser_call(Method::POST, "/api/auth/logout", &other, None, &[]).await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT);
+    signs_nothing_in(&app, &others).await;
+    let signed_in = exchange(&app, &his).await;
+    assert_eq!(signed_in.status, StatusCode::OK, "{}", signed_in.text());
+    assert_eq!(grants(&app).await, 1);
 }
 
 #[tokio::test]

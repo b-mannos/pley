@@ -482,6 +482,7 @@ async fn apps_by_other_publishers_never_get_profiles() {
             scopes: pley::auth::scopes::Scopes::parse("library profiles").unwrap(),
             refresh: true,
             first_party: false,
+            session_hash: None,
             user_agent: None,
             ip: None,
         })

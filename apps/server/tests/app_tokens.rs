@@ -653,6 +653,7 @@ async fn a_password_change_ends_the_accounts_apps() {
             scopes: pley::auth::scopes::Scopes::parse("library").unwrap(),
             refresh: false,
             first_party: true,
+            session_hash: None,
             user_agent: None,
             ip: None,
         })
@@ -804,6 +805,7 @@ async fn the_apps_tables_come_with_an_upgrade() {
             scopes: pley::auth::scopes::Scopes::parse("library").unwrap(),
             refresh: true,
             first_party: true,
+            session_hash: None,
             user_agent: None,
             ip: None,
         })

@@ -24,7 +24,7 @@ use dashmap::DashMap;
 use rand_core::{OsRng, RngCore};
 use sha2::{Digest, Sha256};
 
-use self::grants::{ACCESS_PREFIX, APP_TOKEN_PREFIX, Issued, NewGrant, RefreshError, RefreshInput};
+use self::grants::{ACCESS_PREFIX, APP_TOKEN_PREFIX, IssueError, Issued, NewGrant, RefreshError, RefreshInput};
 use self::scopes::{Need, Scopes};
 use crate::db::Db;
 use crate::error::AppError;
@@ -626,8 +626,9 @@ impl AuthService {
         if token.starts_with(ACCESS_PREFIX) { self.validate_app(token).await } else { self.validate(token).await }
     }
 
-    /// Records what a person allowed an app; its first tokens.
-    pub async fn issue(&self, grant: NewGrant) -> Result<Issued, AppError> {
+    /// Records what a person allowed an app; its first tokens (see
+    /// [`grants::issue`]).
+    pub async fn issue(&self, grant: NewGrant) -> Result<Issued, IssueError> {
         let (issued, dropped) = grants::issue(&self.db, grant).await?;
         if !dropped.is_empty() {
             self.forget_grants(&dropped);
@@ -1193,6 +1194,7 @@ mod tests {
             scopes: Scopes::parse("library play").unwrap(),
             refresh: true,
             first_party: true,
+            session_hash: None,
             user_agent: None,
             ip: None,
         })

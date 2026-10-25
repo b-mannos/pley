@@ -54,8 +54,30 @@ pub struct NewGrant {
     pub refresh: bool,
     /// One of pley's own apps: no yearly end.
     pub first_party: bool,
+    /// SHA-256 of the token of the browser session where the person allowed
+    /// it: the grant is recorded only while that session is signed in, to
+    /// the account that allowed it. `None` for grants made without a
+    /// browser (tests, tools).
+    pub session_hash: Option<String>,
     pub user_agent: Option<String>,
     pub ip: Option<String>,
+}
+
+/// Why a grant wasn't recorded.
+#[derive(Debug, thiserror::Error)]
+pub enum IssueError {
+    /// The browser session where the person allowed the app has signed out
+    /// since, or ended with the account's other sign-ins.
+    #[error("the person who allowed it signed out since")]
+    SignedOut,
+    #[error(transparent)]
+    Internal(#[from] AppError),
+}
+
+impl From<sqlx::Error> for IssueError {
+    fn from(err: sqlx::Error) -> Self {
+        Self::Internal(err.into())
+    }
 }
 
 /// Tokens handed to an app.
@@ -158,10 +180,28 @@ async fn insert_token(
 /// Records what a person allowed an app and hands it its first tokens. The
 /// grants of the profile past [`MAX_GRANTS_PER_USER`] end (the least
 /// recently used): their ids come second.
-pub async fn issue(db: &Db, grant: NewGrant) -> Result<(Issued, Vec<i64>), AppError> {
+///
+/// Nothing is recorded when the browser session where the person allowed
+/// it has ended. That is checked in the same transaction, on the one
+/// writer: a sign-out either comes after the grant, and ends it with the
+/// account's apps, or before, and the grant is never made.
+pub async fn issue(db: &Db, grant: NewGrant) -> Result<(Issued, Vec<i64>), IssueError> {
     let now = now();
     let ends_at = (!grant.first_party).then_some(now + THIRD_PARTY_GRANT_SECS);
     let mut tx = db.write.begin().await?;
+    if let Some(session_hash) = &grant.session_hash {
+        let signed_in: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM sessions WHERE token_hash = ? AND user_id = ? AND expires_at > ?)",
+        )
+        .bind(session_hash)
+        .bind(grant.approved_by)
+        .bind(now)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !signed_in {
+            return Err(IssueError::SignedOut);
+        }
+    }
     let grant_id: i64 = sqlx::query_scalar(
         "INSERT INTO app_grants (user_id, approved_by, client_id, client_name, scope, created_at, last_used_at,
                                  expires_at, ends_at, user_agent, last_ip)
@@ -649,6 +689,7 @@ mod tests {
             scopes: Scopes::parse(scopes).unwrap(),
             refresh: true,
             first_party: client_id == ANDROID,
+            session_hash: None,
             user_agent: Some("okhttp".into()),
             ip: Some("10.0.0.2".into()),
         }

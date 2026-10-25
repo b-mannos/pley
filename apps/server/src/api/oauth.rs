@@ -41,7 +41,7 @@ use super::auth::{
     NO_WAY_IN, NOT_ALLOWED, PIN_LOCKED, PIN_NEEDED, SwitchError, SwitchTarget, check_switch, switch_needs,
     switch_targets,
 };
-use crate::auth::grants::{self, GrantRow, Issued, NewGrant, RefreshError, RefreshInput, SwitchInput};
+use crate::auth::grants::{self, GrantRow, IssueError, Issued, NewGrant, RefreshError, RefreshInput, SwitchInput};
 use crate::auth::scopes::{Scope, Scopes};
 use crate::auth::{AdminUser, AuthUser, ClientIp, SourceIp, cookie_token, forwarded_https, hash_token};
 use crate::error::{ApiResult, AppError};
@@ -437,6 +437,7 @@ pub async fn decide(
             redirect_uri: back.redirect_uri.clone(),
             code_challenge: back.code_challenge.clone(),
             user_id: request.user_id,
+            session_hash: request.session_hash.clone(),
             scopes: request.scopes,
         })
     });
@@ -646,7 +647,9 @@ pub async fn token(
 
 /// grant_type=authorization_code (OAuth 2.1 §4.1.3). Anything wrong leaves
 /// the code as it was; a right exchange after the first ends what the first
-/// one got (§7.5.3).
+/// one got (§7.5.3). The code works only while the browser session that
+/// allowed the app is signed in: a password change or signing out ends
+/// codes too, as it ends the apps signed in already.
 async fn exchange_code(
     state: &AppState,
     headers: &HeaderMap,
@@ -701,31 +704,46 @@ async fn exchange_code(
             scopes: grant.scopes,
             refresh: grant.app.refresh,
             first_party: grant.app.first_party,
+            session_hash: Some(grant.session_hash.clone()),
             user_agent: user_agent(headers),
             ip,
         })
         .await;
     let issued = match issued {
         Ok(issued) => issued,
-        Err(err) => {
+        Err(IssueError::SignedOut) => {
+            state.oauth.codes.failed(code);
+            return Err(OAuthError::invalid_grant(SIGNED_OUT));
+        }
+        Err(IssueError::Internal(err)) => {
             state.oauth.codes.failed(code);
             return Err(OAuthError::server_error(err));
         }
     };
-    if state.oauth.codes.issued(code, issued.grant_id) {
-        tracing::warn!(
-            "{} exchanged a code a second time while it was being issued (someone else may have it): its access is \
-             ended",
-            grant.app.label()
-        );
+    let refusal = match state.oauth.codes.issued(code, issued.grant_id) {
+        codes::Issued::Kept => None,
+        codes::Issued::Replayed => {
+            tracing::warn!(
+                "{} exchanged a code a second time while it was being issued (someone else may have it): its access \
+                 is ended",
+                grant.app.label()
+            );
+            Some("the code was used already")
+        }
+        codes::Issued::SignedOut => Some(SIGNED_OUT),
+    };
+    if let Some(refusal) = refusal {
         if let Err(err) = state.auth.end_grant(issued.grant_id).await {
             tracing::error!("could not end an app's access: {err}");
         }
-        return Err(OAuthError::invalid_grant("the code was used already"));
+        return Err(OAuthError::invalid_grant(refusal));
     }
     tracing::info!("{} may use {}'s account ({})", grant.app.label(), user.username, issued.scopes);
     Ok(tokens(issued))
 }
+
+/// Why a code or a TV's answer got nothing although it was right.
+const SIGNED_OUT: &str = "the person who allowed it signed out since: sign in again";
 
 /// grant_type=refresh_token (OAuth 2.1 §4.3): rotated every time; a spent
 /// one shown again ends the app's access (see [`grants::refresh`]).
@@ -912,7 +930,7 @@ async fn signed_in(state: &AppState, session_hash: &str) -> ApiResult<bool> {
 /// browser.
 fn decide_for_device(state: &AppState, web: &WebUser, id: &str, allow: bool) -> ApiResult<Json<Value>> {
     let decided = state.oauth.pending.decide_device(id, web.user.id, &web.session_hash, allow, |request, key| {
-        state.oauth.devices.decide(key, id, allow, web.user.id, request.scopes)?;
+        state.oauth.devices.decide(key, id, allow, web.user.id, &web.session_hash, request.scopes)?;
         if allow {
             tracing::info!(
                 "{} may use {}'s account ({}) on a device",
@@ -941,6 +959,10 @@ fn decide_for_device(state: &AppState, web: &WebUser, id: &str, allow: bool) -> 
 /// A device code never appears in an address or a page, so one shown again
 /// after its answer is just unknown: unlike an authorization code, it can't
 /// have leaked on the way, and nothing has to end.
+///
+/// As with codes, the tokens are made only while the browser session that
+/// allowed the TV is signed in, and what the TV got ends when the account's
+/// sign-ins end while they are made.
 async fn device_token(
     state: &AppState,
     headers: &HeaderMap,
@@ -960,6 +982,26 @@ async fn device_token(
         Poll::Expired => return Err(OAuthError::new("expired_token", "the code expired: start again")),
         Poll::Unknown => return Err(OAuthError::invalid_grant("unknown device_code")),
     };
+    let issued = issue_for_device(state, headers, ip, &allowed).await;
+    // The request is over, whatever came of it.
+    let signed_out = state.oauth.devices.issued(device_code);
+    let issued = issued?;
+    if signed_out {
+        if let Err(err) = state.auth.end_grant(issued.grant_id).await {
+            tracing::error!("could not end an app's access: {err}");
+        }
+        return Err(OAuthError::new("access_denied", SIGNED_OUT));
+    }
+    Ok(tokens(issued))
+}
+
+/// The tokens of a TV that was allowed, when its account still may have them.
+async fn issue_for_device(
+    state: &AppState,
+    headers: &HeaderMap,
+    ip: Option<String>,
+    allowed: &devices::DeviceGrant,
+) -> Result<Issued, OAuthError> {
     // Things may have changed since the person allowed it.
     for id in [allowed.user_id, allowed.approved_by] {
         match AuthUser::load(&state.db, id).await {
@@ -978,12 +1020,16 @@ async fn device_token(
             scopes: allowed.scopes,
             refresh: allowed.app.refresh,
             first_party: allowed.app.first_party,
+            session_hash: Some(allowed.session_hash.clone()),
             user_agent: user_agent(headers),
             ip,
         })
-        .await
-        .map_err(OAuthError::server_error)?;
-    Ok(tokens(issued))
+        .await;
+    match issued {
+        Ok(issued) => Ok(issued),
+        Err(IssueError::SignedOut) => Err(OAuthError::new("access_denied", SIGNED_OUT)),
+        Err(IssueError::Internal(err)) => Err(OAuthError::server_error(err)),
+    }
 }
 
 // ------------------------------------------------------------------ profiles (pley's own apps)

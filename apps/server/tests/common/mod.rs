@@ -258,6 +258,7 @@ impl TestApp {
                 scopes: pley::auth::scopes::Scopes::parse(scope).unwrap(),
                 refresh: true,
                 first_party: true,
+                session_hash: None,
                 user_agent: Some("pley-android/1.0 okhttp/5".into()),
                 ip: Some("10.0.0.9".into()),
             })

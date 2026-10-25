@@ -51,6 +51,18 @@ impl AuthorizationServer {
         }
     }
 
+    /// The sign-ins of `user_id` ended (a new password, signing out
+    /// everywhere, disabling, deletion): nothing in progress for them can
+    /// sign an app in any more. Their requests on the consent page are
+    /// over, their codes end, and TVs they allowed that haven't asked for
+    /// their answer yet are refused. Called before their apps are ended,
+    /// so that an app being signed in meanwhile ends with them.
+    pub fn forget_user(&self, user_id: i64) {
+        self.pending.forget_user(user_id);
+        self.codes.forget_user(user_id);
+        self.devices.forget_user(user_id);
+    }
+
     /// Forgets what is over: requests, codes, documents and counters.
     pub fn sweep(&self) {
         self.pending.sweep();
