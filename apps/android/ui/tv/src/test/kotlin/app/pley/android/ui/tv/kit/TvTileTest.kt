@@ -25,7 +25,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Tiles: Select opens, holding Select gives the actions (rule 6), and a
+ * Tiles: Select opens, holding Select or pressing Menu gives the actions (rule 6), and a
  * held direction key moves one tile per 100 ms, jumping without animation
  * (rule 5).
  */
@@ -78,6 +78,19 @@ class TvTileTest {
             keyDown(Key.DirectionCenter)
             advanceEventTime(1_000)
             keyUp(Key.DirectionCenter)
+        }
+        compose.waitForIdle()
+        assertEquals(listOf(1L), actions)
+        assertTrue(opened.isEmpty())
+    }
+
+    @Test
+    fun menuOpensTheActionsOnceHoweverLongItIsHeld() {
+        row()
+        compose.onRoot().performKeyInput {
+            keyDown(Key.Menu)
+            advanceEventTime(1_000)
+            keyUp(Key.Menu)
         }
         compose.waitForIdle()
         assertEquals(listOf(1L), actions)

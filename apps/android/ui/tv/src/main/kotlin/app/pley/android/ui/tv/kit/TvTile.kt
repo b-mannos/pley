@@ -31,6 +31,11 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -65,7 +70,8 @@ import kotlinx.coroutines.launch
  * the accent ring drawn around it, and nothing else: no glow; the caption,
  * outside the scaled layer, turns bold. Select opens; holding Select calls
  * [onLongClick], the item's actions (rule 6), which are also buttons on its
- * page. While a key repeats the tile snaps to its focus look (rule 5).
+ * page; so does the remote's Menu key, the way Fire TV apps open them.
+ * While a key repeats the tile snaps to its focus look (rule 5).
  *
  * [focusModifier] goes on the focusable itself: a FocusRequester,
  * [initialFocus] or [rememberedFocus].
@@ -149,6 +155,7 @@ fun TvTileFrame(
         Box(
             focusModifier
                 .onFocusChanged { look.focus(it.isFocused) }
+                .menuKey(onLongClick)
                 .combinedClickable(
                     interactionSource = interactions,
                     indication = null,
@@ -211,6 +218,21 @@ internal class TileFocusLook(private val scope: CoroutineScope, private val gate
     fun scale(): Float = (1f + (PleyFocus.TILE_SCALE - 1f) * progress.value) * pressed.value
 
 }
+
+/**
+ * The remote's Menu key calls [onActions] as it comes up, once however
+ * long it is held; without actions the key goes on to the screen.
+ */
+internal fun Modifier.menuKey(onActions: (() -> Unit)?): Modifier =
+    if (onActions == null) {
+        this
+    } else {
+        onKeyEvent { event ->
+            if (event.key != Key.Menu) return@onKeyEvent false
+            if (event.type == KeyEventType.KeyUp) onActions()
+            true
+        }
+    }
 
 /** The focused tile draws over its neighbours and their captions (zIndex 1), decided while placing, not composing. */
 private fun Modifier.focusedOnTop(look: TileFocusLook): Modifier = layout { measurable, constraints ->
