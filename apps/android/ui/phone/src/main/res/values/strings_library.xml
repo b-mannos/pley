@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- A library's page: its tabs (apps/web/src/pages/LibraryPage.tsx). -->
+    <string name="library_tab_recommended">Recommended</string>
+    <string name="library_tab_library">Library</string>
+    <string name="library_tab_collections">Collections</string>
+    <string name="library_search">Search</string>
+
+    <!-- Sorts, as the web names them. -->
+    <string name="library_sort_title">Title</string>
+    <string name="library_sort_year">Year</string>
+    <string name="library_sort_added">Date added</string>
+    <string name="library_sort_rating">Rating</string>
+    <string name="library_sort_user_rating">Your rating</string>
+    <string name="library_sort_release">Release date</string>
+    <string name="library_sort_duration">Duration</string>
+    <string name="library_sort_last_played">Last played</string>
+    <string name="library_sort_bitrate">Bitrate</string>
+    <string name="library_sort_by">Sort by</string>
+    <string name="library_order">Order</string>
+    <string name="library_ascending">Ascending</string>
+    <string name="library_descending">Descending</string>
+    <string name="library_show">Show</string>
+    <string name="library_show_all">All</string>
+    <string name="library_card_size">Card size</string>
+    <string name="library_density_small">Small</string>
+    <string name="library_density_medium">Medium</string>
+    <string name="library_density_large">Large</string>
+
+    <!-- Filters. -->
+    <string name="library_unwatched">Unwatched</string>
+    <string name="library_watched">Watched</string>
+    <string name="library_genre">Genre</string>
+    <string name="library_all_genres">All genres</string>
+    <string name="library_year">Year</string>
+    <string name="library_all_years">All years</string>
+    <string name="library_clear_filters">Clear filters</string>
+    <string name="library_save_as">Save as…</string>
+
+    <!-- Counts. -->
+    <plurals name="library_count_movies">
+        <item quantity="one">%s movie</item>
+        <item quantity="other">%s movies</item>
+    </plurals>
+    <plurals name="library_count_shows">
+        <item quantity="one">%s show</item>
+        <item quantity="other">%s shows</item>
+    </plurals>
+    <plurals name="library_count_artists">
+        <item quantity="one">%s artist</item>
+        <item quantity="other">%s artists</item>
+    </plurals>
+    <plurals name="library_count_collections">
+        <item quantity="one">%s collection</item>
+        <item quantity="other">%s collections</item>
+    </plurals>
+
+    <!-- States (design spec §8; the web's words, for viewers). -->
+    <string name="library_failed">Couldn\'t load this library</string>
+    <string name="library_missing_title">This library isn\'t here</string>
+    <string name="library_missing_body">It may have been removed, or this profile may not see it.</string>
+    <string name="library_empty_title">This library is empty</string>
+    <string name="library_empty_body">pley hasn\'t found anything in it yet. Titles show up here as soon as the server adds them.</string>
+    <string name="library_no_matches_title">No matches</string>
+    <string name="library_no_matches_body">Nothing in this library matches the current filters.</string>
+    <string name="library_recommended_failed">Couldn\'t load recommendations</string>
+    <string name="library_recommended_empty_title">Nothing to recommend yet</string>
+    <string name="library_recommended_empty_body">Recommendations appear once the library has some items.</string>
+    <string name="library_collections_failed">Couldn\'t load collections</string>
+    <string name="library_collections_empty_title">No collections yet</string>
+    <string name="library_collections_empty_movies">Movies of the same TMDB collection are grouped here once two of them are in this library.</string>
+    <string name="library_collections_empty_shows">There are no collections in this library yet.</string>
+    <string name="library_jump">Jump to a letter</string>
+    <string name="library_jump_letter">Titles starting with %s</string>
+
+    <!-- A collection's page (apps/web/src/pages/collections/CollectionPage.tsx). -->
+    <string name="collection_label">Collection</string>
+    <string name="collection_tmdb" translatable="false">TMDB</string>
+    <string name="collection_smart">Smart</string>
+    <string name="collection_play">Play</string>
+    <string name="collection_shuffle">Shuffle</string>
+    <string name="collection_more">More</string>
+    <string name="collection_less">Less</string>
+    <string name="collection_movies">Movies</string>
+    <string name="collection_shows">Shows</string>
+    <string name="collection_empty_movies">Nothing in this collection yet.</string>
+    <string name="collection_failed">Couldn\'t load this collection</string>
+    <string name="collection_nothing_to_play">Nothing to play: this show has no episodes yet</string>
+    <string name="collections_title">Collections</string>
+</resources>
