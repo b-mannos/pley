@@ -7,14 +7,6 @@ plugins {
 
 android {
     namespace = "app.pley.android.designsystem"
-    // Robolectric on Android Studio's JDK 21 reaches into java.base for file
-    // descriptors; without these every Robolectric test fails at setup.
-    testOptions.unitTests.all {
-        it.jvmArgs(
-            "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED",
-            "--add-opens=java.base/java.io=ALL-UNNAMED",
-        )
-    }
 }
 
 dependencies {

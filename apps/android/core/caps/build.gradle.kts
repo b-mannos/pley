@@ -10,10 +10,6 @@ android {
     defaultConfig {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-    // Robolectric's SDK 36 reaches into the JDK's file descriptors (JDK 21).
-    testOptions.unitTests.all {
-        it.jvmArgs("--add-opens=java.base/jdk.internal.access=ALL-UNNAMED", "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED")
-    }
 }
 
 dependencies {

@@ -33,6 +33,15 @@ internal fun Project.configureAndroid(android: CommonExtension) {
     android.compileOptions.sourceCompatibility = JavaVersion.VERSION_17
     android.compileOptions.targetCompatibility = JavaVersion.VERSION_17
     android.testOptions.unitTests.isIncludeAndroidResources = true
+    // Robolectric's Android 16 runtime reaches into JDK internals that JDK 21
+    // closes off.
+    android.testOptions.unitTests.all {
+        it.jvmArgs(
+            "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED",
+            "--add-opens=java.base/java.io=ALL-UNNAMED",
+        )
+    }
     // robolectric.properties (sdk=36) for every module's unit tests.
     android.sourceSets.findByName("test")?.resources?.srcDir(
         rootProject.layout.projectDirectory.dir("build-logic/robolectric"),

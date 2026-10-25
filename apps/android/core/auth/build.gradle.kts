@@ -7,8 +7,6 @@ plugins {
 android {
     namespace = "app.pley.android.auth"
     defaultConfig.testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    // Robolectric's Android 16 reaches into the JDK (ApplicationSharedMemory).
-    testOptions.unitTests.all { it.jvmArgs("--add-opens=java.base/jdk.internal.access=ALL-UNNAMED") }
 }
 
 dependencies {
