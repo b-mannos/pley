@@ -7,6 +7,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import app.pley.android.common.Tier
 import app.pley.android.common.perf.PerfMonitor
 import app.pley.android.designsystem.image.LocalArtworkImageLoader
+import app.pley.android.screens.onboarding.Household
 import app.pley.android.ui.tv.shell.TvApp
 import app.pley.android.ui.tv.shell.TvShellDemo
 import app.pley.android.ui.tv.shell.TvShellSource
@@ -39,7 +40,15 @@ class TvActivity : ComponentActivity() {
                     TvApp(TvShellDemo.source, onExit = ::finish, tier = tier, placeholder = TvShellDemo.placeholder)
                 }
             } else {
-                val source = TvShellSource.of(app.graph, startup = { app.startup.await().let { it.server to it.signedIn } })
+                val source = TvShellSource.of(
+                    app.graph,
+                    startup = { app.startup.await().let { it.server to it.signedIn } },
+                    // "Who's watching?" at a cold start needs the household's size, saved on this device.
+                    householdSize = {
+                        val startup = app.startup.await()
+                        Household.sizeAtStart(app, { app.graph }, startup.server, startup.signedIn)
+                    },
+                )
                 TvApp(source, onExit = ::finish, tier = tier)
             }
         }
