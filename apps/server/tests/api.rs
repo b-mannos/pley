@@ -331,6 +331,20 @@ async fn shows_progress_and_hubs() {
     assert_eq!(cw["items"][0]["user_state"]["position_ms"], json!(600_000));
     assert!(hubs.iter().any(|h| h["key"] == format!("recently_added:{lib}")));
 
+    // Watching the pilot again part of the way keeps it watched, and out of
+    // Continue Watching: apps play a watched item from its start.
+    let r = app
+        .post(
+            &format!("/api/items/{pilot}/progress"),
+            &token,
+            json!({"position_ms": 120_000, "duration_ms": 3_000_000, "state": "stopped"}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let home = app.get("/api/hubs/home", &token).await;
+    let cw = home.body["hubs"].as_array().unwrap().iter().find(|h| h["key"] == "continue_watching").cloned().unwrap();
+    assert_eq!(titles(&cw["items"]), vec!["Second"]);
+
     let deck = app.get(&format!("/api/items/{show_id}/on-deck"), &token).await;
     assert_eq!(deck.body["item"]["title"], json!("Second"));
 

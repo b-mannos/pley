@@ -969,7 +969,7 @@ pub async fn set_watched(db: &Db, user_id: i64, item_id: i64, kind: &str, watche
 pub async fn in_progress(db: &Db, user_id: i64, library_id: Option<i64>, limit: i64) -> sqlx::Result<Vec<ItemRow>> {
     let scope = if library_id.is_some() { "AND i.library_id = ?" } else { "" };
     let sql = format!(
-        "{SUMMARY_SELECT} WHERE {VISIBLE} AND s.position_ms > 0 AND i.kind IN ('movie', 'episode') {scope}
+        "{SUMMARY_SELECT} WHERE {VISIBLE} AND s.position_ms > 0 AND s.watched = 0 AND i.kind IN ('movie', 'episode') {scope}
          ORDER BY s.last_played_at DESC LIMIT ?"
     );
     let mut q = sqlx::query_as::<_, ItemRow>(&sql).bind(user_id);
