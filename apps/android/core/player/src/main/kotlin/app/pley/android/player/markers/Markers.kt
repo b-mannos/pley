@@ -1,0 +1,55 @@
+package app.pley.android.player.markers
+
+import app.pley.android.model.ItemDetail
+import app.pley.android.model.Marker
+import app.pley.android.model.MarkerKind
+
+/**
+ * Skip Intro and Skip Credits, as the web does them
+ * (apps/web/src/player/SkipButton.tsx). Nothing is skipped by itself: the
+ * button only offers it (automatic skipping was removed from the web in
+ * ba6efb7).
+ */
+object Markers {
+    /** The button goes this long before the segment ends. */
+    const val TAIL_MS = 1_000L
+
+    /** Skip Intro lands this long before the intro ends, so its last moment plays. */
+    const val INTRO_LEAD_MS = 750L
+
+    /** The markers of the file playing (the item's first file when it isn't known yet). */
+    fun forFile(item: ItemDetail, fileId: Long?): List<Marker> {
+        val id = fileId ?: item.files.firstOrNull()?.id ?: return emptyList()
+        return item.markers.filter { it.fileId == id && it.kind != MarkerKind.Unknown }
+    }
+
+    /** The marker the playhead is in: from its start until a second before its end. */
+    fun active(markers: List<Marker>, positionMs: Long): Marker? =
+        markers.firstOrNull { positionMs >= it.startMs && positionMs < it.endMs - TAIL_MS }
+
+    /** Where skipping [marker] lands: just before an intro ends, at the end of credits. */
+    fun skipTarget(marker: Marker): Long {
+        val lead = if (marker.kind == MarkerKind.Intro) minOf(INTRO_LEAD_MS, (marker.endMs - marker.startMs) / 2) else 0
+        return marker.endMs - lead
+    }
+
+    /** Identifies a segment, to tell entering it again apart from entering another. */
+    fun keyOf(marker: Marker): String = "${marker.fileId}:${marker.kind.wire}:${marker.startMs}"
+}
+
+/**
+ * Entering credits brings up Up Next, once per segment: seeking back into
+ * them later lets them play (SkipButton.tsx, useSkipMarkers).
+ */
+class CreditsGate {
+    private val announced = mutableSetOf<String>()
+
+    /** The credits [marker] the playhead just entered for the first time; `null` otherwise. */
+    fun entered(marker: Marker?): Marker? {
+        if (marker == null || marker.kind != MarkerKind.Credits) return null
+        return if (announced.add(Markers.keyOf(marker))) marker else null
+    }
+
+    /** A new item: every segment may be announced again. */
+    fun reset() = announced.clear()
+}

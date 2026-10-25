@@ -1,0 +1,123 @@
+package app.pley.android.player.session
+
+import app.pley.android.model.PlaybackInfo
+import app.pley.android.model.PlaybackRequest
+import app.pley.android.model.ProgressReport
+import app.pley.android.model.ProgressState
+import app.pley.android.network.PleyApi
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/**
+ * Sends playbacks' reports one after the other, from the app's scope: a
+ * player screen that closes still gets its last position and its session's
+ * end to the server, in the order they were made (progress, then
+ * `stopped`, then DELETE). Reports are best effort: a failure is dropped,
+ * as on the web (apps/web/src/lib/progress.ts).
+ */
+class SessionReporter(scope: CoroutineScope) {
+    private val queue = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+
+    init {
+        scope.launch {
+            for (report in queue) {
+                try {
+                    report()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // Best effort: the next report says where the player is anyway.
+                }
+            }
+        }
+    }
+
+    /** Queues [report]. */
+    fun send(report: suspend () -> Unit) {
+        queue.trySend(report)
+    }
+
+    /** Waits until everything queued so far went out. */
+    suspend fun flush() {
+        val done = CompletableDeferred<Unit>()
+        queue.send { done.complete(Unit) }
+        done.await()
+    }
+}
+
+/**
+ * One session on the server (POST /api/playback): its progress reports and
+ * its end. Video and music both play through one. Ending it reports
+ * `stopped` at the last position, then deletes it (and any transcode); it
+ * ends once.
+ */
+class ServerPlaybackSession(
+    private val api: PleyApi,
+    val itemId: Long,
+    val info: PlaybackInfo,
+    private val reporter: SessionReporter,
+) {
+    val id: String get() = info.sessionId
+
+    var ended: Boolean = false
+        private set
+
+    /** POST /api/items/{id}/progress with the session, so it and its transcode stay alive. */
+    fun progress(positionMs: Long, state: ProgressState) {
+        if (ended) return
+        val report = report(positionMs, state)
+        reporter.send { api.reportProgress(itemId, report) }
+    }
+
+    /** Reports `stopped` at [positionMs], then DELETE /api/playback/{session}. */
+    fun end(positionMs: Long) {
+        if (ended) return
+        ended = true
+        val report = report(positionMs, ProgressState.Stopped)
+        reporter.send { api.reportProgress(itemId, report) }
+        reporter.send { api.stopPlayback(id) }
+    }
+
+    /**
+     * Deletes a session that never played (asked for again another way):
+     * no `stopped`, which would move the profile's resume point.
+     */
+    fun discard() {
+        if (ended) return
+        ended = true
+        reporter.send { api.stopPlayback(id) }
+    }
+
+    private fun report(positionMs: Long, state: ProgressState) = ProgressReport(
+        positionMs = positionMs.coerceAtLeast(0),
+        durationMs = info.durationMs.takeIf { it > 0 },
+        state = state,
+        sessionId = id,
+    )
+
+    companion object {
+        /**
+         * Starts a session for [request]. The request isn't cancelled
+         * halfway: the server may have made the session (and its
+         * transcode) already, so a caller cancelled meanwhile gets it
+         * deleted, then the cancellation.
+         */
+        suspend fun start(api: PleyApi, request: PlaybackRequest, reporter: SessionReporter): ServerPlaybackSession {
+            val info = withContext(NonCancellable) { api.startPlayback(request) }
+            try {
+                currentCoroutineContext().ensureActive()
+            } catch (e: CancellationException) {
+                reporter.send { api.stopPlayback(info.sessionId) }
+                throw e
+            }
+            return ServerPlaybackSession(api, request.itemId, info, reporter)
+        }
+    }
+}

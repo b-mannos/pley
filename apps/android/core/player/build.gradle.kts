@@ -23,6 +23,9 @@ dependencies {
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.tracing.ktx)
 
+    // The session's tests: fakes of the contracts, and the FixtureServer.
+    testImplementation(project(":core:testing"))
+    testImplementation(project(":testing:fixtures"))
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
     testImplementation(libs.robolectric)
