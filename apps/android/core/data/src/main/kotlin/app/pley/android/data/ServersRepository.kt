@@ -20,6 +20,13 @@ interface ServersRepository {
 
     /** Forgets [origin]: signs out there (ending the sign-in on the server) and deletes what was saved from it. */
     suspend fun forget(origin: String)
+
+    /**
+     * This installation as players tell it apart (`client_id` of
+     * POST /api/playback): the server ends a client's earlier sessions by
+     * it. The web view app's id is kept, so its sessions are this app's.
+     */
+    suspend fun clientId(): String
 }
 
 /** Who is signed in where. */
@@ -39,11 +46,39 @@ data class Session(
  * read: the app shows the same to everyone.
  */
 interface SessionRepository {
-    /** The session; `null` when signed out. */
+    /** The session; `null` when signed out (or not read yet: [state] tells which). */
     val session: StateFlow<Session?>
 
-    /** Signs out of the active server, ending the sign-in there. */
+    /** Where the app stands: still reading, no server, signed out of one, or signed in. */
+    val state: StateFlow<SessionState>
+
+    /** Signs out of the active server, ending the sign-in there, and deletes what was saved from it. */
     suspend fun signOut()
+
+    /**
+     * Moves the sign-in to [profileId] of the household (with its [pin]
+     * when it has one), then shows that profile's things, from what was
+     * saved for it first. A wrong PIN changes nothing (the sign-in
+     * module's TokenException says why).
+     */
+    suspend fun switchProfile(profileId: Long, pin: String? = null) {}
+
+    /** Asks the server again who the app is (GET /api/auth/me). */
+    suspend fun refresh() {}
+}
+
+/** Where the app stands with its servers. */
+sealed interface SessionState {
+    /** Not read yet: a moment at start. */
+    data object Starting : SessionState
+
+    /** No server chosen: show the servers. */
+    data object NoServer : SessionState
+
+    /** No tokens for [issuer]: show sign-in for it. */
+    data class SignedOut(val issuer: String) : SessionState
+
+    data class SignedIn(val session: Session) : SessionState
 }
 
 /**

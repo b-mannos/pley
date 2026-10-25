@@ -24,3 +24,10 @@ val <T> Loadable<T>.valueOrNull: T?
         is Loadable.Failed -> stale
         Loadable.Loading -> null
     }
+
+/** The same state of [transform]ed values. */
+inline fun <T, R> Loadable<T>.map(transform: (T) -> R): Loadable<R> = when (this) {
+    is Loadable.Ready -> Loadable.Ready(transform(value), fresh)
+    is Loadable.Failed -> Loadable.Failed(error, stale?.let(transform))
+    Loadable.Loading -> Loadable.Loading
+}

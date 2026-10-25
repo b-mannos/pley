@@ -1,28 +1,34 @@
 package app.pley.android.data
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
+import androidx.datastore.core.DataMigration
+import androidx.datastore.core.DataStore
+import androidx.datastore.core.okio.OkioStorage
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.PreferencesSerializer
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
 import app.pley.android.auth.AuthGraph
 import app.pley.android.common.DeviceProfile
-import app.pley.android.common.NotBuiltYet
-import app.pley.android.common.SavedServer
-import app.pley.android.model.CollectionDetail
-import app.pley.android.model.CollectionSummary
-import app.pley.android.model.HistoryPage
-import app.pley.android.model.Hubs
-import app.pley.android.model.ItemDetail
-import app.pley.android.model.ItemSummary
-import app.pley.android.model.Library
-import app.pley.android.model.LibraryFilters
-import app.pley.android.model.PersonDetail
-import app.pley.android.model.PlaylistDetail
-import app.pley.android.model.PlaylistSummary
-import app.pley.android.model.SearchResults
-import app.pley.android.model.TrackDefaults
+import app.pley.android.common.Tier
 import app.pley.android.network.NetworkGraph
+import app.pley.android.network.PleyApi
+import app.pley.android.network.ServerEvents
+import java.io.File
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import okio.FileSystem
+import okio.Path.Companion.toPath
 
 /** Everything the screens read and change, made lazily. */
 interface DataGraph {
@@ -45,111 +51,159 @@ interface DataGraph {
     val settings: AppSettings
 
     companion object {
-        /** Not built yet: every repository answers that it isn't. */
-        fun create(context: Context, network: NetworkGraph, auth: AuthGraph, profile: DeviceProfile): DataGraph = NotBuiltData
+        /**
+         * The data side of the app over [network] and [auth]. Making it
+         * touches nothing: the disk, the Keystore and the network are first
+         * used by whatever asks first, off the main thread.
+         */
+        fun create(context: Context, network: NetworkGraph, auth: AuthGraph, profile: DeviceProfile): DataGraph {
+            val app = context.applicationContext
+            return AppDataGraph(
+                DataEnvironment(
+                    filesDir = { app.filesDir },
+                    cacheDir = { app.cacheDir },
+                    auth = auth,
+                    api = network::api,
+                    events = network::events,
+                    trackDefaults = HttpTrackDefaults { issuer -> network.media(issuer) },
+                    profile = profile,
+                    legacy = LegacyPreferences.of(app),
+                    foreground = processForeground(),
+                    debuggable = (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0,
+                    scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+                ),
+            )
+        }
+
+        /** Whether the app is in the foreground: some activity of it is started. */
+        private fun processForeground(): Flow<Boolean> = flow {
+            emitAll(ProcessLifecycleOwner.get().lifecycle.currentStateFlow.map { it.isAtLeast(Lifecycle.State.STARTED) })
+        }
     }
 }
 
-private fun <T> notBuilt(what: String): Flow<Loadable<T>> = flowOf(Loadable.Failed(NotBuiltYet(what)))
+/**
+ * What the data side is made from. The app's comes from
+ * [DataGraph.create]; tests give their own: a fake API, folders of their
+ * own, a foreground they switch, the test's dispatchers and clock.
+ */
+class DataEnvironment(
+    /** Where snapshots (`snapshots/`) and DataStores (`datastore/`) live: the app's filesDir. */
+    val filesDir: () -> File,
+    /** Where the HTTP caches live (`http/<server>/<user>`, as NetworkGraph makes them): the app's cacheDir. */
+    val cacheDir: () -> File,
+    val auth: AuthGraph,
+    /** The API of a server as a profile (`null` until GET /api/auth/me says which: no HTTP cache). */
+    val api: (issuer: String, userId: Long?) -> PleyApi,
+    val events: (issuer: String) -> ServerEvents,
+    val trackDefaults: TrackDefaultsRoute,
+    val profile: DeviceProfile,
+    val legacy: LegacyPreferences,
+    /** Whether the app is in the foreground, where the server's events are followed. */
+    val foreground: Flow<Boolean>,
+    /** A debug build: software video may be allowed. */
+    val debuggable: Boolean,
+    /** Where work outlives a screen: requests, snapshot writes, live updates. */
+    val scope: CoroutineScope,
+    val io: CoroutineDispatcher = Dispatchers.IO,
+    /** Decoding and encoding snapshots. */
+    val compute: CoroutineDispatcher = Dispatchers.Default,
+    /** Monotonic, in ms: how old answers are. */
+    val clock: () -> Long = { System.nanoTime() / 1_000_000 },
+    /** Unix ms: when a server was last used. */
+    val wallClock: () -> Long = System::currentTimeMillis,
+)
 
-private fun fail(what: String): Nothing = throw NotBuiltYet(what)
+/**
+ * The startup read's files, under filesDir: the active profile's Home
+ * (the snapshot's bytes, GET /api/hubs/home as JSON) and the active
+ * server's origin. Both are absent when there is none.
+ */
+object StartupFiles {
+    const val HOME = "snapshots/${FileSnapshotStore.STARTUP}/${FileSnapshotStore.STARTUP_HOME}"
+    const val SERVER = "snapshots/${FileSnapshotStore.STARTUP}/server"
+}
 
-private object NotBuiltData : DataGraph {
-    override val servers = object : ServersRepository {
-        override val saved: Flow<List<SavedServer>> = flowOf(emptyList())
-        override val active: StateFlow<String?> = MutableStateFlow(null)
-        override suspend fun use(server: SavedServer) = fail("Choosing a server")
-        override suspend fun forget(origin: String) = fail("Forgetting a server")
+/** The data side of the app, over [env]. Each part is made the first time it is asked for. */
+class AppDataGraph(private val env: DataEnvironment) : DataGraph {
+    private val snapshotStore = FileSnapshotStore({ File(env.filesDir(), "snapshots") }, env.io)
+    override val snapshots: SnapshotStore get() = snapshotStore
+
+    private val serversImpl by lazy {
+        DataStoreServers(
+            store = preferences(DataStoreServers.FILE, listOf(WebViewMigration(env.legacy))),
+            legacy = env.legacy,
+            auth = env.auth,
+            forgetData = ::forgetData,
+            app = env.scope,
+            io = env.io,
+            wallClock = env.wallClock,
+            startupServer = { File(env.filesDir(), StartupFiles.SERVER) },
+        )
+    }
+    override val servers: ServersRepository get() = serversImpl
+
+    private val cacheLazy = lazy {
+        ResourceCache(sessionImpl.scopes, { env.api(it.issuer, it.userId) }, snapshotStore, env.scope, env.clock, env.compute)
+    }
+    private val cache by cacheLazy
+
+    private val sessionImpl: SessionManager by lazy {
+        SessionManager(serversImpl, env.auth, { env.api(it, null) }, snapshotStore, ::forgetData, env.scope, env.compute).also {
+            it.onScopeChange = { if (cacheLazy.isInitialized()) cache.reset() }
+            it.start()
+        }
+    }
+    override val session: SessionRepository get() = sessionImpl
+
+    private val live by lazy { ServerLiveUpdates(sessionImpl, env.foreground, env.events, cache, env.scope) }
+    override val liveUpdates: LiveUpdates get() = live
+
+    override val libraries: LibrariesRepository by lazy { CachedLibraries(cache) { live.heard(it) } }
+    override val hubs: HubsRepository by lazy { CachedHubs(cache) }
+    override val libraryItems: LibraryItemsRepository by lazy {
+        CachedLibraryItems(cache, if (env.profile.tier == Tier.T0) LibraryListing.WINDOW_ABOVE_T0 else LibraryListing.WINDOW_ABOVE)
+    }
+    private val itemsImpl by lazy { CachedItems(cache) }
+    override val items: ItemRepository get() = itemsImpl
+    override val search: SearchRepository by lazy { CachedSearch(cache) }
+    override val people: PeopleRepository by lazy { CachedPeople(cache) }
+    override val collections: CollectionsRepository by lazy { CachedCollections(cache) }
+    override val playlists: PlaylistsRepository by lazy { CachedPlaylists(cache) }
+    override val history: HistoryRepository by lazy { CachedHistory(cache) }
+    override val watchState: WatchStateRepository by lazy { CachedWatchState(cache) }
+    override val trackDefaults: TrackDefaultsRepository by lazy { SessionTrackDefaults(sessionImpl, env.trackDefaults) }
+    override val playItem: PlayItem by lazy { CachedPlayItem(cache, itemsImpl) }
+
+    override val settings: AppSettings by lazy {
+        DataStoreSettings(
+            store = preferences(DataStoreSettings.FILE),
+            tv = env.profile.isTv,
+            debuggable = env.debuggable,
+        )
     }
 
-    override val session = object : SessionRepository {
-        override val session: StateFlow<Session?> = MutableStateFlow(null)
-        override suspend fun signOut() = fail("Signing out")
+    /** Deletes what was saved from [issuer]: its snapshots, its HTTP caches, and what is held in memory of it. */
+    private suspend fun forgetData(issuer: String) {
+        val server = ProfileScope.serverKey(issuer)
+        if (cacheLazy.isInitialized()) {
+            val shown = (cache.scopes.value as? ScopeState.Ready)?.profile
+            if (shown == null || shown.server == server) cache.reset()
+        }
+        snapshotStore.clear(issuer)
+        withContext(env.io) { File(env.cacheDir(), "http/$server").deleteRecursively() }
     }
 
-    override val snapshots = object : SnapshotStore {
-        override suspend fun read(key: String): ByteArray? = null
-        override suspend fun write(key: String, bytes: ByteArray) = Unit
-        override suspend fun clear(issuer: String) = Unit
-    }
-
-    override val libraries = object : LibrariesRepository {
-        override fun libraries(): Flow<Loadable<List<Library>>> = notBuilt("Libraries")
-        override suspend fun refresh() = Unit
-    }
-
-    override val hubs = object : HubsRepository {
-        override fun home(): Flow<Loadable<Hubs>> = notBuilt("Home")
-        override fun library(libraryId: Long): Flow<Loadable<Hubs>> = notBuilt("Recommended")
-        override suspend fun refresh() = Unit
-    }
-
-    override val libraryItems = object : LibraryItemsRepository {
-        override fun items(libraryId: Long, query: LibraryQuery): Flow<Loadable<LibraryItems>> = notBuilt("Library pages")
-        override fun filters(libraryId: Long): Flow<Loadable<LibraryFilters>> = notBuilt("Filters")
-    }
-
-    override val items = object : ItemRepository {
-        override fun detail(itemId: Long): Flow<Loadable<ItemDetail>> = notBuilt("Item pages")
-        override fun children(itemId: Long): Flow<Loadable<List<ItemSummary>>> = notBuilt("Seasons and episodes")
-        override fun onDeck(itemId: Long): Flow<Loadable<ItemSummary?>> = notBuilt("On deck")
-        override fun related(itemId: Long): Flow<Loadable<List<ItemSummary>>> = notBuilt("More like this")
-        override fun collectionsOf(itemId: Long): Flow<Loadable<List<CollectionSummary>>> = notBuilt("Part of")
-        override suspend fun next(itemId: Long): ItemSummary? = fail("Up next")
-        override fun prefetch(itemId: Long) = Unit
-    }
-
-    override val search = object : SearchRepository {
-        override fun search(query: String): Flow<Loadable<SearchResults>> = notBuilt("Search")
-        override val recent: Flow<List<String>> = flowOf(emptyList())
-    }
-
-    override val people = object : PeopleRepository {
-        override fun person(personId: Long): Flow<Loadable<PersonDetail>> = notBuilt("People")
-    }
-
-    override val collections = object : CollectionsRepository {
-        override fun collections(libraryId: Long): Flow<Loadable<List<CollectionSummary>>> = notBuilt("Collections")
-        override fun collection(collectionId: Long): Flow<Loadable<CollectionDetail>> = notBuilt("Collections")
-    }
-
-    override val playlists = object : PlaylistsRepository {
-        override fun playlists(): Flow<Loadable<List<PlaylistSummary>>> = notBuilt("Playlists")
-        override fun playlist(playlistId: Long): Flow<Loadable<PlaylistDetail>> = notBuilt("Playlists")
-        override suspend fun create(title: String, itemIds: List<Long>): Long = fail("Playlists")
-        override suspend fun createSmart(title: String, libraryId: Long, query: String): Long = fail("Smart playlists")
-        override suspend fun rename(playlistId: Long, title: String) = fail("Playlists")
-        override suspend fun delete(playlistId: Long) = fail("Playlists")
-        override suspend fun add(playlistId: Long, itemIds: List<Long>) = fail("Playlists")
-        override suspend fun remove(playlistId: Long, entryIds: List<Long>) = fail("Playlists")
-        override suspend fun reorder(playlistId: Long, entryIds: List<Long>) = fail("Playlists")
-    }
-
-    override val history = object : HistoryRepository {
-        override fun history(): Flow<Loadable<HistoryPage>> = notBuilt("History")
-        override suspend fun loadMore() = Unit
-        override suspend fun remove(entryId: Long) = fail("History")
-    }
-
-    override val watchState = object : WatchStateRepository {
-        override suspend fun setWatched(itemId: Long, watched: Boolean) = fail("Watched marks")
-        override suspend fun rate(itemId: Long, rating: Double?) = fail("Ratings")
-        override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) = fail("Track choices")
-    }
-
-    override val trackDefaults = object : TrackDefaultsRepository {
-        override fun defaults(): Flow<Loadable<TrackDefaults>> = notBuilt("Track defaults")
-        override suspend fun save(defaults: TrackDefaults) = fail("Track defaults")
-    }
-
-    override val playItem = PlayItem { _, _ -> fail("Playing") }
-
-    override val liveUpdates = object : LiveUpdates {
-        override val scans: StateFlow<List<ScanState>> = MutableStateFlow(emptyList())
-    }
-
-    override val settings = object : AppSettings {
-        override val settings: Flow<Settings> = flowOf(Settings())
-        override suspend fun update(change: (Settings) -> Settings) = fail("Settings")
-    }
+    /**
+     * A DataStore of preferences in filesDir/[file], on [DataEnvironment.io]
+     * and ending with the graph's scope (a file has one DataStore at a
+     * time). Written through Okio, which replaces the file in one move on
+     * every system.
+     */
+    private fun preferences(file: String, migrations: List<DataMigration<Preferences>> = emptyList()): DataStore<Preferences> =
+        PreferenceDataStoreFactory.create(
+            storage = OkioStorage(FileSystem.SYSTEM, PreferencesSerializer) { File(env.filesDir(), file).absolutePath.toPath() },
+            migrations = migrations,
+            scope = CoroutineScope(env.scope.coroutineContext + env.io + SupervisorJob(env.scope.coroutineContext[Job])),
+        )
 }

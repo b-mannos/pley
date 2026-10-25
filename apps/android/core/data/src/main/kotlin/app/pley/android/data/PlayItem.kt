@@ -8,9 +8,14 @@ sealed interface PlayTarget {
     data class Video(val itemId: Long, val startMs: Long) : PlayTarget
 
     /** Music: the tracks of an album or artist, or one track. */
-    data class Music(val itemIds: List<Long>, val startIndex: Int) : PlayTarget
+    data class Music(
+        val itemIds: List<Long>,
+        val startIndex: Int,
+        /** The tracks themselves, in [itemIds]' order: titles and artwork for the queue. */
+        val tracks: List<ItemSummary> = emptyList(),
+    ) : PlayTarget
 
-    /** A show or season with nothing to play yet. */
+    /** A show or season with nothing to play yet, or an album or artist without tracks. */
     data object NothingToPlay : PlayTarget
 }
 

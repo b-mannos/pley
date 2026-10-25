@@ -43,17 +43,39 @@ data class LibraryQuery(
 /**
  * A library's items as one list, however many there are: the first ones
  * for the first frame, the rest in pages after.
+ *
+ * A big library (above 5,000 items, 2,000 on the smallest TVs) is held as
+ * a window of 2,000 items around what is on screen: [items] then starts
+ * at position [offset] of the listing, and [get] is `null` outside it
+ * until the window moves there ([LibraryItemsRepository.showing]).
  */
 data class LibraryItems(
     val total: Int,
     /** What is loaded so far, in order. */
     val items: List<ItemSummary>,
-)
+    /** The position of `items[0]` in the whole listing: 0 unless [windowed]. */
+    val offset: Int = 0,
+    /** Only a window of the listing is held; the grid says where it is with [LibraryItemsRepository.showing]. */
+    val windowed: Boolean = false,
+) {
+    /** The item at [position] of the whole listing; `null` while it isn't loaded. */
+    operator fun get(position: Int): ItemSummary? = items.getOrNull(position - offset)
+
+    /** Every item is loaded (never true of a windowed listing). */
+    val complete: Boolean get() = !windowed && items.size >= total
+}
 
 interface LibraryItemsRepository {
     fun items(libraryId: Long, query: LibraryQuery): Flow<Loadable<LibraryItems>>
 
     fun filters(libraryId: Long): Flow<Loadable<LibraryFilters>>
+
+    /**
+     * The grid of [libraryId] listed by [query] shows [position] now: a
+     * windowed listing moves its window there. Cheap: call it as the grid
+     * scrolls.
+     */
+    fun showing(libraryId: Long, query: LibraryQuery, position: Int) {}
 }
 
 /** An item's page: its details, children, next episode, related items and collections. */
@@ -81,8 +103,14 @@ interface SearchRepository {
     /** Results for [query]: only the latest query's answer is kept. */
     fun search(query: String): Flow<Loadable<SearchResults>>
 
-    /** This profile's recent searches, newest first. */
+    /** This profile's recent searches, newest first (10 at most). */
     val recent: Flow<List<String>>
+
+    /** Keeps [query] among the recent searches: searched on purpose (submitted, or a result opened). */
+    suspend fun remember(query: String) {}
+
+    /** Forgets this profile's recent searches. */
+    suspend fun clearRecent() {}
 }
 
 interface PeopleRepository {

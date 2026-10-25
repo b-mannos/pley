@@ -6,6 +6,9 @@ plugins {
 
 android {
     namespace = "app.pley.android.data"
+    defaultConfig.testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    // DataStore traces through android.util.Log, a stub in plain unit tests.
+    testOptions.unitTests.isReturnDefaultValues = true
 }
 
 dependencies {
@@ -15,6 +18,19 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.lifecycle.process)
 
+    // FakePleyApi, FakeAuthGraph and the JSON fixtures.
+    testImplementation(project(":core:testing"))
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
+    // The sign-in module's tokens are JSON (org.json is a stub in local unit tests).
+    testImplementation(libs.json)
+    // The web view app's SharedPreferences, as they are on a device.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+
+    // Snapshots read under StrictMode, on a device.
+    androidTestImplementation(project(":core:testing"))
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }

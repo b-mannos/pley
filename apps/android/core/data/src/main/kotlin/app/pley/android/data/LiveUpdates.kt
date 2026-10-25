@@ -17,4 +17,11 @@ data class ScanState(
 interface LiveUpdates {
     /** Scans running now; empty when none. */
     val scans: StateFlow<List<ScanState>>
+
+    /**
+     * Starts following the server, once, after the first frame: from then
+     * on the event stream is open whenever the app is in the foreground and
+     * signed in, and closed otherwise. Calling it again does nothing.
+     */
+    fun start() {}
 }
