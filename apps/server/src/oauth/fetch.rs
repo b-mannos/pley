@@ -1029,4 +1029,30 @@ mod tests {
         send(&lookup);
         assert!(lookup.await.unwrap().first_party);
     }
+
+    #[tokio::test]
+    async fn the_documents_client_resolves_through_the_filter() {
+        // Something listening on this computer, under a name with only
+        // private addresses: the resolver refuses the name, before any
+        // connection is tried.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let count = accepted.clone();
+        tokio::spawn(async move {
+            while listener.accept().await.is_ok() {
+                count.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        let http = http_client();
+        let err = http.get(format!("https://localhost:{port}/pley.json")).send().await.unwrap_err();
+        let chain: Vec<String> = std::iter::successors(Some(&err as &dyn std::error::Error), |e| e.source())
+            .map(ToString::to_string)
+            .collect();
+        assert!(chain.iter().any(|e| e.contains("has no public address")), "{chain:?}");
+        assert_eq!(accepted.load(Ordering::SeqCst), 0, "connected to a loopback address");
+        // https only, refused before any lookup.
+        let err = http.get("http://apps.example.com/pley.json").send().await.unwrap_err();
+        assert!(err.is_builder(), "{err:?}");
+    }
 }

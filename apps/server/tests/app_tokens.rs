@@ -829,3 +829,16 @@ async fn the_apps_tables_come_with_an_upgrade() {
     assert_eq!(tables, ["app_grants", "app_tokens"]);
     fresh.close().await;
 }
+
+#[tokio::test]
+async fn administration_refuses_app_tokens_even_on_a_route_apps_may_use() {
+    let app = TestApp::new().await;
+    app.setup_admin().await;
+    let (token, _) = app.app_token(1, "library play playlists profiles").await;
+    // An administrators' handler on a route an app's scopes open.
+    let router = axum::Router::new()
+        .route("/api/libraries", axum::routing::get(|_: pley::auth::AdminUser| async { "administered" }))
+        .with_state(app.state.clone());
+    let resp = router.oneshot(bearer("GET", "/api/libraries", &token)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}

@@ -948,3 +948,26 @@ async fn consent_answers_are_json_without_cors() {
     assert!(!reply.headers.contains_key("access-control-allow-origin"));
     assert_eq!(reply.headers[header::CACHE_CONTROL], "no-store");
 }
+
+#[tokio::test]
+async fn a_code_exchanged_twice_at_once_leaves_no_access() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let code = code_for(&app, &admin, ANDROID_APP, ANDROID_BACK).await;
+    // The second exchange comes while the first one's tokens are being issued.
+    let (a, b) = tokio::join!(
+        exchange(&app, &code, ANDROID_APP, ANDROID_BACK, VERIFIER),
+        exchange(&app, &code, ANDROID_APP, ANDROID_BACK, VERIFIER)
+    );
+    for reply in [&a, &b] {
+        if reply.status == StatusCode::OK {
+            let access = reply.body["access_token"].as_str().unwrap();
+            assert_eq!(app.get("/api/auth/me", access).await.status, StatusCode::UNAUTHORIZED, "{}", reply.text());
+        } else {
+            assert_eq!(oauth_error(reply), (StatusCode::BAD_REQUEST, "invalid_grant"), "{}", reply.text());
+        }
+    }
+    let grants: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM app_grants").fetch_one(&app.state.db.read).await.unwrap();
+    assert_eq!(grants, 0, "{} / {}", a.text(), b.text());
+}

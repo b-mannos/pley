@@ -359,6 +359,33 @@ pub struct AuthService {
     pub throttle: crate::accounts::Throttle,
     /// The code that sets up a server without accounts from elsewhere.
     pub setup: crate::setup::SetupCode,
+    /// Where tests hold the service, to land a forget at the worst moment.
+    #[cfg(test)]
+    pauses: Pauses,
+}
+
+/// Where tests hold [`AuthService`] (each pause is taken once).
+#[cfg(test)]
+#[derive(Default)]
+struct Pauses {
+    /// Held after [`AuthService::validate_app`]'s query, before it caches
+    /// what it read.
+    after_query: parking_lot::Mutex<Option<Arc<Gate>>>,
+    /// Run by [`AuthService::remember_app`] between its first look at the
+    /// epoch and the insert.
+    before_insert: parking_lot::Mutex<Option<Hook>>,
+}
+
+/// Something a test does from inside the service.
+#[cfg(test)]
+type Hook = Box<dyn FnOnce(&AuthService) + Send>;
+
+/// A pause: the service says it got there, and waits to be let go.
+#[cfg(test)]
+#[derive(Default)]
+struct Gate {
+    reached: tokio::sync::Notify,
+    release: tokio::sync::Notify,
 }
 
 impl AuthService {
@@ -370,6 +397,8 @@ impl AuthService {
             epoch: AtomicU64::new(0),
             throttle: Default::default(),
             setup: Default::default(),
+            #[cfg(test)]
+            pauses: Pauses::default(),
         }
     }
 
@@ -379,7 +408,18 @@ impl AuthService {
         user_agent: Option<&str>,
         ip: Option<&str>,
     ) -> Result<String, AppError> {
-        let token = session_token(new_token);
+        self.create_session_drawing(new_token, user_id, user_agent, ip).await
+    }
+
+    /// [`AuthService::create_session`], with tokens from `draw`.
+    async fn create_session_drawing(
+        &self,
+        draw: impl FnMut() -> String,
+        user_id: i64,
+        user_agent: Option<&str>,
+        ip: Option<&str>,
+    ) -> Result<String, AppError> {
+        let token = session_token(draw);
         let now = now();
         sqlx::query(
             "INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at, user_agent, last_ip)
@@ -504,21 +544,10 @@ impl AuthService {
                 return Some(entry.user.clone());
             }
         }
+        // Read before the database: a forget that lands while the query
+        // runs keeps what it read out of the cache.
         let epoch = self.epoch.load(Ordering::SeqCst);
-        let row: Option<AppRow> = sqlx::query_as(
-            "SELECT u.id, u.username, u.is_admin AS role_admin, u.all_libraries, u.max_age, u.disabled,
-                    a.disabled AS approver_disabled, t.expires_at AS token_expires, g.id AS grant_id, g.client_id,
-                    g.scope, g.approved_by, g.expires_at AS grant_expires, g.ends_at
-             FROM app_tokens t
-             JOIN app_grants g ON g.id = t.grant_id
-             JOIN users u ON u.id = g.user_id
-             JOIN users a ON a.id = g.approved_by
-             WHERE t.token_hash = ? AND t.kind = 'access'",
-        )
-        .bind(&key)
-        .fetch_optional(&self.db.read)
-        .await
-        .ok()?;
+        let row = self.app_row(&key).await.ok()?;
         let Some(row) = row else {
             self.apps.remove(&key);
             return None;
@@ -545,11 +574,44 @@ impl AuthService {
         Some(user)
     }
 
+    /// What the database says about the access token whose SHA-256 is `key`.
+    async fn app_row(&self, key: &str) -> sqlx::Result<Option<AppRow>> {
+        let row = sqlx::query_as(
+            "SELECT u.id, u.username, u.is_admin AS role_admin, u.all_libraries, u.max_age, u.disabled,
+                    a.disabled AS approver_disabled, t.expires_at AS token_expires, g.id AS grant_id, g.client_id,
+                    g.scope, g.approved_by, g.expires_at AS grant_expires, g.ends_at
+             FROM app_tokens t
+             JOIN app_grants g ON g.id = t.grant_id
+             JOIN users u ON u.id = g.user_id
+             JOIN users a ON a.id = g.approved_by
+             WHERE t.token_hash = ? AND t.kind = 'access'",
+        )
+        .bind(key)
+        .fetch_optional(&self.db.read)
+        .await;
+        #[cfg(test)]
+        {
+            let gate = self.pauses.after_query.lock().take();
+            if let Some(gate) = gate {
+                gate.reached.notify_one();
+                gate.release.notified().await;
+            }
+        }
+        row
+    }
+
     /// Caches an app token read while the epoch was `epoch`, unless
     /// something was forgotten since: what was read may be gone.
     fn remember_app(&self, key: String, entry: CachedApp, epoch: u64) {
         if self.epoch.load(Ordering::SeqCst) != epoch {
             return;
+        }
+        #[cfg(test)]
+        {
+            let pause = self.pauses.before_insert.lock().take();
+            if let Some(pause) = pause {
+                pause(self);
+            }
         }
         self.apps.insert(key.clone(), entry);
         // A forget between the check and the insert has bumped the epoch
@@ -1242,6 +1304,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_forget_during_an_app_tokens_lookup_keeps_it_out_of_the_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let (db, auth) = service_with_user(dir.path()).await;
+        let issued = app_of(&auth, 1, 1).await;
+        let gate = Arc::new(Gate::default());
+        *auth.pauses.after_query.lock() = Some(gate.clone());
+        // The grant ends while the lookup holds what it read before.
+        let ending = async {
+            gate.reached.notified().await;
+            sqlx::query("DELETE FROM app_grants WHERE id = ?").bind(issued.grant_id).execute(&db.write).await.unwrap();
+            auth.forget_grants(&[issued.grant_id]);
+            gate.release.notify_one();
+        };
+        let (read, ()) = tokio::join!(auth.validate_app(&issued.access_token), ending);
+        assert!(read.is_some(), "it read the grant before it ended");
+        assert!(!auth.apps.contains_key(&hash_token(&issued.access_token)), "nothing stale is cached");
+        assert!(auth.validate_app(&issued.access_token).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_forget_between_the_check_and_the_insert_still_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_db, auth) = service_with_user(dir.path()).await;
+        let issued = app_of(&auth, 1, 1).await;
+        let grant_id = issued.grant_id;
+        *auth.pauses.before_insert.lock() = Some(Box::new(move |auth: &AuthService| auth.forget_grants(&[grant_id])));
+        assert!(auth.validate_app(&issued.access_token).await.is_some());
+        assert!(!auth.apps.contains_key(&hash_token(&issued.access_token)), "the forget's sweep came too early");
+    }
+
+    #[tokio::test]
     async fn session_validation_never_accepts_app_tokens() {
         let dir = tempfile::tempdir().unwrap();
         let (db, auth) = service_with_user(dir.path()).await;
@@ -1267,6 +1360,16 @@ mod tests {
         let mut draws = ["pley_at_x", "pley_abc", "pleyfine"].into_iter().map(str::to_owned);
         assert_eq!(session_token(|| draws.next().unwrap()), "pleyfine");
         assert!(!session_token(new_token).starts_with(APP_TOKEN_PREFIX));
+    }
+
+    #[tokio::test]
+    async fn a_new_session_never_gets_a_token_that_looks_like_an_apps() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_db, auth) = service_with_user(dir.path()).await;
+        let mut draws = ["pley_at_x", "pley_rt_y", "pleyfine"].into_iter().map(str::to_owned);
+        let token = auth.create_session_drawing(|| draws.next().unwrap(), 1, None, None).await.unwrap();
+        assert_eq!(token, "pleyfine");
+        assert!(auth.validate(&token).await.is_some());
     }
 
     #[test]
