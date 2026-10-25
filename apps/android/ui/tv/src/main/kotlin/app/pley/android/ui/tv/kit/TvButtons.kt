@@ -4,9 +4,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -16,18 +18,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -73,6 +79,7 @@ fun TvPillButton(
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
+    HandOffFocus(enabled, focused)
     Button(
         onClick = onClick,
         onLongClick = onLongClick,
@@ -82,8 +89,9 @@ fun TvPillButton(
             .heightIn(min = 48.dp)
             .widthIn(min = 148.dp)
             .alpha(if (enabled) 1f else DISABLED_ALPHA)
+            .focusProperties { canFocus = enabled || focused }
             .then(if (progress != null) Modifier.progressLine(progress) { focused } else Modifier),
-        shape = ButtonDefaults.shape(PleyShape.Pill),
+        shape = ButtonDefaults.shape(PleyShape.Control),
         colors = ButtonDefaults.colors(
             containerColor = PleyColors.Fg.copy(alpha = 0.12f),
             contentColor = PleyColors.Fg,
@@ -97,26 +105,36 @@ fun TvPillButton(
         scale = ButtonDefaults.scale(focusedScale = PleyFocus.PILL_SCALE, pressedScale = 1f),
         glow = ButtonDefaults.glow(Glow.None, Glow.None, Glow.None),
         border = ButtonDefaults.border(
-            border = Border(BorderStroke(1.dp, PleyColors.Control), shape = PleyShape.Pill),
+            border = Border(BorderStroke(1.dp, PleyColors.Control), shape = PleyShape.Control),
             focusedBorder = Border.None,
             pressedBorder = Border.None,
-            disabledBorder = Border(BorderStroke(1.dp, PleyColors.Control), shape = PleyShape.Pill),
+            disabledBorder = Border(BorderStroke(1.dp, PleyColors.Control), shape = PleyShape.Control),
             focusedDisabledBorder = Border.None,
         ),
-        contentPadding = PaddingValues(horizontal = 24.dp),
+        // tv-material's Row is at least 40 tall, at the top: 4 above and below centre it in the 48.
+        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
     ) {
-        if (icon != null) {
-            Icon(icon, contentDescription = null, size = 22.dp, tint = androidx.tv.material3.LocalContentColor.current)
-            Spacer(Modifier.width(10.dp))
+        // That Row starts its content at the left; a short label sits centred in the 148.
+        Row(
+            Modifier.widthIn(min = 148.dp - 24.dp * 2),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (icon != null) {
+                Icon(icon, contentDescription = null, size = 22.dp, tint = androidx.tv.material3.LocalContentColor.current)
+                Spacer(Modifier.width(10.dp))
+            }
+            Text(label, style = PleyType.Tv.Label)
         }
-        Text(label, style = PleyType.Tv.Label)
     }
 }
 
 /**
- * A round button: From start, Watched, Audio and subtitles, More. A 48 dp
- * circle with a 24 dp icon; [onArt] puts it on [bg][PleyColors.Bg] at 80 %
- * over a backdrop, else on [surface3][PleyColors.Surface3]. Its [label] is
+ * An icon button: From start, Watched, Audio and subtitles, More. A 48 dp
+ * square, its corners a [control][PleyShape.Control]'s, with a 24 dp icon
+ * and the pill's [control][PleyColors.Control] edge, so it reads on dark art
+ * too; [onArt] puts it on [bg][PleyColors.Bg] at 80 % over a backdrop, else
+ * on [surface3][PleyColors.Surface3]. Its [label] is
  * always what screen readers hear; on screen it fades in 8 dp below while
  * the button has focus. The button keeps that room ([PleyTv.ButtonLabelRoom])
  * under itself, so a row of buttons never jumps.
@@ -133,6 +151,7 @@ fun TvRoundButton(
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
+    HandOffFocus(enabled, focused)
     val labelAlpha by animateFloatAsState(if (focused) 1f else 0f, PleyMotion.reveal(), label = "label")
     Box(modifier.width(48.dp).alpha(if (enabled) 1f else DISABLED_ALPHA), contentAlignment = Alignment.TopCenter) {
         IconButton(
@@ -142,8 +161,9 @@ fun TvRoundButton(
             interactionSource = interactions,
             modifier = Modifier
                 .size(48.dp)
+                .focusProperties { canFocus = enabled || focused }
                 .semantics { contentDescription = label },
-            shape = IconButtonDefaults.shape(PleyShape.Circle),
+            shape = IconButtonDefaults.shape(PleyShape.Control),
             colors = IconButtonDefaults.colors(
                 containerColor = if (onArt) PleyColors.OnArt else PleyColors.Surface3,
                 contentColor = PleyColors.Fg,
@@ -156,11 +176,17 @@ fun TvRoundButton(
             ),
             scale = IconButtonDefaults.scale(focusedScale = PleyFocus.ROUND_SCALE, pressedScale = 1f),
             glow = IconButtonDefaults.glow(Glow.None, Glow.None, Glow.None),
-            border = IconButtonDefaults.border(Border.None, Border.None, Border.None, Border.None, Border.None),
+            border = IconButtonDefaults.border(
+                border = Border(BorderStroke(1.dp, PleyColors.Control), shape = PleyShape.Control),
+                focusedBorder = Border.None,
+                pressedBorder = Border.None,
+                disabledBorder = Border(BorderStroke(1.dp, PleyColors.Control), shape = PleyShape.Control),
+                focusedDisabledBorder = Border.None,
+            ),
         ) {
             Icon(icon, contentDescription = null, size = 24.dp, tint = androidx.tv.material3.LocalContentColor.current)
         }
-        // The visible label, under the circle; the button above already says it to screen readers.
+        // The visible label, under the button; the button above already says it to screen readers.
         BasicText(
             label,
             style = PleyType.Tv.Caption.copy(color = PleyColors.Fg, textAlign = TextAlign.Center),
@@ -183,11 +209,18 @@ fun TvTextButton(
     enabled: Boolean = true,
     color: Color = PleyColors.Fg,
 ) {
+    val interactions = remember { MutableInteractionSource() }
+    val focused by interactions.collectIsFocusedAsState()
+    HandOffFocus(enabled, focused)
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.heightIn(min = 40.dp).alpha(if (enabled) 1f else DISABLED_ALPHA),
-        shape = ButtonDefaults.shape(PleyShape.Pill),
+        interactionSource = interactions,
+        modifier = modifier
+            .heightIn(min = 40.dp)
+            .alpha(if (enabled) 1f else DISABLED_ALPHA)
+            .focusProperties { canFocus = enabled || focused },
+        shape = ButtonDefaults.shape(PleyShape.Control),
         colors = ButtonDefaults.colors(
             containerColor = Color.Transparent,
             contentColor = color,
@@ -208,6 +241,21 @@ fun TvTextButton(
 
 /** Disabled buttons are drawn at 40 %. */
 private const val DISABLED_ALPHA = 0.4f
+
+/**
+ * Disabled buttons can't take focus (§2.5), and focus always shows (§5.2
+ * rule 1): a button disabled while it has focus keeps it only until it has
+ * handed it to a neighbour, across first, then down or up.
+ */
+@Composable
+private fun HandOffFocus(enabled: Boolean, focused: Boolean) {
+    val focus = LocalFocusManager.current
+    LaunchedEffect(enabled, focused) {
+        if (!enabled && focused) {
+            listOf(FocusDirection.Right, FocusDirection.Left, FocusDirection.Down, FocusDirection.Up).firstOrNull { focus.moveFocus(it) }
+        }
+    }
+}
 
 /**
  * An in-progress pill's line (design spec §2.5): 3 dp, 7 dp above the

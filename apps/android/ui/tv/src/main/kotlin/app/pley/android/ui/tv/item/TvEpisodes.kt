@@ -186,7 +186,7 @@ private fun SeasonTab(title: String, current: Boolean, onFocus: () -> Unit, onCl
                 scaleY = scale
             }
             .heightIn(min = TabHeight)
-            .background(fill, PleyShape.Pill)
+            .background(fill, PleyShape.Control)
             .semantics { selected = current }
             .clickable(interactionSource = interactions, indication = null, role = Role.Tab, onClick = onClick)
             .padding(horizontal = 20.dp),

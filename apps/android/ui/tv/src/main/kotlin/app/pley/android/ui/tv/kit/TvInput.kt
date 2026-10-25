@@ -33,13 +33,17 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyType
+import kotlinx.coroutines.delay
 
 /**
  * Text entry on TV (D-pad rule 7; design spec §2.11), only for search and
@@ -48,7 +52,7 @@ import app.pley.android.designsystem.PleyType
  * keyboard (Gboard, or Amazon's), and Back or the keyboard's action closes
  * it again, leaving focus on the field.
  *
- * 48 dp, [surface2][PleyColors.Surface2], radius 8, tvBody. At rest a 1 dp
+ * 48 dp, [surface2][PleyColors.Surface2], radius 4, tvBody. At rest a 1 dp
  * [control][PleyColors.Control] edge; focused a 2 dp [accentBright][PleyColors.AccentBright]
  * edge, without scale (fields are wide).
  */
@@ -77,10 +81,20 @@ fun TvTextField(
     }
 
     BackHandler(enabled = editing) { stop() }
+    val view = LocalView.current
     LaunchedEffect(editing) {
         if (editing) {
             field.requestFocus()
             keyboard?.show()
+            // The keyboard's own Back closes it without the app hearing a key,
+            // and the field keeps focus: once it has shown and gone, stop.
+            var shown = false
+            while (true) {
+                delay(KEYBOARD_POLL_MS)
+                val visible = ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime()) == true
+                if (visible) shown = true else if (shown) break
+            }
+            stop()
         }
     }
     val ring = outerFocused || innerFocused
@@ -137,11 +151,16 @@ fun TvTextField(
 /**
  * D-pad rule 10: the remote's digit keys type into pads (PIN, address).
  * [onDigit] gets 0 to 9 from the number row and the number pad; [onDelete]
- * gets Delete and Clear. Other keys pass on.
+ * gets Delete and Clear; [onDot], when given (the address pad), gets the
+ * period and the number pad's dot. Other keys pass on.
  */
-fun Modifier.digitKeys(onDigit: (Int) -> Unit, onDelete: () -> Unit = {}): Modifier = onKeyEvent { event ->
+fun Modifier.digitKeys(onDigit: (Int) -> Unit, onDelete: () -> Unit = {}, onDot: (() -> Unit)? = null): Modifier = onKeyEvent { event ->
     if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
     when (val code = event.nativeKeyEvent.keyCode) {
+        AndroidKeyEvent.KEYCODE_PERIOD, AndroidKeyEvent.KEYCODE_NUMPAD_DOT -> {
+            onDot?.invoke()
+            onDot != null
+        }
         in AndroidKeyEvent.KEYCODE_0..AndroidKeyEvent.KEYCODE_9 -> {
             onDigit(code - AndroidKeyEvent.KEYCODE_0)
             true
@@ -157,3 +176,6 @@ fun Modifier.digitKeys(onDigit: (Int) -> Unit, onDelete: () -> Unit = {}): Modif
         else -> false
     }
 }
+
+/** How often a field being typed in looks whether the keyboard is still up. */
+private const val KEYBOARD_POLL_MS = 250L

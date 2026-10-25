@@ -72,8 +72,6 @@ import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.image.Artwork
 import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.designsystem.reducedMotion
-import app.pley.android.designsystem.tile.TileKind
-import app.pley.android.designsystem.tile.tileGlow
 import app.pley.android.screens.onboarding.ProfileGate
 import app.pley.android.screens.onboarding.ProfileTile
 import app.pley.android.screens.onboarding.ProfilesStep
@@ -87,8 +85,6 @@ import app.pley.android.ui.tv.kit.TvTextButton
 import app.pley.android.ui.tv.kit.digitKeys
 import app.pley.android.ui.tv.kit.initialFocus
 import app.pley.android.ui.tv.shell.LocalTvNavigator
-import app.pley.android.ui.tv.theme.LocalTvTier
-import app.pley.android.ui.tv.theme.glows
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -214,13 +210,12 @@ private fun Picker(state: ProfilesUiState, onPick: (Long) -> Unit, onRetry: () -
 
 /**
  * A profile: its 112 dp avatar and name. Focused, the avatar grows to 1.1
- * with the focus ring (a 3 dp gap) and, on T1 and T2, the glow; the name
+ * with the focus ring (a 3 dp gap); the name
  * turns bold, on the same baseline. A PIN profile wears a lock.
  */
 @Composable
 private fun ProfileChoice(profile: ProfileTile, busy: Boolean, initial: Boolean, onClick: () -> Unit) {
     val reduced = reducedMotion()
-    val tier = LocalTvTier.current
     val scope = rememberCoroutineScope()
     val progress = remember { Animatable(0f) }
     var focused by remember { mutableStateOf(false) }
@@ -249,7 +244,6 @@ private fun ProfileChoice(profile: ProfileTile, busy: Boolean, initial: Boolean,
                     scaleY = s
                     alpha = if (busy) 0.6f else 1f
                 }
-                .then(if (tier.glows) Modifier.tileGlow(TileKind.Avatar) { progress.value } else Modifier)
                 .drawWithContent {
                     drawContent()
                     val a = progress.value
@@ -479,7 +473,7 @@ internal object ProfileColors {
 
 private val AvatarSize = 112.dp
 
-/** Room above and below the row for a focused avatar's growth, ring and glow. */
+/** Room above and below the row for a focused avatar's growth and ring. */
 private val RowBleed = 32.dp
 
 internal const val PROFILES_TAG = "pley.profiles"

@@ -283,7 +283,7 @@ private fun TvServerRow(
             .onFocusChanged { focused = it.isFocused }
             .combinedClickable(interactionSource = interactions, indication = null, onLongClick = onLongClick, onClick = onClick)
             .drawBehind {
-                if (focused) drawRoundRect(PleyColors.Accent, size = Size(size.width, size.height), cornerRadius = CornerRadius(12.dp.toPx()))
+                if (focused) drawRoundRect(PleyColors.Accent, size = Size(size.width, size.height), cornerRadius = CornerRadius(PleyShape.CardRadius.toPx()))
             }
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,

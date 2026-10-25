@@ -302,7 +302,7 @@ internal fun TvHomeSkeleton() {
         block(PleyTv.Gutter, 250.dp, 440.dp, 17.dp)
         block(PleyTv.Gutter, 275.dp, 400.dp, 17.dp)
         block(PleyTv.Gutter, 300.dp, 260.dp, 17.dp)
-        block(PleyTv.Gutter, 341.dp, 148.dp, 48.dp, PleyShape.Pill)
+        block(PleyTv.Gutter, 341.dp, 148.dp, 48.dp, PleyShape.Control)
         block(PleyTv.Gutter, 435.dp, 200.dp, 20.dp)
         val tile = TileKind.Landscape
         repeat(4) { i ->
@@ -361,7 +361,7 @@ internal fun BoxScope.TvHomeToast(message: HomeMessage?, onShown: () -> Unit) {
         Modifier
             .align(Alignment.BottomStart)
             .padding(start = PleyTv.Gutter, bottom = TvSafeArea.Vertical)
-            .background(PleyColors.Surface3, PleyShape.Pill)
+            .background(PleyColors.Surface3, PleyShape.Control)
             .padding(horizontal = 20.dp, vertical = 10.dp)
             .semantics { liveRegion = LiveRegionMode.Polite },
     ) {

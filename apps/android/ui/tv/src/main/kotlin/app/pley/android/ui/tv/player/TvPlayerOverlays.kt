@@ -160,7 +160,7 @@ internal fun BoxScope.TvSkipButton(
                         size = Size(w * share, h),
                     )
                 },
-            shape = ButtonDefaults.shape(PleyShape.Pill),
+            shape = ButtonDefaults.shape(PleyShape.Control),
             colors = ButtonDefaults.colors(
                 containerColor = PleyColors.OnArt,
                 contentColor = PleyColors.Fg,
@@ -172,7 +172,7 @@ internal fun BoxScope.TvSkipButton(
             scale = ButtonDefaults.scale(focusedScale = PleyFocus.PILL_SCALE, pressedScale = 1f),
             glow = ButtonDefaults.glow(Glow.None, Glow.None, Glow.None),
             border = ButtonDefaults.border(Border.None, Border.None, Border.None, Border.None, Border.None),
-            contentPadding = PaddingValues(horizontal = 24.dp),
+            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
         ) {
             Icon(PleyIcons.ChevronsRight, contentDescription = null, size = 22.dp, tint = LocalContentColor.current)
             Spacer(Modifier.width(10.dp))
@@ -260,7 +260,7 @@ private fun PlayNowButton(secondsLeft: Int?, reduced: Boolean, ui: TvPlayerUi, o
                 down = FocusRequester.Cancel
                 left = FocusRequester.Cancel
             },
-        shape = ButtonDefaults.shape(PleyShape.Pill),
+        shape = ButtonDefaults.shape(PleyShape.Control),
         colors = ButtonDefaults.colors(
             containerColor = PleyColors.Fg.copy(alpha = 0.12f),
             contentColor = PleyColors.Fg,
@@ -272,11 +272,11 @@ private fun PlayNowButton(secondsLeft: Int?, reduced: Boolean, ui: TvPlayerUi, o
         scale = ButtonDefaults.scale(focusedScale = PleyFocus.PILL_SCALE, pressedScale = 1f),
         glow = ButtonDefaults.glow(Glow.None, Glow.None, Glow.None),
         border = ButtonDefaults.border(
-            border = Border(BorderStroke(1.dp, PleyColors.Control), shape = PleyShape.Pill),
+            border = Border(BorderStroke(1.dp, PleyColors.Control), shape = PleyShape.Control),
             focusedBorder = Border.None,
             pressedBorder = Border.None,
         ),
-        contentPadding = PaddingValues(start = 20.dp, end = 16.dp),
+        contentPadding = PaddingValues(start = 20.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
     ) {
         Icon(PleyIcons.Play, contentDescription = null, size = 22.dp, tint = LocalContentColor.current)
         Spacer(Modifier.width(10.dp))
@@ -324,7 +324,7 @@ internal fun BoxScope.TvSeekBadge(deltaMs: Long?) {
         Modifier
             .align(if (delta < 0) BiasCentreLeftThird else BiasCentreRightThird)
             .size(64.dp)
-            .background(PleyColors.Bg.copy(alpha = 0.6f), PleyShape.Circle)
+            .background(PleyColors.Bg.copy(alpha = 0.6f), PleyShape.Control)
             .testTag(TAG_BADGE),
         contentAlignment = Alignment.Center,
     ) {
@@ -450,7 +450,7 @@ internal fun BoxScope.TvPlayerToast(toast: PlayerToast?, controlsShown: Boolean,
             .align(Alignment.TopEnd)
             .padding(end = TvSafeArea.Horizontal, top = TvSafeArea.Vertical + if (controlsShown) 52.dp else 0.dp)
             .widthIn(max = 420.dp)
-            .background(PleyColors.Surface3, PleyShape.Pill)
+            .background(PleyColors.Surface3, PleyShape.Control)
             .padding(horizontal = 20.dp, vertical = 10.dp)
             .testTag(TAG_TOAST)
             .semantics { liveRegion = LiveRegionMode.Polite },

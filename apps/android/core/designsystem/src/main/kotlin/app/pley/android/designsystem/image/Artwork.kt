@@ -6,13 +6,17 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
@@ -38,6 +42,14 @@ import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import coil3.compose.LocalPlatformContext
+import coil3.decode.DataSource
+import coil3.request.SuccessResult
+import coil3.request.transitionFactory
+import coil3.transition.CrossfadeTransition
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * The loader [Artwork] uses: Coil's singleton (the app's [PleyImageLoader][app.pley.android.designsystem.PleyImageLoader])
@@ -47,17 +59,48 @@ val LocalArtworkImageLoader = staticCompositionLocalOf<ImageLoader?> { null }
 
 /**
  * Whether a picture has loaded, read only while drawing: the placeholder
- * goes and the trace counters count without recomposing anything.
+ * goes and the trace counters count without recomposing anything. One per
+ * image: `remember(image) { ArtworkLoad() }`.
  */
 @Stable
-class ArtworkLoad internal constructor() {
+class ArtworkLoad {
+    /**
+     * Whether the picture is drawn in full: loaded and, when it fades in
+     * (from disk or the network), faded in, so the placeholder stays under
+     * it till then rather than leaving the page showing through.
+     */
     var loaded: Boolean by mutableStateOf(false)
-        internal set
+        private set
 
-    internal fun onState(state: AsyncImagePainter.State) {
-        loaded = state is AsyncImagePainter.State.Success
+    /** Whether loading has ended: with the picture, or without one when none of its addresses loads. */
+    var settled: Boolean by mutableStateOf(false)
+        private set
+
+    private var fade: Job? = null
+
+    internal fun onState(state: AsyncImagePainter.State, scope: CoroutineScope) {
+        fade?.cancel()
+        fade = null
+        settled = state is AsyncImagePainter.State.Success || state is AsyncImagePainter.State.Error
+        val result = (state as? AsyncImagePainter.State.Success)?.result
+        val millis = result?.fadeMillis() ?: 0
+        if (millis == 0) {
+            loaded = result != null
+            return
+        }
+        loaded = false
+        fade = scope.launch {
+            // Coil's fade starts on the next frame.
+            withFrameNanos { }
+            delay(millis.toLong())
+            loaded = true
+        }
     }
 }
+
+/** How long Coil fades this picture in: not at all from the memory cache. */
+private fun SuccessResult.fadeMillis(): Int =
+    if (dataSource == DataSource.MEMORY_CACHE) 0 else (request.transitionFactory as? CrossfadeTransition.Factory)?.durationMillis ?: 0
 
 /**
  * A picture filling its box: [image]'s first address that loads, at the
@@ -65,6 +108,7 @@ class ArtworkLoad internal constructor() {
  * ([Placeholder]) with [title] centred on it in [titleStyle] (none for
  * backdrops: leave [titleStyle] null). Nothing here recomposes when the
  * picture arrives: the placeholder is drawn behind it, in the draw phase.
+ * [load] tells whoever passes it when the picture is in.
  */
 @Composable
 fun Artwork(
@@ -74,8 +118,8 @@ fun Artwork(
     titleStyle: TextStyle? = null,
     contentScale: ContentScale = ContentScale.Crop,
     alignment: Alignment = Alignment.Center,
+    load: ArtworkLoad = remember(image) { ArtworkLoad() },
 ) {
-    val load = remember(image) { ArtworkLoad() }
     ArtworkBox(image, load, modifier.artworkPlaceholder(title, titleStyle, load), contentScale, alignment)
 }
 
@@ -91,6 +135,8 @@ internal fun ArtworkBox(
     Box(modifier) {
         if (image != null && !image.isEmpty) {
             val loader = LocalArtworkImageLoader.current ?: SingletonImageLoader.get(LocalPlatformContext.current)
+            val scope = rememberCoroutineScope()
+            val onState = remember(load, scope) { { state: AsyncImagePainter.State -> load.onState(state, scope) } }
             AsyncImage(
                 model = image,
                 contentDescription = null,
@@ -98,24 +144,32 @@ internal fun ArtworkBox(
                 modifier = Modifier.matchParentSize(),
                 contentScale = contentScale,
                 alignment = alignment,
-                onState = load::onState,
+                onState = onState,
             )
         }
     }
 }
 
-/** Draws the placeholder behind the content while [load] hasn't loaded. */
-internal fun Modifier.artworkPlaceholder(title: String, titleStyle: TextStyle?, load: ArtworkLoad): Modifier =
-    this then PlaceholderElement(title, titleStyle, load)
+/**
+ * Draws the placeholder behind the content while [load] hasn't loaded, then
+ * [well] (when specified) under pictures that don't cover the box.
+ */
+internal fun Modifier.artworkPlaceholder(
+    title: String,
+    titleStyle: TextStyle?,
+    load: ArtworkLoad,
+    well: Color = Color.Unspecified,
+): Modifier = this then PlaceholderElement(title, titleStyle, load, well)
 
 private data class PlaceholderElement(
     val title: String,
     val titleStyle: TextStyle?,
     val load: ArtworkLoad,
+    val well: Color,
 ) : ModifierNodeElement<PlaceholderNode>() {
-    override fun create() = PlaceholderNode(title, titleStyle, load)
+    override fun create() = PlaceholderNode(title, titleStyle, load, well)
 
-    override fun update(node: PlaceholderNode) = node.update(title, titleStyle, load)
+    override fun update(node: PlaceholderNode) = node.update(title, titleStyle, load, well)
 
     override fun InspectorInfo.inspectableProperties() {
         name = "artworkPlaceholder"
@@ -127,6 +181,7 @@ private class PlaceholderNode(
     var title: String,
     var titleStyle: TextStyle?,
     var load: ArtworkLoad,
+    var well: Color,
 ) : Modifier.Node(), DrawModifierNode, CompositionLocalConsumerModifierNode {
     private var measurer: TextMeasurer? = null
     private var picture: ImageBitmap? = null
@@ -135,7 +190,7 @@ private class PlaceholderNode(
 
     override val shouldAutoInvalidate: Boolean get() = false
 
-    fun update(title: String, titleStyle: TextStyle?, load: ArtworkLoad) {
+    fun update(title: String, titleStyle: TextStyle?, load: ArtworkLoad, well: Color) {
         if (title != this.title || titleStyle != this.titleStyle) {
             picture = null
             layout = null
@@ -143,6 +198,7 @@ private class PlaceholderNode(
         this.title = title
         this.titleStyle = titleStyle
         this.load = load
+        this.well = well
         invalidateDraw()
     }
 
@@ -159,6 +215,8 @@ private class PlaceholderNode(
                     ),
                 )
             }
+        } else if (well.isSpecified) {
+            drawRect(well)
         }
         drawContent()
     }

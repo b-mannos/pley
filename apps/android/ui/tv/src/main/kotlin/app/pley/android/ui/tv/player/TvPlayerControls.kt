@@ -469,7 +469,7 @@ private fun PlayerRoundButton(
                     }
                 }
                 .semantics { contentDescription = label },
-            shape = IconButtonDefaults.shape(PleyShape.Circle),
+            shape = IconButtonDefaults.shape(PleyShape.Control),
             colors = IconButtonDefaults.colors(
                 containerColor = PleyColors.OnArt,
                 contentColor = PleyColors.Fg,

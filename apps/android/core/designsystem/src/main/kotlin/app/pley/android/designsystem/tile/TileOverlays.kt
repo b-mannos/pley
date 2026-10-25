@@ -25,6 +25,7 @@ import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.unit.dp
 import app.pley.android.designsystem.PleyColors
+import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.image.ArtworkLoad
 import app.pley.android.designsystem.image.ArtworkTrace
 
@@ -107,7 +108,8 @@ private class TileOverlaysNode(var spec: TileOverlaysElement) :
     private fun DrawScope.drawTick(s: TileOverlaysElement, inset: Float) {
         val d = s.style.tickSize.toPx()
         val left = size.width - inset - d
-        drawCircle(PleyColors.OnArt, d / 2f, Offset(left + d / 2f, inset + d / 2f))
+        val r = PleyShape.BadgeRadius.toPx()
+        drawRoundRect(PleyColors.OnArt, Offset(left, inset), Size(d, d), CornerRadius(r, r))
         val glyph = s.style.tickGlyph.toPx()
         if (tick == null || tickSize != glyph) {
             // Lucide's check, "M20 6 9 17l-5-5", on its 24 grid.
@@ -129,7 +131,8 @@ private class TileOverlaysNode(var spec: TileOverlaysElement) :
         val h = s.style.countHeight.toPx()
         val w = maxOf(h + 2.dp.toPx(), text.size.width + 2 * 6.dp.toPx())
         val left = size.width - inset - w
-        drawRoundRect(PleyColors.Accent, Offset(left, inset), Size(w, h), CornerRadius(h / 2f, h / 2f))
+        val r = PleyShape.BadgeRadius.toPx()
+        drawRoundRect(PleyColors.Accent, Offset(left, inset), Size(w, h), CornerRadius(r, r))
         drawText(
             text,
             color = PleyColors.OnAccent,
@@ -142,7 +145,7 @@ private class TileOverlaysNode(var spec: TileOverlaysElement) :
         val h = s.style.badgeHeight.toPx()
         val pad = 6.dp.toPx()
         val gap = 6.dp.toPx()
-        val radius = 4.dp.toPx()
+        val radius = PleyShape.BadgeRadius.toPx()
         val top = size.height - barHeight - inset - h
         var x = inset
         for (text in layouts) {

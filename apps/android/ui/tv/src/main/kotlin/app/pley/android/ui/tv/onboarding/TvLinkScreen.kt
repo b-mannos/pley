@@ -228,7 +228,7 @@ private fun Step(number: Int, text: String) = Step(number) {
 @Composable
 private fun Step(number: Int, content: @Composable () -> Unit) {
     Row(Modifier.height(28.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(28.dp).background(PleyColors.Surface3, PleyShape.Circle).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
+        Box(Modifier.size(28.dp).background(PleyColors.Surface3, PleyShape.Field).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
             BasicText(number.toString(), style = PleyType.Tv.Label.copy(color = PleyColors.Fg))
         }
         Spacer(Modifier.width(14.dp))
@@ -251,7 +251,7 @@ private fun CodeFields(code: LinkCode?, dimmed: Boolean) {
         halves.forEachIndexed { i, half ->
             if (i > 0) {
                 Box(Modifier.width(52.dp), contentAlignment = Alignment.Center) {
-                    Box(Modifier.size(20.dp, 4.dp).background(PleyColors.Subtle, PleyShape.Pill))
+                    Box(Modifier.size(20.dp, 4.dp).background(PleyColors.Subtle, PleyShape.Control))
                 }
             }
             Box(
@@ -305,7 +305,7 @@ private fun SignedIn(name: String?) {
         Modifier.padding(start = 96.dp, top = 200.dp).width(440.dp).semantics { liveRegion = LiveRegionMode.Polite },
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        Box(Modifier.size(64.dp).background(PleyColors.Success, PleyShape.Circle), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(64.dp).background(PleyColors.Success, PleyShape.Dialog), contentAlignment = Alignment.Center) {
             Icon(PleyIcons.Check, contentDescription = null, size = 32.dp, tint = PleyColors.Bg)
         }
         BasicText(

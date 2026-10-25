@@ -48,6 +48,7 @@ import app.pley.android.ui.tv.kit.SeeAll
 import app.pley.android.ui.tv.kit.TvBackdrop
 import app.pley.android.ui.tv.kit.TvRow
 import app.pley.android.ui.tv.kit.TvRowColumn
+import app.pley.android.ui.tv.kit.rememberBackdropPrefetcher
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberRested
 import app.pley.android.ui.tv.shell.LocalTvNavigator
@@ -120,6 +121,7 @@ private fun TvHomeRows(model: TvHomeModel, hero: TvHero, origin: String, vm: Hom
     var hasFocus by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf<FocusedTile?>(null) }
     val rested = rememberRested(focused)
+    val backdrops = rememberBackdropPrefetcher()
     LaunchedEffect(rested) { rested?.let { vm.focus(it.item, it.ahead) } }
     val info by vm.info.collectAsStateWithLifecycle()
     val heroAlpha by animateFloatAsState(if (inRows) 0f else 1f, PleyMotion.reveal(), label = "hero")
@@ -184,7 +186,14 @@ private fun TvHomeRows(model: TvHomeModel, hero: TvHero, origin: String, vm: Hom
                         onActions = { tile -> navigator.open(PleyKey.ItemActions(tile.id)) },
                         onFocus = { tile ->
                             inRows = true
-                            row.itemOf(tile)?.let { focused = FocusedTile(it, row.after(it)) }
+                            row.itemOf(tile)?.let {
+                                focused = FocusedTile(it, row.after(it))
+                                // Its backdrop and its neighbours' load now: focus may rest on any of them next.
+                                backdrops.prefetch(
+                                    TvHomeModel.backdropOf(it, origin, tier),
+                                    row.beside(it).map { item -> TvHomeModel.backdropOf(item, origin, tier) },
+                                )
+                            }
                         },
                     )
                 }

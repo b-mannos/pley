@@ -1,5 +1,6 @@
 package app.pley.android.ui.tv.kit
 
+import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -23,10 +24,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
@@ -38,7 +42,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
@@ -50,10 +56,24 @@ import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.image.Artwork
 import app.pley.android.designsystem.image.ArtworkImage
+import app.pley.android.designsystem.image.ArtworkLoad
 import app.pley.android.designsystem.image.GradientBitmaps
+import app.pley.android.designsystem.image.LocalArtworkImageLoader
 import app.pley.android.designsystem.image.drawStretched
 import app.pley.android.designsystem.reducedMotion
 import app.pley.android.ui.tv.theme.LocalTvTier
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.annotation.ExperimentalCoilApi
+import coil3.compose.LocalPlatformContext
+import coil3.decode.BlackholeDecoder
+import coil3.request.CachePolicy
+import coil3.request.Disposable
+import coil3.request.ImageRequest
+import coil3.size.Precision
+import coil3.size.Scale
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Where the bottom gradient over a backdrop runs (design spec §2.2, §4.1,
@@ -80,10 +100,13 @@ data class BackdropScrim(val from: Dp, val to: Dp) {
  * centre, above the middle), with the two gradients that keep the text
  * column on at least 85 % [bg][PleyColors.Bg], drawn together.
  *
- * It follows [image] only once focus has rested ([rememberRested]): a
- * 300 ms crossfade on T1 and T2, on the new picture's layer alone
+ * It follows [image] only once focus has rested ([rememberRested]) and
+ * the new picture has loaded (or failed, or taken over a second): a
+ * 300 ms crossfade on T1 and T2, on the upper picture's layer alone
  * (ModulateAlpha, no offscreen buffer); an instant swap on T0 and with
- * reduced motion. Pictures are asked for at most 1280 wide, 960 on T0.
+ * reduced motion. Each picture keeps its slot while it shows, so the one
+ * going is never loaded again. Pictures are asked for at most 1280 wide,
+ * 960 on T0; [rememberBackdropPrefetcher] loads the next ones ahead.
  * Never blurred.
  */
 @Composable
@@ -95,25 +118,11 @@ fun TvBackdrop(
 ) {
     val tier = LocalTvTier.current
     val cap = ArtworkImage.backdropCap(tier)
-    val wanted = remember(image, title, cap) { Backdrop(image?.let { if (it.maxWidth in 1..cap) it else it.copy(maxWidth = cap) }, title) }
+    val wanted = remember(image, title, cap) { Backdrop(image?.cappedAt(cap), title) }
     val shown = rememberRested(wanted)
     val instant = tier == Tier.T0 || reducedMotion()
-    var under by remember { mutableStateOf<Backdrop?>(null) }
-    var top by remember { mutableStateOf(shown) }
-    val fade = remember { Animatable(1f) }
-    LaunchedEffect(shown) {
-        if (shown == top) return@LaunchedEffect
-        if (instant) {
-            top = shown
-            under = null
-            return@LaunchedEffect
-        }
-        under = top
-        top = shown
-        fade.snapTo(0f)
-        fade.animateTo(1f, tween(PleyMotion.BACKDROP_MS, easing = LinearEasing))
-        under = null
-    }
+    val slots = remember { BackdropSlots(shown) }
+    LaunchedEffect(shown) { slots.show(shown, instant) }
     Box(
         modifier
             .fillMaxSize()
@@ -125,25 +134,141 @@ fun TvBackdrop(
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
             .backdropScrims(scrim),
     ) {
-        under?.let { BackdropPicture(it, Modifier.fillMaxSize()) }
-        BackdropPicture(
-            top,
-            Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    alpha = fade.value
-                    compositingStrategy = CompositingStrategy.ModulateAlpha
-                },
-        )
+        slots.lower?.let { slot -> key(slot) { BackdropPicture(slot, Modifier.fillMaxSize()) } }
+        slots.upper?.let { slot ->
+            key(slot) {
+                BackdropPicture(
+                    slot,
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            alpha = slots.upperAlpha.value
+                            compositingStrategy = CompositingStrategy.ModulateAlpha
+                        },
+                )
+            }
+        }
     }
 }
 
 @Immutable
 private data class Backdrop(val image: ArtworkImage?, val title: String)
 
+/**
+ * The backdrop's two slots. The next picture loads in the free one, out of
+ * sight (under the upper one, or in it at alpha 0), and only then does the
+ * upper one fade: in over the lower one, or out to show it. Pictures are
+ * opaque, so either is the same crossfade.
+ */
+@Stable
+private class BackdropSlots(first: Backdrop) {
+    var lower by mutableStateOf<BackdropSlot?>(BackdropSlot(first, swapped = false))
+        private set
+    var upper by mutableStateOf<BackdropSlot?>(null)
+        private set
+    val upperAlpha = Animatable(0f)
+
+    /** Whether the upper slot shows, or will once its fade ends. */
+    private var upperShows = false
+
+    suspend fun show(next: Backdrop, instant: Boolean) {
+        // A swap cut short by the next one ends where it was going.
+        upperAlpha.snapTo(if (upperShows) 1f else 0f)
+        if (upperShows) lower = null else upper = null
+        if ((if (upperShows) upper else lower)?.backdrop == next) return
+        val incoming = BackdropSlot(next, swapped = true)
+        if (upperShows) lower = incoming else upper = incoming
+        incoming.awaitPicture()
+        upperShows = !upperShows
+        val target = if (upperShows) 1f else 0f
+        if (instant) upperAlpha.snapTo(target) else upperAlpha.animateTo(target, tween(PleyMotion.BACKDROP_MS, easing = LinearEasing))
+        if (upperShows) lower = null else upper = null
+    }
+}
+
+/** A backdrop in its slot. Swapped in, its picture doesn't fade in by itself: the slot does. */
+private class BackdropSlot(val backdrop: Backdrop, swapped: Boolean) {
+    val image: ArtworkImage? = backdrop.image?.let { if (swapped) it.copy(fade = false) else it }
+    val load = ArtworkLoad()
+
+    /** Until the picture is in, or none of its addresses loads, for at most [PictureWaitMs]. */
+    suspend fun awaitPicture() {
+        if (image == null || image.isEmpty) return
+        withTimeoutOrNull(PictureWaitMs) { snapshotFlow { load.settled }.first { it } }
+    }
+}
+
+/** How long a backdrop waits for its picture before it swaps in anyway. */
+private const val PictureWaitMs = 1_000L
+
 @Composable
-private fun BackdropPicture(backdrop: Backdrop, modifier: Modifier) {
-    Artwork(backdrop.image, backdrop.title, modifier, alignment = SubjectAlignment)
+private fun BackdropPicture(slot: BackdropSlot, modifier: Modifier) {
+    Artwork(slot.image, slot.backdrop.title, modifier, alignment = SubjectAlignment, load = slot.load)
+}
+
+/** [this], asked for at most [cap] wide. */
+private fun ArtworkImage.cappedAt(cap: Int): ArtworkImage = if (maxWidth in 1..cap) this else copy(maxWidth = cap)
+
+/**
+ * Loads backdrops before [TvBackdrop] shows them, at the size it asks for
+ * (the window's, capped as it caps them), so it finds them in the cache
+ * and swaps as soon as focus rests. Only the last ones asked for keep
+ * loading.
+ */
+@Stable
+class BackdropPrefetcher internal constructor(
+    private val context: Context,
+    private val loader: ImageLoader,
+    private val tier: Tier,
+    private val size: IntSize,
+) {
+    /** What is loading or loaded, by picture and whether only to disk. */
+    private var loading: Map<Pair<ArtworkImage, Boolean>, Disposable> = emptyMap()
+
+    /**
+     * Loads [focused]'s backdrop and those [beside] it (only to the disk
+     * cache on T0, whose memory is short), and stops loading any asked for
+     * before that aren't among them.
+     */
+    fun prefetch(focused: ArtworkImage?, beside: List<ArtworkImage?>) {
+        if (size.width <= 0 || size.height <= 0) return
+        val cap = ArtworkImage.backdropCap(tier)
+        val wanted = LinkedHashMap<ArtworkImage, Boolean>()
+        focused?.takeUnless { it.isEmpty }?.let { wanted[it.cappedAt(cap)] = false }
+        beside.forEach { image -> image?.takeUnless { it.isEmpty }?.let { wanted.getOrPut(it.cappedAt(cap)) { tier == Tier.T0 } } }
+        val next = wanted.entries.associate { (image, diskOnly) ->
+            val key = image to diskOnly
+            key to (loading[key] ?: loader.enqueue(request(image, diskOnly)))
+        }
+        loading.forEach { (key, job) -> if (key !in next) job.dispose() }
+        loading = next
+    }
+
+    /** What TvBackdrop's picture asks for: its box's size, filled, never scaled up. */
+    @OptIn(ExperimentalCoilApi::class)
+    private fun request(image: ArtworkImage, diskOnly: Boolean): ImageRequest =
+        ImageRequest.Builder(context)
+            .data(image)
+            .size(size.width, size.height)
+            .scale(Scale.FILL)
+            .precision(Precision.INEXACT)
+            .apply {
+                if (diskOnly) {
+                    memoryCachePolicy(CachePolicy.DISABLED)
+                    decoderFactory(BlackholeDecoder.Factory())
+                }
+            }
+            .build()
+}
+
+/** A [BackdropPrefetcher] for this window's backdrop, on the app's image loader. */
+@Composable
+fun rememberBackdropPrefetcher(): BackdropPrefetcher {
+    val context = LocalPlatformContext.current
+    val loader = LocalArtworkImageLoader.current ?: SingletonImageLoader.get(context)
+    val tier = LocalTvTier.current
+    val size = LocalWindowInfo.current.containerSize
+    return remember(context, loader, tier, size) { BackdropPrefetcher(context, loader, tier, size) }
 }
 
 /** Subjects sit right of centre and above the middle. */

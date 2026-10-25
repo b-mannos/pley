@@ -413,7 +413,7 @@ private fun InfoBlock(page: ItemPage, focus: ItemPageFocus, focusedEpisode: Epis
     Column(
         Modifier
             .padding(start = PleyTv.Gutter, top = 30.dp, end = TvSafeArea.Horizontal)
-            .width(PleyTv.TextColumnEnd - PleyTv.Gutter + 160.dp)
+            .width(TextColumn)
             .graphicsLayer { alpha = visible },
     ) {
         BasicText(
@@ -469,8 +469,8 @@ private fun TvItemSkeleton() {
         Block(300.dp, 18.dp)
         Spacer(Modifier.height(44.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(PleyTv.ButtonGap)) {
-            Box(Modifier.size(160.dp, 48.dp).background(PleyColors.Surface2, PleyShape.Pill))
-            repeat(3) { Box(Modifier.size(48.dp).background(PleyColors.Surface2, PleyShape.Circle)) }
+            Box(Modifier.size(160.dp, 48.dp).background(PleyColors.Surface2, PleyShape.Control))
+            repeat(3) { Box(Modifier.size(48.dp).background(PleyColors.Surface2, PleyShape.Control)) }
         }
     }
 }

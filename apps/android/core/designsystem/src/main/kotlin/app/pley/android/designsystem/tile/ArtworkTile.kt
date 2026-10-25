@@ -8,13 +8,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.image.ArtworkBox
 import app.pley.android.designsystem.image.ArtworkLoad
 import app.pley.android.designsystem.image.artworkPlaceholder
 
 /**
- * A tile's art (design spec §2.3): the picture in its well, or the title's
- * gradient while there is none, and the overlays: the 4 dp progress bar,
+ * A tile's art (design spec §2.3): the picture in its [surface2][PleyColors.Surface2]
+ * well, or the title's gradient while there is none (and while the picture
+ * fades in), and the overlays: the 4 dp progress bar,
  * the watched tick or the unwatched count, quality badges and the hairline
  * that keeps dark art from dissolving into the page.
  *
@@ -41,7 +43,7 @@ fun ArtworkTile(
         modifier = modifier
             .clearAndSetSemantics { contentDescription = model.description }
             .clip(shape)
-            .artworkPlaceholder(model.title, if (kind.round) null else style.placeholderText, load)
+            .artworkPlaceholder(model.title, if (kind.round) null else style.placeholderText, load, well = PleyColors.Surface2)
             .tileOverlays(model, kind, style, load),
     )
 }

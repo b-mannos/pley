@@ -23,12 +23,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -53,7 +55,6 @@ import app.pley.android.designsystem.PleyMotion
 import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.reducedMotion
-import app.pley.android.designsystem.tile.TileGlow
 import app.pley.android.screens.PleyKey
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.account.accountEntries
@@ -73,9 +74,7 @@ import app.pley.android.ui.tv.onboarding.onboardingEntries
 import app.pley.android.ui.tv.playlists.playlistsEntries
 import app.pley.android.ui.tv.search.searchEntries
 import app.pley.android.ui.tv.theme.TvTheme
-import app.pley.android.ui.tv.theme.glows
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.drop
 
 /**
  * The TV app (Android TV, Google TV, Fire TV): the theme, the D-pad rules
@@ -106,7 +105,6 @@ fun TvApp(
             }
         }
         KeepUpdated(source)
-        WarmGlows(tier)
     }
 }
 
@@ -129,6 +127,7 @@ private fun TvShell(
     // Signing in and choosing a profile are full screen.
     rail.shown = root !is PleyKey.Servers && root !is PleyKey.Link && root !is PleyKey.SignIn && root != PleyKey.Profiles
     val curtain = rememberCurtain(backStack.lastOrNull())
+    ReturnFocus(rail, content)
 
     // The last resort of Back: below every screen's own (they are added later, so they come first).
     BackHandler { navigator.back() }
@@ -195,6 +194,29 @@ private fun TvShell(
 }
 
 /**
+ * Another activity (the player) had the window: when it comes back, focus
+ * goes back to where it was on the page, or to the page's first element
+ * when that one is gone (Resume that became Play). Left to Compose, it
+ * lands in the rail. Not when focus was in the rail already.
+ */
+@Composable
+private fun ReturnFocus(rail: RailState, content: FocusRequester) {
+    val window = LocalWindowInfo.current
+    LaunchedEffect(window, rail, content) {
+        var inRail = false
+        snapshotFlow { window.isWindowFocused }.drop(1).collect { focused ->
+            if (!focused) {
+                inRail = rail.hasFocus
+                if (!inRail) runCatching { content.saveFocusedChild() }
+            } else if (!inRail) {
+                withFrameNanos { }
+                rail.backToContent()
+            }
+        }
+    }
+}
+
+/**
  * Screen changes (design spec §5.1): the new screen shows under a
  * [bg][PleyColors.Bg] rectangle that fades out over 110 ms. One rectangle,
  * drawn over the content: no full-screen layer fades. None with reduced
@@ -225,14 +247,6 @@ private fun KeepUpdated(source: TvShellSource) {
     }
 }
 
-/** Makes the tiles' glows off the main thread before the first focus needs one (T1 and T2). */
-@Composable
-private fun WarmGlows(tier: Tier) {
-    val density = LocalDensity.current
-    LaunchedEffect(tier, density) {
-        if (tier.glows) withContext(Dispatchers.Default) { TileGlow.warm(density) }
-    }
-}
 
 /**
  * A screen that isn't built yet: its name, a line about the app, and a

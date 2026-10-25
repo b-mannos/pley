@@ -19,7 +19,8 @@ import kotlinx.coroutines.CancellationException
  * - Never wider than the screen needs ([screenWidthPx], rounded up to the
  *   server's next width) and never 1920 on T0.
  * - A 150 ms fade, only for pictures that weren't in the memory cache
- *   (Coil's crossfade skips those), and none on T0.
+ *   (Coil's crossfade skips those), none on T0, and none for an
+ *   [ArtworkImage] that says not to.
  */
 class ArtworkPolicy(val tier: Tier, screenWidthPx: Int) {
     /** The widest picture this device asks for. */
@@ -66,7 +67,7 @@ class ArtworkInterceptor(private val policy: ArtworkPolicy) : Interceptor {
             if (isMissing(url)) continue
             val request = chain.request.newBuilder()
                 .data(url)
-                .apply { if (policy.fadeMillis > 0) crossfade(policy.fadeMillis) }
+                .apply { if (policy.fadeMillis > 0 && image.fade) crossfade(policy.fadeMillis) }
                 .build()
             val result = try {
                 chain.withRequest(request).proceed()

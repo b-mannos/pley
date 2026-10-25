@@ -23,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -122,7 +123,7 @@ private fun LibraryCard(entry: LibraryEntry, onClick: () -> Unit, modifier: Modi
         val content = LocalContentColor.current
         Row(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(48.dp).drawBehind { drawCircle(content.copy(alpha = 0.12f)) },
+                Modifier.size(48.dp).drawBehind { drawRoundRect(content.copy(alpha = 0.12f), cornerRadius = CornerRadius(PleyShape.ControlRadius.toPx())) },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(kindIcon(entry.library.kind), contentDescription = null, size = 24.dp, tint = content)

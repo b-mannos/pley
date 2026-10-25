@@ -5,48 +5,56 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
-/** Corner radii (design spec §1.4), and shapes made from them. */
+/**
+ * Corner radii (design spec §1.4), and shapes made from them. Tight on
+ * purpose: corners are softened, never rounded off. Nothing that holds a
+ * label is a pill; only faces and dots are circles.
+ */
 object PleyShape {
-    /** Badges. */
-    val BadgeRadius = 4.dp
+    /** Badges, progress lines, skeleton text. */
+    val BadgeRadius = 2.dp
 
-    /** Phone tiles: the web's `rounded-md`. */
-    val TilePhoneRadius = 6.dp
+    /** Phone tiles. */
+    val TilePhoneRadius = 4.dp
 
     /** TV tiles. */
-    val TileTvRadius = 8.dp
+    val TileTvRadius = 4.dp
 
     /** Inputs, the address pad's display. */
-    val FieldRadius = 8.dp
+    val FieldRadius = 4.dp
+
+    /** Buttons (with a label or an icon alone), chips, tabs, Skip Intro. */
+    val ControlRadius = 6.dp
 
     /** The phone's Home cards, the link code fields, the Up Next card's image. */
-    val CardRadius = 12.dp
+    val CardRadius = 6.dp
 
     /** Dialogs, the Up Next card, TV side panels (left corners), the QR tile. */
-    val DialogRadius = 16.dp
+    val DialogRadius = 8.dp
 
     /** Phone bottom sheets, top corners. */
-    val SheetRadius = 20.dp
+    val SheetRadius = 12.dp
 
     val Badge = RoundedCornerShape(BadgeRadius)
     val TilePhone = RoundedCornerShape(TilePhoneRadius)
     val TileTv = RoundedCornerShape(TileTvRadius)
     val Field = RoundedCornerShape(FieldRadius)
+    val Control = RoundedCornerShape(ControlRadius)
+
+    /** [Control]'s old name, while screens written before it still use it. */
+    val Pill = Control
     val Card = RoundedCornerShape(CardRadius)
     val Dialog = RoundedCornerShape(DialogRadius)
     val Sheet = RoundedCornerShape(topStart = SheetRadius, topEnd = SheetRadius)
 
-    /** Buttons, chips, tabs, Skip Intro. */
-    val Pill = RoundedCornerShape(percent = 50)
-
-    /** Round buttons, avatars, PIN keys, people. */
+    /** Avatars, people's photos, status dots. */
     val Circle = CircleShape
 }
 
 /**
  * The TV focus ring (design spec §1.4, §2.3): a 3 dp [PleyColors.AccentBright]
  * stroke whose centre runs 4.5 dp outside the tile, so it leaves a 3 dp
- * gap and has an 11 dp inner and 14 dp outer radius around the tile's 8.
+ * gap and has a 7 dp inner and 10 dp outer radius around the tile's 4.
  * It is drawn in the draw phase, never as a border that changes layout.
  */
 object PleyFocus {
@@ -56,7 +64,7 @@ object PleyFocus {
     val RingOffset = 4.5.dp
 
     /** The ring's radius at the stroke's centre, around a [PleyShape.TileTv] corner. */
-    val RingRadius = 12.5.dp
+    val RingRadius = 8.5.dp
 
     /** How far the ring reaches past the tile's edge: [RingOffset] plus half the stroke. */
     val RingReach = 6.dp

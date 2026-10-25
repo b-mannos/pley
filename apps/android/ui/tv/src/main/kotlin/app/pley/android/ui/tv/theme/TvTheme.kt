@@ -48,13 +48,10 @@ fun TvTheme(
 }
 
 /**
- * The device's tier (architecture.md, design spec §6): T0 draws no glow,
- * swaps backdrops at once and asks for smaller pictures.
+ * The device's tier (architecture.md, design spec §6): T0 swaps backdrops
+ * at once and asks for smaller pictures.
  */
 val LocalTvTier = staticCompositionLocalOf { Tier.T2 }
-
-/** Whether focus glows on this device: T1 and T2 only. */
-val Tier.glows: Boolean get() = this != Tier.T0
 
 /**
  * The scheme of design spec §1.1, the phone's roles with `border` as the

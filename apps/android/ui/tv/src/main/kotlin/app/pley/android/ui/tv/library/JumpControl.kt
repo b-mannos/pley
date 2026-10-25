@@ -108,7 +108,7 @@ internal fun JumpControl(
                     scaleX = scale
                     scaleY = scale
                 }
-                .background(if (focused) PleyColors.Accent else PleyColors.Surface3, PleyShape.Circle),
+                .background(if (focused) PleyColors.Accent else PleyColors.Surface3, PleyShape.Control),
             contentAlignment = Alignment.Center,
         ) {
             BasicText(

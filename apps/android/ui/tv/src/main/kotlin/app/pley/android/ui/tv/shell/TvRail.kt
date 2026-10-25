@@ -213,6 +213,7 @@ internal fun NavigationDrawerScope.TvRail(
                 modifier = Modifier.height(AvatarItemHeight).focusRequester(rail.requester(PROFILE_ITEM)),
                 colors = railColors(collapsedSelected = false),
                 scale = railScale,
+                shape = railShape,
                 border = railBorder(),
                 glow = railGlow,
             ) {
@@ -243,6 +244,7 @@ private fun NavigationDrawerScope.RailEntry(item: RailItem, rail: RailState, onS
             .then(if (selected && !open) Modifier.currentMark() else Modifier),
         colors = railColors(collapsedSelected = selected && !open),
         scale = railScale,
+        shape = railShape,
         border = railBorder(),
         glow = railGlow,
     ) {
@@ -334,6 +336,9 @@ private fun railBorder() = NavigationDrawerItemDefaults.border(
     focusedDisabledBorder = Border.None,
     pressedSelectedBorder = Border.None,
 )
+
+/** Entries are rounded a little, as every control is ([PleyShape.Control]). */
+private val railShape = NavigationDrawerItemDefaults.shape(PleyShape.Control)
 
 private val railGlow = NavigationDrawerItemDefaults.glow(Glow.None, Glow.None, Glow.None, Glow.None, Glow.None, Glow.None)
 

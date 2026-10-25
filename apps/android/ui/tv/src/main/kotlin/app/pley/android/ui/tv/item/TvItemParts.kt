@@ -89,7 +89,7 @@ internal fun PanelRow(
             .fillMaxWidth()
             .heightIn(min = 48.dp)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .background(if (focused) PleyColors.Accent else androidx.compose.ui.graphics.Color.Transparent, PleyShape.Pill)
+            .background(if (focused) PleyColors.Accent else androidx.compose.ui.graphics.Color.Transparent, PleyShape.Control)
             .semantics { selected = checked }
             .clickable(interactionSource = interactions, indication = null, role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -151,7 +151,7 @@ internal fun Modifier.focusRing(radius: androidx.compose.ui.unit.Dp, focused: ()
 @Composable
 internal fun TvMetaLine(parts: List<MetaPart>, modifier: Modifier = Modifier) {
     if (parts.isEmpty()) return
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.widthIn(max = TextColumn), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         parts.forEachIndexed { i, part ->
             if (i > 0) BasicText("·", style = PleyType.Tv.Label.copy(color = PleyColors.Subtle))
             when (part) {
@@ -209,7 +209,7 @@ internal fun TvToastHost(state: TvToastState, modifier: Modifier = Modifier) {
             Box(
                 Modifier
                     .widthIn(max = 420.dp)
-                    .background(PleyColors.Surface3, PleyShape.Pill)
+                    .background(PleyColors.Surface3, PleyShape.Control)
                     .padding(horizontal = 20.dp, vertical = 12.dp)
                     .semantics { liveRegion = LiveRegionMode.Polite },
             ) {

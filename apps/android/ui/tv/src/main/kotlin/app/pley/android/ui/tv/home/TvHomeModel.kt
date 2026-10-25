@@ -71,6 +71,12 @@ internal data class TvHomeRow(
         val at = items.indexOfFirst { it.id == item.id }
         return if (at < 0) emptyList() else items.drop(at + 1).take(count)
     }
+
+    /** The items either side of [item] in the row, the next one first. */
+    fun beside(item: ItemSummary): List<ItemSummary> {
+        val at = items.indexOfFirst { it.id == item.id }
+        return if (at < 0) emptyList() else listOfNotNull(items.getOrNull(at + 1), items.getOrNull(at - 1))
+    }
 }
 
 /** The hero: what it says, and its backdrop. */

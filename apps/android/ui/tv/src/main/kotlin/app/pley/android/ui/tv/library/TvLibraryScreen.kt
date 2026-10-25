@@ -134,7 +134,7 @@ private fun TvLibraryPage(state: LibraryUiState<ArtworkTileModel>, vm: LibraryVi
                 val initial = !switched && tab == openedOn
                 when (tab) {
                     LibraryTab.Library -> TvLibraryTab(state, vm, memory, skeleton, initial, chips, tabFocus, contentFocus, onPanel = openPanel)
-                    LibraryTab.Recommended -> TvRecommendedTab(state, vm, memory, initial, Modifier.focusRequester(contentFocus).upTo(tabFocus))
+                    LibraryTab.Recommended -> TvRecommendedTab(state, vm, memory, initial, tabFocus, Modifier.focusRequester(contentFocus).upTo(tabFocus))
                     LibraryTab.Collections -> TvCollectionsTab(state, vm, memory, skeleton, initial, tabFocus, contentFocus)
                 }
             }
@@ -312,6 +312,8 @@ private fun TvLibraryTab(
                         title = stringResource(R.string.tv_library_empty_title),
                         body = stringResource(R.string.tv_library_empty_body),
                         top = 24.dp,
+                        takeFocus = initial,
+                        focusInstead = tabFocus,
                     )
                 }
                 else -> {
@@ -395,6 +397,8 @@ private fun TvCollectionsTab(
                         if (state.kind == LibraryKind.Shows) R.string.tv_library_collections_empty_shows else R.string.tv_library_collections_empty_movies,
                     ),
                     top = 24.dp,
+                    takeFocus = initial,
+                    focusInstead = tabFocus,
                 )
                 else -> TvPosterGrid(
                     total = list?.size ?: SKELETONS,

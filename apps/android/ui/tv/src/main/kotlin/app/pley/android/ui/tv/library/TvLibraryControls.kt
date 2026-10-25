@@ -57,7 +57,7 @@ internal fun TvChip(
         onClick = onClick,
         interactionSource = interactions,
         modifier = modifier.height(40.dp).semantics { this.selected = selected },
-        shape = ButtonDefaults.shape(PleyShape.Pill),
+        shape = ButtonDefaults.shape(PleyShape.Control),
         colors = ButtonDefaults.colors(
             containerColor = PleyColors.Surface3,
             contentColor = PleyColors.Fg,
@@ -99,7 +99,7 @@ internal fun TvTab(
             role = Role.Tab
             this.selected = selected
         },
-        shape = ButtonDefaults.shape(PleyShape.Pill),
+        shape = ButtonDefaults.shape(PleyShape.Control),
         colors = ButtonDefaults.colors(
             containerColor = if (selected) PleyColors.Surface3 else Color.Transparent,
             contentColor = if (selected) PleyColors.Fg else PleyColors.Muted,
@@ -137,7 +137,7 @@ internal fun PanelRow(
         onClick = onClick,
         interactionSource = interactions,
         modifier = modifier.fillMaxWidth().height(48.dp).semantics { selected = checked },
-        shape = ClickableSurfaceDefaults.shape(PleyShape.Pill),
+        shape = ClickableSurfaceDefaults.shape(PleyShape.Control),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = Color.Transparent,
             contentColor = PleyColors.Fg,

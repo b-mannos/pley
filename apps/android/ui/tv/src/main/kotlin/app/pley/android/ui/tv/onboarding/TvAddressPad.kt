@@ -75,6 +75,10 @@ internal fun TvAddressPad(
                     flash.flash(PadKey.Delete)
                     field.deleteLast()
                 },
+                onDot = {
+                    flash.flash(PadKey.Symbol("."))
+                    field.type(".")
+                },
             )
             .testTag(ADDRESS_PAD_TAG),
     ) {

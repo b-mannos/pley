@@ -16,11 +16,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -47,6 +50,7 @@ import app.pley.android.screens.library.TileLook
 import app.pley.android.screens.library.TileRow
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.kit.FocusMemory
+import app.pley.android.ui.tv.kit.LocalTvRailFocus
 import app.pley.android.ui.tv.kit.SeeAll
 import app.pley.android.ui.tv.kit.TvPillButton
 import app.pley.android.ui.tv.kit.TvRow
@@ -59,6 +63,10 @@ import app.pley.android.ui.tv.shell.LocalTvNavigator
  * A page or tab with nothing to show (design spec §8): the title in
  * tvSection, the sentence under it in tvBody [muted][PleyColors.Muted], and
  * the one thing to do ("Retry", "Clear filters") as a pill with focus.
+ * Without one, focus goes to [focusInstead] (the page's selected tab), else
+ * to the rail, so the remote is never dead (§5.2 rule 1); not when
+ * [takeFocus] is false, on a tab chosen after the page opened, where focus
+ * is already on the tabs.
  */
 @Composable
 internal fun TvMessage(
@@ -67,7 +75,16 @@ internal fun TvMessage(
     action: String? = null,
     onAction: () -> Unit = {},
     top: Dp = 140.dp,
+    takeFocus: Boolean = true,
+    focusInstead: FocusRequester? = null,
 ) {
+    if (action == null && takeFocus) {
+        val rail = LocalTvRailFocus.current
+        LaunchedEffect(Unit) {
+            withFrameNanos { }
+            if (focusInstead?.let { runCatching { it.requestFocus() }.isSuccess } != true) rail?.focusCurrent()
+        }
+    }
     Column(
         Modifier.fillMaxWidth().padding(start = PleyTv.Gutter, top = top, end = PleyTv.Gutter),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -97,6 +114,7 @@ internal fun TvRecommendedTab(
     vm: LibraryViewModel<ArtworkTileModel>,
     memory: FocusMemory,
     initial: Boolean,
+    tabFocus: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
     val navigator = LocalTvNavigator.current
@@ -115,6 +133,8 @@ internal fun TvRecommendedTab(
             title = stringResource(R.string.tv_library_recommended_empty_title),
             body = stringResource(R.string.tv_library_recommended_empty_body),
             top = RowsTop,
+            takeFocus = initial,
+            focusInstead = tabFocus,
         )
         else -> {
             val collections = stringResource(R.string.tv_library_tab_collections)

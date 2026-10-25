@@ -13,12 +13,14 @@ import app.pley.android.model.ItemSummary
  * thread, without knowing sizes.
  *
  * [maxWidth] caps the width asked for, in pixels (0: only the device's
- * caps): backdrops use [ArtworkImage.backdropCap].
+ * caps): backdrops use [ArtworkImage.backdropCap]. Without [fade] it never
+ * fades in, for whoever fades it in themselves (the TV's backdrop).
  */
 @Immutable
 data class ArtworkImage(
     val candidates: List<String>,
     val maxWidth: Int = 0,
+    val fade: Boolean = true,
 ) {
     val isEmpty: Boolean get() = candidates.isEmpty()
 

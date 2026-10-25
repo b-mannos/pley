@@ -24,6 +24,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyFocus
 import app.pley.android.designsystem.PleyMotion
+import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
@@ -181,7 +183,7 @@ internal fun TvPadKey(
                     focused -> PleyColors.Accent
                     else -> PleyColors.Surface3
                 }
-                drawCircle(fill)
+                drawRoundRect(fill, cornerRadius = CornerRadius(PleyShape.ControlRadius.toPx()))
             },
         contentAlignment = Alignment.Center,
     ) {

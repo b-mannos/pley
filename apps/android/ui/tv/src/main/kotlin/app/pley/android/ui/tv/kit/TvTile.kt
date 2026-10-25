@@ -49,10 +49,8 @@ import app.pley.android.designsystem.tile.ArtworkTileModel
 import app.pley.android.designsystem.tile.TileCaption
 import app.pley.android.designsystem.tile.TileKind
 import app.pley.android.designsystem.tile.TileStyle
-import app.pley.android.designsystem.tile.tileGlow
 import app.pley.android.designsystem.tile.tvTileSize
 import app.pley.android.ui.tv.theme.LocalTvTier
-import app.pley.android.ui.tv.theme.glows
 import app.pley.android.common.Tier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -64,11 +62,10 @@ import kotlinx.coroutines.launch
  * draws its glow with a shadow layer.
  *
  * Focused, the well grows to 1.08 (in its layer, never recomposing), gets
- * the accent ring drawn around it, and on T1 and T2 the glow; the caption,
+ * the accent ring drawn around it, and nothing else: no glow; the caption,
  * outside the scaled layer, turns bold. Select opens; holding Select calls
  * [onLongClick], the item's actions (rule 6), which are also buttons on its
- * page. While a key repeats the tile snaps to its focus look, without glow
- * (rule 5).
+ * page. While a key repeats the tile snaps to its focus look (rule 5).
  *
  * [focusModifier] goes on the focusable itself: a FocusRequester,
  * [initialFocus] or [rememberedFocus].
@@ -163,7 +160,6 @@ fun TvTileFrame(
                     scaleX = s
                     scaleY = s
                 }
-                .then(if (tier.glows) Modifier.tileGlow(kind) { look.glowAlpha() } else Modifier)
                 .drawWithContent {
                     drawContent()
                     drawFocusRing(kind, look.progress.value, look.scale())
@@ -214,8 +210,6 @@ internal class TileFocusLook(private val scope: CoroutineScope, private val gate
     /** The well's scale now: up to [PleyFocus.TILE_SCALE], times the press. */
     fun scale(): Float = (1f + (PleyFocus.TILE_SCALE - 1f) * progress.value) * pressed.value
 
-    /** The glow's alpha now: none while a key repeats. */
-    fun glowAlpha(): Float = if (gate.holding) 0f else progress.value
 }
 
 /** The focused tile draws over its neighbours and their captions (zIndex 1), decided while placing, not composing. */
