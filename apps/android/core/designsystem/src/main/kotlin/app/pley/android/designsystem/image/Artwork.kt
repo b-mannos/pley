@@ -11,7 +11,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
@@ -128,8 +129,7 @@ private class PlaceholderNode(
     var load: ArtworkLoad,
 ) : Modifier.Node(), DrawModifierNode, CompositionLocalConsumerModifierNode {
     private var measurer: TextMeasurer? = null
-    private var brush: Brush? = null
-    private var brushSize = Size.Unspecified
+    private var picture: ImageBitmap? = null
     private var layout: TextLayoutResult? = null
     private var layoutSize = Size.Unspecified
 
@@ -137,7 +137,7 @@ private class PlaceholderNode(
 
     fun update(title: String, titleStyle: TextStyle?, load: ArtworkLoad) {
         if (title != this.title || titleStyle != this.titleStyle) {
-            brush = null
+            picture = null
             layout = null
         }
         this.title = title
@@ -148,11 +148,7 @@ private class PlaceholderNode(
 
     override fun ContentDrawScope.draw() {
         if (!load.loaded) {
-            if (brush == null || brushSize != size) {
-                brush = Placeholder.brush(title, size)
-                brushSize = size
-            }
-            drawRect(brush!!)
+            drawStretched(picture ?: Placeholder.picture(title).also { picture = it }, Offset.Zero, size)
             titleLayout()?.let { text ->
                 drawText(
                     text,

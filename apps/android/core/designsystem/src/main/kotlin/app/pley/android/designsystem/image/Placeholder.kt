@@ -47,6 +47,20 @@ object Placeholder {
         )
     }
 
+    private val pictures = android.util.LruCache<Int, androidx.compose.ui.graphics.ImageBitmap>(48)
+
+    /**
+     * The gradient for [seed] as a small picture, to draw stretched
+     * ([drawStretched]): a gradient shader over a tile or a backdrop costs far
+     * more on a TV's GPU. Kept per hue.
+     */
+    fun picture(seed: String): androidx.compose.ui.graphics.ImageBitmap {
+        val hue = hue(seed)
+        pictures.get(hue)?.let { return it }
+        val (from, to) = colors(seed)
+        return GradientBitmaps.diagonal(from, to).also { pictures.put(hue, it) }
+    }
+
     /** CSS's hsl(), hue in degrees, saturation and lightness 0 to 1. */
     fun hsl(hue: Float, saturation: Float, lightness: Float): Color {
         val c = (1f - abs(2f * lightness - 1f)) * saturation

@@ -40,7 +40,6 @@ import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.input.key.Key
@@ -55,6 +54,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.pley.android.designsystem.PleyColors
+import app.pley.android.designsystem.image.GradientBitmaps
+import app.pley.android.designsystem.image.drawStretched
 import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.TvSafeArea
@@ -332,13 +333,15 @@ private fun Modifier.focusedRowOnTop(row: RowFocus): Modifier = layout { measura
  */
 fun Modifier.railFade(): Modifier = drawWithContent {
     drawContent()
-    val solid = PleyTv.RailFadeSolidUntil.toPx()
-    val clear = PleyTv.RailFadeClearFrom.toPx()
-    drawRect(
-        brush = Brush.horizontalGradient(0f to PleyColors.Bg, solid / clear to PleyColors.Bg, 1f to Color.Transparent, startX = 0f, endX = clear),
-        topLeft = Offset.Zero,
-        size = Size(clear, size.height),
-    )
+    // A stretched picture rather than a gradient shader (GradientBitmaps): it is
+    // drawn every frame, over the whole height.
+    drawStretched(RailFade, Offset.Zero, Size(PleyTv.RailFadeClearFrom.toPx(), size.height))
+}
+
+/** Bg to x = 56 of its 72 dp, then clear at 72. */
+private val RailFade by lazy {
+    val solid = PleyTv.RailFadeSolidUntil.value / PleyTv.RailFadeClearFrom.value
+    GradientBitmaps.horizontal(0f to PleyColors.Bg, solid to PleyColors.Bg, 1f to Color.Transparent)
 }
 
 /**

@@ -66,6 +66,8 @@ import androidx.tv.material3.Border
 import androidx.tv.material3.Glow
 import androidx.tv.material3.IconButton
 import androidx.tv.material3.IconButtonDefaults
+import app.pley.android.designsystem.image.GradientBitmaps
+import app.pley.android.designsystem.image.drawStretched
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyFocus
 import app.pley.android.designsystem.PleyMotion
@@ -502,24 +504,21 @@ private fun PlayerRoundButton(
 /**
  * The scrims behind the controls (design spec §2.7, black as the player's
  * exception): 120 dp at the top, black 60 % to 0 %, and 200 dp at the
- * bottom, 0 % to 85 %. They fade by their brush's alpha, read while
- * drawing: no layer over the video.
+ * bottom, 0 % to 85 %. They fade by their alpha, read while drawing: no
+ * layer over the video. They are stretched pictures, not gradient shaders,
+ * which cost far more on a TV's GPU (GradientBitmaps).
  */
 internal fun Modifier.controlScrims(alpha: State<Float>): Modifier = drawBehind {
     val a = alpha.value
     if (a <= 0f) return@drawBehind
     val top = TOP_SCRIM.toPx()
     val bottom = BOTTOM_SCRIM.toPx()
-    drawRect(
-        androidx.compose.ui.graphics.Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.6f * a), 1f to Color.Transparent, startY = 0f, endY = top),
-        size = Size(size.width, top),
-    )
-    drawRect(
-        androidx.compose.ui.graphics.Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f * a), startY = size.height - bottom, endY = size.height),
-        topLeft = Offset(0f, size.height - bottom),
-        size = Size(size.width, bottom),
-    )
+    drawStretched(TopScrim, Offset.Zero, Size(size.width, top), alpha = a)
+    drawStretched(BottomScrim, Offset(0f, size.height - bottom), Size(size.width, bottom), alpha = a)
 }
+
+private val TopScrim by lazy { GradientBitmaps.vertical(0f to Color.Black.copy(alpha = 0.6f), 1f to Color.Transparent) }
+private val BottomScrim by lazy { GradientBitmaps.vertical(0f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f)) }
 
 /** Whether a phase counts as playing for Play/Pause: it will play once ready. */
 internal fun PlayerPhase.wantsToPlay(): Boolean = this == PlayerPhase.Playing || this == PlayerPhase.Buffering || this == PlayerPhase.Preparing || this == PlayerPhase.Switching
