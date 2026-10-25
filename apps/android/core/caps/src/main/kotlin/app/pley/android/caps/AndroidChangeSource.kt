@@ -35,15 +35,19 @@ class AndroidChangeSource(context: Context) : ChangeSource {
         }
         displays?.registerDisplayListener(listener, main)
         displayListener = listener
-        // Constructed off the main thread, it still calls back on the main looper.
-        audioReceiver = AudioCapabilitiesReceiver(context) { onChange() }.also { it.register() }
+        // Registered on the main thread: on Android 12L and later it sets up a
+        // spatializer listener that needs a Looper, and the probe starts this
+        // from a worker. Unregistering is posted too, so the two keep order.
+        val receiver = AudioCapabilitiesReceiver(context) { onChange() }
+        audioReceiver = receiver
+        main.post { receiver.register() }
     }
 
     @Synchronized
     override fun stop() {
         displayListener?.let { displays?.unregisterDisplayListener(it) }
         displayListener = null
-        audioReceiver?.unregister()
+        audioReceiver?.let { receiver -> main.post { receiver.unregister() } }
         audioReceiver = null
     }
 }
