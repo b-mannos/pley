@@ -2036,6 +2036,7 @@ dependencies = [
  "axum",
  "bytes",
  "clap",
+ "flate2",
  "futures",
  "hex",
  "libc",

@@ -22,6 +22,7 @@ mod plan;
 mod probe;
 mod trickplay;
 mod util;
+mod webvtt;
 
 use std::future::IntoFuture;
 use std::net::SocketAddr;

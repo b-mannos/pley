@@ -72,6 +72,16 @@ impl Prober {
         }
     }
 
+    /// Takes `info` for what probing `path` says, as if ffprobe had (tests
+    /// run without it).
+    #[cfg(test)]
+    pub fn remember(&self, path: &Path, info: MediaInfo) {
+        let key = file_key(path).expect("the file exists");
+        let mut cache = self.cache.lock();
+        cache.map.insert(key.clone(), Arc::new(info));
+        cache.order.push_back(key);
+    }
+
     async fn run_ffprobe(&self, path: &Path) -> anyhow::Result<MediaInfo> {
         if !self.ff.caps.ffprobe_available {
             bail!("ffprobe is not available");

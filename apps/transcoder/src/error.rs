@@ -22,6 +22,23 @@ pub enum ApiError {
 
 pub type ApiResult<T> = Result<T, ApiError>;
 
+impl ApiError {
+    /// The same error again, for each of several requests that waited on one
+    /// piece of work.
+    pub fn again(&self) -> Self {
+        match self {
+            Self::BadRequest(m) => Self::BadRequest(m.clone()),
+            Self::Unauthorized => Self::Unauthorized,
+            Self::NotFound(m) => Self::NotFound(m.clone()),
+            Self::JobNotFound(m) => Self::JobNotFound(m.clone()),
+            Self::Busy(m) => Self::Busy(m.clone()),
+            Self::Timeout(m) => Self::Timeout(m.clone()),
+            Self::Failed(m) => Self::Failed(m.clone()),
+            Self::Internal(err) => Self::Internal(anyhow::anyhow!("{err:#}")),
+        }
+    }
+}
+
 impl From<anyhow::Error> for ApiError {
     fn from(err: anyhow::Error) -> Self {
         ApiError::Internal(err)
@@ -82,9 +99,12 @@ mod tests {
             (ApiError::Failed("unreadable".into()), 500, "ffmpeg_failed"),
             (ApiError::Internal(anyhow::anyhow!("boom")), 500, "internal"),
         ] {
+            // Each request that waited on the work gets the same answer.
+            let again = answer(err.again()).await;
             let (got_status, body) = answer(err).await;
             assert_eq!((got_status, body.code.as_str()), (status, code));
             assert!(!body.message.is_empty());
+            assert_eq!((again.0, again.1.code, again.1.message), (got_status, body.code, body.message));
         }
         assert_eq!(
             answer(ApiError::NotFound("segment 9 out of range".into())).await.1.message,

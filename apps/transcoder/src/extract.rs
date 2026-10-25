@@ -1,33 +1,65 @@
 // SPDX-License-Identifier: LicenseRef-Restricted
 //! One-shot extractions: video frame thumbnails, embedded cover art, and
-//! subtitles converted to WebVTT (all text tracks of a file in one pass, since
-//! extracting any track means reading the whole file).
+//! subtitles converted to WebVTT (read block by block through a Matroska
+//! file's Cues, or else all text tracks of a file in one FFmpeg pass, since
+//! extracting any track that way means reading the whole file).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant, SystemTime};
 
+use futures::future::{BoxFuture, FutureExt, Shared};
 use parking_lot::Mutex;
 use pley_transcoder_api::{MediaInfo, MediaStream, ThumbnailRequest, Tonemapper};
 use tokio::sync::Semaphore;
 
 use crate::error::{ApiError, ApiResult};
 use crate::ffmpeg::Ffmpeg;
+use crate::matroska;
 use crate::metrics::Metrics;
 use crate::plan::{MAX_DURATION_MS, TextSource, ZSCALE_TONEMAP, untagged_hdr_fix};
 use crate::probe::Prober;
 use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg, secs, touch, write_atomically};
+use crate::webvtt::{self, Event};
 
 pub struct Extractor {
     ff: Arc<Ffmpeg>,
     prober: Arc<Prober>,
     metrics: Arc<Metrics>,
     subs_dir: PathBuf,
+    /// Quick FFmpeg runs: thumbnails, cover art, subtitle files.
     limiter: Semaphore,
-    file_locks: FileLocks,
+    /// Text tracks read through the Cues at once (each with threads of its
+    /// own): a read holds its permit until it is over.
+    cue_reads: Arc<Semaphore>,
+    /// FFmpeg passes over whole files for their text tracks, which take
+    /// hours for a big file on a slow share: apart from the quick runs, so
+    /// they never hold those up.
+    passes: Semaphore,
+    /// The text tracks being extracted, by file version and index: the
+    /// requests for a track wait for its extraction, which goes on without
+    /// them...
+    extractions: Mutex<HashMap<String, Extraction>>,
+    next_extraction: AtomicU64,
+    /// ...and one FFmpeg pass per file (it writes every text track).
+    file_locks: Locks,
+    /// The latest text tracks the Cues couldn't give (by file version and
+    /// index): FFmpeg extracts them without another try.
+    unreadable: Mutex<VecDeque<String>>,
+    /// How often a pass marks its outputs as being written.
+    keep_fresh: Duration,
+    /// How long a pass over a file may take.
+    pass_time: fn(&Path) -> Duration,
 }
+
+/// FFmpeg passes over whole files at once: each reads a file from end to
+/// end, so more would only share the disk or the network between them.
+const PASSES: usize = 2;
+/// How many text tracks the Cues couldn't give are remembered.
+const UNREADABLE_KEPT: usize = 1_000;
 
 pub struct Image {
     pub bytes: Vec<u8>,
@@ -49,7 +81,14 @@ impl Extractor {
             metrics,
             subs_dir,
             limiter: Semaphore::new(concurrency.max(1)),
+            cue_reads: Arc::new(Semaphore::new(concurrency.max(1))),
+            passes: Semaphore::new(PASSES),
+            extractions: Mutex::default(),
+            next_extraction: AtomicU64::new(0),
             file_locks: Mutex::default(),
+            unreadable: Mutex::default(),
+            keep_fresh: KEEP_FRESH,
+            pass_time: whole_file_timeout,
         }
     }
 
@@ -136,19 +175,24 @@ impl Extractor {
 
     /// A subtitle track converted to WebVTT. `stream = None` means `path` is a
     /// subtitle file itself.
-    pub async fn subtitle(&self, path: &str, stream: Option<i64>) -> ApiResult<String> {
+    pub async fn subtitle(self: &Arc<Self>, path: &str, stream: Option<i64>) -> ApiResult<String> {
         let path = existing(path)?;
-        Metrics::inc(&self.metrics.subtitle_extractions);
         match stream {
-            None => self.convert_file(&path).await,
+            None => {
+                Metrics::inc(&self.metrics.subtitle_extractions);
+                self.convert_file(&path).await
+            }
             Some(index) => self.embedded(&path, index).await,
         }
     }
 
     /// An embedded text track's WebVTT as far as it has been pulled out of the
-    /// file, and whether that is all of it. Pulling it out reads the whole
-    /// file (minutes for a big one on a network share), so it runs on its
-    /// own, past this request, and players ask again for the cues found since.
+    /// file, and whether that is all of it, after `wait` at most: the track's
+    /// extraction (started now, unless it is under way) runs on its own, past
+    /// this request. A Matroska file whose Cues list the track's blocks is
+    /// read whole by then, as a rule. Otherwise FFmpeg reads the whole file
+    /// (minutes for a big one on a network share): once it does, the cues it
+    /// has found come at once, and players ask again for those found since.
     pub async fn subtitle_so_far(
         self: &Arc<Self>,
         path: &str,
@@ -161,19 +205,13 @@ impl Extractor {
         if let Some(text) = cached_vtt(&target).await {
             return Ok((text, true));
         }
-        let running = self.file_locks.lock().get(&key).is_some_and(|lock| lock.try_lock().is_err());
-        if !running {
-            Metrics::inc(&self.metrics.subtitle_extractions);
-            let this = self.clone();
-            let file = path.clone();
-            let extraction = tokio::spawn(async move { this.embedded(&file, index).await });
-            // Small files are done at once.
-            match tokio::time::timeout(wait, extraction).await {
-                Ok(Ok(result)) => return result.map(|text| (text, true)),
-                Ok(Err(err)) => return Err(ApiError::Internal(err.into())),
-                Err(_) => {}
+        let extraction = self.extraction(&path, &key, index);
+        if !extraction.by_ffmpeg.load(Ordering::Relaxed) {
+            if let Ok(done) = tokio::time::timeout(wait, extraction.done()).await {
+                return done.map(|text| (text, true));
             }
         }
+        // Still under way: the cues FFmpeg has found, when it is reading the file.
         let part = self.subs_dir.join(format!("{key}_{index}.vtt.part"));
         match tokio::fs::read_to_string(&part).await {
             Ok(text) => Ok((whole_cues(&text), false)),
@@ -225,32 +263,125 @@ impl Extractor {
         Ok(text)
     }
 
-    async fn embedded(&self, path: &Path, index: i64) -> ApiResult<String> {
+    /// An embedded text track, whole: see [`Extractor::extract`].
+    async fn embedded(self: &Arc<Self>, path: &Path, index: i64) -> ApiResult<String> {
         let key = file_key(path)?;
-        let target = self.subs_dir.join(format!("{key}_{index}.vtt"));
-        if let Some(text) = cached_vtt(&target).await {
+        if let Some(text) = cached_vtt(&self.subs_dir.join(format!("{key}_{index}.vtt"))).await {
             return Ok(text);
         }
-        let entry = FileLock::acquire(&self.file_locks, &key);
+        self.extraction(path, &key, index).done().await
+    }
+
+    /// The extraction of text track `index` of a file version (`key`) under
+    /// way, or one started now. It runs on its own, to the cache: requests
+    /// waiting for it may go away.
+    fn extraction(self: &Arc<Self>, path: &Path, key: &str, index: i64) -> Extraction {
+        let track = format!("{key}_{index}");
+        let mut extractions = self.extractions.lock();
+        if let Some(running) = extractions.get(&track) {
+            return running.clone();
+        }
+        Metrics::inc(&self.metrics.subtitle_extractions);
+        let id = self.next_extraction.fetch_add(1, Ordering::Relaxed);
+        let by_ffmpeg = Arc::new(AtomicBool::new(false));
+        let (this, path, key, entry) = (self.clone(), path.to_owned(), key.to_owned(), track.clone());
+        let passing = by_ffmpeg.clone();
+        let task = tokio::spawn(async move {
+            let _over = Forget { extractor: this.clone(), track: entry, id };
+            this.extract(&path, &key, index, &passing).await.map(Arc::new).map_err(Arc::new)
+        });
+        let result = async move { task.await.unwrap_or_else(|err| Err(Arc::new(ApiError::Internal(err.into())))) };
+        let extraction = Extraction { id, by_ffmpeg, result: result.boxed().shared() };
+        extractions.insert(track, extraction.clone());
+        extraction
+    }
+
+    /// Text track `index` of a file, cached: read through its Cues when they
+    /// list its blocks (the track asked for alone: each read is a seek), and
+    /// otherwise with every other text track of the file in a single pass of
+    /// FFmpeg over it (`by_ffmpeg` is set then).
+    async fn extract(&self, path: &Path, key: &str, index: i64, by_ffmpeg: &AtomicBool) -> ApiResult<String> {
+        // Made meanwhile: by an extraction just over, or another track's pass.
+        if let Some(text) = cached_vtt(&self.subs_dir.join(format!("{key}_{index}.vtt"))).await {
+            return Ok(text);
+        }
+        let media = self.text_track(path, index).await?;
+        match self.through_cues(path, key, &media, index).await? {
+            Some(text) => Ok(text),
+            None => {
+                by_ffmpeg.store(true, Ordering::Relaxed);
+                self.through_ffmpeg(path, key, &media, index).await
+            }
+        }
+    }
+
+    /// Text track `index` of a file read through its Cues, and cached; `None`
+    /// when the file doesn't allow that (FFmpeg has to read it then).
+    async fn through_cues(
+        &self,
+        path: &Path,
+        key: &str,
+        media: &Arc<MediaInfo>,
+        index: i64,
+    ) -> ApiResult<Option<String>> {
+        let track = format!("{key}_{index}");
+        // Only Matroska files have Cues, and a track they couldn't give isn't
+        // tried again: no read waits for its turn for those.
+        let matroska = media.format_name.as_deref().is_some_and(|names| names.split(',').any(|n| n == "matroska"));
+        if !matroska || self.unreadable.lock().contains(&track) {
+            return Ok(None);
+        }
+        let permit = self.cue_reads.clone().acquire_owned().await.map_err(|e| ApiError::Internal(e.into()))?;
+        let (file, media, target) = (path.to_owned(), media.clone(), self.subs_dir.join(format!("{track}.vtt")));
+        let read = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            read_through_cues(&file, &media, index, &target)
+        })
+        .await
+        .unwrap_or_else(|e| Err(format!("the read through the cues failed: {e}")));
+        match read {
+            Ok(text) => Ok(Some(text)),
+            Err(reason) => {
+                tracing::debug!("subtitles of {} extracted by ffmpeg: {reason}", path.display());
+                let mut unreadable = self.unreadable.lock();
+                if unreadable.len() == UNREADABLE_KEPT {
+                    unreadable.pop_front();
+                }
+                unreadable.push_back(track);
+                Ok(None)
+            }
+        }
+    }
+
+    /// Text track `index` of a file as FFmpeg extracts it, with every other
+    /// text track of the file in the same pass over it.
+    async fn through_ffmpeg(&self, path: &Path, key: &str, media: &MediaInfo, index: i64) -> ApiResult<String> {
+        let target = self.subs_dir.join(format!("{key}_{index}.vtt"));
+        let entry = Lock::acquire(&self.file_locks, key);
         let _guard = entry.lock.lock().await;
         if let Some(text) = cached_vtt(&target).await {
             return Ok(text);
         }
-
-        let media = self.prober.probe(path).await.map_err(|e| ApiError::Failed(format!("probe failed: {e:#}")))?;
         let text_streams: Vec<i64> = media.streams.iter().filter(|s| s.is_text_subtitle()).map(|s| s.index).collect();
-        if !text_streams.contains(&index) {
-            return Err(ApiError::BadRequest(format!("stream {index} is not a text subtitle track")));
-        }
-        // Extract every text track in a single pass over the file.
-        let _permit = self.limiter.acquire().await.map_err(|e| ApiError::Internal(e.into()))?;
-        let all = self.extract_vtt(path, &key, &text_streams).await;
-        if all.is_err() && text_streams.len() > 1 {
-            self.extract_vtt(path, &key, &[index]).await?;
-        } else {
-            all?;
+        let _permit = self.passes.acquire().await.map_err(|e| ApiError::Internal(e.into()))?;
+        match self.extract_vtt(path, key, &text_streams).await {
+            Err(err) if retry_alone(&err, text_streams.len()) => {
+                tracing::debug!("subtitles of {} extracted alone: {err:?}", path.display());
+                self.extract_vtt(path, key, &[index]).await?;
+            }
+            all => all?,
         }
         Ok(tokio::fs::read_to_string(&target).await?)
+    }
+
+    /// The media facts of a file (cached per file version), checking that
+    /// stream `index` is a text track.
+    async fn text_track(&self, path: &Path, index: i64) -> ApiResult<Arc<MediaInfo>> {
+        let media = self.prober.probe(path).await.map_err(|e| ApiError::Failed(format!("probe failed: {e:#}")))?;
+        if !media.streams.iter().any(|s| s.index == index && s.is_text_subtitle()) {
+            return Err(ApiError::BadRequest(format!("stream {index} is not a text subtitle track")));
+        }
+        Ok(media)
     }
 
     async fn extract_vtt(&self, path: &Path, key: &str, streams: &[i64]) -> ApiResult<()> {
@@ -264,7 +395,8 @@ impl Extractor {
                 .arg(&part);
             outputs.push((part, self.subs_dir.join(format!("{key}_{index}.vtt"))));
         }
-        let result = run_capture(cmd, Duration::from_secs(20 * 60)).await;
+        let parts: Vec<&Path> = outputs.iter().map(|(part, _)| part.as_path()).collect();
+        let result = kept_fresh(run_capture(cmd, (self.pass_time)(path)), &parts, self.keep_fresh).await;
         for (part, done) in &outputs {
             // Only complete files, flushed to disk, get their final name.
             if result.is_ok() && flush(part).await.is_ok() {
@@ -296,6 +428,194 @@ impl Extractor {
         cmd.args(["-c:s", "ass", "-f", "ass"]).arg(out);
         run_capture(cmd, Duration::from_secs(20 * 60)).await.map(|_| ())
     }
+}
+
+/// A text track's extraction under way, and which one it is.
+#[derive(Clone)]
+struct Extraction {
+    id: u64,
+    /// Set once FFmpeg reads the whole file for the track: that may take
+    /// hours, and the cues it has found are in the track's `.part` file.
+    by_ffmpeg: Arc<AtomicBool>,
+    result: Shared<BoxFuture<'static, Result<Arc<String>, Arc<ApiError>>>>,
+}
+
+impl Extraction {
+    /// The track's WebVTT once the extraction is over, or why it couldn't be
+    /// made.
+    async fn done(self) -> ApiResult<String> {
+        self.result.await.map(|text| String::clone(&text)).map_err(|err| err.again())
+    }
+}
+
+/// Takes a track's extraction out of those under way once it's over, however
+/// it ends: the next request finds the cache, or tries again after a failure.
+/// A later extraction in its place stays.
+struct Forget {
+    extractor: Arc<Extractor>,
+    track: String,
+    id: u64,
+}
+
+impl Drop for Forget {
+    fn drop(&mut self) {
+        let mut extractions = self.extractor.extractions.lock();
+        if extractions.get(&self.track).is_some_and(|extraction| extraction.id == self.id) {
+            extractions.remove(&self.track);
+        }
+    }
+}
+
+/// Text track `index` of a Matroska file, read block by block through its
+/// Cues as FFmpeg would have written it, within the limits of such a read,
+/// and cached at `target` (it is served even when it can't be); an error says
+/// why FFmpeg has to read the file instead. Blocking.
+fn read_through_cues(path: &Path, media: &MediaInfo, index: i64, target: &Path) -> Result<String, String> {
+    let budget = matroska::Budget::new(CUE_READ_BYTES, CUE_READ_TIME);
+    let (_, text) = cue_tracks(path, media, &[index], &budget)?.into_iter().next().ok_or("no track read")?;
+    // Cached whole or not at all.
+    if let Err(err) = write_atomically(target, text.as_bytes()) {
+        tracing::debug!("could not cache the subtitles of {} read through the cues: {err}", path.display());
+    }
+    Ok(text)
+}
+
+/// Whether a pass over every text track of a file that failed with `err` is
+/// worth running again for the one asked for alone: when another track
+/// couldn't be converted, not when it ran out of time (reading the file
+/// again takes as long).
+fn retry_alone(err: &ApiError, tracks: usize) -> bool {
+    tracks > 1 && !matches!(err, ApiError::Timeout(_))
+}
+
+/// How often a pass marks its outputs as being written. The cache's pruning
+/// takes temporaries left alone for hours as abandoned, and a pass may run
+/// longer than that (a big file on a slow share), with tracks that get no
+/// cue for a long time.
+const KEEP_FRESH: Duration = Duration::from_secs(10 * 60);
+
+/// `work`, marking the files `parts` as being written every `every` while it
+/// runs.
+async fn kept_fresh<T>(work: impl Future<Output = T>, parts: &[&Path], every: Duration) -> T {
+    tokio::pin!(work);
+    let mut tick = tokio::time::interval(every);
+    loop {
+        tokio::select! {
+            done = &mut work => return done,
+            _ = tick.tick() => {
+                for part in parts {
+                    if let Ok(file) = std::fs::File::options().write(true).open(part) {
+                        let _ = file.set_modified(SystemTime::now());
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// How long FFmpeg may take to read the whole file at `path`: see
+/// [`pass_timeout`].
+fn whole_file_timeout(path: &Path) -> Duration {
+    pass_timeout(std::fs::metadata(path).map(|m| m.len()).unwrap_or(0))
+}
+
+/// 20 minutes, or more for a file too big to read in that time at 10 MB/s
+/// (a slow disk or network share; a 70 GB film needs two hours at that pace).
+fn pass_timeout(bytes: u64) -> Duration {
+    Duration::from_secs((bytes / 10_000_000).max(20 * 60))
+}
+
+/// What reading a track through the Cues may keep in memory (see
+/// [`matroska::Budget`]). A film's track takes under a megabyte, the most
+/// elaborate ASS tens of megabytes; a file whose Cues claim more is left to
+/// FFmpeg, which reads it a packet at a time.
+const CUE_READ_BYTES: u64 = 64 << 20;
+/// How long reading a track through the Cues may take, converting it
+/// included: seconds, even on a network share. Longer, FFmpeg reads the file.
+const CUE_READ_TIME: Duration = Duration::from_secs(60);
+
+/// The text tracks `streams` of a Matroska file as WebVTT, read through its
+/// Cues within `budget`, with FFmpeg's cue times: the file's start time taken
+/// off, rounded the way FFmpeg rescales timestamps.
+fn cue_tracks(
+    path: &Path,
+    media: &MediaInfo,
+    streams: &[i64],
+    budget: &matroska::Budget,
+) -> Result<Vec<(i64, String)>, String> {
+    let started = Instant::now();
+    let found = matroska::text_tracks(path, media, streams, budget)?;
+    tracing::debug!(
+        "{} subtitle tracks of {} read through the cues in {} ms ({} reads, {} KB)",
+        found.tracks.len(),
+        path.display(),
+        started.elapsed().as_millis(),
+        found.reads,
+        found.bytes_read / 1024
+    );
+    as_webvtt(found, media, budget)
+}
+
+/// Tracks read through the Cues as the WebVTT files FFmpeg would write.
+fn as_webvtt(
+    found: matroska::TextTracks,
+    media: &MediaInfo,
+    budget: &matroska::Budget,
+) -> Result<Vec<(i64, String)>, String> {
+    let tick_ns = i64::try_from(found.tick_ns).map_err(|_| "the file's timestamp scale is out of range")?;
+    let tick = (tick_ns, 1_000_000_000);
+    let (us, ms) = ((1, 1_000_000), (1, 1000));
+    // FFmpeg takes off the file's start time in microseconds, while the media
+    // info keeps it in whole milliseconds (`start_ms`, rounded from ffprobe's
+    // microseconds): the same when every time is whole milliseconds.
+    // Otherwise a start of a fraction of one (1.833332 s with ticks of
+    // 333333 ns) would put some cues 1 ms off FFmpeg's. ffprobe gives any
+    // file with audio or video a start time (0 for most), so such a file is
+    // left to FFmpeg.
+    if !found.whole_ms && media.start_ms.is_some() {
+        return Err("the file's start isn't known to the microsecond".into());
+    }
+    let offset = rescale(-media.start_ms.unwrap_or(0) * 1000, us, tick).ok_or("the file's start is out of range")?;
+    let mut out = Vec::new();
+    for track in found.tracks {
+        let index = track.stream_index;
+        let mut events = Vec::with_capacity(track.blocks.len());
+        for block in track.blocks {
+            let start_ms =
+                block.time.checked_add(offset).and_then(|t| rescale(t, tick, us)).and_then(|t| rescale(t, us, ms));
+            // FFmpeg keeps how long a cue lasts in 32 bits of milliseconds:
+            // a longer one (49 days, a damaged file) is left to it.
+            let duration_ms = i64::try_from(block.duration).ok().and_then(|d| rescale(d, tick, ms));
+            let (Some(start_ms), Some(duration_ms @ 0..=0xFFFF_FFFF)) = (start_ms, duration_ms) else {
+                return Err(format!("stream {index} has a cue at a time out of range"));
+            };
+            // FFmpeg's muxer would shift a track starting before 0, and
+            // refuses one going back in time: left to it.
+            if start_ms < 0 || events.last().is_some_and(|e: &Event| e.start_ms > start_ms) {
+                return Err(format!("stream {index} has cues before the start or out of order"));
+            }
+            events.push(Event { start_ms, duration_ms, data: block.data });
+        }
+        // The WebVTT made so far is kept too.
+        let mut held = 0;
+        let text = webvtt::to_webvtt(track.codec, &track.header, &events, |size| {
+            budget.check()?;
+            budget.spend(size.saturating_sub(held) as u64)?;
+            held = held.max(size);
+            Ok(())
+        })?;
+        out.push((index, text));
+    }
+    Ok(out)
+}
+
+/// `value` from one time base to another (`(num, den)`), rounded half away
+/// from zero, as FFmpeg's `av_rescale_q`; `None` when it doesn't fit.
+fn rescale(value: i64, from: (i64, i64), to: (i64, i64)) -> Option<i64> {
+    let (b, c) = (from.0 as i128 * to.1 as i128, from.1 as i128 * to.0 as i128);
+    let n = (value as i128 * b).abs();
+    let q = (n + c / 2) / c;
+    i64::try_from(if value < 0 { -q } else { q }).ok()
 }
 
 const VULKAN_DEVICE: [&str; 4] = ["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"];
@@ -414,24 +734,24 @@ fn guess_charset(raw: &[u8]) -> Option<&'static str> {
     }
 }
 
-type FileLocks = Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>;
+type Locks = Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>;
 
-/// Per-file extraction lock, forgotten again once no request uses it (on
-/// every path, including errors and cancelled requests).
-struct FileLock<'a> {
-    locks: &'a FileLocks,
+/// An extraction lock by key (a file), forgotten again once no extraction
+/// uses it (on every path, including errors).
+struct Lock<'a> {
+    locks: &'a Locks,
     key: String,
     lock: Arc<tokio::sync::Mutex<()>>,
 }
 
-impl<'a> FileLock<'a> {
-    fn acquire(locks: &'a FileLocks, key: &str) -> Self {
+impl<'a> Lock<'a> {
+    fn acquire(locks: &'a Locks, key: &str) -> Self {
         let lock = locks.lock().entry(key.to_owned()).or_default().clone();
         Self { locks, key: key.to_owned(), lock }
     }
 }
 
-impl Drop for FileLock<'_> {
+impl Drop for Lock<'_> {
     fn drop(&mut self) {
         let mut locks = self.locks.lock();
         // Only the map and this guard hold it: nobody else is waiting.
@@ -492,19 +812,112 @@ mod tests {
         assert_eq!(Picture::hdr(640, Some(&p5), &[Tonemapper::Opencl]), Picture::plain(640));
     }
 
-    #[tokio::test]
-    async fn subtitle_caches_are_whole_or_absent() {
-        let dir = tempfile::tempdir().unwrap();
+    /// An extractor whose FFmpeg is `ffmpeg` and whose ffprobe doesn't exist.
+    fn extractor_with(dir: &Path, ffmpeg: PathBuf) -> Extractor {
         let ff = Arc::new(Ffmpeg {
-            ffmpeg: dir.path().join("no-ffmpeg"),
-            ffprobe: dir.path().join("no-ffprobe"),
+            ffmpeg,
+            ffprobe: dir.join("no-ffprobe"),
             caps: Default::default(),
             segment_times_relative: true,
         });
         let metrics = Arc::new(Metrics::default());
         let prober = Arc::new(Prober::new(ff.clone(), metrics.clone(), 1));
+        Extractor::new(ff, prober, metrics, dir.join("subtitles"), 1)
+    }
+
+    /// An extractor whose FFmpeg and ffprobe don't exist.
+    fn extractor_without_ffmpeg(dir: &Path) -> Arc<Extractor> {
+        Arc::new(extractor_with(dir, dir.join("no-ffmpeg")))
+    }
+
+    /// `file`, a version of the synthetic film of the Matroska tests (SubRip
+    /// as stream 2, ASS as stream 4), written to `dir` and probed as ffprobe
+    /// would see it: its path and its key.
+    fn movie_in(extractor: &Extractor, dir: &Path, file: &matroska::tests::TestFile) -> (String, String) {
+        let movie = file.write(dir);
+        extractor.prober.remember(&movie, matroska::tests::movie_media());
+        (movie.to_string_lossy().into_owned(), file_key(&movie).unwrap())
+    }
+
+    /// An extractor without FFmpeg, and the synthetic film: its path and key.
+    fn with_movie(dir: &Path) -> (Arc<Extractor>, String, String) {
+        let extractor = extractor_without_ffmpeg(dir);
+        let (name, key) = movie_in(&extractor, dir, &matroska::tests::movie());
+        (extractor, name, key)
+    }
+
+    /// The synthetic film with Cues that don't say where its blocks are in
+    /// their clusters: FFmpeg has to read it.
+    fn unplaced_movie() -> matroska::tests::TestFile {
+        let mut file = matroska::tests::movie();
+        file.no_relative = true;
+        file
+    }
+
+    /// A stand-in for FFmpeg in `dir`. Each run writes its arguments on a
+    /// line of `ffmpeg.log`, then fails at once, or runs on for 10 seconds
+    /// when `hang`.
+    fn stand_in_ffmpeg(dir: &Path, hang: bool) -> PathBuf {
+        let log = dir.join("ffmpeg.log");
+        #[cfg(windows)]
+        let (path, script) = (
+            dir.join("ffmpeg.cmd"),
+            format!(
+                "@echo %* >> \"{}\"\r\n{}\r\n",
+                log.display(),
+                if hang { "@ping -n 11 127.0.0.1 > nul" } else { "@exit /b 1" }
+            ),
+        );
+        #[cfg(not(windows))]
+        let (path, script) = (
+            dir.join("ffmpeg"),
+            format!(
+                "#!/bin/sh\necho \"$@\" >> '{}'\n{}\n",
+                log.display(),
+                if hang { "exec sleep 10" } else { "exit 1" }
+            ),
+        );
+        std::fs::write(&path, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        path
+    }
+
+    /// The streams each run of the stand-in FFmpeg in `dir` was given.
+    fn ffmpeg_runs(dir: &Path) -> Vec<Vec<i64>> {
+        let log = std::fs::read_to_string(dir.join("ffmpeg.log")).unwrap_or_default();
+        log.lines()
+            .map(|line| {
+                let args: Vec<&str> = line.split_whitespace().map(|arg| arg.trim_matches('"')).collect();
+                let mapped = args.windows(2).filter(|pair| pair[0] == "-map");
+                mapped.filter_map(|pair| pair[1].strip_prefix("0:")?.parse().ok()).collect()
+            })
+            .collect()
+    }
+
+    fn extractions(extractor: &Extractor) -> u64 {
+        extractor.metrics.subtitle_extractions.load(Ordering::Relaxed)
+    }
+
+    /// Waits for `check` to hold (work running on its own), 10 seconds at most.
+    async fn eventually(check: impl Fn() -> bool) {
+        for _ in 0..1_000 {
+            if check() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("condition not reached");
+    }
+
+    #[tokio::test]
+    async fn subtitle_caches_are_whole_or_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let extractor = extractor_without_ffmpeg(dir.path());
         let subs = dir.path().join("subtitles");
-        let extractor = Extractor::new(ff, prober, metrics, subs.clone(), 1);
         let srt = dir.path().join("movie.en.srt");
         std::fs::write(&srt, "1\n00:00:01,000 --> 00:00:02,000\nHello\n").unwrap();
         let name = srt.to_string_lossy().into_owned();
@@ -523,49 +936,388 @@ mod tests {
 
     #[tokio::test]
     async fn embedded_subtitles_come_as_far_as_they_are_read() {
+        use pley_transcoder_api::StreamKind;
         let dir = tempfile::tempdir().unwrap();
-        let ff = Arc::new(Ffmpeg {
-            ffmpeg: dir.path().join("no-ffmpeg"),
-            ffprobe: dir.path().join("no-ffprobe"),
-            caps: Default::default(),
-            segment_times_relative: true,
-        });
-        let metrics = Arc::new(Metrics::default());
-        let prober = Arc::new(Prober::new(ff.clone(), metrics.clone(), 1));
+        let extractor = extractor_without_ffmpeg(dir.path());
         let subs = dir.path().join("subtitles");
-        let extractor = Arc::new(Extractor::new(ff, prober, metrics, subs.clone(), 1));
-        let movie = dir.path().join("movie.mkv");
-        std::fs::write(&movie, "not really a movie").unwrap();
-        let name = movie.to_string_lossy().into_owned();
-        let key = file_key(&movie).unwrap();
-        let wait = Duration::from_millis(500);
+        let wait = Duration::from_millis(200);
 
-        // An extraction that can't run says so.
-        assert!(extractor.subtitle_so_far(&name, 2, wait).await.is_err());
+        // An extraction that can't run (no ffprobe here) says so.
+        let unknown = dir.path().join("unknown.mkv");
+        std::fs::write(&unknown, "not really a movie").unwrap();
+        assert!(extractor.subtitle_so_far(&unknown.to_string_lossy(), 2, wait).await.is_err());
 
-        // While one runs, the cues read so far come, the one being written left out.
-        let lock = FileLock::acquire(&extractor.file_locks, &key);
-        let running = lock.lock.lock().await;
-        assert_eq!(extractor.subtitle_so_far(&name, 2, wait).await.unwrap(), ("WEBVTT\n\n".to_owned(), false));
+        // A file without Cues: FFmpeg reads all of it for the track, in a
+        // pass that waits for its turn (every pass is taken here)...
+        let movie = dir.path().join("movie.mp4");
+        std::fs::write(&movie, "not really a movie either").unwrap();
+        let streams = vec![
+            matroska::tests::stream(0, StreamKind::Video, "h264"),
+            matroska::tests::stream(1, StreamKind::Subtitle, "subrip"),
+        ];
+        extractor.prober.remember(
+            &movie,
+            MediaInfo { format_name: Some("mov,mp4,m4a,3gp,3g2,mj2".into()), streams, ..Default::default() },
+        );
+        let (name, key) = (movie.to_string_lossy().into_owned(), file_key(&movie).unwrap());
+        let passes = extractor.passes.acquire_many(PASSES as u32).await.unwrap();
+        let started = extractions(&extractor);
+        assert_eq!(extractor.subtitle_so_far(&name, 1, wait).await.unwrap(), ("WEBVTT\n\n".to_owned(), false));
+        eventually(|| extractor.file_locks.lock().get(&key).is_some_and(|lock| lock.try_lock().is_err())).await;
+        // ...then the cues it has read so far come at once (the pass may take
+        // hours), the one being written left out, from that same extraction...
         std::fs::write(
-            subs.join(format!("{key}_2.vtt.part")),
+            subs.join(format!("{key}_1.vtt.part")),
             "WEBVTT\r\n\r\n00:01.000 --> 00:02.000\r\nHello\r\n\r\n00:03.0",
         )
         .unwrap();
-        let (text, complete) = extractor.subtitle_so_far(&name, 2, wait).await.unwrap();
+        let so_far = extractor.subtitle_so_far(&name, 1, Duration::from_secs(60));
+        let (text, complete) = tokio::time::timeout(Duration::from_secs(10), so_far).await.expect("at once").unwrap();
         assert_eq!((text.as_str(), complete), ("WEBVTT\n\n00:01.000 --> 00:02.000\nHello\n\n", false));
-
-        // Once done, all of it.
-        drop(running);
-        drop(lock);
-        std::fs::remove_file(subs.join(format!("{key}_2.vtt.part"))).unwrap();
+        assert_eq!(extractions(&extractor), started + 1);
+        // ...and once it's done, all of it.
         std::fs::write(
-            subs.join(format!("{key}_2.vtt")),
+            subs.join(format!("{key}_1.vtt")),
             "WEBVTT\n\n00:01.000 --> 00:02.000\nHello\n\n00:03.000 --> 00:04.000\nBye\n",
         )
         .unwrap();
-        let (text, complete) = extractor.subtitle_so_far(&name, 2, wait).await.unwrap();
+        let (text, complete) = extractor.subtitle_so_far(&name, 1, wait).await.unwrap();
         assert!(complete && text.contains("Bye"), "{text}");
+        drop(passes);
+    }
+
+    #[tokio::test]
+    async fn subtitles_read_through_the_cues_come_whole_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let (extractor, name, key) = with_movie(dir.path());
+        let whole = "WEBVTT\n\n00:01.000 --> 00:02.500\nHello\n\n00:04.800 --> 00:05.800\nBefore the cluster\n\n\
+            00:09.002 --> 00:09.002\nNo duration\n";
+
+        // The first answer has all of it, so the player stops asking.
+        let wait = Duration::from_secs(10);
+        assert_eq!(extractor.subtitle_so_far(&name, 2, wait).await.unwrap(), (whole.to_owned(), true));
+        let cached = dir.path().join("subtitles").join(format!("{key}_2.vtt"));
+        assert_eq!(std::fs::read_to_string(cached).unwrap(), whole);
+        // Whole-track requests read them the same way.
+        assert!(extractor.subtitle(&name, Some(4)).await.unwrap().ends_with("\nHi\n"));
+        assert!(matches!(extractor.subtitle(&name, Some(3)).await, Err(ApiError::BadRequest(_))), "PGS isn't text");
+    }
+
+    #[tokio::test]
+    async fn tracks_of_a_file_are_read_side_by_side() {
+        let dir = tempfile::tempdir().unwrap();
+        let (extractor, name, key) = with_movie(dir.path());
+        let soon = Duration::from_secs(10);
+        // While stream 2 is being extracted...
+        let (finish, finished) = tokio::sync::oneshot::channel::<String>();
+        let result = async move { Ok::<_, Arc<ApiError>>(Arc::new(finished.await.unwrap_or_default())) };
+        let running = Extraction { id: u64::MAX, by_ffmpeg: Arc::default(), result: result.boxed().shared() };
+        extractor.extractions.lock().insert(format!("{key}_2"), running);
+        // ...stream 4 is read all the same,
+        let ass = tokio::time::timeout(soon, extractor.subtitle(&name, Some(4))).await.expect("not held up");
+        assert!(ass.unwrap().ends_with("\nHi\n"));
+        // and requests for stream 2 wait for that extraction rather than
+        // start another one.
+        let again = extractor.subtitle(&name, Some(2));
+        tokio::pin!(again);
+        assert!(tokio::time::timeout(Duration::from_millis(200), &mut again).await.is_err(), "waits");
+        let wait = Duration::from_millis(50);
+        assert_eq!(extractor.subtitle_so_far(&name, 2, wait).await.unwrap(), ("WEBVTT\n\n".to_owned(), false));
+        finish.send("WEBVTT\n\nread meanwhile\n".to_owned()).unwrap();
+        assert_eq!(again.await.unwrap(), "WEBVTT\n\nread meanwhile\n");
+        assert_eq!(extractions(&extractor), 1, "stream 4's");
+    }
+
+    #[tokio::test]
+    async fn tracks_the_cues_list_come_whole_while_ffmpeg_reads_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let (extractor, name, key) = with_movie(dir.path());
+        // FFmpeg reading the whole file for another of its tracks (one the
+        // Cues can't give), or waiting for its turn to...
+        let pass = Lock::acquire(&extractor.file_locks, &key);
+        let _reading = pass.lock.lock().await;
+        // ...the SubRip track still comes whole, read through the Cues, rather
+        // than as far as that pass has got.
+        let (text, complete) = extractor.subtitle_so_far(&name, 2, Duration::from_secs(10)).await.unwrap();
+        assert!(complete && text.contains("Before the cluster"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn reads_go_on_when_their_requests_go_away() {
+        let dir = tempfile::tempdir().unwrap();
+        let (extractor, name, key) = with_movie(dir.path());
+        let cached = dir.path().join("subtitles").join(format!("{key}_2.vtt"));
+        // While other tracks being read take every turn...
+        let turns = extractor.cue_reads.clone().acquire_owned().await.unwrap();
+        // ...a player asking for this one hears it isn't there yet, and asks
+        // again,
+        let wait = Duration::from_millis(50);
+        for _ in 0..2 {
+            assert_eq!(extractor.subtitle_so_far(&name, 2, wait).await.unwrap(), ("WEBVTT\n\n".to_owned(), false));
+        }
+        // and a whole-track request stops waiting (its client went away).
+        assert!(tokio::time::timeout(wait, extractor.subtitle(&name, Some(2))).await.is_err());
+        // The one read they started goes on when its turn comes, to the
+        // cache.
+        drop(turns);
+        eventually(|| cached.exists()).await;
+        assert!(std::fs::read_to_string(&cached).unwrap().contains("Before the cluster"));
+        assert_eq!(extractions(&extractor), 1, "one for all the requests");
+        let (text, complete) = extractor.subtitle_so_far(&name, 2, wait).await.unwrap();
+        assert!(complete && text.contains("Before the cluster"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn long_passes_hold_up_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let (extractor, name, _) = with_movie(dir.path());
+        let soon = Duration::from_secs(10);
+        // Every FFmpeg pass over a whole file taken (hours each on a slow
+        // share)...
+        let _passes = extractor.passes.acquire_many(PASSES as u32).await.unwrap();
+        // ...tracks read through the Cues come all the same...
+        let subrip = tokio::time::timeout(soon, extractor.subtitle(&name, Some(2))).await.expect("not held up");
+        assert!(subrip.unwrap().contains("Hello"));
+        // ...and quick FFmpeg runs don't wait for them (they fail here: no
+        // FFmpeg).
+        let srt = dir.path().join("movie.en.srt");
+        std::fs::write(&srt, "1\n00:00:01,000 --> 00:00:02,000\nHello\n").unwrap();
+        let srt = srt.to_string_lossy().into_owned();
+        assert!(tokio::time::timeout(soon, extractor.subtitle(&srt, None)).await.expect("not held up").is_err());
+        assert!(tokio::time::timeout(soon, extractor.cover(&name)).await.expect("not held up").is_err());
+    }
+
+    #[tokio::test]
+    async fn quick_runs_hold_up_no_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let extractor = Arc::new(extractor_with(dir.path(), stand_in_ffmpeg(dir.path(), false)));
+        let (name, _) = movie_in(&extractor, dir.path(), &unplaced_movie());
+        // Every quick FFmpeg run taken (thumbnails, cover art, subtitle
+        // files)...
+        let _quick = extractor.limiter.acquire().await.unwrap();
+        // ...a pass over a file whose Cues can't be read runs all the same
+        // (and fails here).
+        let pass = tokio::time::timeout(Duration::from_secs(30), extractor.subtitle(&name, Some(2))).await;
+        assert!(pass.expect("not held up").is_err());
+        assert_eq!(ffmpeg_runs(dir.path()).first(), Some(&vec![2, 4]), "every text track at once");
+    }
+
+    #[tokio::test]
+    async fn subtitles_read_through_the_cues_are_served_when_they_cant_be_cached() {
+        let dir = tempfile::tempdir().unwrap();
+        let (extractor, name, key) = with_movie(dir.path());
+        // Something in the way of the cache file (a full disk, a file in use).
+        std::fs::create_dir(dir.path().join("subtitles").join(format!("{key}_2.vtt"))).unwrap();
+        // Served from memory, not left to FFmpeg (which would fail here).
+        assert!(extractor.subtitle(&name, Some(2)).await.unwrap().contains("Before the cluster"));
+    }
+
+    #[tokio::test]
+    async fn passes_that_ran_out_of_time_arent_run_again() {
+        // A pass that fails is run again for the track asked for alone:
+        // another track may be what FFmpeg couldn't convert...
+        let dir = tempfile::tempdir().unwrap();
+        let extractor = Arc::new(extractor_with(dir.path(), stand_in_ffmpeg(dir.path(), false)));
+        let (name, _) = movie_in(&extractor, dir.path(), &unplaced_movie());
+        assert!(matches!(extractor.subtitle(&name, Some(2)).await, Err(ApiError::Failed(_))));
+        assert_eq!(ffmpeg_runs(dir.path()), [vec![2, 4], vec![2]]);
+        // ...but not one that ran out of time: reading the file again would
+        // take as long.
+        let dir = tempfile::tempdir().unwrap();
+        let mut slow = extractor_with(dir.path(), stand_in_ffmpeg(dir.path(), true));
+        slow.pass_time = |_| Duration::from_secs(2);
+        let slow = Arc::new(slow);
+        let (name, _) = movie_in(&slow, dir.path(), &unplaced_movie());
+        assert!(matches!(slow.subtitle(&name, Some(2)).await, Err(ApiError::Timeout(_))));
+        assert_eq!(ffmpeg_runs(dir.path()), [vec![2, 4]]);
+    }
+
+    #[tokio::test]
+    async fn passes_keep_their_outputs_from_being_pruned() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut extractor = extractor_with(dir.path(), stand_in_ffmpeg(dir.path(), true));
+        extractor.keep_fresh = Duration::from_millis(50);
+        let extractor = Arc::new(extractor);
+        let (name, key) = movie_in(&extractor, dir.path(), &unplaced_movie());
+        let part = dir.path().join("subtitles").join(format!("{key}_4.vtt.part"));
+        std::fs::write(&part, "WEBVTT\n").unwrap();
+        let file = std::fs::File::options().write(true).open(&part).unwrap();
+        file.set_modified(SystemTime::now() - Duration::from_secs(4 * 3600)).unwrap();
+        drop(file);
+        // A track with no cue for hours, its pass still running, is marked as
+        // being written...
+        let pass = extractor.extraction(Path::new(&name), &key, 2);
+        eventually(|| {
+            let modified = std::fs::metadata(&part).and_then(|m| m.modified());
+            modified.is_ok_and(|t| t.elapsed().unwrap_or_default() < Duration::from_secs(3600))
+        })
+        .await;
+        // ...so the cache's pruning, which takes old temporaries for abandoned
+        // ones, keeps it.
+        let policy = crate::cache::Policy { max_age: Duration::from_secs(3600), max_bytes: u64::MAX };
+        crate::cache::prune(&dir.path().join("subtitles"), &policy, SystemTime::now() + Duration::from_secs(60));
+        assert!(part.exists());
+        drop(pass);
+    }
+
+    /// FFmpeg and ffprobe from PATH, and the media facts of `path`.
+    async fn tools(path: &Path) -> (Arc<Ffmpeg>, Arc<Prober>, Arc<Metrics>, Arc<MediaInfo>) {
+        let caps =
+            pley_transcoder_api::Capabilities { ffmpeg_available: true, ffprobe_available: true, ..Default::default() };
+        let ff =
+            Arc::new(Ffmpeg { ffmpeg: "ffmpeg".into(), ffprobe: "ffprobe".into(), caps, segment_times_relative: true });
+        let metrics = Arc::new(Metrics::default());
+        let prober = Arc::new(Prober::new(ff.clone(), metrics.clone(), 1));
+        let media = prober.probe(path).await.expect("ffprobe reads it");
+        (ff, prober, metrics, media)
+    }
+
+    /// Room to read every track of a real file, however many it has.
+    fn no_limit() -> matroska::Budget {
+        matroska::Budget::new(u64::MAX, Duration::from_secs(3600))
+    }
+
+    /// Every text track of a local Matroska file, read through its Cues,
+    /// is what FFmpeg extracts, byte for byte:
+    /// `PLEY_TEST_MKV=<file> cargo test -p pley-transcoder cues_match_ffmpeg -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn cues_match_ffmpeg() {
+        let path = PathBuf::from(std::env::var("PLEY_TEST_MKV").expect("set PLEY_TEST_MKV"));
+        let dir = tempfile::tempdir().unwrap();
+        let (ff, prober, metrics, media) = tools(&path).await;
+        let streams: Vec<i64> = media.streams.iter().filter(|s| s.is_text_subtitle()).map(|s| s.index).collect();
+        let started = Instant::now();
+        let ours = cue_tracks(&path, &media, &streams, &no_limit()).expect("the cues list the subtitles");
+        println!("{} tracks through the cues in {:?}", ours.len(), started.elapsed());
+        let extractor = Extractor::new(ff, prober, metrics, dir.path().join("subtitles"), 1);
+        let started = Instant::now();
+        extractor.extract_vtt(&path, "ffmpeg", &streams).await.expect("ffmpeg extracts them");
+        println!("{} tracks by ffmpeg in {:?}", streams.len(), started.elapsed());
+        for (index, text) in &ours {
+            let theirs =
+                std::fs::read_to_string(dir.path().join("subtitles").join(format!("ffmpeg_{index}.vtt"))).unwrap();
+            assert_eq!(text, &theirs, "stream {index}");
+            println!("stream {index}: {} cues, identical", text.matches(" --> ").count());
+        }
+    }
+
+    /// How long reading a file's text tracks through its Cues takes, and how
+    /// much it reads, with no FFmpeg pass: the first track, then all of them
+    /// (or each of `PLEY_TEST_STREAMS=3,5`):
+    /// `PLEY_TEST_MKV=<file> cargo test -p pley-transcoder cues_reading_time -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn cues_reading_time() {
+        let path = PathBuf::from(std::env::var("PLEY_TEST_MKV").expect("set PLEY_TEST_MKV"));
+        let (_, _, _, media) = tools(&path).await;
+        let streams: Vec<i64> = media.streams.iter().filter(|s| s.is_text_subtitle()).map(|s| s.index).collect();
+        let only = std::env::var("PLEY_TEST_STREAMS").ok();
+        let runs: Vec<Vec<i64>> = match &only {
+            Some(list) => list.split(',').map(|s| vec![s.trim().parse().expect("stream indexes")]).collect(),
+            None => vec![streams[..1].to_vec(), streams.clone()],
+        };
+        for wanted in runs {
+            let started = Instant::now();
+            let budget = no_limit();
+            let found = matroska::text_tracks(&path, &media, &wanted, &budget).expect("the cues list the subtitles");
+            let took = started.elapsed();
+            let (reads, kb) = (found.reads, found.bytes_read / 1024);
+            let blocks: usize = found.tracks.iter().map(|t| t.blocks.len()).sum();
+            let vtt = as_webvtt(found, &media, &budget).unwrap();
+            println!(
+                "stream(s) {:?}: {blocks} subtitles in {took:?} ({reads} reads, {kb} KB), {} KB of WebVTT",
+                if wanted.len() > 3 { format!("{} tracks", wanted.len()) } else { format!("{wanted:?}") },
+                vtt.iter().map(|(_, t)| t.len()).sum::<usize>() / 1024
+            );
+        }
+    }
+
+    /// Stream 2, a SubRip track, as read through the Cues: blocks of
+    /// `(time, duration, text)` in ticks of `tick_ns`.
+    fn read(tick_ns: u64, blocks: &[(i64, u64, &str)]) -> matroska::TextTracks {
+        let blocks = blocks
+            .iter()
+            .map(|&(time, duration, text)| matroska::TextBlock { time, duration, data: text.as_bytes().to_vec() })
+            .collect();
+        let track =
+            matroska::TextTrack { stream_index: 2, codec: webvtt::TextCodec::Subrip, header: Vec::new(), blocks };
+        let whole_ms = tick_ns % 1_000_000 == 0;
+        matroska::TextTracks { tick_ns, whole_ms, tracks: vec![track], reads: 0, bytes_read: 0 }
+    }
+
+    /// Cue times are FFmpeg's: the file's start time taken off, block times
+    /// rounded to microseconds and then to milliseconds, half away from zero.
+    #[test]
+    fn cue_times_are_ffmpegs() {
+        let vtt = |found, start_ms| {
+            let media = MediaInfo { start_ms, ..Default::default() };
+            as_webvtt(found, &media, &no_limit()).map(|mut tracks| tracks.remove(0).1)
+        };
+        // Ticks of a millisecond, a file starting at 5.5 s.
+        let found = read(1_000_000, &[(5_500, 1_000, "first"), (6_000, 1_500, "second")]);
+        let first = "WEBVTT\n\n00:00.000 --> 00:01.000\nfirst\n\n00:00.500 --> 00:02.000\nsecond\n";
+        assert_eq!(vtt(found, Some(5_500)).unwrap(), first);
+        // Ticks of 100 µs: 0.5 ms is 1 ms, and so is 1.4 ms.
+        let found = read(100_000, &[(5, 10, "half"), (14, 5, "rounded")]);
+        let rounded = "WEBVTT\n\n00:00.001 --> 00:00.002\nhalf\n\n00:00.001 --> 00:00.002\nrounded\n";
+        assert_eq!(vtt(found, None).unwrap(), rounded);
+        // Ticks of 333333 ns: 3 of them are 999.999 µs, so 1000, so 1 ms...
+        let found = read(333_333, &[(3, 3, "third")]);
+        assert_eq!(vtt(found, None).unwrap(), "WEBVTT\n\n00:00.001 --> 00:00.002\nthird\n");
+        // ...and 500003 of them, 166667.499999 ms, are 166667500 µs, so
+        // 166668 ms (not 166667, as rounded at once).
+        let found = read(333_333, &[(500_003, 3, "twice")]);
+        assert_eq!(vtt(found, None).unwrap(), "WEBVTT\n\n02:46.668 --> 02:46.669\ntwice\n");
+        // With such ticks, a start the media info has in milliseconds
+        // (1.833332 s as 1833) may not be FFmpeg's: left to it. So is the
+        // start of 0 that ffprobe gives most files with audio or video,
+        // which may be a fraction of a millisecond.
+        let found = read(333_333, &[(5_500, 3, "a")]);
+        assert_eq!(vtt(found, Some(1_833)).unwrap_err(), "the file's start isn't known to the microsecond");
+        let found = read(333_333, &[(3, 3, "third")]);
+        assert_eq!(vtt(found, Some(0)).unwrap_err(), "the file's start isn't known to the microsecond");
+        // A cue before the start, or going back in time: FFmpeg's muxer
+        // would shift or refuse them, so they are left to it too.
+        assert!(vtt(read(1_000_000, &[(5_000, 100, "early")]), Some(5_500)).is_err());
+        assert!(vtt(read(1_000_000, &[(2_000, 100, "b"), (1_000, 100, "a")]), None).is_err());
+        assert!(vtt(read(1_000_000, &[(1_000, 100, "a"), (1_000, 100, "b")]), None).is_ok(), "at once");
+    }
+
+    #[test]
+    fn cues_too_long_or_too_late_are_left_to_ffmpeg() {
+        let media = MediaInfo::default();
+        let vtt = |found| as_webvtt(found, &media, &no_limit()).map(|mut tracks| tracks.remove(0).1);
+        // FFmpeg keeps how long a cue lasts in 32 bits of milliseconds.
+        let longest = vtt(read(1_000_000, &[(0, 0xFFFF_FFFF, "a")])).unwrap();
+        assert_eq!(longest, "WEBVTT\n\n00:00.000 --> 1193:02:47.295\na\n");
+        assert!(vtt(read(1_000_000, &[(0, 0x1_0000_0000, "a")])).is_err());
+        assert!(vtt(read(1_000_000, &[(0, u64::MAX, "a")])).is_err());
+        assert!(vtt(read(1_000_000, &[(i64::MAX, 1, "a")])).is_err(), "too far to tell in microseconds");
+        assert!(vtt(read(u64::MAX, &[(1, 1, "a")])).is_err(), "a timestamp scale out of range");
+    }
+
+    #[test]
+    fn rescaling_rounds_like_ffmpeg() {
+        let (ms, us, ns) = ((1, 1000), (1, 1_000_000), (1, 1_000_000_000));
+        assert_eq!(rescale(1_500, ms, us), Some(1_500_000));
+        assert_eq!(rescale(1_500, us, ms), Some(2), "half away from zero");
+        assert_eq!(rescale(-1_500, us, ms), Some(-2));
+        assert_eq!(rescale(1_499, us, ms), Some(1));
+        assert_eq!(rescale(3, (100_000, 1_000_000_000), ms), Some(0), "0.3 ms");
+        assert_eq!(rescale(6_500_000, ns, ms), Some(7));
+        assert_eq!(rescale(i64::MAX / 2, ms, us), None, "too far to tell");
+    }
+
+    #[test]
+    fn whole_file_passes_get_time_for_big_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let small = dir.path().join("small.mkv");
+        std::fs::write(&small, b"tiny").unwrap();
+        assert_eq!(whole_file_timeout(&small), Duration::from_secs(20 * 60));
+        assert_eq!(whole_file_timeout(&dir.path().join("missing.mkv")), Duration::from_secs(20 * 60));
+        assert_eq!(pass_timeout(5_000_000_000), Duration::from_secs(20 * 60));
+        assert_eq!(pass_timeout(77_098_924_052), Duration::from_secs(7_709), "Blade Runner 2049's remux: over 2 hours");
     }
 
     #[test]

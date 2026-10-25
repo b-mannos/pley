@@ -685,8 +685,9 @@ pub struct SubtitleRequest {
     /// Embedded stream index; `None` means `path` is itself a subtitle file.
     #[serde(default)]
     pub stream_index: Option<i64>,
-    /// For an embedded track: answer with the cues found so far rather than
-    /// wait for the whole file; `X-Pley-Complete: 0` says more are coming.
+    /// For an embedded track: answer within a few seconds, with the cues
+    /// found so far when the track isn't all out by then, rather than wait
+    /// for the whole file; `X-Pley-Complete: 0` says more are coming.
     #[serde(default)]
     pub partial: bool,
 }

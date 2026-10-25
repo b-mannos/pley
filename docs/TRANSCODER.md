@@ -72,7 +72,7 @@ following status codes:
 | POST | `/v1/probe` | `ProbeRequest {path}` | `MediaInfo` (cached per file version) |
 | POST | `/v1/thumbnail` | `ThumbnailRequest {path, time_ms?, width?, duration_ms?, hdr}` | `image/jpeg` |
 | POST | `/v1/cover` | `CoverRequest {path}` | embedded cover art (`image/jpeg` or `image/png`) |
-| POST | `/v1/subtitles` | `SubtitleRequest {path, stream_index?, partial?}` | `text/vtt`. With `partial` (embedded tracks): the cues read so far at once, `X-Pley-Complete: 0` while the extraction goes on in the background |
+| POST | `/v1/subtitles` | `SubtitleRequest {path, stream_index?, partial?}` | `text/vtt`: a text track of the file, or a subtitle file (see *Subtitle extraction*). With `partial` (embedded tracks): within a few seconds, the whole track when it's done by then (as a rule when it can be read through the file's Cues), else the cues read so far with `X-Pley-Complete: 0` while the extraction goes on in the background |
 | POST | `/v1/keyframes` | `KeyframesRequest {path}` | `200` if indexed, `202` if queued |
 | POST | `/v1/trickplay` | `TrickplayRequest {path, interval_ms?, width?}` | `TrickplayInfo {id, interval_ms, width, height, columns, rows, count, sheets}`: seek-bar previews, cached per file version until all sheets have been fetched (or for a day). Keyframes only are decoded (seconds for a film); HDR and Dolby Vision are tone-mapped with libplacebo when available. |
 | GET | `/v1/trickplay/{id}/{n}.jpg` | – | sprite sheet `n` (`columns × rows` thumbnails); once every sheet of a set has been fetched, the set is deleted (fetch them all in one go and keep them) |
@@ -137,8 +137,9 @@ following status codes:
    - The caches in the work directory are pruned an hour apart (the first
      time two minutes after start-up). Entries unused for longer than their
      age limit go, then the least recently used ones until the folder fits its
-     budget; temporaries left by a crash go after 3 hours. Reading an entry
-     counts as using it.
+     budget; temporaries left by a crash go after 3 hours untouched (a
+     subtitle pass that runs longer touches its outputs every 10 minutes).
+     Reading an entry counts as using it.
 
      | Folder | Holds | Age limit | Budget |
      |---|---|---|---|
@@ -214,9 +215,67 @@ following status codes:
     time, by reading packet headers) after `POST /v1/keyframes`, which the
     server sends when an item page is opened. Until it exists, jobs transcode.
   - Formats are recognised by content, not by file name.
-- **Subtitle extraction.** Every text track of a file is converted to WebVTT in
-  a single pass over the file and cached. External files are converted with
-  charset detection (UTF-8, UTF-16 BOM, or Windows-1252 as a fallback).
+- **Subtitle extraction.** Text tracks (SubRip, ASS/SSA, plain text and
+  WebVTT) become WebVTT, cached per file version.
+  - Matroska: mkvmerge and FFmpeg list every subtitle block in the Cues, with
+    its place in its cluster, so the track asked for is read block by block:
+    one disk seek per subtitle instead of reading the whole file. A film's
+    track takes milliseconds on a local disk and seconds on a NAS (a
+    thousand subtitles of a 77 GB remux on a disk-backed share: 5 to 12 s),
+    where reading the file takes minutes. Sixteen reads run at once. A
+    cluster's head (its timestamp) is only read where the block can't be
+    told without it; one cluster in sixteen is checked, and a file whose
+    blocks aren't where their cues say has every head read. A file's tracks
+    are read side by side (half of `--probe-concurrency` at once in all, 4
+    by default).
+  - A track's extraction runs on its own: every request for the track
+    waits for the one under way (a `partial` one a few seconds at most, and
+    not at all once FFmpeg reads the file for it), and it goes on, to the
+    cache, when they stop waiting. A track the Cues couldn't give goes
+    straight to FFmpeg the next time (the last thousand such tracks are
+    remembered).
+  - A read through the Cues runs in the transcoder itself, so it has
+    limits that FFmpeg, a process of its own, doesn't need. What it keeps
+    takes at most 64 MiB: the file's seek heads, info, tracks, Cues and
+    tags as it reads them, 256 bytes for the records of each block the Cues
+    list for the track (counted as the Cues are read, so a file listing
+    millions of tiny blocks is turned down before any is read), the blocks
+    and what they inflate to, and the WebVTT made of them. No block may be
+    bigger than 1 MiB nor inflate past 10 MB, an ASS header may define at
+    most 10,000 styles, and the read takes at most a minute, finding the
+    Cues and converting included. The Cues are looked for in the seek
+    heads and before the first cluster, never cluster by cluster. Each
+    block must lie in its cluster, after the one before.
+  - The output is what FFmpeg's `-c:s webvtt` makes of the same track, byte
+    for byte: the SubRip, ASS, plain text and WebVTT decoders and the WebVTT
+    encoder (bold, italics, underline and line breaks; its quirks included)
+    are followed step by step. This is checked against FFmpeg on real files
+    by an ignored test (`PLEY_TEST_MKV=<file> cargo test -p pley-transcoder
+    cues_match_ffmpeg -- --ignored --nocapture`).
+  - FFmpeg extracts the tracks instead when anything is out of the
+    ordinary: the file isn't Matroska; its Cues aren't found as above; its
+    tracks don't line up with ffprobe's streams; its Cues don't list the
+    subtitles, or not with their places; mkvmerge's own statistics tags
+    disagree with the Cues on how many blocks a track has; a cue points at
+    no block, at another track's, or at one that breaks the limits above;
+    the track is encrypted, compressed with bzip2 or LZO (zlib and header
+    stripping are read) or in two ways, has a timing of its own (a
+    timestamp scale or a codec delay), laced blocks or cues before the
+    start or out of order, or is WebVTT as mkvmerge writes it
+    (`S_TEXT/WEBVTT`; WebM's `D_WEBVTT` is read); the file's timestamps
+    aren't whole milliseconds and it has a start time, as ffprobe gives
+    every file with audio or video (pley's media info keeps that start in
+    whole milliseconds, while FFmpeg takes it off to the microsecond). Then
+    every text track of the file comes out in a single pass over it, which
+    may take 20 minutes, or as long as reading the file at 10 MB/s takes
+    (two hours for 70 GB). FFmpeg writes each cue as soon as it is read: a
+    `partial` request is answered with the cues found so far. Two such
+    passes run at once, apart from the quick FFmpeg runs (thumbnails,
+    cover art, subtitle files), which never wait for them. When a pass
+    fails, one more reads the track asked for alone (another track may be
+    what FFmpeg couldn't convert), unless it ran out of time.
+  - External files are converted with charset detection (UTF-8, UTF-16 BOM,
+    or Windows-1252 as a fallback).
 
 ## Audio fingerprints
 
