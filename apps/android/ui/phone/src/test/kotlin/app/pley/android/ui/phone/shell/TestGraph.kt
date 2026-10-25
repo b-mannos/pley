@@ -32,7 +32,10 @@ import app.pley.android.data.SessionState
 import app.pley.android.data.SnapshotStore
 import app.pley.android.data.TrackDefaultsRepository
 import app.pley.android.data.WatchStateRepository
+import app.pley.android.model.CollectionSummary
 import app.pley.android.model.Hubs
+import app.pley.android.model.ItemDetail
+import app.pley.android.model.ItemSummary
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryKind
 import app.pley.android.player.MusicControl
@@ -126,7 +129,16 @@ class TestGraph(server: String? = SERVER) : ScreensGraph {
             override suspend fun refresh() = Unit
         }
         override val libraryItems: LibraryItemsRepository get() = unused("libraryItems")
-        override val items: ItemRepository get() = unused("items")
+        // An item page opened in a tab: its details are still on their way.
+        override val items = object : ItemRepository {
+            override fun detail(itemId: Long): Flow<Loadable<ItemDetail>> = flowOf(Loadable.Loading)
+            override fun children(itemId: Long): Flow<Loadable<List<ItemSummary>>> = unused("children")
+            override fun onDeck(itemId: Long): Flow<Loadable<ItemSummary?>> = unused("onDeck")
+            override fun related(itemId: Long): Flow<Loadable<List<ItemSummary>>> = unused("related")
+            override fun collectionsOf(itemId: Long): Flow<Loadable<List<CollectionSummary>>> = unused("collectionsOf")
+            override suspend fun next(itemId: Long): ItemSummary? = unused("next")
+            override fun prefetch(itemId: Long) = Unit
+        }
         override val search: SearchRepository get() = unused("search")
         override val people: PeopleRepository get() = unused("people")
         override val collections: CollectionsRepository get() = unused("collections")

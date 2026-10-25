@@ -12,6 +12,7 @@ import app.pley.android.auth.SignOutReason
 import app.pley.android.network.ApiException
 import app.pley.android.screens.PleyKey
 import app.pley.android.testing.screens.onboarding.FakeOnboardingSource
+import app.pley.android.ui.phone.item.ITEM_SKELETON
 import app.pley.android.ui.phone.onboarding.LocalOnboardingSource
 import app.pley.android.ui.phone.theme.PhoneTheme
 import org.junit.Assert.assertEquals
@@ -23,8 +24,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * The phone's shell over its screens (Home, Libraries and getting in,
- * placeholders for the rest): the start gate, nothing reached before the
+ * The phone's shell over its screens (Home, Libraries, items and getting
+ * in, placeholders for the rest): the start gate, nothing reached before the
  * first frame, the tabs' back stacks, and what happens when the server
  * refuses or signs the app out.
  */
@@ -51,6 +52,9 @@ class PhoneShellTest {
         compose.waitUntil(SHOWN_WITHIN_MS) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText(text).assertExists()
     }
+
+    /** An item page, still loading its details. */
+    private fun itemPage() = compose.onNodeWithTag(ITEM_SKELETON)
 
     /** The sign-in page (Servers, and SignIn for a server the app was signed out of). */
     private fun signInPage() = compose.onNodeWithText("Sign in to pley")
@@ -131,19 +135,19 @@ class PhoneShellTest {
         tab(PhoneTab.Libraries).performClick()
         showsLibraries()
         compose.runOnIdle { navigation.open(PleyKey.Item(101)) }
-        placeholder("Item 101").assertExists()
+        itemPage().assertExists()
 
         tab(PhoneTab.Search).performClick()
         placeholder("Search").assertExists()
         tab(PhoneTab.Libraries).performClick()
-        placeholder("Item 101").assertExists()
+        itemPage().assertExists()
 
         tab(PhoneTab.Search).performClick()
         restore.emulateSavedInstanceStateRestore()
         placeholder("Search").assertExists()
         tab(PhoneTab.Search).assertIsSelected()
         tab(PhoneTab.Libraries).performClick()
-        placeholder("Item 101").assertExists()
+        itemPage().assertExists()
         // Choosing the tab shown takes it back to its first screen.
         tab(PhoneTab.Libraries).performClick()
         showsLibraries()
