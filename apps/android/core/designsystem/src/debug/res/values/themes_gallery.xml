@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The design gallery's window: pley's bg, painted once. -->
+    <style name="Theme.PleyGallery" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF0B0D10</item>
+        <item name="android:colorBackground">#FF0B0D10</item>
+    </style>
+</resources>

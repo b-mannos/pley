@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: the design gallery, started with adb (see DesignGalleryActivity). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name=".gallery.DesignGalleryActivity"
+            android:exported="true"
+            android:label="pley design gallery"
+            android:theme="@style/Theme.PleyGallery" />
+    </application>
+</manifest>
