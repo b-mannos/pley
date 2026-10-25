@@ -691,6 +691,15 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             ok
         }
     };
+    // Played or copied as they are, its frames stutter: about one in five is
+    // shown out of turn or dropped.
+    let video_ok = if video.is_some_and(|v| v.decode_order_times) {
+        reasons.push("This file's frames carry the wrong times; converting the video puts them right.".into());
+        video_copy_ok = false;
+        false
+    } else {
+        video_ok
+    };
     let audio_ok = match audio {
         None => true,
         Some(a) if caps.plays_audio(&a.codec) => true,
@@ -1519,6 +1528,33 @@ mod tests {
         let d = decide(&file("mp4", 5_000_000), Some(&i), &i.streams, &request());
         assert_eq!(d.method, Method::Direct);
         assert!(d.reasons.is_empty());
+    }
+
+    #[test]
+    fn frames_with_the_wrong_times_are_converted() {
+        // A 1080p Blu-ray rip in MP4: HEVC with B-frames, every frame timed
+        // as it is decoded.
+        let mut i = info("hevc", &["aac"], DynamicRange::Sdr);
+        i.streams[0].height = Some(804);
+        i.streams[0].decode_order_times = true;
+        let mut f = file("mp4", 2_231_717);
+        f.height = Some(804);
+        let mut req = request();
+        req.caps.video_codecs.push("hevc".into());
+        let d = decide(&f, Some(&i), &i.streams, &req);
+        assert_eq!(d.method, Method::Transcode, "neither played as it is nor copied");
+        assert_eq!(d.video.as_ref().unwrap().mode, VideoMode::Transcode);
+        assert_eq!(d.quality, Some("8m"), "at its own size");
+        assert!(d.reasons.iter().any(|r| r.contains("wrong times")), "{:?}", d.reasons);
+        req.mode = PlaybackMode::Remux;
+        assert_eq!(decide(&f, Some(&i), &i.streams, &req).method, Method::Transcode, "a copy keeps the times");
+        req.mode = PlaybackMode::Direct;
+        assert_eq!(decide(&f, Some(&i), &i.streams, &req).method, Method::Direct, "the player asked for it");
+        // The apps' players trust the times too.
+        req.mode = PlaybackMode::Auto;
+        req.caps.caps_version = Some(2);
+        let d = decide(&f, Some(&i), &i.streams, &req);
+        assert_eq!((d.method, d.video.unwrap().mode), (Method::Transcode, VideoMode::Transcode));
     }
 
     #[test]

@@ -236,6 +236,7 @@ interface MediaStream {
   dynamic_range?: "sdr" | "hdr10" | "hdr10plus" | "hlg" | "dolby_vision";
   dv_profile?: number;              // Dolby Vision profile (5, 7, 8, …)
   dv_bl_compat?: number;            // DV base-layer compatibility id (1 = HDR10, 4 = HLG, 0 = none)
+  decode_order_times?: boolean;     // frames timed as they're decoded, not as they're shown: the video is converted
   profile?: string;
   // audio
   channels?: number;

@@ -265,6 +265,18 @@ following status codes:
     time, by reading packet headers) after `POST /v1/keyframes`, which the
     server sends when an item page is opened. Until it exists, jobs transcode.
   - Formats are recognised by content, not by file name.
+- **Frames timed as they are decoded.** Some MP4s (FFmpeg muxing a raw H.264
+  or HEVC stream) give every frame the time it is decoded at as the time it
+  is shown, although B-frames are stored ahead of where they are shown.
+  Players that trust these times show frames out of turn or drop them
+  (Chrome drops about one in five), and copying the video keeps them. The
+  probe of an MP4 or MOV file reads the times of its first 128 packets along
+  with its streams (Matroska times frames as they are shown, MPEG-TS both
+  ways). When a stream that reorders frames (`has_b_frames`) shows every
+  packet read at its decode time, its first 48 packets are decoded, and the
+  stream is marked `decode_order_times` if more than one frame comes out
+  earlier than the frame before it. The server then converts its video:
+  decoding gives every frame its right time.
 - **Subtitle extraction.** Text tracks (SubRip, ASS/SSA, plain text and
   WebVTT) become WebVTT, cached per file version.
   - Matroska: mkvmerge and FFmpeg list every subtitle block in the Cues, with

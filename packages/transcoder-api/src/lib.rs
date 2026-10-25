@@ -150,6 +150,14 @@ pub struct MediaStream {
     /// presentation time (Matroska, MPEG-TS).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub has_b_frames: Option<bool>,
+    /// The frames are stored out of display order (B-frames), but the file
+    /// gives each one the time it is decoded at as the time it is shown (an
+    /// MP4 muxed from a raw stream, without composition offsets). Players
+    /// that trust those times show frames out of order or drop them, and
+    /// copying the stream keeps the wrong times: only decoding it puts them
+    /// right.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub decode_order_times: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hdr: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
