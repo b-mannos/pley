@@ -1,5 +1,6 @@
 package app.pley.android.ui.phone.shell
 
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -10,6 +11,8 @@ import androidx.compose.ui.test.performClick
 import app.pley.android.auth.SignOutReason
 import app.pley.android.network.ApiException
 import app.pley.android.screens.PleyKey
+import app.pley.android.testing.screens.onboarding.FakeOnboardingSource
+import app.pley.android.ui.phone.onboarding.LocalOnboardingSource
 import app.pley.android.ui.phone.theme.PhoneTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -20,10 +23,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * The phone's shell over its screens (Home and Libraries, placeholders
- * for the rest): the start gate, nothing reached before the first frame,
- * the tabs' back stacks, and what happens when the server refuses or signs
- * the app out.
+ * The phone's shell over its screens (Home, Libraries and getting in,
+ * placeholders for the rest): the start gate, nothing reached before the
+ * first frame, the tabs' back stacks, and what happens when the server
+ * refuses or signs the app out.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(application = TestApplication::class)
@@ -49,6 +52,9 @@ class PhoneShellTest {
         compose.onNodeWithText(text).assertExists()
     }
 
+    /** The sign-in page (Servers, and SignIn for a server the app was signed out of). */
+    private fun signInPage() = compose.onNodeWithText("Sign in to pley")
+
     private fun tab(tab: PhoneTab) = compose.onNodeWithTag(TAB_TAG + tab.name)
 
     private fun show(start: PhoneStart, graph: TestGraph = TestGraph(start.server)): Shell {
@@ -56,9 +62,12 @@ class PhoneShellTest {
         val shell = Shell(graph)
         compose.setContent {
             PhoneTheme {
-                PhoneShell(start, { graph }) { state, navigation ->
-                    shell.state = state
-                    shell.navigation = navigation
+                // Getting in reads a fake server: nobody on the network.
+                CompositionLocalProvider(LocalOnboardingSource provides FakeOnboardingSource()) {
+                    PhoneShell(start, { graph }) { state, navigation ->
+                        shell.state = state
+                        shell.navigation = navigation
+                    }
                 }
             }
         }
@@ -74,14 +83,14 @@ class PhoneShellTest {
     @Test
     fun withoutAServerItStartsAtServersFullScreen() {
         show(PhoneStart(server = null, signedIn = false))
-        placeholder("Servers").assertExists()
+        signInPage().assertExists()
         tab(PhoneTab.Home).assertDoesNotExist()
     }
 
     @Test
     fun withAServerButNoTokensItStartsSigningInToIt() {
         val shell = show(PhoneStart(server = TestGraph.SERVER, signedIn = false))
-        placeholder("Sign in").assertExists()
+        signInPage().assertExists()
         tab(PhoneTab.Home).assertDoesNotExist()
         assertEquals(listOf(PleyKey.SignIn(TestGraph.SERVER)), shell.navigation.root.toList())
     }
@@ -155,7 +164,7 @@ class PhoneShellTest {
         compose.runOnIdle { shell.state.report(ApiException(403, "insufficient_scope", "not allowed", scope = "play")) }
         compose.onNodeWithText("pley wasn't allowed to do that: sign in again to allow it").assertExists()
         compose.onNodeWithText("Sign in").performClick()
-        placeholder("Sign in").assertExists()
+        signInPage().assertExists()
         tab(PhoneTab.Home).assertDoesNotExist()
         assertEquals(listOf(PleyKey.SignIn(TestGraph.SERVER)), shell.navigation.root.toList())
     }
@@ -166,7 +175,7 @@ class PhoneShellTest {
         compose.waitUntil(5_000) { "auth" in shell.graph.touched }
         compose.runOnIdle { shell.graph.fakeAuth.signOut(TestGraph.SERVER, SignOutReason.ENDED) }
         compose.waitUntil(5_000) { !shell.navigation.inside }
-        placeholder("Sign in").assertExists()
+        signInPage().assertExists()
         assertEquals(listOf(PleyKey.SignIn(TestGraph.SERVER)), shell.navigation.root.toList())
         compose.onNodeWithText("You were signed out: sign in again.").assertExists()
     }
@@ -187,7 +196,7 @@ class PhoneShellTest {
         tab(PhoneTab.Libraries).performClick()
         compose.runOnIdle { shell.navigation.open(PleyKey.Item(101)) }
         compose.runOnIdle { shell.navigation.restart(PleyKey.SignIn(TestGraph.SERVER)) }
-        placeholder("Sign in").assertExists()
+        signInPage().assertExists()
         compose.runOnIdle { shell.navigation.restart(PleyKey.Home) }
         showsHome()
         tab(PhoneTab.Libraries).performClick()
