@@ -6,6 +6,7 @@ import app.pley.android.auth.AuthGraph
 import app.pley.android.caps.CapsGraph
 import app.pley.android.common.DeviceProfile
 import app.pley.android.data.DataGraph
+import app.pley.android.network.NetworkGraph
 import app.pley.android.player.PlayerGraph
 
 /**
@@ -20,6 +21,15 @@ interface ScreensGraph {
     val caps: CapsGraph
     val auth: AuthGraph
     val playerLauncher: PlayerLauncher
+
+    /**
+     * Finding servers and checking addresses (discovery, the network
+     * sweep, the probe, local network access), and the signed-in clients
+     * the sign-in module's profiles go through. Getting in uses it; graphs
+     * made for other screens' tests needn't have one.
+     */
+    val network: NetworkGraph
+        get() = throw UnsupportedOperationException("this graph has no network parts")
 }
 
 /** The Application, which holds the app's one graph. */
