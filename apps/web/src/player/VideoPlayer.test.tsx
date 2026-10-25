@@ -1,4 +1,4 @@
-import { waitFor } from "@testing-library/react";
+import { act, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ItemDetail, PlaybackInfo } from "@/api/types";
 import { makeItem } from "@/test/fixtures";
@@ -168,6 +168,56 @@ describe("VideoPlayer leaving", () => {
     await waitFor(() => expect(hlsInstances[0]?.calls).toContain("attachMedia"));
     unmount();
     expect(hlsInstances[0]?.calls.at(-1)).toBe("destroy");
+  });
+});
+
+describe("VideoPlayer switching sessions", () => {
+  const starts = (requests: FakeRequest[]) => requests.filter((r) => r.method === "POST" && r.path === "/api/playback");
+
+  it("asks for the next session without waiting for the old one's release", async () => {
+    // The old session's last report and release never get an answer.
+    const requests = serve([session("s1"), session("s2")], {
+      "POST /api/items/7/progress": () => new Promise(() => undefined),
+      "DELETE /api/playback/s1": () => new Promise(() => undefined),
+    });
+    renderPlayer(0);
+    await waitFor(() => expect(hlsInstances[0]?.calls).toContain("attachMedia"));
+
+    // The session expired: the player starts a new one.
+    act(() => {
+      hlsInstances[0]?.emit("hlsError", { fatal: true, type: "networkError", details: "fragLoadError", response: { code: 404 } });
+    });
+
+    await waitFor(() => expect(hlsInstances).toHaveLength(2));
+    expect(starts(requests)).toHaveLength(2);
+    expect(requests.some((r) => r.method === "DELETE" && r.path === "/api/playback/s1")).toBe(true);
+    expect(requests.some((r) => r.path === "/api/items/7/progress" && (r.body as { state: string }).state === "stopped")).toBe(true);
+  });
+
+  it("still waits for a start in flight, which ends its own session", async () => {
+    let answer: (info: PlaybackInfo) => void = () => undefined;
+    const first = new Promise<PlaybackInfo>((resolve) => (answer = resolve));
+    let posts = 0;
+    const requests = mockApi({
+      "POST /api/playback": () => (posts++ === 0 ? first : session("s2")),
+      "DELETE /api/playback/s1": () => undefined,
+    });
+    renderPlayer(0);
+    await waitFor(() => expect(starts(requests)).toHaveLength(1));
+
+    // Back from the back/forward cache before the first start answered.
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(starts(requests)).toHaveLength(1);
+
+    answer(session("s1"));
+    await waitFor(() => expect(starts(requests)).toHaveLength(2));
+    const paths = requests.map((r) => `${r.method} ${r.path}`);
+    expect(paths.indexOf("DELETE /api/playback/s1")).toBeGreaterThanOrEqual(0);
+    expect(paths.indexOf("DELETE /api/playback/s1")).toBeLessThan(paths.lastIndexOf("POST /api/playback"));
+    await waitFor(() => expect(hlsInstances.map((h) => h.calls[0])).toEqual(["loadSource /api/playback/s2/index.m3u8"]));
   });
 });
 

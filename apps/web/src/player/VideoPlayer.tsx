@@ -295,13 +295,14 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     bufferingTimer.current = undefined;
     setBuffering(false);
 
-    // Release the previous session before asking for the next one, so a
-    // quality or track switch never trips the server's transcode limit.
-    // Started right away (not in the async part) so it also happens when this
-    // run is cancelled; it reports the last real position, not the reset element's 0.
+    // Release the previous session, reporting the last real position (not
+    // the reset element's 0). The next one doesn't wait for that: the server
+    // ends this tab's sessions itself before it starts another (and before
+    // it checks its transcode limit). It does wait for the previous run's
+    // start, which ends its own session if that run was cancelled.
     const prev = sessionRef.current;
     sessionRef.current = null;
-    const released = prev ? endSession(item.id, prev, positionRef.current * 1000) : Promise.resolve();
+    if (prev) void endSession(item.id, prev, positionRef.current * 1000);
     const previousStart = pendingStartRef.current;
     destroyHls();
     video.pause();
@@ -324,7 +325,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     // The new session is recorded as soon as it exists, so the next run (or
     // unmount) ends it; a run cancelled before that ends it here instead.
     const acquired = (async (): Promise<PlaybackInfo | null> => {
-      await Promise.all([released, previousStart]);
+      await previousStart;
       if (cancelled) return null;
       const pinfo = await startPlayback({
         item_id: item.id,
