@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What the playback session says, in the web player's words (apps/web/src/player). -->
+<resources>
+    <!-- Qualities (apps/web/src/player/quality.ts). -->
+    <string name="session_quality_original">Original</string>
+    <string name="session_quality_30m">30 Mbps 4K</string>
+    <string name="session_quality_20m">20 Mbps 1080p</string>
+    <string name="session_quality_15m">15 Mbps 4K</string>
+    <string name="session_quality_12m">12 Mbps 1080p</string>
+    <string name="session_quality_8m">8 Mbps 1080p</string>
+    <string name="session_quality_4m">4 Mbps 720p</string>
+    <string name="session_quality_2m">2 Mbps 480p</string>
+    <!-- The original, converted at the closest quality the server chose: "8 Mbps 1080p (auto)". -->
+    <string name="session_quality_auto">%1$s (auto)</string>
+    <!-- The original's hint when the server converts it: "Plays as 8 Mbps 1080p here". -->
+    <string name="session_quality_plays_as">Plays as %1$s here</string>
+    <!-- "Plays as 8 Mbps 1080p here (the file: 4K · 62 Mbps)". -->
+    <string name="session_quality_plays_as_file">Plays as %1$s here (the file: %2$s)</string>
+    <string name="session_quality_converted">Converted</string>
+
+    <!-- Markers (SkipButton.tsx). -->
+    <string name="session_skip_intro">Skip Intro</string>
+    <string name="session_skip_credits">Skip Credits</string>
+
+    <!-- Up Next (UpNext.tsx). -->
+    <string name="session_up_next">Up next</string>
+    <!-- "Up next · S1 E2". -->
+    <string name="session_up_next_episode">Up next · %1$s</string>
+    <string name="session_last_episode">This is the last episode</string>
+    <string name="session_last_in_queue">This is the last one</string>
+
+    <!-- Tracks. -->
+    <string name="session_subtitles_off">Off</string>
+    <string name="session_subtitles_failed">These subtitles couldn\'t be loaded.</string>
+
+    <!-- How it plays (PlaybackDetails.tsx). -->
+    <string name="session_method_direct">Direct play</string>
+    <string name="session_method_remux">Direct stream</string>
+    <string name="session_method_transcode">Transcoding</string>
+    <string name="session_method_remux_audio">Direct stream · Audio transcoding</string>
+    <string name="session_why_direct">The original file, as it is.</string>
+    <string name="session_why_remux">The original video, in a format this player opens.</string>
+    <string name="session_why_transcode">Converted for this player.</string>
+    <string name="session_fallback_unplayable">This device couldn\'t play the original file.</string>
+    <string name="session_fallback_not_smooth">The original didn\'t play smoothly on this device.</string>
+    <string name="session_slow_server">The server can\'t convert this video as fast as it plays. A lower quality will play smoothly.</string>
+
+    <string name="session_row_video">Video</string>
+    <string name="session_row_audio">Audio</string>
+    <string name="session_row_bitrate">Bitrate</string>
+    <string name="session_row_encoder">Encoder</string>
+    <string name="session_row_hdr">HDR</string>
+    <string name="session_row_subtitles">Subtitles</string>
+    <string name="session_row_speed">Speed</string>
+    <!-- "Tone mapped to SDR (libplacebo)". -->
+    <string name="session_tone_mapped">Tone mapped to SDR (%1$s)</string>
+    <string name="session_burned_in">Drawn onto the video</string>
+    <!-- "2.5× real time". -->
+    <string name="session_speed">%1$s× real time</string>
+    <!-- "2.5× real time · 40 s ready". -->
+    <string name="session_speed_ready">%1$s× real time · %2$d s ready</string>
+
+    <!-- Errors (VideoPlayer.tsx). -->
+    <string name="session_error_unplayable">This video can\'t be played on this device.</string>
+    <string name="session_error_stuck">This video doesn\'t play on this device: it stops at the same spot each time.</string>
+    <string name="session_error_stopped">Playback stopped and couldn\'t get going again.</string>
+    <string name="session_error_network">The server can\'t be reached.</string>
+    <!-- "Playback failed (ERROR_CODE_DECODING_FAILED)." -->
+    <string name="session_error_engine">Playback failed (%1$s).</string>
+    <string name="session_error_no_file">This item has no file to play.</string>
+</resources>

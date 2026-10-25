@@ -1,0 +1,159 @@
+package app.pley.android.player.session
+
+import app.pley.android.fixtures.FixtureIds
+import app.pley.android.player.PlayQueue
+import app.pley.android.player.PlayRequest
+import app.pley.android.player.PlayerPhase
+import kotlinx.coroutines.runBlocking
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+
+/** Skip Intro, Skip Credits and Up Next on "Fixture Show", whose 20 s episodes have an intro (2-8 s) and credits (16 s on). */
+@RunWith(RobolectricTestRunner::class)
+class MarkersAndUpNextTest {
+    private var h = SessionHarness()
+
+    @After
+    fun close() = h.close()
+
+    private fun episode(startMs: Long, id: Long = FixtureIds.SHOW_S1E1) = h.play(PlayRequest(id, startMs = startMs)).also {
+        h.engine.durationMs = 20_000
+        h.engine.ready()
+    }
+
+    @Test
+    fun `Skip Intro shows inside the intro and lands 750 ms before its end`() {
+        val c = episode(0)
+        h.advance(1_500)
+        assertNull(c.state.value.skipLabel)
+        h.advance(1_000)
+        assertEquals("Skip Intro", c.state.value.skipLabel)
+        assertEquals(2, c.state.value.markers.size)
+        c.skip()
+        assertEquals(FixtureIds.INTRO_END_MS - 750, h.engine.seeks.single())
+        h.advance(500)
+        // A second before the intro ends, the button goes.
+        assertNull(c.state.value.skipLabel)
+        // Nothing skips by itself.
+        assertEquals(1, h.engine.seeks.size)
+    }
+
+    @Test
+    fun `entering the credits offers Skip Credits and Up Next, once per segment`() {
+        val c = episode(15_000)
+        h.advance(1_500)
+        val state = c.state.value
+        assertEquals("Skip Credits", state.skipLabel)
+        val card = state.upNextCard!!
+        assertEquals(FixtureIds.SHOW_S1E2, card.itemId)
+        assertEquals("Up next · S1 · E2", card.heading)
+        assertTrue(card.imageUrl!!.startsWith(h.server.url))
+        assertEquals(card.title, state.upNext)
+        assertEquals(10, state.upNextSecondsLeft)
+        assertEquals(1, h.api.count("next"))
+
+        // Seeking back hides the card; entering the same credits again doesn't bring it back.
+        c.seekTo(10_000)
+        h.advance(500)
+        assertNull(c.state.value.upNextCard)
+        c.seekTo(16_500)
+        h.advance(1_000)
+        assertEquals("Skip Credits", c.state.value.skipLabel)
+        assertNull(c.state.value.upNextCard)
+        assertEquals(1, h.api.count("next"))
+    }
+
+    @Test
+    fun `the countdown plays the next episode on the same engine, after the one before ended`() {
+        val c = episode(15_000)
+        h.advance(1_500)
+        h.advance(9_000)
+        assertEquals(1, c.state.value.upNextSecondsLeft)
+        assertEquals(1, h.playbackRequests().size)
+        h.advance(1_000)
+        val requests = h.playbackRequests()
+        assertEquals(listOf(FixtureIds.SHOW_S1E1, FixtureIds.SHOW_S1E2), requests.map { it.itemId })
+        assertEquals(listOf("start", "progress stopped", "delete", "start"), h.timeline().filter { it != "progress playing" })
+        assertEquals(2, h.engine.prepared.size)
+        assertEquals(FixtureIds.SHOW_S1E2, c.state.value.itemId)
+        assertEquals("Fixture Show", c.state.value.title)
+        assertTrue(c.state.value.subtitle!!.startsWith("S1 · E2 — "))
+        assertNull(c.state.value.upNextCard)
+        // The next one starts where it resumes, unless watched.
+        val next = runBlocking { h.api.item(FixtureIds.SHOW_S1E2) }.userState
+        assertEquals(if (next.watched) 0L else next.positionMs, requests.last().startMs)
+    }
+
+    @Test
+    fun `Play next starts it at once, and says so when there is nothing next`() {
+        val c = episode(0)
+        c.playNext()
+        h.settle()
+        assertEquals(FixtureIds.SHOW_S1E2, h.playbackRequests().last().itemId)
+        c.close()
+        h.settle()
+
+        val last = runBlocking {
+            var id = FixtureIds.SHOW_S2E1
+            while (true) id = h.api.next(id).item?.id ?: break
+            id
+        }
+        val end = h.play(PlayRequest(last))
+        end.playNext()
+        h.settle()
+        assertEquals("This is the last episode", end.state.value.notice)
+        end.dismissNotice()
+        assertNull(end.state.value.notice)
+    }
+
+    @Test
+    fun `without autoplay the card waits, and cancelling it at the end ends playback`() {
+        h.close()
+        h = SessionHarness(autoplay = false)
+        val c = episode(15_500)
+        h.advance(1_000)
+        assertNotNull(c.state.value.upNextCard)
+        assertNull(c.state.value.upNextSecondsLeft)
+        h.engine.end()
+        h.advance(15_000)
+        assertEquals(1, h.playbackRequests().size)
+        assertEquals(PlayerPhase.Paused, c.state.value.phase)
+        assertNotNull(c.state.value.upNextCard)
+        c.cancelUpNext()
+        assertNull(c.state.value.upNextCard)
+        assertEquals(PlayerPhase.Ended, c.state.value.phase)
+    }
+
+    @Test
+    fun `a cancelled card comes back with its countdown at the end`() {
+        val c = episode(15_500)
+        h.advance(1_000)
+        c.cancelUpNext()
+        assertNull(c.state.value.upNextCard)
+        h.engine.end()
+        h.settle()
+        assertEquals(10, c.state.value.upNextSecondsLeft)
+        h.advance(10_000)
+        assertEquals(FixtureIds.SHOW_S1E2, h.playbackRequests().last().itemId)
+    }
+
+    @Test
+    fun `a playlist plays its next video`() {
+        val entries = runBlocking { h.api.playlist(FixtureIds.PLAYLIST_VIDEO).entries.map { it.item.id } }
+        val c = h.play(PlayRequest(entries[0], queue = PlayQueue.Playlist(FixtureIds.PLAYLIST_VIDEO)))
+        h.engine.ready()
+        h.engine.end()
+        h.settle()
+        assertEquals(entries[1], c.state.value.upNextCard?.itemId)
+        assertEquals("Up next", c.state.value.upNextCard?.heading)
+        c.playNext()
+        h.settle()
+        assertEquals(entries[1], h.playbackRequests().last().itemId)
+    }
+}

@@ -1,5 +1,7 @@
 package app.pley.android.player
 
+import app.pley.android.player.session.SavedPlaybackState
+
 /**
  * What to play: an item of the signed-in server, and how. Small enough to
  * travel in an Intent; everything else is fetched or cached.
@@ -37,4 +39,7 @@ interface PlaybackServices {
 
     /** The controller [prepare] made for [key]; `null` once it was closed (or after process death). */
     fun controller(key: String): PlaybackController?
+
+    /** Starts again what [saved] describes, after process death: a new key. */
+    fun restore(saved: SavedPlaybackState): String = prepare(saved.toPlayRequest())
 }

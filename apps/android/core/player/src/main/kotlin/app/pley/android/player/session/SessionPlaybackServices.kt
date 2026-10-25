@@ -1,0 +1,148 @@
+package app.pley.android.player.session
+
+import android.content.Context
+import android.graphics.Bitmap
+import androidx.media3.common.text.Cue
+import app.pley.android.caps.CapsGraph
+import app.pley.android.common.DeviceProfile
+import app.pley.android.common.Tier
+import app.pley.android.data.DataGraph
+import app.pley.android.network.NetworkGraph
+import app.pley.android.player.PlayRequest
+import app.pley.android.player.PlaybackController
+import app.pley.android.player.PlaybackServices
+import app.pley.android.player.PlayerEngine
+import app.pley.android.player.PlayerPhase
+import app.pley.android.player.PlayerUiState
+import app.pley.android.player.subtitles.OkHttpSubtitleFetcher
+import app.pley.android.player.trickplay.OkHttpSheetSource
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+
+/**
+ * [PlaybackServices] with [SessionPlaybackController]s: [prepare] starts the
+ * playback at once (the server's answer, the details and the decoders get
+ * ready while the player screen opens). One video plays at a time: preparing
+ * another closes the one before, whose session ends. Main thread only.
+ */
+class SessionPlaybackServices(
+    /** The environment of the server signed in to now; throws when there is none. */
+    private val environment: () -> PlaybackEnvironment,
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
+) : PlaybackServices {
+    private val controllers = LinkedHashMap<String, PlaybackController>()
+    private var counter = 0
+
+    override fun prepare(request: PlayRequest): String {
+        controllers.values.toList().forEach { it.close() }
+        val key = "play-${++counter}-${request.itemId}"
+        val env = try {
+            environment()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            controllers[key] = FailedPlayback(e.message ?: e.javaClass.simpleName) { controllers.remove(key) }
+            return key
+        }
+        val controller = SessionPlaybackController(request, env, CoroutineScope(SupervisorJob() + dispatcher)) { controllers.remove(key) }
+        controllers[key] = controller
+        controller.start()
+        return key
+    }
+
+    override fun controller(key: String): PlaybackController? = controllers[key]
+
+    companion object {
+        /**
+         * The services of the app: the server and profile signed in to now
+         * ([DataGraph.session]), the engines of [engines], the capability
+         * probe of [caps], reports from the app's own scope.
+         */
+        fun create(
+            context: Context,
+            data: DataGraph,
+            network: NetworkGraph,
+            caps: CapsGraph,
+            profile: DeviceProfile,
+            engines: PlayerEngine.Factory,
+        ): SessionPlaybackServices {
+            val app = context.applicationContext
+            val reporter = SessionReporter(CoroutineScope(SupervisorJob() + Dispatchers.Default))
+            val texts = ResourcePlayerTexts(app)
+            val clientId = clientIdOf(app)
+            val networkKind = networkKindOf(app)
+            return SessionPlaybackServices({
+                val session = data.session.session.value ?: error("Sign in to play")
+                val api = network.api(session.issuer, session.me?.id)
+                PlaybackEnvironment(
+                    api = api,
+                    capabilities = caps.capabilities,
+                    policy = caps.policy,
+                    details = ItemDetails.snapshotFirst(data.items, api),
+                    engines = { Media3EngineLink(engines.create(app, profile, music = false)) },
+                    texts = texts,
+                    clientId = clientId,
+                    reporter = reporter,
+                    subtitles = OkHttpSubtitleFetcher({ network.subtitles(session.issuer) }),
+                    quality = QualityMemory.of(data.settings, networkKind),
+                    sheets = OkHttpSheetSource({ network.images }),
+                    autoplayNext = {
+                        try {
+                            data.settings.settings.first().autoplayNext
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            true
+                        }
+                    },
+                    lowMemory = profile.tier == Tier.T0,
+                )
+            })
+        }
+    }
+}
+
+/** A playback that couldn't start at all (nobody signed in): it says why, and nothing else. */
+private class FailedPlayback(message: String, private val onClosed: () -> Unit) : PlaybackController {
+    override val state: StateFlow<PlayerUiState> = MutableStateFlow(PlayerUiState(phase = PlayerPhase.Error(message, canRetry = false)))
+    override val engine: PlayerEngine? = null
+    override val cues: StateFlow<List<Cue>> = MutableStateFlow(emptyList())
+
+    override fun play() = Unit
+
+    override fun pause() = Unit
+
+    override fun seekTo(positionMs: Long) = Unit
+
+    override fun selectAudio(index: Long) = Unit
+
+    override fun selectSubtitle(index: Long?) = Unit
+
+    override fun selectQuality(name: String) = Unit
+
+    override fun skip() = Unit
+
+    override fun playNext() = Unit
+
+    override fun cancelUpNext() = Unit
+
+    override fun playOriginal() = Unit
+
+    override fun setDetailsOpen(open: Boolean) = Unit
+
+    override fun dismissNotice() = Unit
+
+    override suspend fun thumbnail(positionMs: Long): Bitmap? = null
+
+    override fun saveState(): SavedPlaybackState = SavedPlaybackState(0, null, 0, null, null, QualityPreset.ORIGINAL_ID, null)
+
+    override fun retry() = Unit
+
+    override fun close() = onClosed()
+}
