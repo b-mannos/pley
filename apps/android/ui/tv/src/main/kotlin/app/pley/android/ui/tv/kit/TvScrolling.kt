@@ -8,6 +8,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.pley.android.designsystem.PleyTv
+import app.pley.android.designsystem.TvSafeArea
 
 /**
  * Where scrolling puts what has focus (D-pad rule 4, with the design
@@ -29,8 +30,25 @@ object TvScrolling {
     /** The focused element's leading edge at [fraction] of the viewport. */
     fun root(fraction: Float = 0.3f): BringIntoViewSpec = FractionSpec(fraction)
 
-    /** The focused tile's left edge at [anchor] from the row's left edge (the screen's). */
-    fun row(density: Density, anchor: Dp = PleyTv.Gutter): BringIntoViewSpec = AnchorSpec(with(density) { anchor.toPx() })
+    /**
+     * The focused tile's left edge at [anchor] from the row's left edge (the
+     * screen's). A row of [state] whose tiles all fit before the safe area's
+     * edge stays where it starts instead: anchoring would only move it part
+     * of the way, leaving its first tile cut under the rail.
+     */
+    fun row(density: Density, state: LazyListState? = null, anchor: Dp = PleyTv.Gutter): BringIntoViewSpec = with(density) {
+        if (state != null) RowSpec(anchor.toPx(), TvSafeArea.Horizontal.toPx(), state) else AnchorSpec(anchor.toPx())
+    }
+
+    /** Whether every tile of [state]'s row fits on screen unscrolled, short of [endRoom]; null before its first layout. */
+    fun fits(state: LazyListState, endRoom: Float): Boolean? {
+        val info = state.layoutInfo
+        val items = info.visibleItemsInfo
+        if (info.totalItemsCount == 0 || items.isEmpty()) return null
+        if (items.size < info.totalItemsCount || items.first().index != 0) return false
+        val span = items.last().let { it.offset + it.size } - items.first().offset
+        return span <= info.viewportEndOffset - endRoom
+    }
 
     /**
      * The focused tile's top at [tileTop] from the page's top: by default
@@ -69,6 +87,16 @@ object TvScrolling {
     @Stable
     private class AnchorSpec(private val anchor: Float) : BringIntoViewSpec {
         override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = offset - anchor
+    }
+
+    /**
+     * [AnchorSpec] for a row that scrolls; back to its start for one that
+     * fits. Asked again on every frame of a scroll, so it follows the row.
+     */
+    @Stable
+    private class RowSpec(private val anchor: Float, private val endRoom: Float, private val state: LazyListState) : BringIntoViewSpec {
+        override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
+            if (fits(state, endRoom) == true) state.layoutInfo.visibleItemsInfo.first().offset.toFloat() else offset - anchor
     }
 
     /**

@@ -103,7 +103,7 @@ fun TvRow(
     val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
     val row = remember { RowFocus() }
-    val spec = remember(density) { TvScrolling.row(density) }
+    val spec = remember(density, state) { TvScrolling.row(density, state) }
     val group = remember { FocusRequester() }
     if (column != null) {
         DisposableEffect(column, rowKey) {

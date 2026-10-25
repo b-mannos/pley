@@ -29,6 +29,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -67,6 +68,8 @@ import app.pley.android.ui.tv.kit.TvTile
 import app.pley.android.ui.tv.kit.railOnLeftStopOnRight
 import app.pley.android.ui.tv.kit.rememberRested
 import app.pley.android.ui.tv.kit.rememberedFocus
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 
 /**
  * The seasons and episodes (design spec §2.4, §4.4; mockup tv-show): the
@@ -219,10 +222,16 @@ private fun EpisodeRow(
     val start = remember(episodes, target) { episodes.indexOfFirst { it.item.id == target }.coerceAtLeast(0) }
     val state = rememberLazyListState(initialFirstVisibleItemIndex = start)
     val density = LocalDensity.current
-    val spec = remember(density) { TvScrolling.row(density) }
+    val spec = remember(density, state) { TvScrolling.row(density, state) }
     val targetRequester = remember { FocusRequester() }
     val targetId = episodes.getOrNull(start)?.item?.id
     val rail = LocalTvRailFocus.current
+    // A season that fits on screen opens unscrolled, whichever episode is next.
+    LaunchedEffect(state, density) {
+        val endRoom = with(density) { TvSafeArea.Horizontal.toPx() }
+        val fits = snapshotFlow { TvScrolling.fits(state, endRoom) }.filterNotNull().first()
+        if (fits && (state.firstVisibleItemIndex != 0 || state.firstVisibleItemScrollOffset != 0)) state.scrollToItem(0)
+    }
     CompositionLocalProvider(LocalBringIntoViewSpec provides spec) {
         LazyRow(
             state = state,
