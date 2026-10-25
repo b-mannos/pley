@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import { Check, ShieldCheck, TriangleAlert } from "lucide-react";
 import { errorMessage, isApiError } from "@/api/client";
 import { useLogout, useProfiles, useServer } from "@/api/hooks";
-import type { ConsentRequest, OAuthClient } from "@/api/oauth";
+import type { AppRedirect, ConsentRequest, OAuthClient } from "@/api/oauth";
 import { useOptionalAudioPlayer } from "@/audio/AudioPlayer";
 import { useAuth } from "@/auth";
 import { Avatar } from "@/components/Avatar";
@@ -76,6 +76,15 @@ function useKeysSettled(ms: number) {
   return settled;
 }
 
+/** Where an app's answer goes back to, in words. */
+export function whereItGoes(redirect: AppRedirect): string {
+  return redirect.kind === "web"
+    ? `the website ${redirect.to}`
+    : redirect.kind === "loopback"
+      ? "an app on this computer"
+      : "an app on this device";
+}
+
 /** Where the answer goes, and what to be sure of before allowing. */
 function Destination({ redirect }: { redirect: ConsentRequest["redirect"] }) {
   if (redirect.kind === "device") {
@@ -95,13 +104,7 @@ function Destination({ redirect }: { redirect: ConsentRequest["redirect"] }) {
   return (
     <div>
       <p className="font-medium">It goes back to:</p>
-      <p className="mt-1">
-        {redirect.kind === "web"
-          ? `the website ${redirect.to}`
-          : redirect.kind === "loopback"
-            ? "an app on this computer"
-            : "an app on this device"}
-      </p>
+      <p className="mt-1">{whereItGoes(redirect)}</p>
       {redirect.kind !== "web" ? (
         <p className="mt-1 text-danger">Only allow this if you just started signing in to the app.</p>
       ) : null}

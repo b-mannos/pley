@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import type { ConsentRequest, OAuthClient, RequestError } from "@/api/oauth";
 import type { User } from "@/api/types";
 import { apiError, LocationDisplay, mockApi, TestProviders, testQueryClient, testUser, type FakeRequest } from "@/test/render";
-import { AuthorizePage } from "./AuthorizePage";
+import { AuthorizePage, RequestOverPage } from "./AuthorizePage";
 
 const QUERY =
   "response_type=code&client_id=https%3A%2F%2Fhhaidar.github.io%2Fpley%2Foauth%2Fandroid.json" +
@@ -294,11 +294,16 @@ describe("AuthorizePage", () => {
       message: "this app can't ask for openid",
       back_url: "/api/oauth/requests/r1/continue",
       client: other,
+      redirect: { kind: "web", to: "apps.example.com" },
     };
     serve({ answer: () => error });
     renderPage();
 
     expect(await screen.findByText("This app can't ask for openid")).toBeInTheDocument();
+    // Where the click leads is shown before it.
+    expect(screen.getByText("from apps.example.com")).toBeInTheDocument();
+    expect(screen.getByText("Back to the app goes to:")).toBeInTheDocument();
+    expect(screen.getByText("the website apps.example.com")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Allow" })).not.toBeInTheDocument();
     expect(assign).not.toHaveBeenCalled();
     await userEvent.setup().click(screen.getByRole("button", { name: "Back to the app" }));
@@ -315,6 +320,19 @@ describe("AuthorizePage", () => {
     expect(screen.queryByRole("button", { name: "Allow" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Don't allow" })).not.toBeInTheDocument();
     expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("says a request is over where a late link back to the app leads", () => {
+    const client = testQueryClient();
+    render(<RequestOverPage />, {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <TestProviders route="/oauth/over" client={client}>
+          {children}
+        </TestProviders>
+      ),
+    });
+    expect(screen.getByRole("heading", { name: "This request is over" })).toBeInTheDocument();
+    expect(screen.getByText("Start again from the app.")).toBeInTheDocument();
   });
 
   it("comes back to the whole request from another profile", async () => {

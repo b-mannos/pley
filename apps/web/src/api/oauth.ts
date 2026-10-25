@@ -12,6 +12,12 @@ export interface OAuthClient {
   first_party: boolean;
 }
 
+/** Where an app's answer goes back to: a website (its host), an app on this computer, or an app (its scheme). */
+export interface AppRedirect {
+  kind: "app" | "loopback" | "web";
+  to: string;
+}
+
 /** What an app may ask for. */
 export type OAuthScope = "library" | "play" | "playlists" | "profiles";
 
@@ -28,7 +34,7 @@ export interface ConsentRequest {
    * Where the answer goes: back to a website (its host) or an app (its
    * scheme), or to the TV showing a code ("BCDF-GHJK").
    */
-  redirect: { kind: "app" | "loopback" | "web" | "device"; to: string };
+  redirect: AppRedirect | { kind: "device"; to: string };
   scopes: (OAuthScope | (string & {}))[];
 }
 
@@ -39,6 +45,8 @@ export interface RequestError {
   message: string;
   back_url: string;
   client: OAuthClient;
+  /** Where "Back to the app" goes, shown before the click. */
+  redirect: AppRedirect;
 }
 
 export type RequestAnswer = ConsentRequest | RequestError;

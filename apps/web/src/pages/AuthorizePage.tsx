@@ -5,7 +5,7 @@ import { decide, startRequest, type ConsentRequest, type RequestAnswer, type Req
 import { Splash } from "@/auth";
 import { Button, Spinner } from "@/components/ui";
 import { useDocumentTitle } from "@/lib/hooks";
-import { AppConsent, appName } from "./AppConsent";
+import { AppConsent, appName, whereItGoes } from "./AppConsent";
 import { AuthLayout } from "./AuthLayout";
 
 /** How long before a link back to the app shows, in case the browser didn't go. */
@@ -59,16 +59,33 @@ export function AuthorizePage() {
   return <Consent request={current.answer} />;
 }
 
-/** A mistake the app made: it hears about it only if the person goes back. */
+/**
+ * A mistake the app made: it hears about it only if the person goes back,
+ * knowing where that is (a request with a mistake can be a lure to a site).
+ */
 function RequestErrorScreen({ request }: { request: RequestError }) {
   return (
-    <AuthLayout title="This request can't be allowed">
-      <div className="space-y-5">
-        <p className="text-sm text-muted">{errorMessage(new Error(request.message))}</p>
+    <AuthLayout title="This request can't be allowed" subtitle={`from ${appName(request.client)}`}>
+      <div className="space-y-5 text-sm">
+        <p className="text-muted">{errorMessage(new Error(request.message))}</p>
+        <div>
+          <p className="font-medium">Back to the app goes to:</p>
+          <p className="mt-1">{whereItGoes(request.redirect)}</p>
+        </div>
         <Button variant="primary" className="w-full" onClick={() => window.location.assign(request.back_url)}>
           Back to the app
         </Button>
       </div>
+    </AuthLayout>
+  );
+}
+
+/** Where the way back to an app leads once the request is over (a link followed late, from a tab left open). */
+export function RequestOverPage() {
+  useDocumentTitle("Request over");
+  return (
+    <AuthLayout title="This request is over">
+      <p className="text-sm text-muted">Start again from the app.</p>
     </AuthLayout>
   );
 }

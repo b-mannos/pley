@@ -71,6 +71,17 @@ const router = createBrowserRouter([
   { path: "/setup", element: <SetupPage />, errorElement: <RouteErrorPage /> },
   { path: "/login", element: <LoginPage />, errorElement: <RouteErrorPage /> },
   { path: "/invite/:code", element: <InvitePage />, errorElement: <RouteErrorPage /> },
+  // Where the way back to an app leads once its request is over.
+  {
+    path: "/oauth/over",
+    errorElement: <RouteErrorPage />,
+    ...onDemand(
+      () => import("@/pages/AuthorizePage"),
+      (m) => m.RequestOverPage,
+      () => [],
+      <Splash />,
+    ),
+  },
   {
     element: <RequireAuth />,
     errorElement: <RouteErrorPage />,
