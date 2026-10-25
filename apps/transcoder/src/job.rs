@@ -29,7 +29,7 @@ use crate::extract::Extractor;
 use crate::ffmpeg::Ffmpeg;
 use crate::keyframes::KeyframeStore;
 use crate::metrics::Metrics;
-use crate::plan::{ArgsContext, Burn, MAX_DURATION_MS, PROCESS_WINDOW, Plan};
+use crate::plan::{ArgsContext, Burn, MAX_DURATION_MS, PROCESS_WINDOW, Plan, READRATE, READRATE_BURST_MS};
 use crate::probe::Prober;
 use crate::util::now_ms;
 
@@ -50,6 +50,9 @@ const MAX_FAILURES: u32 = 2;
 /// another request is waiting for it (prevents two requests from restarting
 /// each other forever).
 const PREEMPT_GRACE: Duration = Duration::from_secs(3);
+/// What stopping a process costs, until one was stopped (FFmpeg takes
+/// 0.1-0.3 s to exit, tone mapping on Vulkan the longest).
+const STOP_COST: Duration = Duration::from_millis(300);
 /// Segments deleted per lock acquisition when pruning.
 const PRUNE_BATCH: usize = 32;
 
@@ -149,16 +152,53 @@ struct Runtime {
     /// The automatic preset of the running process (index in
     /// [`adaptive::LADDER`]), and when it started or moved.
     preset: Option<(usize, Instant)>,
+    /// What a restart costs this job: from starting FFmpeg to its first
+    /// segment (the latest process's), and stopping the one before.
+    start_cost: Option<Duration>,
+    stop_cost: Option<Duration>,
 }
 
 struct Proc {
+    /// The segment it started at.
+    start: u32,
     end: u32,
     started: Instant,
     next: Arc<AtomicU32>,
     /// [`LOOKAHEAD`] in the job's segments.
     lookahead: u32,
+    pace: Arc<Mutex<Pace>>,
     exited: watch::Receiver<bool>,
     kill: Option<oneshot::Sender<()>>,
+}
+
+/// How fast a process has been going over the last few seconds. FFmpeg's
+/// own `speed` is the average since the process started, which the burst
+/// before the read rate applies keeps high long after it ended.
+#[derive(Default)]
+struct Pace {
+    /// When the process was where (ms of media), oldest first.
+    samples: VecDeque<(Instant, i64)>,
+}
+
+impl Pace {
+    /// How long the speed is measured over.
+    const WINDOW: Duration = Duration::from_secs(4);
+    /// The least of them that gives a speed.
+    const MIN_SPAN: Duration = Duration::from_secs(2);
+
+    fn record(&mut self, at: Instant, out_ms: i64) {
+        self.samples.push_back((at, out_ms));
+        while self.samples.get(1).is_some_and(|(t, _)| at.saturating_duration_since(*t) >= Self::WINDOW) {
+            self.samples.pop_front();
+        }
+    }
+
+    /// Media seconds made per second lately.
+    fn speed(&self) -> Option<f64> {
+        let (&(t0, m0), &(t1, m1)) = (self.samples.front()?, self.samples.back()?);
+        let span = t1.saturating_duration_since(t0);
+        (span >= Self::MIN_SPAN).then(|| (m1 - m0) as f64 / 1000.0 / span.as_secs_f64())
+    }
 }
 
 impl Proc {
@@ -382,11 +422,17 @@ impl JobManager {
         }
         if let Some(p) = guard.as_ref().filter(|p| p.running()) {
             if p.will_produce(n) {
-                return Ok(());
-            }
-            // Another request is waiting for this young process: let it be
-            // served first. This request retries after the next segment or second.
-            if p.started.elapsed() < PREEMPT_GRACE && job.is_awaited(|m| m != n && p.will_produce(m)) {
+                match job.throttled_wait(p, n) {
+                    None => return Ok(()),
+                    Some(wait) => tracing::debug!(
+                        job = %job.id,
+                        "segment {n}: restarting rather than waiting {:.1} s for the throttled process",
+                        wait.as_secs_f64()
+                    ),
+                }
+            } else if p.started.elapsed() < PREEMPT_GRACE && job.is_awaited(|m| m != n && p.will_produce(m)) {
+                // Another request is waiting for this young process: let it be
+                // served first. This request retries after the next segment or second.
                 return Ok(());
             }
         }
@@ -397,7 +443,12 @@ impl JobManager {
             }
         }
         if let Some(old) = guard.take() {
+            let running = old.running();
+            let stopping = Instant::now();
             old.stop().await;
+            if running {
+                job.runtime.lock().stop_cost = Some(stopping.elapsed());
+            }
         }
         *guard = Some(self.spawn(job, n, None)?);
         Ok(())
@@ -514,6 +565,7 @@ impl JobManager {
         tracing::debug!(job = %job.id, "ffmpeg {}", args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "));
         let mut cmd = self.ff.command();
         cmd.args(&args).current_dir(&job.dir).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let spawned = Instant::now();
         let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(err) => {
@@ -550,8 +602,9 @@ impl JobManager {
 
         let next = Arc::new(AtomicU32::new(start));
         let tail = Arc::new(Mutex::new(VecDeque::new()));
-        tokio::spawn(read_segment_list(job.clone(), stdout, next.clone(), self.metrics.clone()));
-        tokio::spawn(read_progress(job.clone(), stderr, start_ms, tail.clone()));
+        let pace = Arc::new(Mutex::new(Pace::default()));
+        tokio::spawn(read_segment_list(job.clone(), stdout, next.clone(), spawned, self.metrics.clone()));
+        tokio::spawn(read_progress(job.clone(), stderr, start_ms, tail.clone(), pace.clone()));
 
         let (exit_tx, exit_rx) = watch::channel(false);
         let (kill_tx, kill_rx) = oneshot::channel::<()>();
@@ -578,10 +631,12 @@ impl JobManager {
         });
 
         Ok(Proc {
+            start,
             end,
             started: Instant::now(),
             next,
             lookahead: job.segments_in(LOOKAHEAD),
+            pace,
             exited: exit_rx,
             kill: Some(kill_tx),
         })
@@ -678,6 +733,38 @@ impl Job {
         rt.state == JobState::Running
             && rt.process.as_ref().is_some_and(|p| !p.hardware)
             && self.plan.video.as_ref().is_some_and(|v| !v.copy)
+    }
+
+    /// The wait for segment `n` from process `p`, which will produce it, when
+    /// restarting at `n` is quicker, so the request doesn't wait. That is when
+    /// the process is held back by the read rate: past its burst, going at
+    /// that rate (the encoder isn't what limits it), so slower than a new
+    /// process with a burst of its own. And when the wait is longer than a
+    /// restart costs this job, and no other request waits for a segment the
+    /// process is about to make (players that fetch several at once).
+    fn throttled_wait(&self, p: &Proc, n: u32) -> Option<Duration> {
+        let bounds = &self.plan.boundaries;
+        let next = p.next.load(Relaxed) as usize;
+        let n = n as usize;
+        if !self.plan.throttle || n < next || n + 1 >= bounds.len() || next + 1 >= bounds.len() {
+            return None;
+        }
+        if bounds[next] - bounds[p.start as usize] < READRATE_BURST_MS {
+            return None;
+        }
+        let speed = p.pace.lock().speed()?;
+        if (speed - READRATE).abs() > READRATE * 0.1 {
+            return None;
+        }
+        // Up to the end of `n`, from halfway through the one being made.
+        let media_ms = (bounds[n + 1] - bounds[next]) - (bounds[next + 1] - bounds[next]) / 2;
+        let wait = Duration::from_secs_f64(media_ms.max(0) as f64 / 1000.0 / speed);
+        let restart = {
+            let rt = self.runtime.lock();
+            rt.start_cost? + rt.stop_cost.unwrap_or(STOP_COST)
+        };
+        let others = self.is_awaited(|m| m as usize != n && p.will_produce(m));
+        (wait > restart && !others).then_some(wait)
     }
 
     /// How many of this job's segments last `span` (at least one).
@@ -865,11 +952,21 @@ impl Job {
     }
 }
 
-async fn read_segment_list(job: Arc<Job>, stdout: ChildStdout, next: Arc<AtomicU32>, metrics: Arc<Metrics>) {
+async fn read_segment_list(
+    job: Arc<Job>,
+    stdout: ChildStdout,
+    next: Arc<AtomicU32>,
+    spawned: Instant,
+    metrics: Arc<Metrics>,
+) {
     let mut lines = BufReader::new(stdout).lines();
+    let mut first = true;
     while let Ok(Some(line)) = lines.next_line().await {
         if let Some(n) = parse_list_line(&line) {
             tracing::trace!(job = %job.id, "segment {n} ready");
+            if std::mem::take(&mut first) {
+                job.runtime.lock().start_cost = Some(spawned.elapsed());
+            }
             job.mark_ready(n);
             next.store(n + 1, Relaxed);
             Metrics::inc(&metrics.segments_produced);
@@ -877,7 +974,13 @@ async fn read_segment_list(job: Arc<Job>, stdout: ChildStdout, next: Arc<AtomicU
     }
 }
 
-async fn read_progress(job: Arc<Job>, stderr: ChildStderr, start_ms: i64, tail: Arc<Mutex<VecDeque<String>>>) {
+async fn read_progress(
+    job: Arc<Job>,
+    stderr: ChildStderr,
+    start_ms: i64,
+    tail: Arc<Mutex<VecDeque<String>>>,
+    pace: Arc<Mutex<Pace>>,
+) {
     const PROGRESS_KEYS: [&str; 12] = [
         "frame",
         "fps",
@@ -900,6 +1003,10 @@ async fn read_progress(job: Arc<Job>, stderr: ChildStderr, start_ms: i64, tail: 
             if PROGRESS_KEYS.contains(&key) || key.starts_with("stream_") {
                 if key == "progress" {
                     job.update_progress(&block, start_ms);
+                    let out_us = block.get("out_time_us").and_then(|v| v.trim().parse::<f64>().ok());
+                    if let Some(us) = out_us.filter(|us| *us >= 0.0) {
+                        pace.lock().record(Instant::now(), start_ms + (us / 1000.0) as i64);
+                    }
                     block.clear();
                 } else {
                     block.insert(key.to_owned(), value.to_owned());
@@ -1028,10 +1135,12 @@ mod tests {
     fn waits_only_for_segments_ahead_of_the_process() {
         let (_exit_tx, exited) = watch::channel(false);
         let p = Proc {
+            start: 0,
             end: 20,
             started: Instant::now(),
             next: Arc::new(AtomicU32::new(10)),
             lookahead: 3,
+            pace: Arc::default(),
             exited,
             kill: None,
         };
@@ -1042,6 +1151,81 @@ mod tests {
         p.next.store(18, Relaxed);
         assert!(p.will_produce(19));
         assert!(!p.will_produce(20), "outside the process window");
+    }
+
+    #[test]
+    fn pace_is_measured_over_the_last_seconds() {
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        let mut pace = Pace::default();
+        pace.record(at(0), 0);
+        pace.record(at(1_000), 30_000);
+        assert_eq!(pace.speed(), None, "too short to tell");
+        // After a burst of 30 s in a second, twice real time.
+        for s in 2..=10 {
+            pace.record(at(s * 1_000), 30_000 + (s as i64 - 1) * 2_000);
+        }
+        let speed = pace.speed().unwrap();
+        assert!((speed - 2.0).abs() < 0.001, "the burst is forgotten: {speed}");
+    }
+
+    #[test]
+    fn seeks_just_past_a_throttled_process_restart_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut job = job(dir.path(), (0..=100).map(|i| i * 2_000).collect());
+        job.plan.segment_seconds = 2.0;
+        job.plan.throttle = true;
+        let (_exit_tx, exited) = watch::channel(false);
+        let p = Proc {
+            start: 0,
+            end: 100,
+            started: Instant::now(),
+            next: Arc::new(AtomicU32::new(40)),
+            lookahead: 6,
+            pace: Arc::default(),
+            exited,
+            kill: None,
+        };
+        let going = |speed: f64| {
+            let at = Instant::now();
+            let mut pace = p.pace.lock();
+            *pace = Pace::default();
+            pace.record(at, 80_000);
+            pace.record(at + Duration::from_secs(3), 80_000 + (3_000.0 * speed) as i64);
+        };
+        going(2.0);
+        assert_eq!(job.throttled_wait(&p, 42), None, "no restart measured yet");
+        job.runtime.lock().start_cost = Some(Duration::from_millis(400));
+        job.runtime.lock().stop_cost = Some(Duration::from_millis(100));
+
+        // Two segments past the one being made: 2.5 segments of 2 s at twice
+        // real time, against 0.5 s to restart.
+        let wait = job.throttled_wait(&p, 42).unwrap();
+        assert!((wait.as_secs_f64() - 2.5).abs() < 0.001, "{wait:?}");
+        assert_eq!(job.throttled_wait(&p, 40), None, "half a segment: no quicker to restart");
+        // (a) Still in its burst (40 s made of 60).
+        p.next.store(20, Relaxed);
+        assert_eq!(job.throttled_wait(&p, 22), None);
+        p.next.store(40, Relaxed);
+        // (b) Slower than the read rate: the encoder is what limits it.
+        going(1.5);
+        assert_eq!(job.throttled_wait(&p, 42), None);
+        going(2.1);
+        assert!(job.throttled_wait(&p, 42).is_some());
+        // (c) A restart costing more than the wait.
+        job.runtime.lock().start_cost = Some(Duration::from_secs(3));
+        assert_eq!(job.throttled_wait(&p, 42), None);
+        job.runtime.lock().start_cost = Some(Duration::from_millis(400));
+        // (d) Another request waits for a segment the process is about to make.
+        let other = Waiting::register(&job, 41);
+        assert_eq!(job.throttled_wait(&p, 42), None);
+        drop(other);
+        let this = Waiting::register(&job, 42);
+        assert!(job.throttled_wait(&p, 42).is_some(), "the request itself doesn't count");
+        drop(this);
+        // Not throttled at all.
+        job.plan.throttle = false;
+        assert_eq!(job.throttled_wait(&p, 42), None);
     }
 
     #[test]

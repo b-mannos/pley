@@ -33,8 +33,8 @@ pub const MAX_DURATION_MS: i64 = MAX_SEGMENTS * 4_000;
 /// Maximum segments per ffmpeg process (keeps command lines short on Windows).
 pub const PROCESS_WINDOW: u32 = 1200;
 /// Throttling: read at 2× realtime after a 60 s burst.
-const READRATE: &str = "2";
-const READRATE_BURST: &str = "60";
+pub const READRATE: f64 = 2.0;
+pub const READRATE_BURST_MS: i64 = 60_000;
 
 /// CPU tone mapping chain (zimg). Expects HDR input, outputs 8-bit BT.709.
 pub const ZSCALE_TONEMAP: &str = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
@@ -490,7 +490,8 @@ impl Plan {
 
         // Main input.
         if self.throttle {
-            a.push_all(["-readrate", READRATE, "-readrate_initial_burst", READRATE_BURST]);
+            let (rate, burst) = (trim_float(READRATE), (READRATE_BURST_MS / 1000).to_string());
+            a.push_all(["-readrate", &rate, "-readrate_initial_burst", &burst]);
         }
         if seek_ms > 0 {
             // Converted audio starts at the keyframe like the copied video,

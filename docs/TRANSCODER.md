@@ -116,7 +116,16 @@ following status codes:
    segment already exists. If it doesn't:
    - When a running ffmpeg process is about to produce it (at most 12 s of
      segments ahead of the process, never behind it), the request waits for
-     that process.
+     that process. Not when the read rate holds the process back (see
+     *Throttling*) and that wait is longer than a restart: past its burst and
+     going at the read rate (not slower: then the encoder is the limit, and a
+     new process would be no quicker), it makes a segment of 2 s in about a
+     second, so a seek a few segments past it would wait seconds. The
+     request then starts a new process at its segment, with a burst of its
+     own, when the wait (from halfway through the segment being made) is
+     longer than this job's last start to a first segment plus the stop of
+     the old process, and no other request waits for a segment the old
+     process is about to make.
    - Otherwise a new process starts exactly at that segment, using `-ss`,
      `-output_ts_offset`, `-segment_times` and `-segment_start_number`, so
      timestamps stay on the absolute timeline. `avoid_negative_ts` is disabled
@@ -141,7 +150,8 @@ following status codes:
    live metrics: fps, speed, bitrate and position.
 4. **Throttling.** Once a 60 s buffer exists, ffmpeg reads at most 2× realtime
    (`-readrate`), which saves CPU, GPU and disk. This applies when supported
-   and enabled.
+   and enabled. How fast a process goes is measured over its last 4 s of
+   progress, since FFmpeg's own `speed` averages in the burst.
 5. **Housekeeping.**
    - A process idle for 60 s (paused player) is stopped.
    - A job idle for 20 minutes expires.
