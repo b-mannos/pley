@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings, two panes (design spec §4.8). -->
+    <string name="tv_settings_title">Settings</string>
+    <string name="tv_settings_profile">Profile</string>
+    <string name="tv_settings_playback">Playback</string>
+    <string name="tv_settings_audio">Audio</string>
+    <string name="tv_settings_display">Subtitles and display</string>
+    <string name="tv_settings_server">Server</string>
+    <string name="tv_settings_diagnostics">Diagnostics</string>
+    <string name="tv_settings_about">About</string>
+
+    <!-- Profile: who is watching and their track defaults (AccountPage.tsx). -->
+    <string name="tv_account_role_managed">Managed profile</string>
+    <string name="tv_account_role_user">User</string>
+    <string name="tv_account_switch_profile">Switch profile</string>
+    <string name="tv_account_audio_language">Audio language</string>
+    <string name="tv_account_subtitles">Subtitles</string>
+    <string name="tv_account_subtitle_language">Subtitle language</string>
+    <string name="tv_account_file_default">The file\'s default</string>
+    <string name="tv_account_same_as_audio">Same as the audio language</string>
+    <string name="tv_account_change_on_web">change on the web</string>
+    <string name="tv_account_defaults_read_only">This server doesn\'t let the app change these: change them on the web</string>
+    <string name="tv_account_saved">Saved</string>
+    <string name="tv_account_subtitles_off">Off</string>
+    <string name="tv_account_subtitles_off_hint">Subtitles stay off until you turn them on.</string>
+    <string name="tv_account_subtitles_forced">Only for foreign dialogue</string>
+    <string name="tv_account_subtitles_forced_hint">Forced subtitles come on: they translate the lines you\'re meant to read.</string>
+    <string name="tv_account_subtitles_foreign">When the audio is in another language</string>
+    <string name="tv_account_subtitles_foreign_hint">Full subtitles come on when the audio isn\'t in your subtitle language.</string>
+    <string name="tv_account_subtitles_always">Always</string>
+    <string name="tv_account_subtitles_always_hint">Subtitles in your language come on whenever there are some.</string>
+    <string name="tv_account_history">Watch history</string>
+    <string name="tv_account_always_start_as">Always start as</string>
+    <string name="tv_account_ask_who">Ask who\'s watching</string>
+    <string name="tv_account_manage_web">Manage your account on the web</string>
+    <string name="tv_account_manage_web_value">Name, picture, password, PIN, two-step, devices and apps</string>
+    <string name="tv_account_web_title">Manage your account on the web</string>
+    <string name="tv_account_web_body">Scan the code with your phone, or go to this address on a phone or computer on the same network:</string>
+    <string name="tv_account_close">Close</string>
+
+    <!-- Sign out. -->
+    <string name="tv_account_sign_out">Sign out</string>
+    <string name="tv_account_sign_out_title">Sign out?</string>
+    <string name="tv_account_sign_out_body">pley signs this TV out of %1$s and deletes what it saved from it. The music stops.</string>
+    <string name="tv_account_sign_out_intro">Sign this TV out of %1$s. You\'ll need a new link code to sign in again.</string>
+    <string name="tv_account_cancel">Cancel</string>
+
+    <!-- Watch history. -->
+    <plurals name="tv_account_history_count">
+        <item quantity="one">%1$d play</item>
+        <item quantity="other">%1$d plays</item>
+    </plurals>
+    <string name="tv_account_history_empty_title">No history yet</string>
+    <string name="tv_account_history_empty">Movies, episodes and songs you finish show up here.</string>
+    <string name="tv_account_history_failed">Couldn\'t load your watch history</string>
+    <string name="tv_account_history_more">Show more</string>
+    <string name="tv_account_history_loading">Loading…</string>
+    <string name="tv_account_history_remove">Remove %1$s from history</string>
+    <string name="tv_account_retry">Try again</string>
+    <string name="tv_account_back">Back</string>
+
+    <!-- Playback. -->
+    <string name="tv_settings_quality">Quality</string>
+    <string name="tv_settings_quality_original">Original</string>
+    <string name="tv_settings_quality_preset">%1$s · %2$d Mbps</string>
+    <string name="tv_settings_refresh_rate">Match the refresh rate</string>
+    <string name="tv_settings_refresh_auto">Auto</string>
+    <string name="tv_settings_refresh_auto_hint">As the TV\'s own match-content setting says, for videos of 10 minutes or more</string>
+    <string name="tv_settings_refresh_always">Always</string>
+    <string name="tv_settings_refresh_always_hint">The TV switches to the video\'s frame rate, whatever its own setting</string>
+    <string name="tv_settings_refresh_off">Off</string>
+    <string name="tv_settings_refresh_off_hint">The TV keeps its refresh rate</string>
+    <string name="tv_settings_autoplay">Play the next episode by itself</string>
+    <string name="tv_settings_autoplay_hint">After a 10 second countdown</string>
+    <string name="tv_settings_playback_details">Playback details</string>
+    <string name="tv_settings_playback_details_hint">Show how a video plays (direct, remux or transcode) over it</string>
+    <string name="tv_settings_advanced">Advanced</string>
+    <string name="tv_settings_tunneling">Tunneled playback</string>
+    <string name="tv_settings_tunneling_hint">Smoother video on some TVs; can break playback on others</string>
+    <string name="tv_settings_software_video">Software video decoding</string>
+    <string name="tv_settings_software_video_hint">Debug builds: lets emulators play video without a hardware decoder</string>
+
+    <!-- Audio: passthrough per format. -->
+    <string name="tv_settings_passthrough_intro">Send surround sound to your TV or receiver as it is, or decode it here.</string>
+    <string name="tv_settings_format_ac3">Dolby Digital</string>
+    <string name="tv_settings_format_eac3">Dolby Digital Plus</string>
+    <string name="tv_settings_format_atmos">Dolby Atmos</string>
+    <string name="tv_settings_format_truehd">Dolby TrueHD</string>
+    <string name="tv_settings_format_dts">DTS</string>
+    <string name="tv_settings_format_dts_hd">DTS-HD and DTS:X</string>
+    <string name="tv_settings_passthrough_auto">Auto</string>
+    <string name="tv_settings_passthrough_auto_hint">As the TV or receiver says it plays</string>
+    <string name="tv_settings_passthrough_on">On</string>
+    <string name="tv_settings_passthrough_on_hint">Always send it as it is</string>
+    <string name="tv_settings_passthrough_off">Off</string>
+    <string name="tv_settings_passthrough_off_hint">Never: pley converts it</string>
+
+    <!-- Subtitles and display. -->
+    <string name="tv_settings_subtitle_size">Subtitle size</string>
+    <string name="tv_settings_size_small">Small</string>
+    <string name="tv_settings_size_medium">Medium</string>
+    <string name="tv_settings_size_large">Large</string>
+    <string name="tv_settings_size_largest">Largest</string>
+    <string name="tv_settings_subtitle_background">Subtitle background</string>
+    <string name="tv_settings_background_none">None, with an outline</string>
+    <string name="tv_settings_background_box">Dark box</string>
+    <string name="tv_settings_grid_density">Grid density</string>
+    <string name="tv_settings_density_small">More, smaller posters</string>
+    <string name="tv_settings_density_medium">Medium</string>
+    <string name="tv_settings_density_large">Fewer, larger posters</string>
+
+    <!-- Server, Diagnostics, About. -->
+    <string name="tv_settings_server_value">The server this TV uses</string>
+    <string name="tv_settings_server_unknown">No server</string>
+    <string name="tv_settings_switch_server">Switch server</string>
+    <string name="tv_settings_open_diagnostics">Open diagnostics</string>
+    <string name="tv_settings_open_diagnostics_value">What this TV decodes and shows, and why</string>
+    <string name="tv_settings_version">Version</string>
+    <string name="tv_settings_licences">Open-source licences</string>
+    <string name="tv_diagnostics_title">Diagnostics</string>
+    <string name="tv_diagnostics_device">This TV</string>
+    <string name="tv_diagnostics_app">App</string>
+    <string name="tv_diagnostics_app_value">pley %1$s</string>
+    <string name="tv_diagnostics_plays">What it plays</string>
+    <string name="tv_diagnostics_probing">Checking what this TV plays…</string>
+    <string name="tv_diagnostics_probe_failed">The check of this TV failed.</string>
+    <string name="tv_diagnostics_probe_again">Check again</string>
+</resources>

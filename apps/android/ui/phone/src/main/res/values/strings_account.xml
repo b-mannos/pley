@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Me (design spec §4.8; apps/web/src/pages/AccountPage.tsx). -->
+    <string name="account_me">Me</string>
+    <string name="account_role_managed">Managed profile</string>
+    <string name="account_role_user">User</string>
+    <string name="account_switch_profile">Switch profile</string>
+    <string name="account_activity">Activity</string>
+    <string name="account_history">Watch history</string>
+    <string name="account_this_device">This device</string>
+    <string name="account_settings">Settings</string>
+    <string name="account_settings_value">Quality, refresh rate, subtitles, privacy</string>
+    <string name="account_diagnostics">Diagnostics</string>
+    <string name="account_diagnostics_value">What this device plays, and why</string>
+    <string name="account_account">Account</string>
+    <string name="account_manage_web">Manage your account on the web</string>
+    <string name="account_manage_web_value">Name, picture, password, PIN, two-step, devices and apps</string>
+    <string name="account_link_tv">Link a TV</string>
+    <string name="account_link_tv_value">Enter the code a TV shows</string>
+    <string name="account_switch_server">Switch server</string>
+    <string name="account_sign_out">Sign out</string>
+    <string name="account_sign_out_title">Sign out?</string>
+    <string name="account_sign_out_body">pley signs this device out of %1$s and deletes what it saved from it. The music stops.</string>
+    <string name="account_version">pley %1$s for Android</string>
+
+    <!-- Track defaults (AccountPage.tsx PlaybackCard). -->
+    <string name="account_audio_and_subtitles">Audio and subtitles</string>
+    <string name="account_defaults_footer">What a film or show starts with until you pick tracks for it. The tracks you pick are remembered for each title.</string>
+    <string name="account_defaults_web_only">This server lets you change these on the web only.</string>
+    <string name="account_defaults_read_only">This server doesn\'t let the app change these: change them on the web</string>
+    <string name="account_change_on_web">Change on the web</string>
+    <string name="account_audio_language">Audio language</string>
+    <string name="account_subtitles">Subtitles</string>
+    <string name="account_subtitle_language">Subtitle language</string>
+    <string name="account_language_file_default">The file\'s default</string>
+    <string name="account_language_same_as_audio">Same as the audio language</string>
+    <string name="account_subtitles_off">Off</string>
+    <string name="account_subtitles_off_hint">Subtitles stay off until you turn them on.</string>
+    <string name="account_subtitles_forced">Only for foreign dialogue</string>
+    <string name="account_subtitles_forced_hint">Forced subtitles come on: they translate the lines you\'re meant to read.</string>
+    <string name="account_subtitles_foreign">When the audio is in another language</string>
+    <string name="account_subtitles_foreign_hint">Full subtitles come on when the audio isn\'t in your subtitle language.</string>
+    <string name="account_subtitles_always">Always</string>
+    <string name="account_subtitles_always_hint">Subtitles in your language come on whenever there are some.</string>
+    <string name="account_saved_audio">Audio language saved</string>
+    <string name="account_saved_subtitles">Subtitles saved</string>
+    <string name="account_saved_subtitle_language">Subtitle language saved</string>
+
+    <!-- Watch history (apps/web/src/components/HistoryList.tsx). -->
+    <string name="account_history_empty_title">No history yet</string>
+    <string name="account_history_empty">Movies, episodes and songs you finish show up here.</string>
+    <string name="account_history_failed">Couldn\'t load your watch history</string>
+    <string name="account_history_more">Show more</string>
+    <string name="account_history_loading">Loading more…</string>
+    <string name="account_history_remove">Remove %1$s from history</string>
+
+    <!-- Settings: this device's own. -->
+    <string name="settings_playback">Playback</string>
+    <string name="settings_quality_home">Quality on Wi-Fi</string>
+    <string name="settings_quality_mobile">Quality on mobile data</string>
+    <string name="settings_quality_original">Original</string>
+    <string name="settings_quality_preset">%1$s · %2$d Mbps</string>
+    <string name="settings_refresh_rate">Match the refresh rate</string>
+    <string name="settings_refresh_seamless">When seamless</string>
+    <string name="settings_refresh_seamless_hint">The screen follows the video\'s frame rate when it can do so without a pause.</string>
+    <string name="settings_refresh_auto">Auto</string>
+    <string name="settings_refresh_always">Always</string>
+    <string name="settings_refresh_off">Off</string>
+    <string name="settings_refresh_off_hint">The screen keeps its refresh rate.</string>
+    <string name="settings_autoplay">Play the next episode by itself</string>
+    <string name="settings_autoplay_hint">After a 10 second countdown</string>
+    <string name="settings_playback_details">Playback details</string>
+    <string name="settings_playback_details_hint">Show how a video plays (direct, remux or transcode) over it</string>
+    <string name="settings_subtitle_style">Subtitle style</string>
+    <string name="settings_subtitle_style_hint">Captions turned on in Android\'s accessibility settings keep their own style until you change these.</string>
+    <string name="settings_subtitle_size">Size</string>
+    <string name="settings_size_small">Small</string>
+    <string name="settings_size_medium">Medium</string>
+    <string name="settings_size_large">Large</string>
+    <string name="settings_size_largest">Largest</string>
+    <string name="settings_subtitle_background">Background</string>
+    <string name="settings_background_none">None, with an outline</string>
+    <string name="settings_background_box">Dark box</string>
+    <string name="settings_display">Display</string>
+    <string name="settings_grid_density">Grid density</string>
+    <string name="settings_density_small">More, smaller cards</string>
+    <string name="settings_density_medium">Medium</string>
+    <string name="settings_density_large">Fewer, larger cards</string>
+    <string name="settings_privacy">Privacy</string>
+    <string name="settings_private_tab">Sign in from a private tab</string>
+    <string name="settings_private_tab_hint">The browser keeps no pley sign-in behind; you type your password each time</string>
+    <string name="settings_advanced">Advanced</string>
+    <string name="settings_software_video">Software video decoding</string>
+    <string name="settings_software_video_hint">Debug builds: lets emulators play video without a hardware decoder</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version</string>
+    <string name="settings_licences">Open-source licences</string>
+    <string name="settings_licences_value">AndroidX, Media3, OkHttp, Coil, kotlinx, Lucide, QR Code generator</string>
+
+    <!-- Diagnostics. -->
+    <string name="diagnostics_device">This device</string>
+    <string name="diagnostics_app">App</string>
+    <string name="diagnostics_app_value">pley %1$s</string>
+    <string name="diagnostics_plays">What it plays</string>
+    <string name="diagnostics_probing">Checking what this device plays…</string>
+    <string name="diagnostics_probe_failed">The check of this device failed.</string>
+    <string name="diagnostics_probe_again">Check again</string>
+    <string name="diagnostics_report">What pley tells the server</string>
+    <string name="diagnostics_copy">Copy</string>
+    <string name="diagnostics_copied">Copied</string>
+</resources>

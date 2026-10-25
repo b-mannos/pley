@@ -1,0 +1,144 @@
+package app.pley.android.ui.tv.settings
+
+import androidx.activity.ComponentActivity
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.navigation3.runtime.NavKey
+import app.pley.android.common.Tier
+import app.pley.android.data.FrameRateMatching
+import app.pley.android.data.TrackDefaultsUnsupported
+import app.pley.android.network.ApiException
+import app.pley.android.screens.PleyKey
+import app.pley.android.ui.tv.kit.focused
+import app.pley.android.ui.tv.kit.press
+import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.RailState
+import app.pley.android.ui.tv.shell.TvNavigator
+import app.pley.android.ui.tv.theme.TvTheme
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+/**
+ * The TV's settings with the D-pad (design spec §4.8): focus starts on the
+ * first category and the rows follow it; Right goes into the rows; a
+ * choice opens a side panel on the current value and gives focus back to
+ * its row; switches toggle on Select; Sign out asks first, with focus on
+ * Cancel.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w960dp-h540dp-xhdpi", application = TvAccountTestApplication::class)
+class TvSettingsFocusTest {
+    @get:Rule
+    val compose = createAndroidComposeRule<ComponentActivity>()
+
+    private val graph = TvAccountTestGraph()
+    private val stack = mutableListOf<NavKey>(PleyKey.Settings)
+
+    @Before
+    fun graph() {
+        TvAccountTestApplication.graph = graph
+    }
+
+    private fun show() {
+        val navigator = TvNavigator(stack, RailState()) {}
+        compose.setContent {
+            TvTheme(Tier.T2, reducedMotion = true) {
+                CompositionLocalProvider(LocalTvNavigator provides navigator) { TvSettingsScreen() }
+            }
+        }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Anna").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    private fun category(c: Category) = compose.onNodeWithTag("$TV_SETTINGS_CATEGORY.${c.name}")
+
+    @Test
+    fun focusStartsOnProfileAndTheRowsFollowTheFocusedCategory() {
+        show()
+        category(Category.Profile).assertIsFocused()
+        compose.onNodeWithText("Audio language").assertExists()
+        compose.press(Key.DirectionDown)
+        category(Category.Playback).assertIsFocused()
+        compose.onNodeWithText("Match the refresh rate").assertExists()
+        compose.onNodeWithText("Audio language").assertDoesNotExist()
+    }
+
+    @Test
+    fun aChoiceOpensItsPanelOnTheCurrentValueAndFocusComesBack() {
+        show()
+        compose.press(Key.DirectionDown)
+        compose.press(Key.DirectionRight)
+        compose.focused().assert(hasText("Quality"))
+        compose.press(Key.DirectionDown)
+        compose.focused().assert(hasText("Match the refresh rate"))
+        compose.press(Key.DirectionCenter)
+        compose.onNodeWithTag(TV_CHOICE_PANEL).assertExists()
+        // Auto is a TV's default, and is where focus starts.
+        compose.focused().assert(hasText("Auto"))
+        compose.press(Key.DirectionDown)
+        compose.focused().assert(hasText("Always"))
+        compose.press(Key.DirectionCenter)
+        compose.waitUntil(5_000) { graph.settingsFlow.value.frameRateMatching == FrameRateMatching.Always }
+        compose.waitForIdle()
+        compose.focused().assert(hasText("Match the refresh rate"))
+    }
+
+    @Test
+    fun switchesToggleOnSelect() {
+        show()
+        compose.press(Key.DirectionDown)
+        compose.press(Key.DirectionRight)
+        compose.press(Key.DirectionDown, times = 2)
+        compose.focused().assert(hasText("Play the next episode by itself"))
+        compose.press(Key.DirectionCenter)
+        compose.waitUntil(5_000) { !graph.settingsFlow.value.autoplayNext }
+        assertFalse(graph.settingsFlow.value.autoplayNext)
+    }
+
+    @Test
+    fun aRefusedTrackDefaultShowsItCanOnlyChangeOnTheWeb() {
+        graph.refuse = TrackDefaultsUnsupported(ApiException(404, "not_found", "Not found"))
+        show()
+        compose.press(Key.DirectionRight)
+        // Switch profile, then the audio language and the subtitles.
+        compose.press(Key.DirectionDown, times = 2)
+        compose.focused().assert(hasText("Subtitles"))
+        compose.press(Key.DirectionCenter)
+        compose.press(Key.DirectionDown, times = 2)
+        compose.press(Key.DirectionCenter)
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("change on the web", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitForIdle()
+        // Read-only now: Select shows the web's address instead.
+        compose.focused().assert(hasText("Subtitles"))
+        compose.press(Key.DirectionCenter)
+        compose.onNodeWithTag(TV_WEB_DIALOG).assertExists()
+        compose.onNodeWithText("192.168.1.20:7539/account").assertExists()
+    }
+
+    @Test
+    fun signOutAsksFirstWithFocusOnCancel() {
+        show()
+        compose.press(Key.DirectionDown, times = 7)
+        category(Category.SignOut).assertIsFocused()
+        compose.press(Key.DirectionCenter)
+        compose.focused().assert(hasText("Cancel"))
+        compose.press(Key.DirectionRight)
+        compose.press(Key.DirectionCenter)
+        compose.waitUntil(5_000) { stack.firstOrNull() is PleyKey.Link }
+        assertNull(graph.sessionFlow.value)
+        assertEquals(listOf<NavKey>(PleyKey.Link(TvAccountTestGraph.SERVER)), stack.toList())
+    }
+}
