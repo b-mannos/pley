@@ -38,8 +38,8 @@ use serde_json::{Value, json};
 use url::Url;
 
 use super::auth::{
-    NO_WAY_IN, NOT_ALLOWED, PIN_LOCKED, PIN_NEEDED, SwitchError, SwitchTarget, check_switch, switch_needs,
-    switch_targets,
+    NO_WAY_IN, NOT_ALLOWED, PIN_LOCKED, PIN_NEEDED, SwitchError, SwitchTarget, check_own_pin, check_switch,
+    switch_needs, switch_targets,
 };
 use crate::auth::grants::{self, GrantRow, IssueError, Issued, NewGrant, RefreshError, RefreshInput, SwitchInput};
 use crate::auth::scopes::{Scope, Scopes};
@@ -1100,6 +1100,11 @@ async fn issue_for_device(
 /// app signs in again: apps never see passwords or two-step codes. A
 /// refusal spends nothing. A switch keeps the app, what it was allowed and
 /// whoever allowed it, and ends the tokens it had at once.
+///
+/// A switch to the profile the app acts as checks that profile's PIN ("Who's
+/// watching?" as a TV starts) and, when it is right, answers as a switch
+/// would: a new pair, the same scope. Without a PIN, given or on the
+/// profile, it is `invalid_request`, as before this check existed.
 async fn switch_profile(
     state: &AppState,
     headers: &HeaderMap,
@@ -1125,9 +1130,18 @@ async fn switch_profile(
         ));
     }
     if profile == holder.user.id {
-        return Err(OAuthError::invalid_request("the app uses this profile already"));
+        // "Who's watching?" as a TV starts: the profile's own PIN, checked
+        // and answered as a switch to it would be. Without a PIN to check,
+        // the app has nothing to ask (older servers answered this to every
+        // switch to the current profile, and apps take it to mean "can't
+        // check").
+        let pin = form.get("pin").ok_or_else(|| OAuthError::invalid_request(SAME_PROFILE))?;
+        if !check_own_pin(state, &holder.user, pin).await.map_err(refused_switch)? {
+            return Err(OAuthError::invalid_request(SAME_PROFILE));
+        }
+    } else {
+        check_switch(state, &holder.user, profile, form.get("pin"), None, None).await.map_err(refused_switch)?;
     }
-    check_switch(state, &holder.user, profile, form.get("pin"), None, None).await.map_err(refused_switch)?;
     let input = SwitchInput {
         token: token.to_owned(),
         grant_id: holder.grant_id,
@@ -1144,14 +1158,21 @@ async fn switch_profile(
     }
     state.auth.forget_user(holder.user.id);
     state.auth.forget_user(profile);
-    tracing::info!(
-        "{} switched from {}'s profile to profile {profile} ({})",
-        app_label(client_id),
-        holder.user.username,
-        issued.scopes
-    );
+    if profile == holder.user.id {
+        tracing::info!("{} confirmed {}'s PIN ({})", app_label(client_id), holder.user.username, issued.scopes);
+    } else {
+        tracing::info!(
+            "{} switched from {}'s profile to profile {profile} ({})",
+            app_label(client_id),
+            holder.user.username,
+            issued.scopes
+        );
+    }
     Ok(tokens(issued))
 }
+
+/// A switch to the profile the app acts as, without a PIN to check.
+const SAME_PROFILE: &str = "the app uses this profile already";
 
 /// A refresh token that got nothing, for a switch; a spent one ended its
 /// grant (see [`grants::holder`]).

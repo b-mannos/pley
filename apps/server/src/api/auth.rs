@@ -470,24 +470,7 @@ pub(crate) async fn check_switch(
     let attempt = state.auth.throttle.begin(&format!("profile:{target}")).map_err(SwitchError::Throttled)?;
     let ok = match (&profile.pin_hash, freer) {
         (Some(pin_hash), _) => match pin {
-            // Throttled per profile, and capped in a row: guessing a
-            // 4-digit PIN over weeks doesn't get through either.
-            Some(_) if profile.pin_failures >= accounts::MAX_PIN_FAILURES_IN_A_ROW => {
-                return Err(SwitchError::PinLocked);
-            }
-            Some(pin) => {
-                let right = verify_password(pin.to_owned(), pin_hash.clone()).await?;
-                if !right || profile.pin_failures > 0 {
-                    sqlx::query(
-                        "UPDATE users SET pin_failures = CASE WHEN ? THEN 0 ELSE pin_failures + 1 END WHERE id = ?",
-                    )
-                    .bind(right)
-                    .bind(target)
-                    .execute(&state.db.write)
-                    .await?;
-                }
-                right
-            }
+            Some(pin) => check_pin(state, &profile, pin_hash, pin).await?,
             None => return Err(SwitchError::PinNeeded),
         },
         (None, true) if profile.password_hash.starts_with('!') => return Err(SwitchError::NoWayIn),
@@ -507,6 +490,46 @@ pub(crate) async fn check_switch(
     }
     attempt.succeeded();
     Ok(())
+}
+
+/// Whether `pin` is `profile`'s PIN (`pin_hash`), counting it in a row
+/// (`users.pin_failures`): throttled per profile by the caller, and capped
+/// in a row, so guessing a 4-digit PIN over weeks doesn't get through
+/// either.
+async fn check_pin(state: &AppState, profile: &SwitchTarget, pin_hash: &str, pin: &str) -> Result<bool, SwitchError> {
+    if profile.pin_failures >= accounts::MAX_PIN_FAILURES_IN_A_ROW {
+        return Err(SwitchError::PinLocked);
+    }
+    let right = verify_password(pin.to_owned(), pin_hash.to_owned()).await?;
+    if !right || profile.pin_failures > 0 {
+        sqlx::query("UPDATE users SET pin_failures = CASE WHEN ? THEN 0 ELSE pin_failures + 1 END WHERE id = ?")
+            .bind(right)
+            .bind(profile.id)
+            .execute(&state.db.write)
+            .await?;
+    }
+    Ok(right)
+}
+
+/// Checks the PIN of the profile `user` is on, for an app asking "Who's
+/// watching?" as it starts (the switch-profile grant to its own profile):
+/// by [`check_switch`]'s rules, throttled per profile and locked after 100
+/// wrong ones in a row, counted with the switches to it. `Ok(false)`: the
+/// profile has no PIN, so there is nothing to check.
+pub(crate) async fn check_own_pin(state: &AppState, user: &AuthUser, pin: &str) -> Result<bool, SwitchError> {
+    let Some(profile) = switch_target(state, user.id, user.id).await? else {
+        return Err(SwitchError::NotFound);
+    };
+    let Some(pin_hash) = &profile.pin_hash else {
+        return Ok(false);
+    };
+    let attempt = state.auth.throttle.begin(&format!("profile:{}", user.id)).map_err(SwitchError::Throttled)?;
+    if !check_pin(state, &profile, pin_hash, pin).await? {
+        attempt.failed();
+        return Err(SwitchError::WrongPin);
+    }
+    attempt.succeeded();
+    Ok(true)
 }
 
 /// Switch this device to another home profile, by the rules of
