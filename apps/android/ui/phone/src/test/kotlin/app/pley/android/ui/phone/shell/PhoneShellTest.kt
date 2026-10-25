@@ -16,22 +16,32 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
- * The phone's shell over placeholder screens: the start gate, nothing
- * reached before the first frame, the tabs' back stacks, and what happens
- * when the server refuses or signs the app out.
+ * The phone's shell over its screens (Home and Libraries, placeholders
+ * for the rest): the start gate, nothing reached before the first frame,
+ * the tabs' back stacks, and what happens when the server refuses or signs
+ * the app out.
  */
 @RunWith(RobolectricTestRunner::class)
+@Config(application = TestApplication::class)
 class PhoneShellTest {
     @get:Rule
     val compose = createComposeRule()
 
     private fun placeholder(name: String) = compose.onNodeWithText("$name isn't built yet")
 
+    /** Home, over a library with nothing in it yet. */
+    private fun home() = compose.onNodeWithText("Nothing here yet")
+
+    /** The Libraries tab, listing the one library. */
+    private fun libraries() = compose.onNodeWithText(TestGraph.FILMS.name)
+
     private fun tab(tab: PhoneTab) = compose.onNodeWithTag(TAB_TAG + tab.name)
 
     private fun show(start: PhoneStart, graph: TestGraph = TestGraph(start.server)): Shell {
+        TestApplication.graph = graph
         val shell = Shell(graph)
         compose.setContent {
             PhoneTheme {
@@ -68,20 +78,21 @@ class PhoneShellTest {
     @Test
     fun signedInItStartsAtHomeWithTheTabs() {
         show(PhoneStart(server = TestGraph.SERVER, signedIn = true))
-        placeholder("Home").assertExists()
+        home().assertExists()
         tab(PhoneTab.Home).assertIsSelected()
         tab(PhoneTab.Me).assertExists()
     }
 
     @Test
-    fun nothingIsAskedOfTheDataOrSignInBeforeTheFirstFrame() {
+    fun nothingIsAskedOfSignInOrPlaybackBeforeTheFirstFrame() {
         val graph = TestGraph()
+        TestApplication.graph = graph
         compose.mainClock.autoAdvance = false
         compose.setContent {
             PhoneTheme { PhoneShell(PhoneStart(TestGraph.SERVER, signedIn = true), { graph }) }
         }
-        // Composed and laid out, but no frame has gone by.
-        assertEquals(emptyList<String>(), graph.touched.toList())
+        // Composed and laid out, but no frame has gone by: only Home's own data (what was saved) is read.
+        assertEquals(emptyList<String>(), graph.touched.filter { it != "data" })
         compose.mainClock.advanceTimeByFrame()
         compose.mainClock.advanceTimeByFrame()
         compose.waitUntil(5_000) { graph.fakeCaps.warmUps == 1 && "auth" in graph.touched && "data" in graph.touched }
@@ -91,13 +102,15 @@ class PhoneShellTest {
     @Test
     fun eachTabKeepsItsBackStackAcrossTabsAndRecreation() {
         val graph = TestGraph()
+        TestApplication.graph = graph
         val restore = StateRestorationTester(compose)
+        lateinit var navigation: PhoneNavigation
         restore.setContent {
-            PhoneTheme { PhoneShell(PhoneStart(TestGraph.SERVER, signedIn = true), { graph }) }
+            PhoneTheme { PhoneShell(PhoneStart(TestGraph.SERVER, signedIn = true), { graph }) { _, it -> navigation = it } }
         }
         tab(PhoneTab.Libraries).performClick()
-        placeholder("Libraries").assertExists()
-        compose.onNodeWithText("Open another screen").performClick()
+        libraries().assertExists()
+        compose.runOnIdle { navigation.open(PleyKey.Item(101)) }
         placeholder("Item 101").assertExists()
 
         tab(PhoneTab.Search).performClick()
@@ -113,7 +126,7 @@ class PhoneShellTest {
         placeholder("Item 101").assertExists()
         // Choosing the tab shown takes it back to its first screen.
         tab(PhoneTab.Libraries).performClick()
-        placeholder("Libraries").assertExists()
+        libraries().assertExists()
     }
 
     @Test
@@ -121,7 +134,7 @@ class PhoneShellTest {
         val shell = show(PhoneStart(TestGraph.SERVER, signedIn = true))
         tab(PhoneTab.Playlists).performClick()
         compose.runOnIdle { shell.navigation.back() }
-        placeholder("Home").assertExists()
+        home().assertExists()
         tab(PhoneTab.Home).assertIsSelected()
     }
 
@@ -154,19 +167,19 @@ class PhoneShellTest {
         compose.runOnIdle { shell.graph.fakeAuth.signOut("http://10.0.0.9:7539") }
         compose.waitForIdle()
         assertTrue(shell.navigation.inside)
-        placeholder("Home").assertExists()
+        home().assertExists()
     }
 
     @Test
     fun signingInAgainStartsTheTabsOver() {
         val shell = show(PhoneStart(TestGraph.SERVER, signedIn = true))
         tab(PhoneTab.Libraries).performClick()
-        compose.onNodeWithText("Open another screen").performClick()
+        compose.runOnIdle { shell.navigation.open(PleyKey.Item(101)) }
         compose.runOnIdle { shell.navigation.restart(PleyKey.SignIn(TestGraph.SERVER)) }
         placeholder("Sign in").assertExists()
         compose.runOnIdle { shell.navigation.restart(PleyKey.Home) }
-        placeholder("Home").assertExists()
+        home().assertExists()
         tab(PhoneTab.Libraries).performClick()
-        placeholder("Libraries").assertExists()
+        libraries().assertExists()
     }
 }

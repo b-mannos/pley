@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Home (design spec §4.1, §8), in the web's words. -->
+    <string name="home_profile">%1$s: open Me</string>
+    <string name="home_no_libraries">No libraries yet</string>
+    <string name="home_no_libraries_body">Ask the server owner to add a library.</string>
+    <string name="home_empty">Nothing here yet</string>
+    <string name="home_empty_body">Your libraries are empty. Add media to the library folders and run a scan.</string>
+    <string name="home_scanning">Scanning your libraries…</string>
+    <string name="home_scanning_body">New items will show up here as soon as they\'re found.</string>
+    <string name="home_failed">Couldn\'t load your home screen</string>
+    <string name="home_nothing_to_play">Nothing to play</string>
+    <string name="home_loading">Loading your home screen</string>
+
+    <!-- The Libraries tab. -->
+    <string name="home_libraries_title">Libraries</string>
+    <string name="home_libraries_failed">Couldn\'t load your libraries</string>
+    <string name="home_libraries_scanning">Scanning</string>
+    <string name="home_libraries_loading">Loading your libraries</string>
+</resources>

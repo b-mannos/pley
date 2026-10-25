@@ -1,5 +1,6 @@
 package app.pley.android.ui.phone.shell
 
+import android.app.Application
 import app.pley.android.auth.AuthGraph
 import app.pley.android.caps.CapsGraph
 import app.pley.android.caps.DefaultPlaybackCapsPolicy
@@ -18,22 +19,29 @@ import app.pley.android.data.ItemRepository
 import app.pley.android.data.LibrariesRepository
 import app.pley.android.data.LibraryItemsRepository
 import app.pley.android.data.LiveUpdates
+import app.pley.android.data.Loadable
 import app.pley.android.data.PeopleRepository
 import app.pley.android.data.PlayItem
 import app.pley.android.data.PlaylistsRepository
 import app.pley.android.data.ScanState
 import app.pley.android.data.SearchRepository
 import app.pley.android.data.ServersRepository
+import app.pley.android.data.Session
 import app.pley.android.data.SessionRepository
+import app.pley.android.data.SessionState
 import app.pley.android.data.SnapshotStore
 import app.pley.android.data.TrackDefaultsRepository
 import app.pley.android.data.WatchStateRepository
+import app.pley.android.model.Hubs
+import app.pley.android.model.Library
+import app.pley.android.model.LibraryKind
 import app.pley.android.player.MusicControl
 import app.pley.android.player.NowPlaying
 import app.pley.android.player.PlaybackServices
 import app.pley.android.player.PlayerEngine
 import app.pley.android.player.PlayerGraph
 import app.pley.android.screens.PlayerLauncher
+import app.pley.android.screens.PleyGraphOwner
 import app.pley.android.screens.ScreensGraph
 import app.pley.android.testing.auth.FakeAuthGraph
 import app.pley.android.testing.caps.FakeDeviceCapabilities
@@ -100,10 +108,23 @@ class TestGraph(server: String? = SERVER) : ScreensGraph {
         override val liveUpdates = object : LiveUpdates {
             override val scans: StateFlow<List<ScanState>> = this@TestGraph.scans
         }
-        override val session: SessionRepository get() = unused("session")
+        override val session = object : SessionRepository {
+            override val session: StateFlow<Session?> = MutableStateFlow(null)
+            override val state: StateFlow<SessionState> = MutableStateFlow(SessionState.Starting)
+            override suspend fun signOut() = Unit
+        }
         override val snapshots: SnapshotStore get() = unused("snapshots")
-        override val libraries: LibrariesRepository get() = unused("libraries")
-        override val hubs: HubsRepository get() = unused("hubs")
+
+        // Home and the Libraries tab: one library, nothing in it yet.
+        override val libraries = object : LibrariesRepository {
+            override fun libraries(): Flow<Loadable<List<Library>>> = flowOf(Loadable.Ready(listOf(FILMS), fresh = true))
+            override suspend fun refresh() = Unit
+        }
+        override val hubs = object : HubsRepository {
+            override fun home(): Flow<Loadable<Hubs>> = flowOf(Loadable.Ready(Hubs(), fresh = true))
+            override fun library(libraryId: Long): Flow<Loadable<Hubs>> = flowOf(Loadable.Ready(Hubs(), fresh = true))
+            override suspend fun refresh() = Unit
+        }
         override val libraryItems: LibraryItemsRepository get() = unused("libraryItems")
         override val items: ItemRepository get() = unused("items")
         override val search: SearchRepository get() = unused("search")
@@ -121,5 +142,20 @@ class TestGraph(server: String? = SERVER) : ScreensGraph {
 
     companion object {
         const val SERVER = "http://192.168.1.20:7539"
+
+        /** The one library Home and the Libraries tab know of. */
+        val FILMS = Library(1, "Films", LibraryKind.Movies, itemCount = 12)
+    }
+}
+
+/**
+ * The test's Application: the app's own is the graph's owner, which
+ * screens' ViewModels are made from. Each test sets [graph].
+ */
+class TestApplication : Application(), PleyGraphOwner {
+    override val screensGraph: ScreensGraph get() = graph ?: error("no TestGraph set")
+
+    companion object {
+        var graph: TestGraph? = null
     }
 }
