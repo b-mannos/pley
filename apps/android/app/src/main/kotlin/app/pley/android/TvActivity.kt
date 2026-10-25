@@ -3,18 +3,56 @@ package app.pley.android
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
+import app.pley.android.common.Tier
 import app.pley.android.common.perf.PerfMonitor
+import app.pley.android.designsystem.image.LocalArtworkImageLoader
 import app.pley.android.ui.tv.shell.TvApp
+import app.pley.android.ui.tv.shell.TvShellDemo
+import app.pley.android.ui.tv.shell.TvShellSource
 
 /**
  * The native app on TVs (Android TV, Google TV, Fire TV). Back goes
- * through the activity's back dispatcher only (Compose's BackHandler),
- * which Fire OS 16 needs: it can skip onBackPressed.
+ * through the activity's back dispatcher only (Compose's BackHandler; the
+ * manifest turns on the system's back callbacks), which Fire OS 16 needs:
+ * it can skip onBackPressed. The last Back finishes the activity.
+ *
+ * Debug builds take two extras, for trying the frame on an emulator:
+ * `--es tier T0|T1|T2` overrides the device's tier, and `--ez demo true`
+ * shows made-up libraries and rows instead of the app's data.
+ *
+ * ```
+ * adb shell am start -n app.pley.android/.TvActivity --ez demo true --es tier T2
+ * ```
  */
 class TvActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         PerfMonitor.attach(this)
-        setContent { TvApp() }
+        val app = application as PleyApplication
+        val device = app.graph.device
+        val tier = debugTier() ?: device.tier
+        val demo = BuildConfig.DEBUG && intent.getBooleanExtra(EXTRA_DEMO, false)
+        setContent {
+            if (demo) {
+                CompositionLocalProvider(LocalArtworkImageLoader provides TvShellDemo.imageLoader(this, device.copy(tier = tier))) {
+                    TvApp(TvShellDemo.source, onExit = ::finish, tier = tier, placeholder = TvShellDemo.placeholder)
+                }
+            } else {
+                val source = TvShellSource.of(app.graph, startup = { app.startup.await().let { it.server to it.signedIn } })
+                TvApp(source, onExit = ::finish, tier = tier)
+            }
+        }
+    }
+
+    /** Debug builds: the tier asked for with `--es tier`, or `null`. */
+    private fun debugTier(): Tier? {
+        if (!BuildConfig.DEBUG) return null
+        return intent.getStringExtra(EXTRA_TIER)?.let { name -> Tier.entries.firstOrNull { it.name == name } }
+    }
+
+    private companion object {
+        const val EXTRA_TIER = "tier"
+        const val EXTRA_DEMO = "demo"
     }
 }

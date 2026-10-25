@@ -1,101 +1,267 @@
 package app.pley.android.ui.tv.shell
 
-import androidx.compose.foundation.background
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
-import androidx.tv.material3.Button
-import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.Text
+import androidx.tv.material3.DrawerValue
+import androidx.tv.material3.ModalNavigationDrawer
+import androidx.tv.material3.rememberDrawerState
 import app.pley.android.common.TestTags
+import app.pley.android.common.Tier
 import app.pley.android.designsystem.PleyColors
-import app.pley.android.designsystem.TvSafeArea
+import app.pley.android.designsystem.PleyMotion
+import app.pley.android.designsystem.PleyTv
+import app.pley.android.designsystem.PleyType
+import app.pley.android.designsystem.reducedMotion
+import app.pley.android.designsystem.tile.TileGlow
 import app.pley.android.screens.PleyKey
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.account.accountEntries
 import app.pley.android.ui.tv.home.homeEntries
 import app.pley.android.ui.tv.item.itemEntries
+import app.pley.android.ui.tv.kit.KeyRepeatGate
+import app.pley.android.ui.tv.kit.LocalKeyRepeatGate
+import app.pley.android.ui.tv.kit.LocalTvRailFocus
+import app.pley.android.ui.tv.kit.TvPillButton
+import app.pley.android.ui.tv.kit.TvScrolling
+import app.pley.android.ui.tv.kit.initialFocus
+import app.pley.android.ui.tv.kit.keyRepeatGate
+import app.pley.android.ui.tv.kit.railOnLeftStopOnRight
 import app.pley.android.ui.tv.library.libraryEntries
 import app.pley.android.ui.tv.music.musicEntries
 import app.pley.android.ui.tv.onboarding.onboardingEntries
 import app.pley.android.ui.tv.playlists.playlistsEntries
 import app.pley.android.ui.tv.search.searchEntries
 import app.pley.android.ui.tv.theme.TvTheme
+import app.pley.android.ui.tv.theme.glows
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
- * The TV app (Android TV, Google TV, Fire TV). A placeholder for now: one
- * back stack whose screens each area adds, a placeholder for any screen not
- * built yet, and the TV's safe area.
+ * The TV app (Android TV, Google TV, Fire TV): the theme, the D-pad rules
+ * that hold everywhere (the held-key gate, where scrolling puts focus),
+ * the start gate, the rail and the one back stack whose screens each area
+ * adds (its <Area>Entries). Screens not built yet show [placeholder].
+ *
+ * [tier] is the device's ([app.pley.android.common.DeviceProfile]); [onExit]
+ * leaves the app, the last step of Back.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TvApp() {
-    TvTheme {
-        Box(Modifier.fillMaxSize().background(PleyColors.Bg).testTag(TestTags.TV_ROOT)) {
-            val backStack = rememberNavBackStack(PleyKey.Home)
-            NavDisplay(
-                backStack = backStack,
-                onBack = { backStack.removeLastOrNull() },
-                entryProvider = entryProvider(fallback = { key -> NavEntry(key) { Placeholder(it) { next -> backStack.add(next) } } }) {
-                    onboardingEntries()
-                    homeEntries()
-                    libraryEntries()
-                    itemEntries()
-                    searchEntries()
-                    playlistsEntries()
-                    accountEntries()
-                    musicEntries()
+fun TvApp(
+    source: TvShellSource,
+    onExit: () -> Unit,
+    tier: Tier = Tier.T2,
+    reducedMotion: Boolean? = null,
+    placeholder: @Composable (NavKey) -> Unit = { Placeholder(it) },
+) {
+    TvTheme(tier, reducedMotion) {
+        val gate = remember { KeyRepeatGate() }
+        val root = remember { TvScrolling.root() }
+        CompositionLocalProvider(LocalKeyRepeatGate provides gate, LocalBringIntoViewSpec provides root) {
+            // No background: the window's is pley's (one full-screen fill, not two).
+            Box(Modifier.fillMaxSize().keyRepeatGate(gate).testTag(TestTags.TV_ROOT)) {
+                val start by produceState<PleyKey?>(null, source) { value = startKey(source.startFacts()) }
+                start?.let { TvShell(it, source, onExit, placeholder) }
+            }
+        }
+        KeepUpdated(source)
+        WarmGlows(tier)
+    }
+}
+
+@Composable
+private fun TvShell(
+    start: PleyKey,
+    source: TvShellSource,
+    onExit: () -> Unit,
+    placeholder: @Composable (NavKey) -> Unit,
+) {
+    val backStack = rememberNavBackStack(start)
+    val libraries by source.libraries.collectAsStateWithLifecycle(emptyList())
+    val profile by source.profile.collectAsStateWithLifecycle(null)
+    val items = remember(libraries) { railItems(libraries) }
+    val content = remember { FocusRequester() }
+    val rail = remember { RailState(content) }
+    val navigator = remember(backStack) { TvNavigator(backStack, rail, onExit) }
+    val root = navigator.root ?: start
+    rail.current = railCurrent(root, items + SettingsItem)
+    // Signing in and choosing a profile are full screen.
+    rail.shown = root !is PleyKey.Servers && root !is PleyKey.Link && root !is PleyKey.SignIn && root != PleyKey.Profiles
+    val curtain = rememberCurtain(backStack.lastOrNull())
+
+    // The last resort of Back: below every screen's own (they are added later, so they come first).
+    BackHandler { navigator.back() }
+
+    // The rail's page again: back to where focus was on it. Another page: its own initial focus.
+    val select: (PleyKey) -> Unit = { key ->
+        if (navigator.root == key && backStack.size == 1) rail.backToContent() else navigator.restart(key)
+    }
+    ModalNavigationDrawer(
+        drawerState = rememberDrawerState(DrawerValue.Closed),
+        scrimBrush = SolidColor(PleyColors.Bg.copy(alpha = 0.5f)),
+        drawerContent = {
+            if (rail.shown) {
+                TvRail(
+                    items = items,
+                    profile = profile,
+                    rail = rail,
+                    onSelect = { select(it.key) },
+                    onProfile = { select(PleyKey.Profiles) },
+                )
+            }
+        },
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .focusRequester(content)
+                // No focusRestorer here: it would hand focus back to a page that is leaving.
+                // The rail saves and restores the page's focus itself.
+                .railOnLeftStopOnRight(if (rail.shown) rail else null, stopRight = false)
+                .focusGroup()
+                .drawWithContent {
+                    drawContent()
+                    val a = curtain.value
+                    if (a > 0f) drawRect(PleyColors.Bg.copy(alpha = a))
                 },
-            )
+        ) {
+            CompositionLocalProvider(LocalTvNavigator provides navigator, LocalTvRailFocus provides rail.takeIf { it.shown }) {
+                NavDisplay(
+                    backStack = backStack,
+                    onBack = { navigator.back() },
+                    entryDecorators = listOf(
+                        rememberSaveableStateHolderNavEntryDecorator(),
+                        rememberViewModelStoreNavEntryDecorator(),
+                    ),
+                    // Screens change under the curtain, not with sliding or fading pages.
+                    transitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
+                    popTransitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
+                    predictivePopTransitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
+                    entryProvider = entryProvider(fallback = { key -> NavEntry(key) { placeholder(it) } }) {
+                        onboardingEntries()
+                        homeEntries()
+                        libraryEntries()
+                        itemEntries()
+                        searchEntries()
+                        playlistsEntries()
+                        accountEntries()
+                        musicEntries()
+                    },
+                )
+            }
         }
     }
 }
 
-/** A screen that isn't built yet: its name, and a focused button, as every TV screen starts with focus. */
+/**
+ * Screen changes (design spec §5.1): the new screen shows under a
+ * [bg][PleyColors.Bg] rectangle that fades out over 110 ms. One rectangle,
+ * drawn over the content: no full-screen layer fades. None with reduced
+ * motion.
+ */
 @Composable
-private fun Placeholder(key: NavKey, open: (NavKey) -> Unit) {
-    val focus = remember { FocusRequester() }
+private fun rememberCurtain(key: Any?): Animatable<Float, *> {
+    val reduced = reducedMotion()
+    val curtain = remember { Animatable(0f) }
+    val first = remember { BooleanArray(1) { true } }
+    LaunchedEffect(key) {
+        if (first[0] || reduced) {
+            first[0] = false
+            return@LaunchedEffect
+        }
+        curtain.snapTo(1f)
+        curtain.animateTo(0f, tween(PleyMotion.SCREEN_MS / 2, easing = LinearEasing))
+    }
+    return curtain
+}
+
+/** Server events while the app is started, never in the background. */
+@Composable
+private fun KeepUpdated(source: TvShellSource) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(source, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { source.keepUpdated() }
+    }
+}
+
+/** Makes the tiles' glows off the main thread before the first focus needs one (T1 and T2). */
+@Composable
+private fun WarmGlows(tier: Tier) {
+    val density = LocalDensity.current
+    LaunchedEffect(tier, density) {
+        if (tier.glows) withContext(Dispatchers.Default) { TileGlow.warm(density) }
+    }
+}
+
+/**
+ * A screen that isn't built yet: its name, a line about the app, and a
+ * focused button, as every TV screen starts with focus (D-pad rule 1).
+ */
+@Composable
+fun Placeholder(key: NavKey) {
+    val navigator = LocalTvNavigator.current
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = TvSafeArea.Horizontal, vertical = TvSafeArea.Vertical)
+            .padding(start = PleyTv.Gutter, top = 58.dp, end = 48.dp)
             .testTag(TestTags.PLACEHOLDER),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("pley", fontSize = 36.sp, fontWeight = FontWeight.ExtraBold, color = PleyColors.Fg)
-        Text(
+        BasicText(
             stringResource(R.string.tv_shell_placeholder_title, key.javaClass.simpleName),
-            style = MaterialTheme.typography.headlineMedium,
-            color = PleyColors.Fg,
+            style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg),
         )
-        Text(
+        BasicText(
             stringResource(R.string.tv_shell_placeholder_body),
-            style = MaterialTheme.typography.bodyLarge,
-            color = PleyColors.Muted,
-            modifier = Modifier.widthIn(max = 640.dp),
+            style = PleyType.Tv.BodyLarge.copy(color = PleyColors.Muted),
+            modifier = Modifier.widthIn(max = 464.dp),
         )
         val next = if (key == PleyKey.Home) PleyKey.Libraries else PleyKey.Search()
-        Button(onClick = { open(next) }, modifier = Modifier.focusRequester(focus)) {
-            Text(stringResource(R.string.tv_shell_placeholder_next))
-        }
+        TvPillButton(
+            label = stringResource(R.string.tv_shell_placeholder_next),
+            onClick = { navigator.open(next) },
+            modifier = Modifier.padding(top = 16.dp).initialFocus(),
+        )
     }
-    LaunchedEffect(key) { focus.requestFocus() }
 }
