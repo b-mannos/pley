@@ -56,6 +56,17 @@ function rangesOf(tr: TimeRanges): [number, number][] {
   return out;
 }
 
+/**
+ * Where hls.js starts. A stream's first frame comes a little after 0 (0.08 s
+ * for a remux, 0.13 s for a transcode with B-frames): from 0, the playhead
+ * would sit before it, on a frozen picture, until hls.js's gap handling
+ * moved it on. Just past 0, hls.js seeks to the first frame itself, as the
+ * gap is within its tolerance (0.25 s).
+ */
+function hlsStartPosition(startSec: number): number {
+  return startSec > 0 ? startSec : 0.001;
+}
+
 export interface VideoPlayerProps {
   item: ItemDetail;
   startMs: number;
@@ -359,7 +370,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
               seekOnLoad(startSec);
             } else {
               const hls = new Hls({
-                startPosition: startSec,
+                startPosition: hlsStartPosition(startSec),
                 maxBufferLength: 30,
                 maxMaxBufferLength: 120,
                 backBufferLength: 60,
