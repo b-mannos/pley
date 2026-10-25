@@ -249,7 +249,9 @@ class DeviceSignInTest {
         val grant = DeviceGrant(offline, { Tokens(it, store, offline) }) { testScheduler.currentTime }
         val code = grant.start(server.url("/").toString())
         pollAnswer = { MockResponse().setBody(tokenAnswer("pley_at_tv", "pley_rt_tv")) }
-        assertEquals(listOf(DevicePoll.Waiting, DevicePoll.SignedIn(issuer)), grant.poll(code).toList())
+        // Each failure says when the next try is.
+        val trouble = listOf(2_000L, 4_000L, 8_000L, 16_000L, 30_000L).map { DevicePoll.Unreachable(it) }
+        assertEquals(listOf(DevicePoll.Waiting) + trouble + DevicePoll.SignedIn(issuer), grant.poll(code).toList())
         // 1 s, then 2, 4, 8, 16 and 30 s after failures in a row.
         assertEquals(listOf(1_000L, 3_000L, 7_000L, 15_000L, 31_000L, 61_000L), tries)
     }

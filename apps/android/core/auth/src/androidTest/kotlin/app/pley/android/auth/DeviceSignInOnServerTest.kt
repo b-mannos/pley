@@ -48,7 +48,7 @@ class DeviceSignInOnServerTest {
 
         val code = graph.deviceSignIn.start(server!!)
         say("USER_CODE=${code.userCode} URI=${code.verificationUri} INTERVAL=${code.intervalSeconds}")
-        val outcome = withTimeout(5 * 60_000) { graph.deviceSignIn.poll(code).first { it != DevicePoll.Waiting } }
+        val outcome = withTimeout(5 * 60_000) { graph.deviceSignIn.poll(code).first { it != DevicePoll.Waiting && it !is DevicePoll.Unreachable } }
         say("POLL=$outcome")
         assertEquals(DevicePoll.SignedIn(code.issuer), outcome)
         assertTrue(graph.hasTokens(code.issuer))

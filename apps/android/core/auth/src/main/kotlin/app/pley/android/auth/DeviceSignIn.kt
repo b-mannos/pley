@@ -62,6 +62,12 @@ sealed interface DevicePoll {
     /** The code ran out: get a new one. */
     data object Expired : DevicePoll
 
+    /**
+     * The server can't be reached: polling goes on by itself in
+     * [retryInMs]. Waiting comes again once it answers.
+     */
+    data class Unreachable(val retryInMs: Long) : DevicePoll
+
     data class Failed(val message: String) : DevicePoll
 }
 
@@ -77,7 +83,7 @@ interface DeviceSignIn {
     /**
      * Asks whether [code] was approved, every interval while collected
      * (slower when the server says so), until it is signed in, denied or
-     * expired.
+     * expired. Network trouble shows as Unreachable while it lasts.
      */
     fun poll(code: DeviceCode): Flow<DevicePoll>
 }
@@ -112,9 +118,10 @@ class DeviceGrant(
     override fun poll(code: DeviceCode): Flow<DevicePoll> = flow {
         var interval = (code.intervalSeconds.takeIf { it > 0 } ?: DEFAULT_INTERVAL_S) * 1000L
         var failures = 0
+        var troubled = false
         emit(DevicePoll.Waiting)
         while (true) {
-            val wait = if (failures == 0) interval else maxOf(interval, BACKOFF_MS[minOf(failures, BACKOFF_MS.size) - 1])
+            val wait = waitAfter(failures, interval)
             delay(minOf(wait, (code.expiresAt - clock()).coerceAtLeast(0)))
             if (clock() >= code.expiresAt) {
                 emit(DevicePoll.Expired)
@@ -150,8 +157,19 @@ class DeviceGrant(
                 emit(outcome)
                 return@flow
             }
+            if (failures > 0) {
+                troubled = true
+                emit(DevicePoll.Unreachable(waitAfter(failures, interval)))
+            } else if (troubled) {
+                troubled = false
+                emit(DevicePoll.Waiting)
+            }
         }
     }
+
+    /** How long to wait after [failures] network failures in a row, asking every [interval] ms otherwise. */
+    private fun waitAfter(failures: Int, interval: Long): Long =
+        if (failures == 0) interval else maxOf(interval, BACKOFF_MS[minOf(failures, BACKOFF_MS.size) - 1])
 
     /** Keeps the tokens in [answer]; what to show. */
     private suspend fun keep(code: DeviceCode, answer: String): DevicePoll = try {

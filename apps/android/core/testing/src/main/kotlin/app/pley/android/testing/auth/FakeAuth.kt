@@ -65,7 +65,7 @@ class FakeDeviceSignIn : DeviceSignIn {
     }
     private val answers = Channel<DevicePoll>(Channel.UNLIMITED)
 
-    /** What the next poll says after Waiting; anything but Waiting ends it. */
+    /** What the next poll says after Waiting; anything but Waiting or Unreachable ends it. */
     fun answer(poll: DevicePoll) {
         answers.trySend(poll)
     }
@@ -80,7 +80,7 @@ class FakeDeviceSignIn : DeviceSignIn {
         emit(DevicePoll.Waiting)
         for (poll in answers) {
             emit(poll)
-            if (poll != DevicePoll.Waiting) break
+            if (poll != DevicePoll.Waiting && poll !is DevicePoll.Unreachable) break
         }
     }
 }
