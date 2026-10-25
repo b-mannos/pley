@@ -1,0 +1,128 @@
+package app.pley.android.player.engine
+
+import android.media.MediaCodecInfo.CodecProfileLevel
+import androidx.media3.common.C
+import androidx.media3.common.ColorInfo
+import androidx.media3.common.Format
+import androidx.media3.common.MimeTypes
+import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
+import org.robolectric.RobolectricTestRunner
+import app.pley.android.caps.DecoderPolicy
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(RobolectricTestRunner::class)
+class DecoderRulesTest {
+    private fun info(name: String, mime: String, hardware: Boolean) =
+        MediaCodecInfo.newInstance(name, mime, mime, null, hardware, !hardware, hardware, false, false)
+
+    private val listed = mapOf(
+        MimeTypes.VIDEO_H264 to listOf(info("c2.android.avc.decoder", MimeTypes.VIDEO_H264, false), info("c2.vendor.avc.decoder", MimeTypes.VIDEO_H264, true)),
+        MimeTypes.VIDEO_H265 to listOf(info("c2.vendor.hevc.decoder", MimeTypes.VIDEO_H265, true), info("c2.android.hevc.decoder", MimeTypes.VIDEO_H265, false)),
+        MimeTypes.VIDEO_DOLBY_VISION to listOf(info("c2.vendor.dolby.decoder", MimeTypes.VIDEO_DOLBY_VISION, true)),
+        MimeTypes.VIDEO_AV1 to listOf(info("c2.android.av1.decoder", MimeTypes.VIDEO_AV1, false)),
+        MimeTypes.AUDIO_AAC to listOf(info("c2.android.aac.decoder", MimeTypes.AUDIO_AAC, false)),
+    )
+    private val base = MediaCodecSelector { mime, _, _ -> listed[mime].orEmpty() }
+
+    private fun names(rules: DecoderRules, mime: String, format: Format?) =
+        rules.selectorFor(base, format).getDecoderInfos(mime, false, false).map { it.name }
+
+    private fun video(mime: String, width: Int, height: Int, fps: Float, codecs: String? = null, color: ColorInfo? = null): Format =
+        Format.Builder().setSampleMimeType(mime).setWidth(width).setHeight(height).setFrameRate(fps).setCodecs(codecs).setColorInfo(color).build()
+
+    private val hdr10 = ColorInfo.Builder().setColorSpace(C.COLOR_SPACE_BT2020).setColorTransfer(C.COLOR_TRANSFER_ST2084).setLumaBitdepth(10).setChromaBitdepth(10).build()
+
+    @Test
+    fun tvsKeepHardwareVideoDecodersOnly() {
+        val rules = DecoderRules({ DecoderPolicy(tv = true) })
+        assertEquals(listOf("c2.vendor.avc.decoder"), names(rules, MimeTypes.VIDEO_H264, video(MimeTypes.VIDEO_H264, 1280, 720, 24f)))
+        assertEquals(emptyList<String>(), names(rules, MimeTypes.VIDEO_AV1, video(MimeTypes.VIDEO_AV1, 1280, 720, 24f)))
+        // Audio decoders are never limited.
+        assertEquals(listOf("c2.android.aac.decoder"), names(rules, MimeTypes.AUDIO_AAC, null))
+    }
+
+    @Test
+    fun phonesPutHardwareFirstAndKeepSoftwareUpTo1080p30EightBitSdr() {
+        val rules = DecoderRules({ DecoderPolicy(tv = false) })
+        assertEquals(
+            listOf("c2.vendor.avc.decoder", "c2.android.avc.decoder"),
+            names(rules, MimeTypes.VIDEO_H264, video(MimeTypes.VIDEO_H264, 1920, 1080, 29.97f, "avc1.640028")),
+        )
+        // Portrait counts the same.
+        assertEquals(2, names(rules, MimeTypes.VIDEO_H264, video(MimeTypes.VIDEO_H264, 1080, 1920, 30f)).size)
+        // 60 fps, 4K, 10-bit or HDR: hardware only.
+        assertEquals(listOf("c2.vendor.avc.decoder"), names(rules, MimeTypes.VIDEO_H264, video(MimeTypes.VIDEO_H264, 1920, 1080, 60f)))
+        assertEquals(listOf("c2.vendor.hevc.decoder"), names(rules, MimeTypes.VIDEO_H265, video(MimeTypes.VIDEO_H265, 3840, 2160, 24f)))
+        assertEquals(listOf("c2.vendor.hevc.decoder"), names(rules, MimeTypes.VIDEO_H265, video(MimeTypes.VIDEO_H265, 1920, 1080, 24f, "hvc1.2.4.L120.B0")))
+        assertEquals(listOf("c2.vendor.hevc.decoder"), names(rules, MimeTypes.VIDEO_H265, video(MimeTypes.VIDEO_H265, 1920, 1080, 24f, color = hdr10)))
+        // AV1 in software only, as on the Note20 Ultra: 1080p30 8-bit plays, 4K doesn't.
+        assertEquals(1, names(rules, MimeTypes.VIDEO_AV1, video(MimeTypes.VIDEO_AV1, 1920, 1080, 24f, "av01.0.08M.08")).size)
+        assertEquals(0, names(rules, MimeTypes.VIDEO_AV1, video(MimeTypes.VIDEO_AV1, 3840, 2160, 24f, "av01.0.12M.10")).size)
+    }
+
+    @Test
+    fun theDebugSwitchAllowsSoftwareAtAnySize() {
+        val rules = DecoderRules({ DecoderPolicy(tv = true, allowSoftware = true) })
+        assertEquals(1, names(rules, MimeTypes.VIDEO_AV1, video(MimeTypes.VIDEO_AV1, 3840, 2160, 60f, "av01.0.12M.10")).size)
+    }
+
+    @Test
+    fun dolbyVisionDecodersAreLeftOutOnScreensWithoutDolbyVision() {
+        val format = video(MimeTypes.VIDEO_DOLBY_VISION, 3840, 2160, 23.976f, "dvh1.08.06")
+        val hdr10Screen = DecoderRules({ DecoderPolicy(tv = true) }, dolbyVisionScreen = { false })
+        assertEquals(emptyList<String>(), names(hdr10Screen, MimeTypes.VIDEO_DOLBY_VISION, format))
+        val dvScreen = DecoderRules({ DecoderPolicy(tv = true) }, dolbyVisionScreen = { true })
+        assertEquals(listOf("c2.vendor.dolby.decoder"), names(dvScreen, MimeTypes.VIDEO_DOLBY_VISION, format))
+        val unknown = DecoderRules({ DecoderPolicy(tv = true) })
+        assertEquals(listOf("c2.vendor.dolby.decoder"), names(unknown, MimeTypes.VIDEO_DOLBY_VISION, format))
+    }
+
+    @Test
+    fun theFormatsBitDepthComesFromItsCodecString() {
+        val depth = DecoderRules.Picture::bitDepthOf
+        assertEquals(10, depth("hvc1.2.4.L153.B0"))
+        assertEquals(10, depth("hev1.A2.4.L120.B0"))
+        assertEquals(8, depth("hvc1.1.6.L120.90"))
+        assertEquals(10, depth("avc1.6E0028"))
+        assertEquals(8, depth("avc1.640028"))
+        assertEquals(10, depth("vp09.02.40.10"))
+        assertEquals(8, depth("vp09.00.40.08"))
+        assertEquals(10, depth("av01.0.12M.10"))
+        assertEquals(10, depth("dvh1.08.06"))
+        assertEquals(8, depth(null))
+    }
+
+    @Test
+    fun dolbyVisionCodecStringsGiveTheProfileAndTheBaseLayersDecoder() {
+        fun dv(codecs: String) = Format.Builder().setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION).setCodecs(codecs).build()
+        // Profile 8 (dvh1.08) and its HEVC base layer.
+        assertEquals(CodecProfileLevel.DolbyVisionProfileDvheSt, MediaCodecUtil.getCodecProfileAndLevel(dv("dvh1.08.06"))?.first)
+        assertEquals(MimeTypes.VIDEO_H265, MediaCodecUtil.getAlternativeCodecMimeType(dv("dvh1.08.06")))
+        assertEquals(MimeTypes.VIDEO_H265, MediaCodecUtil.getAlternativeCodecMimeType(dv("dvhe.08.09")))
+        // Profile 5 has no backward-compatible base layer: no alternative.
+        assertEquals(CodecProfileLevel.DolbyVisionProfileDvheStn, MediaCodecUtil.getCodecProfileAndLevel(dv("dvhe.05.06"))?.first)
+        assertNull(MediaCodecUtil.getAlternativeCodecMimeType(dv("dvhe.05.06")))
+        // Profile 9 (AVC base) and 10 (AV1 base).
+        assertEquals(MimeTypes.VIDEO_H264, MediaCodecUtil.getAlternativeCodecMimeType(dv("dvav.09.05")))
+        assertEquals(MimeTypes.VIDEO_AV1, MediaCodecUtil.getAlternativeCodecMimeType(dv("dav1.10.06")))
+    }
+
+    @Test
+    fun picturesFromFormats() {
+        val picture = DecoderRules.Picture.of(video(MimeTypes.VIDEO_H265, 3840, 2160, 23.976f, "hvc1.2.4.L153", hdr10))
+        assertEquals(3840, picture.width)
+        assertEquals(10, picture.bitDepth)
+        assertTrue(picture.hdr)
+        val unknown = DecoderRules.Picture.of(Format.Builder().setSampleMimeType(MimeTypes.VIDEO_H264).build())
+        assertEquals(0, unknown.width)
+        assertFalse(unknown.hdr)
+        assertTrue(DecoderRules.Picture.of(Format.Builder().setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION).build()).hdr)
+    }
+}
