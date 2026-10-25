@@ -114,7 +114,8 @@ internal class SessionManager(
         tokens.signedIn.collectLatest { signedIn ->
             if (!signedIn) {
                 meState.value = null
-                setScope(null)
+                // The screens' loads fail ("sign in again") rather than wait for a profile.
+                setScope(null, ScopeState.SignedOut)
                 _state.value = SessionState.SignedOut(active)
             } else {
                 resolve(active)
@@ -228,10 +229,11 @@ internal class SessionManager(
         _scopes.value = ScopeState.Ready(scope)
     }
 
-    private suspend fun setScope(scope: ProfileScope?) {
+    /** [scope] `null`: no profile's answers are read, for the reason [none] says. */
+    private suspend fun setScope(scope: ProfileScope?, none: ScopeState = ScopeState.Waiting) {
         if (scope == null) {
-            if (_scopes.value != ScopeState.Waiting) {
-                _scopes.value = ScopeState.Waiting
+            if (_scopes.value != none) {
+                _scopes.value = none
                 onScopeChange(null)
             }
             if (snapshots.active != null) snapshots.activate(null)

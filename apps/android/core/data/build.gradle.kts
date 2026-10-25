@@ -20,6 +20,8 @@ dependencies {
 
     // FakePleyApi, FakeAuthGraph and the JSON fixtures.
     testImplementation(project(":core:testing"))
+    // A server that signs in for real: tokens it refuses, a server that restarts.
+    testImplementation(project(":testing:fixtures"))
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
     // The sign-in module's tokens are JSON (org.json is a stub in local unit tests).

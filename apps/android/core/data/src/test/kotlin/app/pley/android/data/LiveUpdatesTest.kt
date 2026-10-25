@@ -48,6 +48,17 @@ class LiveUpdatesTest {
     }
 
     @Test
+    fun `reading the scans starts following the server, as the shells do`() = runTest {
+        val data = signedIn(folder.newFolder())
+        testScheduler.runCurrent()
+        assertEquals(0, data.events.connected.value)
+
+        data.graph.liveUpdates.scans
+        testScheduler.runCurrent()
+        assertEquals(1, data.events.connected.value)
+    }
+
+    @Test
     fun `starting twice opens one stream`() = runTest {
         val data = signedIn(folder.newFolder())
         data.graph.liveUpdates.start()

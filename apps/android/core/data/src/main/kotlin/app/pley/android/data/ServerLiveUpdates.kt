@@ -54,7 +54,11 @@ internal class ServerLiveUpdates(
     private val app: CoroutineScope,
 ) : LiveUpdates {
     private val _scans = MutableStateFlow<List<ScanState>>(emptyList())
-    override val scans: StateFlow<List<ScanState>> = _scans.asStateFlow()
+    private val readScans = _scans.asStateFlow()
+
+    // Nothing else starts it in the app: reading the scans does (LiveUpdates.scans).
+    override val scans: StateFlow<List<ScanState>>
+        get() = readScans.also { start() }
 
     private val started = AtomicBoolean(false)
 

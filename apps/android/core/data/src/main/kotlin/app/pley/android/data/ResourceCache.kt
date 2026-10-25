@@ -2,6 +2,7 @@
 
 package app.pley.android.data
 
+import app.pley.android.auth.SignedOutException
 import app.pley.android.model.PleyJson
 import app.pley.android.network.PleyApi
 import java.util.concurrent.atomic.AtomicInteger
@@ -30,13 +31,16 @@ import kotlinx.serialization.SerializationException
 
 /** Whose answers the repositories read now. */
 internal sealed interface ScopeState {
-    /** Nobody's yet: starting, no server, signed out, or asking the server who. */
+    /** Nobody's yet: starting, no server, or asking the server who. */
     data object Waiting : ScopeState
 
     data class Ready(val profile: ProfileScope) : ScopeState
 
     /** Signed in, but the profile is unknown and the server can't say: [error]. */
     data class Unavailable(val error: Throwable) : ScopeState
+
+    /** Signed out of the server in use: nothing loads until the person signs in again. */
+    data object SignedOut : ScopeState
 }
 
 /**
@@ -115,11 +119,15 @@ internal class ResourceCache(
     /** [resource] for whoever is signed in: follows profile switches. */
     fun <T> observe(resource: Resource<T>): Flow<Loadable<T>> = whileReady { profile -> observe(profile, resource) }
 
-    /** [block]'s flow for the profile in use, Loading while there is none. */
+    /**
+     * [block]'s flow for the profile in use, Loading while there is none
+     * yet, Failed when there won't be one (signed out).
+     */
     fun <T> whileReady(block: (ProfileScope) -> Flow<Loadable<T>>): Flow<Loadable<T>> = scopes.flatMapLatest { state ->
         when (state) {
             is ScopeState.Ready -> block(state.profile)
             is ScopeState.Unavailable -> flowOf(Loadable.Failed(state.error))
+            ScopeState.SignedOut -> flowOf(Loadable.Failed(SignedOutException()))
             ScopeState.Waiting -> flowOf(Loadable.Loading)
         }
     }.distinctUntilChanged()
@@ -165,6 +173,7 @@ internal class ResourceCache(
     suspend fun profile(): ProfileScope = when (val state = scopes.first { it !is ScopeState.Waiting }) {
         is ScopeState.Ready -> state.profile
         is ScopeState.Unavailable -> throw state.error
+        ScopeState.SignedOut -> throw SignedOutException()
         ScopeState.Waiting -> error("unreachable")
     }
 
