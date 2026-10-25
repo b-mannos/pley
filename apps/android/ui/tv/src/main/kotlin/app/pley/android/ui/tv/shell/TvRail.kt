@@ -85,7 +85,12 @@ class RailState(private val content: FocusRequester = FocusRequester()) : TvRail
 
     /** Whether focus is in the rail, which is what opens it. */
     var hasFocus by mutableStateOf(false)
-        internal set
+        private set
+
+    /** Set when focus comes into the rail, cleared when another page shows ([pageChanged]). */
+    private var sentFromPage = false
+
+    override val keepsFocus: Boolean get() = hasFocus && sentFromPage
 
     /** Whether the rail shows at all: not on the sign-in screens. */
     var shown by mutableStateOf(false)
@@ -95,6 +100,16 @@ class RailState(private val content: FocusRequester = FocusRequester()) : TvRail
     private var sending = false
 
     internal fun requester(id: String): FocusRequester = requesters.getOrPut(id) { FocusRequester() }
+
+    internal fun focusChanged(hasFocus: Boolean) {
+        if (hasFocus && !this.hasFocus) sentFromPage = true
+        this.hasFocus = hasFocus
+    }
+
+    /** Another page shows: chosen in the rail, it takes focus from it ([keepsFocus]). */
+    internal fun pageChanged() {
+        sentFromPage = false
+    }
 
     override fun focusCurrent(): Boolean {
         if (!shown) return false
@@ -168,7 +183,7 @@ internal fun NavigationDrawerScope.TvRail(
             Modifier
                 .fillMaxHeight()
                 .testTag(TestTags.TV_RAIL)
-                .onFocusChanged { rail.hasFocus = it.hasFocus }
+                .onFocusChanged { rail.focusChanged(it.hasFocus) }
                 .focusProperties { onEnter = { with(rail) { enter() } } }
                 .focusGroup()
                 // The open rail covers the page's left: Right goes back to where focus was there.

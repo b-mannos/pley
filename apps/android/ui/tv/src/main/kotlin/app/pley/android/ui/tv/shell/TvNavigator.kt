@@ -26,12 +26,16 @@ class TvNavigator internal constructor(
 
     override fun open(key: PleyKey) {
         backStack.add(key)
+        rail.pageChanged()
     }
 
     override fun back() {
         when {
             rail.hasFocus -> exit()
-            backStack.size > 1 -> backStack.removeAt(backStack.lastIndex)
+            backStack.size > 1 -> {
+                backStack.removeAt(backStack.lastIndex)
+                rail.pageChanged()
+            }
             !rail.focusCurrent() -> exit()
         }
     }
@@ -40,6 +44,7 @@ class TvNavigator internal constructor(
         if (backStack.size == 1 && backStack[0] == key) return
         backStack.clear()
         backStack.add(key)
+        rail.pageChanged()
     }
 }
 

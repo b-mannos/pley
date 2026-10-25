@@ -15,8 +15,10 @@ import androidx.compose.ui.focus.FocusState
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.requestFocus
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
 import androidx.compose.ui.node.LayoutAwareModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.currentValueOf
 import androidx.compose.ui.platform.InspectorInfo
 import app.pley.android.designsystem.TvSafeArea
 import kotlinx.coroutines.launch
@@ -27,6 +29,14 @@ import kotlinx.coroutines.launch
  * provides it; without one (tests, previews), leaving does nothing special.
  */
 interface TvRailFocus {
+    /**
+     * Whether focus is in the rail, sent there while the page showing was
+     * (Left before it had loaded, say): the page's initial focus leaves it
+     * there. Not when the page was chosen in the rail, which it takes focus
+     * from as ever.
+     */
+    val keepsFocus: Boolean
+
     /** Moves focus to the rail's current item, which opens the rail. */
     fun focusCurrent(): Boolean
 }
@@ -86,7 +96,8 @@ fun rememberFocusMemory(): FocusMemory = rememberSaveable(saver = FocusMemory.Sa
  * D-pad rule 1: this element takes focus once it is first laid out, so no
  * screen shows without a focused element. With [memory], it gives way to
  * the element focused last on the page ([rememberedFocus]) when that one
- * comes back.
+ * comes back. It never takes focus back from the rail when someone went
+ * there while the page was loading ([TvRailFocus.keepsFocus]).
  *
  * Put it before the focusable it is for: `Modifier.initialFocus().focusable()`.
  */
@@ -125,8 +136,23 @@ private class InitialFocusNode(
     var memory: FocusMemory?,
     var key: String?,
     var initial: Boolean,
-) : Modifier.Node(), FocusRequesterModifierNode, LayoutAwareModifierNode, FocusEventModifierNode {
+) : Modifier.Node(),
+    FocusRequesterModifierNode,
+    LayoutAwareModifierNode,
+    FocusEventModifierNode,
+    CompositionLocalConsumerModifierNode {
     private var placed = false
+
+    /**
+     * Takes focus while it is still on the page or nowhere: not once
+     * someone has moved it to the rail ([TvRailFocus.keepsFocus]), as Left
+     * while the page was still loading does. Asked when the request runs,
+     * after the keys pressed meanwhile.
+     */
+    private fun takeFocus() {
+        if (currentValueOf(LocalTvRailFocus)?.keepsFocus == true) return
+        requestFocus()
+    }
 
     override fun onPlaced(coordinates: LayoutCoordinates) {
         if (placed) return
@@ -137,17 +163,17 @@ private class InitialFocusNode(
             // The page remembers this element: it takes focus back.
             memory != null && key != null && memory.key == key -> {
                 memory.restored = true
-                coroutineScope.launch { requestFocus() }
+                coroutineScope.launch { takeFocus() }
             }
             !initial -> Unit
             // Nothing remembered: the page's initial focus.
-            memory?.key == null -> coroutineScope.launch { requestFocus() }
+            memory?.key == null -> coroutineScope.launch { takeFocus() }
             // Something else is remembered. If it doesn't come back (gone,
             // or not laid out), this one takes focus after all.
             else -> coroutineScope.launch {
                 withFrameNanos { }
                 withFrameNanos { }
-                if (!memory.restored) requestFocus()
+                if (!memory.restored) takeFocus()
             }
         }
     }

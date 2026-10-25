@@ -16,6 +16,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -48,6 +49,7 @@ class TvRowFocusTest {
     private val rail = object : TvRailFocus {
         val requester = FocusRequester()
         var asked = 0
+        override var keepsFocus = false
 
         override fun focusCurrent(): Boolean {
             asked++
@@ -68,6 +70,7 @@ class TvRowFocusTest {
                             Modifier
                                 .size(56.dp)
                                 .focusRequester(rail.requester)
+                                .onFocusChanged { rail.keepsFocus = it.hasFocus }
                                 .semantics { contentDescription = "rail" }
                                 .testTag("rail")
                                 .focusable(),

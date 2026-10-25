@@ -12,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -71,6 +72,7 @@ class TvHomeTest {
     private val rail = object : TvRailFocus {
         val requester = FocusRequester()
         var asked = 0
+        override var keepsFocus = false
 
         override fun focusCurrent(): Boolean {
             asked++
@@ -85,7 +87,7 @@ class TvHomeTest {
             val navigator = remember { TvNavigator(backStack, RailState(), exit = {}) }
             CompositionLocalProvider(LocalTvNavigator provides navigator, LocalTvRailFocus provides rail) {
                 Row(Modifier.fillMaxSize()) {
-                    Box(Modifier.size(56.dp).focusRequester(rail.requester).testTag("rail").focusable())
+                    Box(Modifier.size(56.dp).focusRequester(rail.requester).onFocusChanged { rail.keepsFocus = it.hasFocus }.testTag("rail").focusable())
                     TvHomeScreen(vm)
                 }
             }

@@ -7,13 +7,17 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.navigation3.runtime.NavKey
+import androidx.test.core.app.ApplicationProvider
 import app.pley.android.common.TestTags
+import app.pley.android.data.Loadable
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryKind
 import app.pley.android.testing.screens.onboarding.FakeOnboardingSource
@@ -64,15 +68,30 @@ class TvAppTest {
     private val threeLibraries = listOf(Library(1, "Movies", LibraryKind.Movies), Library(2, "Shows", LibraryKind.Shows), Library(3, "Music", LibraryKind.Music))
 
     private fun app(facts: StartFacts = home, placeholder: @androidx.compose.runtime.Composable (NavKey) -> Unit = { Placeholder(it) }) {
+        start(facts, placeholder)
+        // Every screen starts with focus (D-pad rule 1): Home once its rows are shaped, off the
+        // main thread, which waiting for the main thread to be idle doesn't wait for.
+        compose.waitUntil(STARTS_WITHIN_MS) { compose.onAllNodes(isFocused()).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    /** The app, without waiting for its first screen. */
+    private fun start(facts: StartFacts = home, placeholder: @androidx.compose.runtime.Composable (NavKey) -> Unit = { Placeholder(it) }) {
         compose.setContent {
             // Getting in reads a fake server: a household of four, a code to show, nobody on the network.
             CompositionLocalProvider(LocalOnboardingSource provides onboarding) {
                 TvApp(FakeSource(facts, threeLibraries), onExit = { exits++ }, reducedMotion = true, placeholder = placeholder)
             }
         }
-        // Every screen starts with focus (D-pad rule 1): Home once its rows are shaped, off the
-        // main thread, which waiting for the main thread to be idle doesn't wait for.
-        compose.waitUntil(STARTS_WITHIN_MS) { compose.onAllNodes(isFocused()).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    /** Home's data in the test graph, which a test can hold back. */
+    private val homeData get() = (ApplicationProvider.getApplicationContext<TvTestApplication>().screensGraph as TvTestGraph).sources.home
+
+    /** Waits for [text], which a screen shows once its state is worked out off the main thread. */
+    private fun waitFor(text: String, ofContentDescription: Boolean = false) {
+        val matcher = if (ofContentDescription) hasContentDescription(text) else hasText(text)
+        compose.waitUntil(STARTS_WITHIN_MS) { compose.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitForIdle()
     }
 
     private fun back() {
@@ -171,6 +190,24 @@ class TvAppTest {
         compose.press(Key.DirectionCenter)
         compose.press(Key.DirectionLeft)
         railEntry("home").assertIsFocused()
+    }
+
+    @Test
+    fun leftWhileHomeLoadsStaysOnTheRailOnceItHasLoaded() {
+        val ready = homeData.value
+        homeData.value = Loadable.Loading
+        start()
+        waitFor("Loading your home screen", ofContentDescription = true)
+        // The skeleton has nothing to focus: Left goes to the rail.
+        compose.press(Key.DirectionLeft)
+        railEntry("home").assertIsFocused()
+        // Home comes in with Resume, its initial focus, which leaves focus where it was sent.
+        homeData.value = ready
+        waitFor("Resume")
+        railEntry("home").assertIsFocused()
+        // Right goes to the page, starting on Resume.
+        compose.press(Key.DirectionRight)
+        compose.onNodeWithText("Resume").assertIsFocused()
     }
 
     @Test
