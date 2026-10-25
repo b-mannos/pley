@@ -190,7 +190,9 @@ class Media3EngineTest {
         server.start()
         try {
             val engine = engine()
-            engine.prepare(EngineSource(server.url("/api/playback/s1/index.m3u8").toString(), hls = true), startMs = 0, playWhenReady = true)
+            // Not playing: the player's clock moves by itself while the request is really out, and
+            // playing, Media3's stuck-buffering check would reach its 10 minutes before a slow 404 came.
+            engine.prepare(EngineSource(server.url("/api/playback/s1/index.m3u8").toString(), hls = true), startMs = 0, playWhenReady = false)
             val error = TestPlayerRunHelper.run(engine.player).untilPlayerError()
             assertTrue(MediaRetries.isFinal(error))
             assertEquals(1, server.requestCount)
