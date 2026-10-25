@@ -480,6 +480,16 @@ private fun LazyListScope.pane(
             item(key = "row-grid-density") {
                 TvSettingRow(stringResource(R.string.tv_settings_grid_density), value = stringResource(densityLabel(s.gridDensity)), icon = PleyIcons.LayoutDashboard, onClick = { pick(Picking.GridDensity) }, modifier = keyed("row-grid-density"))
             }
+            item(key = "row-reduce-motion") {
+                TvSettingRow(
+                    stringResource(R.string.tv_settings_reduce_motion),
+                    value = stringResource(R.string.tv_settings_reduce_motion_hint),
+                    checked = s.reduceMotion,
+                    icon = PleyIcons.Sparkles,
+                    onClick = { model.setReduceMotion(!s.reduceMotion) },
+                    modifier = keyed("row-reduce-motion"),
+                )
+            }
         }
         Category.Server -> {
             item(key = "row-server") {

@@ -2,13 +2,17 @@ package app.pley.android.ui.tv.shell
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
+import app.pley.android.auth.AuthEvent
 import app.pley.android.data.valueOrNull
 import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.model.Library
 import app.pley.android.screens.ScreensGraph
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
 /**
@@ -30,6 +34,12 @@ interface TvShellSource {
      * as long as it runs: the shell runs it while the app is started.
      */
     suspend fun keepUpdated()
+
+    /** The servers the app was signed out of without being asked (a refused sign-in): sign-in shows again. */
+    val signedOut: Flow<String> get() = emptyFlow()
+
+    /** pley's own "Reduce motion" switch (the system's setting counts as well). */
+    val reduceMotion: Flow<Boolean> get() = flowOf(false)
 
     companion object {
         /**
@@ -93,4 +103,8 @@ private class GraphShellSource(
         // Server events flow while something listens to them (the data module's LiveUpdates).
         graph.data.liveUpdates.scans.collect { }
     }
+
+    override val signedOut: Flow<String> = graph.auth.events.filterIsInstance<AuthEvent.SignedOut>().map { it.issuer }
+
+    override val reduceMotion: Flow<Boolean> = graph.data.settings.settings.map { it.reduceMotion }.distinctUntilChanged()
 }

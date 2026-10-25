@@ -116,6 +116,8 @@ class SettingsViewModel(
 
     fun setPlaybackDetails(on: Boolean) = update { it.copy(showPlaybackDetails = on) }
 
+    fun setReduceMotion(on: Boolean) = update { it.copy(reduceMotion = on) }
+
     fun setAlwaysStartAs(profileId: Long?) = update { it.copy(alwaysStartAs = profileId) }
 
     fun setSoftwareVideo(on: Boolean) = update { it.copy(allowSoftwareVideo = on) }

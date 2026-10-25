@@ -94,7 +94,9 @@ fun TvApp(
     reducedMotion: Boolean? = null,
     placeholder: @Composable (NavKey) -> Unit = { Placeholder(it) },
 ) {
-    TvTheme(tier, reducedMotion) {
+    // Settings → Display → Reduce motion, on top of the system's "Remove animations".
+    val chosen by source.reduceMotion.collectAsStateWithLifecycle(false)
+    TvTheme(tier, reducedMotion ?: true.takeIf { chosen }) {
         val gate = remember { KeyRepeatGate() }
         val root = remember { TvScrolling.root() }
         CompositionLocalProvider(LocalKeyRepeatGate provides gate, LocalBringIntoViewSpec provides root) {
@@ -128,6 +130,10 @@ private fun TvShell(
     rail.shown = root !is PleyKey.Servers && root !is PleyKey.Link && root !is PleyKey.SignIn && root != PleyKey.Profiles
     val curtain = rememberCurtain(backStack.lastOrNull())
     ReturnFocus(rail, content)
+    // A refused sign-in (the server ended it, or forgot it): that server's sign-in again, as on phones.
+    LaunchedEffect(source, navigator) {
+        source.signedOut.collect { issuer -> if (rail.shown) navigator.restart(PleyKey.Link(issuer)) }
+    }
 
     // The last resort of Back: below every screen's own (they are added later, so they come first).
     BackHandler { navigator.back() }

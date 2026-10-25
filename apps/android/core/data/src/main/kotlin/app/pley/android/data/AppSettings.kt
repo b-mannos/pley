@@ -60,6 +60,8 @@ data class Settings(
     val alwaysStartAs: Long? = null,
     val showPlaybackDetails: Boolean = false,
     val gridDensity: GridDensity = GridDensity.Medium,
+    /** Move less (design spec §5.3), whatever the system says: Fire OS has no "Remove animations". */
+    val reduceMotion: Boolean = false,
     /** Debug builds only (emulators): let software decoders play video beyond what the device's policy allows. */
     val allowSoftwareVideo: Boolean = false,
 ) {

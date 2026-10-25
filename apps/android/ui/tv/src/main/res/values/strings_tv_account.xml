@@ -75,6 +75,8 @@
     <string name="tv_settings_autoplay_hint">After a 10 second countdown</string>
     <string name="tv_settings_playback_details">Playback details</string>
     <string name="tv_settings_playback_details_hint">Show how a video plays (direct, remux or transcode) over it</string>
+    <string name="tv_settings_reduce_motion">Reduce motion</string>
+    <string name="tv_settings_reduce_motion_hint">No zooming, sliding or fading: things change in place</string>
     <string name="tv_settings_advanced">Advanced</string>
     <string name="tv_settings_tunneling">Tunneled playback</string>
     <string name="tv_settings_tunneling_hint">Smoother video on some TVs; can break playback on others</string>
