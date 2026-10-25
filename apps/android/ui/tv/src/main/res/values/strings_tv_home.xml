@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Home: the hero's buttons (design spec §2.2). -->
+    <string name="tv_home_resume">Resume</string>
+    <string name="tv_home_play">Play</string>
+    <string name="tv_home_from_start">From start</string>
+    <string name="tv_home_info">Info</string>
+    <string name="tv_home_mark_watched">Mark as watched</string>
+    <string name="tv_home_mark_unwatched">Mark as unwatched</string>
+    <string name="tv_home_see_all">See all</string>
+    <string name="tv_home_rating">Rated %1$s</string>
+
+    <!-- Home's states (design spec §8), in the web's words. -->
+    <string name="tv_home_no_libraries">No libraries yet</string>
+    <string name="tv_home_no_libraries_body">Ask the server owner to add a library.</string>
+    <string name="tv_home_empty">Nothing here yet</string>
+    <string name="tv_home_empty_body">Your libraries are empty. Add media to the library folders and run a scan.</string>
+    <string name="tv_home_scanning">Scanning your libraries…</string>
+    <string name="tv_home_scanning_body">New items will show up here as soon as they\'re found.</string>
+    <string name="tv_home_failed">Couldn\'t load your home screen</string>
+    <string name="tv_home_retry">Retry</string>
+    <string name="tv_home_nothing_to_play">Nothing to play</string>
+    <string name="tv_home_loading">Loading your home screen</string>
+
+    <!-- The list of libraries. -->
+    <string name="tv_libraries_title">Libraries</string>
+    <string name="tv_libraries_failed">Couldn\'t load your libraries</string>
+    <string name="tv_libraries_scanning">Scanning…</string>
+</resources>

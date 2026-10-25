@@ -2,10 +2,6 @@ package app.pley.android.ui.tv.shell
 
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsFocused
@@ -14,19 +10,12 @@ import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavKey
 import app.pley.android.common.TestTags
-import app.pley.android.designsystem.tile.TileKind
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryKind
-import app.pley.android.screens.PleyKey
-import app.pley.android.ui.tv.kit.TvRow
-import app.pley.android.ui.tv.kit.TvRowColumn
 import app.pley.android.ui.tv.kit.focused
 import app.pley.android.ui.tv.kit.press
-import app.pley.android.ui.tv.kit.rememberFocusMemory
-import app.pley.android.ui.tv.kit.tiles
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
@@ -39,10 +28,11 @@ import org.robolectric.annotation.Config
 /**
  * The frame with the D-pad and Back (D-pad rule 11): initial focus on every
  * start screen, the rail and content, the Back sequence, and a row's focus
- * coming back after Back.
+ * coming back after Back. Home is the real one, over the JSON fixtures
+ * ([TvTestGraph]); the screens not built yet are placeholders.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(qualifiers = "w960dp-h540dp-land-television-xhdpi")
+@Config(qualifiers = "w960dp-h540dp-land-television-xhdpi", application = TvTestApplication::class)
 class TvAppTest {
     @get:Rule
     val compose = createAndroidComposeRule<ComponentActivity>()
@@ -92,17 +82,20 @@ class TvAppTest {
     fun whoIsWatchingStartsFocused() = startsFocusedOn(StartFacts("http://s", true, profiles = 2), "Profiles")
 
     @Test
-    fun homeStartsFocused() = startsFocusedOn(home, "Home")
+    fun homeStartsFocused() {
+        app()
+        compose.onNodeWithText("Resume").assertIsFocused()
+    }
 
     @Test
     fun leftFromContentEntersTheRailAtTheCurrentPage() {
         app()
-        compose.onNodeWithText("Open another screen").assertIsFocused()
+        compose.onNodeWithText("Resume").assertIsFocused()
         compose.press(Key.DirectionLeft)
         railEntry("home").assertIsFocused()
         // Right goes back to where focus was.
         compose.press(Key.DirectionRight)
-        compose.onNodeWithText("Open another screen").assertIsFocused()
+        compose.onNodeWithText("Resume").assertIsFocused()
     }
 
     @Test
@@ -119,11 +112,12 @@ class TvAppTest {
     @Test
     fun backGoesFromThePageToTheRailThenLeaves() {
         app()
-        // A page opened from Home: Back returns to Home.
+        // A page opened from Home: Back returns to Home, on the tile it was opened from.
+        compose.press(Key.DirectionDown)
         compose.press(Key.DirectionCenter)
-        compose.onNodeWithText("Libraries isn't built yet").assertExists()
+        compose.onNodeWithText("Item isn't built yet").assertExists()
         back()
-        compose.onNodeWithText("Home isn't built yet").assertExists()
+        compose.focused().assertContentDescriptionEquals(HALF_LOOP)
         assertEquals(0, exits)
         // On the rail's page: Back goes to the rail's current entry.
         back()
@@ -144,43 +138,31 @@ class TvAppTest {
         assertEquals(1, exits)
     }
 
-    /** Home as two rows of tiles that open items. */
-    private fun rowsApp() = app(placeholder = { key ->
-        if (key == PleyKey.Home) {
-            val navigator = LocalTvNavigator.current
-            val memory = rememberFocusMemory()
-            TvRowColumn(contentPadding = PaddingValues(top = 188.dp)) {
-                item("a") { TvRow("a", "Row A", tiles("A", 10), TileKind.Landscape, onOpen = { navigator.open(PleyKey.Item(it.id)) }, memory = memory, initialFocus = true) }
-                item("b") { TvRow("b", "Row B", tiles("B", 10, from = 100), TileKind.Poster, onOpen = { navigator.open(PleyKey.Item(it.id)) }, memory = memory) }
-                item("end") { Spacer(Modifier.height(200.dp)) }
-            }
-        } else {
-            Placeholder(key)
-        }
-    })
-
     @Test
     fun rightFromTheRailComesBackToTheTile() {
-        rowsApp()
-        compose.press(Key.DirectionRight, times = 2)
-        compose.press(Key.DirectionDown)
-        compose.focused().assertContentDescriptionEquals("B 100")
+        app()
+        compose.press(Key.DirectionDown, times = 2)
+        compose.focused().assertContentDescriptionEquals(DUNE)
         compose.press(Key.DirectionLeft)
         railEntry("home").assertIsFocused()
         compose.press(Key.DirectionRight)
-        compose.focused().assertContentDescriptionEquals("B 100")
+        compose.focused().assertContentDescriptionEquals(DUNE)
     }
 
     @Test
     fun aRowsFocusComesBackAfterBack() {
-        rowsApp()
-        compose.focused().assertContentDescriptionEquals("A 1")
-        compose.press(Key.DirectionDown)
-        compose.press(Key.DirectionRight, times = 3)
-        compose.focused().assertContentDescriptionEquals("B 103")
+        app()
+        compose.press(Key.DirectionDown, times = 2)
+        compose.focused().assertContentDescriptionEquals(DUNE)
         compose.press(Key.DirectionCenter)
         compose.onNodeWithText("Item isn't built yet").assertExists()
         back()
-        compose.focused().assertContentDescriptionEquals("B 103")
+        compose.focused().assertContentDescriptionEquals(DUNE)
+    }
+
+    private companion object {
+        /** What the fixtures' tiles say to screen readers. */
+        const val HALF_LOOP = "Half Loop, Severance, Season 1 Episode 2, 34 minutes left"
+        const val DUNE = "Dune: Part Two, 2024"
     }
 }

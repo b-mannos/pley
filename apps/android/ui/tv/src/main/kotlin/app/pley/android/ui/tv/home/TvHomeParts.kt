@@ -1,0 +1,418 @@
+package app.pley.android.ui.tv.home
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import app.pley.android.common.describe
+import app.pley.android.common.perf.StartupSignals
+import app.pley.android.designsystem.PleyColors
+import app.pley.android.designsystem.PleyShape
+import app.pley.android.designsystem.PleyTv
+import app.pley.android.designsystem.PleyType
+import app.pley.android.designsystem.TvSafeArea
+import app.pley.android.designsystem.icon.Icon
+import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.image.LocalArtworkImageLoader
+import app.pley.android.designsystem.tile.QualityBadge
+import app.pley.android.designsystem.tile.TileKind
+import app.pley.android.designsystem.tile.TileStyle
+import app.pley.android.designsystem.tile.rememberSkeleton
+import app.pley.android.designsystem.tile.skeleton
+import app.pley.android.screens.home.HomeInfo
+import app.pley.android.screens.home.HomeMessage
+import app.pley.android.screens.home.HomeMeta
+import app.pley.android.ui.tv.R
+import app.pley.android.ui.tv.kit.FocusMemory
+import app.pley.android.ui.tv.kit.LocalTvRailFocus
+import app.pley.android.ui.tv.kit.LocalTvRowColumn
+import app.pley.android.ui.tv.kit.TvPillButton
+import app.pley.android.ui.tv.kit.TvRoundButton
+import app.pley.android.ui.tv.kit.initialFocus
+import coil3.SingletonImageLoader
+import coil3.compose.LocalPlatformContext
+import coil3.request.ImageRequest
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
+
+/**
+ * The hero's stack at x = 96 (design spec §2.2): the title (logo art once
+ * the server has it), an episode's "S2 · E5 · The Long Night", the
+ * metadata line, progress, three lines of summary, then Resume (or Play)
+ * and the round buttons From start, Info and Watched. A missing piece
+ * closes its gap. Resume ([resume]) is the page's initial focus.
+ *
+ * It is one focus group that the rows' column comes back to by its key
+ * ([HERO_KEY]), always on Resume once the page went back to its top.
+ */
+@Composable
+internal fun TvHomeHero(
+    hero: HomeInfo,
+    resume: FocusRequester,
+    memory: FocusMemory,
+    onFocused: () -> Unit,
+    onPlay: (fromStart: Boolean) -> Unit,
+    onInfo: () -> Unit,
+    onWatched: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val column = LocalTvRowColumn.current
+    val group = remember { FocusRequester() }
+    if (column != null) {
+        DisposableEffect(column) {
+            column.rows[HERO_KEY] = group
+            onDispose { if (column.rows[HERO_KEY] === group) column.rows.remove(HERO_KEY) }
+        }
+    }
+    Column(
+        modifier
+            .height(HeroHeight)
+            .wrapContentHeight(Alignment.Top, unbounded = true)
+            .focusRequester(group)
+            .onFocusChanged {
+                if (it.hasFocus) {
+                    onFocused()
+                    column?.focusedRow = HERO_KEY
+                }
+            }
+            .focusRestorer(resume)
+            .focusGroup()
+            .padding(start = PleyTv.Gutter, top = HeroTop),
+    ) {
+        Box(
+            Modifier.width(TextColumn).height(TitleBox).wrapContentHeight(Alignment.Bottom, unbounded = true),
+            contentAlignment = Alignment.BottomStart,
+        ) {
+            BasicText(
+                hero.title,
+                style = PleyType.Tv.HeroTitle.copy(color = PleyColors.Fg),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.semantics { heading() },
+            )
+        }
+        if (hero.context.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            BasicText(hero.context, style = PleyType.Tv.Title.copy(color = PleyColors.Fg), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(TextColumn))
+        }
+        if (!hero.meta.isEmpty) {
+            Spacer(Modifier.height(8.dp))
+            TvMetaLine(hero.meta)
+        }
+        if (hero.inProgress) {
+            Spacer(Modifier.height(12.dp))
+            ProgressLine(hero.progress, hero.timeLeft)
+        }
+        if (hero.summary.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            BasicText(
+                hero.summary,
+                style = PleyType.Tv.BodyLarge.copy(color = SummaryColor),
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.width(TextColumn),
+            )
+        }
+        Spacer(Modifier.height(20.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(PleyTv.ButtonGap)) {
+            TvPillButton(
+                label = stringResource(if (hero.inProgress) R.string.tv_home_resume else R.string.tv_home_play),
+                onClick = { onPlay(false) },
+                icon = PleyIcons.Play,
+                progress = hero.progress.takeIf { hero.inProgress },
+                modifier = Modifier.focusRequester(resume).initialFocus(memory),
+            )
+            if (hero.inProgress) {
+                TvRoundButton(stringResource(R.string.tv_home_from_start), PleyIcons.RotateCcw, onClick = { onPlay(true) })
+            }
+            TvRoundButton(stringResource(R.string.tv_home_info), PleyIcons.Info, onClick = onInfo)
+            TvRoundButton(
+                stringResource(if (hero.watched) R.string.tv_home_mark_unwatched else R.string.tv_home_mark_watched),
+                PleyIcons.CircleCheck,
+                onClick = onWatched,
+            )
+        }
+    }
+}
+
+/**
+ * The compact block about the focused tile over the rows (design spec
+ * §4.1), from y = 30: the title in a 60 dp box, the metadata line 12
+ * below (an episode's number first), two lines of summary 10 below.
+ */
+@Composable
+internal fun TvInfoBlock(info: HomeInfo, modifier: Modifier = Modifier) {
+    Column(modifier.padding(start = PleyTv.Gutter, top = 30.dp).width(TextColumn)) {
+        Box(Modifier.height(60.dp).wrapContentHeight(Alignment.Bottom, unbounded = true), contentAlignment = Alignment.BottomStart) {
+            BasicText(info.title, style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.height(12.dp))
+        TvMetaLine(info.meta, lead = info.context)
+        if (info.summary.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            BasicText(info.summary, style = PleyType.Tv.Body.copy(color = SummaryColor), maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/**
+ * The metadata line (design spec §2.2, §2.6): year · content rating (a
+ * badge) · runtime · ★ rating · quality badges, in tvLabel
+ * [muted][PleyColors.Muted] with [subtle][PleyColors.Subtle] dots. [lead]
+ * goes first ("S1 · E3 · Glasshouse") and gives way when space runs out.
+ */
+@Composable
+internal fun TvMetaLine(meta: HomeMeta, modifier: Modifier = Modifier, lead: String = "") {
+    val label = PleyType.Tv.Label.copy(color = PleyColors.Muted)
+    val dot = PleyType.Tv.Label.copy(color = PleyColors.Subtle)
+    val score = meta.rating
+    val rating = score?.let { stringResource(R.string.tv_home_rating, it) }
+    Row(
+        modifier.widthIn(max = TextColumn).height(20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        var first = true
+        val separate: @Composable () -> Unit = {
+            if (!first) BasicText("·", style = dot)
+            first = false
+        }
+        if (lead.isNotEmpty()) {
+            separate()
+            BasicText(lead, style = label.copy(color = PleyColors.Fg), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        }
+        if (meta.year.isNotEmpty()) {
+            separate()
+            BasicText(meta.year, style = label, maxLines = 1)
+        }
+        meta.contentRating?.let {
+            separate()
+            QualityBadge(it, TileStyle.Tv)
+        }
+        if (meta.runtime.isNotEmpty()) {
+            separate()
+            BasicText(meta.runtime, style = label, maxLines = 1, softWrap = false)
+        }
+        if (score != null) {
+            separate()
+            Row(
+                Modifier.semantics(mergeDescendants = true) { contentDescription = rating.orEmpty() },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(PleyIcons.Star, contentDescription = null, size = 16.dp, tint = PleyColors.Accent)
+                Spacer(Modifier.width(4.dp))
+                BasicText(score, style = label.copy(color = PleyColors.Fg), maxLines = 1)
+            }
+        }
+        if (meta.badges.isNotEmpty()) {
+            separate()
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { meta.badges.forEach { QualityBadge(it, TileStyle.Tv) } }
+        }
+    }
+}
+
+private val HomeMeta.isEmpty: Boolean
+    get() = year.isEmpty() && contentRating == null && runtime.isEmpty() && rating == null && badges.isEmpty()
+
+/** A 160 by 4 bar (surface4 track, accent fill), then "26 min left" in tvCaption. */
+@Composable
+private fun ProgressLine(progress: Float, timeLeft: String) {
+    Row(Modifier.height(18.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(160.dp, 4.dp).drawBehind {
+                val r = CornerRadius(size.height / 2f)
+                drawRoundRect(PleyColors.Surface4, cornerRadius = r)
+                drawRoundRect(PleyColors.Accent, size = Size(size.width * progress.coerceIn(0f, 1f), size.height), cornerRadius = r)
+            },
+        )
+        if (timeLeft.isNotEmpty()) {
+            Spacer(Modifier.width(10.dp))
+            BasicText(timeLeft, style = PleyType.Tv.Caption.copy(color = PleyColors.Fg))
+        }
+    }
+}
+
+/**
+ * Home with nothing saved yet (design spec §8): static skeletons in the
+ * hero's and the first row's shapes, after a moment, so a Home read from
+ * what was saved never flashes one. No spinner.
+ */
+@Composable
+internal fun TvHomeSkeleton() {
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(SKELETON_DELAY_MS)
+        shown = true
+    }
+    val loading = stringResource(R.string.tv_home_loading)
+    Box(Modifier.fillMaxSize().semantics { contentDescription = loading }) {
+        if (!shown) return@Box
+        val state = rememberSkeleton(animated = false)
+        val bar = RoundedCornerShape(PleyShape.BadgeRadius)
+        @Composable
+        fun block(x: Dp, y: Dp, w: Dp, h: Dp, shape: androidx.compose.ui.graphics.Shape = bar) =
+            Box(Modifier.offset(x, y).size(w, h).skeleton(state, shape))
+        block(PleyTv.Gutter, 98.dp, 300.dp, 44.dp)
+        block(PleyTv.Gutter, 186.dp, 240.dp, 20.dp)
+        block(PleyTv.Gutter, 250.dp, 440.dp, 17.dp)
+        block(PleyTv.Gutter, 275.dp, 400.dp, 17.dp)
+        block(PleyTv.Gutter, 300.dp, 260.dp, 17.dp)
+        block(PleyTv.Gutter, 341.dp, 148.dp, 48.dp, PleyShape.Pill)
+        block(PleyTv.Gutter, 435.dp, 200.dp, 20.dp)
+        val tile = TileKind.Landscape
+        repeat(4) { i ->
+            block(PleyTv.Gutter + (tile.tvWidth + tile.tvGap) * i, 474.dp, tile.tvWidth, tile.tvHeight, TileStyle.Tv.shape(tile))
+        }
+    }
+}
+
+/**
+ * A state with a sentence instead of rows (design spec §8): [title] in
+ * tvPageTitle and [body] in tvBody [muted][PleyColors.Muted], centred, and
+ * a Retry pill with focus when [retry] is given. Without one there is
+ * nothing to focus on the page, so focus goes to the rail.
+ */
+@Composable
+internal fun TvHomeNotice(title: String, body: String, retry: (() -> Unit)? = null) {
+    val rail = LocalTvRailFocus.current
+    Column(
+        Modifier.fillMaxSize().padding(start = PleyTv.Gutter, end = TvSafeArea.Horizontal).semantics { liveRegion = LiveRegionMode.Polite },
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        BasicText(
+            title,
+            style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg, textAlign = TextAlign.Center),
+            modifier = Modifier.semantics { heading() },
+        )
+        Spacer(Modifier.height(12.dp))
+        BasicText(body, style = PleyType.Tv.Body.copy(color = PleyColors.Muted, textAlign = TextAlign.Center), modifier = Modifier.widthIn(max = TextColumn))
+        if (retry != null) {
+            Spacer(Modifier.height(24.dp))
+            TvPillButton(stringResource(R.string.tv_home_retry), onClick = retry, icon = PleyIcons.RefreshCw, modifier = Modifier.initialFocus())
+        }
+    }
+    if (retry == null) {
+        LaunchedEffect(Unit) {
+            withFrameNanos { }
+            rail?.focusCurrent()
+        }
+    }
+}
+
+/** A short message at the foot of the page, gone after 3.5 s (6 s for errors). */
+@Composable
+internal fun BoxScope.TvHomeToast(message: HomeMessage?, onShown: () -> Unit) {
+    if (message == null) return
+    val text = when (message) {
+        HomeMessage.NothingToPlay -> stringResource(R.string.tv_home_nothing_to_play)
+        is HomeMessage.Failed -> sentence(message.error)
+    }
+    LaunchedEffect(message) {
+        delay(if (message is HomeMessage.Failed) ERROR_TOAST_MS else TOAST_MS)
+        onShown()
+    }
+    Box(
+        Modifier
+            .align(Alignment.BottomStart)
+            .padding(start = PleyTv.Gutter, bottom = TvSafeArea.Vertical)
+            .background(PleyColors.Surface3, PleyShape.Pill)
+            .padding(horizontal = 20.dp, vertical = 10.dp)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+    ) {
+        BasicText(text, style = PleyType.Tv.Label.copy(color = PleyColors.Fg))
+    }
+}
+
+/**
+ * Tells the shells Home is drawn (StartupSignals.homeDrawn, which the
+ * benchmarks' time to full display waits for): its first frame with
+ * content, once the first row's first pictures are in (or after 2 s).
+ */
+@Composable
+internal fun MarkHomeDrawn(model: TvHomeModel) {
+    val context = LocalPlatformContext.current
+    val loader = LocalArtworkImageLoader.current ?: SingletonImageLoader.get(context)
+    val density = LocalDensity.current
+    LaunchedEffect(Unit) {
+        if (StartupSignals.homeDrawn.value) return@LaunchedEffect
+        withFrameNanos { }
+        val row = model.rows.firstOrNull()
+        if (row != null) {
+            val w = with(density) { row.kind.tvWidth.roundToPx() }
+            val h = with(density) { row.kind.tvHeight.roundToPx() }
+            withTimeoutOrNull(FIRST_ROW_WAIT_MS) {
+                coroutineScope {
+                    row.tiles.take(FIRST_ROW_TILES).mapNotNull { it.image }
+                        .map { image -> async { loader.execute(ImageRequest.Builder(context).data(image).size(w, h).build()) } }
+                        .awaitAll()
+                }
+            }
+        }
+        StartupSignals.markHomeDrawn()
+    }
+}
+
+/** [error]'s sentence, capitalised, with a full stop. */
+internal fun sentence(error: Throwable): String {
+    val text = describe(error).replaceFirstChar { it.uppercase() }
+    return if (text.endsWith('.') || text.endsWith('…')) text else "$text."
+}
+
+/** The text column over backdrops (design spec §1.3): x 96 to 560. */
+internal val TextColumn = 464.dp
+
+private val HeroTop = 58.dp
+private val TitleBox = 84.dp
+private val SummaryColor = PleyColors.Fg.copy(alpha = 0.85f)
+
+private const val SKELETON_DELAY_MS = 300L
+private const val TOAST_MS = 3_500L
+private const val ERROR_TOAST_MS = 6_000L
+private const val FIRST_ROW_WAIT_MS = 2_000L
+private const val FIRST_ROW_TILES = 4
