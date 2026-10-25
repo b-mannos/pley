@@ -228,15 +228,26 @@ impl Transcoder {
         Ok((resp.bytes().await?, content_type))
     }
 
+    /// A subtitle track as WebVTT, whole: a subtitle file (`stream_index`
+    /// `None`), converted in seconds, or a track of the file. A Matroska
+    /// file's usually come in seconds too, read through its Cues; others may
+    /// need a pass over the whole file, which the transcoder lets run as long
+    /// as the file's size calls for (two hours for 70 GB on a slow share):
+    /// the wait for those only ends for a transcoder that stopped answering.
     pub async fn subtitles(&self, path: &str, stream_index: Option<i64>) -> TranscoderResult<String> {
         let req = SubtitleRequest { path: path.to_owned(), stream_index, partial: false };
-        let resp = self.post("/v1/subtitles", &req, Duration::from_secs(25 * 60)).await?;
+        // A file's conversion ends within the 30 minutes the API gives a request.
+        let wait = if stream_index.is_some() { Duration::from_secs(12 * 3600) } else { Duration::from_secs(25 * 60) };
+        let resp = self.post("/v1/subtitles", &req, wait).await?;
         Ok(resp.text().await?)
     }
 
     /// An embedded track's subtitles as far as they have been pulled out of
     /// the file, and whether that is all of them (the transcoder goes on
-    /// pulling them out after answering).
+    /// pulling them out after answering). The transcoder answers within a
+    /// few seconds: with all of them when they are out by then (as a rule
+    /// for a Matroska file, read through its Cues), else with those found so
+    /// far.
     pub async fn subtitles_so_far(&self, path: &str, stream_index: i64) -> TranscoderResult<(String, bool)> {
         let req = SubtitleRequest { path: path.to_owned(), stream_index: Some(stream_index), partial: true };
         let resp = self.post("/v1/subtitles", &req, Duration::from_secs(60)).await?;
@@ -279,6 +290,9 @@ impl Transcoder {
         Ok(resp.bytes().await?)
     }
 
+    /// A new job. The transcoder may probe the file first, and pull a text
+    /// track out of it to burn in, which it gives up on after 20 minutes:
+    /// the wait here is longer, so its answer comes through.
     pub async fn create_job(&self, req: &JobRequest) -> TranscoderResult<JobCreated> {
         self.post_json("/v1/jobs", req, Duration::from_secs(25 * 60)).await
     }

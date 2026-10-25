@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use axum::Json;
@@ -447,10 +448,16 @@ pub async fn subtitles(
     Ok(vtt((*text).clone()))
 }
 
-type Extraction = Shared<BoxFuture<'static, Result<Arc<String>, Arc<AppError>>>>;
+/// A conversion under way, and which one it is.
+#[derive(Clone)]
+struct Extraction {
+    id: u64,
+    result: Shared<BoxFuture<'static, Result<Arc<String>, Arc<AppError>>>>,
+}
 
 /// Subtitles being pulled out of their files, by cache file.
 static EXTRACTIONS: LazyLock<DashMap<PathBuf, Extraction>> = LazyLock::new(DashMap::new);
+static NEXT_EXTRACTION: AtomicU64 = AtomicU64::new(0);
 
 /// The subtitle file at `path` (a sidecar) as WebVTT, made once and cached
 /// at `cache`: requests for the same subtitles wait for one conversion, which
@@ -460,27 +467,39 @@ async fn extract_subtitles(state: &AppState, path: String, cache: PathBuf) -> Ap
     let extraction = EXTRACTIONS
         .entry(cache.clone())
         .or_insert_with(|| {
+            let id = NEXT_EXTRACTION.fetch_add(1, Ordering::Relaxed);
             let state = state.clone();
             let cache = cache.clone();
             let task = tokio::spawn(async move {
+                let _done = Forget { cache: cache.clone(), id };
                 let text = state.transcoder.subtitles(&path, None).await?;
                 cache_subtitles(&cache, &text).await;
                 Ok::<_, AppError>(Arc::new(text))
             });
-            async move {
+            let result = async move {
                 match task.await {
                     Ok(result) => result.map_err(Arc::new),
                     Err(err) => Err(Arc::new(AppError::Internal(err.into()))),
                 }
-            }
-            .boxed()
-            .shared()
+            };
+            Extraction { id, result: result.boxed().shared() }
         })
         .clone();
-    let result = extraction.await;
-    // Done: the next request finds the cache (or tries again after a failure).
-    EXTRACTIONS.remove(&cache);
-    result.map_err(|err| err.again())
+    extraction.result.await.map_err(|err| err.again())
+}
+
+/// Takes a conversion out of [`EXTRACTIONS`] once it's over, however it ends
+/// and whoever still waits for it: the next request finds the cache, or
+/// tries again after a failure. A later conversion in its place stays.
+struct Forget {
+    cache: PathBuf,
+    id: u64,
+}
+
+impl Drop for Forget {
+    fn drop(&mut self) {
+        EXTRACTIONS.remove_if(&self.cache, |_, extraction| extraction.id == self.id);
+    }
 }
 
 fn vtt(text: String) -> Response {

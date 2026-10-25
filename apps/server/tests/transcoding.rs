@@ -50,6 +50,12 @@ struct Fake {
     job_delay: Arc<Mutex<Duration>>,
     /// Creating a job fails, as when ffmpeg can't read the file.
     fail_jobs: Arc<AtomicBool>,
+    /// How long converting a subtitle file takes.
+    sidecar_delay: Arc<Mutex<Duration>>,
+    /// The next subtitle file's conversion fails.
+    sidecar_fails: Arc<AtomicBool>,
+    /// Subtitle file conversions answered (done or failed).
+    sidecar_answers: Arc<AtomicUsize>,
 }
 
 impl Fake {
@@ -304,8 +310,14 @@ async fn start_fake() -> (Fake, String) {
                 let first_of_slow =
                     req.stream_index == Some(5) && !fake.subtitles.lock().iter().any(|r| r.stream_index == Some(5));
                 let partial = req.partial;
+                let sidecar = req.stream_index.is_none();
                 fake.subtitles.lock().push(req);
-                if fails {
+                if sidecar {
+                    let delay = *fake.sidecar_delay.lock();
+                    tokio::time::sleep(delay).await;
+                    fake.sidecar_answers.fetch_add(1, Ordering::SeqCst);
+                }
+                if fails || (sidecar && fake.sidecar_fails.swap(false, Ordering::SeqCst)) {
                     return error(StatusCode::INTERNAL_SERVER_ERROR, "ffmpeg_failed");
                 }
                 if first_of_slow && partial {
@@ -746,6 +758,42 @@ async fn subtitles_are_cached_whole_and_follow_their_sidecar() {
     std::fs::File::options().write(true).open(&srt).unwrap().set_modified(later).unwrap();
     assert_eq!(app.get(&sidecar, admin).await.status, StatusCode::OK);
     assert_eq!(converted(), 4);
+}
+
+#[tokio::test]
+async fn subtitle_files_are_converted_once_and_forgotten_when_done() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let file = app.file_of(w.movies["Feature"]).await;
+    let sidecar = format!("/api/files/{file}/subtitles/1000.vtt");
+    let converted = || w.fake.subtitles.lock().iter().filter(|r| r.stream_index.is_none()).count();
+
+    // Two players ask at once and share a conversion; both leave (the track
+    // changed) once it's under way, and it fails.
+    *w.fake.sidecar_delay.lock() = Duration::from_millis(400);
+    w.fake.sidecar_fails.store(true, Ordering::SeqCst);
+    tokio::select! {
+        _ = async { tokio::join!(app.get(&sidecar, admin), app.get(&sidecar, admin)) } => {}
+        () = eventually(|| converted() == 1) => {}
+    }
+    eventually(|| w.fake.sidecar_answers.load(Ordering::SeqCst) == 1).await;
+    assert_eq!(converted(), 1, "one conversion for both");
+
+    // Asked again once it has failed, it's converted again rather than
+    // answered with that failure (only a request at the very moment it fails
+    // may still share it), and kept from then on.
+    *w.fake.sidecar_delay.lock() = Duration::ZERO;
+    let mut again = app.get(&sidecar, admin).await;
+    for _ in 0..100 {
+        if again.status == StatusCode::OK {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        again = app.get(&sidecar, admin).await;
+    }
+    assert_eq!(again.status, StatusCode::OK, "{}", again.text());
+    assert_eq!(app.get(&sidecar, admin).await.text(), again.text());
+    assert_eq!(converted(), 2);
 }
 
 #[tokio::test]
