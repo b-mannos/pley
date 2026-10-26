@@ -24,12 +24,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
@@ -65,7 +61,7 @@ import app.pley.android.designsystem.icon.PleyIcon
 /**
  * A pill: Play, Resume, Get a new code, Play now. 40 tall, at least 128
  * wide. At rest a faint fill with a [control][PleyColors.Control] edge.
- * [progress] (0 to 1, Resume) draws the played line along its bottom.
+ * How far a title was played shows beside it, not in the button.
  */
 @Composable
 fun TvPillButton(
@@ -74,7 +70,6 @@ fun TvPillButton(
     modifier: Modifier = Modifier,
     icon: PleyIcon? = null,
     enabled: Boolean = true,
-    progress: Float? = null,
     onLongClick: (() -> Unit)? = null,
 ) {
     val interactions = remember { MutableInteractionSource() }
@@ -89,8 +84,7 @@ fun TvPillButton(
             .heightIn(min = PleyTv.ButtonHeight)
             .widthIn(min = PillMinWidth)
             .alpha(if (enabled) 1f else DISABLED_ALPHA)
-            .focusProperties { canFocus = enabled || focused }
-            .then(if (progress != null) Modifier.progressLine(progress) { focused } else Modifier),
+            .focusProperties { canFocus = enabled || focused },
         shape = ButtonDefaults.shape(PleyShape.Control),
         colors = ButtonDefaults.colors(
             containerColor = PleyColors.Fg.copy(alpha = 0.12f),
@@ -259,25 +253,6 @@ private fun HandOffFocus(enabled: Boolean, focused: Boolean) {
             listOf(FocusDirection.Right, FocusDirection.Left, FocusDirection.Down, FocusDirection.Up).firstOrNull { focus.moveFocus(it) }
         }
     }
-}
-
-/**
- * An in-progress pill's line (design spec §2.5): 3 dp, 5 dp above the
- * bottom, inset by the side padding. At rest accent over fg 20 %; focused
- * onAccent over onAccent 25 %.
- */
-private fun Modifier.progressLine(progress: Float, focused: () -> Boolean): Modifier = drawWithContent {
-    drawContent()
-    val h = 3.dp.toPx()
-    val inset = PillPadding.toPx()
-    val y = size.height - 5.dp.toPx() - h
-    val w = (size.width - 2 * inset).coerceAtLeast(0f)
-    val on = focused()
-    val track = if (on) PleyColors.OnAccent.copy(alpha = 0.25f) else PleyColors.Fg.copy(alpha = 0.2f)
-    val fill = if (on) PleyColors.OnAccent else PleyColors.Accent
-    val r = CornerRadius(h / 2f, h / 2f)
-    drawRoundRect(track, Offset(inset, y), Size(w, h), r)
-    drawRoundRect(fill, Offset(inset, y), Size(w * progress.coerceIn(0f, 1f), h), r)
 }
 
 /** Lets a label be wider than the button it sits under, centred on it. */

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,13 +29,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -144,9 +142,9 @@ internal fun TvHomeHero(
             Spacer(Modifier.height(8.dp))
             TvMetaLine(hero.meta)
         }
-        if (hero.inProgress) {
+        if (hero.inProgress && hero.timeLeft.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
-            ProgressLine(hero.progress, hero.timeLeft)
+            BasicText(hero.timeLeft, style = PleyType.Tv.Caption.copy(color = PleyColors.Fg), maxLines = 1, modifier = Modifier.heightIn(min = 17.dp))
         }
         if (hero.summary.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
@@ -164,7 +162,6 @@ internal fun TvHomeHero(
                 label = stringResource(if (hero.inProgress) R.string.tv_home_resume else R.string.tv_home_play),
                 onClick = { onPlay(false) },
                 icon = PleyIcons.Play,
-                progress = hero.progress.takeIf { hero.inProgress },
                 modifier = Modifier.focusRequester(resume).initialFocus(memory),
             )
             if (hero.inProgress) {
@@ -258,24 +255,6 @@ internal fun TvMetaLine(meta: HomeMeta, modifier: Modifier = Modifier, lead: Str
 
 private val HomeMeta.isEmpty: Boolean
     get() = year.isEmpty() && contentRating == null && runtime.isEmpty() && rating == null && badges.isEmpty()
-
-/** A 160 by 4 bar (surface4 track, accent fill), then "26 min left" in tvCaption. */
-@Composable
-private fun ProgressLine(progress: Float, timeLeft: String) {
-    Row(Modifier.height(17.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.size(160.dp, 4.dp).drawBehind {
-                val r = CornerRadius(size.height / 2f)
-                drawRoundRect(PleyColors.Surface4, cornerRadius = r)
-                drawRoundRect(PleyColors.Accent, size = Size(size.width * progress.coerceIn(0f, 1f), size.height), cornerRadius = r)
-            },
-        )
-        if (timeLeft.isNotEmpty()) {
-            Spacer(Modifier.width(8.dp))
-            BasicText(timeLeft, style = PleyType.Tv.Caption.copy(color = PleyColors.Fg))
-        }
-    }
-}
 
 /**
  * Home with nothing saved yet (design spec §8): static skeletons in the

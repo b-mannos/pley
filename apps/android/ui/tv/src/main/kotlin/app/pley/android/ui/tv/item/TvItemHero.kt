@@ -90,7 +90,12 @@ internal fun TvHero(
         }
         Spacer(Modifier.height(12.dp))
         TvMetaLine(page.meta)
-        val genres = (page.genres + page.partOf.map { stringResource(R.string.tv_item_part_of, it.title) }).joinToString(" · ")
+        // How far a resumed title was played: "1h 33m left", as on Home.
+        page.primary.timeLeft.takeIf { page.primary.kind == PrimaryAction.Kind.Resume && it.isNotEmpty() }?.let { left ->
+            Spacer(Modifier.height(8.dp))
+            BasicText(left, style = PleyType.Tv.Caption.copy(color = PleyColors.Fg), maxLines = 1)
+        }
+        val genres =(page.genres + page.partOf.map { stringResource(R.string.tv_item_part_of, it.title) }).joinToString(" · ")
         if (genres.isNotEmpty()) {
             Spacer(Modifier.height(6.dp))
             BasicText(genres, style = PleyType.Tv.Caption.copy(color = PleyColors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(TextColumn))
@@ -193,7 +198,6 @@ private fun HeroButtonsRow(
             onClick = { actions.model.play(fromStart = false) },
             icon = if (unavailable) null else PleyIcons.Play,
             enabled = !unavailable,
-            progress = primary.progress.takeIf { primary.kind == PrimaryAction.Kind.Resume && it > 0f },
             onLongClick = onPrimaryActions,
             modifier = Modifier
                 .testTag(TestTags.ITEM_PLAY)

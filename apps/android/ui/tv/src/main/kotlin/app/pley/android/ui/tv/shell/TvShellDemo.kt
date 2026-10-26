@@ -281,7 +281,7 @@ private fun Hero(details: DemoDetails, memory: app.pley.android.ui.tv.kit.FocusM
         )
         Spacer(Modifier.height(20.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(PleyTv.ButtonGap)) {
-            TvPillButton("Resume", onClick = { }, icon = PleyIcons.Play, progress = 0.55f, modifier = Modifier.initialFocus(memory))
+            TvPillButton("Resume", onClick = { }, icon = PleyIcons.Play, modifier = Modifier.initialFocus(memory))
             TvRoundButton("From start", PleyIcons.RotateCcw, onClick = { })
             TvRoundButton("Info", PleyIcons.Info, onClick = { })
             TvRoundButton("Watched", PleyIcons.CircleCheck, onClick = { })
