@@ -609,10 +609,25 @@ impl Plan {
     }
 
     /// The whole media as one Matroska file at `output` (a converted
-    /// download): the streams the segments would have, made in one go.
-    pub fn file_args(&self, ctx: &ArgsContext<'_>, output: &Path) -> Vec<OsString> {
+    /// download): the streams the segments would have, made in one go, and
+    /// every subtitle track of `media` in its order, as it is (MP4's text
+    /// made SRT), for the player to show itself, with the fonts they use.
+    /// Players find a track by its place among the subtitle tracks, the
+    /// original's as the file's.
+    pub fn file_args(&self, ctx: &ArgsContext<'_>, media: &MediaInfo, output: &Path) -> Vec<OsString> {
         let mut a = self.stream_args(ctx, 0, self.segment_count());
-        a.push_all(["-f", "matroska"]);
+        let mut n = 0;
+        for s in media.streams.iter().filter(|s| s.kind == StreamKind::Subtitle) {
+            let codec = match s.codec.as_str() {
+                c if MATROSKA_SUBTITLES.contains(&c) => "copy",
+                "mov_text" => "srt",
+                // Teletext and the like: Matroska has no place for them.
+                _ => continue,
+            };
+            a.push_all(["-map", &format!("0:{}", s.index), &format!("-c:s:{n}"), codec]);
+            n += 1;
+        }
+        a.push_all(["-map", "0:t?", "-f", "matroska"]);
         a.push_os(output.as_os_str().to_owned());
         a.0
     }
@@ -907,6 +922,10 @@ pub struct ArgsContext<'a> {
     /// Folder for libplacebo's compiled shaders (see [`shader_cache_option`]).
     pub shader_cache: Option<&'a Path>,
 }
+
+/// Subtitle codecs a Matroska file holds as they are.
+const MATROSKA_SUBTITLES: [&str; 7] =
+    ["subrip", "ass", "ssa", "webvtt", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"];
 
 #[derive(Default)]
 struct Args(Vec<OsString>);
@@ -1378,7 +1397,21 @@ mod tests {
         let ff = ffmpeg_with(vec![x264()], vec![]);
         let mut req = request();
         req.options.throttle = false;
-        let plan = Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, None).unwrap();
+        let mut media = media(DynamicRange::Sdr, None);
+        media.streams.push(MediaStream {
+            index: 4,
+            kind: StreamKind::Subtitle,
+            codec: "dvb_teletext".into(),
+            ..Default::default()
+        });
+        media.streams.push(MediaStream {
+            index: 5,
+            kind: StreamKind::Subtitle,
+            codec: "mov_text".into(),
+            text_based: Some(true),
+            ..Default::default()
+        });
+        let plan = Plan::build(&req, &media, &ff, None).unwrap();
         let ctx = ArgsContext {
             input: Path::new("/media/movie.mkv"),
             encoder: None,
@@ -1387,7 +1420,7 @@ mod tests {
             shader_cache: None,
         };
         let args: Vec<String> = plan
-            .file_args(&ctx, Path::new("/work/conversions/abc.mkv.part"))
+            .file_args(&ctx, &media, Path::new("/work/conversions/abc.mkv.part"))
             .iter()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
@@ -1395,6 +1428,11 @@ mod tests {
         assert!(line.ends_with("-f matroska /work/conversions/abc.mkv.part"), "{line}");
         assert!(line.contains("-c:v libx264") && line.contains("-preset fast"), "{line}");
         assert!(line.contains("-c:a aac"), "{line}");
+        // The subtitles as they are, in their order; teletext has no place in Matroska.
+        assert!(
+            line.contains("-map 0:2 -c:s:0 copy -map 0:3 -c:s:1 copy -map 0:5 -c:s:2 srt -map 0:t? -f matroska"),
+            "{line}"
+        );
         for absent in ["-segment", "-ss ", "-t ", "-readrate", "-output_ts_offset"] {
             assert!(!line.contains(absent), "{absent} in {line}");
         }

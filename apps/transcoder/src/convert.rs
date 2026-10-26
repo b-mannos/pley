@@ -326,7 +326,7 @@ impl Conversions {
             preset,
             shader_cache: self.shader_cache.as_deref(),
         };
-        let args = plan.file_args(&ctx, &part);
+        let args = plan.file_args(&ctx, &media, &part);
         tracing::debug!(conversion = %id, "ffmpeg {}", args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "));
         let mut cmd = self.ff.command();
         // A file for later: never at the cost of a playback.
@@ -380,11 +380,16 @@ fn part_of(path: &Path) -> PathBuf {
     PathBuf::from(part)
 }
 
+/// What a conversion makes besides the request's streams: its subtitle
+/// tracks since 2. A file made before names another conversion.
+const MADE: u32 = 2;
+
 /// What names a conversion: the input as it is now (path, size and time)
 /// and what the request makes of it, not who asked or where a playback
 /// would have started.
 fn conversion_id(req: &JobRequest, size: u64, modified_ms: u128) -> String {
     let what = serde_json::json!({
+        "made": MADE,
         "input": req.input,
         "size": size,
         "modified": modified_ms.to_string(),
@@ -495,11 +500,16 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("source.mkv");
+        let srt = dir.path().join("source.srt");
+        std::fs::write(&srt, "1\n00:00:01,000 --> 00:00:02,000\nHello\n").unwrap();
         let made = std::process::Command::new("ffmpeg")
             .args(["-hide_banner", "-loglevel", "error", "-y"])
             .args(["-f", "lavfi", "-i", "testsrc2=duration=4:size=320x180:rate=24"])
             .args(["-f", "lavfi", "-i", "sine=frequency=440:duration=4"])
-            .args(["-c:v", "libx264", "-preset", "ultrafast", "-c:a", "eac3", "-ac", "6"])
+            .arg("-i")
+            .arg(&srt)
+            .args(["-map", "0", "-map", "1", "-map", "2"])
+            .args(["-c:v", "libx264", "-preset", "ultrafast", "-c:a", "eac3", "-ac", "6", "-c:s", "srt"])
             .arg(&source)
             .status()
             .unwrap();
@@ -560,7 +570,7 @@ mod tests {
             .output()
             .unwrap();
         let streams = String::from_utf8_lossy(&out.stdout).replace("\r", "");
-        assert_eq!(streams.trim(), "h264\naac,2", "{streams}");
+        assert_eq!(streams.trim(), "h264\naac,2\nsubrip", "{streams}");
 
         // Asked again: the file made.
         let again = conversions.create(req.clone()).await.unwrap();

@@ -100,7 +100,10 @@ in one FFmpeg run: what a download is when the device that keeps it
 doesn't play the original as it is (sound it doesn't decode, a picture
 too big for it). Its streams are what a job's segments would be (the same
 plan: encoder, tone mapping, AAC), made at full speed (`throttle` is
-ignored) from the start (`start_ms` is too). A remux whose segments would
+ignored) from the start (`start_ms` is too), with every subtitle track
+of the input as it is, in its order (MP4's text made SRT; teletext, which
+Matroska can't hold, left out), and the fonts they use: a player finds a
+track by its place among the subtitle tracks, as in the original. A remux whose segments would
 be edited (Dolby Vision converted, HDR10+ left out) has its video made
 anew instead, as a file can't be edited the way segments are.
 
