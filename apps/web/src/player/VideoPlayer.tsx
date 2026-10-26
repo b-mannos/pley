@@ -13,13 +13,14 @@ import {
   Play,
   RotateCcw,
   RotateCw,
+  ServerOff,
   SkipForward,
   TriangleAlert,
   Volume1,
   Volume2,
   VolumeX,
 } from "lucide-react";
-import { errorMessage } from "@/api/client";
+import { errorMessage, isApiError } from "@/api/client";
 import { onServerEvent } from "@/api/events";
 import { fetchNext, invalidateWatchState, useTrickplay } from "@/api/hooks";
 import type { ItemDetail, ItemSummary, PlaybackInfo, PlaybackMode, PlaybackState, ServerEvent } from "@/api/types";
@@ -171,6 +172,9 @@ function bufferedAhead(v: HTMLMediaElement): number {
   return 0;
 }
 
+/** What to check when the server answers nothing (the Android apps say the same). */
+const REACH_HINT = "Check that the server is on and that this device is on its network.";
+
 export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: initialSub, queue }: VideoPlayerProps) {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -235,6 +239,12 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const [buffering, setBuffering] = useState(false);
   const bufferingTimer = useRef<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  /** The error is the server answering nothing: "Can't reach your server", as the apps say. */
+  const [unreachable, setUnreachable] = useState(false);
+  const failUnreachable = () => {
+    setUnreachable(true);
+    setError(REACH_HINT);
+  };
   const [needsGesture, setNeedsGesture] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(startMs / 1000);
@@ -425,6 +435,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     lastData.current = performance.now();
     setLoading(true);
     setError(null);
+    setUnreachable(false);
     setNeedsGesture(false);
     setEnded(false);
     window.clearTimeout(bufferingTimer.current);
@@ -556,7 +567,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                     return;
                   }
                 }
-                setError(`Playback failed (${data.details}).`);
+                // No answer at all, after the retries: the server is out of reach.
+                if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !data.response?.code) failUnreachable();
+                else setError(`Playback failed (${data.details}).`);
               });
               hls.on(Hls.Events.FRAG_LOADED, () => {
                 // Media that arrives isn't media that plays: budgets start over
@@ -579,7 +592,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         }
       } catch (err) {
         if (cancelled) return;
-        setError(errorMessage(err));
+        if (isApiError(err, 0)) failUnreachable();
+        else setError(errorMessage(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -678,7 +692,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       restartAt(at);
       return;
     }
-    setError(message || "This video can't be played in your browser.");
+    if (code === MediaError.MEDIA_ERR_NETWORK) failUnreachable();
+    else setError(message || "This video can't be played in your browser.");
   });
 
   const onMediaError = useEffectEvent(() => {
@@ -1147,6 +1162,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
   const retry = () => {
     setError(null);
+    setUnreachable(false);
     recoveries.current.recreate = 0;
     recoveries.current.stuck = 0;
     // Without a session (its start failed) the element knows nothing: use the intended start.
@@ -1315,9 +1331,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         </div>
       ) : error ? (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-black/85 p-6 text-center">
-          <TriangleAlert className="size-12 text-accent" />
+          {unreachable ? <ServerOff className="size-12 text-accent" /> : <TriangleAlert className="size-12 text-accent" />}
           <div className="max-w-lg">
-            <div className="text-lg font-semibold">Playback error</div>
+            <div className="text-lg font-semibold">{unreachable ? "Can't reach your server" : "Playback error"}</div>
             <p className="mt-1 text-sm text-white/70">{error}</p>
           </div>
           <div className="flex gap-2">

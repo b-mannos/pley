@@ -196,6 +196,21 @@ describe("VideoPlayer switching sessions", () => {
     expect(requests.some((r) => r.path === "/api/items/7/progress" && (r.body as { state: string }).state === "stopped")).toBe(true);
   });
 
+  it("says the server can't be reached when its stream stops answering", async () => {
+    serve([session("s1")]);
+    renderPlayer(0);
+    await waitFor(() => expect(hlsInstances[0]?.calls).toContain("attachMedia"));
+
+    // No answer at all, past the retries.
+    act(() => {
+      for (let i = 0; i < 5; i++) hlsInstances[0]?.emit("hlsError", { fatal: true, type: "networkError", details: "fragLoadError" });
+    });
+
+    expect(await screen.findByText("Can't reach your server")).toBeInTheDocument();
+    expect(screen.getByText("Check that the server is on and that this device is on its network.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
   it("still waits for a start in flight, which ends its own session", async () => {
     let answer: (info: PlaybackInfo) => void = () => undefined;
     const first = new Promise<PlaybackInfo>((resolve) => (answer = resolve));
