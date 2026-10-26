@@ -25,6 +25,7 @@ use crate::playback::{
     transcode_info,
 };
 use crate::state::AppState;
+use crate::streams;
 
 /// Length of HLS segments. Nothing plays before FFmpeg has written a whole
 /// segment, and every start, seek and quality switch starts a process that
@@ -76,6 +77,16 @@ pub async fn start(
     };
     let info = file.media_info();
     let streams = file.streams();
+    // No audio track named: the one the user's choices pick (what the item's
+    // details told the player, `selected_audio`), not just the file's
+    // default. A player that plays its own pick as it is would otherwise get
+    // a session for the default track, find it isn't the one it shows, and
+    // start another (a job made for nothing).
+    if req.audio_index.is_none() {
+        let pref = streams::load(&state.db, user.id, streams::scope(&row)).await?;
+        let defaults = streams::defaults(&state.db, user.id).await?;
+        req.audio_index = streams::resolve(pref.as_ref(), &defaults, &streams).audio;
+    }
     let decision = decide(&file, info.as_ref(), &streams, &req);
     let mut reasons = decision.reasons.clone();
     let subtitles = subtitle_tracks(file.id, &streams);

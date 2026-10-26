@@ -918,6 +918,30 @@ async fn image_subtitles_and_other_tracks_need_a_transcode() {
     assert_eq!(w.fake.last_request().start_ms, Some(42_000));
 }
 
+/// A play request that names no audio track plays the one the user picked
+/// (the item's `selected_audio`, what the player shows as chosen), not the
+/// file's default: a player that plays its pick as it is would otherwise be
+/// answered for the default track, and ask again (a job made for nothing).
+#[tokio::test]
+async fn the_audio_the_user_picked_plays_unless_another_is_named() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let feature = w.movies["Feature"];
+    let file = app.file_of(feature).await;
+    let choice = json!({"file_id": file, "audio_index": 2, "subtitle_index": null});
+    assert_eq!(app.put(&format!("/api/items/{feature}/streams"), admin, choice).await.status, StatusCode::NO_CONTENT);
+    let detail = app.get(&format!("/api/items/{feature}"), admin).await;
+    assert_eq!(detail.body["files"][0]["selected_audio"], json!(2));
+
+    let started = play(app, admin, json!({"item_id": feature, "caps": browser()})).await;
+    assert_eq!((&started.body["method"], &started.body["audio_index"]), (&json!("remux"), &json!(2)));
+    assert_eq!(w.fake.last_request().audio.unwrap().stream_index, Some(2));
+    // A track named still wins.
+    let english = play(app, admin, json!({"item_id": feature, "caps": browser(), "audio_index": 1})).await;
+    assert_eq!(english.body["audio_index"], json!(1));
+    assert_eq!(w.fake.last_request().audio.unwrap().stream_index, Some(1));
+}
+
 #[tokio::test]
 async fn frame_grabs_are_made_once_per_file() {
     let w = world().await;
