@@ -241,7 +241,7 @@ class SessionPlaybackController(
             it.copy(
                 itemId = detail.id,
                 title = if (episode) detail.grandparentTitle ?: detail.title else if (detail.year != null) "${detail.title} (${detail.year})" else detail.title,
-                subtitle = if (episode) listOf(episodeLabel(detail.parentIndex, detail.index), detail.title).filter { s -> s.isNotEmpty() }.joinToString(" — ") else null,
+                subtitle = if (episode) listOf(episodeLabel(detail.parentIndex, detail.index), detail.title).filter { s -> s.isNotEmpty() }.joinToString(" · ") else null,
                 durationMs = chosen?.durationMs ?: detail.durationMs ?: 0,
                 markers = markers,
                 chapters = chosen?.chapters.orEmpty().map { c -> ChapterMark(c.title, c.startMs, c.endMs, c.thumbUrl?.let { u -> env.api.url(u) }) },

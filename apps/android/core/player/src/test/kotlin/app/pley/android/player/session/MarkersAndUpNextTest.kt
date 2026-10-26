@@ -83,7 +83,7 @@ class MarkersAndUpNextTest {
         assertEquals(2, h.engine.prepared.size)
         assertEquals(FixtureIds.SHOW_S1E2, c.state.value.itemId)
         assertEquals("Fixture Show", c.state.value.title)
-        assertTrue(c.state.value.subtitle!!.startsWith("S1 · E2 — "))
+        assertTrue(c.state.value.subtitle!!.startsWith("S1 · E2 · "))
         assertNull(c.state.value.upNextCard)
         // The next one starts where it resumes, unless watched.
         val next = runBlocking { h.api.item(FixtureIds.SHOW_S1E2) }.userState
