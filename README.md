@@ -82,7 +82,11 @@ app; and pley for Android, a native app for phones, tablets, Android TV,
 Google TV and Fire TV, with its own player, which plays more files as they
 are than a browser, music in the background, and a remote-first interface
 on TVs. It signs in through the server's own page or, on a TV, with a code;
-installing it is in [docs/ANDROID.md](docs/ANDROID.md).
+installing it is in [docs/ANDROID.md](docs/ANDROID.md). And pley for Kodi,
+an add-on for Kodi 20 and newer (LibreELEC and CoreELEC boxes, Android TV
+boxes, computers) that plays with Kodi's own player, with Skip Intro and
+Up Next, and signs in with a code too
+([apps/kodi/README.md](apps/kodi/README.md)).
 
 **Offline**: on the home network everything works without the internet.
 Item pages download a file's original, which the Android app (phones and
@@ -113,6 +117,7 @@ HTTP, so the two can have different licenses
 | `apps/web` | The web app (React, TypeScript, Vite, Tailwind), embedded into the server |
 | `apps/desktop` | pley for Windows, macOS and Linux (Tauri) |
 | `apps/android` | pley for Android phones, tablets and TVs (Kotlin, Compose, Media3) |
+| `apps/kodi` | pley for Kodi, an add-on (Python, GPL-2.0-or-later) |
 | `packages/transcoder-api` | Protocol types shared by server and transcoder |
 | `deploy/` | Docker, systemd and launchd setups ([guide](deploy/README.md)) |
 | `docs/` | [HTTP API](docs/API.md), [Plex API](docs/PLEX.md), [transcoder](docs/TRANSCODER.md), [storage](docs/STORAGE.md) |

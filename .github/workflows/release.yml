@@ -91,6 +91,15 @@ jobs:
           pattern: release-*
           path: dist
           merge-multiple: true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: src
+      # The Kodi add-on, as Kodi installs it from a zip file.
+      - name: Kodi add-on
+        run: |
+          python3 src/apps/kodi/package.py
+          mv src/dist/plugin.video.pley-*.zip dist/
       - name: Checksums
         working-directory: dist
         run: sha256sum -- * > SHA256SUMS
