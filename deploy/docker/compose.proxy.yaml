@@ -1,0 +1,16 @@
+# Add-on: for a reverse proxy that runs in Docker too (Caddy, Traefik, nginx
+# Proxy Manager, ...). pley joins the proxy's network and publishes no port,
+# so only containers on that network reach it, at http://pley:7539.
+# Create the network once (`docker network create proxy`) and attach the
+# proxy to it, or put the proxy's own network in PLEY_PROXY_NETWORK.
+# Needs Docker Compose 2.24 or newer (`!reset`).
+services:
+  pley:
+    ports: !reset []
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    name: ${PLEY_PROXY_NETWORK:-proxy}
+    external: true

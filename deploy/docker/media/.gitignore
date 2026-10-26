@@ -1,0 +1,7 @@
+# Media added here stays out of git; only the folders and README.md are kept.
+/*
+!/.gitignore
+!/README.md
+!/Movies/
+!/TV Shows/
+!/Music/

@@ -8,3 +8,7 @@ data
 **/node_modules
 apps/web/dist
 *.log
+# A Docker install's database, keys and media never go to the builder.
+deploy/docker/config
+deploy/docker/media
+**/.env

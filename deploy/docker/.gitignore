@@ -1,0 +1,4 @@
+# This install's settings and local overrides.
+/.env
+/.env.new
+/compose.override.yaml

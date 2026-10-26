@@ -327,9 +327,48 @@ jobs:
           context: .
           file: deploy/docker/Dockerfile
           push: false
-          tags: pley:ci
+          load: true
+          tags: pley:local
           cache-from: type=gha
           cache-to: ${{ github.ref == 'refs/heads/master' && 'type=gha,mode=max' || '' }}
+      - name: Check the compose add-ons
+        working-directory: deploy/docker
+        env:
+          PLEY_RENDER_GID: "44"
+        run: |
+          for addon in vaapi nvidia proxy plex; do
+            docker compose -f compose.yaml -f "compose.$addon.yaml" config --quiet
+          done
+          ports=$(docker compose -f compose.yaml -f compose.proxy.yaml config --format json | jq '.services.pley.ports // [] | length')
+          test "$ports" = 0 || { echo "::error::compose.proxy.yaml leaves a port published"; exit 1; }
+      # The documented setup, with the image just built.
+      - name: Start pley with setup.sh
+        env:
+          PLEY_PULL_POLICY: never
+        run: deploy/docker/setup.sh
+      - name: Check the container's lockdown
+        working-directory: deploy/docker
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          in_pley() { docker compose exec -T pley "$@"; }
+          # grep reads all of its input: with pipefail, -q could fail the writer.
+          docker compose port pley 7539 | grep -x '127.0.0.1:7539' >/dev/null || fail "not published on 127.0.0.1 only"
+          curl -fsS http://127.0.0.1:7539/api/health
+          docker compose logs pley | grep 'setup#code=' >/dev/null || fail "no setup link in the log"
+          test "$(in_pley id -u)" = "$(id -u)" || fail "not running as the user setup.sh chose"
+          in_pley grep -q '^CapBnd:[[:space:]]*0*$' /proc/1/status || fail "capabilities left"
+          in_pley grep -q '^NoNewPrivs:[[:space:]]*1$' /proc/1/status || fail "no-new-privileges is off"
+          test -z "$(in_pley find / -xdev -perm /6000 -type f 2>/dev/null)" || fail "setuid or setgid programs in the image"
+          if in_pley touch /usr/local/bin/x 2>/dev/null; then fail "the image is writable"; fi
+          if in_pley touch /media/x 2>/dev/null; then fail "the media is writable"; fi
+          in_pley touch /config/x /tmp/x || fail "/config or /tmp isn't writable"
+          test "$(stat -c %a config)" = 700 || fail "the config folder isn't private"
+      - name: pley's log
+        if: always()
+        working-directory: deploy/docker
+        run: |
+          docker compose logs --no-color pley || true
+          docker compose down || true
 
   workflows:
     name: Workflows

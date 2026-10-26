@@ -1,0 +1,10 @@
+# Add-on: the Plex-compatible API (docs/PLEX.md) for python-plexapi,
+# Tautulli and Kometa, published like the web port: on this computer only
+# unless PLEY_PLEX_LISTEN says otherwise. It takes the same accounts and
+# tokens as pley; keep it off the internet.
+services:
+  pley:
+    environment:
+      PLEY_PLEX_BIND: 0.0.0.0:32400
+    ports:
+      - "${PLEY_PLEX_LISTEN:-127.0.0.1:32400}:32400"

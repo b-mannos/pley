@@ -1,0 +1,15 @@
+# Add-on: NVIDIA hardware transcoding (NVENC, NVDEC, Vulkan tone mapping).
+# Needs the NVIDIA driver and the NVIDIA Container Toolkit on the host
+# (https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/).
+# setup.sh turns it on when Docker has the toolkit's runtime; by hand, add
+# this file to COMPOSE_FILE in .env.
+services:
+  pley:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              # "video" is NVENC/NVDEC, "graphics" Vulkan.
+              capabilities: [gpu, video, compute, utility, graphics]

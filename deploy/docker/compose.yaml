@@ -1,50 +1,82 @@
-# docker compose -f deploy/docker/compose.yaml up -d
-# Then `docker logs pley` shows a link with the setup code
-# (http://localhost:7539/setup#code=…): open it to create the admin account.
+# pley with Docker Compose. From this folder:
+#
+#   ./setup.sh                     prepares everything and starts pley, or:
+#   cp .env.example .env           then edit it, and
+#   docker compose up -d           (`docker compose logs pley` shows the setup link)
+#
+# Settings come from .env (see .env.example); each has a default, so this file
+# also runs as it is. Hardware transcoding, a reverse proxy in Docker and the
+# Plex-compatible API are add-ons (compose.*.yaml, see README.md).
+#
+# The container is locked down: it runs as an ordinary user, with no Linux
+# capabilities, a read-only image and the media read-only, so the config
+# folder is the only place it can write; and pley is published on this
+# computer only (127.0.0.1), for a reverse proxy in front of it.
+name: pley
+
 services:
   pley:
+    image: ${PLEY_IMAGE:-pley:local}
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile
-    image: pley:latest
+    # "build": `up` builds the image from this checkout (unchanged layers are
+    # cached), so `git pull && docker compose up -d` updates pley. With a
+    # published image (PLEY_IMAGE), use "missing" and `docker compose pull`.
+    pull_policy: ${PLEY_PULL_POLICY:-build}
     container_name: pley
     restart: unless-stopped
     # pley lets requests in progress finish for 5 s, then stops the
     # transcoder and closes the database: give it room (Docker's default
     # is 10 s before it kills the container).
     stop_grace_period: 30s
-    # pley needs no privileges of its own (it runs as uid 1000).
+
+    # The user that owns the config folder and can read the media.
+    user: "${PLEY_UID:-1000}:${PLEY_GID:-1000}"
+    read_only: true
+    tmpfs:
+      # The transcoder's self-tests; SQLite keeps its temporary data in memory.
+      - /tmp:size=256m,mode=1777,noexec,nosuid,nodev
+      # Optional: transcode segments in RAM (about 2 GB per stream).
+      # - /config/transcode:size=4g,uid=${PLEY_UID:-1000},gid=${PLEY_GID:-1000},mode=0700,noexec,nosuid,nodev
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # Room for FFmpeg's threads, but not for a runaway process.
+    pids_limit: 4096
+
+    environment:
+      # The Plex-compatible API stays off unless compose.plex.yaml turns it on.
+      PLEY_PLEX_BIND: "off"
+      # The apps' search for servers on the network can't reach a container
+      # on Docker's own network: don't listen for it.
+      PLEY_NO_DISCOVERY: "true"
+      PLEY_LOG: ${PLEY_LOG:-info}
+
     ports:
-      # Published on every address of the host: Docker's port rules go
-      # around host firewalls such as ufw. Behind a reverse proxy on this
-      # host, publish it on 127.0.0.1 only: "127.0.0.1:7539:7539".
-      - "7539:7539"
+      # 127.0.0.1: only this computer (a reverse proxy here) reaches pley.
+      # Docker's port rules go around host firewalls such as ufw, so publish
+      # it on every address (0.0.0.0:7539) only on purpose.
+      - "${PLEY_LISTEN:-127.0.0.1:7539}:7539"
+
     volumes:
-      # Database, artwork, caches and transcode segments. Must be writable by
-      # uid 1000 (or set `user:` to the owner of this folder).
-      - ./config:/config
-      # Your media, read-only. Add one line per folder.
-      - /srv/media:/media:ro
-    # Optional: a RAM disk for transcode segments (needs ~2 GB per stream).
-    # tmpfs:
-    #   - /config/transcode:size=4g,uid=1000,gid=1000
+      # Database, artwork, caches and transcode segments.
+      - type: bind
+        source: ${PLEY_CONFIG_DIR:-./config}
+        target: /config
+        bind:
+          create_host_path: false
+      # Your media, read-only: libraries are folders under /media.
+      - type: bind
+        source: ${PLEY_MEDIA_DIR:-./media}
+        target: /media
+        read_only: true
+        bind:
+          create_host_path: false
 
-    # Intel / AMD hardware transcoding (VAAPI, QSV): pass the GPU and add the
-    # host's `render` group id (`getent group render | cut -d: -f3`).
-    # devices:
-    #   - /dev/dri:/dev/dri
-    # group_add:
-    #   - "993"
-
-    # NVIDIA (NVENC/NVDEC/Vulkan): install the NVIDIA Container Toolkit, then:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu, video, compute, utility, graphics]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

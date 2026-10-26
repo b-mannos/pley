@@ -149,6 +149,10 @@ the code can claim a new server.
 A lost password is reset with `pley reset-password <user> <new-password>
 [--admin]`, which also turns that account's two-step sign-in off.
 
+To run it on a home server instead, `deploy/docker/setup.sh` builds and
+starts it in Docker, locked down, for a reverse proxy in front of it
+([guide](deploy/docker/README.md)).
+
 ## Configuration
 
 Options come from command-line flags, `PLEY_*` environment variables or

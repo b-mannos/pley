@@ -1,0 +1,4 @@
+# pley's database, artwork and caches when PLEY_CONFIG_DIR is ./config.
+# They stay out of git; `git clean -x` would delete them.
+*
+!.gitignore

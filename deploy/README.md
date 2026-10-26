@@ -17,28 +17,31 @@ Change it with `--data-dir` or `PLEY_DATA_DIR`. Every option is listed in
 
 ## Docker
 
-Releases publish the image to GitHub Container Registry for amd64 and
-arm64 (`ghcr.io/<owner>/<repo>:latest`, or a version such as `:0.2`). To build
-it yourself instead:
+```sh
+cd deploy/docker && ./setup.sh
+```
+
+sets pley up with Docker Compose and starts it, locked down and published on
+`127.0.0.1` for a reverse proxy: [docker/README.md](docker/README.md) is the
+whole guide (media folders, reverse proxies, hardware transcoding, security,
+updates and backups).
+
+The image is based on Debian 13 with its FFmpeg 7, which supports NVENC,
+VAAPI, QSV and Vulkan (libplacebo) tone mapping. Releases publish it to
+GitHub Container Registry for amd64 and arm64
+(`ghcr.io/<owner>/<repo>:latest`, or a version such as `:0.2`). Without
+Compose:
 
 ```sh
 docker build -f deploy/docker/Dockerfile -t pley .
-docker run -d --name pley -p 7539:7539 \
+docker run -d --name pley -p 127.0.0.1:7539:7539 --read-only --tmpfs /tmp \
+  --cap-drop ALL --security-opt no-new-privileges \
   -v ./config:/config -v /srv/media:/media:ro pley
 ```
 
-or `docker compose -f deploy/docker/compose.yaml up -d` (edit the media path
-first). The image is based on Debian 13 with its FFmpeg 7, which supports
-NVENC, VAAPI, QSV and Vulkan (libplacebo) tone mapping:
-
-- **Intel / AMD:** pass `/dev/dri` and add the host's `render` group id with
-  `--group-add` (see the comments in `compose.yaml`).
-- **NVIDIA:** install the NVIDIA Container Toolkit and run with `--gpus all`.
-  The image already asks for the `video` driver capability that NVENC needs.
-
-The container runs as uid 1000, with no extra privileges; the `/config`
-folder must be writable by it. Setting pley up takes the code it prints at
-start: `docker logs pley` shows a link that fills it in.
+The container runs as uid 1000 (`--user` changes it); the `/config` folder
+must be writable by it. Setting pley up takes the code it prints at start:
+`docker logs pley` shows a link that fills it in.
 `docker exec pley pley reset-password <user> <password>` recovers a lost
 password.
 
@@ -83,7 +86,7 @@ its menu scans the libraries, shows the logs, turns **Start pley at login** on
 or off and quits pley. Started by double-click on Windows, pley closes its
 console window once the icon is up; logs are in `logs/pley.log` in the data
 folder. Services, containers and SSH sessions never show the icon, and
-`--no-tray` (or `PLEY_NO_TRAY=1`) turns it off.
+`--no-tray` (or `PLEY_NO_TRAY=true`) turns it off.
 
 ## Firewall and remote access
 

@@ -1,0 +1,11 @@
+# Add-on: Intel and AMD hardware transcoding (VAAPI, Quick Sync, Vulkan tone
+# mapping). pley gets the GPU's render node and nothing else of the host's
+# graphics. setup.sh turns it on when it finds one; by hand, add this file to
+# COMPOSE_FILE in .env and set PLEY_RENDER_GID.
+services:
+  pley:
+    devices:
+      # pley opens the GPU as /dev/dri/renderD128 in the container.
+      - ${PLEY_RENDER_DEVICE:-/dev/dri/renderD128}:/dev/dri/renderD128
+    group_add:
+      - "${PLEY_RENDER_GID:?set PLEY_RENDER_GID in .env to the render node's group, from: stat -c %g /dev/dri/renderD128}"

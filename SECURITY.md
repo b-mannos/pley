@@ -21,9 +21,10 @@ Only the latest release gets fixes.
 - **Keep what doesn't need to be public off the internet:** the
   Plex-compatible API on port 32400 (turn it off with `plex_bind = "off"` if
   no Plex app needs it), and any transcoder on another machine.
-- **Mount media read-only** (the Docker example does), run pley as an
-  unprivileged user, and don't let untrusted people write to library
-  folders.
+- **Mount media read-only**, run pley as an unprivileged user, and don't let
+  untrusted people write to library folders. The Docker setup does the
+  first two and more: a read-only image, no capabilities, the port on
+  127.0.0.1 only ([deploy/docker/README.md](deploy/docker/README.md#security)).
 - **Two-step sign-in:** turn it on for administrators of a server reachable
   from the internet (Account → Two-step sign-in), and keep the recovery codes
   somewhere safe.

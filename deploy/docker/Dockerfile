@@ -3,9 +3,10 @@
 # QSV, Vulkan/libplacebo tone mapping).
 #
 #   docker build -f deploy/docker/Dockerfile -t pley .
-#   docker run -d -p 7539:7539 -v ./config:/config -v /srv/media:/media:ro pley
+#   docker run -d -p 127.0.0.1:7539:7539 -v ./config:/config -v /srv/media:/media:ro pley
 #
-# See deploy/README.md for hardware transcoding.
+# deploy/docker/README.md sets it up with Docker Compose, hardened, and
+# covers hardware transcoding.
 
 # ---- web UI -----------------------------------------------------------------
 FROM node:24-bookworm-slim AS web
@@ -33,24 +34,35 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # ---- runtime ----------------------------------------------------------------
 FROM debian:trixie-slim
+# Mesa brings VAAPI for AMD and Vulkan for AMD and Intel. Intel's own VAAPI
+# driver and the runtime FFmpeg's Quick Sync encoders load (oneVPL) exist for
+# amd64 only. No program keeps a setuid or setgid bit: nothing in the image
+# can gain privileges, even when it is run without no-new-privileges.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates ffmpeg tini \
         libvulkan1 mesa-vulkan-drivers mesa-va-drivers \
+    && if [ "$(dpkg --print-architecture)" = amd64 ]; then \
+        apt-get install -y --no-install-recommends intel-media-va-driver libmfx-gen1.2; \
+    fi \
     && rm -rf /var/lib/apt/lists/* \
+    && find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
     && useradd --system --uid 1000 --user-group --home-dir /config --shell /usr/sbin/nologin pley \
-    && mkdir -p /config /media && chown pley:pley /config
+    && mkdir -p /config /media && chown pley:pley /config && chmod 700 /config
 
 COPY --from=build /out/bin/ /usr/local/bin/
 COPY apps/server/LICENSE /usr/share/doc/pley/LICENSE.txt
 COPY LICENSING.md /usr/share/doc/pley/
 
+# HOME is /config for any user the container runs as (`--user`), so the GPU
+# drivers' shader caches and fontconfig's land in the one writable folder.
 ENV PLEY_DATA_DIR=/config \
     PLEY_BIND=0.0.0.0:7539 \
+    HOME=/config \
     NVIDIA_DRIVER_CAPABILITIES=compute,video,utility,graphics
 VOLUME ["/config"]
 EXPOSE 7539
 USER pley
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --start-interval=2s \
     CMD ["pley", "health"]
 ENTRYPOINT ["tini", "--", "pley"]
