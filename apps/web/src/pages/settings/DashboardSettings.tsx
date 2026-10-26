@@ -31,6 +31,7 @@ import { Modal } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
 import { StorageSection } from "./StorageSection";
 import { Badge, Button, Card, EmptyState, Field, ProgressBar, SectionTitle, Skeleton } from "@/components/ui";
+import { versionLabel, WEB_COMMIT, WEB_VERSION } from "@/lib/build";
 import { cn } from "@/lib/cn";
 import { formatBytes, formatClock, formatUptime, fullTitle, transcodeSummary } from "@/lib/format";
 import { thumbCandidates } from "@/lib/images";
@@ -272,7 +273,7 @@ function TranscoderCard({ tc }: { tc: TranscoderInfo }) {
       {tc.error ? <p className="mb-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">{tc.error}</p> : null}
       <dl>
         <InfoRow label="Status">{tc.available ? "Available" : "Unavailable"}</InfoRow>
-        {tc.version ? <InfoRow label="Version">pley-transcoder {tc.version}</InfoRow> : null}
+        {tc.version ? <InfoRow label="Version">pley-transcoder {versionLabel(tc.version, tc.commit)}</InfoRow> : null}
         {tc.url ? (
           <InfoRow label="URL">
             <span className="break-all font-mono text-xs">{tc.url}</span>
@@ -538,7 +539,8 @@ export function DashboardSettings() {
               <Card>
                 <h3 className="mb-3 text-base font-semibold">{system.data.name}</h3>
                 <dl>
-                  <InfoRow label="Version">pley {system.data.version}</InfoRow>
+                  <InfoRow label="Version">pley {versionLabel(system.data.version, system.data.commit)}</InfoRow>
+                  <InfoRow label="Web app">{versionLabel(WEB_VERSION, WEB_COMMIT)}</InfoRow>
                   <InfoRow label="Platform">
                     {system.data.os} · {system.data.arch}
                   </InfoRow>

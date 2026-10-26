@@ -179,7 +179,50 @@ Rules the build keeps:
 
 Two flavors, `store` (Google Play and the Amazon Appstore, no self-updater)
 and `direct` (the download the pley server will offer, which may hand an
-update to the installer).
+update to the installer). Release builds are minified, and signed when the
+release key is given (below).
+
+The version is pley's, from `VERSION` at the repository's root, and the
+version code follows from it (1.2.3 is 1020300), so every release installs
+over the one before. Builds record the commit they were made from
+(`PLEY_COMMIT`, else git's); Settings and Diagnostics show both, as
+"0.2.0 (1a2b3c4d5)".
+
+### Releases
+
+Release builds are signed with the key these environment variables name,
+and unsigned without them:
+
+| Variable | |
+|---|---|
+| `PLEY_KEYSTORE` | the keystore file |
+| `PLEY_KEYSTORE_PASSWORD` | its password |
+| `PLEY_KEY_ALIAS` | the key's alias |
+| `PLEY_KEY_PASSWORD` | the key's password, when not the keystore's |
+
+```powershell
+$env:PLEY_KEYSTORE = "$HOME\keys\pley-release.keystore"   # and the others
+.\gradlew.bat :app:assembleDirectRelease :app:bundleStoreRelease
+```
+
+The APK to sideload (phones, Android TV, Fire TV) is
+`app/build/outputs/apk/direct/release/app-direct-release.apk`; the bundle
+for Google Play is `app/build/outputs/bundle/storeRelease/app-store-release.aab`.
+
+A tag's release workflow builds both, with the key from the repository's
+secrets: `ANDROID_KEYSTORE_BASE64` (the keystore, base64-encoded),
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and, when it differs,
+`ANDROID_KEY_PASSWORD`. Without them the release has no Android app.
+A new key is made once, and kept safe: every update must be signed with it.
+
+```sh
+keytool -genkeypair -v -keystore pley-release.keystore -alias pley \
+  -keyalg RSA -keysize 4096 -validity 10000
+base64 -w0 pley-release.keystore   # the ANDROID_KEYSTORE_BASE64 secret
+```
+
+Apps installed from a build signed with another key (a debug build) must
+be uninstalled once before a release installs.
 
 Launchers, the same in every build: "pley" on phones and tablets
 (`MainActivity`, `LAUNCHER`) and on TV home screens (`TvActivity`,

@@ -125,7 +125,7 @@ fi
 case $(setting PLEY_PULL_POLICY build) in
     build)
         say "Building pley (the first time takes several minutes)..."
-        docker compose build --pull pley
+        PLEY_COMMIT=$(git rev-parse --short=9 HEAD 2>/dev/null || echo unknown) docker compose build --pull pley
         ;;
     never) ;;
     *) docker compose pull pley ;;

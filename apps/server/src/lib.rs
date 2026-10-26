@@ -53,6 +53,13 @@ use tokio_util::sync::CancellationToken;
 pub use config::Config;
 pub use state::AppState;
 
+/// pley's version (VERSION at the repository's root).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The commit this build was made from, "unknown" without the repository.
+pub const COMMIT: &str = env!("PLEY_COMMIT");
+/// What `pley --version` and the log say: "0.2.0 (1a2b3c4d5)".
+pub const VERSION_AND_COMMIT: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("PLEY_COMMIT"), ")");
+
 /// Woken by [`request_shutdown`].
 static SHUTDOWN: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
@@ -184,7 +191,7 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     let state = AppState::init(config).await?;
     state.start_background_tasks();
     let app = api::router(state.clone());
-    tracing::info!("pley {} listening on http://{}", env!("CARGO_PKG_VERSION"), display_addr(addr));
+    tracing::info!("pley {VERSION_AND_COMMIT} listening on http://{}", display_addr(addr));
     if let Some(code) = state.auth.setup.shown() {
         tracing::warn!(
             "pley isn't set up yet: open http://{}/setup#code={code} to create the administrator account \

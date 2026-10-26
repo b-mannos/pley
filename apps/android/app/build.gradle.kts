@@ -4,13 +4,41 @@ plugins {
     alias(libs.plugins.baselineprofile)
 }
 
+// pley's version, one for every app (VERSION at the repository's root), and
+// the commit the build is made from: PLEY_COMMIT, else git's, else "unknown".
+val pleyVersion = rootProject.file("../../VERSION").readText().trim()
+val pleyCommit: String = providers.environmentVariable("PLEY_COMMIT").orNull?.trim()?.take(9)?.ifEmpty { null }
+    ?: providers.exec {
+        commandLine("git", "rev-parse", "--short=9", "HEAD")
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get().trim().ifEmpty { "unknown" }
+
+/** 1.2.3 is 1020300: every release above the one before, with room for rebuilds. */
+fun versionCodeOf(version: String): Int {
+    val (major, minor, patch) = version.split(".").map(String::toInt)
+    return major * 1_000_000 + minor * 10_000 + patch * 100
+}
+
 android {
     namespace = "app.pley.android"
 
     defaultConfig {
         applicationId = "app.pley.android"
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = versionCodeOf(pleyVersion)
+        versionName = pleyVersion
+        buildConfigField("String", "COMMIT", "\"$pleyCommit\"")
+    }
+
+    // Release builds are signed with the key these name (the release workflow
+    // sets them from the repository's secrets), and unsigned without them.
+    val keystore = providers.environmentVariable("PLEY_KEYSTORE").orNull
+    if (keystore != null) {
+        signingConfigs.create("release") {
+            storeFile = file(keystore)
+            storePassword = providers.environmentVariable("PLEY_KEYSTORE_PASSWORD").get()
+            keyAlias = providers.environmentVariable("PLEY_KEY_ALIAS").get()
+            keyPassword = providers.environmentVariable("PLEY_KEY_PASSWORD").orNull ?: storePassword
+        }
     }
 
     // Where a build goes: the stores (no self-updater), or the pley server's
@@ -27,6 +55,7 @@ android {
 
     buildTypes {
         release {
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

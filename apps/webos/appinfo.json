@@ -1,6 +1,6 @@
 {
   "id": "app.pley.tv",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "vendor": "pley",
   "type": "web",
   "main": "index.html",

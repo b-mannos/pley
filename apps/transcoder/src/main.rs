@@ -50,7 +50,7 @@ WARRANTY. See the LICENSE file.";
 #[derive(Debug, Parser)]
 #[command(
     name = "pley-transcoder",
-    version,
+    version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("PLEY_COMMIT"), ")"),
     about = "pley transcoder — FFmpeg media engine for the pley media server"
 )]
 struct Args {
@@ -251,6 +251,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
     let info = TranscoderInfo {
         name: "pley-transcoder".into(),
         version: env!("CARGO_PKG_VERSION").into(),
+        commit: Some(env!("PLEY_COMMIT")).filter(|c| *c != "unknown").map(Into::into),
         api_version: API_VERSION,
         license: "LicenseRef-Restricted".into(),
         source: None,
@@ -289,7 +290,11 @@ async fn run(args: Args) -> anyhow::Result<()> {
         use std::io::Write;
         std::io::stdout().flush()?;
     }
-    tracing::info!("pley-transcoder {} listening on http://{addr}", env!("CARGO_PKG_VERSION"));
+    tracing::info!(
+        "pley-transcoder {} ({}) listening on http://{addr}",
+        env!("CARGO_PKG_VERSION"),
+        env!("PLEY_COMMIT")
+    );
 
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     let exit_with_parent = args.exit_with_parent;

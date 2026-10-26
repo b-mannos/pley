@@ -387,7 +387,7 @@ export function SettingsScreen(p: { entry: Entry }) {
       break;
     }
     case "about":
-      rows.push(<SettingRow key="version" fid="row-version" icon="info" label="Version" value={`${app.platform.appName} ${app.platform.version}`} onSelect={() => undefined} />);
+      rows.push(<SettingRow key="version" fid="row-version" icon="info" label="Version" value={`${app.platform.appName} ${buildLabel(app.platform.version)}`} onSelect={() => undefined} />);
       rows.push(
         <div key="lic" class="settings-heading t-label c-subtle">
           Open-source licences
@@ -725,4 +725,10 @@ function HistoryMessage(p: { title: string; body: string; action: string; onActi
       </div>
     </div>
   );
+}
+
+/** "0.2.0 (1a2b3c4d5)": the app's version and the commit it was built from, when known. */
+export function buildLabel(version: string): string {
+  const commit = typeof __PLEY_COMMIT__ === "string" ? __PLEY_COMMIT__ : "";
+  return commit && commit !== "unknown" ? `${version} (${commit})` : version;
 }

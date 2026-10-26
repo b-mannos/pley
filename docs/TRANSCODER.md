@@ -66,7 +66,7 @@ following status codes:
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/health` | – | `ok` |
-| GET | `/v1/info` | – | `TranscoderInfo`: version, license, source, capabilities, limits |
+| GET | `/v1/info` | – | `TranscoderInfo`: version, commit (the build's short hash, when known), license, source, capabilities, limits |
 | GET | `/v1/status` | – | `TranscoderStatus`: counters, running processes, disk use, every job with live metrics |
 | GET | `/metrics` | – | Prometheus text format |
 | POST | `/v1/probe` | `ProbeRequest {path}` | `MediaInfo` (cached per file version) |

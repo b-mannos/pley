@@ -6,6 +6,7 @@ import { fileURLToPath, URL } from "node:url";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { brotliCompressSync, constants as zlib, gzipSync } from "node:zlib";
+import { commit, version } from "../../scripts/commit.mjs";
 
 const COMPRESSIBLE = new Set([".js", ".mjs", ".css", ".html", ".svg", ".json", ".webmanifest", ".txt"]);
 
@@ -52,6 +53,11 @@ function precompress(): Plugin {
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), precompress()],
+  // Shown in Account and the dashboard (src/lib/build.ts).
+  define: {
+    __PLEY_VERSION__: JSON.stringify(version()),
+    __PLEY_COMMIT__: JSON.stringify(commit()),
+  },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

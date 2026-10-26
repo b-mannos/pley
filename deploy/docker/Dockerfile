@@ -10,8 +10,13 @@
 
 # ---- web UI -----------------------------------------------------------------
 FROM node:24-bookworm-slim AS web
+# The commit apps show beside the version (scripts/commit.mjs): the build
+# context has no .git.
+ARG PLEY_COMMIT=unknown
+ENV PLEY_COMMIT=$PLEY_COMMIT
 WORKDIR /src
-COPY package.json package-lock.json ./
+COPY VERSION package.json package-lock.json ./
+COPY scripts/commit.mjs scripts/
 COPY apps/web/package.json apps/web/
 RUN npm ci --no-fund --no-audit
 COPY apps/web apps/web
@@ -19,8 +24,10 @@ RUN npm run build
 
 # ---- Rust binaries ----------------------------------------------------------
 FROM rust:1-bookworm AS build
+ARG PLEY_COMMIT=unknown
+ENV PLEY_COMMIT=$PLEY_COMMIT
 WORKDIR /src
-COPY Cargo.toml Cargo.lock rustfmt.toml ./
+COPY VERSION Cargo.toml Cargo.lock rustfmt.toml ./
 COPY apps/server apps/server
 COPY apps/transcoder apps/transcoder
 COPY packages packages

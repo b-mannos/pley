@@ -24,6 +24,7 @@ import {
   useDeleteAvatar,
   useDevices,
   useLogout,
+  useServer,
   useSetPin,
   useSignOutDevice,
   useUpdateProfile,
@@ -36,6 +37,7 @@ import { Avatar, AVATAR_COLORS, avatarColor } from "@/components/Avatar";
 import { useToast } from "@/components/Toast";
 import { HistoryList } from "@/components/HistoryList";
 import { Badge, Button, buttonClass, Card, CardTitle, Field, Select, TextInput } from "@/components/ui";
+import { versionLabel, WEB_COMMIT, WEB_VERSION } from "@/lib/build";
 import { cn } from "@/lib/cn";
 import { formatAgo, formatDay } from "@/lib/format";
 import { LANGUAGES } from "@/lib/languages";
@@ -666,6 +668,19 @@ export function AccountPage() {
       <HistoryCard />
       <DevicesCard />
       <AppsCard />
+      <BuildLine />
     </div>
+  );
+}
+
+/** Which pley this is: the web app's build and, when it differs, the server's. */
+function BuildLine() {
+  const server = useServer().data;
+  const web = versionLabel(WEB_VERSION, WEB_COMMIT);
+  const serverLabel = server ? versionLabel(server.version, server.commit) : null;
+  return (
+    <p className="text-center text-xs text-muted" data-testid="build">
+      {serverLabel && serverLabel !== web ? `pley ${web} · server ${serverLabel}` : `pley ${web}`}
+    </p>
   );
 }

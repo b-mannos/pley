@@ -415,6 +415,9 @@ pub struct Limits {
 pub struct TranscoderInfo {
     pub name: String,
     pub version: String,
+    /// The commit the program was built from, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
     pub api_version: u32,
     /// SPDX license of the transcoder program.
     pub license: String,

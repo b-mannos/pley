@@ -24,7 +24,7 @@ pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 pub const EVENT_RECHECK: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Parser)]
-#[command(name = "pley", version, about = "pley — a fast, self-hosted media server")]
+#[command(name = "pley", version = crate::VERSION_AND_COMMIT, about = "pley — a fast, self-hosted media server")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,

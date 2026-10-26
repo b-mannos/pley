@@ -1,7 +1,7 @@
 {
   "name": "pley-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "pley for Windows, macOS and Linux: a window on a pley server's web app",
   "scripts": {

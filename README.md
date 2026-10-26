@@ -240,7 +240,18 @@ supported Rust, the license check and the Docker build. Pushing a tag such as
 Linux, Windows and macOS (x86_64 and arm64) with checksums and build
 provenance, a draft GitHub release, and the Docker image on GitHub Container
 Registry. `scripts/build.ps1` (or `build.sh`) builds an archive locally.
+The release also carries the Android app (an APK to sideload and a bundle
+for Google Play, signed with the key from the repository's secrets), the
+desktop app's installers, the LG TV app, the Kodi add-on and the Roku app.
+
+Every app has one version, pley's, in [`VERSION`](VERSION):
+`node scripts/version.mjs set 0.3.0` writes it into every manifest, and
+`node scripts/version.mjs check` (which CI runs) finds any that disagree. A
+release's tag is that version (`v0.3.0`). Builds record the commit they
+were made from, which every app shows beside its version, as
+"0.2.0 (1a2b3c4d5)": `pley --version`, the web app's Account page and
+dashboard, and the apps' Settings.
 
 ## Status
 
-Version 0.1.
+Version 0.2.

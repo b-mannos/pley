@@ -7,6 +7,7 @@ import { build } from "esbuild";
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
+import { commit } from "../../../scripts/commit.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -39,7 +40,7 @@ export async function buildApp(o) {
     jsxImportSource: "preact",
     // The fonts are copied next to the stylesheet as they are.
     external: ["*.woff2"],
-    define: { __PLEY_VERSION__: JSON.stringify(o.version) },
+    define: { __PLEY_VERSION__: JSON.stringify(o.version), __PLEY_COMMIT__: JSON.stringify(commit()) },
     logLevel: "warning",
     metafile: true,
   });

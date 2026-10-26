@@ -173,6 +173,7 @@ pub struct TranscoderSummary {
     managed: bool,
     url: Option<String>,
     version: Option<String>,
+    commit: Option<String>,
     license: Option<String>,
     ffmpeg_version: Option<String>,
     encoders: Vec<String>,
@@ -197,6 +198,7 @@ pub async fn system(State(state): State<AppState>, _admin: AdminUser) -> ApiResu
         managed: state.transcoder.is_managed(),
         url: state.transcoder.base_url(),
         version: info.as_ref().map(|i| i.version.clone()),
+        commit: info.as_ref().and_then(|i| i.commit.clone()),
         license: info.as_ref().map(|i| i.license.clone()),
         ffmpeg_version: info.as_ref().and_then(|i| i.capabilities.ffmpeg_version.clone()),
         encoders: info
@@ -247,7 +249,8 @@ pub async fn system(State(state): State<AppState>, _admin: AdminUser) -> ApiResu
     });
     Ok(Json(serde_json::json!({
         "name": settings.server_name,
-        "version": env!("CARGO_PKG_VERSION"),
+        "version": crate::VERSION,
+        "commit": crate::COMMIT,
         "os": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
         "uptime_secs": state.started_at.elapsed().as_secs(),

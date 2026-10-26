@@ -1,7 +1,6 @@
 package app.pley.android.ui.phone.account
 
 import android.content.Context
-import android.content.pm.PackageManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -40,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.pley.android.auth.SignIn
+import app.pley.android.common.AppBuild
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.model.SubtitleMode
@@ -365,12 +365,8 @@ private fun savedMessage(field: TrackField): Int = when (field) {
     TrackField.SubtitleLanguage -> R.string.account_saved_subtitle_language
 }
 
-/** The app's version name ("0.9.3"), or an empty string when the system won't say. */
-internal fun versionOf(context: Context): String = try {
-    context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty()
-} catch (_: PackageManager.NameNotFoundException) {
-    ""
-}
+/** The app's version and commit ("0.9.3 (1a2b3c4d5)"), or an empty string when the system won't say. */
+internal fun versionOf(context: Context): String = AppBuild.label(context)
 
 /** Rows stop growing at this width (tablets). */
 private val MAX_WIDTH = 640.dp

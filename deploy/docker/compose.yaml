@@ -20,6 +20,9 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile
+      # Shown beside the version in the apps; setup.sh sets it.
+      args:
+        PLEY_COMMIT: ${PLEY_COMMIT:-unknown}
     # "build": `up` builds the image from this checkout (unchanged layers are
     # cached), so `git pull && docker compose up -d` updates pley. With a
     # published image (PLEY_IMAGE), use "missing" and `docker compose pull`.

@@ -83,6 +83,8 @@ export interface InviteCheck {
 export interface ServerStatus {
   name: string;
   version: string;
+  /** The server build's short commit hash; "unknown" without the repository. */
+  commit?: string;
   setup_required: boolean;
   /** Setting up takes the code in the server's log. */
   setup_code_required?: boolean;
@@ -622,6 +624,7 @@ export interface TranscoderInfo {
   managed: boolean;
   url: string | null;
   version: string | null;
+  commit?: string | null;
   license: string | null;
   ffmpeg_version: string | null;
   encoders: string[];
@@ -679,6 +682,7 @@ export interface TranscoderStatus {
 export interface SystemInfo {
   name: string;
   version: string;
+  commit?: string;
   os: string;
   arch: string;
   uptime_secs: number;

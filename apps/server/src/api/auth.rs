@@ -38,7 +38,8 @@ pub async fn server_status(State(state): State<AppState>) -> ApiResult<Json<serd
     let settings = state.settings.get();
     Ok(Json(serde_json::json!({
         "name": settings.server_name,
-        "version": env!("CARGO_PKG_VERSION"),
+        "version": crate::VERSION,
+        "commit": crate::COMMIT,
         "setup_required": users == 0,
         // Setting up takes the code in the log (see crate::setup).
         "setup_code_required": users == 0,

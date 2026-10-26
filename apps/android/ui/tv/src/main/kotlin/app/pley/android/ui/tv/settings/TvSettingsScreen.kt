@@ -783,12 +783,8 @@ private fun backgroundLabel(background: SubtitleBackground): Int = when (backgro
     SubtitleBackground.DarkBox -> R.string.tv_settings_background_box
 }
 
-/** The app's version name, or an empty string when the system won't say. */
-internal fun versionOf(context: android.content.Context): String = try {
-    context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty()
-} catch (_: android.content.pm.PackageManager.NameNotFoundException) {
-    ""
-}
+/** The app's version and commit, or an empty string when the system won't say. */
+internal fun versionOf(context: android.content.Context): String = app.pley.android.common.AppBuild.label(context)
 
 /** The libraries in the app, with their licences. */
 @OptIn(UnstableApi::class)

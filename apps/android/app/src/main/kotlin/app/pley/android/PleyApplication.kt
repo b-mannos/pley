@@ -3,6 +3,7 @@ package app.pley.android
 import android.app.Application
 import android.os.StrictMode
 import androidx.tracing.trace
+import app.pley.android.common.AppBuild
 import app.pley.android.common.TraceNames
 import app.pley.android.common.perf.StartupSignals
 import app.pley.android.designsystem.PleyImageLoader
@@ -44,6 +45,7 @@ class PleyApplication : Application(), PleyGraphOwner, DownloadsOwner, Singleton
     override fun onCreate() {
         trace(TraceNames.APP_ON_CREATE) {
             super.onCreate()
+            AppBuild.commit = BuildConfig.COMMIT
             if (BuildConfig.DEBUG) watchForSlowCalls()
             startup = StartupRead.start(this)
             restartDemoServer()

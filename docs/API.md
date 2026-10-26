@@ -313,7 +313,7 @@ interface PlaybackInfo {
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/api/health` | – | `{ "status": "ok" }` |
-| GET | `/api/server` | – | `{ name: string, version: string, setup_required: boolean, setup_code_required: boolean }`. Setup takes the code from the server's log |
+| GET | `/api/server` | – | `{ name: string, version: string, commit: string, setup_required: boolean, setup_code_required: boolean }`; `commit` is the build's short hash, `"unknown"` when built without the repository. Setup takes the code from the server's log |
 | GET | `/api/oauth/device/qr?code=` | – | where to type a TV's code, as a QR code (PNG): see [TVs](#tvs) |
 | POST | `/api/setup` | `{ username, password, setup_code }` | `{ user: User, token? }` — creates the first (admin) account and signs in. `409` once a user exists, `403` without the right `setup_code` (5 tries per 15 minutes from each address, then `429`) |
 | POST | `/api/auth/login` | `{ username, password, code? }` | `{ user: User, token? }` (`401` on bad credentials). With two-step sign-in, `code` is a code from the authenticator app or a recovery code: without it, or with a wrong one, `401` with `code: "two_step"` |
@@ -1698,6 +1698,7 @@ interface Settings {
 interface SystemInfo {
   name: string;
   version: string;
+  commit: string;                   // the build's short hash, "unknown" without the repository
   os: string;
   arch: string;
   uptime_secs: number;
@@ -1707,6 +1708,7 @@ interface SystemInfo {
     managed: boolean;               // spawned and supervised by pley (vs. external URL)
     url: string | null;
     version: string | null;
+    commit: string | null;
     license: string | null;         // "LicenseRef-Restricted"
     ffmpeg_version: string | null;
     encoders: string[];             // working video encoders, e.g. ["h264_nvenc", "libx264"]
