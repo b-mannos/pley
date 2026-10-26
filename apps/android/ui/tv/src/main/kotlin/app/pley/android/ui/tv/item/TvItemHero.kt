@@ -1,8 +1,5 @@
 package app.pley.android.ui.tv.item
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,7 +28,6 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
@@ -57,9 +53,9 @@ import app.pley.android.ui.tv.kit.rememberedFocus
 /**
  * The top of the TV item page (design spec §4.3, mockup tv-movie), in the
  * 464 dp text column at x = 96: the title (the show's, for an episode or
- * season) bottom-aligned in the logo's 84 dp box, an episode's context
- * line, the metadata line, genres, three lines of summary (Select opens
- * it all when it runs longer), the credits, then the buttons: Resume or
+ * season) bottom-aligned in the logo's 72 dp box, an episode's context
+ * line, the metadata line, genres, three lines of summary (More shows it
+ * all when it runs longer), the credits, then the buttons: Resume or
  * Play, From start, Watched, Audio and subtitles, Add to playlist, More.
  * Focus starts on Resume or Play; holding Select on it opens the item's
  * actions. Down from the buttons goes to [down] (the episode to watch).
@@ -74,7 +70,6 @@ internal fun TvHero(
     actions: TvPageActions,
     onTracks: () -> Unit,
     onMore: () -> Unit,
-    onSummary: () -> Unit,
     onPrimaryActions: () -> Unit,
 ) {
     val places = remember { HeroPlaces() }
@@ -89,25 +84,25 @@ internal fun TvHero(
             BasicText(heroTitle(page), style = PleyType.Tv.HeroTitle.copy(color = PleyColors.Fg), maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         contextLine(page)?.let {
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
             BasicText(it, style = PleyType.Tv.Title.copy(color = PleyColors.Fg), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(TextColumn))
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
         TvMetaLine(page.meta)
         val genres = (page.genres + page.partOf.map { stringResource(R.string.tv_item_part_of, it.title) }).joinToString(" · ")
         if (genres.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             BasicText(genres, style = PleyType.Tv.Caption.copy(color = PleyColors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(TextColumn))
         }
         page.summary?.let { summary ->
             Spacer(Modifier.height(10.dp))
-            HeroSummary(summary, buttons.summary, places, focus, onSummary)
+            HeroSummary(summary, buttons)
         }
         creditsLine(page)?.let { credits ->
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
             BasicText(credits, style = PleyType.Tv.Caption.copy(color = PleyColors.Fg), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(TextColumn))
         }
-        Spacer(Modifier.height(26.dp))
+        Spacer(Modifier.height(22.dp))
         HeroButtonsRow(page, memory, buttons, down, actions, places, focus, onTracks, onMore, onPrimaryActions)
     }
 }
@@ -123,32 +118,19 @@ private class HeroPlaces {
     }
 }
 
+/**
+ * The summary, plain text that never takes focus. When it runs past its
+ * lines, More offers it all ([HeroButtons.summaryCut]).
+ */
 @Composable
-private fun HeroSummary(summary: String, requester: FocusRequester, places: HeroPlaces, focus: ItemPageFocus, onOpen: () -> Unit) {
-    var overflows by remember(summary) { mutableStateOf(false) }
-    val interactions = remember { MutableInteractionSource() }
-    val focused by interactions.collectIsFocusedAsState()
-    var placed by remember { mutableStateOf<LayoutCoordinates?>(null) }
+private fun HeroSummary(summary: String, buttons: HeroButtons) {
     BasicText(
         summary,
         style = PleyType.Tv.BodyLarge.copy(color = PleyColors.Fg.copy(alpha = 0.85f)),
         maxLines = SUMMARY_LINES,
         overflow = TextOverflow.Ellipsis,
-        onTextLayout = { overflows = it.hasVisualOverflow },
-        modifier = Modifier
-            .width(TextColumn)
-            .onPlaced { placed = it }
-            .then(
-                if (overflows) {
-                    Modifier
-                        .focusRequester(requester)
-                        .onFocusChanged { if (it.isFocused) placed?.let { p -> focus.heroElementY = places.topOf(p) } }
-                        .focusRing(8.dp) { focused }
-                        .clickable(interactionSource = interactions, indication = null, role = Role.Button, onClick = onOpen)
-                } else {
-                    Modifier
-                },
-            ),
+        onTextLayout = { buttons.summaryCut = it.hasVisualOverflow },
+        modifier = Modifier.width(TextColumn),
     )
 }
 
@@ -266,11 +248,11 @@ internal fun primaryLabel(primary: PrimaryAction): String {
     }
 }
 
-/** The hero's top: the logo box at y = 58. */
-private val HeroTop = 58.dp
+/** The hero's top: the logo box at y = 52. */
+private val HeroTop = 52.dp
 
-/** The logo art's box, 360 by 84; the title sits at its bottom. */
-private val TitleBox = 84.dp
+/** The logo art's box, 320 by 72; the title sits at its bottom. */
+private val TitleBox = 72.dp
 
 /** The text column, x 96 to 560. */
 internal val TextColumn = PleyTv.TextColumnEnd - PleyTv.Gutter

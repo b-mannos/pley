@@ -65,7 +65,6 @@ import app.pley.android.designsystem.tile.skeleton
 import app.pley.android.designsystem.tile.tvTileSize
 import app.pley.android.ui.tv.kit.FocusMemory
 import app.pley.android.ui.tv.kit.LocalKeyRepeatGate
-import app.pley.android.ui.tv.kit.TvTile
 import app.pley.android.ui.tv.kit.TvTileFrame
 import app.pley.android.ui.tv.kit.rememberedFocus
 import app.pley.android.ui.tv.theme.LocalTvTier
@@ -185,37 +184,28 @@ internal fun TvPosterGrid(
             verticalArrangement = Arrangement.spacedBy(RowGap),
         ) {
             header?.invoke(this)
-            items(
-                count = total,
-                key = keyAt,
-                contentType = { if (tileAt(it) == null) SKELETON else kind },
-            ) { position ->
+            // One cell per position, whether its page has loaded or not: the same
+            // frame turns from a skeleton into the tile, so a focused cell keeps
+            // its focus (and the grid its scroll anchor) when its page arrives.
+            items(count = total, key = keyAt, contentType = { kind }) { position ->
                 val requester = remember { FocusRequester() }
                 DisposableEffect(position, requester) {
                     focus.cells[position] = requester
                     onDispose { if (focus.cells[position] === requester) focus.cells.remove(position) }
                 }
                 val tile = tileAt(position)
-                val track = Modifier.onFocusChanged { if (it.hasFocus) focus.focused = position }
-                when {
-                    tile == null -> SkeletonCell(kind, skeleton, track, Modifier.focusRequester(requester))
-                    badge != null -> BadgedTile(
-                        tile = tile,
-                        kind = kind,
-                        badge = badge(position),
-                        onClick = { onOpen(position, tile) },
-                        modifier = track,
-                        focusModifier = Modifier.focusRequester(requester).rememberedFocus(memory, "$memoryPrefix/${tile.id}", initial = initialFocus && position == 0),
-                    )
-                    else -> TvTile(
-                        model = tile,
-                        kind = kind,
-                        onClick = { onOpen(position, tile) },
-                        onLongClick = onActions?.let { { it(tile) } },
-                        modifier = track,
-                        focusModifier = Modifier.focusRequester(requester).rememberedFocus(memory, "$memoryPrefix/${tile.id}", initial = initialFocus && position == 0),
-                    )
-                }
+                GridCell(
+                    tile = tile,
+                    kind = kind,
+                    skeleton = skeleton,
+                    badge = if (tile != null) badge?.invoke(position) else null,
+                    onClick = { if (tile != null) onOpen(position, tile) },
+                    onLongClick = if (tile != null) onActions?.let { { it(tile) } } else null,
+                    modifier = Modifier.onFocusChanged { if (it.hasFocus) focus.focused = position },
+                    focusModifier = Modifier
+                        .focusRequester(requester)
+                        .rememberedFocus(memory, "$memoryPrefix/${tile?.id ?: "cell$position"}", initial = initialFocus && position == 0),
+                )
             }
         }
     }
@@ -226,55 +216,54 @@ internal fun TvPosterGrid(
 internal fun rememberTvGridState(): LazyGridState =
     rememberLazyGridState(cacheWindow = remember { LazyLayoutCacheWindow(aheadFraction = 1f, behindFraction = 0.25f) })
 
-/** A tile with a count on its art's top right: a collection and how many titles it holds. */
+/**
+ * A grid's cell: [tile], with [badge] (a count) on its art's top right
+ * when given; while [tile] is `null` (its page not loaded yet), a still
+ * well and two caption bars, focusable like the tile it stands for.
+ */
 @Composable
-private fun BadgedTile(
-    tile: ArtworkTileModel,
+private fun GridCell(
+    tile: ArtworkTileModel?,
     kind: TileKind,
+    skeleton: SkeletonState,
     badge: String?,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
     modifier: Modifier,
     focusModifier: Modifier,
 ) {
     TvTileFrame(
         kind = kind,
         onClick = onClick,
-        onLongClick = null,
+        onLongClick = onLongClick,
         modifier = modifier,
         focusModifier = focusModifier,
-        caption = { focused -> TileCaption(tile.title, tile.subtitle, TileStyle.Tv, emphasized = focused) },
-    ) {
-        Box(Modifier.tvTileSize(kind)) {
-            ArtworkTile(tile, kind, TileStyle.Tv, Modifier.tvTileSize(kind))
-            if (badge != null) {
-                QualityBadge(
-                    badge,
-                    TileStyle.Tv,
-                    onArt = true,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(TileStyle.Tv.inset).clearAndSetSemantics { },
-                )
-            }
-        }
-    }
-}
-
-/** A cell not loaded yet: a still well and two caption bars, focusable like the tile it stands for. */
-@Composable
-private fun SkeletonCell(kind: TileKind, skeleton: SkeletonState, modifier: Modifier, focusModifier: Modifier) {
-    TvTileFrame(
-        kind = kind,
-        onClick = {},
-        onLongClick = null,
-        modifier = modifier,
-        focusModifier = focusModifier,
-        caption = {
-            Column(Modifier.fillMaxWidth().clearAndSetSemantics { }) {
-                Box(Modifier.padding(top = 3.dp).fillMaxWidth(0.6f).height(12.dp).skeleton(skeleton, PleyShape.Badge))
-                Box(Modifier.padding(top = 8.dp).fillMaxWidth(0.35f).height(12.dp).skeleton(skeleton, PleyShape.Badge))
+        caption = { focused ->
+            if (tile != null) {
+                TileCaption(tile.title, tile.subtitle, TileStyle.Tv, emphasized = focused)
+            } else {
+                Column(Modifier.fillMaxWidth().clearAndSetSemantics { }) {
+                    Box(Modifier.padding(top = 3.dp).fillMaxWidth(0.6f).height(12.dp).skeleton(skeleton, PleyShape.Badge))
+                    Box(Modifier.padding(top = 8.dp).fillMaxWidth(0.35f).height(12.dp).skeleton(skeleton, PleyShape.Badge))
+                }
             }
         },
     ) {
-        Box(Modifier.tvTileSize(kind).skeleton(skeleton, TileStyle.Tv.shape(kind)))
+        if (tile == null) {
+            Box(Modifier.tvTileSize(kind).skeleton(skeleton, TileStyle.Tv.shape(kind)))
+        } else {
+            Box(Modifier.tvTileSize(kind)) {
+                ArtworkTile(tile, kind, TileStyle.Tv, Modifier.tvTileSize(kind))
+                if (badge != null) {
+                    QualityBadge(
+                        badge,
+                        TileStyle.Tv,
+                        onArt = true,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(TileStyle.Tv.inset).clearAndSetSemantics { },
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -302,9 +291,8 @@ private class GridSpec(private val anchor: Float, private val hero: Float, priva
 }
 
 /** Between a caption and the next row's wells. */
-internal val RowGap = 22.dp
+internal val RowGap = 20.dp
 
 /** Room above the first row for the focused tile's growth and ring. */
-internal val TileRoom = 16.dp
+internal val TileRoom = 14.dp
 
-private const val SKELETON = "skeleton"

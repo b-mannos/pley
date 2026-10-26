@@ -471,7 +471,7 @@ internal object ProfileColors {
     }
 }
 
-private val AvatarSize = 112.dp
+private val AvatarSize = 100.dp
 
 /** Room above and below the row for a focused avatar's growth and ring. */
 private val RowBleed = 32.dp

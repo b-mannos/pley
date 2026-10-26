@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -76,6 +77,7 @@ import app.pley.android.ui.tv.kit.BackdropScrim
 import app.pley.android.ui.tv.kit.TvBackdrop
 import app.pley.android.ui.tv.kit.TvRow
 import app.pley.android.ui.tv.kit.railFade
+import app.pley.android.ui.tv.kit.readOn
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberRested
 import app.pley.android.ui.tv.shell.LocalTvNavigator
@@ -147,12 +149,15 @@ internal fun TvItemScreen(model: ItemViewModel) {
 }
 
 /** Where focus is on the page, which says where the page scrolls and what the info block shows. */
-internal enum class Area { Hero, Tabs, Episodes, Rows }
+internal enum class Area { Hero, Tabs, Episodes, Rows, Details }
 
 /** The page's focus, shared by its sections and the scrolling. */
 @Stable
 internal class ItemPageFocus {
     var area by mutableStateOf(Area.Hero)
+
+    /** Read on past what has focus, into the details ([readOn]): the info block steps aside for the text. */
+    var reading by mutableStateOf(false)
 
     /** The focused hero element's top inside the hero, in px, for scrolling back to it from far down. */
     var heroElementY: Float = 0f
@@ -197,7 +202,6 @@ private fun TvItemPage(page: ItemPage, model: ItemViewModel, navigator: TvNaviga
                     actions = actions,
                     onTracks = { panel = Panel.Tracks },
                     onMore = { panel = Panel.More },
-                    onSummary = { summaryOpen = true },
                     onPrimaryActions = { panel = Panel.Actions(page.item, buttons.play) },
                 )
             }
@@ -218,8 +222,8 @@ private fun TvItemPage(page: ItemPage, model: ItemViewModel, navigator: TvNaviga
             }
             rowsOf(page, focus, memory, sections, actions) { item, returnTo -> panel = Panel.Actions(item, returnTo) }
             if (!page.details.isEmpty || page.mediaInfo.isNotEmpty()) {
-                item(key = "details", contentType = "details") {
-                    TvDetails(page, onChooseVersion = model::chooseVersion, modifier = Modifier.onFocusChanged { if (it.hasFocus) focus.area = Area.Rows })
+                item(key = DETAILS_KEY, contentType = DETAILS_KEY) {
+                    TvDetails(page, onChooseVersion = model::chooseVersion, modifier = Modifier.onFocusChanged { if (it.hasFocus) focus.area = Area.Details })
                 }
             }
         }
@@ -233,12 +237,16 @@ private fun TvItemPage(page: ItemPage, model: ItemViewModel, navigator: TvNaviga
                 restore = returnTo
             },
             buttons = buttons,
+            onSummary = {
+                panel = null
+                summaryOpen = true
+            },
         )
         if (summaryOpen) {
             val text = listOfNotNull(page.tagline, page.summary).joinToString("\n\n")
             TvTextDialog(title = page.title, text = text, onDismiss = {
                 summaryOpen = false
-                restore = buttons.summary
+                restore = buttons.more
             })
         }
     }
@@ -253,13 +261,15 @@ private fun TvItemPage(page: ItemPage, model: ItemViewModel, navigator: TvNaviga
     }
 }
 
-/** The focus requesters of the hero's buttons, for panels to give focus back to. */
+/** The focus requesters of the hero's buttons, for panels to give focus back to, and whether its summary was cut. */
 @Stable
 internal class HeroButtons {
     val play = FocusRequester()
     val tracks = FocusRequester()
     val more = FocusRequester()
-    val summary = FocusRequester()
+
+    /** Whether the summary runs past its lines, so More offers it all. */
+    var summaryCut by mutableStateOf(false)
 }
 
 /** Each row's focus group, by key, so focus can go back to it after a panel. */
@@ -349,10 +359,13 @@ private fun LazyListScope.rowsOf(
 /**
  * The page's column (design spec §2.4, §4.4): one list from the hero down,
  * which scrolls so that what has focus sits where the spec puts it — the
- * hero at the top; the season tabs at y = 250 and the episodes under them
- * at 306; other rows' tiles at 230, their header at 188 — and, once focus
- * has left the hero, draws nothing above that line, so the rows pass under
- * the info block. Tiles that scroll left pass under the rail ([railFade]).
+ * hero at the top; the season tabs at y = 218 and the episodes under them
+ * at 272; other rows' tiles at 210, their header at 172; the details'
+ * header there too — and, once focus has left the hero, draws nothing
+ * above that line, so the rows pass under the info block. Tiles that
+ * scroll left pass under the rail ([railFade]). Down past the last thing
+ * that takes focus reads on through the details ([readOn]); the info block
+ * steps aside then and the text has the screen down from the safe area.
  */
 @Composable
 private fun ItemColumn(state: LazyListState, focus: ItemPageFocus, content: LazyListScope.() -> Unit) {
@@ -365,12 +378,16 @@ private fun ItemColumn(state: LazyListState, focus: ItemPageFocus, content: Lazy
             verticalArrangement = Arrangement.spacedBy(PleyTv.RowGap),
             modifier = Modifier
                 .fillMaxSize()
+                .readOn(state, line = PleyTv.FocusedRowHeaderY, onReading = { focus.reading = it })
                 .railFade()
                 .drawWithContent {
-                    val line = when (focus.area) {
-                        Area.Hero -> null
-                        Area.Tabs, Area.Episodes -> TabsTop - Clearance
-                        Area.Rows -> RowTilesTop - PleyTv.HeaderToTiles - PleyTv.RowHeaderHeight - Clearance
+                    val line = when {
+                        focus.reading -> TvSafeArea.Vertical
+                        else -> when (focus.area) {
+                            Area.Hero -> null
+                            Area.Tabs, Area.Episodes -> TabsTop - Clearance
+                            Area.Rows, Area.Details -> PleyTv.FocusedRowHeaderY - Clearance
+                        }
                     }
                     if (line == null) drawContent() else clipRect(top = line.toPx()) { this@drawWithContent.drawContent() }
                 },
@@ -388,12 +405,26 @@ private class ItemPageSpec(
     private val tabs = with(density) { TabsTop.toPx() }
     private val episodes = with(density) { EpisodeTilesTop.toPx() }
     private val rows = with(density) { RowTilesTop.toPx() }
+    private val header = with(density) { PleyTv.FocusedRowHeaderY.toPx() }
+    private val bottom = with(density) { TvSafeArea.Vertical.toPx() }
 
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = when (focus.area) {
         Area.Hero -> if (state.firstVisibleItemIndex == 0) -state.firstVisibleItemScrollOffset.toFloat() else offset - focus.heroElementY
         Area.Tabs -> offset - tabs
         Area.Episodes -> offset - episodes
         Area.Rows -> offset - rows
+        Area.Details -> details(offset, size, containerSize)
+    }
+
+    /**
+     * The details' header at the rows' header line, so the text above a
+     * focused version row shows too; further while that row would end
+     * below the safe area, never so far that it goes under the info block.
+     */
+    private fun details(offset: Float, size: Float, containerSize: Float): Float {
+        val block = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == DETAILS_KEY } ?: return offset - rows
+        val top = (block.offset + state.layoutInfo.beforeContentPadding).toFloat()
+        return maxOf(top - header, offset + size - (containerSize - bottom)).coerceAtMost(offset - header)
     }
 }
 
@@ -407,14 +438,18 @@ private class ItemPageSpec(
 @Composable
 private fun InfoBlock(page: ItemPage, focus: ItemPageFocus, focusedEpisode: EpisodeLine?) {
     val area = focus.area
-    val visible by animateFloatAsState(if (area == Area.Hero) 0f else 1f, if (reducedMotion()) androidx.compose.animation.core.snap() else PleyMotion.reveal(), label = "info")
-    if (area == Area.Hero && visible == 0f) return
+    // Gone over the hero, and while reading on through the details, which then have the whole screen.
+    val hidden = area == Area.Hero || focus.reading
+    val visible = animateFloatAsState(if (hidden) 0f else 1f, if (reducedMotion()) androidx.compose.animation.core.snap() else PleyMotion.reveal(), label = "info")
+    // Read through derivedStateOf, the fade's frames recompose nothing: only its end does.
+    val gone by remember { derivedStateOf { (focus.area == Area.Hero || focus.reading) && visible.value == 0f } }
+    if (gone) return
     val episode = rememberRested(focusedEpisode)
     Column(
         Modifier
-            .padding(start = PleyTv.Gutter, top = 30.dp, end = TvSafeArea.Horizontal)
+            .padding(start = PleyTv.Gutter, top = 28.dp, end = TvSafeArea.Horizontal)
             .width(TextColumn)
-            .graphicsLayer { alpha = visible },
+            .graphicsLayer { alpha = visible.value },
     ) {
         BasicText(
             heroTitle(page),
@@ -422,11 +457,11 @@ private fun InfoBlock(page: ItemPage, focus: ItemPageFocus, focusedEpisode: Epis
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
         TvMetaLine(page.meta)
         val showEpisode = (area == Area.Episodes || area == Area.Tabs) && episode != null
         if (showEpisode && episode != null) {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(14.dp))
             BasicText(episode.item.title, style = PleyType.Tv.Title.copy(color = PleyColors.Fg), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(4.dp))
             val aired = episode.aired?.let { stringResource(R.string.tv_item_aired, it) }
@@ -441,7 +476,7 @@ private fun InfoBlock(page: ItemPage, focus: ItemPageFocus, focusedEpisode: Epis
             }
         } else {
             page.summary?.let {
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
                 BasicText(it, style = PleyType.Tv.Body.copy(color = PleyColors.Fg.copy(alpha = 0.85f)), maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -457,20 +492,20 @@ internal fun heroTitle(page: ItemPage): String = when (page.kind) {
 /** The loading page (design spec §8): still blocks where the hero's text and buttons will be. No spinner. */
 @Composable
 private fun TvItemSkeleton() {
-    Column(Modifier.fillMaxSize().padding(start = PleyTv.Gutter, top = 70.dp)) {
-        Block(360.dp, 56.dp)
-        Spacer(Modifier.height(30.dp))
-        Block(260.dp, 20.dp)
-        Spacer(Modifier.height(28.dp))
-        Block(464.dp, 18.dp)
-        Spacer(Modifier.height(10.dp))
-        Block(440.dp, 18.dp)
-        Spacer(Modifier.height(10.dp))
-        Block(300.dp, 18.dp)
-        Spacer(Modifier.height(44.dp))
+    Column(Modifier.fillMaxSize().padding(start = PleyTv.Gutter, top = 82.dp)) {
+        Block(320.dp, 40.dp)
+        Spacer(Modifier.height(14.dp))
+        Block(220.dp, 18.dp)
+        Spacer(Modifier.height(24.dp))
+        Block(464.dp, 15.dp)
+        Spacer(Modifier.height(7.dp))
+        Block(440.dp, 15.dp)
+        Spacer(Modifier.height(7.dp))
+        Block(300.dp, 15.dp)
+        Spacer(Modifier.height(38.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(PleyTv.ButtonGap)) {
-            Box(Modifier.size(160.dp, 48.dp).background(PleyColors.Surface2, PleyShape.Control))
-            repeat(3) { Box(Modifier.size(48.dp).background(PleyColors.Surface2, PleyShape.Control)) }
+            Box(Modifier.size(140.dp, PleyTv.ButtonHeight).background(PleyColors.Surface2, PleyShape.Control))
+            repeat(3) { Box(Modifier.size(PleyTv.ButtonHeight).background(PleyColors.Surface2, PleyShape.Control)) }
         }
     }
 }
@@ -481,12 +516,12 @@ private fun Block(width: androidx.compose.ui.unit.Dp, height: androidx.compose.u
 }
 
 /** The season tabs' top once focus is in the episodes (mockup tv-show). */
-internal val TabsTop = 250.dp
+internal val TabsTop = 218.dp
 
 /** The episode tiles' top, under the tabs. */
-internal val EpisodeTilesTop = 306.dp
+internal val EpisodeTilesTop = 272.dp
 
-/** Other rows' tiles' top: their header at y = 188. */
+/** Other rows' tiles' top: their header at y = 172. */
 internal val RowTilesTop = PleyTv.FocusedRowHeaderY + PleyTv.RowHeaderHeight + PleyTv.HeaderToTiles
 
 /** Room kept above the line under the info block. */
@@ -496,3 +531,6 @@ private val Clearance = 12.dp
 private val BottomRoom = 300.dp
 
 internal const val TV_ITEM_PAGE = "pley.tv.item"
+
+/** The details' item key in the page's column. */
+private const val DETAILS_KEY = "details"

@@ -42,6 +42,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
+import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
 import kotlinx.coroutines.delay
 
@@ -52,7 +53,7 @@ import kotlinx.coroutines.delay
  * keyboard (Gboard, or Amazon's), and Back or the keyboard's action closes
  * it again, leaving focus on the field.
  *
- * 48 dp, [surface2][PleyColors.Surface2], radius 4, tvBody. At rest a 1 dp
+ * 44 dp, [surface2][PleyColors.Surface2], radius 4, tvBody. At rest a 1 dp
  * [control][PleyColors.Control] edge; focused a 2 dp [accentBright][PleyColors.AccentBright]
  * edge, without scale (fields are wide).
  */
@@ -100,7 +101,7 @@ fun TvTextField(
     val ring = outerFocused || innerFocused
     Box(
         modifier
-            .height(48.dp)
+            .height(FieldHeight)
             .fillMaxWidth()
             .background(PleyColors.Surface2, PleyShape.Field)
             .border(if (ring) 2.dp else 1.dp, if (ring) PleyColors.AccentBright else PleyColors.Control, PleyShape.Field)
@@ -179,3 +180,6 @@ fun Modifier.digitKeys(onDigit: (Int) -> Unit, onDelete: () -> Unit = {}, onDot:
 
 /** How often a field being typed in looks whether the keyboard is still up. */
 private const val KEYBOARD_POLL_MS = 250L
+
+/** A text field's height. */
+internal val FieldHeight = 44.dp

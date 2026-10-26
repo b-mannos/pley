@@ -77,7 +77,7 @@ class TvRowFocusTest {
                         )
                         TvRowColumn(
                             state = list,
-                            contentPadding = PaddingValues(top = if (withHero) 0.dp else 188.dp),
+                            contentPadding = PaddingValues(top = if (withHero) 0.dp else 172.dp),
                             heroHeight = if (withHero) 400.dp else 0.dp,
                             modifier = Modifier.fillMaxSize(),
                         ) {
@@ -118,11 +118,11 @@ class TvRowFocusTest {
         compose.onNodeWithTag("resume").assertIsFocused()
         compose.press(Key.DirectionDown)
         compose.focused().assertContentDescriptionEquals("A 1")
-        // The row's header is at y = 188: the hero (400 dp) scrolled 400 + 32 - 188.
+        // The row's header is at y = 172: the hero (400 dp) scrolled 400 + 28 - 172.
         compose.mainClock.advanceTimeBy(2_000)
         compose.waitForIdle()
         assertEquals(0, list.firstVisibleItemIndex)
-        assertEquals(with(compose.density) { 244.dp.roundToPx() }.toFloat(), list.firstVisibleItemScrollOffset.toFloat(), 2f)
+        assertEquals(with(compose.density) { 256.dp.roundToPx() }.toFloat(), list.firstVisibleItemScrollOffset.toFloat(), 2f)
         compose.press(Key.DirectionUp)
         compose.onNodeWithTag("resume").assertIsFocused()
         compose.mainClock.advanceTimeBy(2_000)

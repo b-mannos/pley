@@ -49,40 +49,44 @@ object PleyType {
         hyphens = if (title) Hyphens.None else Hyphens.Unspecified,
     )
 
-    /** TV styles, in sp on the 960 by 540 canvas. The minimum is 14 sp; [Tv.Badge] alone is smaller, always bold and boxed. */
+    /**
+     * TV styles, in sp on the 960 by 540 canvas, at Google TV's density.
+     * Body text is at least 14 sp and captions 13; [Tv.Badge] alone is
+     * smaller, always bold and boxed.
+     */
     object Tv {
         /** A title without logo art; 2 lines at most. */
-        val HeroTitle = style(44, 50, Bold, -0.5f, title = true)
+        val HeroTitle = style(38, 44, Bold, -0.5f, title = true)
 
         /** Library, Search, Settings, Who's watching? */
-        val PageTitle = style(32, 38, Bold, -0.25f, title = true)
+        val PageTitle = style(28, 34, Bold, -0.25f, title = true)
 
         /** Row headers. */
-        val Section = style(20, 26, Bold, title = true)
+        val Section = style(18, 24, Bold, title = true)
 
         /** Episode titles in info blocks; panel and dialog titles; placeholder titles on tiles. */
-        val Title = style(18, 24, Bold, title = true)
+        val Title = style(16, 22, Bold, title = true)
 
         /** Summaries on the hero and the item page. */
-        val BodyLarge = style(17, 25, Regular)
+        val BodyLarge = style(15, 22, Regular)
 
         /** Lists, settings rows, instructions, 2-line summaries. */
-        val Body = style(15, 21, Regular)
+        val Body = style(14, 20, Regular)
 
         /** Buttons, the metadata line, tabs, chips. */
-        val Label = style(15, 20, Medium, 0.1f)
+        val Label = style(14, 18, Medium, 0.1f)
 
         /** Tile captions, scrubber times. */
-        val Caption = style(14, 18, Medium, 0.2f)
+        val Caption = style(13, 17, Medium, 0.2f)
 
         /** Quality badges, as written ("1080p", never forced to capitals). */
-        val Badge = style(12, 14, Bold, 0.4f)
+        val Badge = style(11, 13, Bold, 0.4f)
 
         /** The link code, in a monospaced face. */
-        val Code = style(56, 64, Bold, 4f, family = FontFamily.Monospace)
+        val Code = style(48, 56, Bold, 4f, family = FontFamily.Monospace)
 
         /** PIN and address pad keys. */
-        val PinDigit = style(32, 32, Medium)
+        val PinDigit = style(28, 28, Medium)
     }
 
     /** Phone styles, named after the Material 3 roles the phone's theme sets them as. */

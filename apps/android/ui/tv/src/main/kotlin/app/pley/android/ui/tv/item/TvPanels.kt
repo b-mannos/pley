@@ -47,6 +47,7 @@ internal fun TvPanels(
     actions: TvPageActions,
     onClose: (FocusRequester?) -> Unit,
     buttons: HeroButtons,
+    onSummary: () -> Unit,
 ) {
     var last by remember { mutableStateOf(panel) }
     if (panel != null) last = panel
@@ -76,7 +77,7 @@ internal fun TvPanels(
         ) {
             when (shown) {
                 Panel.Tracks -> tracks(page, actions, first)
-                Panel.More -> more(page, actions, first) { onClose(returnTo) }
+                Panel.More -> more(page, actions, first, buttons.summaryCut, onSummary) { onClose(returnTo) }
                 is Panel.Actions -> itemActionsList(shown, actions, first) { onClose(returnTo) }
                 null -> Unit
             }
@@ -123,9 +124,19 @@ private fun LazyListScope.tracks(page: ItemPage, actions: TvPageActions, first: 
     }
 }
 
-/** More: the profile's rating, then going to the show or season, and the collections it is part of. */
-private fun LazyListScope.more(page: ItemPage, actions: TvPageActions, first: FocusRequester, close: () -> Unit) {
+/** More: the whole summary when the hero cut it, the profile's rating, then going to the show or season, and the collections it is part of. */
+private fun LazyListScope.more(
+    page: ItemPage,
+    actions: TvPageActions,
+    first: FocusRequester,
+    summaryCut: Boolean,
+    onSummary: () -> Unit,
+    close: () -> Unit,
+) {
     item(key = "title") { PanelTitle(stringResource(R.string.tv_item_more)) }
+    if (summaryCut) {
+        item(key = "summary") { PanelRow(stringResource(R.string.tv_item_full_summary), icon = PleyIcons.Info, onClick = onSummary) }
+    }
     var given = false
     if (page.rateable) {
         item(key = "rating") { PanelHeading(stringResource(R.string.tv_item_your_rating)) }

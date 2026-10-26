@@ -111,14 +111,14 @@ internal fun TvGallery(tier: Tier) {
 
         Section("Type")
         Column(Modifier.padding(start = PleyTv.Gutter), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Label("Hero title 44", PleyType.Tv.HeroTitle)
-            Label("Page title 32", PleyType.Tv.PageTitle)
-            Label("Section 20 · Continue Watching", PleyType.Tv.Section)
-            Label("Title 18 · Glasshouse", PleyType.Tv.Title)
-            Label("Body large 17 · A volcanologist and her estranged brother race the ash cloud.", PleyType.Tv.BodyLarge, color = PleyColors.Fg.copy(alpha = 0.85f))
-            Label("Body 15 · Your phone must be on the same Wi-Fi as this TV.", PleyType.Tv.Body, color = PleyColors.Muted)
-            Label("Label 15 · 2025 · R · 2h 2m", PleyType.Tv.Label, color = PleyColors.Muted)
-            Label("Caption 14 · S4 · E2 · 31 min left", PleyType.Tv.Caption, color = PleyColors.Muted)
+            Label("Hero title 38", PleyType.Tv.HeroTitle)
+            Label("Page title 28", PleyType.Tv.PageTitle)
+            Label("Section 18 · Continue Watching", PleyType.Tv.Section)
+            Label("Title 16 · Glasshouse", PleyType.Tv.Title)
+            Label("Body large 15 · A volcanologist and her estranged brother race the ash cloud.", PleyType.Tv.BodyLarge, color = PleyColors.Fg.copy(alpha = 0.85f))
+            Label("Body 14 · Your phone must be on the same Wi-Fi as this TV.", PleyType.Tv.Body, color = PleyColors.Muted)
+            Label("Label 14 · 2025 · R · 2h 2m", PleyType.Tv.Label, color = PleyColors.Muted)
+            Label("Caption 13 · S4 · E2 · 31 min left", PleyType.Tv.Caption, color = PleyColors.Muted)
             Label("BCDF–GHJK", PleyType.Tv.Code)
         }
 

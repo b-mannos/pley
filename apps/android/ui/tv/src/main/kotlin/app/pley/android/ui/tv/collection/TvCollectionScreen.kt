@@ -237,7 +237,7 @@ private fun Loading() {
         Box(Modifier.size(240.dp, 18.dp).skeleton(skeleton, PleyShape.Badge))
         Box(Modifier.width(TextColumn).height(70.dp).skeleton(skeleton, PleyShape.Badge))
         Spacer(Modifier.height(20.dp))
-        Box(Modifier.size(148.dp, 48.dp).skeleton(skeleton, PleyShape.Control))
+        Box(Modifier.size(128.dp, PleyTv.ButtonHeight).skeleton(skeleton, PleyShape.Control))
         Spacer(Modifier.fillMaxWidth())
     }
 }

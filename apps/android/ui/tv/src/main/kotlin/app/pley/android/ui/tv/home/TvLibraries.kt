@@ -76,13 +76,13 @@ internal fun TvLibrariesScreen(vm: LibrariesViewModel = viewModel(factory = Libr
                     style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg),
                     modifier = Modifier.padding(start = PleyTv.Gutter).semantics { heading() },
                 )
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(20.dp))
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(COLUMNS),
                     state = rememberLazyGridState(),
                     contentPadding = PaddingValues(start = PleyTv.Gutter, end = TvSafeArea.Horizontal, top = 8.dp, bottom = TvSafeArea.Vertical),
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     itemsIndexed(s.libraries, key = { _, entry -> entry.library.id }, contentType = { _, _ -> "library" }) { index, entry ->
@@ -121,14 +121,14 @@ private fun LibraryCard(entry: LibraryEntry, onClick: () -> Unit, modifier: Modi
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f, pressedScale = 1f),
     ) {
         val content = LocalContentColor.current
-        Row(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxSize().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(48.dp).drawBehind { drawRoundRect(content.copy(alpha = 0.12f), cornerRadius = CornerRadius(PleyShape.ControlRadius.toPx())) },
+                Modifier.size(PleyTv.ButtonHeight).drawBehind { drawRoundRect(content.copy(alpha = 0.12f), cornerRadius = CornerRadius(PleyShape.ControlRadius.toPx())) },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(kindIcon(entry.library.kind), contentDescription = null, size = 24.dp, tint = content)
+                Icon(kindIcon(entry.library.kind), contentDescription = null, size = PleyTv.IconSize, tint = content)
             }
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 BasicText(
                     entry.library.name,
@@ -153,4 +153,4 @@ internal fun kindIcon(kind: LibraryKind): PleyIcon = when (kind) {
 }
 
 private const val COLUMNS = 3
-private val CardHeight = 96.dp
+private val CardHeight = 80.dp

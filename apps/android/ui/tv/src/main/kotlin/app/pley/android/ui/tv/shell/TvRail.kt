@@ -29,7 +29,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.key.Key
@@ -57,6 +56,8 @@ import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.image.Artwork
+import app.pley.android.designsystem.image.GradientBitmaps
+import app.pley.android.designsystem.image.drawStretched
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.kit.TvRailFocus
 
@@ -167,15 +168,8 @@ internal fun NavigationDrawerScope.TvRail(
                 if (!open) return@drawBehind
                 val panel = size.width - RailShadow.toPx()
                 drawRect(PleyColors.Surface.copy(alpha = 0.96f), size = Size(panel, size.height))
-                drawRect(
-                    Brush.horizontalGradient(
-                        listOf(PleyColors.Surface.copy(alpha = 0.85f), Color.Transparent),
-                        startX = panel,
-                        endX = size.width,
-                    ),
-                    topLeft = Offset(panel, 0f),
-                    size = Size(size.width - panel, size.height),
-                )
+                // A stretched picture rather than a gradient shader (GradientBitmaps): cheaper on TV GPUs.
+                drawStretched(RailEdge, Offset(panel, 0f), Size(size.width - panel, size.height))
             }
             .padding(end = if (open) RailShadow else 0.dp),
     ) {
@@ -237,7 +231,7 @@ private fun NavigationDrawerScope.RailEntry(item: RailItem, rail: RailState, onS
     NavigationDrawerItem(
         selected = selected,
         onClick = { onSelect(item) },
-        leadingContent = { Icon(item.icon, contentDescription = null, size = 22.dp, tint = LocalContentColor.current) },
+        leadingContent = { Icon(item.icon, contentDescription = null, size = PleyTv.IconSize, tint = LocalContentColor.current) },
         modifier = Modifier
             .focusRequester(rail.requester(item.id))
             .testTag("${TestTags.TV_RAIL}.${item.id}")
@@ -356,4 +350,7 @@ private val ItemGap = 8.dp
 
 /** The open rail's soft right edge. */
 private val RailShadow = 64.dp
+
+/** That edge: surface at 85 % to clear. */
+private val RailEdge by lazy { GradientBitmaps.horizontal(0f to PleyColors.Surface.copy(alpha = 0.85f), 1f to PleyColors.Surface.copy(alpha = 0f)) }
 

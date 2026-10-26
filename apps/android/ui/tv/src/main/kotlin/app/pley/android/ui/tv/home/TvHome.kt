@@ -202,8 +202,8 @@ private fun TvHomeRows(model: TvHomeModel, hero: TvHero, origin: String, vm: Hom
     }
 }
 
-/** The hero, down to the first row's header at y = 432 less the gap between rows (design spec §2.2). */
-internal val HeroHeight = 432.dp - PleyTv.RowGap
+/** The hero, down to the first row's header at y = 384 less the gap between rows (design spec §2.2): the first row's tiles show whole under it. */
+internal val HeroHeight = 384.dp - PleyTv.RowGap
 
 /** About one row of posters: the next row is composed before focus reaches it. */
 private val RowAhead = 300.dp

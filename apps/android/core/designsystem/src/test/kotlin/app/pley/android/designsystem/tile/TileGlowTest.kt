@@ -15,9 +15,9 @@ class TileGlowTest {
     @Test
     fun aGlowIsAQuarterResolutionAlphaBitmapFadingOut() {
         val glow = TileGlow.render(TileKind.Poster, density = 2f).asAndroidBitmap()
-        // (124 + 2 × 20) by (186 + 2 × 20) dp, at 2 px per dp, a quarter of it.
-        assertEquals(82, glow.width)
-        assertEquals(113, glow.height)
+        // (108 + 2 × 20) by (162 + 2 × 20) dp, at 2 px per dp, a quarter of it.
+        assertEquals(74, glow.width)
+        assertEquals(101, glow.height)
         assertEquals(android.graphics.Bitmap.Config.ALPHA_8, glow.config)
         assertTrue(glow.byteCount in 5_000..40_000)
         val edge = android.graphics.Color.alpha(glow.getPixel(10, glow.height / 2))

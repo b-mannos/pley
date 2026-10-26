@@ -45,7 +45,7 @@ import app.pley.android.screens.library.AlphaIndex
 import app.pley.android.ui.tv.R
 
 /**
- * The A to Z jump (design spec §4.2): a 48 dp circle beside the grid
+ * The A to Z jump (design spec §4.2): a 40 dp circle beside the grid
  * showing the letter of the focused title's section, in tvTitle on
  * [surface3][PleyColors.Surface3]. Right from the grid's last column
  * focuses it (the accent fill, scaled to 1.08). Then Up and Down step
@@ -138,7 +138,7 @@ private fun Neighbour(letter: Int, index: AlphaIndex) {
 }
 
 /** Above and below the circle, for the neighbouring letters. */
-internal val NeighbourRoom = 24.dp
+internal val NeighbourRoom = 20.dp
 
 /** The jump control's test tag. */
 internal const val JUMP_TAG = "pley.library.jump"

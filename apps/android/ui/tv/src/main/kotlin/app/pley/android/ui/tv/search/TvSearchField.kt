@@ -50,9 +50,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
+import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.ui.tv.kit.FieldHeight
 
 /**
  * The search field on TV (design spec §2.11, §4.5; D-pad rule 7): the
@@ -61,7 +63,7 @@ import app.pley.android.designsystem.icon.PleyIcons
  * system keyboard (Gboard, or Amazon's, both with voice input), and Back
  * or the keyboard's Search closes it again, leaving focus on the field.
  *
- * 48 dp, [surface2][PleyColors.Surface2], radius 8, tvBody. At rest a 1 dp
+ * 44 dp, [surface2][PleyColors.Surface2], radius 8, tvBody. At rest a 1 dp
  * [control][PleyColors.Control] edge; focused a 2 dp [accentBright][PleyColors.AccentBright]
  * edge, without scale.
  */
@@ -111,7 +113,7 @@ internal fun TvSearchField(
     val ring = outerFocused || innerFocused
     Row(
         modifier
-            .height(48.dp)
+            .height(FieldHeight)
             .background(PleyColors.Surface2, PleyShape.Field)
             .border(if (ring) 2.dp else 1.dp, if (ring) PleyColors.AccentBright else PleyColors.Control, PleyShape.Field)
             .then(focusModifier)
@@ -133,7 +135,7 @@ internal fun TvSearchField(
             .padding(start = 16.dp, end = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(PleyIcons.Search, contentDescription = null, size = 22.dp, tint = if (ring) PleyColors.Fg else PleyColors.Muted)
+        Icon(PleyIcons.Search, contentDescription = null, size = PleyTv.IconSize, tint = if (ring) PleyColors.Fg else PleyColors.Muted)
         Spacer(Modifier.width(12.dp))
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
             if (state.text.isEmpty()) {

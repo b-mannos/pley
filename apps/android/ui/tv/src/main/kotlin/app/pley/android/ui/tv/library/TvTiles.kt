@@ -86,8 +86,8 @@ internal fun tvTabLabel(tab: LibraryTab): Int = when (tab) {
 
 /**
  * The TV grid's columns (design spec §4.2): as many wells of [kind] as fit
- * between the gutter (x = 96) and [end], 16 dp apart: six posters of 112,
- * from 96 to 848, which leaves the jump control its room at 864 to 912.
+ * between the gutter (x = 96) and [end], 14 dp apart: seven posters of 96,
+ * from 96 to 858, which leaves the jump control its room at 872 to 912.
  */
 internal fun tvGridColumns(kind: TileKind, end: Dp = GridEnd): Int {
     val width = end - PleyTv.Gutter
@@ -98,4 +98,4 @@ internal fun tvGridColumns(kind: TileKind, end: Dp = GridEnd): Int {
 internal val GridEnd: Dp get() = PleyTv.CanvasWidth - TvSafeArea.Horizontal - JumpSize - PleyTv.TileGap
 
 /** The jump control's circle. */
-internal val JumpSize: Dp = 48.dp
+internal val JumpSize: Dp = 40.dp

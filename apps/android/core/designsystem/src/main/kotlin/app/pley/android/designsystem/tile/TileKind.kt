@@ -25,26 +25,26 @@ enum class TileKind(
     /** People and profiles are circles. */
     val round: Boolean = false,
 ) {
-    /** Movies, shows, seasons: 6 and a peek in a TV row. */
-    Poster(124.dp, 186.dp, 118.dp),
+    /** Movies, shows, seasons: 7 and a peek in a TV row. */
+    Poster(108.dp, 162.dp, 118.dp),
 
-    /** Continue Watching and extras, 16:9: 3 and a peek. */
-    Landscape(232.dp, 131.dp, 236.dp),
+    /** Continue Watching and extras, 16:9: 3 and most of a 4th. */
+    Landscape(204.dp, 115.dp, 236.dp),
 
-    /** Episode rows, 16:9: 3 and most of a 4th. The phone's episode list uses 128 by 72. */
-    Episode(208.dp, 117.dp, 128.dp),
+    /** Episode rows, 16:9: 4 and a peek. The phone's episode list uses 128 by 72. */
+    Episode(184.dp, 104.dp, 128.dp),
 
-    /** The library grid's posters: 6 columns. */
-    LibraryGrid(112.dp, 168.dp, 118.dp),
+    /** The library grid's posters: 7 columns. */
+    LibraryGrid(96.dp, 144.dp, 118.dp),
 
     /** Albums. */
-    Square(150.dp, 150.dp, 132.dp),
+    Square(132.dp, 132.dp, 132.dp),
 
-    /** Cast, a circle: 7 in a row. */
-    Person(110.dp, 110.dp, 96.dp, round = true),
+    /** Cast, a circle: 7 and most of an 8th in a row. */
+    Person(96.dp, 96.dp, 96.dp, round = true),
 
     /** Profiles on "Who's watching?", a circle. */
-    Avatar(112.dp, 112.dp, 88.dp, round = true),
+    Avatar(100.dp, 100.dp, 88.dp, round = true),
     ;
 
     /** Width over height. */
@@ -87,13 +87,13 @@ enum class TileStyle(
 ) {
     Tv(
         cornerRadius = PleyShape.TileTvRadius,
-        tickSize = 22.dp,
-        tickGlyph = 13.dp,
-        countHeight = 20.dp,
+        tickSize = 20.dp,
+        tickGlyph = 12.dp,
+        countHeight = 18.dp,
         inset = 6.dp,
         progressHeight = 4.dp,
         badgeText = PleyType.Tv.Badge,
-        badgeHeight = 20.dp,
+        badgeHeight = 18.dp,
         placeholderText = PleyType.Tv.Title,
         captionTitle = PleyType.Tv.Caption,
         captionSubtitle = PleyType.Tv.Caption,

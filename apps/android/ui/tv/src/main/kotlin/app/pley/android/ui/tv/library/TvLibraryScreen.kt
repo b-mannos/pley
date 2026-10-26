@@ -196,8 +196,8 @@ private fun Header(
 }
 
 /**
- * The Library tab: the chips at y = 80, the grid from y = 140, and the
- * jump control at (864, 140) when the listing has its A to Z.
+ * The Library tab: the chips at y = 80, the grid from y = 136, and the
+ * jump control at (872, 136) when the listing has its A to Z.
  */
 @Composable
 private fun TvLibraryTab(
@@ -240,7 +240,7 @@ private fun TvLibraryTab(
         Spacer(Modifier.height(ChipsTop))
         Row(
             Modifier.padding(start = PleyTv.Gutter, end = TvSafeArea.Horizontal).height(40.dp).focusRequester(contentFocus).upTo(tabFocus),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TvChip(
@@ -320,7 +320,8 @@ private fun TvLibraryTab(
                     TvPosterGrid(
                         total = cells?.total ?: SKELETONS,
                         tileAt = { cells?.get(it) },
-                        keyAt = { cells?.key(it) ?: -(it + 1L) },
+                        // By position: a cell keeps its key (and focus) when its page loads.
+                        keyAt = { it },
                         kind = kind,
                         onOpen = { _, tile -> navigator.open(state.opens(tile.id)) },
                         onActions = { tile -> navigator.open(PleyKey.ItemActions(tile.id)) },
@@ -356,7 +357,7 @@ private fun TvLibraryTab(
     }
 }
 
-/** The Collections tab: the count at y = 80, then the collections' posters with their counts, from y = 140. */
+/** The Collections tab: the count at y = 80, then the collections' posters with their counts, from y = 136. */
 @Composable
 private fun TvCollectionsTab(
     state: LibraryUiState<ArtworkTileModel>,
@@ -403,7 +404,7 @@ private fun TvCollectionsTab(
                 else -> TvPosterGrid(
                     total = list?.size ?: SKELETONS,
                     tileAt = { list?.getOrNull(it)?.tile },
-                    keyAt = { list?.getOrNull(it)?.id ?: -(it + 1L) },
+                    keyAt = { it },
                     kind = TileKind.LibraryGrid,
                     onOpen = { position, _ -> list?.getOrNull(position)?.let { navigator.open(PleyKey.Collection(it.id)) } },
                     memory = memory,
@@ -433,9 +434,9 @@ internal fun Modifier.upTo(target: FocusRequester): Modifier = focusProperties {
 /** Skeleton tiles while nothing is known: three rows. */
 private const val SKELETONS = 18
 
-/** The header's line: tvPageTitle's 38 dp, room for the tabs' 40 and their focus scale. */
+/** The header's line: tvPageTitle's 34 dp, room for the tabs' 40 and their focus scale. */
 internal val HeaderHeight = 44.dp
 
 /** The chips' top, and the grid's tiles' (design spec §4.2). */
 internal val ChipsTop = 80.dp
-internal val GridTop = 140.dp
+internal val GridTop = 136.dp

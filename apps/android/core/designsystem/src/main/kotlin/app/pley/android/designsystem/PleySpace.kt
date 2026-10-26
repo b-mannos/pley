@@ -50,32 +50,41 @@ object PleyTv {
     val TextColumnEnd = 560.dp
 
     /** Where the page puts a focused row's header, under the info block. */
-    val FocusedRowHeaderY = 188.dp
+    val FocusedRowHeaderY = 172.dp
 
     /** A row header's line (tvSection). */
-    val RowHeaderHeight = 26.dp
+    val RowHeaderHeight = 24.dp
 
     /** From a row header to its tiles: room for the focused tile's growth and ring. */
-    val HeaderToTiles = 16.dp
+    val HeaderToTiles = 14.dp
 
     /** From tiles to their caption: the same room below. */
-    val TilesToCaption = 16.dp
+    val TilesToCaption = 14.dp
 
     /** A caption's two lines of tvCaption. */
-    val CaptionHeight = 36.dp
+    val CaptionHeight = 34.dp
 
     /** Between one row's caption and the next row's header. */
-    val RowGap = 32.dp
+    val RowGap = 28.dp
 
     /** Between posters, squares and people. */
-    val TileGap = 16.dp
+    val TileGap = 14.dp
 
-    /** Between landscape and episode tiles, which grow 9.3 dp a side when focused. */
-    val WideTileGap = 20.dp
+    /** Between landscape and episode tiles, which grow 8.2 dp a side when focused. */
+    val WideTileGap = 18.dp
 
     /** Between buttons in a row; the row reserves [ButtonLabelRoom] under itself for round buttons' labels. */
-    val ButtonGap = 12.dp
-    val ButtonLabelRoom = 26.dp
+    val ButtonGap = 10.dp
+    val ButtonLabelRoom = 24.dp
+
+    /** Pills and round buttons. tv-material's buttons lay their content in a row at least this tall, so labels sit centred. */
+    val ButtonHeight = 40.dp
+
+    /** The least height of a row in a list, a side panel or settings. */
+    val ListRowHeight = 44.dp
+
+    /** Icons in buttons, list rows and the rail. */
+    val IconSize = 20.dp
 
     /** The rows' fade under the collapsed rail: [Bg][PleyColors.Bg] to this x… */
     val RailFadeSolidUntil = 56.dp

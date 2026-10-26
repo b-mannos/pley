@@ -145,7 +145,7 @@ private fun ArtistContent(
         }
         Spacer(Modifier.height(18.dp))
         Row(
-            Modifier.padding(start = PleyTv.Gutter).height(48.dp + PleyTv.ButtonLabelRoom),
+            Modifier.padding(start = PleyTv.Gutter).height(PleyTv.ButtonHeight + PleyTv.ButtonLabelRoom),
             horizontalArrangement = Arrangement.spacedBy(PleyTv.ButtonGap),
         ) {
             TvPillButton(stringResource(R.string.tv_music_play), onClick = onPlay, icon = PleyIcons.Play, enabled = !busy, modifier = Modifier.rememberedFocus(memory, "play", initial = true))

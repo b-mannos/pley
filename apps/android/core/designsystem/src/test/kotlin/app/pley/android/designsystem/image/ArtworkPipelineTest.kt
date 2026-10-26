@@ -37,7 +37,7 @@ class ArtworkPipelineTest {
     @Test
     fun widthsFollowTheBoxDensityAndTier() {
         // A 1080p TV (2 px per dp), the design spec's §6 list.
-        assertEquals(320, width(TileKind.Poster.tvWidth.value, 2f, Tier.T1, 1920))
+        assertEquals(240, width(TileKind.Poster.tvWidth.value, 2f, Tier.T1, 1920))
         assertEquals(480, width(TileKind.Landscape.tvWidth.value, 2f, Tier.T1, 1920))
         assertEquals(960, width(360f, 2f, Tier.T2, 1920))
         assertEquals(1280, width(960f, 2f, Tier.T2, 1920, ArtworkImage.backdropCap(Tier.T2)))

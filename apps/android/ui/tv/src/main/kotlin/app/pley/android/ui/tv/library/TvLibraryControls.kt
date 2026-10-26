@@ -32,6 +32,7 @@ import androidx.tv.material3.Text
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyFocus
 import app.pley.android.designsystem.PleyShape
+import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
@@ -117,7 +118,7 @@ internal fun TvTab(
 }
 
 /**
- * A row of a side panel (design spec §2.7): 48 dp, its label in tvBody,
+ * A row of a side panel (design spec §2.7): 44 dp, its label in tvBody,
  * an [accent][PleyColors.Accent] check on the choice in force, or a
  * chevron for a row that opens another list. Focused, an accent pill
  * without scale: the panel would clip it.
@@ -136,7 +137,7 @@ internal fun PanelRow(
     Surface(
         onClick = onClick,
         interactionSource = interactions,
-        modifier = modifier.fillMaxWidth().height(48.dp).semantics { selected = checked },
+        modifier = modifier.fillMaxWidth().height(PleyTv.ListRowHeight).semantics { selected = checked },
         shape = ClickableSurfaceDefaults.shape(PleyShape.Control),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = Color.Transparent,

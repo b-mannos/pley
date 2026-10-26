@@ -63,7 +63,7 @@ import app.pley.android.designsystem.icon.PleyIcon
  */
 
 /**
- * A pill: Play, Resume, Get a new code, Play now. 48 tall, at least 148
+ * A pill: Play, Resume, Get a new code, Play now. 40 tall, at least 128
  * wide. At rest a faint fill with a [control][PleyColors.Control] edge.
  * [progress] (0 to 1, Resume) draws the played line along its bottom.
  */
@@ -86,8 +86,8 @@ fun TvPillButton(
         enabled = enabled,
         interactionSource = interactions,
         modifier = modifier
-            .heightIn(min = 48.dp)
-            .widthIn(min = 148.dp)
+            .heightIn(min = PleyTv.ButtonHeight)
+            .widthIn(min = PillMinWidth)
             .alpha(if (enabled) 1f else DISABLED_ALPHA)
             .focusProperties { canFocus = enabled || focused }
             .then(if (progress != null) Modifier.progressLine(progress) { focused } else Modifier),
@@ -111,18 +111,18 @@ fun TvPillButton(
             disabledBorder = Border(BorderStroke(1.dp, PleyColors.Control), shape = PleyShape.Control),
             focusedDisabledBorder = Border.None,
         ),
-        // tv-material's Row is at least 40 tall, at the top: 4 above and below centre it in the 48.
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
+        // tv-material's Row is at least 40 tall, at the top: as tall as the pill, it centres the label.
+        contentPadding = PaddingValues(horizontal = PillPadding, vertical = 0.dp),
     ) {
-        // That Row starts its content at the left; a short label sits centred in the 148.
+        // That Row starts its content at the left; a short label sits centred in the 128.
         Row(
-            Modifier.widthIn(min = 148.dp - 24.dp * 2),
+            Modifier.widthIn(min = PillMinWidth - PillPadding * 2),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
-                Icon(icon, contentDescription = null, size = 22.dp, tint = androidx.tv.material3.LocalContentColor.current)
-                Spacer(Modifier.width(10.dp))
+                Icon(icon, contentDescription = null, size = PleyTv.IconSize, tint = androidx.tv.material3.LocalContentColor.current)
+                Spacer(Modifier.width(8.dp))
             }
             Text(label, style = PleyType.Tv.Label)
         }
@@ -130,12 +130,12 @@ fun TvPillButton(
 }
 
 /**
- * An icon button: From start, Watched, Audio and subtitles, More. A 48 dp
- * square, its corners a [control][PleyShape.Control]'s, with a 24 dp icon
+ * An icon button: From start, Watched, Audio and subtitles, More. A 40 dp
+ * square, its corners a [control][PleyShape.Control]'s, with a 20 dp icon
  * and the pill's [control][PleyColors.Control] edge, so it reads on dark art
  * too; [onArt] puts it on [bg][PleyColors.Bg] at 80 % over a backdrop, else
  * on [surface3][PleyColors.Surface3]. Its [label] is
- * always what screen readers hear; on screen it fades in 8 dp below while
+ * always what screen readers hear; on screen it fades in 6 dp below while
  * the button has focus. The button keeps that room ([PleyTv.ButtonLabelRoom])
  * under itself, so a row of buttons never jumps.
  */
@@ -153,14 +153,14 @@ fun TvRoundButton(
     val focused by interactions.collectIsFocusedAsState()
     HandOffFocus(enabled, focused)
     val labelAlpha by animateFloatAsState(if (focused) 1f else 0f, PleyMotion.reveal(), label = "label")
-    Box(modifier.width(48.dp).alpha(if (enabled) 1f else DISABLED_ALPHA), contentAlignment = Alignment.TopCenter) {
+    Box(modifier.width(PleyTv.ButtonHeight).alpha(if (enabled) 1f else DISABLED_ALPHA), contentAlignment = Alignment.TopCenter) {
         IconButton(
             onClick = onClick,
             onLongClick = onLongClick,
             enabled = enabled,
             interactionSource = interactions,
             modifier = Modifier
-                .size(48.dp)
+                .size(PleyTv.ButtonHeight)
                 .focusProperties { canFocus = enabled || focused }
                 .semantics { contentDescription = label },
             shape = IconButtonDefaults.shape(PleyShape.Control),
@@ -184,7 +184,7 @@ fun TvRoundButton(
                 focusedDisabledBorder = Border.None,
             ),
         ) {
-            Icon(icon, contentDescription = null, size = 24.dp, tint = androidx.tv.material3.LocalContentColor.current)
+            Icon(icon, contentDescription = null, size = PleyTv.IconSize, tint = androidx.tv.material3.LocalContentColor.current)
         }
         // The visible label, under the button; the button above already says it to screen readers.
         BasicText(
@@ -193,7 +193,7 @@ fun TvRoundButton(
             maxLines = 1,
             softWrap = false,
             modifier = Modifier
-                .padding(top = 48.dp + 8.dp)
+                .padding(top = PleyTv.ButtonHeight + 6.dp)
                 .graphicsLayer { alpha = labelAlpha }
                 .wrapContentWidthUnbounded(),
         )
@@ -242,6 +242,10 @@ fun TvTextButton(
 /** Disabled buttons are drawn at 40 %. */
 private const val DISABLED_ALPHA = 0.4f
 
+/** A pill's least width, and the room either side of its label. */
+private val PillMinWidth = 128.dp
+private val PillPadding = 20.dp
+
 /**
  * Disabled buttons can't take focus (§2.5), and focus always shows (§5.2
  * rule 1): a button disabled while it has focus keeps it only until it has
@@ -258,15 +262,15 @@ private fun HandOffFocus(enabled: Boolean, focused: Boolean) {
 }
 
 /**
- * An in-progress pill's line (design spec §2.5): 3 dp, 7 dp above the
+ * An in-progress pill's line (design spec §2.5): 3 dp, 5 dp above the
  * bottom, inset by the side padding. At rest accent over fg 20 %; focused
  * onAccent over onAccent 25 %.
  */
 private fun Modifier.progressLine(progress: Float, focused: () -> Boolean): Modifier = drawWithContent {
     drawContent()
     val h = 3.dp.toPx()
-    val inset = 24.dp.toPx()
-    val y = size.height - 7.dp.toPx() - h
+    val inset = PillPadding.toPx()
+    val y = size.height - 5.dp.toPx() - h
     val w = (size.width - 2 * inset).coerceAtLeast(0f)
     val on = focused()
     val track = if (on) PleyColors.OnAccent.copy(alpha = 0.25f) else PleyColors.Fg.copy(alpha = 0.2f)

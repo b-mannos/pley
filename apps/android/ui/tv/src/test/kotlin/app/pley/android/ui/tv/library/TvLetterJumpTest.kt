@@ -83,12 +83,12 @@ class TvLetterJumpTest {
                         requester = jump,
                         onJump = { position ->
                             scope.launch {
-                                state.scrollToItem(position - position % 6)
+                                state.scrollToItem(position - position % 7)
                                 withFrameNanos { }
                                 focus.focus(position)
                             }
                         },
-                        modifier = Modifier.offset(x = 864.dp, y = 0.dp),
+                        modifier = Modifier.offset(x = 872.dp, y = 0.dp),
                     )
                 }
             }
@@ -108,8 +108,8 @@ class TvLetterJumpTest {
     fun rightFromTheLastColumnReachesTheJumpControl() {
         grid()
         focusedTitle("Alien 1")
-        press(Key.DirectionRight, 5)
-        focusedTitle("Alien 6")
+        press(Key.DirectionRight, 6)
+        focusedTitle("Alien 7")
         press(Key.DirectionRight)
         compose.onNodeWithTag(JUMP_TAG).assertIsFocused()
     }
@@ -117,13 +117,13 @@ class TvLetterJumpTest {
     @Test
     fun aLetterLandsOnItsFirstTitle() {
         grid()
-        press(Key.DirectionRight, 6)
+        press(Key.DirectionRight, 7)
         press(Key.DirectionDown)
         press(Key.DirectionCenter)
         focusedTitle("Batman 1")
 
         // Back to the control: it starts from the focused title's letter.
-        press(Key.DirectionRight, 6)
+        press(Key.DirectionRight, 7)
         compose.onNodeWithTag(JUMP_TAG).assertIsFocused().assertContentDescriptionEquals("Jump to a letter: B")
         press(Key.DirectionDown, 24)
         press(Key.DirectionCenter)
@@ -133,7 +133,7 @@ class TvLetterJumpTest {
     @Test
     fun anEmptyLetterLandsOnTheNextThatHasTitles() {
         grid()
-        press(Key.DirectionRight, 6)
+        press(Key.DirectionRight, 7)
         // A to C: no title starts with C, so the jump goes on to Z.
         press(Key.DirectionDown, 2)
         compose.onNodeWithTag(JUMP_TAG).assertContentDescriptionEquals("Jump to a letter: C")

@@ -52,6 +52,7 @@ import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyFocus
 import app.pley.android.designsystem.PleyMotion
 import app.pley.android.designsystem.PleyShape
+import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.Icon
@@ -66,7 +67,7 @@ import app.pley.android.ui.tv.kit.TvTextButton
 import kotlinx.coroutines.delay
 
 /**
- * A row of a side panel or list (design spec §2.7): 48 tall, its [label]
+ * A row of a side panel or list (design spec §2.7): 44 tall, its [label]
  * in tvBody, a [checked] row with an [accent][PleyColors.Accent] check.
  * Focused, the row is an accent pill with [onAccent][PleyColors.OnAccent]
  * content; rows in panels never scale, which would clip them.
@@ -87,7 +88,7 @@ internal fun PanelRow(
     Row(
         modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp)
+            .heightIn(min = PleyTv.ListRowHeight)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .background(if (focused) PleyColors.Accent else androidx.compose.ui.graphics.Color.Transparent, PleyShape.Control)
             .semantics { selected = checked }
@@ -96,7 +97,7 @@ internal fun PanelRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
-            Icon(icon, contentDescription = null, size = 22.dp, tint = content)
+            Icon(icon, contentDescription = null, size = PleyTv.IconSize, tint = content)
             Spacer(Modifier.width(12.dp))
         }
         Column(Modifier.weight(1f)) {
@@ -112,7 +113,7 @@ internal fun PanelRow(
         }
         if (checked) {
             Spacer(Modifier.width(12.dp))
-            Icon(PleyIcons.Check, contentDescription = null, size = 22.dp, tint = if (focused) PleyColors.OnAccent else PleyColors.Accent)
+            Icon(PleyIcons.Check, contentDescription = null, size = PleyTv.IconSize, tint = if (focused) PleyColors.OnAccent else PleyColors.Accent)
         }
     }
 }

@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
+import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
@@ -102,7 +103,7 @@ internal fun TvSettingRow(
     Row(
         modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp)
+            .heightIn(min = PleyTv.ListRowHeight)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .background(if (focused) PleyColors.Accent else Color.Transparent, PleyShape.Pill)
             .semantics {
@@ -114,8 +115,8 @@ internal fun TvSettingRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
-            Icon(icon, contentDescription = null, size = 22.dp, tint = if (focused) PleyColors.OnAccent else if (danger) PleyColors.DangerText else PleyColors.Muted)
-            Spacer(Modifier.width(14.dp))
+            Icon(icon, contentDescription = null, size = PleyTv.IconSize, tint = if (focused) PleyColors.OnAccent else if (danger) PleyColors.DangerText else PleyColors.Muted)
+            Spacer(Modifier.width(12.dp))
         }
         Column(Modifier.weight(1f)) {
             BasicText(label, style = PleyType.Tv.Body.copy(color = fg), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -259,7 +260,7 @@ private fun ChoiceLine(label: String, hint: String?, checked: Boolean, focusRequ
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp)
+            .heightIn(min = PleyTv.ListRowHeight)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .background(if (focused) PleyColors.Accent else Color.Transparent, PleyShape.Pill)
             .semantics { selected = checked }
@@ -275,7 +276,7 @@ private fun ChoiceLine(label: String, hint: String?, checked: Boolean, focusRequ
         }
         if (checked) {
             Spacer(Modifier.width(12.dp))
-            Icon(PleyIcons.Check, contentDescription = null, size = 22.dp, tint = if (focused) PleyColors.OnAccent else PleyColors.Accent)
+            Icon(PleyIcons.Check, contentDescription = null, size = PleyTv.IconSize, tint = if (focused) PleyColors.OnAccent else PleyColors.Accent)
         }
     }
 }

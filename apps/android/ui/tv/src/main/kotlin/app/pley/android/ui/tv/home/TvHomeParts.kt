@@ -137,7 +137,7 @@ internal fun TvHomeHero(
             )
         }
         if (hero.context.isNotEmpty()) {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
             BasicText(hero.context, style = PleyType.Tv.Title.copy(color = PleyColors.Fg), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(TextColumn))
         }
         if (!hero.meta.isEmpty) {
@@ -145,7 +145,7 @@ internal fun TvHomeHero(
             TvMetaLine(hero.meta)
         }
         if (hero.inProgress) {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
             ProgressLine(hero.progress, hero.timeLeft)
         }
         if (hero.summary.isNotEmpty()) {
@@ -182,19 +182,19 @@ internal fun TvHomeHero(
 
 /**
  * The compact block about the focused tile over the rows (design spec
- * §4.1), from y = 30: the title in a 60 dp box, the metadata line 12
- * below (an episode's number first), two lines of summary 10 below.
+ * §4.1), from y = 28: the title in a 52 dp box, the metadata line 10
+ * below (an episode's number first), two lines of summary 8 below.
  */
 @Composable
 internal fun TvInfoBlock(info: HomeInfo, modifier: Modifier = Modifier) {
-    Column(modifier.padding(start = PleyTv.Gutter, top = 30.dp).width(TextColumn)) {
-        Box(Modifier.height(60.dp).wrapContentHeight(Alignment.Bottom, unbounded = true), contentAlignment = Alignment.BottomStart) {
+    Column(modifier.padding(start = PleyTv.Gutter, top = 28.dp).width(TextColumn)) {
+        Box(Modifier.height(52.dp).wrapContentHeight(Alignment.Bottom, unbounded = true), contentAlignment = Alignment.BottomStart) {
             BasicText(info.title, style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
         TvMetaLine(info.meta, lead = info.context)
         if (info.summary.isNotEmpty()) {
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
             BasicText(info.summary, style = PleyType.Tv.Body.copy(color = SummaryColor), maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
@@ -213,7 +213,7 @@ internal fun TvMetaLine(meta: HomeMeta, modifier: Modifier = Modifier, lead: Str
     val score = meta.rating
     val rating = score?.let { stringResource(R.string.tv_home_rating, it) }
     Row(
-        modifier.widthIn(max = TextColumn).height(20.dp),
+        modifier.widthIn(max = TextColumn).height(18.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -244,7 +244,7 @@ internal fun TvMetaLine(meta: HomeMeta, modifier: Modifier = Modifier, lead: Str
                 Modifier.semantics(mergeDescendants = true) { contentDescription = rating.orEmpty() },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(PleyIcons.Star, contentDescription = null, size = 16.dp, tint = PleyColors.Accent)
+                Icon(PleyIcons.Star, contentDescription = null, size = 14.dp, tint = PleyColors.Accent)
                 Spacer(Modifier.width(4.dp))
                 BasicText(score, style = label.copy(color = PleyColors.Fg), maxLines = 1)
             }
@@ -262,7 +262,7 @@ private val HomeMeta.isEmpty: Boolean
 /** A 160 by 4 bar (surface4 track, accent fill), then "26 min left" in tvCaption. */
 @Composable
 private fun ProgressLine(progress: Float, timeLeft: String) {
-    Row(Modifier.height(18.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.height(17.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(
             Modifier.size(160.dp, 4.dp).drawBehind {
                 val r = CornerRadius(size.height / 2f)
@@ -271,7 +271,7 @@ private fun ProgressLine(progress: Float, timeLeft: String) {
             },
         )
         if (timeLeft.isNotEmpty()) {
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(8.dp))
             BasicText(timeLeft, style = PleyType.Tv.Caption.copy(color = PleyColors.Fg))
         }
     }
@@ -297,16 +297,16 @@ internal fun TvHomeSkeleton() {
         @Composable
         fun block(x: Dp, y: Dp, w: Dp, h: Dp, shape: androidx.compose.ui.graphics.Shape = bar) =
             Box(Modifier.offset(x, y).size(w, h).skeleton(state, shape))
-        block(PleyTv.Gutter, 98.dp, 300.dp, 44.dp)
-        block(PleyTv.Gutter, 186.dp, 240.dp, 20.dp)
-        block(PleyTv.Gutter, 250.dp, 440.dp, 17.dp)
-        block(PleyTv.Gutter, 275.dp, 400.dp, 17.dp)
-        block(PleyTv.Gutter, 300.dp, 260.dp, 17.dp)
-        block(PleyTv.Gutter, 341.dp, 148.dp, 48.dp, PleyShape.Control)
-        block(PleyTv.Gutter, 435.dp, 200.dp, 20.dp)
+        block(PleyTv.Gutter, 84.dp, 260.dp, 38.dp)
+        block(PleyTv.Gutter, 132.dp, 210.dp, 18.dp)
+        block(PleyTv.Gutter, 168.dp, 440.dp, 15.dp)
+        block(PleyTv.Gutter, 190.dp, 400.dp, 15.dp)
+        block(PleyTv.Gutter, 212.dp, 260.dp, 15.dp)
+        block(PleyTv.Gutter, 250.dp, 128.dp, PleyTv.ButtonHeight, PleyShape.Control)
+        block(PleyTv.Gutter, 387.dp, 180.dp, 17.dp)
         val tile = TileKind.Landscape
         repeat(4) { i ->
-            block(PleyTv.Gutter + (tile.tvWidth + tile.tvGap) * i, 474.dp, tile.tvWidth, tile.tvHeight, TileStyle.Tv.shape(tile))
+            block(PleyTv.Gutter + (tile.tvWidth + tile.tvGap) * i, 422.dp, tile.tvWidth, tile.tvHeight, TileStyle.Tv.shape(tile))
         }
     }
 }
@@ -407,8 +407,8 @@ internal fun sentence(error: Throwable): String {
 /** The text column over backdrops (design spec §1.3): x 96 to 560. */
 internal val TextColumn = 464.dp
 
-private val HeroTop = 58.dp
-private val TitleBox = 84.dp
+private val HeroTop = 52.dp
+private val TitleBox = 72.dp
 private val SummaryColor = PleyColors.Fg.copy(alpha = 0.85f)
 
 private const val SKELETON_DELAY_MS = 300L

@@ -173,9 +173,9 @@ internal fun TvSettingsScreen(start: Category = Category.Profile) {
                 style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg),
                 modifier = Modifier.padding(start = PleyTv.Gutter),
             )
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(20.dp))
             Row(Modifier.fillMaxSize()) {
-                // Categories: x = 96, 280 wide.
+                // Categories: x = 96, 256 wide.
                 Column(
                     Modifier
                         .padding(start = PleyTv.Gutter)
@@ -215,7 +215,7 @@ internal fun TvSettingsScreen(start: Category = Category.Profile) {
                         )
                     }
                 }
-                // The category's rows: x = 400 to 912.
+                // The category's rows: x = 376 to 912.
                 LazyColumn(
                     Modifier
                         .padding(start = PANE_START - PleyTv.Gutter - CATEGORIES_WIDTH, end = TvSafeArea.Horizontal)
@@ -555,9 +555,9 @@ private fun LazyListScope.pane(
 /** Who is signed in: the avatar, the name, what kind of profile and the server. */
 @Composable
 private fun ProfileHeader(me: MeUiState) {
-    val profile = me.profile ?: return Spacer(Modifier.height(64.dp))
+    val profile = me.profile ?: return Spacer(Modifier.height(60.dp))
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        ProfileAvatar(ProfileTile(profile.id, profile.name, profile.avatarUrl, profile.avatarColor, Needs.NONE, current = true), 56.dp)
+        ProfileAvatar(ProfileTile(profile.id, profile.name, profile.avatarUrl, profile.avatarColor, Needs.NONE, current = true), 48.dp)
         Spacer(Modifier.width(16.dp))
         Column {
             BasicText(profile.name, style = PleyType.Tv.Title.copy(color = PleyColors.Fg), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -823,10 +823,10 @@ internal fun licences(): List<Pair<String, String>> = listOf(
     "QR Code generator (Nayuki)" to "MIT",
 )
 
-private val CATEGORIES_WIDTH = 280.dp
+private val CATEGORIES_WIDTH = 256.dp
 
-/** Where the rows start: x = 400. */
-private val PANE_START = 400.dp
+/** Where the rows start: x = 376. */
+private val PANE_START = 376.dp
 
 private const val MESSAGE_MS = 3_500L
 

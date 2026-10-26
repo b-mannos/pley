@@ -63,7 +63,7 @@ class ArtworkTileTest {
     /** A loader that has only [present] (as a solid [red] picture) and a 404 for anything else. */
     private fun loader(vararg present: String): ImageLoader {
         val engine = FakeImageLoaderEngine.Builder()
-            .intercept({ it in present }, FakeImage(width = 248, height = 372, color = red))
+            .intercept({ it in present }, FakeImage(width = 216, height = 324, color = red))
             .default { chain -> ErrorResult(null, chain.request, HttpException(NetworkResponse(code = 404))) }
             .build()
         return ImageLoader.Builder(context)
@@ -110,25 +110,25 @@ class ArtworkTileTest {
     @Test
     fun aFallbackAddressThatLoadsReplacesTheGradient() {
         compose.setContent {
-            CompositionLocalProvider(LocalArtworkImageLoader provides loader("$origin/api/items/9/images/poster?w=320")) {
+            CompositionLocalProvider(LocalArtworkImageLoader provides loader("$origin/api/items/9/images/poster?w=240")) {
                 ArtworkTile(model(), TileKind.Poster, TileStyle.Tv, Modifier.tvTileSize(TileKind.Poster).testTag("tile"))
             }
         }
         compose.waitForIdle()
-        assertNear(Color(red), pixel("tile", 124, 186))
+        assertNear(Color(red), pixel("tile", 108, 162))
     }
 
     @Test
     fun progressIsDrawnAlongTheBottom() {
         compose.setContent {
-            CompositionLocalProvider(LocalArtworkImageLoader provides loader("$origin/api/items/9/images/poster?w=320")) {
+            CompositionLocalProvider(LocalArtworkImageLoader provides loader("$origin/api/items/9/images/poster?w=240")) {
                 ArtworkTile(model(progress = 0.5f), TileKind.Poster, TileStyle.Tv, Modifier.tvTileSize(TileKind.Poster).testTag("tile"))
             }
         }
         compose.waitForIdle()
-        // 248 by 372 px at xhdpi; the bar is the bottom 8 px: accent to half, then the dark track.
-        assertNear(Color(0xFF38BDF8), pixel("tile", 60, 368))
-        val track = pixel("tile", 190, 368)
+        // 216 by 324 px at xhdpi; the bar is the bottom 8 px: accent to half, then the dark track.
+        assertNear(Color(0xFF38BDF8), pixel("tile", 52, 320))
+        val track = pixel("tile", 166, 320)
         assertTrue("track $track", track.red < 0.45f)
     }
 
