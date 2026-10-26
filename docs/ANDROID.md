@@ -58,19 +58,26 @@ doesn't play as it is, or every file when Settings → Downloads → Quality
 picks a smaller one, is made by the server first (`POST /api/conversions`
 with the player's capabilities, docs/API.md "Downloads"): the download
 shows "Preparing on the server" with the server's progress, looks again
-every 5 s, then downloads the made file. A server whose transcoder can't
-make files gives the original, unless a smaller quality was asked for. They come in a
-foreground service of type dataSync with a notification, one at a time;
-one cut short goes on from where it stopped (Range). They wait for Wi-Fi
-or Ethernet unless Settings → Downloads allows mobile data, and those
-waiting go on when the app opens. Download sits under Play on a movie's
-or an episode's page, beside each episode of a season (and for the whole
+every 5 s, then downloads the made file, which keeps the original's
+subtitle tracks (the player finds them in it as in the original). A
+server whose transcoder can't make files gives the original, unless a
+smaller quality was asked for. They come in a foreground service of type
+dataSync with a notification, one at a time; one cut short goes on from
+where it stopped (Range). They wait for Wi-Fi or Ethernet unless Settings
+→ Downloads allows mobile data ("Waiting for Wi-Fi"), and for the server
+when it doesn't answer or its transcoder isn't running ("Waiting for your
+server"); those waiting go on when the app opens. A failed one says why
+in its menu, with Try again and Delete download; deleting one the server
+is still making stops it there. Download sits under Play on a movie's or
+an episode's page, beside each episode of a season (and for the whole
 season), and they are listed under Me → Downloads, which the offline
 banner leads to as well.
 
 A downloaded file plays from the device whether the server answers or
 not ("Downloaded" in the player); a quality picked by hand streams from
-the server instead. A download waits 1.5 s at most for the server's
+the server instead, and so does a download whose file isn't the one the
+server now has under that number (by its name and size: a server whose
+database was made anew numbers its files again). A download waits 1.5 s at most for the server's
 details, then starts from the ones saved with it (away from home, the
 server's address can take long to fail). Progress is kept on the device
 while the server is out of reach, then sent when it answers again (the
