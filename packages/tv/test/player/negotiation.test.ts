@@ -4,7 +4,7 @@ import type { ClientCaps, ItemDetail, MediaFile, MediaStream, PlaybackInfo, Play
 import type { KeyValue } from "../../src/auth/tokens";
 import { PlaybackController, type PlayerEnv } from "../../src/player/controller";
 import type { EngineListener, EngineSource, EngineStatus, PlayerEngine } from "../../src/player/engine";
-import { dvContainerMode, dvRetryMode, playbackRequest, type Choices } from "../../src/player/plan";
+import { dvContainerMode, dvRetryMode, initialAudio, playbackRequest, type Choices } from "../../src/player/plan";
 import { ORIGINAL } from "../../src/player/quality";
 import { Reporter } from "../../src/player/reporter";
 import { NetworkError } from "../../src/net/transport";
@@ -114,6 +114,40 @@ function info(over: Partial<PlaybackInfo> = {}): PlaybackInfo {
 }
 
 // ---- the request
+
+describe("the audio to start with", () => {
+  /** A remux's tracks: TrueHD Atmos first and default, its E-AC-3, a commentary. */
+  function remux(): MediaFile {
+    const f = file();
+    f.streams = [
+      f.streams[0]!,
+      stream({ index: 1, kind: "audio", codec: "truehd", language: "eng", channels: 8, default: true }),
+      stream({ index: 2, kind: "audio", codec: "ac3", language: "eng", channels: 2, default: false, title: "Director's Commentary" }),
+      stream({ index: 3, kind: "audio", codec: "eac3", language: "eng", channels: 6, default: false }),
+      stream({ index: 4, kind: "audio", codec: "eac3", language: "fra", channels: 6, default: false }),
+    ];
+    return f;
+  }
+
+  it("is the E-AC-3 in the same language when the TrueHD first in the file doesn't play here, never the commentary", () => {
+    expect(initialAudio(remux(), null, LG)?.index).toBe(3);
+  });
+
+  it("stays the server's when it plays here, or when nothing better does", () => {
+    expect(initialAudio(remux(), null, { ...LG, audio_passthrough: ["ac3", "eac3", "truehd"] })?.index).toBe(1);
+    const lone = remux();
+    lone.streams = lone.streams.filter((s) => s.index !== 3);
+    expect(initialAudio(lone, null, LG)?.index).toBe(1);
+    expect(initialAudio(remux(), 2, LG)?.index).toBe(2);
+  });
+
+  it("is named in the request, since the server judges a file played as it is by its own pick", () => {
+    const f = remux();
+    const req = playbackRequest(70, choices({ file: f, audio: initialAudio(f, null, LG) }), "webos-abc", LG, true);
+    expect(req.audio_index).toBe(3);
+    expect(playbackRequest(70, choices(), "webos-abc", LG, true).audio_index).toBeUndefined();
+  });
+});
 
 describe("the play request", () => {
   it("asks for keyed addresses and sends the TV's capabilities, with no track indexes for a direct play", () => {

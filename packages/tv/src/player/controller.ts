@@ -370,7 +370,7 @@ export class PlaybackController {
     this.current = req;
     const chosen = chooseFile(detail, req.fileId, this.caps);
     this.file = chosen;
-    this.audio = initialAudio(chosen, req.audioIndex);
+    this.audio = initialAudio(chosen, req.audioIndex, this.caps);
     this.subtitle = initialSubtitle(chosen, req.subtitleIndex);
     this.quality = chooseQuality(this.env.quality.remembered(), qualitiesFor(chosen));
     this.offset = chosen ? this.env.offsets.get(this.env.api.server, chosen.id) : 0;
@@ -668,7 +668,7 @@ export class PlaybackController {
         this.update({ suggestLowerQuality: true, note: T.slowServer });
         break;
       case "fail":
-        this.fail(failureText(action.failure, action.detail), action.failure !== "unplayable");
+        this.fail(failureText(action.failure, action.detail), action.failure !== "unplayable", action.failure === "network" ? T.offlineTitle : undefined);
         break;
     }
   }

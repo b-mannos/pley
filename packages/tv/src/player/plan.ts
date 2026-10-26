@@ -47,16 +47,34 @@ export function startMs(item: ItemDetail, req: PlayRequest): number {
   return Math.max(0, item.user_state.position_ms);
 }
 
-/** The audio to start with: as asked, else the profile's choice, else the default, else the first. */
-export function initialAudio(file: MediaFile | null, requested: number | null | undefined): MediaStream | null {
+/** The audio the server plays when a request names none: the profile's choice (`selected_audio`), else the file's default, else the first. */
+export function serverAudio(file: MediaFile | null): MediaStream | null {
   const audio = audioStreams(file);
-  return (
-    (requested != null ? audio.filter((s) => s.index === requested)[0] : undefined) ??
-    audio.filter((s) => s.index === file?.selected_audio)[0] ??
-    audio.filter((s) => s.default)[0] ??
-    audio[0] ??
-    null
-  );
+  return audio.filter((s) => s.index === file?.selected_audio)[0] ?? audio.filter((s) => s.default)[0] ?? audio[0] ?? null;
+}
+
+/**
+ * The audio to start with: as asked, else the server's. When that one
+ * doesn't play here (TrueHD or DTS on a TV whose output takes neither) and
+ * another track in its language does, that one, with the most channels:
+ * the file then plays as it is (a remux's E-AC-3 keeps its Atmos) instead
+ * of the server converting the first. Never a commentary (the Android
+ * app's PlaybackPlan.initialAudio).
+ */
+export function initialAudio(file: MediaFile | null, requested: number | null | undefined, caps: ClientCaps | null = null): MediaStream | null {
+  const audio = audioStreams(file);
+  const asked = requested != null ? audio.filter((s) => s.index === requested)[0] : undefined;
+  if (asked) return asked;
+  const chosen = serverAudio(file);
+  if (!chosen || !caps || audioPlaysHere(chosen, caps)) return chosen;
+  const better = audio
+    .filter((s) => s !== chosen && s.language === chosen.language && !isCommentary(s) && audioPlaysHere(s, caps))
+    .sort((a, b) => (b.channels ?? 0) - (a.channels ?? 0) || Number(!!b.default) - Number(!!a.default) || a.index - b.index);
+  return better[0] ?? chosen;
+}
+
+function isCommentary(s: MediaStream): boolean {
+  return /commentary/i.test(s.title ?? "");
 }
 
 /** The subtitles to start with: as asked, else the profile's choice; `null` is off, whatever the file flags. */
@@ -120,7 +138,9 @@ export function playbackRequest(itemId: number, c: Choices, clientId: string, ca
     client_id: clientId,
     caps: caps ?? emptyCaps(),
   };
-  if (c.audio && (c.streaming || !audioHere)) req.audio_index = c.audio.index;
+  // Named when the server must convert it, or when it isn't the one the server would play (it judges a file played as it is by that one).
+  const notTheServers = !!c.audio && c.audio.index !== serverAudio(c.file)?.index;
+  if (c.audio && (c.streaming || !audioHere || notTheServers)) req.audio_index = c.audio.index;
   if (c.subtitle && c.streaming && isPicture(c.subtitle) && !c.sideload) req.subtitle_index = c.subtitle.index;
   if (c.quality.maxBitrateKbps != null) req.max_bitrate = c.quality.maxBitrateKbps;
   if (c.quality.maxHeight != null) req.max_height = c.quality.maxHeight;

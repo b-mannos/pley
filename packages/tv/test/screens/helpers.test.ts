@@ -106,6 +106,14 @@ describe("signing in", () => {
     expect(refusal("browser").approve).toBe(true);
     expect(refusal(null, "invalid_request").letThrough).toBe(true);
     expect(refusal("throttled", "invalid_grant", "too many tries: try again in 5 minutes").message).toBe("Too many tries: try again in 5 minutes.");
+    // A code without a description reads as words, not "Invalid_client."
+    expect(refusal(null, "invalid_client").message).toBe("The server doesn't know this app.");
+  });
+
+  it("doesn't call a PIN wrong when the server answered nothing", () => {
+    const r = switchRefusal(new NetworkError("Can't reach the server"));
+    expect(r).toMatchObject({ offline: true, message: "Can't reach your server: nothing answers there." });
+    expect(switchRefusal(new NetworkError("The server took too long to answer")).message).toBe("Can't reach your server: no answer in time.");
   });
 });
 

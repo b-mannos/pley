@@ -66,6 +66,11 @@ export function App(p: ShellProps) {
   });
 
   const toRail = () => !railless(nav.root?.key) && nav.top?.key.name !== "player" && !!rail.current?.focusCurrent();
+  // What plays (the music) ends on the server first, a second at most: its session would otherwise be kept 90 s.
+  const leaveApp = () => {
+    state.endPlayback();
+    void state.reporter.flush(1_000).then(() => state.platform.exit());
+  };
   const showToast = (text: string, error = false) => (toast.value = { text, error, id: Date.now() });
   const claim = (el: HTMLElement, fid: string | null, initial: boolean) => {
     const entry = nav.top;
@@ -115,7 +120,7 @@ export function App(p: ShellProps) {
     };
     const exit = () => {
       if (state.platform.asksBeforeExit) exiting.value = true;
-      else state.platform.exit();
+      else leaveApp();
     };
     const off = input.push((key, e) => {
       if (key !== "back") return false;
@@ -236,7 +241,7 @@ export function App(p: ShellProps) {
             onDismiss={() => (exiting.value = false)}
             buttons={[
               { label: "Cancel", onSelect: () => (exiting.value = false) },
-              { label: "Exit", initial: true, onSelect: () => state.platform.exit() },
+              { label: "Exit", initial: true, onSelect: leaveApp },
             ]}
           />
         )}

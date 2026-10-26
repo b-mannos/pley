@@ -1,5 +1,5 @@
 import { signal } from "@preact/signals";
-import { isApiError, SessionStoppedError } from "../api/client";
+import { isApiError, SessionStoppedError, unreachable } from "../api/client";
 import type { ItemSummary, PlaybackInfo, PlaybackMode } from "../api/types";
 import { SignedOutError } from "../auth/tokens";
 import { NetworkError } from "../net/transport";
@@ -22,6 +22,8 @@ export interface NowPlaying {
 
 /** Progress reports while music plays. */
 const REPORT_MS = 10_000;
+/** While paused: the server forgets players it hasn't heard from for 90 s, and their addresses with them. */
+const PAUSED_REPORT_MS = 30_000;
 /** "Previous" past this restarts the track. */
 const RESTART_MS = 3_000;
 /** New sessions for a track that keeps failing. */
@@ -59,6 +61,7 @@ export class MusicPlayer {
   private generation = 0;
   private retries = 0;
   private reportTimer: ReturnType<typeof setInterval> | null = null;
+  private lastReportAt = 0;
   private readonly timer: SleepTimer;
 
   constructor(app: AppState) {
@@ -82,6 +85,8 @@ export class MusicPlayer {
       onFire: () => this.audio.pause(),
       onChange: (s) => (this.sleep.value = s),
     });
+    // A profile switch, signing out, another server or the app closing: the music's session ends with them.
+    app.onLeave(() => this.stop());
   }
 
   /** Plays `tracks` from `at`; shuffled, `at` first and the rest in a random order. */
@@ -101,12 +106,27 @@ export class MusicPlayer {
       void this.start(0, null);
       return;
     }
-    if (now.error) {
+    // An error, or a video took over and its session ended: a new one, where it was.
+    if (now.error || !this.session) {
       void this.start(this.audio.currentTime * 1000, null);
       return;
     }
     if (this.audio.paused) void this.audio.play().catch(() => undefined);
     else this.audio.pause();
+  }
+
+  /** Nothing plays any more: the session ends and the queue goes (Now Playing leaves the rail). */
+  stop(): void {
+    this.generation++;
+    this.audio.pause();
+    this.endSession();
+    this.timer.cancel();
+    this.queue = [];
+    this.order = [];
+    this.index = 0;
+    this.retries = 0;
+    this.audio.removeAttribute("src");
+    this.now.value = null;
   }
 
   pause(): void {
@@ -168,10 +188,16 @@ export class MusicPlayer {
     this.timer.set(next);
   }
 
-  /** A video takes the screen and the TV's one media pipeline: the music pauses and lets go. */
+  /**
+   * A video takes the screen and the TV's one media pipeline: the music
+   * pauses and lets go of its session, which would otherwise be kept
+   * through a whole film; the queue and the place stay, and Play starts a
+   * new session there.
+   */
   yieldToVideo(): void {
     if (!this.now.value) return;
     this.audio.pause();
+    this.endSession();
   }
 
   positionMs(): number {
@@ -245,11 +271,34 @@ export class MusicPlayer {
     }
   }
 
+  /**
+   * The <audio> element gave up, which it says no more about. The session
+   * tells: gone (its address with it, after a long pause) means a new one
+   * where it was; stopped means the server stopped it; no answer, the
+   * server is out of reach; alive, the track is at fault.
+   */
   private failed(): void {
-    const mine = this.generation;
     const session = this.session;
-    if (!session || !this.now.value) return;
-    // A file the TV can't decode: once more as a conversion; network trouble: a few new sessions.
+    const api = this.app.api.value;
+    if (!session || !this.now.value || !api) return;
+    const mine = this.generation;
+    api.sessionStatus(session.session_id).then(
+      () => mine === this.generation && this.trackFailed(session),
+      (e: unknown) => {
+        if (mine !== this.generation) return;
+        if (e instanceof SessionStoppedError) this.stoppedByServer(session.session_id);
+        else if (isApiError(e, 404)) {
+          this.session = null;
+          void this.start(this.audio.currentTime * 1000, session.method === "direct" ? null : "transcode");
+        } else if (unreachable(e)) this.update({ playing: false, loading: false, error: "offline" });
+        else this.trackFailed(session);
+      },
+    );
+  }
+
+  private trackFailed(session: PlaybackInfo): void {
+    const mine = this.generation;
+    // A file the TV can't decode: once more as a conversion; other trouble: a few new sessions.
     if (session.method === "direct" && this.retries === 0) {
       this.retries++;
       this.endSession();
@@ -287,10 +336,12 @@ export class MusicPlayer {
     }
   }
 
+  /** Every 10 s while it plays, every 30 s paused: the server keeps the session, and its address, as long as it hears from it. */
   private startReports(): void {
     if (this.reportTimer !== null) clearInterval(this.reportTimer);
     this.reportTimer = setInterval(() => {
       if (!this.audio.paused) this.report("playing");
+      else if (Date.now() - this.lastReportAt >= PAUSED_REPORT_MS) this.report("paused");
     }, REPORT_MS);
   }
 
@@ -301,6 +352,7 @@ export class MusicPlayer {
     if (!api || !s || !track) return;
     const pos = this.audio.currentTime * 1000;
     const dur = this.durationMs();
+    this.lastReportAt = Date.now();
     this.app.reporter.send(() => api.progress(track.id, pos, dur || null, state, s.session_id));
   }
 

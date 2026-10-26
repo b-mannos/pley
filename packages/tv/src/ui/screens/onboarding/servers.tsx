@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { errorMessage } from "../../../api/client";
 import { candidates, origin, unencrypted } from "../../../auth/addresses";
 import { check, connect, ConnectError, hostPort, problemText, subnetOf, sweep, type ConnectProblem, type ServerInfo } from "../../../auth/servers";
 import { useUi } from "../../context";
@@ -6,7 +7,7 @@ import { Pill, TextButton } from "../../kit/buttons";
 import { F, G } from "../../kit/focusable";
 import { TextField } from "../../kit/field";
 import { Icon } from "../../kit/icons";
-import { Dialog, useApp } from "../common";
+import { Dialog, sentence, useApp } from "../common";
 import { ADDRESS_KEYS, BrandGlow, keyId, NumberPad, PadGlyph, PleyLogo, StatusLine, type PadKey } from "./kit";
 
 /** A row of the server list. */
@@ -144,7 +145,7 @@ export function ServersScreen() {
         if (e instanceof ConnectError) {
           if (e.problem.kind === "unreachable") setRows((list) => list.map((r) => (r.url === url ? { ...r, unreachable: true } : r)));
           setProblem(e.problem);
-        } else setProblem({ kind: "failed", message: String((e as Error)?.message ?? e) });
+        } else setProblem({ kind: "failed", message: sentence(errorMessage(e)) });
       },
     );
   };
@@ -219,7 +220,7 @@ export function ServersScreen() {
             (e) => {
               if (!alive.current) return;
               setChecking(false);
-              setProblem(e instanceof ConnectError ? e.problem : { kind: "failed", message: String((e as Error)?.message ?? e) });
+              setProblem(e instanceof ConnectError ? e.problem : { kind: "failed", message: sentence(errorMessage(e)) });
             },
           );
         }}

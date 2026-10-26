@@ -223,10 +223,11 @@ export function failureText(failure: Failure, detail: string | null): string {
     case "stopped":
       return "Playback stopped and couldn't get going again.";
     case "network":
-      return "The server can't be reached.";
+      return "Check that the server is on and that this device is on its network.";
     case "engine": {
+      // The TV's own words when it gives any ("PIPELINE_ERROR_DECODE"), not its generic ones.
       const short = (detail ?? "").split(":")[0]!.trim();
-      return `Playback failed (${short || "?"}).`;
+      return short && !/^playback failed$/i.test(short) ? `The TV's player gave up (${short}).` : "The TV's player gave up.";
     }
   }
 }

@@ -370,7 +370,7 @@ function invalidToken(res: HttpResponse): boolean {
 
 function toError(res: HttpResponse): ApiError {
   let code = statusCode(res.status);
-  let message = `Request failed (${res.status})`;
+  let message = `the server refused (HTTP ${res.status})`;
   const body = res.body;
   if (body && typeof body === "object" && !(body instanceof Blob)) {
     const o = body as { code?: unknown; message?: unknown };

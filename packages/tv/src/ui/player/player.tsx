@@ -12,7 +12,7 @@ import { useUi } from "../context";
 import { Pill, TextButton } from "../kit/buttons";
 import { F, G } from "../kit/focusable";
 import { Icon, type IconName } from "../kit/icons";
-import { useApp } from "../screens/common";
+import { sentence, useApp } from "../screens/common";
 import { chapterName, CompactReadout, PlayerPanels, type PlayerPanel } from "./panels";
 import { PictureSubtitles, TextSubtitles } from "./subtitles";
 
@@ -520,7 +520,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
             {s.stoppedByServer ? "Playback stopped" : error.title ?? "Can't play this item"}
           </div>
           <div class="t-body c-muted lines-4" style="margin-top:12px;text-align:center;white-space:pre-line">
-            {error.message}
+            {sentence(error.message)}
           </div>
           <G kind="row" class="buttons" style="margin-top:32px;justify-content:center">
             {error.canRetry ? (

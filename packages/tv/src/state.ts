@@ -127,6 +127,7 @@ export class AppState {
   private holds = 0;
   private noticeTimer: ReturnType<typeof setTimeout> | null = null;
   private awayTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly leavers: (() => void)[] = [];
 
   constructor(platform: Platform, http: Transport = xhrTransport) {
     this.platform = platform;
@@ -242,8 +243,19 @@ export class AppState {
     this.store.set(PROFILES_KEY, JSON.stringify(profiles));
   }
 
+  /** `fn` runs when what plays must end: a profile switch, signing out, another server, the app closing. */
+  onLeave(fn: () => void): void {
+    this.leavers.push(fn);
+  }
+
+  /** Ends what plays in the background (the music's session) before the profile, the sign-in, the server or the app goes. */
+  endPlayback(): void {
+    for (const fn of this.leavers.slice()) fn();
+  }
+
   /** The app acts as another profile now: what was shown for the one before goes. */
   async switched(): Promise<void> {
+    this.endPlayback();
     this.store.remove(HOME_KEY);
     this.home.value = null;
     this.homeError.value = null;
@@ -265,6 +277,7 @@ export class AppState {
 
   /** Forgets the server in use (Change server). */
   forgetServer(): void {
+    this.endPlayback();
     this.events?.stop();
     this.events = null;
     this.store.remove(SERVER_KEY);
@@ -281,6 +294,9 @@ export class AppState {
 
   async signOut(): Promise<void> {
     this.events?.stop();
+    // The music's session ends while the sign-in that made it still works.
+    this.endPlayback();
+    await this.reporter.flush(2_000);
     await this.tokens?.signOut();
     this.store.remove(HOME_KEY);
     this.home.value = null;

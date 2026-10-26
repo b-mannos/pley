@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { errorMessage, isApiError } from "../../../api/client";
+import { errorMessage, isApiError, unreachable, unreachableReason } from "../../../api/client";
 import type { HouseholdProfile } from "../../../api/types";
 import { SignedOutError, TokenError } from "../../../auth/tokens";
-import { NetworkError } from "../../../net/transport";
 import { useUi } from "../../context";
 import { Pill, TextButton } from "../../kit/buttons";
 import { F, G } from "../../kit/focusable";
@@ -24,8 +23,16 @@ const ITEM_GAP = 40;
 /** More than this many profiles scroll, the focused one's left edge at x 288. */
 const FIT = 6;
 
-/** Why a switch was refused, in a sentence, and what it leads to. */
-export function switchRefusal(e: unknown): { message: string; locked?: boolean; approve?: boolean; letThrough?: boolean } {
+/**
+ * Why a switch was refused, in a sentence, and what it leads to. `offline`:
+ * the server answered nothing, so the PIN wasn't checked and isn't wrong
+ * (the pad doesn't shake).
+ */
+export function switchRefusal(e: unknown): { message: string; locked?: boolean; approve?: boolean; letThrough?: boolean; offline?: boolean } {
+  if (unreachable(e)) {
+    const reason = unreachableReason(e);
+    return { message: `Can't reach your server: ${reason.charAt(0).toLowerCase()}${reason.slice(1)}`, offline: true };
+  }
   if (e instanceof TokenError) {
     const reason = e.oauth?.reason;
     if (e.oauth?.error === "invalid_request" && !reason) return { message: "", letThrough: true };
@@ -47,7 +54,6 @@ export function switchRefusal(e: unknown): { message: string; locked?: boolean; 
         return { message: e.status >= 500 ? "The server refused: try again." : sentence(e.message) };
     }
   }
-  if (e instanceof NetworkError) return { message: sentence(e.message) };
   return { message: sentence(errorMessage(e)) };
 }
 
@@ -176,7 +182,7 @@ export function ProfilesScreen() {
                 setStep({ kind: "approve", profile: step.profile });
                 return null;
               }
-              return { message: r.message, locked: !!r.locked };
+              return { message: r.message, locked: !!r.locked, offline: !!r.offline };
             }
           }}
         />
@@ -274,7 +280,7 @@ function PinPad(p: {
   locked: boolean;
   initialError: string | null;
   onBack: () => void;
-  onSubmit: (pin: string) => Promise<{ message: string; locked: boolean } | null>;
+  onSubmit: (pin: string) => Promise<{ message: string; locked: boolean; offline?: boolean } | null>;
 }) {
   const ui = useUi();
   const [digits, setDigits] = useState("");
@@ -299,7 +305,8 @@ function PinPad(p: {
       busy.current = false;
       if (!refused) return;
       setError(refused.message);
-      setShakes((n) => n + 1);
+      // A PIN the server couldn't check isn't wrong: the dots clear without shaking.
+      if (!refused.offline) setShakes((n) => n + 1);
       if (refused.locked) setLocked(true);
     });
   };

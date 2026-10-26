@@ -51,11 +51,24 @@ export interface OAuthError {
   reason: string | null;
 }
 
+/** RFC 6749's error codes in words, for a refusal that came without a description (rather than "Invalid_client."). */
+const OAUTH_WORDS: Record<string, string> = {
+  invalid_client: "the server doesn't know this app",
+  unauthorized_client: "the server doesn't let this app sign in this way",
+  invalid_grant: "the server refused this sign-in",
+  access_denied: "the sign-in was refused",
+  expired_token: "the code expired",
+  invalid_scope: "the server refused what this app asked for",
+  invalid_request: "the server didn't understand the request",
+  unsupported_grant_type: "the server doesn't take this kind of sign-in",
+};
+
 export class TokenError extends AuthError {
   readonly status: number;
   readonly oauth: OAuthError | null;
   constructor(status: number, oauth: OAuthError | null) {
-    super(oauth?.description || oauth?.error || `the server refused (HTTP ${status})`);
+    const code = oauth?.error ?? "";
+    super(oauth?.description || OAUTH_WORDS[code] || (code ? `the server refused (${code.replace(/_/g, " ")})` : `the server refused (HTTP ${status})`));
     this.name = "TokenError";
     this.status = status;
     this.oauth = oauth;
