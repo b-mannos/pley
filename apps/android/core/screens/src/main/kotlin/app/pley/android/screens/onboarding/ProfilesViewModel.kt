@@ -284,7 +284,7 @@ class ProfilesViewModel(
             } catch (e: AuthException) {
                 failed(tile, e.message.orEmpty())
             } catch (e: IOException) {
-                failed(tile, describe(e))
+                unreachable(tile, e)
             } finally {
                 _state.update { it.copy(busy = null) }
             }
@@ -305,7 +305,7 @@ class ProfilesViewModel(
             } catch (_: SignedOutException) {
                 signedOut()
             } catch (e: IOException) {
-                wrong(tile, describe(e), lockedOut = false)
+                unreachable(tile, e)
             }
         }
     }
@@ -333,6 +333,21 @@ class ProfilesViewModel(
         _state.update { s ->
             val step = s.step as? ProfilesStep.Pin ?: ProfilesStep.Pin(tile)
             s.copy(step = step.copy(digits = 0, busy = false, error = sentence(message), shakes = step.shakes + 1, lockedOut = lockedOut))
+        }
+    }
+
+    /**
+     * The server couldn't be asked: not a wrong PIN, so the pad doesn't
+     * shake; it says so, and the PIN can be typed again once it answers.
+     */
+    private fun unreachable(tile: ProfileTile, e: IOException) {
+        val message = sentence("can't reach your server: ${describe(e)}")
+        pin.clear()
+        _state.update { s ->
+            when (val step = s.step) {
+                is ProfilesStep.Pin -> s.copy(step = step.copy(digits = 0, busy = false, error = message))
+                else -> s.copy(error = message)
+            }
         }
     }
 

@@ -219,6 +219,23 @@ class ProfilesViewModelTest {
     }
 
     @Test
+    fun aServerOutOfReachIsNoWrongPin() = runTest {
+        source.signIn(server, Me(1, "anna", "Anna", hasPin = true))
+        val vm = profiles(tv = true, gate = true)
+        advanceUntilIdle()
+        vm.pick(1)
+        source.pinCheck = { _, _ -> throw java.net.SocketTimeoutException("timeout") }
+        vm.type("1234")
+        vm.submit()
+        advanceUntilIdle()
+
+        val pad = vm.state.value.step as ProfilesStep.Pin
+        assertEquals("Can't reach your server: no answer in time.", pad.error)
+        assertEquals("the pad doesn't shake", 0, pad.shakes)
+        assertEquals(false, pad.lockedOut)
+    }
+
+    @Test
     fun serversThatCantCheckThePinLetItThrough() = runTest {
         source.signIn(server, Me(1, "anna", "Anna", hasPin = true))
         source.pinCheck = { _, _ -> PinCheck.Unsupported }
