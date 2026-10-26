@@ -21,6 +21,8 @@ export type PageKey =
   | { name: "playlist"; id: number }
   | { name: "addToPlaylist"; itemIds: number[]; title: string }
   | { name: "settings" }
+  | { name: "history" }
+  | { name: "nowPlaying" }
   | { name: "player"; request: PlayRequest; pressedAt: number };
 
 export type LibraryTab = "recommended" | "library" | "collections";

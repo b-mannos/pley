@@ -175,3 +175,48 @@ export function SkeletonTile(p: { kind: TileKind; fid?: string; style?: string; 
     </div>
   );
 }
+
+/**
+ * A tile for what isn't an item (a collection, a playlist, a person): its
+ * pictures, its two caption lines, and a count badge at the top right.
+ */
+export function ArtTile(p: {
+  kind: TileKind;
+  title: string;
+  subtitle?: string;
+  candidates: string[];
+  /** A count on the art's corner ("12"). */
+  badge?: string | null;
+  fid?: string;
+  initial?: boolean;
+  onSelect?: () => void;
+  onActions?: () => void;
+  onFocus?: (el: HTMLElement) => void;
+  priority?: number;
+  style?: string;
+}) {
+  const spec = TILES[p.kind];
+  return (
+    <F
+      class="tile"
+      style={`width:${spec.w}px;${p.style ?? ""}`}
+      fid={p.fid}
+      initial={p.initial}
+      label={[p.title, p.subtitle].filter(Boolean).join(", ")}
+      onSelect={p.onSelect}
+      onLongSelect={p.onActions}
+      onMenu={p.onActions}
+      onFocus={p.onFocus}
+    >
+      <div class={`tile-well${spec.round ? " round" : ""}`} style={`width:${spec.w}px;height:${spec.h}px`}>
+        <div class="tile-clip">
+          <Art candidates={p.candidates} width={spec.w} title={p.title} showTitle={!spec.round} class="tile-clip" priority={p.priority} />
+          {!spec.round && <div class="tile-hairline" />}
+          {p.badge && <div class="tile-corner-badge t-badge">{p.badge}</div>}
+        </div>
+        <div class="tile-ring" />
+      </div>
+      <TileCaption title={p.title} subtitle={p.subtitle ?? ""} />
+    </F>
+  );
+}

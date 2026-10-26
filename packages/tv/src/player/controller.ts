@@ -27,6 +27,7 @@ import {
   audioPlaysHere,
   audioStreams,
   chooseFile,
+  dvContainerMode,
   dvRetryMode,
   initialAudio,
   initialSubtitle,
@@ -161,6 +162,8 @@ export interface PlayerEnv {
   caps: () => Promise<ClientCaps | null>;
   /** The TV's player can't send headers: its URLs carry a key (docs/API.md, "Keyed URLs"). */
   keyedUrls: boolean;
+  /** Containers the TV shows Dolby Vision from, when it says; others are asked for as a remux. */
+  dvContainers?: () => string[] | null;
   clientId: string;
   offsets: OffsetStore;
   quality: { remembered(): string | null; remember(id: string): void };
@@ -403,6 +406,7 @@ export class PlaybackController {
     this.update({ phase: { kind: "preparing" }, skipLabel: null, firstFrameMs: null });
     this.setClock({ positionMs: atMs });
 
+    if (this.quality.id === ORIGINAL.id && !this.guardMode) this.guardMode = dvContainerMode(chosen, this.caps, this.env.dvContainers?.());
     const mode = this.recovery.fallbackMode ?? (this.quality.id === ORIGINAL.id ? this.guardMode : null) ?? modeOf(this.quality);
     const decision = this.caps ? decide(chosen, this.caps) : null;
     let choices: Choices = {

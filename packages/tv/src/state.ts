@@ -119,7 +119,7 @@ export class AppState {
     const server = this.server.value;
     if (!server) return { page: "servers" };
     if (!this.tokens?.signedIn) return { page: "link", server };
-    return this.householdSize() > 1 ? { page: "profiles" } : { page: "home" };
+    return this.householdSize() > 1 && this.alwaysStartAs() === null ? { page: "profiles" } : { page: "home" };
   }
 
   /** Signs in to `server` from now on (its tokens, if the TV has them). */
@@ -166,6 +166,38 @@ export class AppState {
   hasTokens(url: string): boolean {
     const home = origin(url);
     return !!home && new Tokens(home, this.platform.clientId, this.store, this.http).signedIn;
+  }
+
+  /**
+   * This TV's own id for its playbacks ("webos-1f3a…"), kept for good: the
+   * server ends a client's earlier sessions when it starts another, so two
+   * TVs of a household must never share one.
+   */
+  installId(): string {
+    let id = this.store.get("pley.installId");
+    if (!id) {
+      const bytes = new Uint8Array(16);
+      try {
+        crypto.getRandomValues(bytes);
+      } catch {
+        for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+      }
+      id = `${this.platform.name}-${Array.prototype.map.call(bytes, (b: number) => (b < 16 ? "0" : "") + b.toString(16)).join("")}`;
+      this.store.set("pley.installId", id);
+    }
+    return id;
+  }
+
+  /** The profile "Always start as" names for this server; `null` asks who's watching. */
+  alwaysStartAs(): number | null {
+    const v = this.store.get(`pley.alwaysStartAs.${this.server.value ?? ""}`);
+    return v ? Number(v) : null;
+  }
+
+  setAlwaysStartAs(id: number | null): void {
+    const key = `pley.alwaysStartAs.${this.server.value ?? ""}`;
+    if (id === null) this.store.remove(key);
+    else this.store.set(key, String(id));
   }
 
   /** How many profiles the household had when last asked (1 while unknown). */

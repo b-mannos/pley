@@ -23,7 +23,8 @@ export function pageOf(item: ItemSummary): PageKey {
 
 /** Opens the player for `request`, timed from now (time to first frame is measured from the press). */
 export function openPlayer(ui: Ui, request: PlayRequest): void {
-  ui.nav.open({ name: "player", request, pressedAt: Date.now() });
+  // The same clock as the player's, which measures the time to the first frame from here.
+  ui.nav.open({ name: "player", request, pressedAt: typeof performance !== "undefined" ? performance.now() : Date.now() });
 }
 
 /**

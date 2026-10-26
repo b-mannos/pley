@@ -204,6 +204,15 @@ export class FocusManager {
     return true;
   }
 
+  /** Nothing focused (the page it was on went away). */
+  blur(): void {
+    const was = this.current;
+    if (!was) return;
+    this.current = null;
+    was.removeAttribute("data-focused");
+    handlers.get(was)?.onBlur?.();
+  }
+
   /** The element last focused inside `group`, if it is still there. */
   rememberedIn(group: Element): HTMLElement | null {
     const el = remembered.get(group);

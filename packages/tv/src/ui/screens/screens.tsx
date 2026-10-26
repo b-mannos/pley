@@ -11,9 +11,9 @@ import { ItemActionsScreen } from "./actions";
 import { SearchScreen } from "./search";
 import { PersonScreen } from "./person";
 import { CollectionScreen, CollectionsScreen } from "./collections";
-import { AlbumScreen, ArtistScreen } from "./music";
+import { AlbumScreen, ArtistScreen, NowPlayingScreen } from "./music";
 import { AddToPlaylistScreen, PlaylistScreen, PlaylistsScreen } from "./playlists";
-import { SettingsScreen } from "./settings";
+import { HistoryScreen, SettingsScreen } from "./settings";
 import { PlayerScreen } from "../player/player";
 
 /** One page of the back stack, by its key (the Android app's TvEntries). */
@@ -74,6 +74,12 @@ export function Screen(p: { entry: Entry; state: AppState }) {
       break;
     case "settings":
       page = <SettingsScreen entry={p.entry} />;
+      break;
+    case "history":
+      page = <HistoryScreen entry={p.entry} />;
+      break;
+    case "nowPlaying":
+      page = <NowPlayingScreen />;
       break;
     case "player":
       page = <PlayerScreen request={key.request} pressedAt={key.pressedAt} />;

@@ -1,5 +1,5 @@
 import { createContext, type ComponentChildren } from "preact";
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useContext, useEffect, useLayoutEffect, useState } from "preact/hooks";
 import { errorMessage } from "../../api/client";
 import type { ItemDetail, ItemSummary } from "../../api/types";
 import { SignedOutError } from "../../auth/tokens";
@@ -9,6 +9,7 @@ import type { AppState } from "../../state";
 import { useUi } from "../context";
 import { Pill, TextButton } from "../kit/buttons";
 import { G } from "../kit/focusable";
+import { useTrap } from "../kit/panel";
 import { Icon, type IconName } from "../kit/icons";
 
 /** The app's state, for screens (the shell provides it with each page). */
@@ -215,22 +216,18 @@ export function Dialog(p: {
   onDismiss: () => void;
 }) {
   const ui = useUi();
-  const root = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const el = root.current!;
-    ui.focus.trap(el);
-    const off = ui.input.push((key, e) => {
-      if (key !== "back") return false;
-      if (e.type === "down" && !e.repeat) p.onDismiss();
-      return true;
-    });
-    return () => {
-      off();
-      ui.focus.release(el);
-    };
-  }, []);
+  const trap = useTrap();
+  useLayoutEffect(
+    () =>
+      ui.input.push((key, e) => {
+        if (key !== "back") return false;
+        if (e.type === "down" && !e.repeat) p.onDismiss();
+        return true;
+      }),
+    [],
+  );
   return (
-    <div ref={root} class="dialog-root" role="dialog" aria-label={p.title}>
+    <div ref={trap} class="dialog-root" role="dialog" aria-label={p.title}>
       <div class="scrim in" />
       <div class="dialog small">
         <div class="t-title c-fg">{p.title}</div>

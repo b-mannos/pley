@@ -58,6 +58,14 @@ export class WebosEngine extends VideoEngine {
     this.video.appendChild(el);
   }
 
+  /**
+   * LG's pipeline counts frames its own way: until a real TV shows the
+   * counts mean what they say, they don't move a playback to a conversion.
+   */
+  override frameCounts(): { dropped: number; total: number } | null {
+    return null;
+  }
+
   override release(): void {
     this.video.removeEventListener("umsmediainfo", this.onUms);
     super.release();

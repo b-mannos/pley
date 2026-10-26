@@ -2,8 +2,9 @@ import type { DeviceFacts, Platform, Probe } from "pley-tv/platform";
 import { localStore } from "pley-tv/auth/tokens";
 import { standardKey, type Key } from "pley-tv/ui/keys";
 import { browserFacts, readFacts, type WebosFacts } from "./facts";
-import { tierOf, webosCaps } from "./caps";
+import { browserCaps, tierOf, webosCaps } from "./caps";
 import { WebosEngine } from "./engine";
+import { VideoEngine } from "pley-tv/player/video-engine";
 import { hasLuna, luna } from "./luna";
 
 /** pley for LG TV's built-in OAuth client (apps/server/src/oauth/builtin/webos.json). */
@@ -39,10 +40,11 @@ export function webosPlatform(): Platform {
     appName: "pley for LG TV",
     storage: localStore,
     mapKey: webosKey,
-    createEngine: (host) => new WebosEngine(host),
+    // A desktop browser (development) plays what it plays through a plain <video>.
+    createEngine: (host) => (onTv ? new WebosEngine(host) : new VideoEngine(host, "Browser video")),
     async probe(overrides): Promise<Probe> {
       await factsReady;
-      const r = webosCaps(facts, overrides);
+      const r = onTv ? webosCaps(facts, overrides) : browserCaps();
       return { caps: r.caps, lines: r.lines, dvContainers: r.dvContainers };
     },
     device(): DeviceFacts {

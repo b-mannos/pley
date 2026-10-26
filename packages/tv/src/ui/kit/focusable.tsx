@@ -88,3 +88,23 @@ export function railOnLeft(toRail: () => boolean, stopRight = true): (dir: Dir) 
     return false;
   };
 }
+
+/** A box that says when focus comes into it (a page's section that isn't a row). */
+export function FocusWatch(p: { onFocus: () => void; class?: string; children?: ComponentChildren }) {
+  const ui = useUi();
+  const box = useRef<HTMLDivElement>(null);
+  const on = useRef(p.onFocus);
+  on.current = p.onFocus;
+  useLayoutEffect(
+    () =>
+      ui.focus.onChange((el) => {
+        if (el && box.current && box.current.contains(el)) on.current();
+      }),
+    [],
+  );
+  return (
+    <div ref={box} class={p.class}>
+      {p.children}
+    </div>
+  );
+}

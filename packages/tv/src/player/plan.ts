@@ -196,4 +196,18 @@ export function dvRetryMode(info: PlaybackInfo, file: MediaFile | null, caps: Cl
   return null;
 }
 
+/**
+ * A Dolby Vision file in a container the TV shows Dolby Vision only from
+ * others (LG before webOS 25: not Matroska): played as it is, it would
+ * show its base layer, so it is asked for as a remux, which keeps it.
+ */
+export function dvContainerMode(file: MediaFile | null, caps: ClientCaps | null, dvContainers: string[] | null | undefined): PlaybackMode | null {
+  if (!file || !caps || !dvContainers) return null;
+  const video = videoOf(file);
+  if (!video || rangeOf(video) !== "dolby_vision" || caps.hdr_types.indexOf("dolby_vision") < 0) return null;
+  if (!caps.dolby_vision_profiles.some((p) => p.profile === video.dv_profile)) return null;
+  const container = (file.container ?? "").toLowerCase().replace("matroska", "mkv").split(",")[0]!;
+  return container && dvContainers.indexOf(container) < 0 ? "remux" : null;
+}
+
 export { decide };

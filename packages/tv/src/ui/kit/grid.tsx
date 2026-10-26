@@ -2,7 +2,7 @@ import type { ComponentChildren } from "preact";
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useUi } from "../context";
 import type { Dir } from "../focus";
-import { G } from "./focusable";
+import { FocusWatch, G } from "./focusable";
 import { GUTTER } from "./row";
 import { TILES, type TileKind } from "./tile";
 
@@ -134,7 +134,7 @@ export function PosterGrid(p: GridProps) {
       <div class="grid-content" style={`transform:translateY(${t}px)`}>
         {p.hero && (
           <div class="grid-hero" style={`height:${heroH}px`}>
-            <HeroFocusWatch onFocus={() => setInHero(true)}>{p.hero}</HeroFocusWatch>
+            <FocusWatch onFocus={() => setInHero(true)}>{p.hero}</FocusWatch>
           </div>
         )}
         <G
@@ -156,18 +156,4 @@ export function PosterGrid(p: GridProps) {
       </div>
     </div>
   );
-}
-
-/** Tells the grid when focus is in its hero, so the page scrolls back to the top. */
-function HeroFocusWatch(p: { onFocus: () => void; children: ComponentChildren }) {
-  const ui = useUi();
-  const box = useRef<HTMLDivElement>(null);
-  useLayoutEffect(
-    () =>
-      ui.focus.onChange((el) => {
-        if (el && box.current && box.current.contains(el)) p.onFocus();
-      }),
-    [],
-  );
-  return <div ref={box}>{p.children}</div>;
 }

@@ -5,6 +5,7 @@ import { UiContext, type Ui } from "../context";
 import { FocusManager } from "../focus";
 import { ImageLoader } from "../images";
 import { Input } from "../input";
+import { initMusic } from "../../player/music";
 import { AppContext } from "../screens/common";
 import { Screen } from "../screens/screens";
 import { Navigator, type Entry, type PageKey } from "./navigator";
@@ -32,6 +33,7 @@ export function App(p: ShellProps) {
   const focus = useMemo(() => new FocusManager(), []);
   const input = useMemo(() => new Input(focus, (e) => state.platform.mapKey(e)), []);
   const nav = useMemo(() => new Navigator(), []);
+  useMemo(() => initMusic(state), []);
   const rail = useRef<RailApi | null>(null);
   const toast = useSignal<{ text: string; error: boolean; id: number } | null>(null);
   const curtain = useSignal(0);
@@ -185,7 +187,7 @@ export function App(p: ShellProps) {
     shownAt.current = Date.now();
     restored.current.delete(id);
     // Focus left over from the page before is no use here.
-    if (focus.current && !el.contains(focus.current)) focus.current = null;
+    if (focus.current && !el.contains(focus.current)) focus.blur();
   };
   useLayoutEffect(() => {
     if (!top) return;

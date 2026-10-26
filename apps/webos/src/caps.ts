@@ -135,3 +135,37 @@ function lines(f: WebosFacts, caps: ClientCaps, dvContainers: string[]): string[
 function hdrName(t: string): string {
   return t === "hdr10" ? "HDR10" : t === "hdr10plus" ? "HDR10+" : t === "hlg" ? "HLG" : "Dolby Vision";
 }
+
+/**
+ * What a desktop browser plays (development only): asked of the browser
+ * itself, since no LG table applies.
+ */
+export function browserCaps(): CapsResult {
+  const v = document.createElement("video");
+  const can = (type: string) => v.canPlayType(type) !== "";
+  const video: VideoDecoderCaps[] = [{ codec: "h264", hardware: true, profiles: ["Constrained Baseline", "Baseline", "Main", "High"], max_width: 3840, max_height: 2160, max_fps: 60, max_bit_depth: 8 }];
+  if (can('video/mp4; codecs="hvc1.1.6.L153.B0"')) video.push({ codec: "hevc", hardware: true, profiles: ["Main", "Main 10"], max_width: 3840, max_height: 2160, max_fps: 60, max_bit_depth: 10 });
+  if (can('video/webm; codecs="vp09.00.40.08"')) video.push({ codec: "vp9", hardware: false, profiles: ["Profile 0"], max_width: 3840, max_height: 2160, max_fps: 60, max_bit_depth: 8 });
+  if (can('video/mp4; codecs="av01.0.08M.08"')) video.push({ codec: "av1", hardware: false, profiles: ["Main"], max_width: 3840, max_height: 2160, max_fps: 60, max_bit_depth: 10 });
+  const audio = ["aac", "mp3", "opus", "flac", "vorbis"];
+  const caps: ClientCaps = {
+    containers: ["mp4", "m4v", "mov", "webm", "mkv", "mp3", "m4a", "flac", "ogg", "wav"],
+    video_codecs: video.map((x) => x.codec),
+    audio_codecs: audio,
+    hdr: false,
+    dolby_vision: false,
+    caps_version: 2,
+    video,
+    hdr_types: [],
+    dolby_vision_profiles: [],
+    audio_decode: audio,
+    audio_passthrough: [],
+    audio_channels: 2,
+    subtitle_codecs: SUBTITLES,
+    audio_track_switching: false,
+    picture_subtitles_sideload: true,
+    hls: { master_playlist: true, segments: ["ts", "fmp4"] },
+    device: { form: "tv", tier: "high", fire_tv: false, model: "Browser" },
+  };
+  return { caps, lines: ["A desktop browser, for development: it plays what it says it plays."], dvContainers: [] };
+}

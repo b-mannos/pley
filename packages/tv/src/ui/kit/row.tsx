@@ -161,7 +161,16 @@ export interface Section {
  * rows), a hero section brings the page back to its top, and once
  * scrolled nothing draws above the anchor line − 12.
  */
-export function SectionPage(p: { sections: Section[]; top?: number; bottomRoom?: number; class?: string; clipAbove?: number; focusedKey?: string; onFocusSection?: (key: string) => void }) {
+export function SectionPage(p: {
+  sections: Section[];
+  top?: number;
+  class?: string;
+  clipAbove?: number;
+  focusedKey?: string;
+  onFocusSection?: (key: string) => void;
+  /** Read on past the focused section's line (text below the last row that takes focus). */
+  extraShift?: number;
+}) {
   const [focusedKey, setFocusedKey] = useState<string | null>(p.focusedKey ?? null);
   const top = p.top ?? 0;
   let y = top;
@@ -173,6 +182,7 @@ export function SectionPage(p: { sections: Section[]; top?: number; bottomRoom?:
   const at = positions.filter((x) => x.section.key === focusedKey)[0];
   let shift = 0;
   if (at && at.section.anchor !== null) shift = Math.max(0, at.y - at.section.anchor);
+  shift += p.extraShift ?? 0;
   const clip = shift > 0 && p.clipAbove !== undefined ? `clip-path:inset(${p.clipAbove}px 0 0 0);-webkit-clip-path:inset(${p.clipAbove}px 0 0 0)` : "";
   return (
     <div class={p.class} style={`position:absolute;left:0;top:0;right:0;bottom:0;${clip}`}>

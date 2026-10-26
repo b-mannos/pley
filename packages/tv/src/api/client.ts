@@ -3,6 +3,7 @@ import { Cancel, NetworkError, withQuery, type HttpResponse, type Transport } fr
 import type {
   Collection,
   Hub,
+  HistoryEntry,
   HouseholdProfile,
   Id,
   ItemDetail,
@@ -212,7 +213,28 @@ export class Api {
     return this.get(`/api/playlists/${id}`, { cancel });
   }
 
+  /** The collections an item is part of. */
+  itemCollections(id: Id, cancel?: Cancel): Promise<{ collections: { id: Id; title: string }[] }> {
+    return this.get(`/api/items/${id}/collections`, { cancel });
+  }
+
+  addToPlaylist(playlistId: Id, itemIds: Id[]): Promise<{ added: number }> {
+    return this.call("POST", `/api/playlists/${playlistId}/items`, { item_ids: itemIds }) as Promise<{ added: number }>;
+  }
+
+  createPlaylist(title: string, kind: "video" | "audio" | null, itemIds: Id[]): Promise<Playlist> {
+    return this.call("POST", "/api/playlists", { title, ...(kind ? { kind } : {}), item_ids: itemIds }) as Promise<Playlist>;
+  }
+
   // ---- watching
+
+  history(offset: number, limit: number, cancel?: Cancel): Promise<{ total: number; entries: HistoryEntry[] }> {
+    return this.get("/api/history", { query: { offset, limit }, cancel });
+  }
+
+  removeHistory(id: Id): Promise<unknown> {
+    return this.call("DELETE", `/api/history/${id}`);
+  }
 
   addToMyList(id: Id): Promise<unknown> {
     return this.call("PUT", `/api/watchlist/${id}`);
@@ -224,6 +246,11 @@ export class Api {
 
   hideFromContinueWatching(id: Id): Promise<unknown> {
     return this.call("DELETE", `/api/continue-watching/${id}`);
+  }
+
+  /** The person's rating, 0–10 (halves), or none. */
+  rate(id: Id, rating: number | null): Promise<unknown> {
+    return this.call("PUT", `/api/items/${id}/rating`, rating === null ? {} : { rating });
   }
 
   markWatched(id: Id): Promise<unknown> {

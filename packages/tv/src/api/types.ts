@@ -354,6 +354,13 @@ export type ServerEvent =
   | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean }
   | { type: "scan_started" | "scan_progress" | "scan_finished"; library_id: Id };
 
+export interface HistoryEntry {
+  id: Id;
+  viewed_at: Timestamp;
+  device?: string;
+  item: ItemSummary;
+}
+
 export interface HouseholdProfile {
   id: Id;
   name: string;

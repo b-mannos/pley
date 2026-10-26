@@ -29,18 +29,40 @@ export function useScrollToFocus(inner: { current: HTMLElement | null }, height:
 }
 
 /**
+ * A focus trap for an overlay, set up from its root's ref: refs are set
+ * before any layout effect runs, so the overlay's own rows can claim
+ * focus inside it as it opens. Released (focus back to the opener) when
+ * the overlay goes.
+ */
+export function useTrap(): (el: HTMLElement | null) => void {
+  const ui = useUi();
+  const root = useRef<HTMLElement | null>(null);
+  useLayoutEffect(
+    () => () => {
+      if (root.current) ui.focus.release(root.current);
+      root.current = null;
+    },
+    [],
+  );
+  return (el) => {
+    if (el && root.current !== el) {
+      root.current = el;
+      ui.focus.trap(el);
+    }
+  };
+}
+
+/**
  * A side panel (TvSidePanel): 360 wide at the right, sliding in over a
  * scrim, focus trapped inside; Back closes it and focus goes back to what
  * opened it.
  */
 export function SidePanel(p: { onClose: () => void; children: ComponentChildren; wide?: boolean; label?: string }) {
   const ui = useUi();
-  const root = useRef<HTMLDivElement>(null);
+  const trap = useTrap();
   const inner = useRef<HTMLDivElement>(null);
   const [shown, setShown] = useState(false);
   useLayoutEffect(() => {
-    const el = root.current!;
-    ui.focus.trap(el);
     const off = ui.input.push((key, e) => {
       if (key === "back") {
         if (e.type === "down") p.onClose();
@@ -48,16 +70,15 @@ export function SidePanel(p: { onClose: () => void; children: ComponentChildren;
       }
       return false;
     });
-    const raf = requestAnimationFrame(() => setShown(true));
+    const t = setTimeout(() => setShown(true), 16);
     return () => {
-      cancelAnimationFrame(raf);
+      clearTimeout(t);
       off();
-      ui.focus.release(el);
     };
   }, []);
   const shift = useScrollToFocus(inner, 540 - 54);
   return (
-    <div ref={root} class="panel-root" style="position:absolute;left:0;top:0;right:0;bottom:0;z-index:30" aria-label={p.label}>
+    <div ref={trap} class="panel-root" style="position:absolute;left:0;top:0;right:0;bottom:0;z-index:30" aria-label={p.label}>
       <div class={`scrim${shown ? " in" : ""}`} />
       <div class={`side-panel${p.wide ? " wide" : ""}${shown ? " in" : ""}`}>
         <div ref={inner} class="panel-scroll" style={`transform:translateY(${-shift}px)`}>
@@ -79,24 +100,20 @@ export function PanelHeading(p: { children: ComponentChildren }) {
 /** A dialog of text with Close (TvTextDialog). */
 export function TextDialog(p: { title: string; text: string; onClose: () => void }) {
   const ui = useUi();
-  const root = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const el = root.current!;
-    ui.focus.trap(el);
-    const off = ui.input.push((key, e) => {
-      if (key === "back") {
-        if (e.type === "down") p.onClose();
-        return true;
-      }
-      return false;
-    });
-    return () => {
-      off();
-      ui.focus.release(el);
-    };
-  }, []);
+  const trap = useTrap();
+  useLayoutEffect(
+    () =>
+      ui.input.push((key, e) => {
+        if (key === "back") {
+          if (e.type === "down") p.onClose();
+          return true;
+        }
+        return false;
+      }),
+    [],
+  );
   return (
-    <div ref={root} style="position:absolute;left:0;top:0;right:0;bottom:0;z-index:40">
+    <div ref={trap} style="position:absolute;left:0;top:0;right:0;bottom:0;z-index:40">
       <div class="scrim in" />
       <div class="dialog">
         <div class="t-title">{p.title}</div>
