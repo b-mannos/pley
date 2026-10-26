@@ -6,6 +6,7 @@ import { AudioPlayerBar } from "@/audio/AudioPlayerBar";
 import { useAudioPlayer } from "@/audio/AudioPlayer";
 import { cn } from "@/lib/cn";
 import { APP_RESUMED } from "@/lib/shell";
+import { ConnectionBanner } from "./ConnectionBanner";
 import { ListMenuProvider } from "./lists/ListMenu";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -29,6 +30,7 @@ export function AppLayout() {
       <Sidebar open={drawer} onClose={closeDrawer} />
       <div className="flex min-h-screen flex-col lg:pl-60">
         <TopBar onMenu={() => setDrawer(true)} />
+        <ConnectionBanner />
         <main className={cn("flex-1", audio.current && "pb-24")}>
           <ListMenuProvider>
             <Suspense fallback={<PageSpinner />}>

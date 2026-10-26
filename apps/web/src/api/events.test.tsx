@@ -2,8 +2,9 @@ import type { ReactNode } from "react";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { connectionLost } from "@/lib/connection";
 import { testQueryClient } from "@/test/render";
-import { onServerEvent, useServerEvents } from "./events";
+import { LOST_AFTER_MS, onServerEvent, useServerEvents } from "./events";
 import { keys } from "./hooks";
 import type { Activity, Library, ServerEvent } from "./types";
 
@@ -134,6 +135,41 @@ describe("useServerEvents", () => {
 
     act(() => source().open());
     expect(invalidated(client, keys.item(5))).toBe(true);
+  });
+
+  it("says the server is out of reach when it stays away, and stops once it is back", async () => {
+    const health = vi.fn(() => Promise.reject(new TypeError("Failed to fetch")));
+    vi.stubGlobal("fetch", health);
+    const { source } = setup();
+    act(() => source().open());
+
+    act(() => source().fail());
+    act(() => {
+      vi.advanceTimersByTime(LOST_AFTER_MS - 1);
+    });
+    expect(connectionLost()).toBe(false);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    await vi.waitFor(() => expect(connectionLost()).toBe(true));
+    expect(health).toHaveBeenCalledWith("/api/health", expect.anything());
+
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+    act(() => source().open());
+    expect(connectionLost()).toBe(false);
+  });
+
+  it("doesn't say so for a stream the server refuses while it answers", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("ok"))));
+    const { source } = setup();
+
+    act(() => source().fail());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LOST_AFTER_MS);
+    });
+    expect(connectionLost()).toBe(false);
   });
 
   it("reconnects after the server goes away, waiting longer each time", () => {

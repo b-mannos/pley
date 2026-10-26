@@ -1,7 +1,11 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { connectionLost, serverAnswers, setConnectionLost } from "@/lib/connection";
 import { keys } from "./hooks";
 import type { Activity, Id, Library, ServerEvent } from "./types";
+
+/** How long the stream may be down before the pages say the server is out of reach: a restart takes a moment. */
+export const LOST_AFTER_MS = 5_000;
 
 type Listener = (ev: ServerEvent) => void;
 const listeners = new Set<Listener>();
@@ -33,7 +37,25 @@ export function useServerEvents(enabled: boolean) {
     let closed = false;
     let failures = 0;
     let connectedBefore = false;
+    let lostTimer: number | undefined;
     const pendingLibraries = new Set<Id>();
+
+    // Down a while, and the server doesn't answer at all: the pages say so
+    // (a stream refused, a sign-in that ended, is something else).
+    const dropped = () => {
+      if (connectionLost() || lostTimer !== undefined) return;
+      lostTimer = window.setTimeout(() => {
+        lostTimer = undefined;
+        void serverAnswers().then((answers) => {
+          if (!closed && !answers && es?.readyState !== EventSource.OPEN) setConnectionLost(true);
+        });
+      }, LOST_AFTER_MS);
+    };
+    const back = () => {
+      window.clearTimeout(lostTimer);
+      lostTimer = undefined;
+      setConnectionLost(false);
+    };
 
     // The server neither replays events nor queues them for slow clients:
     // after a reconnect anything may have changed (e.g. a scan finished while
@@ -141,6 +163,7 @@ export function useServerEvents(enabled: boolean) {
       es = new EventSource("/api/events");
       es.onopen = () => {
         failures = 0;
+        back();
         // Also fires when the browser reconnects on its own.
         if (connectedBefore) resync();
         connectedBefore = true;
@@ -153,6 +176,7 @@ export function useServerEvents(enabled: boolean) {
         }
       };
       es.onerror = () => {
+        dropped();
         // While CONNECTING the browser retries on its own; once CLOSED
         // (e.g. a non-200 response) we have to reconnect manually.
         if (es && es.readyState === EventSource.CLOSED) {
@@ -171,6 +195,8 @@ export function useServerEvents(enabled: boolean) {
       es?.close();
       window.clearTimeout(retryTimer);
       window.clearTimeout(flushTimer);
+      window.clearTimeout(lostTimer);
+      setConnectionLost(false);
     };
   }, [enabled, qc]);
 }
