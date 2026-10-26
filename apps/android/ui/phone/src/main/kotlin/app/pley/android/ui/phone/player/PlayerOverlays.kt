@@ -1,9 +1,13 @@
 package app.pley.android.ui.phone.player
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,7 +21,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -40,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -129,7 +133,8 @@ internal fun BoxScope.SkipButton(state: PlayerScreenState) {
     ) {
         Row(
             Modifier
-                .height(40.dp)
+                // As tall as the player's other buttons (Unlock, the bar's), for a thumb.
+                .heightIn(min = 48.dp)
                 .clip(PleyShape.Pill)
                 .background(PleyColors.Surface3.copy(alpha = 0.92f))
                 .clickable(role = Role.Button) {
@@ -150,7 +155,9 @@ internal fun BoxScope.SkipButton(state: PlayerScreenState) {
 /**
  * What plays next, from the credits on: its still, "Up next · S1 E4", the
  * title, Play now with the seconds left (a fill sweeping across it once a
- * second) and Cancel. It is announced once, not every second.
+ * second) and Cancel. It is announced once, not every second. While the
+ * controls show, it goes up above them without its still, so on a phone on
+ * its side it stays on screen and clear of the top bar.
  */
 @Composable
 internal fun BoxScope.UpNextCard(state: PlayerScreenState) {
@@ -183,10 +190,16 @@ private fun UpNextContent(card: UpNextUi, state: PlayerScreenState) {
             .background(PleyColors.Surface2.copy(alpha = 0.96f))
             .padding(12.dp),
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(PleyShape.Card)) {
-            Artwork(card.imageUrl?.let { ArtworkImage(listOf(it)) }, card.title, Modifier.fillMaxSize())
+        AnimatedVisibility(
+            !state.controlsVisible,
+            enter = if (reduced) EnterTransition.None else fadeIn(PleyMotion.overlay()) + expandVertically(PleyMotion.overlay()),
+            exit = if (reduced) ExitTransition.None else fadeOut(PleyMotion.overlay()) + shrinkVertically(PleyMotion.overlay()),
+        ) {
+            Box(Modifier.fillMaxWidth().padding(bottom = 10.dp).aspectRatio(16f / 9f).clip(PleyShape.Card)) {
+                Artwork(card.imageUrl?.let { ArtworkImage(listOf(it)) }, card.title, Modifier.fillMaxSize())
+            }
         }
-        Column(Modifier.padding(top = 10.dp).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }) {
+        Column(Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }) {
             Text(card.heading, style = MaterialTheme.typography.labelMedium, color = PleyColors.AccentBright, maxLines = 1)
             Text(
                 card.title,
@@ -216,14 +229,16 @@ private fun UpNextContent(card: UpNextUi, state: PlayerScreenState) {
                     icon = PleyIcons.Play,
                     modifier = Modifier
                         .fillMaxWidth()
-                        // The countdown: a darker sweep across the pill, stepped once a second.
-                        .drawBehind {
+                        // The countdown: a darker sweep across the button, stepped once a
+                        // second. Over it, not behind: the button's own fill would hide it.
+                        .drawWithContent {
+                            drawContent()
                             if (done > 0f) {
                                 drawRoundRect(
                                     Color.Black.copy(alpha = 0.18f),
                                     topLeft = Offset.Zero,
                                     size = Size(size.width * done, size.height),
-                                    cornerRadius = CornerRadius(size.height / 2f),
+                                    cornerRadius = CornerRadius(PleyShape.ControlRadius.toPx()),
                                 )
                             }
                         },
