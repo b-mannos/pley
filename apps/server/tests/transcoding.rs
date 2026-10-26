@@ -229,6 +229,7 @@ async fn start_fake() -> (Fake, String) {
                             codec: VideoCodec::H264,
                             hardware: false,
                             accel: HwAccel::None,
+                            main10: false,
                         }],
                         ..Default::default()
                     },

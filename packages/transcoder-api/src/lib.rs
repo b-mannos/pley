@@ -321,6 +321,10 @@ pub struct EncoderInfo {
     pub codec: VideoCodec,
     pub hardware: bool,
     pub accel: HwAccel,
+    /// An HEVC encoder that passed a 10-bit (Main 10) test encode too: what
+    /// transcodes that keep HDR need.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub main10: bool,
 }
 
 /// A hardware pipeline that keeps frames in GPU memory from decode to encode.
@@ -380,6 +384,11 @@ pub struct Capabilities {
     /// [`VideoRequest::strip_hdr10plus`] ask. Older transcoders lack both.
     #[serde(default)]
     pub hls_master_playlist: bool,
+    /// Transcodes of HDR video can keep it, as HEVC Main 10 in HDR10 or HLG
+    /// ([`VideoRequest::dynamic_range`]): a 10-bit HEVC encoder works. Older
+    /// transcoders lack it and always tone-map to SDR.
+    #[serde(default)]
+    pub hdr_transcode: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -480,6 +489,40 @@ pub struct VideoRequest {
     /// streams carrying both (androidx/media#1895).
     #[serde(default)]
     pub strip_hdr10plus: bool,
+    /// The dynamic range a transcode of HDR video is made in (ignored for
+    /// SDR video and remuxes). HDR10 and HLG need `codec` HEVC: the
+    /// transcode is then HEVC Main 10 with the HDR10 metadata of the source
+    /// kept (Dolby Vision's left out); video in the other HDR format is
+    /// converted with libplacebo (HLG or Dolby Vision profile 5 to HDR10, say).
+    /// Where that can't be done (no 10-bit HEVC encoder, no libplacebo for a
+    /// conversion, subtitles drawn onto the video) it is tone-mapped to SDR,
+    /// with a warning.
+    #[serde(default)]
+    pub dynamic_range: OutputRange,
+}
+
+/// The dynamic range of a transcode of HDR video.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputRange {
+    /// Tone-mapped to SDR: what every player shows.
+    #[default]
+    Sdr,
+    /// PQ, BT.2020 (HDR10 static metadata kept when the source has it).
+    Hdr10,
+    /// Hybrid log-gamma, BT.2020.
+    Hlg,
+}
+
+impl OutputRange {
+    /// The range as [`DynamicRange`] names it.
+    pub fn dynamic_range(self) -> DynamicRange {
+        match self {
+            OutputRange::Sdr => DynamicRange::Sdr,
+            OutputRange::Hdr10 => DynamicRange::Hdr10,
+            OutputRange::Hlg => DynamicRange::Hlg,
+        }
+    }
 }
 
 /// What a remux does with a Dolby Vision stream. Whatever it is, the
@@ -634,6 +677,10 @@ pub struct VideoPlan {
     pub width_out: Option<i64>,
     pub height_out: Option<i64>,
     pub dynamic_range_in: DynamicRange,
+    /// What a transcode comes out as: SDR (tone-mapped, or SDR already),
+    /// HDR10 or HLG. `None` for remuxes (and from older transcoders).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamic_range_out: Option<DynamicRange>,
     pub dv_profile: Option<i64>,
     /// Dolby Vision base-layer compatibility id (1 HDR10, 2 SDR, 4 HLG; 0 none).
     #[serde(default)]
@@ -955,6 +1002,22 @@ mod tests {
             serde_json::from_str(r#"{"mode":"copy","dolby_vision":"to81","strip_hdr10plus":true}"#).unwrap();
         assert_eq!((video.dolby_vision, video.strip_hdr10plus), (DolbyVisionMode::To81, true));
         assert_eq!(serde_json::to_value(DolbyVisionMode::Signal).unwrap(), "signal");
+        // Transcodes are SDR unless asked.
+        assert_eq!(video.dynamic_range, OutputRange::Sdr);
+        let video: VideoRequest = serde_json::from_str(r#"{"codec":"hevc","dynamic_range":"hdr10"}"#).unwrap();
+        assert_eq!((video.codec, video.dynamic_range), (VideoCodec::Hevc, OutputRange::Hdr10));
+        assert_eq!(OutputRange::Hlg.dynamic_range(), DynamicRange::Hlg);
+        // Encoders and capabilities from older transcoders.
+        let enc: EncoderInfo =
+            serde_json::from_str(r#"{"name":"hevc_nvenc","codec":"hevc","hardware":true,"accel":"nvenc"}"#).unwrap();
+        assert!(!enc.main10);
+        let caps: Capabilities = serde_json::from_str(
+            r#"{"ffmpeg_available":true,"ffprobe_available":true,"ffmpeg_path":"","ffprobe_path":"",
+                "ffmpeg_version":null,"encoders":[],"hwaccels":[],"tonemappers":[],"dolby_vision":false,
+                "subtitle_burn_image":false,"subtitle_burn_text":false,"readrate":false}"#,
+        )
+        .unwrap();
+        assert!(!caps.hdr_transcode);
     }
 
     #[test]

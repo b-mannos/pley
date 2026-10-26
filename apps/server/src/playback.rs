@@ -862,6 +862,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             max_bitrate_kbps: max_bitrate.map(|b| b.saturating_sub(192).max(500)),
             dolby_vision: if copy { copy_dolby_vision } else { DolbyVisionMode::Copy },
             strip_hdr10plus: copy && copy_strip_hdr10plus,
+            dynamic_range: Default::default(),
         }
     });
     let audio_req = audio.map(|a| {

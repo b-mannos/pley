@@ -16,7 +16,8 @@ use std::path::{Path, PathBuf};
 
 use pley_transcoder_api::{
     AudioCodec, AudioMode, AudioPlan, DolbyVisionMode, DynamicRange, EncoderInfo, HwAccel, JobRequest, MediaInfo,
-    MediaStream, StreamKind, Tonemapper, VideoCodec, VideoMode, VideoPlan, decode_key, is_text_subtitle_codec,
+    MediaStream, StreamKind, Tonemapper, VideoCodec, VideoMode, VideoPlan, VideoRequest, decode_key,
+    is_text_subtitle_codec,
 };
 
 use crate::ffmpeg::{Ffmpeg, VAAPI_DEVICE};
@@ -110,11 +111,102 @@ pub struct VideoOut {
     pub dolby_vision: Option<DolbyVisionMode>,
     /// A remux of HEVC leaves out its HDR10+ metadata.
     pub strip_hdr10plus: bool,
+    /// A transcode that keeps HDR: HEVC Main 10 in HDR10 or HLG (see
+    /// [`hdr_output`]); `None` when it comes out SDR.
+    pub hdr: Option<HdrOut>,
+}
+
+/// What a transcode that keeps HDR comes out as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HdrOut {
+    /// [`DynamicRange::Hdr10`] or [`DynamicRange::Hlg`].
+    pub range: DynamicRange,
+    /// libplacebo converts the video to it (HLG or Dolby Vision profile 5
+    /// to HDR10, say); otherwise the decoded frames are in it already,
+    /// their HDR10 metadata going to the encoder with them.
+    pub convert: bool,
+}
+
+impl HdrOut {
+    /// FFmpeg's name for the output's transfer function.
+    fn transfer(self) -> &'static str {
+        if self.range == DynamicRange::Hlg { "arib-std-b67" } else { "smpte2084" }
+    }
+}
+
+/// The 10-bit pixel format an encoder takes: P010 for hardware encoders,
+/// planar for x265.
+pub fn ten_bit_format(accel: HwAccel) -> &'static str {
+    match accel {
+        HwAccel::None | HwAccel::Auto => "yuv420p10le",
+        _ => "p010le",
+    }
+}
+
+/// Whether a stream's base picture is HLG rather than PQ: HLG itself, and
+/// Dolby Vision profile 8.4.
+fn hlg_source(src: &MediaStream) -> bool {
+    match src.dynamic_range() {
+        DynamicRange::Hlg => true,
+        DynamicRange::DolbyVision => src.dv_bl_compat == Some(4),
+        _ => false,
+    }
+}
+
+/// What a transcode of `src` keeps of its HDR, as `vreq` asks (see
+/// [`pley_transcoder_api::VideoRequest::dynamic_range`]), with the encoder
+/// for it; `None` with a warning when it can't be kept, and quietly for SDR
+/// video and SDR requests.
+///
+/// The HDR10 metadata (mastering display, content light levels) goes along
+/// with the decoded frames, through scaling and libplacebo, to the encoders
+/// (NVENC and x265 write it). Dolby Vision metadata doesn't: NVENC never
+/// writes it and x265 is told not to, so Dolby Vision comes out as its
+/// HDR10 base layer, or converted by libplacebo when it has none (profile 5).
+fn hdr_output<'a>(
+    vreq: &VideoRequest,
+    src: &MediaStream,
+    burn: bool,
+    ff: &'a Ffmpeg,
+    accel: HwAccel,
+    warnings: &mut Vec<String>,
+) -> Option<(HdrOut, &'a EncoderInfo)> {
+    let range = src.dynamic_range();
+    let wanted = vreq.dynamic_range.dynamic_range();
+    // Dolby Vision on an SDR base layer (profile 8.2) is SDR underneath.
+    let sdr_base = range == DynamicRange::DolbyVision && src.dv_bl_compat == Some(2);
+    if !range.is_hdr() || !wanted.is_hdr() || sdr_base {
+        return None;
+    }
+    let mut no = |why: &str| -> Option<(HdrOut, &'a EncoderInfo)> {
+        warnings.push(format!("{why}: {} is tone-mapped to SDR", src.dynamic_range_label()));
+        None
+    };
+    if vreq.codec != VideoCodec::Hevc {
+        return no("HDR is kept in HEVC only");
+    }
+    if burn {
+        return no("subtitles drawn onto the video are SDR");
+    }
+    let convert = src.is_dolby_vision_only() || hlg_source(src) != (wanted == DynamicRange::Hlg);
+    if convert && !ff.caps.tonemappers.contains(&Tonemapper::Libplacebo) {
+        return no("converting to another HDR format needs libplacebo");
+    }
+    let Some(encoder) = ff.pick_main10_encoder(accel).0 else {
+        return no("no 10-bit HEVC encoder works");
+    };
+    Some((HdrOut { range: wanted, convert }, encoder))
 }
 
 /// The encoder used by fully-GPU Vulkan pipelines.
 pub fn vulkan_encoder() -> EncoderInfo {
-    EncoderInfo { name: "h264_vulkan".into(), codec: VideoCodec::H264, hardware: true, accel: HwAccel::Vulkan }
+    EncoderInfo {
+        name: "h264_vulkan".into(),
+        codec: VideoCodec::H264,
+        hardware: true,
+        accel: HwAccel::Vulkan,
+        main10: false,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -234,6 +326,7 @@ impl Plan {
                         pipeline: Pipeline::Software,
                         dolby_vision,
                         strip_hdr10plus: vreq.strip_hdr10plus && src.codec == "hevc",
+                        hdr: None,
                     })
                 } else {
                     let (width, height) = fit(src_width, src_height, vreq.max_width, vreq.max_height);
@@ -241,18 +334,28 @@ impl Plan {
                     if let Some(max) = vreq.max_bitrate_kbps {
                         bitrate = bitrate.min(max.max(300));
                     }
-                    let (encoder, warning) = ff.pick_encoder(vreq.codec, req.options.hwaccel);
-                    warnings.extend(warning);
-                    let encoder = encoder.cloned().ok_or("no working video encoder found (is ffmpeg installed?)")?;
+                    let accel = req.options.hwaccel;
+                    let kept = hdr_output(vreq, src, burn.is_some(), ff, accel, &mut warnings);
+                    let hdr = kept.map(|(hdr, _)| hdr);
+                    let encoder = match kept {
+                        Some((_, encoder)) => encoder.clone(),
+                        None => {
+                            let (encoder, warning) = ff.pick_encoder(vreq.codec, accel);
+                            warnings.extend(warning);
+                            encoder.cloned().ok_or("no working video encoder found (is ffmpeg installed?)")?
+                        }
+                    };
                     let range = src.dynamic_range();
-                    let tonemap = if range.is_hdr() {
-                        let p5 = range == DynamicRange::DolbyVision
-                            && (src.dv_profile == Some(5) || src.dv_bl_compat == Some(0));
-                        let (choice, w) = ff.pick_tonemapper(req.options.tonemap, p5);
-                        warnings.extend(w);
-                        choice
-                    } else {
-                        None
+                    let tonemap = match hdr {
+                        // libplacebo converts between HDR formats; nothing
+                        // is needed for frames in the output's already.
+                        Some(hdr) => hdr.convert.then_some(Tonemapper::Libplacebo),
+                        None if range.is_hdr() => {
+                            let (choice, w) = ff.pick_tonemapper(req.options.tonemap, src.is_dolby_vision_only());
+                            warnings.extend(w);
+                            choice
+                        }
+                        None => None,
                     };
                     let tonemap_input = match tonemap {
                         Some(Tonemapper::Zscale | Tonemapper::Opencl) => untagged_hdr_fix(src),
@@ -273,9 +376,12 @@ impl Plan {
                             && req.options.hwaccel == HwAccel::Vulkan;
                         Pipeline::Vulkan { encode_on_gpu }
                     } else if tonemap.is_none() && burn.is_none() {
+                        // HDR in 10 bits stays on the GPU with CUDA only
+                        // (the one tried); the others scale on the CPU.
                         ff.caps
                             .gpu_pipelines
                             .iter()
+                            .filter(|p| hdr.is_none() || p.accel == HwAccel::Nvenc)
                             .find(|p| p.accel == encoder.accel && p.codecs.contains(&key))
                             .map_or(Pipeline::Software, |p| Pipeline::Gpu(p.accel))
                     } else {
@@ -314,6 +420,7 @@ impl Plan {
                         encoder: Some(encoder),
                         dolby_vision: None,
                         strip_hdr10plus: false,
+                        hdr,
                     })
                 }
             }
@@ -413,6 +520,7 @@ impl Plan {
             width_out: Some(v.width),
             height_out: Some(v.height),
             dynamic_range_in: src.map(|s| s.dynamic_range()).unwrap_or_default(),
+            dynamic_range_out: (!v.copy).then(|| v.hdr.map_or(DynamicRange::Sdr, |h| h.range)),
             dv_profile: src.and_then(|s| s.dv_profile),
             dv_bl_compat: src.and_then(|s| s.dv_bl_compat),
             tonemap: v.tonemap,
@@ -653,13 +761,16 @@ impl Plan {
     ) -> String {
         let input = format!("[0:{}]", v.stream_index);
         let (w, h) = (v.width, v.height);
-        // Zero-copy: one GPU scaler converts to 8-bit NV12 for the encoder.
+        // The pixel format the encoder gets (from the CPU, or downloaded).
+        let ten_bit = v.hdr.map(|_| ten_bit_format(encoder.map_or(HwAccel::None, |e| e.accel)));
+        // Zero-copy: one GPU scaler converts to NV12 (P010 for HDR) for the encoder.
         if let Pipeline::Gpu(accel) = pipeline {
+            let format = if v.hdr.is_some() { "p010le" } else { "nv12" };
             let scaler = match accel {
-                HwAccel::Vaapi => format!("scale_vaapi=w={w}:h={h}:format=nv12"),
-                HwAccel::Qsv => format!("vpp_qsv=w={w}:h={h}:format=nv12"),
+                HwAccel::Vaapi => format!("scale_vaapi=w={w}:h={h}:format={format}"),
+                HwAccel::Qsv => format!("vpp_qsv=w={w}:h={h}:format={format}"),
                 HwAccel::Videotoolbox => format!("scale_vt=w={w}:h={h}"),
-                _ => format!("scale_cuda=w={w}:h={h}:format=nv12"),
+                _ => format!("scale_cuda=w={w}:h={h}:format={format}"),
             };
             return format!("{input}{scaler}[vout]");
         }
@@ -676,18 +787,27 @@ impl Plan {
             Some(Tonemapper::Libplacebo) => {
                 // libplacebo scales too, unless a bitmap overlay needs source size first.
                 let (w, h) = if overlay_needed { (v.src_width, v.src_height) } else { (v.width, v.height) };
-                let format = if matches!(pipeline, Pipeline::Vulkan { .. }) { "nv12" } else { "yuv420p" };
+                let vulkan = matches!(pipeline, Pipeline::Vulkan { .. });
+                let format = match (vulkan, v.hdr.is_some()) {
+                    (true, false) => "nv12",
+                    (true, true) => "p010",
+                    (false, false) => "yuv420p",
+                    (false, true) => "p010le",
+                };
+                // To SDR (tone mapping), or to the HDR format kept.
+                let target = match v.hdr {
+                    Some(hdr) => format!("colorspace=bt2020nc:color_primaries=bt2020:color_trc={}", hdr.transfer()),
+                    None => "colorspace=bt709:color_primaries=bt709:color_trc=bt709".to_owned(),
+                };
                 // Shaders compiled by earlier processes save ~0.2 s at the
                 // start of each one.
                 let cache = shader_cache.and_then(shader_cache_option).map(|o| format!(":{o}")).unwrap_or_default();
-                pre.push(format!(
-                    "libplacebo=w={w}:h={h}:format={format}:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=auto{cache}"
-                ));
+                pre.push(format!("libplacebo=w={w}:h={h}:format={format}:{target}:range=tv:tonemapping=auto{cache}"));
                 match pipeline {
                     // Frames stay in Vulkan memory all the way into h264_vulkan.
                     Pipeline::Vulkan { encode_on_gpu: true } => return format!("{input}{}[vout]", pre.join(",")),
-                    // One download of the (already scaled) 8-bit frame.
-                    Pipeline::Vulkan { encode_on_gpu: false } => pre.push("hwdownload,format=nv12".into()),
+                    // One download of the (already scaled) frame.
+                    Pipeline::Vulkan { encode_on_gpu: false } => pre.push(format!("hwdownload,format={format}")),
                     _ => {}
                 }
                 if overlay_needed && scale_needed {
@@ -723,11 +843,17 @@ impl Plan {
                 v.src_width, v.src_height
             ));
         }
-        if encoder.is_some_and(|e| e.accel == HwAccel::Vaapi) {
-            post.push("format=nv12,hwupload".into());
-        } else if !matches!(pipeline, Pipeline::Vulkan { .. }) {
-            // (The Vulkan path already delivers NV12, which every encoder accepts.)
-            post.push("format=yuv420p".into());
+        let vulkan = matches!(pipeline, Pipeline::Vulkan { .. });
+        match ten_bit {
+            _ if encoder.is_some_and(|e| e.accel == HwAccel::Vaapi) => {
+                post.push(format!("format={},hwupload", if ten_bit.is_some() { "p010" } else { "nv12" }));
+            }
+            // The Vulkan path already delivers NV12, which every encoder
+            // accepts; P010 for HDR, which x265 doesn't.
+            None if vulkan => {}
+            Some("p010le") if vulkan => {}
+            Some(format) => post.push(format!("format={format}")),
+            None => post.push("format=yuv420p".into()),
         }
 
         let join = |parts: &[String]| if parts.is_empty() { "null".to_owned() } else { parts.join(",") };
@@ -798,6 +924,12 @@ fn encoder_args(enc: &EncoderInfo, v: &VideoOut, preset: Option<&str>) -> Vec<St
         ]);
     };
     let h264 = v.codec == VideoCodec::H264;
+    // HDR is kept in HEVC Main 10 (see `hdr_output`).
+    let profile = match (h264, v.hdr.is_some()) {
+        (true, _) => "high",
+        (false, false) => "main",
+        (false, true) => "main10",
+    };
     let mut s: Vec<String> = vec!["-c:v".into(), enc.name.clone()];
     match enc.accel {
         HwAccel::Nvenc => {
@@ -806,12 +938,12 @@ fn encoder_args(enc: &EncoderInfo, v: &VideoOut, preset: Option<&str>) -> Vec<St
             );
             rate(&mut s);
             s.extend(["-forced-idr", "1", "-no-scenecut", "1", "-spatial-aq", "1", "-g", "9999"].map(String::from));
-            s.extend(["-profile:v".into(), if h264 { "high" } else { "main" }.into()]);
+            s.extend(["-profile:v", profile].map(String::from));
         }
         HwAccel::Qsv => {
             s.extend(["-preset", "veryfast", "-look_ahead", "0", "-forced_idr", "1", "-g", "9999"].map(String::from));
             rate(&mut s);
-            s.extend(["-profile:v".into(), if h264 { "high" } else { "main" }.into()]);
+            s.extend(["-profile:v", profile].map(String::from));
         }
         HwAccel::Amf => {
             s.extend(
@@ -819,15 +951,21 @@ fn encoder_args(enc: &EncoderInfo, v: &VideoOut, preset: Option<&str>) -> Vec<St
                     .map(String::from),
             );
             rate(&mut s);
-            s.extend(["-profile:v".into(), if h264 { "high" } else { "main" }.into()]);
+            s.extend(["-profile:v", profile].map(String::from));
         }
         HwAccel::Vaapi => {
             rate(&mut s);
             s.extend(["-g", "9999"].map(String::from));
+            if v.hdr.is_some() {
+                s.extend(["-profile:v", profile].map(String::from));
+            }
         }
         HwAccel::Videotoolbox => {
             rate(&mut s);
             s.extend(["-allow_sw", "1", "-realtime", "1", "-g", "9999"].map(String::from));
+            if v.hdr.is_some() {
+                s.extend(["-profile:v", profile].map(String::from));
+            }
         }
         HwAccel::Vulkan => {
             s.extend(["-rc_mode", "vbr", "-tune", "hq", "-usage", "transcode"].map(String::from));
@@ -846,9 +984,24 @@ fn encoder_args(enc: &EncoderInfo, v: &VideoOut, preset: Option<&str>) -> Vec<St
             } else {
                 s.extend(["-preset".into(), preset, "-crf".into(), "24".into()]);
                 s.extend(["-maxrate".into(), format!("{br}k"), "-bufsize".into(), format!("{}k", br * 2)]);
-                s.extend(["-x265-params", "log-level=error:scenecut=0:open-gop=0:keyint=9999"].map(String::from));
+                // Parameter sets (and the HDR10 metadata) at every keyframe:
+                // each segment starts on one.
+                s.extend(
+                    ["-x265-params", "log-level=error:scenecut=0:open-gop=0:keyint=9999:repeat-headers=1"]
+                        .map(String::from),
+                );
+                if v.hdr.is_some() {
+                    // A source's Dolby Vision metadata stays out.
+                    s.extend(["-profile:v", profile, "-dolbyvision", "0"].map(String::from));
+                }
             }
         }
+    }
+    if let Some(hdr) = v.hdr {
+        // Said in the stream itself, whatever the frames were tagged with.
+        s.extend(
+            ["-color_primaries", "bt2020", "-color_trc", hdr.transfer(), "-colorspace", "bt2020nc"].map(String::from),
+        );
     }
     s
 }
@@ -1107,11 +1260,31 @@ mod tests {
     }
 
     fn x264() -> EncoderInfo {
-        EncoderInfo { name: "libx264".into(), codec: VideoCodec::H264, hardware: false, accel: HwAccel::None }
+        EncoderInfo {
+            name: "libx264".into(),
+            codec: VideoCodec::H264,
+            hardware: false,
+            accel: HwAccel::None,
+            main10: false,
+        }
     }
 
     fn nvenc() -> EncoderInfo {
-        EncoderInfo { name: "h264_nvenc".into(), codec: VideoCodec::H264, hardware: true, accel: HwAccel::Nvenc }
+        EncoderInfo {
+            name: "h264_nvenc".into(),
+            codec: VideoCodec::H264,
+            hardware: true,
+            accel: HwAccel::Nvenc,
+            main10: false,
+        }
+    }
+
+    fn hevc_nvenc() -> EncoderInfo {
+        EncoderInfo { name: "hevc_nvenc".into(), codec: VideoCodec::Hevc, main10: true, ..nvenc() }
+    }
+
+    fn x265() -> EncoderInfo {
+        EncoderInfo { name: "libx265".into(), codec: VideoCodec::Hevc, main10: true, ..x264() }
     }
 
     fn media(range: DynamicRange, dv_profile: Option<i64>) -> MediaInfo {
@@ -1466,6 +1639,171 @@ mod tests {
         m.streams[0].color_space = Some("bt2020nc".into());
         let plan = Plan::build(&request(), &m, &ff, None).unwrap();
         assert!(!args_string(&plan, 0, 2).contains("setparams"));
+    }
+
+    /// A request for HEVC in `range`, at 1080p.
+    fn hdr_request(range: pley_transcoder_api::OutputRange) -> JobRequest {
+        let mut req = request();
+        let video = req.video.as_mut().unwrap();
+        (video.codec, video.dynamic_range) = (VideoCodec::Hevc, range);
+        req
+    }
+
+    /// NVENC for H.264 and HEVC (Main 10), x264 and x265, libplacebo on
+    /// Vulkan, 10-bit HEVC decoded straight into CUDA and Vulkan memory.
+    fn hdr_ffmpeg() -> Ffmpeg {
+        let mut ff = ffmpeg_with(vec![nvenc(), hevc_nvenc(), x264(), x265()], vec![Tonemapper::Libplacebo]);
+        ff.caps.vulkan_decode = vec!["hevc10".into()];
+        ff.caps.gpu_pipelines =
+            vec![pley_transcoder_api::GpuPipeline { accel: HwAccel::Nvenc, codecs: vec!["hevc10".into()] }];
+        ff
+    }
+
+    #[test]
+    fn hdr10_is_kept_in_hevc_main_10_on_the_gpu() {
+        use pley_transcoder_api::OutputRange;
+        let ff = hdr_ffmpeg();
+        let m = ten_bit(media(DynamicRange::Hdr10, None));
+        let plan = Plan::build(&hdr_request(OutputRange::Hdr10), &m, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!(v.hdr, Some(HdrOut { range: DynamicRange::Hdr10, convert: false }));
+        assert_eq!((v.tonemap, v.pipeline), (None, Pipeline::Gpu(HwAccel::Nvenc)));
+        assert!(plan.warnings.is_empty(), "{:?}", plan.warnings);
+        let args = args_string(&plan, 0, 2);
+        // Decoded, scaled to 10 bits and encoded without leaving the GPU;
+        // the frames' HDR10 metadata goes with them to the encoder.
+        assert!(args.contains("-hwaccel cuda -hwaccel_output_format cuda"), "{args}");
+        assert!(args.contains("[0:0]scale_cuda=w=1920:h=1080:format=p010le[vout]"), "{args}");
+        assert!(args.contains("-c:v hevc_nvenc"), "{args}");
+        assert!(args.contains("-profile:v main10"), "{args}");
+        assert!(args.contains("-color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc"), "{args}");
+        assert!(!args.contains("libplacebo"), "{args}");
+        let vp = plan.video_plan(&m, None).unwrap();
+        assert_eq!((vp.codec_out.as_str(), vp.dynamic_range_out), ("hevc", Some(DynamicRange::Hdr10)));
+        assert_eq!((vp.encoder.as_deref(), vp.tonemap), (Some("hevc_nvenc"), None));
+
+        // Hardware sessions ran out: x265 in 10 bits, from the CPU.
+        let ctx = ArgsContext {
+            input: Path::new("/media/movie.mkv"),
+            encoder: Some(&ff.caps.encoders[3]),
+            relative_split_times: true,
+            preset: None,
+            shader_cache: None,
+        };
+        let args: Vec<String> = plan.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        let args = args.join(" ");
+        assert!(args.contains("scale=1920:1080:flags=bicubic,format=yuv420p10le[vout]"), "{args}");
+        assert!(args.contains("-c:v libx265"), "{args}");
+        assert!(args.contains("repeat-headers=1 -profile:v main10 -dolbyvision 0"), "{args}");
+        assert!(args.contains("-color_trc smpte2084"), "{args}");
+
+        // Without a zero-copy pipeline: decoded on the GPU, scaled on the CPU.
+        let mut ff = hdr_ffmpeg();
+        ff.caps.gpu_pipelines.clear();
+        let plan = Plan::build(&hdr_request(OutputRange::Hdr10), &m, &ff, None).unwrap();
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains("-hwaccel cuda ") && !args.contains("hwaccel_output_format"), "{args}");
+        assert!(args.contains("scale=1920:1080:flags=bicubic,format=p010le[vout]"), "{args}");
+
+        // Dolby Vision 8.1 and 7 are their HDR10 base layer: kept as it is,
+        // the Dolby Vision metadata left out.
+        for profile in [8, 7] {
+            let m = ten_bit(media(DynamicRange::DolbyVision, Some(profile)));
+            let plan = Plan::build(&hdr_request(OutputRange::Hdr10), &m, &hdr_ffmpeg(), None).unwrap();
+            let v = plan.video.as_ref().unwrap();
+            assert_eq!((v.hdr.map(|h| h.convert), v.tonemap), (Some(false), None), "P{profile}");
+        }
+    }
+
+    #[test]
+    fn other_hdr_formats_are_converted_by_libplacebo() {
+        use pley_transcoder_api::OutputRange;
+        let ff = hdr_ffmpeg();
+        // Dolby Vision profile 5 to HDR10: libplacebo applies the RPU, on
+        // Vulkan, then one 10-bit download for NVENC.
+        let p5 = ten_bit(media(DynamicRange::DolbyVision, Some(5)));
+        let plan = Plan::build(&hdr_request(OutputRange::Hdr10), &p5, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!(v.hdr, Some(HdrOut { range: DynamicRange::Hdr10, convert: true }));
+        assert_eq!((v.tonemap, v.pipeline), (Some(Tonemapper::Libplacebo), Pipeline::Vulkan { encode_on_gpu: false }));
+        let args = args_string(&plan, 0, 2);
+        assert!(
+            args.contains(
+                "libplacebo=w=1920:h=1080:format=p010:colorspace=bt2020nc:color_primaries=bt2020:color_trc=smpte2084:\
+                 range=tv:tonemapping=auto,hwdownload,format=p010[vout]"
+            ),
+            "{args}"
+        );
+        assert!(args.contains("-c:v hevc_nvenc") && args.contains("-profile:v main10"), "{args}");
+
+        // HLG to HDR10 for a screen that shows only HDR10; kept as it is for
+        // one that shows HLG.
+        let hlg = ten_bit(media(DynamicRange::Hlg, None));
+        let plan = Plan::build(&hdr_request(OutputRange::Hdr10), &hlg, &ff, None).unwrap();
+        assert_eq!(plan.video.as_ref().unwrap().hdr, Some(HdrOut { range: DynamicRange::Hdr10, convert: true }));
+        let plan = Plan::build(&hdr_request(OutputRange::Hlg), &hlg, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!((v.hdr, v.tonemap), (Some(HdrOut { range: DynamicRange::Hlg, convert: false }), None));
+        assert!(args_string(&plan, 0, 2).contains("-color_trc arib-std-b67"));
+        // Dolby Vision 8.4 is HLG underneath.
+        let mut p84 = ten_bit(media(DynamicRange::DolbyVision, Some(8)));
+        p84.streams[0].dv_bl_compat = Some(4);
+        let plan = Plan::build(&hdr_request(OutputRange::Hlg), &p84, &ff, None).unwrap();
+        assert_eq!(plan.video.as_ref().unwrap().hdr.map(|h| h.convert), Some(false));
+        // HDR10 to HLG, for a screen that shows HLG alone, in software
+        // (no Vulkan decoding): libplacebo outputs 10 bits.
+        let mut ff = hdr_ffmpeg();
+        ff.caps.vulkan_decode.clear();
+        let plan =
+            Plan::build(&hdr_request(OutputRange::Hlg), &ten_bit(media(DynamicRange::Hdr10, None)), &ff, None).unwrap();
+        let args = args_string(&plan, 0, 2);
+        assert!(
+            args.contains("libplacebo=w=1920:h=1080:format=p010le:colorspace=bt2020nc:color_primaries=bt2020:color_trc=arib-std-b67"),
+            "{args}"
+        );
+        assert!(args.contains("format=p010le[vout]"), "{args}");
+    }
+
+    #[test]
+    fn hdr_is_tone_mapped_when_it_cant_be_kept() {
+        use pley_transcoder_api::OutputRange;
+        let p5 = ten_bit(media(DynamicRange::DolbyVision, Some(5)));
+        let sdr = |plan: &Plan| plan.video.as_ref().unwrap().hdr.is_none();
+        // H.264 asked for.
+        let mut req = hdr_request(OutputRange::Hdr10);
+        req.video.as_mut().unwrap().codec = VideoCodec::H264;
+        let plan = Plan::build(&req, &p5, &hdr_ffmpeg(), None).unwrap();
+        assert!(sdr(&plan) && plan.warnings.iter().any(|w| w.contains("HEVC only")), "{:?}", plan.warnings);
+        assert_eq!(plan.video.as_ref().unwrap().encoder.as_ref().unwrap().name, "h264_nvenc");
+        // Subtitles drawn onto the video.
+        let mut req = hdr_request(OutputRange::Hdr10);
+        req.subtitle = Some(SubtitleBurnRequest { stream_index: Some(3), external_path: None });
+        let plan = Plan::build(&req, &p5, &hdr_ffmpeg(), None).unwrap();
+        assert!(sdr(&plan) && plan.warnings.iter().any(|w| w.contains("subtitles")), "{:?}", plan.warnings);
+        assert_eq!(plan.video.as_ref().unwrap().tonemap, Some(Tonemapper::Libplacebo));
+        // A conversion without libplacebo.
+        let mut ff = hdr_ffmpeg();
+        ff.caps.tonemappers = vec![Tonemapper::Zscale];
+        let plan = Plan::build(&hdr_request(OutputRange::Hdr10), &p5, &ff, None).unwrap();
+        assert!(sdr(&plan) && plan.warnings.iter().any(|w| w.contains("libplacebo")), "{:?}", plan.warnings);
+        assert_eq!(plan.video.as_ref().unwrap().tonemap, Some(Tonemapper::Zscale));
+        // ...though HDR10 itself needs none.
+        let plan = Plan::build(&hdr_request(OutputRange::Hdr10), &ten_bit(media(DynamicRange::Hdr10, None)), &ff, None)
+            .unwrap();
+        assert!(!sdr(&plan));
+        // No 10-bit HEVC encoder: HEVC in SDR.
+        let ff =
+            ffmpeg_with(vec![nvenc(), EncoderInfo { main10: false, ..hevc_nvenc() }], vec![Tonemapper::Libplacebo]);
+        let plan = Plan::build(&hdr_request(OutputRange::Hdr10), &p5, &ff, None).unwrap();
+        assert!(sdr(&plan) && plan.warnings.iter().any(|w| w.contains("10-bit")), "{:?}", plan.warnings);
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains("color_trc=bt709") && args.contains("-profile:v main "), "{args}");
+        assert_eq!(plan.video_plan(&p5, None).unwrap().dynamic_range_out, Some(DynamicRange::Sdr));
+        // SDR video, and SDR asked for: nothing to say.
+        let plan = Plan::build(&hdr_request(OutputRange::Hdr10), &media(DynamicRange::Sdr, None), &ff, None).unwrap();
+        assert!(sdr(&plan) && plan.warnings.is_empty());
+        let plan = Plan::build(&hdr_request(OutputRange::Sdr), &p5, &hdr_ffmpeg(), None).unwrap();
+        assert!(sdr(&plan) && plan.warnings.is_empty(), "{:?}", plan.warnings);
     }
 
     #[test]

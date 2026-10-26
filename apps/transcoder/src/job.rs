@@ -531,7 +531,9 @@ impl JobManager {
             .acquire(want_hw)
             .ok_or_else(|| ApiError::Busy(format!("all {} transcode slots are in use", self.limits.max_jobs)))?;
         let fallback = if want_hw && !hw {
-            let Some(software) = planned.and_then(|e| self.ff.software_encoder(e.codec)) else {
+            // HDR kept needs a software encoder that makes Main 10 too.
+            let main10 = plan.video.as_ref().is_some_and(|v| v.hdr.is_some());
+            let Some(software) = planned.and_then(|e| self.ff.software_encoder_for(e.codec, main10)) else {
                 self.slots.release(false);
                 return Err(ApiError::Busy(format!(
                     "all {} hardware encoder sessions are in use and no software encoder is available",
@@ -1093,7 +1095,11 @@ fn describe(created: &JobCreated) -> String {
             v.width_out.unwrap_or(0),
             v.height_out.unwrap_or(0),
             v.encoder.as_deref().map(|e| format!(" via {e}")).unwrap_or_default(),
-            v.tonemap.map(|t| format!(" tonemap {}", t.as_str())).unwrap_or_default(),
+            match (v.dynamic_range_out.filter(|r| r.is_hdr()), v.tonemap) {
+                (Some(out), Some(t)) => format!(" {} to {}", t.as_str(), out.label()),
+                (Some(out), None) => format!(" keeping {}", out.label()),
+                (None, t) => t.map(|t| format!(" tonemap {}", t.as_str())).unwrap_or_default(),
+            },
             v.dolby_vision.map(|m| format!(" dolby vision {m:?}").to_lowercase()).unwrap_or_default(),
             if v.hdr10plus_stripped { " without hdr10+" } else { "" },
         )

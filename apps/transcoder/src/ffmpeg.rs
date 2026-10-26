@@ -19,7 +19,7 @@ use tokio::sync::Semaphore;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 5;
+const DETECTION_REVISION: u32 = 6;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -96,23 +96,41 @@ impl Ffmpeg {
         cmd
     }
 
-    pub fn software_encoder(&self, codec: VideoCodec) -> Option<&EncoderInfo> {
-        self.caps.encoders.iter().find(|e| e.codec == codec && !e.hardware)
+    /// The software encoder for `codec`; with `main10`, one that encodes
+    /// HEVC Main 10.
+    pub fn software_encoder_for(&self, codec: VideoCodec, main10: bool) -> Option<&EncoderInfo> {
+        self.caps.encoders.iter().find(|e| e.codec == codec && !e.hardware && (e.main10 || !main10))
     }
 
     /// Choose an encoder for `codec` honouring the requested acceleration.
     /// Returns the encoder plus a warning when the request could not be met.
     pub fn pick_encoder(&self, codec: VideoCodec, accel: HwAccel) -> (Option<&EncoderInfo>, Option<String>) {
+        self.pick(codec, accel, false)
+    }
+
+    /// [`Ffmpeg::pick_encoder`] among the HEVC encoders that encode Main 10
+    /// (transcodes that keep HDR): a hardware one, else the software one.
+    pub fn pick_main10_encoder(&self, accel: HwAccel) -> (Option<&EncoderInfo>, Option<String>) {
+        self.pick(VideoCodec::Hevc, accel, true)
+    }
+
+    fn pick(&self, codec: VideoCodec, accel: HwAccel, main10: bool) -> (Option<&EncoderInfo>, Option<String>) {
+        // Vulkan's encoder makes H.264 only: HEVC is encoded as if nothing was asked.
+        let accel = if main10 && accel == HwAccel::Vulkan { HwAccel::Auto } else { accel };
         let hardware = |a: Option<HwAccel>| {
-            self.caps.encoders.iter().find(|e| e.codec == codec && e.hardware && a.is_none_or(|a| e.accel == a))
+            self.caps
+                .encoders
+                .iter()
+                .find(|e| e.codec == codec && e.hardware && (e.main10 || !main10) && a.is_none_or(|a| e.accel == a))
         };
+        let software = || self.software_encoder_for(codec, main10);
         match accel {
-            HwAccel::None => (self.software_encoder(codec), None),
-            HwAccel::Auto => (hardware(None).or_else(|| self.software_encoder(codec)), None),
+            HwAccel::None => (software(), None),
+            HwAccel::Auto => (hardware(None).or_else(software), None),
             wanted => match hardware(Some(wanted)) {
                 Some(enc) => (Some(enc), None),
                 None => (
-                    self.software_encoder(codec),
+                    software(),
                     Some(format!("hardware encoder for {wanted:?} is not available, using software encoding")),
                 ),
             },
@@ -162,7 +180,11 @@ impl Ffmpeg {
 }
 
 fn encoder_names(caps: &Capabilities) -> String {
-    caps.encoders.iter().map(|e| e.name.as_str()).collect::<Vec<_>>().join(", ")
+    caps.encoders
+        .iter()
+        .map(|e| if e.main10 { format!("{} (main10)", e.name) } else { e.name.clone() })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn tonemapper_names(caps: &Capabilities) -> String {
@@ -231,18 +253,30 @@ fn leak(s: String) -> &'static str {
 
 pub const VAAPI_DEVICE: &str = "/dev/dri/renderD128";
 
-async fn test_encoder(ffmpeg: &Path, name: &str, accel: HwAccel) -> bool {
+/// A test encode with `name`; `main10`: 10-bit HEVC (Main 10), as
+/// transcodes that keep HDR encode it ([`crate::plan`]'s encoder arguments).
+async fn test_encoder(ffmpeg: &Path, name: &str, accel: HwAccel, main10: bool) -> bool {
     let mut args: Vec<&str> = vec!["-hide_banner", "-nostdin", "-loglevel", "error"];
     if accel == HwAccel::Vaapi {
         args.extend(["-vaapi_device", VAAPI_DEVICE]);
     }
     args.extend(["-f", "lavfi", "-i", "color=black:s=320x240:r=25:d=0.2", "-frames:v", "3"]);
-    if accel == HwAccel::Vaapi {
-        args.extend(["-vf", "format=nv12,hwupload"]);
-    } else {
-        args.extend(["-pix_fmt", "yuv420p"]);
+    match (accel, main10) {
+        (HwAccel::Vaapi, false) => args.extend(["-vf", "format=nv12,hwupload"]),
+        (HwAccel::Vaapi, true) => args.extend(["-vf", "format=p010,hwupload"]),
+        (_, false) => args.extend(["-pix_fmt", "yuv420p"]),
+        (_, true) => args.extend(["-pix_fmt", crate::plan::ten_bit_format(accel)]),
     }
-    args.extend(["-c:v", name, "-f", "null", "-"]);
+    args.extend(["-c:v", name]);
+    if main10 {
+        args.extend(["-profile:v", "main10"]);
+        // libx265 would write a source's Dolby Vision metadata, which
+        // transcodes leave out (FFmpeg 7.1 and later have the option).
+        if accel == HwAccel::None {
+            args.extend(["-dolbyvision", "0"]);
+        }
+    }
+    args.extend(["-f", "null", "-"]);
     matches!(run(ffmpeg, &args, Duration::from_secs(30)).await, Some(Output { success: true, .. }))
 }
 
@@ -376,13 +410,15 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
         let limiter = limiter.clone();
         async move {
             let _permit = limiter.acquire().await.ok();
-            let ok = test_encoder(ffmpeg, name, *accel).await;
+            let ok = test_encoder(ffmpeg, name, *accel, false).await;
+            let main10 = ok && *codec == VideoCodec::Hevc && test_encoder(ffmpeg, name, *accel, true).await;
             (
                 EncoderInfo {
                     name: (*name).to_owned(),
                     codec: *codec,
                     hardware: *accel != HwAccel::None,
                     accel: *accel,
+                    main10,
                 },
                 ok,
             )
@@ -451,6 +487,7 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
     let working: Vec<EncoderInfo> = encoder_results.into_iter().filter(|(_, ok)| *ok).map(|(e, _)| e).collect();
     caps.encoders =
         working.iter().filter(|e| e.hardware).cloned().chain(working.iter().filter(|e| !e.hardware).cloned()).collect();
+    caps.hdr_transcode = caps.encoders.iter().any(|e| e.main10);
 
     for (ok, mapper) in
         [(libplacebo, Tonemapper::Libplacebo), (opencl, Tonemapper::Opencl), (zscale, Tonemapper::Zscale)]
@@ -739,7 +776,17 @@ mod tests {
     }
 
     fn enc(name: &str, accel: HwAccel) -> EncoderInfo {
-        EncoderInfo { name: name.into(), codec: VideoCodec::H264, hardware: accel != HwAccel::None, accel }
+        EncoderInfo {
+            name: name.into(),
+            codec: VideoCodec::H264,
+            hardware: accel != HwAccel::None,
+            accel,
+            main10: false,
+        }
+    }
+
+    fn hevc(name: &str, accel: HwAccel, main10: bool) -> EncoderInfo {
+        EncoderInfo { codec: VideoCodec::Hevc, main10, ..enc(name, accel) }
     }
 
     #[test]
@@ -750,6 +797,25 @@ mod tests {
         let (enc, warning) = ff.pick_encoder(VideoCodec::H264, HwAccel::Qsv);
         assert_eq!(enc.unwrap().name, "libx264");
         assert!(warning.is_some());
+    }
+
+    #[test]
+    fn main10_encoders_for_hdr() {
+        // An 8-bit only hardware encoder doesn't count: x265 does.
+        let ff = fake(vec![hevc("hevc_qsv", HwAccel::Qsv, false), hevc("libx265", HwAccel::None, true)], vec![]);
+        assert_eq!(ff.pick_main10_encoder(HwAccel::Auto).0.unwrap().name, "libx265");
+        assert_eq!(ff.pick_encoder(VideoCodec::Hevc, HwAccel::Auto).0.unwrap().name, "hevc_qsv");
+        let ff = fake(vec![hevc("hevc_nvenc", HwAccel::Nvenc, true), hevc("libx265", HwAccel::None, true)], vec![]);
+        assert_eq!(ff.pick_main10_encoder(HwAccel::Auto).0.unwrap().name, "hevc_nvenc");
+        // Vulkan encodes only H.264: as if nothing was asked, and no warning.
+        assert_eq!(ff.pick_main10_encoder(HwAccel::Vulkan), (ff.caps.encoders.first(), None));
+        assert_eq!(ff.pick_main10_encoder(HwAccel::None).0.unwrap().name, "libx265");
+        assert_eq!(ff.software_encoder_for(VideoCodec::Hevc, true).unwrap().name, "libx265");
+        // None at all.
+        let ff = fake(vec![hevc("libx265", HwAccel::None, false)], vec![]);
+        assert_eq!(ff.pick_main10_encoder(HwAccel::Auto).0, None);
+        assert_eq!(ff.software_encoder_for(VideoCodec::Hevc, true), None);
+        assert!(ff.software_encoder_for(VideoCodec::Hevc, false).is_some());
     }
 
     #[test]

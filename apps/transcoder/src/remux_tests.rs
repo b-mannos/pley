@@ -18,8 +18,8 @@ use std::process::Command;
 use std::sync::Arc;
 
 use pley_transcoder_api::{
-    AudioMode, AudioRequest, Capabilities, DolbyVisionMode, DynamicRange, JobRequest, MediaInfo, StreamKind,
-    TranscodeOptions, VideoMode, VideoRequest,
+    AudioMode, AudioRequest, Capabilities, DolbyVisionMode, DynamicRange, EncoderInfo, HwAccel, JobRequest, MediaInfo,
+    OutputRange, StreamKind, TranscodeOptions, VideoCodec, VideoMode, VideoRequest,
 };
 
 use crate::dovi::{self, NAL_DV_EL, NAL_DV_RPU};
@@ -392,6 +392,77 @@ fn hdr10_remuxes_are_left_as_they_are() {
     let master = hls::master_playlist(&plan, &media);
     assert!(master.contains(",CODECS=\"hvc1.2.4.L"), "{master}");
     assert!(!master.contains("SUPPLEMENTAL") && master.contains("VIDEO-RANGE=PQ"), "{master}");
+}
+
+/// Transcodes that keep HDR, with x265 (NVENC is planned the same way and
+/// writes the same metadata; docs/TRANSCODER.md): HEVC Main 10 with PQ and
+/// BT.2020 said in the stream, the mastering display and light levels at the
+/// start of every segment, and Dolby Vision (profile 7 here) left out: its
+/// HDR10 base layer is what comes out.
+#[test]
+fn hdr_transcodes_keep_hdr10_and_leave_dolby_vision_out() {
+    if !has_ffmpeg() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let Some((source, _)) = hdr10_source(dir.path()) else { return };
+    let p7 = with_profile_7(dir.path(), &source);
+    let mut ff = ff();
+    ff.caps.encoders = vec![EncoderInfo {
+        name: "libx265".into(),
+        codec: VideoCodec::Hevc,
+        hardware: false,
+        accel: HwAccel::None,
+        main10: true,
+    }];
+    for (input, dolby_vision) in [(&source, false), (&p7, true)] {
+        let mut media = probe(input);
+        let v = media.streams.iter_mut().find(|s| s.kind == StreamKind::Video).unwrap();
+        assert_eq!(v.dynamic_range, Some(DynamicRange::Hdr10));
+        if dolby_vision {
+            assert!(frames(input, 1).contains("Dolby Vision Metadata"));
+            (v.dynamic_range, v.dv_profile, v.dv_level, v.dv_bl_compat) =
+                (Some(DynamicRange::DolbyVision), Some(7), Some(6), Some(6));
+        }
+        let req = JobRequest {
+            input: input.to_string_lossy().into_owned(),
+            video: Some(VideoRequest {
+                codec: VideoCodec::Hevc,
+                dynamic_range: OutputRange::Hdr10,
+                max_height: Some(360),
+                ..Default::default()
+            }),
+            audio: None,
+            segment_seconds: Some(2.0),
+            options: TranscodeOptions { throttle: false, hardware_decoding: false, ..Default::default() },
+            ..Default::default()
+        };
+        let plan = Plan::build(&req, &media, &ff, None).unwrap();
+        assert!(plan.warnings.is_empty(), "{:?}", plan.warnings);
+        let out = dir.path().join(if dolby_vision { "out-p7" } else { "out-hdr10" });
+        std::fs::create_dir(&out).unwrap();
+        let ctx = ArgsContext { input, encoder: None, relative_split_times: true, preset: None, shader_cache: None };
+        let args = plan.ffmpeg_args(&ctx, 0, plan.segment_count());
+        let ran = Command::new("ffmpeg").arg("-hide_banner").args(&args).current_dir(&out).output().unwrap();
+        assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+        assert_eq!(plan.segment_count(), 3);
+        for n in 0..plan.segment_count() {
+            let segment = out.join(format!("{n}.ts"));
+            let video = stream(&segment, "v");
+            assert_eq!(
+                (video["codec_name"].as_str(), video["profile"].as_str(), video["pix_fmt"].as_str()),
+                ("hevc", "Main 10", "yuv420p10le"),
+                "{segment:?}"
+            );
+            assert_eq!((video["color_transfer"].as_str(), video["color_primaries"].as_str()), ("smpte2084", "bt2020"));
+            let first = frames(&segment, 1);
+            assert!(first.contains("Mastering display metadata") && first.contains("max_luminance=10000000/10000"));
+            assert!(first.contains("Content light level metadata") && first.contains("max_content=1000"), "{first}");
+            assert!(!frames(&segment, 4).contains("Dolby Vision"), "{segment:?}");
+        }
+        let master = hls::master_playlist(&plan, &media);
+        assert!(master.contains("CODECS=\"hvc1.2.4.L93.B0\"") && master.contains("VIDEO-RANGE=PQ"), "{master}");
+    }
 }
 
 /// Dolby Vision 8.1 + HDR10+ made from the profile 7 test file: its RPUs

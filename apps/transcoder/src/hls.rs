@@ -104,7 +104,12 @@ pub fn master_playlist(plan: &Plan, media: &MediaInfo) -> String {
 /// The video's codec, its supplemental codec, and its range.
 fn video_codecs(v: &VideoOut, src: Option<&MediaStream>) -> (String, Option<String>, &'static str) {
     let Some(src) = src.filter(|_| v.copy) else {
-        // Encoded here: tone-mapped (or SDR already), 8-bit.
+        // Encoded here: HEVC Main 10 keeping HDR, else tone-mapped (or SDR
+        // already), 8-bit.
+        if let Some(hdr) = v.hdr {
+            let range = if hdr.range == DynamicRange::Hlg { "HLG" } else { "PQ" };
+            return (hevc_codec(Some("Main 10"), 10, None, v.height), None, range);
+        }
         let level = Some(h264_level(v.width, v.height, src.and_then(|s| s.frame_rate)));
         let codec = match v.codec {
             VideoCodec::H264 => avc_codec(Some("High"), level),
@@ -275,6 +280,7 @@ mod tests {
             pipeline: Pipeline::Software,
             dolby_vision,
             strip_hdr10plus: false,
+            hdr: None,
         }
     }
 
@@ -400,6 +406,21 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("INDEPENDENT"));
+    }
+
+    #[test]
+    fn hdr_encodes_are_main_10_in_their_range() {
+        use crate::plan::HdrOut;
+        let m = media(DynamicRange::DolbyVision, Some((5, 9, 0)));
+        let mut video = video_out(false, None);
+        video.codec = VideoCodec::Hevc;
+        video.hdr = Some(HdrOut { range: DynamicRange::Hdr10, convert: true });
+        let v = Variant::of(&plan(Some(video.clone()), None), &m);
+        assert_eq!((v.codecs, v.video_range), (vec!["hvc1.2.4.L123.B0".to_owned()], Some("PQ")));
+        video.hdr = Some(HdrOut { range: DynamicRange::Hlg, convert: false });
+        (video.width, video.height) = (3840, 2160);
+        let v = Variant::of(&plan(Some(video), None), &media(DynamicRange::Hlg, None));
+        assert_eq!((v.codecs, v.video_range), (vec!["hvc1.2.4.L153.B0".to_owned()], Some("HLG")));
     }
 
     #[test]
