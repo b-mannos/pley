@@ -74,7 +74,8 @@ class PleyApplication : Application(), PleyGraphOwner, SingletonImageLoader.Fact
             }
             StartupSignals.homeDrawn.first { it }
             graph.player
-            graph.caps.capabilities
+            // The probe itself, not only its holder: the first play needs its answer.
+            runCatching { graph.caps.capabilities.warmUp() }
         }
     }
 
