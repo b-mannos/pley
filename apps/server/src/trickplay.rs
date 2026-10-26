@@ -323,10 +323,10 @@ impl TrickplayService {
         let _ = tokio::fs::remove_dir_all(&target).await;
         tokio::fs::rename(&part, &target).await?;
         // Chapter images come from the same sheets; make them while they are warm.
-        if file.media_info().is_some_and(|m| m.chapters.len() > 1) {
-            if let Err(err) = self.chapter_images(&file).await {
-                tracing::debug!("chapter images for file {file_id}: {err:#}");
-            }
+        if file.media_info().is_some_and(|m| m.chapters.len() > 1)
+            && let Err(err) = self.chapter_images(&file).await
+        {
+            tracing::debug!("chapter images for file {file_id}: {err:#}");
         }
         Ok(())
     }

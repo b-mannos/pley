@@ -671,25 +671,27 @@ fn takes(d: &VideoDecoder, v: &MediaStream, depth: i64) -> bool {
             return false;
         }
     }
-    if let (Some(fps), Some(max)) = (v.frame_rate, d.max_fps) {
-        if fps > max + 0.01 {
-            return false;
-        }
+    if let (Some(fps), Some(max)) = (v.frame_rate, d.max_fps)
+        && fps > max + 0.01
+    {
+        return false;
     }
     if d.max_bit_depth.is_some_and(|max| depth > max) {
         return false;
     }
-    if let (Some(level), Some(max)) = (v.level, d.max_level) {
-        if level > 0 && level > max {
-            return false;
-        }
+    if let (Some(level), Some(max)) = (v.level, d.max_level)
+        && level > 0
+        && level > max
+    {
+        return false;
     }
     if !d.profiles.is_empty() {
         let has = |p: &str| d.profiles.iter().any(|x| x.eq_ignore_ascii_case(p));
-        if let Some(profile) = v.profile.as_deref() {
-            if !has(profile) && KNOWN_PROFILES.contains(&profile.to_ascii_lowercase().as_str()) {
-                return false;
-            }
+        if let Some(profile) = v.profile.as_deref()
+            && !has(profile)
+            && KNOWN_PROFILES.contains(&profile.to_ascii_lowercase().as_str())
+        {
+            return false;
         }
         // 10-bit HEVC needs Main 10 even when ffprobe gave no profile.
         if v.codec == "hevc" && depth >= 10 && !has("Main 10") && !has("Rext") {
@@ -1418,10 +1420,10 @@ impl Sessions {
         let now = now();
         let mut stopped = self.stopped.lock();
         stopped.retain(|_, s| now - s.at <= STOPPED_KEPT_SECS);
-        if stopped.len() >= STOPPED_KEPT {
-            if let Some(oldest) = stopped.iter().min_by_key(|(_, s)| s.at).map(|(id, _)| id.clone()) {
-                stopped.remove(&oldest);
-            }
+        if stopped.len() >= STOPPED_KEPT
+            && let Some(oldest) = stopped.iter().min_by_key(|(_, s)| s.at).map(|(id, _)| id.clone())
+        {
+            stopped.remove(&oldest);
         }
         stopped.insert(
             session.id.clone(),

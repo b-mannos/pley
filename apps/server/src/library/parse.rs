@@ -317,12 +317,14 @@ pub fn parse_episode(path: &Path, root: &Path) -> EpisodeName {
     // 10x12): only at the start of the name, in a season folder whose number
     // is the hundreds. Anime numbers its episodes on from one season to the
     // next (`Show - 104`), never at the start of the name.
-    if leading {
-        if let (Some(s), Some(n)) = (dir_season, episode) {
-            if s >= 1 && n >= 100 && n / 100 == s && n % 100 >= 1 {
-                episode = Some(n % 100);
-            }
-        }
+    if leading
+        && let (Some(s), Some(n)) = (dir_season, episode)
+        && s >= 1
+        && n >= 100
+        && n / 100 == s
+        && n % 100 >= 1
+    {
+        episode = Some(n % 100);
     }
 
     let season = season.or(dir_season).unwrap_or(1);
@@ -474,12 +476,12 @@ pub fn parse_track(path: &Path, root: &Path, tags: &BTreeMap<String, String>) ->
 /// "Artist - Title" → "Title" when the artist matches the folder.
 fn clean_track_title(raw: &str, artist: Option<&str>) -> String {
     let t = raw.replace('_', " ").trim().to_owned();
-    if let Some(artist) = artist {
-        if let Some(rest) = t.strip_prefix(artist) {
-            let rest = rest.trim_start_matches(|c: char| c.is_whitespace() || c == '-');
-            if !rest.is_empty() {
-                return rest.to_owned();
-            }
+    if let Some(artist) = artist
+        && let Some(rest) = t.strip_prefix(artist)
+    {
+        let rest = rest.trim_start_matches(|c: char| c.is_whitespace() || c == '-');
+        if !rest.is_empty() {
+            return rest.to_owned();
         }
     }
     t

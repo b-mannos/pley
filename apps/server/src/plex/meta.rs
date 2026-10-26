@@ -594,10 +594,11 @@ pub fn item_node(
                 node.push(Node::new("Guid").attr("id", format!("mbid://{mbid}")));
             }
         }
-        if detail.full && !is_leaf(kind) {
-            if let Some(path) = extras.path.as_deref() {
-                node.push(Node::new("Location").attr("path", path));
-            }
+        if detail.full
+            && !is_leaf(kind)
+            && let Some(path) = extras.path.as_deref()
+        {
+            node.push(Node::new("Location").attr("path", path));
         }
         if detail.full {
             for credit in &extras.people {

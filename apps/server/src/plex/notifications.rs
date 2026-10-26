@@ -248,10 +248,10 @@ impl Listener {
         // Sessions gone without a word: stopped.
         let gone: Vec<String> = self.sessions.keys().filter(|id| !mine.iter().any(|s| &&s.id == id)).cloned().collect();
         for id in gone {
-            if let Some(last) = self.sessions.remove(&id) {
-                if last.state != "stopped" {
-                    notes.push(playing(&Reported { state: "stopped", ..last }));
-                }
+            if let Some(last) = self.sessions.remove(&id)
+                && last.state != "stopped"
+            {
+                notes.push(playing(&Reported { state: "stopped", ..last }));
             }
         }
         // Keys stay for quiet sessions, which may wake.

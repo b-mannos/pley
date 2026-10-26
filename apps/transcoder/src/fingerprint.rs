@@ -128,7 +128,7 @@ fn parse_frame_stats(log: &str, start_ms: i64) -> Vec<FrameStats> {
 /// `fp_format=raw` writes the values as native-endian (little-endian on every
 /// platform FFmpeg runs on) 32-bit integers.
 fn parse_raw(bytes: &[u8]) -> Vec<u32> {
-    bytes.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+    bytes.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
 }
 
 #[cfg(test)]

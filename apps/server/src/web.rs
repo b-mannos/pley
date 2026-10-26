@@ -87,11 +87,11 @@ pub async fn static_handler(State(state): State<AppState>, request: Request) -> 
     headers.insert(header::VARY, HeaderValue::from_static("Accept-Encoding"));
 
     for (encoding, suffix) in [("br", ".br"), ("gzip", ".gz")] {
-        if accept.split(',').any(|e| e.trim().split(';').next() == Some(encoding)) {
-            if let Some(compressed) = load(&format!("{name}{suffix}")) {
-                headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(encoding));
-                return (headers, Body::from(compressed.bytes)).into_response();
-            }
+        if accept.split(',').any(|e| e.trim().split(';').next() == Some(encoding))
+            && let Some(compressed) = load(&format!("{name}{suffix}"))
+        {
+            headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(encoding));
+            return (headers, Body::from(compressed.bytes)).into_response();
         }
     }
     (headers, Body::from(asset.bytes)).into_response()

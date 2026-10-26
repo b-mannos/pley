@@ -68,10 +68,8 @@ pub async fn start(
     // A transcoder older than master playlists can't name Dolby Vision
     // (or anything else) in one: the player gets what older servers gave.
     let master_ok = state.transcoder.info().is_some_and(|info| info.capabilities.hls_master_playlist);
-    if !master_ok {
-        if let Some(hls) = req.caps.hls.as_mut() {
-            hls.master_playlist = false;
-        }
+    if !master_ok && let Some(hls) = req.caps.hls.as_mut() {
+        hls.master_playlist = false;
     }
     // Transcodes keep HDR only with a transcoder that can (HEVC Main 10).
     req.hdr_transcodes = state.transcoder.info().is_some_and(|info| info.capabilities.hdr_transcode);
@@ -395,10 +393,10 @@ async fn replacement_job(state: &AppState, user: &AuthUser, session: &Session, f
     if let Some(stopped) = state.sessions.stopped(&session.id) {
         return Err(AppError::SessionStopped(stopped.message));
     }
-    if let Some(current) = session.job_id() {
-        if current != failed {
-            return Ok(current);
-        }
+    if let Some(current) = session.job_id()
+        && current != failed
+    {
+        return Ok(current);
     }
     let spec = session.transcode.as_ref().ok_or_else(|| AppError::not_found("not a transcode session"))?;
     // Pre-start near the playhead instead of at the beginning.
@@ -834,10 +832,10 @@ pub async fn subtitles(
         state.config.cache_dir().join("subtitles").join(format!("{}_{}_{}{version}.vtt", file.id, index, file.mtime));
     // Anything but WebVTT is a file cut short by an earlier version (written
     // in place) that crashed or ran out of space: it is made again.
-    if let Ok(text) = tokio::fs::read_to_string(&cache).await {
-        if text.starts_with("WEBVTT") {
-            return Ok(vtt(text));
-        }
+    if let Ok(text) = tokio::fs::read_to_string(&cache).await
+        && text.starts_with("WEBVTT")
+    {
+        return Ok(vtt(text));
     }
     let Some(path) = sidecar else {
         // An embedded track: the cues found so far, at once, while the rest

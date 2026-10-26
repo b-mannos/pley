@@ -204,15 +204,15 @@ impl Tvmaze {
     }
 
     async fn find(&self, show: &ShowRow) -> Result<Option<i64>, ProviderError> {
-        if let Some(tvdb) = show.tvdb_id {
-            if let Some(id) = self.lookup("thetvdb", &tvdb.to_string()).await? {
-                return Ok(Some(id));
-            }
+        if let Some(tvdb) = show.tvdb_id
+            && let Some(id) = self.lookup("thetvdb", &tvdb.to_string()).await?
+        {
+            return Ok(Some(id));
         }
-        if let Some(imdb) = show.imdb_id.as_deref().filter(|i| i.starts_with("tt")) {
-            if let Some(id) = self.lookup("imdb", imdb).await? {
-                return Ok(Some(id));
-            }
+        if let Some(imdb) = show.imdb_id.as_deref().filter(|i| i.starts_with("tt"))
+            && let Some(id) = self.lookup("imdb", imdb).await?
+        {
+            return Ok(Some(id));
         }
         let request = self.api.http.get(format!("{}/search/shows", self.base)).query(&[("q", show.title.as_str())]);
         let results: Vec<SearchResult> = match self.api.json(request).await {

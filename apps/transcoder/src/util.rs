@@ -49,10 +49,8 @@ pub fn touch(path: &Path) {
     let recent = std::fs::metadata(path)
         .and_then(|m| m.modified())
         .is_ok_and(|t| t.elapsed().map(|age| age < EVERY).unwrap_or(true));
-    if !recent {
-        if let Ok(file) = std::fs::File::options().write(true).open(path) {
-            let _ = file.set_modified(SystemTime::now());
-        }
+    if !recent && let Ok(file) = std::fs::File::options().write(true).open(path) {
+        let _ = file.set_modified(SystemTime::now());
     }
 }
 

@@ -206,13 +206,13 @@ async fn report(
     match existing {
         Some(session) => {
             let changed = session.update(time_ms, play_state);
-            if session.should_touch_transcoder() {
-                if let Some(job) = session.job_id() {
-                    let transcoder = state.transcoder.clone();
-                    tokio::spawn(async move {
-                        let _ = transcoder.touch_job(&job).await;
-                    });
-                }
+            if session.should_touch_transcoder()
+                && let Some(job) = session.job_id()
+            {
+                let transcoder = state.transcoder.clone();
+                tokio::spawn(async move {
+                    let _ = transcoder.touch_job(&job).await;
+                });
             }
             if changed {
                 state.events.send(ServerEvent::SessionsChanged);

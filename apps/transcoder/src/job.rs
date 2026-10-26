@@ -698,14 +698,13 @@ impl JobManager {
                 self.remove(&job.id).await;
                 continue;
             }
-            if idle > PROCESS_IDLE_MS {
-                if let Ok(mut guard) = job.process.try_lock() {
-                    if guard.as_ref().is_some_and(Proc::running) {
-                        tracing::debug!(job = %job.id, "stopping idle ffmpeg process");
-                        if let Some(p) = guard.take() {
-                            p.stop().await;
-                        }
-                    }
+            if idle > PROCESS_IDLE_MS
+                && let Ok(mut guard) = job.process.try_lock()
+                && guard.as_ref().is_some_and(Proc::running)
+            {
+                tracing::debug!(job = %job.id, "stopping idle ffmpeg process");
+                if let Some(p) = guard.take() {
+                    p.stop().await;
                 }
             }
             let pruned = job.clone();
@@ -827,11 +826,11 @@ impl Job {
     /// Marks segment `n` ready, without waking anyone: see [`segment_written`].
     fn mark_ready(&self, n: u32) {
         let mut ready = self.ready.lock();
-        if let Some(slot) = ready.get_mut(n as usize) {
-            if !*slot {
-                *slot = true;
-                self.ready_count.fetch_add(1, Relaxed);
-            }
+        if let Some(slot) = ready.get_mut(n as usize)
+            && !*slot
+        {
+            *slot = true;
+            self.ready_count.fetch_add(1, Relaxed);
         }
     }
 

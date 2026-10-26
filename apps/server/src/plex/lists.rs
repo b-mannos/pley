@@ -348,11 +348,11 @@ pub async fn create(State(state): State<AppState>, PlexUser(user): PlexUser, par
     }
     .ok_or_else(|| PlexError::BadRequest("type must be video or audio".into()))?;
     let id = playlists::create(&state.db, &user, &title, kind).await?;
-    if !items.is_empty() {
-        if let Err(err) = playlists::add(&state.db, &user, id, &items).await {
-            playlists::delete(&state.db, &user, id).await?;
-            return Err(err.into());
-        }
+    if !items.is_empty()
+        && let Err(err) = playlists::add(&state.db, &user, id, &items).await
+    {
+        playlists::delete(&state.db, &user, id).await?;
+        return Err(err.into());
     }
     playlist_container_of(&state, &user, id).await
 }

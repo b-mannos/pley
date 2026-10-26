@@ -241,10 +241,10 @@ impl Extractor {
             return Ok((text, true));
         }
         let extraction = self.extraction(&path, &key, index);
-        if !extraction.by_ffmpeg.load(Ordering::Relaxed) {
-            if let Ok(done) = tokio::time::timeout(wait, extraction.done()).await {
-                return done.map(|text| (text, true));
-            }
+        if !extraction.by_ffmpeg.load(Ordering::Relaxed)
+            && let Ok(done) = tokio::time::timeout(wait, extraction.done()).await
+        {
+            return done.map(|text| (text, true));
         }
         // Still under way: the cues FFmpeg has found, when it is reading the file.
         let part = self.subs_dir.join(format!("{key}_{index}.vtt.part"));
@@ -261,11 +261,11 @@ impl Extractor {
     async fn convert_file(&self, path: &Path) -> ApiResult<String> {
         let raw = tokio::fs::read(path).await?;
         let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-        if ext == "vtt" {
-            if let Ok(text) = String::from_utf8(raw.clone()) {
-                let text = text.trim_start_matches('\u{feff}').to_owned();
-                return Ok(if text.starts_with("WEBVTT") { text } else { format!("WEBVTT\n\n{text}") });
-            }
+        if ext == "vtt"
+            && let Ok(text) = String::from_utf8(raw.clone())
+        {
+            let text = text.trim_start_matches('\u{feff}').to_owned();
+            return Ok(if text.starts_with("WEBVTT") { text } else { format!("WEBVTT\n\n{text}") });
         }
         let key = file_key(path)?;
         // Not `_file.vtt`: earlier versions wrote those in place, so a crash
@@ -455,10 +455,10 @@ impl Extractor {
                 cmd.args(MEDIA_INPUT_OPTIONS).arg("-i").arg(input_arg(input)).args(["-map", &format!("0:{index}")]);
             }
             TextSource::File(path) => {
-                if let Ok(raw) = tokio::fs::read(path).await {
-                    if let Some(charset) = guess_charset(&raw) {
-                        cmd.args(["-sub_charenc", charset]);
-                    }
+                if let Ok(raw) = tokio::fs::read(path).await
+                    && let Some(charset) = guess_charset(&raw)
+                {
+                    cmd.args(["-sub_charenc", charset]);
                 }
                 cmd.args(MEDIA_INPUT_OPTIONS).arg("-i").arg(input_arg(path)).args(["-map", "0:s:0"]);
             }
@@ -1280,7 +1280,7 @@ mod tests {
             .collect();
         let track =
             matroska::TextTrack { stream_index: 2, codec: webvtt::TextCodec::Subrip, header: Vec::new(), blocks };
-        let whole_ms = tick_ns % 1_000_000 == 0;
+        let whole_ms = tick_ns.is_multiple_of(1_000_000);
         matroska::TextTracks { tick_ns, whole_ms, tracks: vec![track], reads: 0, bytes_read: 0 }
     }
 

@@ -412,7 +412,7 @@ impl TopLevel {
         if self.walked > MAX_TOP_LEVEL_BOXES {
             return Err("too many boxes");
         }
-        if self.walked % 64 == 0 && self.deadline.is_some_and(|d| Instant::now() >= d) {
+        if self.walked.is_multiple_of(64) && self.deadline.is_some_and(|d| Instant::now() >= d) {
             return Err("too many fragments to read in time");
         }
         self.pos = h.end;
@@ -579,10 +579,10 @@ fn read_track<R: Read + Seek>(r: &mut Reader<R>, trak: &BoxHead) -> Result<Optio
     }
 
     let mut edits = Vec::new();
-    if let Some(edts) = find(&kids, b"edts") {
-        if let Some(elst) = find(&r.children(&edts)?, b"elst") {
-            edits = parse_elst(&r.body(&elst, MAX_SMALL_BOX)?)?;
-        }
+    if let Some(edts) = find(&kids, b"edts")
+        && let Some(elst) = find(&r.children(&edts)?, b"elst")
+    {
+        edits = parse_elst(&r.body(&elst, MAX_SMALL_BOX)?)?;
     }
     Ok(Some(Track { id, timescale: scale, edits, tables: read_tables(r, &tables)? }))
 }

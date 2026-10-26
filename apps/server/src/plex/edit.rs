@@ -71,15 +71,15 @@ impl Edit {
     fn parse(params: &Params) -> Self {
         let mut edit = Edit::default();
         for (key, value) in &params.0 {
-            if let Some((name, part)) = key.split_once('.') {
-                if let Some(&(_, field)) = FIELDS.iter().find(|(plex, _)| *plex == name) {
-                    match part {
-                        "value" => edit.values.push((field, value.clone())),
-                        "locked" => edit.locks.push((field, value == "1")),
-                        _ => {}
-                    }
-                    continue;
+            if let Some((name, part)) = key.split_once('.')
+                && let Some(&(_, field)) = FIELDS.iter().find(|(plex, _)| *plex == name)
+            {
+                match part {
+                    "value" => edit.values.push((field, value.clone())),
+                    "locked" => edit.locks.push((field, value == "1")),
+                    _ => {}
                 }
+                continue;
             }
             let Some(tags) = edit.tags_for(key) else { continue };
             let rest = &key[key.find(['[', '.']).unwrap_or(key.len())..];

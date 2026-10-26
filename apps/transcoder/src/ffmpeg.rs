@@ -43,21 +43,14 @@ impl Ffmpeg {
         let ffprobe = resolve_executable(ffprobe).unwrap_or_else(|| ffprobe.to_path_buf());
         let key = cache_key(&ffmpeg, &ffprobe);
 
-        if !force {
-            if let Some(cached) = read_cache(cache_path, &key) {
-                tracing::info!(
-                    "ffmpeg {} (cached capabilities): encoders [{}], tone mapping [{}]",
-                    cached.caps.ffmpeg_version.as_deref().unwrap_or("?"),
-                    encoder_names(&cached.caps),
-                    tonemapper_names(&cached.caps),
-                );
-                return Self {
-                    ffmpeg,
-                    ffprobe,
-                    caps: cached.caps,
-                    segment_times_relative: cached.segment_times_relative,
-                };
-            }
+        if !force && let Some(cached) = read_cache(cache_path, &key) {
+            tracing::info!(
+                "ffmpeg {} (cached capabilities): encoders [{}], tone mapping [{}]",
+                cached.caps.ffmpeg_version.as_deref().unwrap_or("?"),
+                encoder_names(&cached.caps),
+                tonemapper_names(&cached.caps),
+            );
+            return Self { ffmpeg, ffprobe, caps: cached.caps, segment_times_relative: cached.segment_times_relative };
         }
 
         let started = Instant::now();

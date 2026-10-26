@@ -444,10 +444,11 @@ impl AuthService {
         }
         let key = hash_token(token);
         let now = now();
-        if let Some(entry) = self.cache.get(&key) {
-            if entry.cached_at.elapsed() < CACHE_TTL && entry.expires_at > now {
-                return Some(entry.user.clone());
-            }
+        if let Some(entry) = self.cache.get(&key)
+            && entry.cached_at.elapsed() < CACHE_TTL
+            && entry.expires_at > now
+        {
+            return Some(entry.user.clone());
         }
         #[allow(clippy::type_complexity)]
         let row: Option<(i64, String, bool, bool, Option<i64>, bool, i64, i64)> = sqlx::query_as(
@@ -538,10 +539,11 @@ impl AuthService {
         }
         let key = hash_token(token);
         let now = now();
-        if let Some(entry) = self.apps.get(&key) {
-            if entry.cached_at.elapsed() < CACHE_TTL && entry.expires_at > now {
-                return Some(entry.user.clone());
-            }
+        if let Some(entry) = self.apps.get(&key)
+            && entry.cached_at.elapsed() < CACHE_TTL
+            && entry.expires_at > now
+        {
+            return Some(entry.user.clone());
         }
         // Read before the database: a forget that lands while the query
         // runs keeps what it read out of the cache.
@@ -753,10 +755,11 @@ pub(crate) fn cookie_token(parts: &Parts) -> Option<String> {
     for cookie_header in parts.headers.get_all(header::COOKIE) {
         let Ok(cookies) = cookie_header.to_str() else { continue };
         for pair in cookies.split(';') {
-            if let Some((name, value)) = pair.trim().split_once('=') {
-                if name == COOKIE_NAME && !value.is_empty() {
-                    return Some(value.to_owned());
-                }
+            if let Some((name, value)) = pair.trim().split_once('=')
+                && name == COOKIE_NAME
+                && !value.is_empty()
+            {
+                return Some(value.to_owned());
             }
         }
     }

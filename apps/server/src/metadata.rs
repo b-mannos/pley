@@ -427,7 +427,7 @@ impl MetadataAgent {
                 Err(TmdbError::NotFound) => tracing::debug!("no metadata match for item {id}"),
                 Err(TmdbError::Other(err)) => tracing::warn!("metadata for item {id} failed: {err:#}"),
             }
-            if done % 5 == 0 || done == total {
+            if done.is_multiple_of(5) || done == total {
                 progress(done, total);
             }
         }
@@ -1027,10 +1027,11 @@ impl MetadataAgent {
     /// from the same URL are not downloaded again.
     async fn artwork(&self, current: Option<&str>, remote: Option<&str>, size: &str) -> Option<String> {
         let remote = remote?;
-        if let Some(cur) = current {
-            if !store::is_blob(cur) && Path::new(cur).exists() {
-                return None;
-            }
+        if let Some(cur) = current
+            && !store::is_blob(cur)
+            && Path::new(cur).exists()
+        {
+            return None;
         }
         let url = format!("{IMAGES}/{size}{remote}");
         match self.store.remote(&url).await {

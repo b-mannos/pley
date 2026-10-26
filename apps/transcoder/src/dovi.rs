@@ -191,7 +191,7 @@ impl<'a> BitReader<'a> {
 
     /// Reads up to the next byte boundary; those bits must be zero.
     fn align_zero(&mut self) -> anyhow::Result<()> {
-        while self.pos % 8 != 0 {
+        while !self.pos.is_multiple_of(8) {
             ensure!(!self.bit()?, "alignment bits that aren't zero");
         }
         Ok(())
@@ -207,7 +207,7 @@ struct BitWriter {
 
 impl BitWriter {
     fn bit(&mut self, bit: bool) {
-        if self.len % 8 == 0 {
+        if self.len.is_multiple_of(8) {
             self.bytes.push(0);
         }
         if bit {
@@ -240,7 +240,7 @@ impl BitWriter {
     }
 
     fn align_zero(&mut self) {
-        while self.len % 8 != 0 {
+        while !self.len.is_multiple_of(8) {
             self.bit(false);
         }
     }

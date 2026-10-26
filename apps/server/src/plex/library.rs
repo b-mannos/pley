@@ -1570,14 +1570,14 @@ pub async fn metadata(
     let mut nodes = item_nodes(&state, &rows, &sections, detail).await?;
     if params.flag("includeOnDeck") {
         for (node, row) in nodes.iter_mut().zip(&rows) {
-            if let Some(next) = catalog::on_deck(&state.db, user.id, row).await? {
-                if let Some(next_row) = catalog::item(&state.db, user.id, next).await? {
-                    let detail = Detail { guids: true, full: false, media: true, markers: false };
-                    let next_node = item_nodes(&state, &[next_row], &sections, detail).await?;
-                    let mut on_deck = Node::new("OnDeck");
-                    on_deck.extend(next_node);
-                    node.push(on_deck);
-                }
+            if let Some(next) = catalog::on_deck(&state.db, user.id, row).await?
+                && let Some(next_row) = catalog::item(&state.db, user.id, next).await?
+            {
+                let detail = Detail { guids: true, full: false, media: true, markers: false };
+                let next_node = item_nodes(&state, &[next_row], &sections, detail).await?;
+                let mut on_deck = Node::new("OnDeck");
+                on_deck.extend(next_node);
+                node.push(on_deck);
             }
         }
     }

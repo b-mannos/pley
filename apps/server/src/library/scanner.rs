@@ -514,10 +514,8 @@ impl Scanner {
         let removed = totals.removed > 0;
         tokio::spawn(async move {
             store.fingerprint_pending().await;
-            if removed {
-                if let Err(err) = store.clean().await {
-                    tracing::warn!("storage clean-up failed: {err:#}");
-                }
+            if removed && let Err(err) = store.clean().await {
+                tracing::warn!("storage clean-up failed: {err:#}");
             }
         });
 

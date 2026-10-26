@@ -67,10 +67,10 @@ impl Drop for Guard {
             }
             PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0);
         }
-        if let Some(thread) = self.thread.take() {
-            if !super::join_within(thread, TRAY_STOP_WAIT) {
-                tracing::warn!("the tray icon's thread did not stop: leaving it to the end of the process");
-            }
+        if let Some(thread) = self.thread.take()
+            && !super::join_within(thread, TRAY_STOP_WAIT)
+        {
+            tracing::warn!("the tray icon's thread did not stop: leaving it to the end of the process");
         }
     }
 }

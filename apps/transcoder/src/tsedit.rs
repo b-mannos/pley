@@ -70,7 +70,7 @@ pub fn edit_ts(data: &[u8], edits: Edits) -> Result<(Option<Vec<u8>>, Edited), S
 /// The transport stream with each HEVC access unit passed through `edit`
 /// (`None`: unchanged), or `None` when nothing changed.
 pub fn rewrite_video(data: &[u8], mut edit: impl FnMut(&[u8]) -> Option<Vec<u8>>) -> Result<Option<Vec<u8>>, String> {
-    if data.len() % PACKET != 0 || data.chunks(PACKET).any(|p| p[0] != 0x47) {
+    if !data.len().is_multiple_of(PACKET) || data.chunks(PACKET).any(|p| p[0] != 0x47) {
         return Err("not an MPEG-TS file".into());
     }
     let Some(video) = hevc_pid(data) else { return Ok(None) };
@@ -343,7 +343,7 @@ fn hevc_pid(data: &[u8]) -> Option<u16> {
     };
     let pat = section(0)?;
     // Programs from byte 8 to the CRC; program 0 is the network PID.
-    let pmt = pat.get(8..pat.len().checked_sub(4)?)?.chunks_exact(4).find_map(|entry| {
+    let pmt = pat.get(8..pat.len().checked_sub(4)?)?.as_chunks::<4>().0.iter().find_map(|entry| {
         let program = u16::from_be_bytes([entry[0], entry[1]]);
         (program != 0).then(|| (u16::from(entry[2] & 0x1F) << 8) | u16::from(entry[3]))
     })?;

@@ -1059,10 +1059,10 @@ fn block_counts(tags: &[u8], writing_app: Option<&[u8]>, uids: &[u64]) -> Vec<Op
                 _ => {}
             }
         }
-        if let (Some(frames), Some(app)) = (frames, app) {
-            if writing_app.is_some_and(|w| trim_nul(w) == trim_nul(app)) {
-                counts[slot] = Some(frames);
-            }
+        if let (Some(frames), Some(app)) = (frames, app)
+            && writing_app.is_some_and(|w| trim_nul(w) == trim_nul(app))
+        {
+            counts[slot] = Some(frames);
         }
     }
     counts

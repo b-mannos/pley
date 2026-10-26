@@ -241,10 +241,10 @@ pub async fn progress(
     if !matches!(body.state.as_str(), "playing" | "paused" | "stopped" | "buffering") {
         return Err(AppError::bad_request("state must be playing, paused or stopped"));
     }
-    if let Some(age_ms) = body.age_ms.filter(|age| *age > 0) {
-        if changed_since(&state, user.id, id, age_ms).await? {
-            return Ok(StatusCode::NO_CONTENT);
-        }
+    if let Some(age_ms) = body.age_ms.filter(|age| *age > 0)
+        && changed_since(&state, user.id, id, age_ms).await?
+    {
+        return Ok(StatusCode::NO_CONTENT);
     }
     let duration = body.duration_ms.filter(|d| *d > 0).or(row.duration_ms).unwrap_or(0);
     let device = crate::accounts::device_name(headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()));
@@ -267,25 +267,25 @@ pub async fn progress(
     }
     // The place is kept, but a session stopped from elsewhere is over: a
     // direct play's player hears it here (its file requests name no session).
-    if let Some(stopped) = body.session_id.as_deref().and_then(|sid| state.sessions.stopped(sid)) {
-        if stopped.user_id == user.id {
-            return Err(AppError::SessionStopped(stopped.message));
-        }
+    if let Some(stopped) = body.session_id.as_deref().and_then(|sid| state.sessions.stopped(sid))
+        && stopped.user_id == user.id
+    {
+        return Err(AppError::SessionStopped(stopped.message));
     }
-    if let Some(session) = body.session_id.as_deref().and_then(|sid| state.sessions.get(sid)) {
-        if session.user_id == user.id {
-            let changed = session.update(body.position_ms, &body.state);
-            if session.should_touch_transcoder() {
-                if let Some(job) = session.job_id() {
-                    let transcoder = state.transcoder.clone();
-                    tokio::spawn(async move {
-                        let _ = transcoder.touch_job(&job).await;
-                    });
-                }
-            }
-            if changed {
-                state.events.send(ServerEvent::SessionsChanged);
-            }
+    if let Some(session) = body.session_id.as_deref().and_then(|sid| state.sessions.get(sid))
+        && session.user_id == user.id
+    {
+        let changed = session.update(body.position_ms, &body.state);
+        if session.should_touch_transcoder()
+            && let Some(job) = session.job_id()
+        {
+            let transcoder = state.transcoder.clone();
+            tokio::spawn(async move {
+                let _ = transcoder.touch_job(&job).await;
+            });
+        }
+        if changed {
+            state.events.send(ServerEvent::SessionsChanged);
         }
     }
     Ok(StatusCode::NO_CONTENT)

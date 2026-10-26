@@ -724,10 +724,10 @@ async fn exchange_code(
             tracing::warn!(
                 "{client_id} exchanged a code a second time (someone else may have it): its access is ended"
             );
-            if let Some(token_hash) = made {
-                if let Err(err) = state.auth.end_grant_of_token(&token_hash).await {
-                    tracing::error!("could not end an app's access: {err}");
-                }
+            if let Some(token_hash) = made
+                && let Err(err) = state.auth.end_grant_of_token(&token_hash).await
+            {
+                tracing::error!("could not end an app's access: {err}");
             }
             return Err(OAuthError::invalid_grant("the code was used already"));
         }
@@ -1484,10 +1484,10 @@ async fn sign_out_app(state: &AppState, user_id: i64, grant_id: i64) -> ApiResul
         return Err(AppError::not_found("no such app"));
     }
     let described = describe(state, grant_id).await;
-    if state.auth.end_grant(grant_id).await? {
-        if let Some((app, user)) = described {
-            tracing::info!("{app} was signed out of {user}'s account");
-        }
+    if state.auth.end_grant(grant_id).await?
+        && let Some((app, user)) = described
+    {
+        tracing::info!("{app} was signed out of {user}'s account");
     }
     Ok(StatusCode::NO_CONTENT)
 }

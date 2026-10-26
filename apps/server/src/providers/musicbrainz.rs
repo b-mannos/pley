@@ -322,14 +322,14 @@ impl MusicBrainz {
         .execute(&self.db.write)
         .await?;
         // The album's artist, when MusicBrainz credits it under our name.
-        if let (Some(artist_id), Some(name), Some((mbid, names))) = (album.artist_id, &album.artist, &found.artist) {
-            if names.iter().any(|n| normalize_key(n) == normalize_key(name)) {
-                sqlx::query("UPDATE items SET musicbrainz_id = ? WHERE id = ? AND musicbrainz_id IS NULL")
-                    .bind(mbid)
-                    .bind(artist_id)
-                    .execute(&self.db.write)
-                    .await?;
-            }
+        if let (Some(artist_id), Some(name), Some((mbid, names))) = (album.artist_id, &album.artist, &found.artist)
+            && names.iter().any(|n| normalize_key(n) == normalize_key(name))
+        {
+            sqlx::query("UPDATE items SET musicbrainz_id = ? WHERE id = ? AND musicbrainz_id IS NULL")
+                .bind(mbid)
+                .bind(artist_id)
+                .execute(&self.db.write)
+                .await?;
         }
         Ok(())
     }

@@ -153,17 +153,17 @@ pub fn router(state: Arc<AppState>) -> Router {
 }
 
 async fn auth(State(state): Shared, request: Request, next: Next) -> Response {
-    if let Some(expected) = &state.token {
-        if request.uri().path() != "/health" {
-            let presented = request
-                .headers()
-                .get(header::AUTHORIZATION)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.strip_prefix("Bearer "))
-                .unwrap_or_default();
-            if !constant_time_eq(presented.as_bytes(), expected.as_bytes()) {
-                return ApiError::Unauthorized.into_response();
-            }
+    if let Some(expected) = &state.token
+        && request.uri().path() != "/health"
+    {
+        let presented = request
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .unwrap_or_default();
+        if !constant_time_eq(presented.as_bytes(), expected.as_bytes()) {
+            return ApiError::Unauthorized.into_response();
         }
     }
     next.run(request).await

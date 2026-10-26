@@ -105,11 +105,11 @@ pub async fn create(
         })?,
     };
     let id = playlists::create(&state.db, &user, &title, kind).await?;
-    if !body.item_ids.is_empty() {
-        if let Err(err) = playlists::add(&state.db, &user, id, &body.item_ids).await {
-            playlists::delete(&state.db, &user, id).await?;
-            return Err(err);
-        }
+    if !body.item_ids.is_empty()
+        && let Err(err) = playlists::add(&state.db, &user, id, &body.item_ids).await
+    {
+        playlists::delete(&state.db, &user, id).await?;
+        return Err(err);
     }
     Ok((StatusCode::CREATED, Json(detail(&state, &user, id).await?)))
 }

@@ -134,13 +134,13 @@ pub async fn list(db: &Db, user: &AuthUser, library_id: i64) -> sqlx::Result<Vec
     .await?;
     let ids: Vec<i64> = rows.iter().filter(|r| r.smart_filter.is_none()).map(|r| r.id).collect();
     let mut counts = visible_counts(db, user.id, &ids).await?;
-    if rows.iter().any(|r| r.smart_filter.is_some()) {
-        if let Some(lib) = crate::library::get_library(db, library_id).await? {
-            for row in &rows {
-                if let Some(filter) = &row.smart_filter {
-                    let count = crate::plex::smart_count(db, user.id, &lib, filter).await?;
-                    counts.insert(row.id, i64::try_from(count).unwrap_or(i64::MAX));
-                }
+    if rows.iter().any(|r| r.smart_filter.is_some())
+        && let Some(lib) = crate::library::get_library(db, library_id).await?
+    {
+        for row in &rows {
+            if let Some(filter) = &row.smart_filter {
+                let count = crate::plex::smart_count(db, user.id, &lib, filter).await?;
+                counts.insert(row.id, i64::try_from(count).unwrap_or(i64::MAX));
             }
         }
     }

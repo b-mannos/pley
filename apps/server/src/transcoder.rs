@@ -174,10 +174,10 @@ impl Transcoder {
         self.stopping.store(true, Ordering::SeqCst);
         self.stop.notify_waiters();
         let task = self.supervisor.lock().take();
-        if let Some(task) = task {
-            if tokio::time::timeout(Duration::from_secs(15), task).await.is_err() {
-                tracing::warn!("the transcoder supervisor did not stop in time");
-            }
+        if let Some(task) = task
+            && tokio::time::timeout(Duration::from_secs(15), task).await.is_err()
+        {
+            tracing::warn!("the transcoder supervisor did not stop in time");
         }
     }
 
@@ -648,11 +648,10 @@ impl Transcoder {
         let announce = tokio::select! {
             announce = tokio::time::timeout(Duration::from_secs(120), async {
                 while let Ok(Some(line)) = stdout_lines.next_line().await {
-                    if let Ok(a) = serde_json::from_str::<Announce>(&line) {
-                        if a.event == "listening" {
+                    if let Ok(a) = serde_json::from_str::<Announce>(&line)
+                        && a.event == "listening" {
                             return Some(a.addr);
                         }
-                    }
                 }
                 None
             }) => announce,

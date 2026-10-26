@@ -105,11 +105,11 @@ impl Sidecars {
             let mut subtitles = Vec::new();
             for name in names {
                 let lower = name.to_ascii_lowercase();
-                if let Some((stem, ext)) = lower.rsplit_once('.') {
-                    if IMAGE_EXTENSIONS.contains(&ext) {
-                        let images = index.images.entry(dir.clone()).or_default();
-                        images.entry(stem.to_owned()).or_insert_with(|| name.clone());
-                    }
+                if let Some((stem, ext)) = lower.rsplit_once('.')
+                    && IMAGE_EXTENSIONS.contains(&ext)
+                {
+                    let images = index.images.entry(dir.clone()).or_default();
+                    images.entry(stem.to_owned()).or_insert_with(|| name.clone());
                 }
                 let lower = name.to_lowercase();
                 let Some((base, ext)) = lower.rsplit_once('.') else { continue };

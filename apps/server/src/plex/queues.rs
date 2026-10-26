@@ -61,10 +61,10 @@ fn store(queue: Queue) -> i64 {
     let id = NEXT_QUEUE.fetch_add(1, Ordering::Relaxed);
     let mut queues = QUEUES.lock();
     queues.retain(|_, q| q.used.elapsed() < KEEP);
-    if queues.len() >= MAX_QUEUES {
-        if let Some(oldest) = queues.iter().min_by_key(|(_, q)| q.used).map(|(id, _)| *id) {
-            queues.remove(&oldest);
-        }
+    if queues.len() >= MAX_QUEUES
+        && let Some(oldest) = queues.iter().min_by_key(|(_, q)| q.used).map(|(id, _)| *id)
+    {
+        queues.remove(&oldest);
     }
     queues.insert(id, queue);
     id

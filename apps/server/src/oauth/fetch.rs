@@ -381,10 +381,10 @@ impl Documents {
             }
             let waiting = self.in_flight.lock().get(client_id).cloned();
             if let Some(mut answer) = waiting {
-                if let Ok(answer) = answer.wait_for(Option::is_some).await {
-                    if let Some(result) = (*answer).clone() {
-                        return result;
-                    }
+                if let Ok(answer) = answer.wait_for(Option::is_some).await
+                    && let Some(result) = (*answer).clone()
+                {
+                    return result;
                 }
                 // That fetch was dropped half way: try again.
                 continue;

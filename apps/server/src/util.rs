@@ -107,10 +107,10 @@ pub fn normalize_key(value: &str) -> String {
 pub fn sort_title(title: &str) -> String {
     let lower = title.trim().to_lowercase();
     for article in ["the ", "a ", "an "] {
-        if let Some(rest) = lower.strip_prefix(article) {
-            if !rest.trim().is_empty() {
-                return rest.trim_start().to_owned();
-            }
+        if let Some(rest) = lower.strip_prefix(article)
+            && !rest.trim().is_empty()
+        {
+            return rest.trim_start().to_owned();
         }
     }
     lower

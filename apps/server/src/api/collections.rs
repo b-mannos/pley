@@ -144,10 +144,10 @@ pub async fn update(
 ) -> ApiResult<Json<CollectionDetail>> {
     let library_id = library_of(&state, id).await?;
     let title = body.title.as_deref().map(clean_title).transpose()?;
-    if let Some(sort) = &body.sort {
-        if !matches!(sort.as_str(), "release" | "title" | "custom") {
-            return Err(AppError::bad_request("sort must be release, title or custom"));
-        }
+    if let Some(sort) = &body.sort
+        && !matches!(sort.as_str(), "release" | "title" | "custom")
+    {
+        return Err(AppError::bad_request("sort must be release, title or custom"));
     }
     let summary = body.summary.map(|s| s.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()));
     if let Some(filter) = &body.smart_filter {
