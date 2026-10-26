@@ -616,6 +616,19 @@ impl Plan {
     /// original's as the file's.
     pub fn file_args(&self, ctx: &ArgsContext<'_>, media: &MediaInfo, output: &Path) -> Vec<OsString> {
         let mut a = self.stream_args(ctx, 0, self.segment_count());
+        // Their languages and names (stream_args leaves the input's metadata out).
+        let name = |a: &mut Args, out: &str, s: &MediaStream| {
+            let key = format!("-metadata:s:{out}");
+            if let Some(language) = s.language.as_deref().filter(|l| !l.is_empty()) {
+                a.push_all([key.as_str(), &format!("language={language}")]);
+            }
+            if let Some(title) = s.title.as_deref().filter(|t| !t.is_empty()) {
+                a.push_all([key.as_str(), &format!("title={title}")]);
+            }
+        };
+        if let Some(sound) = self.audio.as_ref().and_then(|au| media.stream(au.stream_index)) {
+            name(&mut a, "a:0", sound);
+        }
         let mut n = 0;
         for s in media.streams.iter().filter(|s| s.kind == StreamKind::Subtitle) {
             let codec = match s.codec.as_str() {
@@ -625,6 +638,7 @@ impl Plan {
                 _ => continue,
             };
             a.push_all(["-map", &format!("0:{}", s.index), &format!("-c:s:{n}"), codec]);
+            name(&mut a, &format!("s:{n}"), s);
             n += 1;
         }
         a.push_all(["-map", "0:t?", "-f", "matroska"]);
@@ -1398,6 +1412,8 @@ mod tests {
         let mut req = request();
         req.options.throttle = false;
         let mut media = media(DynamicRange::Sdr, None);
+        media.streams[1].language = Some("eng".into());
+        (media.streams[3].language, media.streams[3].title) = (Some("fre".into()), Some("Forced".into()));
         media.streams.push(MediaStream {
             index: 4,
             kind: StreamKind::Subtitle,
@@ -1430,9 +1446,13 @@ mod tests {
         assert!(line.contains("-c:a aac"), "{line}");
         // The subtitles as they are, in their order; teletext has no place in Matroska.
         assert!(
-            line.contains("-map 0:2 -c:s:0 copy -map 0:3 -c:s:1 copy -map 0:5 -c:s:2 srt -map 0:t? -f matroska"),
+            line.contains(
+                "-map 0:2 -c:s:0 copy -map 0:3 -c:s:1 copy -metadata:s:s:1 language=fre -metadata:s:s:1 title=Forced"
+            ),
             "{line}"
         );
+        assert!(line.contains("-map 0:5 -c:s:2 srt -map 0:t? -f matroska"), "{line}");
+        assert!(line.contains("-metadata:s:a:0 language=eng"), "{line}");
         for absent in ["-segment", "-ss ", "-t ", "-readrate", "-output_ts_offset"] {
             assert!(!line.contains(absent), "{absent} in {line}");
         }
