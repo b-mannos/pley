@@ -17,3 +17,4 @@ Thumbs.db
 /dist
 /.local
 /.claude/
+__pycache__/

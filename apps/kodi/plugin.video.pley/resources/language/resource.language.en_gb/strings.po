@@ -1,0 +1,168 @@
+# pley for Kodi
+# Addon id: plugin.video.pley
+msgid ""
+msgstr ""
+"Project-Id-Version: plugin.video.pley\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en_GB\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgctxt "#30000"
+msgid "Choose a server"
+msgstr ""
+
+msgctxt "#30001"
+msgid "Sign in to %s"
+msgstr ""
+
+msgctxt "#30002"
+msgid "Sign out"
+msgstr ""
+
+msgctxt "#30003"
+msgid "Search"
+msgstr ""
+
+msgctxt "#30004"
+msgid "Playlists"
+msgstr ""
+
+msgctxt "#30005"
+msgid "Collections"
+msgstr ""
+
+msgctxt "#30006"
+msgid "Next page"
+msgstr ""
+
+msgctxt "#30007"
+msgid "Enter an address"
+msgstr ""
+
+msgctxt "#30009"
+msgid "Looking for pley servers on this network"
+msgstr ""
+
+msgctxt "#30010"
+msgid "Sign in"
+msgstr ""
+
+msgctxt "#30011"
+msgid "On your phone or computer, open [B]%s[/B] and type the code [B]%s[/B]"
+msgstr ""
+
+msgctxt "#30012"
+msgid "Signed in as %s"
+msgstr ""
+
+msgctxt "#30013"
+msgid "Signed out of pley"
+msgstr ""
+
+msgctxt "#30014"
+msgid "The code expired. Sign in again for a new one."
+msgstr ""
+
+msgctxt "#30015"
+msgid "Signing in was refused on the server's page."
+msgstr ""
+
+msgctxt "#30016"
+msgid "%s doesn't answer. Check the address, and that the server is running."
+msgstr ""
+
+msgctxt "#30017"
+msgid "%s isn't a pley server, or isn't one Kodi can sign in to."
+msgstr ""
+
+msgctxt "#30018"
+msgid "pley's service isn't running: restart Kodi."
+msgstr ""
+
+msgctxt "#30019"
+msgid "Mark as watched"
+msgstr ""
+
+msgctxt "#30020"
+msgid "Mark as unwatched"
+msgstr ""
+
+msgctxt "#30021"
+msgid "Add to My List"
+msgstr ""
+
+msgctxt "#30022"
+msgid "Remove from My List"
+msgstr ""
+
+msgctxt "#30024"
+msgid "The server stopped this stream."
+msgstr ""
+
+msgctxt "#30026"
+msgid "The server answered: %s"
+msgstr ""
+
+msgctxt "#30027"
+msgid "Settings"
+msgstr ""
+
+msgctxt "#30030"
+msgid "Nothing found"
+msgstr ""
+
+# Settings
+
+msgctxt "#30040"
+msgid "Server"
+msgstr ""
+
+msgctxt "#30041"
+msgid "Server address"
+msgstr ""
+
+msgctxt "#30042"
+msgid "Server name"
+msgstr ""
+
+msgctxt "#30043"
+msgid "Playback"
+msgstr ""
+
+msgctxt "#30044"
+msgid "Quality"
+msgstr ""
+
+msgctxt "#30045"
+msgid "Original"
+msgstr ""
+
+msgctxt "#30046"
+msgid "30 Mbps 4K"
+msgstr ""
+
+msgctxt "#30047"
+msgid "20 Mbps 1080p"
+msgstr ""
+
+msgctxt "#30048"
+msgid "15 Mbps 4K"
+msgstr ""
+
+msgctxt "#30049"
+msgid "12 Mbps 1080p"
+msgstr ""
+
+msgctxt "#30050"
+msgid "8 Mbps 1080p"
+msgstr ""
+
+msgctxt "#30051"
+msgid "4 Mbps 720p"
+msgstr ""
+
+msgctxt "#30052"
+msgid "2 Mbps 480p"
+msgstr ""

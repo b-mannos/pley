@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<settings version="1">
+  <section id="plugin.video.pley">
+    <category id="server" label="30040">
+      <group id="1">
+        <setting id="server_name" type="string" label="30042">
+          <level>0</level>
+          <default/>
+          <constraints>
+            <allowempty>true</allowempty>
+          </constraints>
+          <control type="edit" format="string">
+            <heading>30042</heading>
+          </control>
+        </setting>
+        <setting id="server_url" type="string" label="30041">
+          <level>0</level>
+          <default/>
+          <constraints>
+            <allowempty>true</allowempty>
+          </constraints>
+          <control type="edit" format="string">
+            <heading>30041</heading>
+          </control>
+        </setting>
+        <setting id="server_id" type="string">
+          <level>4</level>
+          <default/>
+          <constraints>
+            <allowempty>true</allowempty>
+          </constraints>
+          <visible>false</visible>
+          <control type="edit" format="string"/>
+        </setting>
+      </group>
+      <group id="2">
+        <setting id="choose_server" type="action" label="30000">
+          <level>0</level>
+          <data>RunPlugin(plugin://plugin.video.pley/?route=choose_server)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
+        <setting id="sign_in" type="action" label="30010">
+          <level>0</level>
+          <data>RunPlugin(plugin://plugin.video.pley/?route=sign_in)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
+        <setting id="sign_out" type="action" label="30002">
+          <level>0</level>
+          <data>RunPlugin(plugin://plugin.video.pley/?route=sign_out)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
+      </group>
+    </category>
+    <category id="playback" label="30043">
+      <group id="1">
+        <setting id="quality" type="integer" label="30044">
+          <level>0</level>
+          <default>0</default>
+          <constraints>
+            <options>
+              <option label="30045">0</option>
+              <option label="30046">1</option>
+              <option label="30047">2</option>
+              <option label="30048">3</option>
+              <option label="30049">4</option>
+              <option label="30050">5</option>
+              <option label="30051">6</option>
+              <option label="30052">7</option>
+            </options>
+          </constraints>
+          <control type="list" format="string">
+            <heading>30044</heading>
+          </control>
+        </setting>
+      </group>
+    </category>
+  </section>
+</settings>
