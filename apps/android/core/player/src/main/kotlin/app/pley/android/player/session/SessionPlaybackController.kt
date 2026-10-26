@@ -153,7 +153,7 @@ class SessionPlaybackController(
     private val recovery = Recovery()
     private val struggle = StruggleMeter()
     private val credits = CreditsGate()
-    private val nextUp = NextUp(env.api)
+    private val nextUp = NextUp(env.api, env.local)
     private val serverSubtitles = ServerSubtitles(scope, env.subtitles, env.parser, env.work, onError = { notice(texts.subtitlesFailed) })
     private val pictureSubtitles = env.pictures?.let { PictureSubtitles(scope, it, onError = ::picturesFailed) }
 
@@ -423,13 +423,21 @@ class SessionPlaybackController(
         applyTracks()
     }
 
-    /** The item's details: the server's (or what was saved of them), else a download's while the server is out of reach. */
-    private suspend fun detailOf(itemId: Long): ItemDetail = try {
-        env.details.detail(itemId)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        env.local.detail(itemId) ?: throw e
+    /**
+     * The item's details: the server's (or what was saved of them). A
+     * download waits for the server [SERVER_DETAIL_WAIT_MS] at most, then
+     * starts from what was saved with it: away from home, the server's
+     * address may take long to fail.
+     */
+    private suspend fun detailOf(itemId: Long): ItemDetail {
+        val saved = env.local.detail(itemId)?.takeIf { d -> d.files.any { env.local.file(it.id) != null } }
+        return try {
+            if (saved == null) env.details.detail(itemId) else withTimeoutOrNull(SERVER_DETAIL_WAIT_MS) { env.details.detail(itemId) } ?: saved
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            saved ?: env.local.detail(itemId) ?: throw e
+        }
     }
 
     /** Reports `stopped` at [positionMs] and deletes the session playing; false when none plays. */
@@ -1049,10 +1057,12 @@ class SessionPlaybackController(
     /** Finds what plays next (once at a time), then calls [then] with it. */
     private fun lookUpNext(then: (ItemSummary?) -> Unit) {
         val detail = item ?: return then(null)
+        // Asked at the end too, when the session has ended already: by the file.
+        val fromDownload = !streamingPicked && file?.let { env.local.file(it.id) } != null
         nextLookup?.cancel()
         nextLookup = scope.launch {
             val found = try {
-                nextUp.after(detail.id, detail.kind, current.queue)
+                nextUp.after(detail.id, detail.kind, current.queue, fromDownload)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -1081,7 +1091,8 @@ class SessionPlaybackController(
             itemId = found.id,
             title = found.title,
             heading = texts.upNext(NextUp.labelOf(found)),
-            imageUrl = (found.thumbUrl ?: found.backdropUrl)?.let { env.api.url(it, UP_NEXT_IMAGE_WIDTH) },
+            // A download's picture is a file here.
+            imageUrl = (found.thumbUrl ?: found.backdropUrl)?.let { if (it.startsWith("file:")) it else env.api.url(it, UP_NEXT_IMAGE_WIDTH) },
             secondsLeft = null,
         )
         ui.update { it.copy(upNextCard = card, upNext = card.title, upNextSecondsLeft = null) }
@@ -1260,6 +1271,9 @@ class SessionPlaybackController(
 
         /** The longest a new session waits for the one before to be ended. */
         const val END_WAIT_MS = 2_000L
+
+        /** How long a download waits for the server's details before starting from its own. */
+        const val SERVER_DETAIL_WAIT_MS = 1_500L
 
         /** Seeks stop this short of the end, so the end isn't reached by a seek. */
         const val SEEK_END_MARGIN_MS = 250L

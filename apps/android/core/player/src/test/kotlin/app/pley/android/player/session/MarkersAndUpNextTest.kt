@@ -1,6 +1,9 @@
 package app.pley.android.player.session
 
+import app.pley.android.data.LocalFile
+import app.pley.android.data.LocalMedia
 import app.pley.android.fixtures.FixtureIds
+import app.pley.android.model.ItemSummary
 import app.pley.android.player.PlayQueue
 import app.pley.android.player.PlayRequest
 import app.pley.android.player.PlayerPhase
@@ -67,6 +70,28 @@ class MarkersAndUpNextTest {
         assertEquals("Skip Credits", c.state.value.skipLabel)
         assertNull(c.state.value.upNextCard)
         assertEquals(1, h.api.count("next"))
+    }
+
+    @Test
+    fun `a download goes on to the next one downloaded when the server is away`() {
+        val first = runBlocking { h.api.item(FixtureIds.SHOW_S1E1) }
+        val second: ItemSummary = runBlocking { h.api.item(FixtureIds.SHOW_S1E2) }.toSummary().copy(thumbUrl = "file:///downloads/e2/image.jpg")
+        h.local = object : LocalMedia {
+            override fun file(fileId: Long) = LocalFile("file:///downloads/e1/media.mkv").takeIf { fileId == first.files.first().id }
+
+            override suspend fun nextAfter(itemId: Long) = second.takeIf { itemId == FixtureIds.SHOW_S1E1 }
+        }
+        h.api.unreachable += "next"
+        val c = episode(19_000)
+        assertEquals("file:///downloads/e1/media.mkv", h.engine.source?.url)
+
+        h.engine.end()
+        h.advance(500)
+
+        val card = c.state.value.upNextCard!!
+        assertEquals(FixtureIds.SHOW_S1E2, card.itemId)
+        assertEquals("the picture saved with it", "file:///downloads/e2/image.jpg", card.imageUrl)
+        assertEquals(PlayerPhase.Paused, c.state.value.phase)
     }
 
     @Test

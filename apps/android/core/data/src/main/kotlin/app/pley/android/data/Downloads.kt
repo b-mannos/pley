@@ -2,6 +2,7 @@ package app.pley.android.data
 
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ItemKind
+import app.pley.android.model.ItemSummary
 import app.pley.android.model.ProgressReport
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +35,13 @@ interface LocalMedia {
      * It never fails: what can't be sent is kept.
      */
     suspend fun report(itemId: Long, report: ProgressReport) {}
+
+    /**
+     * The episode to play after [itemId] while the server is away: the
+     * next of its show downloaded whole, by season and number, with the
+     * picture saved beside it; `null` when there is none.
+     */
+    suspend fun nextAfter(itemId: Long): ItemSummary? = null
 
     companion object {
         /** No downloads: TVs, tests. */

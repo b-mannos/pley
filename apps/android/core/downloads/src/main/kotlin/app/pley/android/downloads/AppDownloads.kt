@@ -17,6 +17,7 @@ import app.pley.android.data.LocalFile
 import app.pley.android.data.Session
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ItemKind
+import app.pley.android.model.ItemSummary
 import app.pley.android.model.MediaFile
 import app.pley.android.model.PleyJson
 import app.pley.android.model.ProgressReport
@@ -180,6 +181,25 @@ class AppDownloads internal constructor(
         }
     }
 
+    override suspend fun nextAfter(itemId: Long): ItemSummary? {
+        val (server, userId) = current() ?: return null
+        val mine = store.all.value.filter { it.server == server && it.userId == userId }
+        val now = mine.firstOrNull { it.itemId == itemId } ?: return null
+        val next = nextEpisode(mine, now) ?: return null
+        val saved = detail(next.itemId)?.toSummary() ?: ItemSummary(id = next.itemId, libraryId = 0, kind = next.kind, title = next.title)
+        return saved.copy(
+            index = next.episodeIndex,
+            parentIndex = next.seasonIndex,
+            grandparentId = next.showId,
+            grandparentTitle = next.showTitle,
+            // The server's pictures can't come: the one saved can.
+            thumbUrl = if (next.image) Uri.fromFile(store.imageOf(next)).toString() else null,
+            backdropUrl = null,
+            // Where it was left here is the latest this device knows.
+            userState = saved.userState.copy(positionMs = next.positionMs, watched = next.watched),
+        )
+    }
+
     override suspend fun report(itemId: Long, report: ProgressReport) {
         val (server, userId) = current() ?: return
         val key = Key(server, userId, itemId)
@@ -324,6 +344,15 @@ class AppDownloads internal constructor(
     )
 
     companion object {
+        /** The episode of [now]'s show downloaded whole after it, by season and number, among [mine]. */
+        internal fun nextEpisode(mine: List<Saved>, now: Saved): Saved? {
+            if (now.kind != ItemKind.Episode || now.showId == null) return null
+            val order = compareBy<Saved>({ it.seasonIndex ?: Int.MAX_VALUE }, { it.episodeIndex ?: Int.MAX_VALUE })
+            return mine
+                .filter { it.kind == ItemKind.Episode && it.showId == now.showId && it.state == DownloadState.Done && order.compare(it, now) > 0 }
+                .minWithOrNull(order)
+        }
+
         /** A share of the duration past which a download played here counts as watched, as on the server. */
         const val WATCHED_SHARE = 0.9
 

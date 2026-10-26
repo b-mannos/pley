@@ -4,6 +4,7 @@ package app.pley.android.player.session
 
 import app.pley.android.caps.CapsSnapshot
 import app.pley.android.caps.DefaultPlaybackCapsPolicy
+import app.pley.android.data.LocalMedia
 import app.pley.android.fixtures.FixtureIds
 import app.pley.android.fixtures.FixtureServer
 import app.pley.android.fixtures.Journal
@@ -28,6 +29,7 @@ import app.pley.android.testing.caps.FakeDeviceCapabilities
 import app.pley.android.testing.caps.TestDevices
 import app.pley.android.testing.caps.capsOf
 import app.pley.android.testing.player.session.FakeEngineLink
+import java.io.IOException
 import java.util.Collections
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -59,10 +61,14 @@ class CountingApi(private val delegate: PleyApi) : PleyApi by delegate {
     /** Calls that failed, with their route. */
     val failures = mutableListOf<Pair<String, Throwable>>()
 
+    /** Calls (by name) that fail as if the server were away. */
+    val unreachable: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
+
     private suspend fun <T> counted(name: String, block: suspend () -> T): T {
         inFlight.incrementAndGet()
         names += name
         try {
+            if (name in unreachable) throw IOException("$name: the server is away")
             return block()
         } catch (e: Exception) {
             synchronized(failures) { failures += name to e }
@@ -119,6 +125,9 @@ class SessionHarness(
     val remembered = mutableListOf<String>()
     private var controllers = mutableListOf<SessionPlaybackController>()
 
+    /** Downloads, for playbacks started from now on. */
+    var local: LocalMedia = LocalMedia.None
+
     init {
         server.start()
         val token = server.accessToken()
@@ -153,6 +162,7 @@ class SessionHarness(
         work = dispatcher,
         pictures = pictures,
         events = events,
+        local = local,
     )
 
     /** Starts playing [request] and lets the server answer. */
