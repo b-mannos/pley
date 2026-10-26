@@ -371,6 +371,15 @@ The tests run in Vitest with jsdom: focus moves, keys, playback
 negotiation, the seek keys, real TVs' capabilities as snapshots, AVPlay's
 errors.
 
+`node scripts/render-icons.mjs` draws the apps' pictures from the logo,
+the P on the logo's tile colour (#0a1622) to the edges, as 24-bit RGB PNGs
+at 72 dpi: Samsung's 512×423 icon (Samsung asks for that format), LG's 80
+and 130 px icons, which `iconColor` in `appinfo.json` matches on the TV's
+own tile, and LG's 1920×1080 launch picture (`splashBackground`). The
+stores want their own on top when the apps are published: Samsung's
+Seller Office a 512×423 and a 1920×1080 logo with its background, LG's
+Seller Lounge a 400×400 icon.
+
 **Samsung.** Packaging needs the Tizen SDK's command-line tools
 (`TIZEN_STUDIO` set to the SDK's folder, or `tizen` on the PATH) and a
 security profile, named by `PLEY_TIZEN_PROFILE` (default `pley-dev`). A

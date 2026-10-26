@@ -1,6 +1,7 @@
-// Builds pley for Samsung TVs into dist/: the app, its fonts and icon,
-// Samsung's webapis.js (which the TV serves itself), and config.xml with
-// the package's version. `npm run package` makes the .wgt from it.
+// Builds pley for Samsung TVs into dist/: the app, its fonts and icon
+// (scripts/render-icons.mjs draws it), Samsung's webapis.js (which the TV
+// serves itself), and config.xml with the package's version. `npm run
+// package` makes the .wgt from it.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

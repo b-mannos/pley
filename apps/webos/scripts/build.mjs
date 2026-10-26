@@ -1,6 +1,6 @@
-// Builds pley for LG TVs into dist/: the app, its fonts and icons, and
-// appinfo.json with the package's version. `npm run package` makes the
-// .ipk from it.
+// Builds pley for LG TVs into dist/: the app, its fonts, icons and launch
+// picture (scripts/render-icons.mjs draws them), and appinfo.json with the
+// package's version. `npm run package` makes the .ipk from it.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -22,6 +22,7 @@ const { bytes } = await buildApp({
   files: [
     { from: join(root, "assets/icon.png"), to: "icon.png" },
     { from: join(root, "assets/largeIcon.png"), to: "largeIcon.png" },
+    { from: join(root, "assets/splash.png"), to: "splash.png" },
   ],
 });
 const appinfo = JSON.parse(readFileSync(join(root, "appinfo.json"), "utf8"));
