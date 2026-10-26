@@ -159,7 +159,12 @@ class AppDownloads internal constructor(
     override fun resume() {
         scope.launch {
             current()?.let { (server, userId) -> flushReports(server, userId) }
-            if (store.all.value.any { it.state == DownloadState.Queued || it.state == DownloadState.Waiting }) start()
+            if (store.all.value.any { it.state == DownloadState.Queued || it.state == DownloadState.Waiting }) {
+                start()
+            } else {
+                // Subtitles kept cut short: no service for a few requests (it does them first when it runs).
+                runner.finishCutSubtitles(current())
+            }
         }
     }
 

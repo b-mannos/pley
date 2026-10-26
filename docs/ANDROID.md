@@ -63,7 +63,11 @@ Downloads (`:core:downloads`) keep the original file of a movie or an
 episode (of several versions, the sharpest up to 1080p of those the
 device plays as they are, by the player's capabilities), with its
 details, a picture and its text subtitles as WebVTT, in the app's own
-storage (removed with the app), per server and profile. A file the device
+storage (removed with the app), per server and profile. A track the
+server is still reading out of the file (minutes for a big one on a
+network share) is kept as far as it goes while the file comes, then
+asked for again once the file is down, and when the app opens while it
+still falls short. A file the device
 doesn't play as it is, or every file when Settings → Downloads → Quality
 picks a smaller one, is made by the server first (`POST /api/conversions`
 with the player's capabilities, docs/API.md "Downloads"): the download

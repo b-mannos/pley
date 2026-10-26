@@ -60,7 +60,10 @@ internal class DownloadFailure(message: String) : Exception(message)
  * Fetches downloads one at a time, oldest first: first the item's
  * details, a picture and its text subtitles as WebVTT, then the file
  * itself, picked up where it stopped (Range) after a lost network or a
- * restart. A download the server converts for this device is asked for,
+ * restart. A subtitle track the server is still reading out of the file
+ * (minutes for a big one on a network share) is saved as far as it goes
+ * and asked for again once the file is down, and on later runs while it
+ * still falls short. A download the server converts for this device is asked for,
  * then left while the server makes it (the others go on meanwhile), and
  * looked at again every few seconds until it is whole. A network
  * downloads may not use, or none, makes it wait; errors the server gives
@@ -78,6 +81,8 @@ internal class DownloadRunner(
     private val conversionPollMs: Long = CONVERSION_POLL_MS,
     /** The wait after a lost network or server, longer each time. */
     private val backoffMs: Long = BACKOFF_MS,
+    /** The wait before asking again for a subtitle track the server is still reading. */
+    private val subtitleWaitMs: Long = SUBTITLE_WAIT_MS,
     /**
      * The server and profile signed in: only their downloads run, as the
      * server's token is that profile's. `null`: every one (tests).
@@ -113,8 +118,10 @@ internal class DownloadRunner(
     /**
      * Runs downloads until none is left to do, or none can go on: no
      * network they may use for [waitMs]. Returns whether some still wait.
+     * Subtitles that downloads kept cut short are asked for first.
      */
     suspend fun run(waitMs: Long = WAIT_MS): Boolean {
+        finishCutSubtitles(profile())
         var failures = 0
         while (true) {
             currentCoroutineContext().ensureActive()
@@ -165,7 +172,9 @@ internal class DownloadRunner(
                 if (s.convert && s.mediaUrl == null) s = converted(s) ?: return@withContext Outcome.Converting
                 s = keep(key) { it.copy(state = DownloadState.Downloading) }
                 fetchMedia(s)
-                store.update(key) { it.copy(state = DownloadState.Done, downloadedBytes = it.sizeBytes, error = null) }
+                s = store.update(key) { it.copy(state = DownloadState.Done, downloadedBytes = it.sizeBytes, error = null) } ?: s
+                // Read whole by the server meanwhile, as a rule.
+                finishSubtitles(s, SUBTITLE_TRIES)
                 Outcome.Done
             }
         } catch (e: CancellationException) {
@@ -224,9 +233,11 @@ internal class DownloadRunner(
         } ?: false
         val file = detail.files.firstOrNull { it.id == saved.fileId }
         val tracks = file?.streams.orEmpty().filter { it.kind == StreamKind.Subtitle && it.textBased == true }
+        // Asked for once each: the file needn't wait for the server to read a track out of it.
+        val partial = mutableListOf<Int>()
         val subtitles = tracks.mapNotNull { track ->
             try {
-                saveSubtitles(saved, api, track.index)
+                if (!saveSubtitles(saved, api, track.index, tries = 1)) partial += track.index
                 track.index
             } catch (e: CancellationException) {
                 throw e
@@ -240,25 +251,64 @@ internal class DownloadRunner(
                 extrasSaved = true,
                 image = picture,
                 subtitles = subtitles,
+                partialSubtitles = partial,
                 durationMs = file?.durationMs ?: detail.durationMs ?: it.durationMs,
             )
         } ?: throw CancellationException("removed")
     }
 
-    /** A text track as the server's WebVTT, asked for again while it is still being read out of the file. */
-    private suspend fun saveSubtitles(saved: Saved, api: PleyApi, index: Int) {
+    /**
+     * A text track as the server's WebVTT, asked for up to [tries] times
+     * while the server is still reading it out of the file, and saved as
+     * far as it goes. Whether it came whole.
+     */
+    private suspend fun saveSubtitles(saved: Saved, api: PleyApi, index: Int, tries: Int): Boolean {
         val client = sources.subtitles(saved.server)
         val url = api.url("/api/files/${saved.fileId}/subtitles/$index.vtt")
-        repeat(SUBTITLE_TRIES) { attempt ->
+        var attempt = 0
+        while (true) {
             val (text, complete) = call(client, Request.Builder().url(url).header("Accept", "text/vtt").build()) { response ->
                 if (!response.isSuccessful) throw ApiException.from(response)
                 response.body.string() to (response.header(HttpPleyApi.SUBTITLES_COMPLETE_HEADER)?.trim() != "0")
             }
-            if (complete || attempt == SUBTITLE_TRIES - 1) {
-                withContext(io) { writeWhole(store.subtitleOf(saved, index), text) }
-                return
+            if (complete || ++attempt >= tries) {
+                // Never into the folder of a download deleted meanwhile.
+                if (store.get(saved.key) != null) withContext(io) { writeWhole(store.subtitleOf(saved, index), text) }
+                return complete
             }
-            delay(SUBTITLE_WAIT_MS)
+            delay(subtitleWaitMs)
+        }
+    }
+
+    /** The subtitle tracks of [saved] that came cut short, asked for again up to [tries] times each. */
+    private suspend fun finishSubtitles(saved: Saved, tries: Int) {
+        if (saved.partialSubtitles.isEmpty()) return
+        val api = sources.api(saved.server, saved.userId)
+        val whole = saved.partialSubtitles.filterTo(HashSet()) { index ->
+            try {
+                saveSubtitles(saved, api, index, tries)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: IOException) {
+                // Out of reach, or gone from the server: what came stays.
+                false
+            }
+        }
+        if (whole.isNotEmpty()) store.update(saved.key) { it.copy(partialSubtitles = it.partialSubtitles - whole) }
+    }
+
+    /**
+     * Downloads of [signedIn] (every one when `null`) whose subtitles still
+     * fall short, the app closed before the server had read them whole:
+     * asked for once more, with their server in reach.
+     */
+    internal suspend fun finishCutSubtitles(signedIn: Pair<String, Long>?) {
+        val short = store.all.value.filter {
+            it.state == DownloadState.Done && it.partialSubtitles.isNotEmpty() &&
+                (signedIn == null || (it.server == signedIn.first && it.userId == signedIn.second))
+        }
+        for (saved in short) {
+            if (gate.open(mobileAllowed(), saved.server)) finishSubtitles(saved, tries = 1)
         }
     }
 

@@ -6,7 +6,10 @@ import app.pley.android.model.ConversionState
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ItemKind
 import app.pley.android.model.MediaFile
+import app.pley.android.model.MediaStream
+import app.pley.android.model.StreamKind
 import app.pley.android.network.ApiException
+import app.pley.android.network.HttpPleyApi
 import app.pley.android.network.PleyApi
 import app.pley.android.testing.network.FakePleyApi
 import kotlin.random.Random
@@ -186,6 +189,49 @@ class DownloadRunnerTest {
     }
 
     @Test
+    fun aSubtitleTrackCutShortIsAskedForAgainOnceTheFileIsDown() = runBlocking {
+        api.answer("item", detail(subtitles = true))
+        server.enqueue(vtt(PARTIAL, whole = false))
+        server.enqueue(MockResponse.Builder().code(200).body(Buffer().write(body)).build())
+        server.enqueue(vtt(WHOLE, whole = true))
+        val saved = add()
+
+        assertFalse(runner().run())
+
+        assertEquals("/api/files/7/subtitles/2.vtt", server.takeRequest().url.encodedPath)
+        assertEquals("the file doesn't wait for the track", "/api/files/7/stream", server.takeRequest().url.encodedPath)
+        assertEquals("/api/files/7/subtitles/2.vtt", server.takeRequest().url.encodedPath)
+        val done = store.get(saved.key)!!
+        assertEquals(DownloadState.Done, done.state)
+        assertEquals(listOf(2), done.subtitles)
+        assertEquals(emptyList<Int>(), done.partialSubtitles)
+        assertEquals(WHOLE, store.subtitleOf(done, 2).readText())
+    }
+
+    @Test
+    fun subtitlesStillShortAreFinishedOnALaterRun() = runBlocking {
+        api.answer("item", detail(subtitles = true))
+        server.enqueue(vtt(PARTIAL, whole = false))
+        server.enqueue(MockResponse.Builder().code(200).body(Buffer().write(body)).build())
+        repeat(DownloadRunner.SUBTITLE_TRIES) { server.enqueue(vtt(PARTIAL, whole = false)) }
+        val saved = add()
+
+        assertFalse(runner().run())
+        val short = store.get(saved.key)!!
+        assertEquals(DownloadState.Done, short.state)
+        assertEquals("what came is kept meanwhile", PARTIAL, store.subtitleOf(short, 2).readText())
+        assertEquals(listOf(2), short.partialSubtitles)
+
+        server.enqueue(vtt(WHOLE, whole = true))
+        assertFalse("nothing waits", runner().run())
+
+        val whole = store.get(saved.key)!!
+        assertEquals(emptyList<Int>(), whole.partialSubtitles)
+        assertEquals(WHOLE, store.subtitleOf(whole, 2).readText())
+        assertEquals(2 + DownloadRunner.SUBTITLE_TRIES + 1, server.requestCount)
+    }
+
+    @Test
     fun aConvertedFileCutShortGoesOnWhenTheServerForgotItsConversion() = runBlocking {
         // The server restarted: it answers 404 for the file until asked for the conversion again.
         api.answer("conversion", ConversionInfo(id = CONVERSION, state = ConversionState.Done, progress = 1.0, size = body.size.toLong(), url = FILE))
@@ -317,19 +363,39 @@ class DownloadRunnerTest {
         mobileAllowed = { false },
         conversionPollMs = 10,
         backoffMs = 1,
+        subtitleWaitMs = 1,
         profile = { profile },
     )
 
     private companion object {
         const val CONVERSION = "0123456789abcdef0123456789abcdef"
         const val FILE = "/api/conversions/$CONVERSION/file"
+        const val PARTIAL = "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nFirst\n\n"
+        const val WHOLE = PARTIAL + "01:50:00.000 --> 01:50:02.000\nLast\n\n"
     }
 
-    private fun detail() = ItemDetail(
+    /** The item, with an English SubRip track when [subtitles]. */
+    private fun detail(subtitles: Boolean = false) = ItemDetail(
         id = 42,
         libraryId = 1,
         kind = ItemKind.Movie,
         title = "Alien",
-        files = listOf(MediaFile(id = 7, path = "Alien (1979).mkv", size = body.size.toLong(), container = "mkv")),
+        files = listOf(
+            MediaFile(
+                id = 7,
+                path = "Alien (1979).mkv",
+                size = body.size.toLong(),
+                container = "mkv",
+                streams = if (subtitles) listOf(MediaStream(2, StreamKind.Subtitle, "subrip", language = "eng", textBased = true)) else emptyList(),
+            ),
+        ),
     )
+
+    /** The server's WebVTT of a track, said to be [whole] or still being read out of the file. */
+    private fun vtt(text: String, whole: Boolean) = MockResponse.Builder()
+        .code(200)
+        .setHeader("Content-Type", "text/vtt; charset=utf-8")
+        .apply { if (!whole) setHeader(HttpPleyApi.SUBTITLES_COMPLETE_HEADER, "0") }
+        .body(text)
+        .build()
 }

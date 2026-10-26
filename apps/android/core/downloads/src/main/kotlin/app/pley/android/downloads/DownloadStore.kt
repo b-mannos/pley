@@ -41,6 +41,8 @@ internal data class Saved(
     val image: Boolean = false,
     /** The subtitle tracks saved as WebVTT (subs/<index>.vtt). */
     val subtitles: List<Int> = emptyList(),
+    /** Those of [subtitles] saved before the server had read them whole out of the file: asked for again. */
+    val partialSubtitles: List<Int> = emptyList(),
     /** When it was asked for, unix ms. */
     val addedAt: Long,
     /** Where it was left, played here. */
