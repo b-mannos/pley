@@ -4,13 +4,13 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
@@ -33,16 +34,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyMotion
@@ -50,10 +51,11 @@ import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.icon.SkipIcon
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.PleyIconButton
 
-/** Heights of the scrims behind the top and bottom controls (design spec §3.5). */
+/** Heights of the scrim's darker ends, behind the top and bottom controls (design spec §3.5). */
 private val TopScrim = 110.dp
 private val BottomScrim = 150.dp
 
@@ -61,32 +63,40 @@ private val BottomScrim = 150.dp
 internal val ControlsLift = 120.dp
 
 /**
- * The scrims: black 60 % to clear behind the top row, clear to black 70 %
- * behind the bottom. They fade by drawing their gradients at [alpha]
- * (read while drawing), never as a layer over the video.
+ * The scrim over the picture while the controls show, as streaming apps'
+ * players dim it: black 40 % all over, so the glyphs in the middle read
+ * on any picture without a disc behind them, darkening to 60 % behind the
+ * top row and 80 % behind the bottom one. Drawn under the subtitles. It
+ * fades by drawing its gradient at its alpha (read while drawing), never
+ * as a layer over the video.
  */
 @Composable
 internal fun Scrims(visible: Boolean) {
     val alpha = animateFloatAsState(if (visible) 1f else 0f, PleyMotion.reveal(), label = "scrims")
-    val density = LocalDensity.current
-    val top = with(density) { TopScrim.toPx() }
-    val bottom = with(density) { BottomScrim.toPx() }
-    Canvas(Modifier.fillMaxSize()) {
-        val a = alpha.value
-        if (a <= 0f) return@Canvas
-        drawRect(
-            Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.6f * a), 1f to Color.Transparent, startY = 0f, endY = top),
-            size = size.copy(height = top),
-        )
-        drawRect(
-            Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.7f * a), startY = size.height - bottom, endY = size.height),
-            topLeft = Offset(0f, size.height - bottom),
-            size = size.copy(height = bottom),
-        )
-    }
+    Spacer(
+        Modifier
+            .fillMaxSize()
+            .drawWithCache {
+                val top = (TopScrim.toPx() / size.height).coerceIn(0f, 0.5f)
+                val bottom = (1f - BottomScrim.toPx() / size.height).coerceIn(0.5f, 1f)
+                val scrim = Brush.verticalGradient(
+                    0f to Color.Black.copy(alpha = 0.6f),
+                    top to Color.Black.copy(alpha = MID_DIM),
+                    bottom to Color.Black.copy(alpha = MID_DIM),
+                    1f to Color.Black.copy(alpha = 0.8f),
+                )
+                onDrawBehind {
+                    val a = alpha.value
+                    if (a > 0f) drawRect(scrim, alpha = a)
+                }
+            },
+    )
 }
 
-/** Back (large, as the hybrid player's), the title and the episode, then picture in picture and Settings. */
+/** How much the picture dims behind the controls between the scrim's darker ends. */
+private const val MID_DIM = 0.4f
+
+/** Back (large, as the hybrid player's), the title and the episode, how it plays, then picture in picture and Settings. */
 @Composable
 internal fun TopBar(state: PlayerScreenState, host: PlayerHost, modifier: Modifier = Modifier) {
     PlayerProbe.composed?.invoke("top")
@@ -117,6 +127,10 @@ internal fun TopBar(state: PlayerScreenState, host: PlayerHost, modifier: Modifi
                 Text(it, style = MaterialTheme.typography.bodySmall, color = PleyColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
+        state.method?.let {
+            MethodBadge(it) { state.open(SheetPage.Details) }
+            Spacer(Modifier.size(4.dp))
+        }
         if (host.pipSupported) PleyIconButton(PleyIcons.PictureInPicture2, stringResource(R.string.player_pip), onClick = host::enterPip)
         PleyIconButton(PleyIcons.SlidersHorizontal, stringResource(R.string.player_settings), onClick = { state.open(SheetPage.Settings) })
     }
@@ -138,55 +152,62 @@ private fun BackButton(onClick: () -> Unit) {
     }
 }
 
-/** −10 s, Play/Pause in a 72 dp circle of fg 15 %, +10 s, 56 dp apart. Play/Pause steps aside for the spinner. */
+/**
+ * −10 s, Play/Pause and +10 s, as streaming apps' players draw them:
+ * glyphs alone on the dimmed picture, the skips with their seconds in
+ * them, 64 dp apart. Play/Pause steps aside for the spinner.
+ */
 @Composable
 internal fun CentreControls(state: PlayerScreenState, spinning: Boolean, modifier: Modifier = Modifier) {
     PlayerProbe.composed?.invoke("centre")
     // The seek preview takes the middle while the seek bar is dragged.
     val scrubbing = state.scrubMs != null
+    val seconds = (PlayerScreenState.SEEK_STEP_MS / 1000).toInt()
     Row(
         modifier.graphicsLayer { alpha = if (scrubbing) 0f else 1f },
-        horizontalArrangement = Arrangement.spacedBy(56.dp),
+        horizontalArrangement = Arrangement.spacedBy(64.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RoundButton(PleyIcons.RotateCcw, stringResource(R.string.player_back_10), size = 56.dp, iconSize = 32.dp, fill = Color.Transparent) {
-            state.seekBy(-PlayerScreenState.SEEK_STEP_MS)
+        GlyphButton(stringResource(R.string.player_back_10), SkipTarget, onClick = { state.seekBy(-PlayerScreenState.SEEK_STEP_MS) }) {
+            SkipIcon(forward = false, seconds = seconds, size = SkipGlyph)
         }
         val playing = state.playing
-        Box(Modifier.size(72.dp).graphicsLayer { alpha = if (spinning) 0f else 1f }) {
-            RoundButton(
-                if (playing) PleyIcons.Pause else PleyIcons.Play,
-                stringResource(if (playing) R.string.player_pause else R.string.player_play),
-                size = 72.dp,
-                iconSize = 36.dp,
-                fill = PleyColors.Fg.copy(alpha = 0.15f),
-                onClick = state::togglePlay,
-            )
+        Box(Modifier.size(PlayTarget).graphicsLayer { alpha = if (spinning) 0f else 1f }) {
+            GlyphButton(stringResource(if (playing) R.string.player_pause else R.string.player_play), PlayTarget, onClick = state::togglePlay) {
+                Icon(if (playing) PleyIcons.Pause else PleyIcons.Play, contentDescription = null, size = PlayGlyph)
+            }
         }
-        RoundButton(PleyIcons.RotateCw, stringResource(R.string.player_forward_10), size = 56.dp, iconSize = 32.dp, fill = Color.Transparent) {
-            state.seekBy(PlayerScreenState.SEEK_STEP_MS)
+        GlyphButton(stringResource(R.string.player_forward_10), SkipTarget, onClick = { state.seekBy(PlayerScreenState.SEEK_STEP_MS) }) {
+            SkipIcon(forward = true, seconds = seconds, size = SkipGlyph)
         }
     }
 }
 
+/** The centre's touch targets and glyphs: the skips 64 dp around 40, Play/Pause 80 around 52. */
+private val SkipTarget = 64.dp
+private val SkipGlyph = 40.dp
+private val PlayTarget = 80.dp
+private val PlayGlyph = 52.dp
+
+/** A [size] round touch target, read out as [label], around its [glyph]. */
 @Composable
-private fun RoundButton(icon: PleyIcon, label: String, size: androidx.compose.ui.unit.Dp, iconSize: androidx.compose.ui.unit.Dp, fill: Color, onClick: () -> Unit) {
+private fun GlyphButton(label: String, size: Dp, onClick: () -> Unit, glyph: @Composable () -> Unit) {
     Box(
         Modifier
             .size(size)
             .clip(PleyShape.Circle)
-            .background(fill)
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, size = iconSize)
+        glyph()
     }
 }
 
 /**
  * The seek bar with its times, then Subtitles · Audio · Quality · Fit ·
- * Chapters · Lock · Next episode, and how it plays at the end.
+ * Chapters · Lock · Next episode, spread across the width as far as they
+ * fit and scrolling when they don't.
  */
 @Composable
 internal fun BottomBar(state: PlayerScreenState, picture: PictureState, screenAspect: () -> Float, modifier: Modifier = Modifier) {
@@ -198,36 +219,34 @@ internal fun BottomBar(state: PlayerScreenState, picture: PictureState, screenAs
             .padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
     ) {
         TimesAndSeekBar(state)
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Row(
-            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (state.subtitles.isNotEmpty()) {
-                BarItem(PleyIcons.Captions, stringResource(R.string.player_subtitles)) { state.open(SheetPage.Subtitles) }
-            }
-            if (state.audio.size > 1) {
-                BarItem(PleyIcons.AudioLines, stringResource(R.string.player_audio)) { state.open(SheetPage.Audio) }
-            }
-            if (state.qualities.isNotEmpty()) {
-                BarItem(PleyIcons.Gauge, stringResource(R.string.player_quality)) { state.open(SheetPage.Quality) }
-            }
-            FitItem(state, picture, screenAspect)
-            if (state.chapters.size > 1) {
-                BarItem(PleyIcons.ListOrdered, stringResource(R.string.player_chapters)) { state.open(SheetPage.Chapters) }
-            }
-            BarItem(PleyIcons.Lock, stringResource(R.string.player_lock), onClick = state::lock)
-            if (state.episode) {
-                BarItem(PleyIcons.SkipForward, stringResource(R.string.player_next_episode)) {
-                    state.touched()
-                    state.controller.playNext()
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .widthIn(min = maxWidth),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (state.subtitles.isNotEmpty()) {
+                    BarItem(PleyIcons.Captions, stringResource(R.string.player_subtitles)) { state.open(SheetPage.Subtitles) }
                 }
-            }
-        }
-            state.method?.let {
-                Spacer(Modifier.size(8.dp))
-                MethodBadge(it) { state.open(SheetPage.Details) }
+                if (state.audio.size > 1) {
+                    BarItem(PleyIcons.AudioLines, stringResource(R.string.player_audio)) { state.open(SheetPage.Audio) }
+                }
+                if (state.qualities.isNotEmpty()) {
+                    BarItem(PleyIcons.Gauge, stringResource(R.string.player_quality)) { state.open(SheetPage.Quality) }
+                }
+                FitItem(state, picture, screenAspect)
+                if (state.chapters.size > 1) {
+                    BarItem(PleyIcons.ListOrdered, stringResource(R.string.player_chapters)) { state.open(SheetPage.Chapters) }
+                }
+                BarItem(PleyIcons.Lock, stringResource(R.string.player_lock), onClick = state::lock)
+                if (state.episode) {
+                    BarItem(PleyIcons.SkipForward, stringResource(R.string.player_next_episode)) {
+                        state.touched()
+                        state.controller.playNext()
+                    }
+                }
             }
         }
     }

@@ -115,6 +115,8 @@ fun PhonePlayerScreen(
     ) {
         val engine = rememberEngine(state, ui)
         engine?.let { VideoPicture(it, picture) }
+        // Under the subtitles, which it mustn't dim.
+        if (!inPip) ControlScrims(state)
         Captions(state, engine, picture, captions, inPip)
         if (inPip) {
             Spinner(rememberSpinning(state))
@@ -178,12 +180,15 @@ private fun rememberEngine(state: PlayerScreenState, ui: State<*>): Player? {
     return engine
 }
 
-/** The controls' groups, the scrims behind them, and their hide timer. */
+/** The scrim behind the controls, read in its own scope so showing them recomposes only it. */
+@Composable
+private fun ControlScrims(state: PlayerScreenState) = Scrims(state.controlsVisible && !state.locked)
+
+/** The controls' groups. */
 @Composable
 private fun BoxScope.Controls(state: PlayerScreenState, picture: PictureState, host: PlayerHost, screenAspect: () -> Float) {
     val visible = state.controlsVisible && !state.locked
     val spinning = rememberSpinning(state)
-    Scrims(visible)
     ControlsGroup(visible, Modifier.align(Alignment.TopCenter)) { TopBar(state, host) }
     ControlsGroup(visible, Modifier.align(Alignment.Center)) { CentreControls(state, spinning) }
     ControlsGroup(visible, Modifier.align(Alignment.BottomCenter)) { BottomBar(state, picture, screenAspect) }

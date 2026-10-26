@@ -363,10 +363,11 @@ internal fun TvPlayerScreen(
             .testTag(TAG_PLAYER),
     ) {
         VideoSurface(player, Modifier.fillMaxSize())
+        // Under the subtitles, which the scrim mustn't dim.
+        Box(Modifier.fillMaxSize().controlScrims(controlsAlpha))
         PlayerSubtitles(controller, player, captionLook, lifted = ui.controls)
         // Holds focus while the controls are hidden: the keys arrive through it.
         Box(Modifier.fillMaxSize().videoFocus(ui, enabled = !ui.controls, label = videoLabel))
-        Box(Modifier.fillMaxSize().controlScrims(controlsAlpha))
         if (controlsPresent) {
             TvPlayerTopBar(state, controlsAlpha, now)
             if (ui.controls) TvSeekPreview(state, seeker, controller)

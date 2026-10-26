@@ -78,6 +78,7 @@ import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.icon.SkipIcon
 import app.pley.android.designsystem.image.Artwork
 import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.model.MarkerKind
@@ -358,9 +359,10 @@ internal data class RowOptions(
 
 /**
  * The control row, top y = 413 (design spec §2.7): Previous · −10 s ·
- * Play/Pause (64 dp) · +10 s · Next centred; Subtitles · Audio · Quality ·
- * Info at the right safe edge; Chapters, when the file has them, and the
- * sleep timer at the left one. Up goes back to the scrubber.
+ * Play/Pause · +10 s · Next centred; Subtitles · Audio · Quality · Info at
+ * the right safe edge; Chapters, when the file has them, and the sleep
+ * timer at the left one. Up goes back to the scrubber. As in streaming
+ * apps' players, the icons stand on the scrim alone until focused.
  */
 @Composable
 internal fun BoxScope.TvControlRow(
@@ -378,6 +380,9 @@ internal fun BoxScope.TvControlRow(
         this.up = ui.requester(PlayerFocus.Scrubber)
         down = FocusRequester.Cancel
     }
+    // The 48 dp buttons sit this far down, so their centres line up with Play/Pause's.
+    val beside = Modifier.padding(top = (PLAY_BUTTON - BUTTON) / 2).then(up)
+    val skipSeconds = TvPlayerText.seconds(TvSeeker.STEP_MS)
     Box(
         Modifier
             .align(Alignment.TopStart)
@@ -387,22 +392,24 @@ internal fun BoxScope.TvControlRow(
             .graphicsLayer { this.alpha = alpha.value },
     ) {
         Row(
-            Modifier.align(Alignment.TopStart).padding(top = 8.dp),
+            Modifier.align(Alignment.TopStart),
             horizontalArrangement = Arrangement.spacedBy(PleyTv.ButtonGap),
         ) {
             if (options.chapters) {
-                PlayerRoundButton(stringResource(R.string.tv_player_chapters), PleyIcons.ListVideo, { ui.openPanel(PlayerPanel.Chapters) }, up, ui, PlayerFocus.Chapters)
+                PlayerRoundButton(stringResource(R.string.tv_player_chapters), PleyIcons.ListVideo, { ui.openPanel(PlayerPanel.Chapters) }, beside, ui, PlayerFocus.Chapters)
             }
-            PlayerRoundButton(stringResource(R.string.tv_player_sleep), MoonIcon, { ui.openPanel(PlayerPanel.Sleep) }, up, ui, PlayerFocus.Sleep)
+            PlayerRoundButton(stringResource(R.string.tv_player_sleep), MoonIcon, { ui.openPanel(PlayerPanel.Sleep) }, beside, ui, PlayerFocus.Sleep)
         }
         Row(
             Modifier.align(Alignment.TopCenter),
-            horizontalArrangement = Arrangement.spacedBy(20.dp),
+            horizontalArrangement = Arrangement.spacedBy(TRANSPORT_GAP),
         ) {
             if (options.previousNext) {
-                PlayerRoundButton(stringResource(R.string.tv_player_previous), PleyIcons.SkipBack, onPrevious, Modifier.padding(top = 8.dp).then(up), ui, null)
+                PlayerRoundButton(stringResource(R.string.tv_player_previous), PleyIcons.SkipBack, onPrevious, beside, ui, null, iconSize = TRANSPORT_ICON)
             }
-            PlayerRoundButton(stringResource(R.string.tv_player_back_10), PleyIcons.RotateCcw, onBack10, Modifier.padding(top = 8.dp).then(up), ui, null)
+            PlayerRoundButton(stringResource(R.string.tv_player_back_10), onBack10, beside, ui, null) { tint ->
+                SkipIcon(forward = false, seconds = skipSeconds, size = TRANSPORT_ICON, tint = tint)
+            }
             PlayerRoundButton(
                 stringResource(if (playing) R.string.tv_player_pause else R.string.tv_player_play),
                 if (playing) PleyIcons.Pause else PleyIcons.Play,
@@ -410,38 +417,35 @@ internal fun BoxScope.TvControlRow(
                 up,
                 ui,
                 PlayerFocus.PlayPause,
-                size = 64.dp,
-                iconSize = 32.dp,
+                size = PLAY_BUTTON,
+                iconSize = PLAY_ICON,
             )
-            PlayerRoundButton(stringResource(R.string.tv_player_forward_10), PleyIcons.RotateCw, onForward10, Modifier.padding(top = 8.dp).then(up), ui, null)
+            PlayerRoundButton(stringResource(R.string.tv_player_forward_10), onForward10, beside, ui, null) { tint ->
+                SkipIcon(forward = true, seconds = skipSeconds, size = TRANSPORT_ICON, tint = tint)
+            }
             if (options.previousNext) {
-                PlayerRoundButton(stringResource(R.string.tv_player_next), PleyIcons.SkipForward, onNext, Modifier.padding(top = 8.dp).then(up), ui, null)
+                PlayerRoundButton(stringResource(R.string.tv_player_next), PleyIcons.SkipForward, onNext, beside, ui, null, iconSize = TRANSPORT_ICON)
             }
         }
         Row(
-            Modifier.align(Alignment.TopEnd).padding(top = 8.dp),
+            Modifier.align(Alignment.TopEnd),
             horizontalArrangement = Arrangement.spacedBy(PleyTv.ButtonGap),
         ) {
             if (options.subtitles) {
-                PlayerRoundButton(stringResource(R.string.tv_player_subtitles), PleyIcons.Captions, { ui.openPanel(PlayerPanel.Subtitles) }, up, ui, PlayerFocus.Subtitles)
+                PlayerRoundButton(stringResource(R.string.tv_player_subtitles), PleyIcons.Captions, { ui.openPanel(PlayerPanel.Subtitles) }, beside, ui, PlayerFocus.Subtitles)
             }
             if (options.audio) {
-                PlayerRoundButton(stringResource(R.string.tv_player_audio), PleyIcons.AudioLines, { ui.openPanel(PlayerPanel.Audio) }, up, ui, PlayerFocus.Audio)
+                PlayerRoundButton(stringResource(R.string.tv_player_audio), PleyIcons.AudioLines, { ui.openPanel(PlayerPanel.Audio) }, beside, ui, PlayerFocus.Audio)
             }
             if (options.quality) {
-                PlayerRoundButton(stringResource(R.string.tv_player_quality), PleyIcons.Gauge, { ui.openPanel(PlayerPanel.Quality) }, up, ui, PlayerFocus.Quality)
+                PlayerRoundButton(stringResource(R.string.tv_player_quality), PleyIcons.Gauge, { ui.openPanel(PlayerPanel.Quality) }, beside, ui, PlayerFocus.Quality)
             }
-            PlayerRoundButton(stringResource(R.string.tv_player_info), PleyIcons.Info, { ui.openPanel(PlayerPanel.Info) }, up, ui, PlayerFocus.Info)
+            PlayerRoundButton(stringResource(R.string.tv_player_info), PleyIcons.Info, { ui.openPanel(PlayerPanel.Info) }, beside, ui, PlayerFocus.Info)
         }
     }
 }
 
-/**
- * A round button of the player (design spec §2.5): `bg` 80 % over the
- * video, accent when focused and 1.08 larger, its label fading in 8 dp
- * below while focused (always there for screen readers). [target] names it
- * for focus requests.
- */
+/** A [PlayerRoundButton] showing [icon], [iconSize] square. */
 @Composable
 private fun PlayerRoundButton(
     label: String,
@@ -450,8 +454,28 @@ private fun PlayerRoundButton(
     modifier: Modifier,
     ui: TvPlayerUi,
     target: PlayerFocus?,
-    size: Dp = 48.dp,
-    iconSize: Dp = 24.dp,
+    size: Dp = BUTTON,
+    iconSize: Dp = ICON,
+) = PlayerRoundButton(label, onClick, modifier, ui, target, size) { tint ->
+    Icon(icon, contentDescription = null, size = iconSize, tint = tint)
+}
+
+/**
+ * A button of the player (design spec §2.5): its [glyph] alone on the
+ * scrim, in fg; focused, the accent fills a [control][PleyShape.Control]
+ * square behind it, 1.08 larger, and its label fades in 8 dp below (always
+ * there for screen readers). [target] names it for focus requests; [glyph]
+ * is drawn in the colour it is given.
+ */
+@Composable
+private fun PlayerRoundButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier,
+    ui: TvPlayerUi,
+    target: PlayerFocus?,
+    size: Dp = BUTTON,
+    glyph: @Composable (Color) -> Unit,
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
@@ -473,7 +497,7 @@ private fun PlayerRoundButton(
                 .semantics { contentDescription = label },
             shape = IconButtonDefaults.shape(PleyShape.Control),
             colors = IconButtonDefaults.colors(
-                containerColor = PleyColors.OnArt,
+                containerColor = Color.Transparent,
                 contentColor = PleyColors.Fg,
                 focusedContainerColor = PleyColors.Accent,
                 focusedContentColor = PleyColors.OnAccent,
@@ -484,7 +508,7 @@ private fun PlayerRoundButton(
             glow = IconButtonDefaults.glow(Glow.None, Glow.None, Glow.None),
             border = IconButtonDefaults.border(Border.None, Border.None, Border.None, Border.None, Border.None),
         ) {
-            Icon(icon, contentDescription = null, size = iconSize, tint = androidx.tv.material3.LocalContentColor.current)
+            glyph(androidx.tv.material3.LocalContentColor.current)
         }
         BasicText(
             label,
@@ -504,23 +528,29 @@ private fun PlayerRoundButton(
 }
 
 /**
- * The scrims behind the controls (design spec §2.7, black as the player's
- * exception): 120 dp at the top, black 60 % to 0 %, and 200 dp at the
- * bottom, 0 % to 85 %. They fade by their alpha, read while drawing: no
- * layer over the video. They are stretched pictures, not gradient shaders,
- * which cost far more on a TV's GPU (GradientBitmaps).
+ * The scrim behind the controls (design spec §2.7, black as the player's
+ * exception), over the whole picture: 65 % at the top behind the title,
+ * 25 % through the middle, so the picture steps back while the controls
+ * are up, and 90 % at the bottom, where the row's icons stand on it alone.
+ * It fades by its alpha, read while drawing: no layer over the video. It
+ * is one stretched picture, not a gradient shader, which costs far more on
+ * a TV's GPU (GradientBitmaps).
  */
 internal fun Modifier.controlScrims(alpha: State<Float>): Modifier = drawBehind {
     val a = alpha.value
     if (a <= 0f) return@drawBehind
-    val top = TOP_SCRIM.toPx()
-    val bottom = BOTTOM_SCRIM.toPx()
-    drawStretched(TopScrim, Offset.Zero, Size(size.width, top), alpha = a)
-    drawStretched(BottomScrim, Offset(0f, size.height - bottom), Size(size.width, bottom), alpha = a)
+    drawStretched(ControlScrim, Offset.Zero, size, alpha = a)
 }
 
-private val TopScrim by lazy { GradientBitmaps.vertical(0f to Color.Black.copy(alpha = 0.6f), 1f to Color.Transparent) }
-private val BottomScrim by lazy { GradientBitmaps.vertical(0f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f)) }
+private val ControlScrim by lazy {
+    GradientBitmaps.vertical(
+        0f to Color.Black.copy(alpha = 0.65f),
+        0.22f to Color.Black.copy(alpha = 0.25f),
+        0.55f to Color.Black.copy(alpha = 0.25f),
+        0.78f to Color.Black.copy(alpha = 0.7f),
+        1f to Color.Black.copy(alpha = 0.9f),
+    )
+}
 
 /** Whether a phase counts as playing for Play/Pause: it will play once ready. */
 internal fun PlayerPhase.wantsToPlay(): Boolean = this == PlayerPhase.Playing || this == PlayerPhase.Buffering || this == PlayerPhase.Preparing || this == PlayerPhase.Switching
@@ -537,8 +567,14 @@ private val CHAPTER_GAP = 2.dp
 private val THUMB = 14.dp
 private val THUMB_FOCUSED = 20.dp
 private val SCRUB_HEIGHT = 40.dp
-private val TOP_SCRIM = 120.dp
-private val BOTTOM_SCRIM = 200.dp
+
+/** The control row's buttons: 48 dp with 24 dp icons, the transport's icons 28, Play/Pause 64 with 36. */
+private val BUTTON = 48.dp
+private val ICON = 24.dp
+private val TRANSPORT_ICON = 28.dp
+private val PLAY_BUTTON = 64.dp
+private val PLAY_ICON = 36.dp
+private val TRANSPORT_GAP = 24.dp
 
 /** Where things sit on the 540 dp canvas (design spec §2.7). */
 internal val TIMES_TOP = 371.dp
