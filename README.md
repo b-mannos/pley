@@ -86,9 +86,9 @@ installing it is in [docs/ANDROID.md](docs/ANDROID.md). And pley for Kodi,
 an add-on for Kodi 20 and newer (LibreELEC and CoreELEC boxes, Android TV
 boxes, computers) that plays with Kodi's own player, with Skip Intro and
 Up Next, and signs in with a code too
-([apps/kodi/README.md](apps/kodi/README.md)); and pley for Roku, a native
+([docs/KODI.md](docs/KODI.md)); and pley for Roku, a native
 app that signs in the same way, sideloaded for now
-([apps/roku/README.md](apps/roku/README.md)).
+([docs/ROKU.md](docs/ROKU.md)).
 
 **Offline**: on the home network everything works without the internet.
 Item pages download a file's original, which the Android app (phones and

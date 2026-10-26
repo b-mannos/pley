@@ -11,6 +11,9 @@ It is free software under the GPL (version 2 or later, as Kodi), since it
 runs inside Kodi; it talks to the server only over HTTP, like the other
 apps (LICENSING.md).
 
+The add-on is in `apps/kodi/plugin.video.pley`, its tests in
+`apps/kodi/tests`; file names below are the add-on's own.
+
 ## Installing
 
 No add-on repository carries it yet. Pack it and install the zip:

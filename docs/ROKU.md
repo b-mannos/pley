@@ -17,6 +17,8 @@ without internet: pictures come from the server, the fonts are the Roku's
 own, and the client ID (`https://hhaidar.github.io/pley/oauth/roku.json`) is
 only a name the server knows; nobody fetches it.
 
+The app is in `apps/roku`; paths below are relative to it.
+
 ## How it's built
 
 | Path | What |
@@ -150,3 +152,13 @@ The manifest asks for SceneGraph 1.2, which every Roku OS since 9 runs.
 Roku's store certification asks for 1.3 since October 2026, which needs Roku
 OS 15; the app uses nothing of 1.3, so the switch is one line when it goes
 to the store.
+
+## Not yet
+
+- Music libraries, "Who's watching?" and switching profiles.
+- Hearing what other devices change at once: Home asks again once its rows
+  are a minute old.
+- The Show screen asks for its seasons again each time it shows; Home's row
+  fingerprints would spare that when nothing changed.
+- Roku's channel store: a developer account, certification, SceneGraph 1.3
+  and the launch beacons' order.
