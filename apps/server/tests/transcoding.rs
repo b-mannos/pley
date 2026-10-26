@@ -19,10 +19,10 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use parking_lot::Mutex;
 use pley_transcoder_api::{
-    API_VERSION, AudioMode, AudioPlan, Capabilities, EncoderInfo, ErrorBody, HwAccel, JobCreated, JobRequest,
-    JobStatus, Limits, MediaInfo, MediaStream, PrefetchRequest, Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER,
-    StreamKind, SubtitleRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest, VideoCodec,
-    VideoMode, VideoPlan,
+    API_VERSION, AudioMode, AudioPlan, Capabilities, ConversionState, ConversionStatus, EncoderInfo, ErrorBody,
+    HwAccel, JobCreated, JobRequest, JobStatus, Limits, MediaInfo, MediaStream, PrefetchRequest, Prefetched,
+    ProbeRequest, SUBTITLES_COMPLETE_HEADER, StreamKind, SubtitleRequest, TranscoderInfo, TranscoderStatus,
+    TrickplayInfo, TrickplayRequest, VideoCodec, VideoMode, VideoPlan,
 };
 use serde_json::{Value, json};
 
@@ -71,7 +71,12 @@ struct Fake {
     unreadable: Arc<AtomicBool>,
     /// Subtitle tracks copied into Matroska files of their own, in order.
     tracks: Arc<Mutex<Vec<SubtitleRequest>>>,
+    /// Conversions asked for, in order.
+    conversions: Arc<Mutex<Vec<JobRequest>>>,
 }
+
+/// The stand-in's one conversion: running when asked for, done when looked at again.
+const CONVERSION: &str = "0123456789abcdef0123456789abcdef";
 
 impl Fake {
     /// The transcoder restarted: every job is gone.
@@ -234,6 +239,7 @@ async fn start_fake() -> (Fake, String) {
                             main10: false,
                         }],
                         subtitle_matroska: true,
+                        conversions: true,
                         ..Default::default()
                     },
                     limits: Limits { max_jobs: 8, max_hw_jobs: 0 },
@@ -398,6 +404,61 @@ async fn start_fake() -> (Fake, String) {
         )
         .route("/v1/keyframes", post(|| async { StatusCode::ACCEPTED }))
         .route(
+            "/v1/conversions",
+            post(|State(fake): State<Fake>, Json(req): Json<JobRequest>| async move {
+                fake.conversions.lock().push(req);
+                Json(ConversionStatus {
+                    id: CONVERSION.into(),
+                    state: ConversionState::Running,
+                    progress: 0.25,
+                    duration_ms: 60_000,
+                    ..Default::default()
+                })
+            }),
+        )
+        .route(
+            "/v1/conversions/{id}",
+            get(|Path(id): Path<String>| async move {
+                if id != CONVERSION {
+                    return error(StatusCode::NOT_FOUND, "not_found");
+                }
+                Json(ConversionStatus {
+                    id,
+                    state: ConversionState::Done,
+                    progress: 1.0,
+                    duration_ms: 60_000,
+                    size: Some(10),
+                    ..Default::default()
+                })
+                .into_response()
+            }),
+        )
+        .route(
+            "/v1/conversions/{id}/file",
+            get(|Path(id): Path<String>, headers: HeaderMap| async move {
+                if id != CONVERSION {
+                    return error(StatusCode::NOT_FOUND, "not_found");
+                }
+                let body = "0123456789";
+                match headers.get(header::RANGE).and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("bytes=")) {
+                    Some(range) => {
+                        let start: usize = range.trim_end_matches('-').parse().unwrap();
+                        (
+                            StatusCode::PARTIAL_CONTENT,
+                            [
+                                (header::CONTENT_TYPE, "video/x-matroska".to_owned()),
+                                (header::CONTENT_RANGE, format!("bytes {start}-9/10")),
+                                (header::ACCEPT_RANGES, "bytes".to_owned()),
+                            ],
+                            body[start..].to_owned(),
+                        )
+                            .into_response()
+                    }
+                    None => ([(header::CONTENT_TYPE, "video/x-matroska")], body).into_response(),
+                }
+            }),
+        )
+        .route(
             "/v1/prefetch",
             post(|State(fake): State<Fake>, Json(req): Json<PrefetchRequest>| async move {
                 fake.prefetches.lock().push(req);
@@ -487,6 +548,61 @@ async fn world() -> World {
     let library = app.library(&admin, "Movies", "movies", "movies").await;
     let movies = app.ids(library, &admin).await;
     World { app, fake, base, admin, movies }
+}
+
+/// A phone's caps: Matroska and H.264 played as they are, but not AC-3.
+fn phone() -> Value {
+    json!({"containers": ["mkv", "mp4"], "video_codecs": ["h264"], "audio_codecs": ["aac"]})
+}
+
+#[tokio::test]
+async fn a_download_takes_the_original_when_it_plays_as_it_is() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let clip = w.movies["Clip"];
+    let answer = app.post("/api/conversions", admin, json!({"item_id": clip, "caps": browser()})).await;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+    let file = app.file_of(clip).await;
+    assert_eq!(
+        (&answer.body["state"], &answer.body["id"], &answer.body["url"], &answer.body["size"]),
+        (&json!("direct"), &Value::Null, &json!(format!("/api/files/{file}/stream")), &json!(3072))
+    );
+    assert!(w.fake.conversions.lock().is_empty(), "nothing to convert");
+}
+
+#[tokio::test]
+async fn a_download_the_player_cannot_play_is_converted_and_comes_with_ranges() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let feature = w.movies["Feature"];
+    let answer = app.post("/api/conversions", admin, json!({"item_id": feature, "caps": phone()})).await;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+    assert_eq!(
+        (&answer.body["state"], &answer.body["id"], &answer.body["progress"]),
+        (&json!("running"), &json!(CONVERSION), &json!(0.25))
+    );
+    let url = format!("/api/conversions/{CONVERSION}/file");
+    assert_eq!(answer.body["url"], json!(url));
+    // What a playback would stream: the video as it is, the sound made AAC, from the start, at full speed.
+    let asked = w.fake.conversions.lock().last().cloned().unwrap();
+    assert_eq!(asked.video.as_ref().map(|v| v.mode), Some(VideoMode::Copy));
+    assert_eq!(asked.audio.as_ref().map(|a| a.mode), Some(AudioMode::Transcode));
+    assert_eq!((asked.start_ms, asked.segment_seconds), (None, None));
+    assert!(asked.input.ends_with("Feature (2021).mkv"), "{}", asked.input);
+
+    let status = app.get(&format!("/api/conversions/{CONVERSION}"), admin).await;
+    assert_eq!((&status.body["state"], &status.body["size"]), (&json!("done"), &json!(10)));
+    let rest = app.call(Method::GET, &url, Some(admin), None, &[("range", "bytes=4-")]).await;
+    assert_eq!(rest.status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(rest.headers.get("content-range").and_then(|v| v.to_str().ok()), Some("bytes 4-9/10"));
+    assert_eq!(rest.text(), "456789");
+
+    // Someone who can't see the movie can't see its conversion either.
+    let (other, _) = app.user(admin, "other", json!({"all_libraries": false, "library_ids": []})).await;
+    for path in [format!("/api/conversions/{CONVERSION}"), url.clone()] {
+        assert_eq!(app.get(&path, &other).await.status, StatusCode::NOT_FOUND, "{path}");
+    }
+    assert_eq!(app.get("/api/conversions/ffffffffffffffffffffffffffffffff", admin).await.status, StatusCode::NOT_FOUND);
 }
 
 fn browser() -> Value {

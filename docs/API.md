@@ -691,6 +691,9 @@ sign-in settings among them.
 | DELETE | `/api/playback/{session}` | `play` |
 | GET | `/api/playback/{session}/{file}` | `play` |
 | GET | `/api/files/{id}/stream` | `play` |
+| POST | `/api/conversions` | `play` |
+| GET | `/api/conversions/{id}` | `play` |
+| GET | `/api/conversions/{id}/file` | `play` |
 | GET | `/api/files/{id}/subtitles/{file}` | `play` |
 | GET | `/api/files/{id}/trickplay` | `play` |
 | GET | `/api/files/{id}/trickplay/{sheet}` | `play` |
@@ -1314,6 +1317,44 @@ For those players, the Dolby Vision rules of version 2 become:
 The player's details (`GET /api/playback/{session}`) say what became of
 it: `transcode.dolby_vision` (`"kept"`, `"converted to 8.1"`) and
 `transcode.hdr10plus_stripped`.
+
+## Downloads
+
+A device that keeps a title to play away from the server downloads its
+original (`GET /api/files/{id}/stream`, with ranges) when it plays it as it
+is, else a file the server makes for it: the streams a playback would
+stream, in one Matroska file.
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| POST | `/api/conversions` | `POST /api/playback`'s body (`item_id`, `file_id?`, `caps`, `audio_index?`, `max_height?`, `max_bitrate?`, `mode?`) | `DownloadInfo` |
+| GET | `/api/conversions/{id}` | – | `DownloadInfo` |
+| GET | `/api/conversions/{id}/file` | – | the converted file (`video/x-matroska`) once whole, with `Range` |
+
+```ts
+interface DownloadInfo {
+  id: string | null;         // the conversion; null for the original
+  state: "direct" | "queued" | "running" | "done" | "failed";
+  progress: number;          // 0 to 1 (1 for the original)
+  size: number | null;       // bytes: the original's, or the converted file's once done
+  error: string | null;      // why it failed
+  url: string;               // the original, or the converted file
+}
+```
+
+The server decides as for a playback with the same body: what the player
+plays as it is downloads as it is (`direct`); otherwise the transcoder makes
+the file (the video copied or made anew at `max_height` and `max_bitrate`,
+the sound made AAC), one conversion at a time, from the start and at full
+speed. Asked again for the same file and choices, from any device, the
+same conversion answers (or the file it made); a failed one is tried
+again. Look at `GET /api/conversions/{id}` every few seconds until it is
+`done`, then fetch `url`. Converted files are kept a week after their last
+download (a download cut short goes on with `Range`), within the
+transcoder's limit; once gone, asking again makes them again. A
+conversion is known to the server once asked for since it started (a
+`404` otherwise: ask again), and to those who may see its title. `503`
+with a transcoder too old to convert.
 
 ## Intro and credits detection
 

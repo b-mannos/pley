@@ -14,12 +14,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use axum::http::HeaderValue;
 use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
 use pley_transcoder_api::{
-    Announce, CoverRequest, ErrorBody, Fingerprint, FingerprintRequest, Frames, FramesRequest, JobCreated, JobRequest,
-    JobStatus, KeyframesRequest, MediaInfo, PrefetchRequest, Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER,
-    SubtitleRequest, TOKEN_ENV, ThumbnailRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
+    Announce, ConversionStatus, CoverRequest, ErrorBody, Fingerprint, FingerprintRequest, Frames, FramesRequest,
+    JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo, PrefetchRequest, Prefetched, ProbeRequest,
+    SUBTITLES_COMPLETE_HEADER, SubtitleRequest, TOKEN_ENV, ThumbnailRequest, TranscoderInfo, TranscoderStatus,
+    TrickplayInfo, TrickplayRequest,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -365,6 +367,30 @@ impl Transcoder {
     /// the wait here is longer, so its answer comes through.
     pub async fn create_job(&self, req: &JobRequest) -> TranscoderResult<JobCreated> {
         self.post_json("/v1/jobs", req, Duration::from_secs(25 * 60)).await
+    }
+
+    /// Starts making `req` into one file (a converted download), or finds
+    /// the conversion made of it: transcoders with `conversions`.
+    pub async fn create_conversion(&self, req: &JobRequest) -> TranscoderResult<ConversionStatus> {
+        self.post_json("/v1/conversions", req, Duration::from_secs(10 * 60)).await
+    }
+
+    pub async fn conversion(&self, id: &str) -> TranscoderResult<ConversionStatus> {
+        self.get_json(&format!("/v1/conversions/{id}"), Duration::from_secs(10)).await
+    }
+
+    /// A conversion's file, from the `range` a download asks for when it
+    /// goes on (the caller forwards the body). A range past its end answers
+    /// as the transcoder does (416).
+    pub async fn conversion_file(&self, id: &str, range: Option<&HeaderValue>) -> TranscoderResult<reqwest::Response> {
+        let base = self.base()?;
+        let mut req = self.authed(self.http.get(format!("{base}/v1/conversions/{id}/file")));
+        if let Some(range) = range {
+            req = req.header(reqwest::header::RANGE, range.as_bytes());
+        }
+        // No overall limit: the file comes as fast as the network takes it.
+        let resp = req.send().await?;
+        if resp.status().is_success() || resp.status().as_u16() == 416 { Ok(resp) } else { Err(api_error(resp).await) }
     }
 
     pub async fn delete_job(&self, id: &str) -> TranscoderResult<()> {

@@ -10,8 +10,10 @@ use axum::response::{IntoResponse, Response};
 use dashmap::DashMap;
 use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
-use pley_transcoder_api::{AudioMode, JobRequest, SUBTITLES_COMPLETE_HEADER, StreamKind, VideoMode};
-use serde::Deserialize;
+use pley_transcoder_api::{
+    AudioMode, ConversionState, ConversionStatus, JobRequest, SUBTITLES_COMPLETE_HEADER, StreamKind, VideoMode,
+};
+use serde::{Deserialize, Serialize};
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
@@ -388,6 +390,153 @@ async fn replacement_job(state: &AppState, user: &AuthUser, session: &Session, f
     tracing::info!("recreated transcode job for session {}", session.id);
     *session.job_id.lock() = Some(created.id.clone());
     Ok(created.id)
+}
+
+/// Where a download stands: the original, or a conversion of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DownloadState {
+    /// The original plays on the player as it is: `url` is it.
+    Direct,
+    Queued,
+    Running,
+    /// The converted file is whole: `url` is it.
+    Done,
+    Failed,
+}
+
+/// `POST /api/conversions` and `GET /api/conversions/{id}`: what a
+/// download of an item takes (docs/API.md, "Downloads").
+#[derive(Debug, Serialize)]
+pub struct DownloadInfo {
+    /// The conversion's id; `None` for the original.
+    pub id: Option<String>,
+    pub state: DownloadState,
+    /// How far a conversion has come, 0 to 1 (1 for the original).
+    pub progress: f64,
+    /// Bytes, once known: the original's, or the converted file's once done.
+    pub size: Option<u64>,
+    pub error: Option<String>,
+    /// Where the file comes from (with ranges): the original, or the converted file.
+    pub url: String,
+}
+
+impl DownloadInfo {
+    fn of(status: &ConversionStatus) -> Self {
+        Self {
+            id: Some(status.id.clone()),
+            state: match status.state {
+                ConversionState::Queued => DownloadState::Queued,
+                ConversionState::Running => DownloadState::Running,
+                ConversionState::Done => DownloadState::Done,
+                ConversionState::Failed => DownloadState::Failed,
+            },
+            progress: status.progress,
+            size: status.size,
+            error: status.error.clone(),
+            url: format!("/api/conversions/{}/file", status.id),
+        }
+    }
+}
+
+/// `POST /api/conversions`: what a download of the item takes on the
+/// player of `req.caps`, decided as a playback is. The original, when it
+/// plays there as it is; else one file made by the transcoder of what a
+/// playback would stream (the video copied or made anew, the sound made
+/// AAC), once for every player that needs the same.
+pub async fn convert(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Json(mut req): Json<PlaybackRequest>,
+) -> ApiResult<Json<DownloadInfo>> {
+    let row = item_or_404(&state, user.id, req.item_id).await?;
+    if !matches!(row.kind.as_str(), "movie" | "episode" | "extra") {
+        return Err(AppError::bad_request("only movies, episodes and extras are downloaded"));
+    }
+    let transcoder = state.transcoder.info();
+    req.hdr_transcodes = transcoder.as_ref().is_some_and(|info| info.capabilities.hdr_transcode);
+    let files = catalog::files_for_item(&state.db, row.id).await?;
+    let file = match req.file_id {
+        Some(id) => files.into_iter().find(|f| f.id == id).ok_or_else(|| AppError::not_found("file not found"))?,
+        None => files.into_iter().next().ok_or_else(|| AppError::not_found("this item has no media file"))?,
+    };
+    let info = file.media_info();
+    let streams = file.streams();
+    if req.audio_index.is_none() {
+        let pref = streams::load(&state.db, user.id, streams::scope(&row)).await?;
+        let defaults = streams::defaults(&state.db, user.id).await?;
+        req.audio_index = streams::resolve(pref.as_ref(), &defaults, &streams).audio;
+    }
+    let decision = decide(&file, info.as_ref(), &streams, &req);
+    if decision.method == Method::Direct {
+        return Ok(Json(DownloadInfo {
+            id: None,
+            state: DownloadState::Direct,
+            progress: 1.0,
+            size: u64::try_from(file.size).ok(),
+            error: None,
+            url: format!("/api/files/{}/stream", file.id),
+        }));
+    }
+    if !transcoder.is_some_and(|info| info.capabilities.conversions) {
+        return Err(AppError::Unavailable(
+            "this server's transcoder can't make files for downloading: update it, or download the original".into(),
+        ));
+    }
+    let job = JobRequest {
+        input: file.path.clone(),
+        media: info,
+        label: Some(label(&row)),
+        owner: Some(user.username.clone()),
+        video: decision.video.clone(),
+        audio: decision.audio.clone(),
+        subtitle: decision.subtitle.clone(),
+        segment_seconds: None,
+        start_ms: None,
+        options: state.settings.get().transcode_options(),
+    };
+    let status = state.transcoder.create_conversion(&job).await.map_err(|err| for_viewer(&user, err))?;
+    state.sessions.note_conversion(&status.id, file.id);
+    Ok(Json(DownloadInfo::of(&status)))
+}
+
+/// The file conversion `id` is made of, when this user may see it.
+async fn conversion_of(state: &AppState, user: &AuthUser, id: &str) -> ApiResult<i64> {
+    let file_id = state.sessions.conversion_file(id).ok_or_else(|| AppError::not_found("conversion not found"))?;
+    visible_file(state, user, file_id).await?;
+    Ok(file_id)
+}
+
+/// `GET /api/conversions/{id}`: how a conversion goes.
+pub async fn conversion(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+) -> ApiResult<Json<DownloadInfo>> {
+    conversion_of(&state, &user, &id).await?;
+    let status = state.transcoder.conversion(&id).await.map_err(|err| for_viewer(&user, err))?;
+    Ok(Json(DownloadInfo::of(&status)))
+}
+
+/// `GET /api/conversions/{id}/file`: the converted file once whole, with
+/// ranges (a download cut short goes on), from the transcoder as it comes.
+pub async fn conversion_file(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+    request: Request,
+) -> ApiResult<Response> {
+    conversion_of(&state, &user, &id).await?;
+    let range = request.headers().get(header::RANGE);
+    let upstream = state.transcoder.conversion_file(&id, range).await.map_err(|err| for_viewer(&user, err))?;
+    let mut response =
+        Response::builder().status(upstream.status().as_u16()).header(header::CACHE_CONTROL, "private, no-cache");
+    for name in [header::CONTENT_TYPE, header::CONTENT_LENGTH, header::CONTENT_RANGE, header::ACCEPT_RANGES] {
+        if let Some(value) = upstream.headers().get(name.as_str()) {
+            response = response.header(name, value.as_bytes());
+        }
+    }
+    response.body(Body::from_stream(upstream.bytes_stream())).map_err(|e| AppError::Internal(e.into()))
 }
 
 pub async fn hls_file(

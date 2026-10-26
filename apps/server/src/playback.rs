@@ -1144,6 +1144,9 @@ pub struct Sessions {
     changed: Notify,
     /// Sessions stopped from elsewhere, by id (see [`Sessions::stop`]).
     stopped: Mutex<HashMap<String, Stopped>>,
+    /// Conversions asked for (converted downloads), by id: the file each is
+    /// made of. Whoever may see that file may fetch it.
+    conversions: Mutex<HashMap<String, i64>>,
 }
 
 /// A session stopped from elsewhere (an administrator, or its owner on
@@ -1201,6 +1204,17 @@ pub const STARTING_SECS: i64 = 30;
 const MAX_DIRECT_PER_USER: usize = 20;
 
 impl Sessions {
+    /// Conversion `id` is made of file `file_id`.
+    pub fn note_conversion(&self, id: &str, file_id: i64) {
+        self.conversions.lock().insert(id.to_owned(), file_id);
+    }
+
+    /// The file conversion `id` is made of; `None` for one not asked for
+    /// since the server started (asked again, it is known again).
+    pub fn conversion_file(&self, id: &str) -> Option<i64> {
+        self.conversions.lock().get(id).copied()
+    }
+
     pub fn insert(&self, session: Session) -> Arc<Session> {
         let session = Arc::new(session);
         let mut map = self.map.lock();
