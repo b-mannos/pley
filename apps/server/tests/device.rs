@@ -783,6 +783,36 @@ async fn kodi_and_roku_sign_in_only_with_a_code() {
 }
 
 #[tokio::test]
+async fn a_tv_can_show_where_to_type_its_code_as_a_qr_code() {
+    let app = TestApp::new().await;
+    let drawn = app.call(Method::GET, "/api/oauth/device/qr?code=bcdf-ghjk", None, None, &[("host", HOST)]).await;
+    assert_eq!(drawn.status, StatusCode::OK, "{}", drawn.text());
+    assert_eq!(drawn.headers[header::CONTENT_TYPE], "image/png");
+    assert_eq!(drawn.headers[header::CACHE_CONTROL], "no-store");
+    // Module by module, the QR code of the link page with that code, in a
+    // quiet zone of 4 light modules.
+    let picture = image::load_from_memory(&drawn.bytes).unwrap().into_luma8();
+    let expected = format!("{ISSUER}/link?code=BCDFGHJK");
+    let code = qrcodegen::QrCode::encode_text(&expected, qrcodegen::QrCodeEcc::Medium).unwrap();
+    let modules = code.size() + 8;
+    assert_eq!(picture.width(), picture.height());
+    let scale = picture.width() / modules as u32;
+    assert_eq!(picture.width(), scale * modules as u32);
+    for y in 0..modules {
+        for x in 0..modules {
+            let pixel = picture.get_pixel(x as u32 * scale + scale / 2, y as u32 * scale + scale / 2)[0];
+            assert_eq!(pixel == 0, code.get_module(x - 4, y - 4), "module {x},{y}");
+        }
+    }
+    // Only codes: nothing else can be drawn on pley's behalf.
+    for asked in ["", "code=", "code=BCDF", "code=AEIO-UAEI", "code=bcdf-ghjkb", "code=https://evil.example"] {
+        let refused =
+            app.call(Method::GET, &format!("/api/oauth/device/qr?{asked}"), None, None, &[("host", HOST)]).await;
+        assert_eq!(refused.status, StatusCode::BAD_REQUEST, "{asked}");
+    }
+}
+
+#[tokio::test]
 async fn metadata_lists_the_device_endpoint() {
     let app = TestApp::new().await;
     let found = metadata(&app, &[("host", HOST)]).await;

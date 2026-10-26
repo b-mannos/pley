@@ -302,6 +302,7 @@ interface PlaybackInfo {
 |---|---|---|---|
 | GET | `/api/health` | – | `{ "status": "ok" }` |
 | GET | `/api/server` | – | `{ name: string, version: string, setup_required: boolean, setup_code_required: boolean }`. Setup takes the code from the server's log |
+| GET | `/api/oauth/device/qr?code=` | – | where to type a TV's code, as a QR code (PNG): see [TVs](#tvs) |
 | POST | `/api/setup` | `{ username, password, setup_code }` | `{ user: User, token? }` — creates the first (admin) account and signs in. `409` once a user exists, `403` without the right `setup_code` (5 tries per 15 minutes from each address, then `429`) |
 | POST | `/api/auth/login` | `{ username, password, code? }` | `{ user: User, token? }` (`401` on bad credentials). With two-step sign-in, `code` is a code from the authenticator app or a recovery code: without it, or with a wrong one, `401` with `code: "two_step"` |
 
@@ -582,9 +583,14 @@ TV and Fire TV, pley for Kodi and pley for Roku.
 
    The TV keeps `device_code` (256 random bits) to itself and shows
    `user_code` and `verification_uri`, or a QR code of
-   `verification_uri_complete`. User codes are 8 of RFC 8628 §6.1's 20
-   consonants (`BCDFGHJKLMNPQRSTVWXZ`, about 2.6 × 10¹⁰ codes), without
-   vowels or digits so they spell nothing and look like nothing else.
+   `verification_uri_complete`. A TV that can't draw one shows
+   **`GET /api/oauth/device/qr?code=BCDF-GHJK`**: that address as a PNG
+   (black on white, 8 pixels a module, with a quiet zone of 4 modules;
+   `Cache-Control: no-store`), for anyone who asks, since it looks no
+   request up; `400` for something that isn't a code. User codes are 8 of
+   RFC 8628 §6.1's 20 consonants (`BCDFGHJKLMNPQRSTVWXZ`, about 2.6 × 10¹⁰
+   codes), without vowels or digits so they spell nothing and look like
+   nothing else.
    `invalid_client` for an app that isn't pley's own, `unauthorized_client`
    for one of pley's own that doesn't sign in this way (the desktop app),
    `invalid_scope` as at `/oauth/authorize`, `429`

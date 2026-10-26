@@ -29,7 +29,7 @@ use std::net::IpAddr;
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
-use axum::extract::{FromRequestParts, Path, State};
+use axum::extract::{FromRequestParts, Path, Query, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -898,6 +898,45 @@ fn start_on_device(
         "interval": devices::INTERVAL.as_secs(),
     });
     Ok((StatusCode::OK, NO_STORE, Json(body)).into_response())
+}
+
+/// The code a TV asks for the QR code of.
+#[derive(Deserialize)]
+pub struct QrCode {
+    code: String,
+}
+
+/// `GET /api/oauth/device/qr?code=…`: where to type a TV's code, as a QR code
+/// in a PNG, for TVs that can't draw one (pley for Roku): this server's
+/// `/link?code=…`, the same address as `verification_uri_complete`. Anyone
+/// may ask, as anyone may start signing in: no request is looked up, so it
+/// says nothing about which codes exist.
+pub async fn device_qr(headers: HeaderMap, Query(asked): Query<QrCode>) -> ApiResult<Response> {
+    let code = devices::normalize(&asked.code).ok_or_else(|| AppError::bad_request(NOT_A_CODE))?;
+    let issuer = issuer(&headers)?;
+    let png = qr_png(&format!("{issuer}/link?code={code}"))
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("a QR code that couldn't be drawn")))?;
+    Ok(([(header::CONTENT_TYPE, "image/png"), (header::CACHE_CONTROL, "no-store")], png).into_response())
+}
+
+/// Pixels to a module of [`qr_png`]'s codes, and modules of quiet zone
+/// around them, which scanners need.
+const QR_SCALE: u32 = 8;
+const QR_QUIET: i32 = 4;
+
+/// `text` as a QR code (medium error correction): black on white, with its
+/// quiet zone.
+fn qr_png(text: &str) -> Option<Vec<u8>> {
+    let code = qrcodegen::QrCode::encode_text(text, qrcodegen::QrCodeEcc::Medium).ok()?;
+    let side = (code.size() + 2 * QR_QUIET) as u32 * QR_SCALE;
+    let picture = image::GrayImage::from_fn(side, side, |x, y| {
+        // Outside the code (the quiet zone) a module is light.
+        let dark = code.get_module((x / QR_SCALE) as i32 - QR_QUIET, (y / QR_SCALE) as i32 - QR_QUIET);
+        image::Luma([if dark { 0 } else { 255 }])
+    });
+    let mut png = Vec::new();
+    picture.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok()?;
+    Some(png)
 }
 
 /// What the `/link` page sends: the code the TV shows, as it was typed.

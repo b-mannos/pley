@@ -63,6 +63,7 @@ pub fn router(state: AppState) -> Router {
         .route("/oauth/revoke", post(oauth::revoke).layer(DefaultBodyLimit::max(FORM_MAX)))
         .route("/oauth/device", post(oauth::device_authorization).layer(DefaultBodyLimit::max(FORM_MAX)))
         .route("/oauth/device/verify", post(oauth::verify_user_code).layer(DefaultBodyLimit::max(FORM_MAX)))
+        .route("/oauth/device/qr", get(oauth::device_qr))
         .route("/oauth/profiles", get(oauth::profiles))
         .route("/libraries", get(libraries::list).post(libraries::create))
         .route("/libraries/scan", post(libraries::scan_all))
