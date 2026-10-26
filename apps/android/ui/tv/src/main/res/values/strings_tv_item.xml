@@ -23,6 +23,11 @@
     <string name="tv_item_extras">Extras</string>
     <string name="tv_item_cast">Cast</string>
     <string name="tv_item_guest_stars">Guest Stars</string>
+    <string name="tv_item_cast_and_crew">Cast &amp; Crew</string>
+    <string name="tv_item_guest_stars_and_crew">Guest Stars &amp; Crew</string>
+    <string name="tv_item_crew">Crew</string>
+    <!-- Under a person's picture in Cast & Crew. -->
+    <string name="tv_item_creator">Creator</string>
     <string name="tv_item_more_like_this">More Like This</string>
     <string name="tv_item_episodes">Episodes</string>
     <string name="tv_item_details">Details</string>

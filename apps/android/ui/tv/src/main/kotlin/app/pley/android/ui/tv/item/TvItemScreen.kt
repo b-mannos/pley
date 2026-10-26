@@ -62,8 +62,11 @@ import app.pley.android.designsystem.image.ArtworkCandidates
 import app.pley.android.designsystem.reducedMotion
 import app.pley.android.designsystem.tile.ArtworkTileModel
 import app.pley.android.designsystem.tile.TileKind
+import app.pley.android.model.Credit
+import app.pley.android.model.CreditRole
 import app.pley.android.model.ItemKind
 import app.pley.android.model.ItemSummary
+import app.pley.android.screens.item.CrewLine
 import app.pley.android.screens.item.EpisodeLine
 import app.pley.android.screens.item.ItemEvent
 import app.pley.android.screens.item.ItemPage
@@ -319,15 +322,25 @@ private fun LazyListScope.rowsOf(
             }
         }
     }
-    if (page.cast.isNotEmpty()) {
+    val crew = page.details.crew
+    if (page.cast.isNotEmpty() || crew.isNotEmpty()) {
         item(key = "cast", contentType = TileKind.Person) {
-            val tiles = remember(page.cast, origin) {
-                page.cast.map { ArtworkTileModel(id = it.id, title = it.name, subtitle = it.character.orEmpty(), image = ArtworkImage.of(it.photoUrl, origin)) }
+            val roles = mapOf(
+                CreditRole.Director to stringResource(R.string.tv_item_director),
+                CreditRole.Writer to stringResource(R.string.tv_item_writer),
+                CreditRole.Creator to stringResource(R.string.tv_item_creator),
+            )
+            val tiles = remember(page.cast, crew, origin, roles) { castAndCrew(page.cast, crew, roles, origin) }
+            val episode = page.kind == ItemKind.Episode
+            val title = when {
+                crew.isEmpty() -> if (episode) R.string.tv_item_guest_stars else R.string.tv_item_cast
+                page.cast.isEmpty() -> R.string.tv_item_crew
+                else -> if (episode) R.string.tv_item_guest_stars_and_crew else R.string.tv_item_cast_and_crew
             }
             Box(Modifier.focusRequester(sections.of("cast")).onFocusChanged { if (it.hasFocus) focus.area = Area.Rows }) {
                 TvRow(
                     rowKey = "cast",
-                    title = stringResource(if (page.kind == ItemKind.Episode) R.string.tv_item_guest_stars else R.string.tv_item_cast),
+                    title = stringResource(title),
                     tiles = tiles,
                     kind = TileKind.Person,
                     onOpen = { actions.openPerson(it.id) },
@@ -534,3 +547,22 @@ internal const val TV_ITEM_PAGE = "pley.tv.item"
 
 /** The details' item key in the page's column. */
 private const val DETAILS_KEY = "details"
+
+/**
+ * The tiles of Cast & Crew: the cast with their parts, then who made it
+ * with their [roles] ("Director"), each person once, so that their names
+ * lead to their pages as on the web.
+ */
+internal fun castAndCrew(cast: List<Credit>, crew: List<CrewLine>, roles: Map<CreditRole, String>, origin: String): List<ArtworkTileModel> {
+    val seen = HashSet<Long>()
+    return buildList {
+        cast.filter { seen.add(it.id) }.forEach {
+            add(ArtworkTileModel(id = it.id, title = it.name, subtitle = it.character.orEmpty(), image = ArtworkImage.of(it.photoUrl, origin)))
+        }
+        crew.forEach { line ->
+            line.people.filter { seen.add(it.id) }.forEach {
+                add(ArtworkTileModel(id = it.id, title = it.name, subtitle = roles[line.role].orEmpty(), image = ArtworkImage.of(it.photoUrl, origin)))
+            }
+        }
+    }
+}
