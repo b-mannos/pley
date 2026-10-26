@@ -373,6 +373,49 @@ describe("VideoPlayer subtitle timing", () => {
     expect(screen.queryByTestId("subtitles")).not.toBeInTheDocument();
     expect(window.localStorage.getItem("pley.subtitleOffsets")).toBe("{}");
   });
+
+  it("moves the track's own cues in native fullscreen, where the browser draws them", async () => {
+    window.localStorage.setItem("pley.subtitleOffsets", JSON.stringify({ f3: 1 }));
+    const onTrack: FakeCue[] = [];
+    const track = {
+      get cues() {
+        return onTrack;
+      },
+      mode: "disabled",
+      addCue: (cue: FakeCue) => onTrack.push(cue),
+      removeCue: (cue: FakeCue) => onTrack.splice(onTrack.indexOf(cue), 1),
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    };
+    vi.spyOn(HTMLMediaElement.prototype, "addTextTrack").mockImplementation(() => track as unknown as TextTrack);
+    serve(
+      [
+        session("s1", {
+          subtitles: [
+            { index: 3, codec: "subrip", language: "eng", title: null, default: false, forced: false, external: false, text_based: true, url: "/api/subs/3.vtt" },
+          ],
+        }),
+      ],
+      { "GET /api/subs/3.vtt": () => new Response("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello", { status: 200 }) },
+    );
+    const item = detail();
+    const file = item.files[0];
+    if (!file) throw new Error("no file");
+    file.streams = [english];
+    const { container } = renderWithProviders(<VideoPlayer item={item} startMs={0} fileId={null} audio={null} sub={3} />);
+    const video = container.querySelector("video");
+    if (!video) throw new Error("no video element");
+
+    // Drawn by pley: the cues stay at the file's times, hidden.
+    await waitFor(() => expect(onTrack.map((c) => [c.startTime, c.endTime])).toEqual([[1, 2]]));
+    expect(track.mode).toBe("hidden");
+
+    // Drawn by the browser: moved one second later on the track.
+    fireEvent(video, new Event("webkitbeginfullscreen"));
+    await waitFor(() => expect(onTrack.map((c) => [c.startTime, c.endTime])).toEqual([[2, 3]]));
+    expect(track.mode).toBe("showing");
+    expect(onTrack[0]?.text).toBe("Hello");
+  });
 });
 
 describe("VideoPlayer with hls.js", () => {
