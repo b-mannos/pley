@@ -46,6 +46,8 @@ class PendingReportsTest {
         assertEquals(2L, AppDownloads.pickFile(listOf(uhd, hd, sd))?.id)
         assertEquals(1L, AppDownloads.pickFile(listOf(uhd))?.id)
         assertEquals("4K only: the smaller", 4L, AppDownloads.pickFile(listOf(uhd, uhd.copy(id = 4, size = 30_000_000_000)))?.id)
+        assertEquals("one that plays here as it is", 1L, AppDownloads.pickFile(listOf(uhd, hd, sd)) { it.id == 1L }?.id)
+        assertEquals("none does: as if all did", 2L, AppDownloads.pickFile(listOf(uhd, hd, sd)) { false }?.id)
     }
 
     private fun report(itemId: Long, position: Long, at: Long) = PendingReport(

@@ -36,6 +36,7 @@
     <!-- How it plays (PlaybackDetails.tsx). -->
     <string name="session_method_direct">Direct play</string>
     <string name="session_method_downloaded">Downloaded</string>
+    <string name="session_error_download_needs_server">This download doesn\'t play on this device as it is. It plays with the server in reach, which converts it.</string>
     <string name="session_method_remux">Direct stream</string>
     <string name="session_method_transcode">Transcoding</string>
     <string name="session_method_remux_audio">Direct stream · Audio transcoding</string>

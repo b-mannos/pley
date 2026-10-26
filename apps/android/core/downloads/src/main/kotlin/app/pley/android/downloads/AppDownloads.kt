@@ -69,6 +69,8 @@ class AppDownloads internal constructor(
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher = Dispatchers.IO,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Whether a version of an item plays here as it is: away from the server, nothing converts it. */
+    private val playsHere: suspend (ItemDetail, MediaFile) -> Boolean = { _, _ -> true },
 ) : Downloads {
     init {
         // Small, and read once: made off the main thread by the app's warm-up.
@@ -297,9 +299,10 @@ class AppDownloads internal constructor(
 
     private fun keyOf(itemId: Long): Key? = current()?.let { (server, userId) -> Key(server, userId, itemId) }
 
-    private fun savedOf(detail: ItemDetail, server: String, userId: Long): Saved? {
+    private suspend fun savedOf(detail: ItemDetail, server: String, userId: Long): Saved? {
         if (detail.kind != ItemKind.Movie && detail.kind != ItemKind.Episode) return null
-        val file = pickFile(detail.files) ?: return null
+        val playable = if (detail.files.size > 1) detail.files.filter { playsHere(detail, it) }.map { it.id }.toSet() else null
+        val file = pickFile(detail.files) { playable == null || it.id in playable } ?: return null
         val episode = detail.kind == ItemKind.Episode
         return Saved(
             server = server,
@@ -365,7 +368,13 @@ class AppDownloads internal constructor(
          * The app's downloads: kept in the app's own storage (removed with
          * the app), the server and profile signed in to now from [data].
          */
-        fun create(context: Context, data: DataGraph, network: NetworkGraph): AppDownloads {
+        /** [playsHere]: whether a version of an item plays on this device as it is (the player's capabilities). */
+        fun create(
+            context: Context,
+            data: DataGraph,
+            network: NetworkGraph,
+            playsHere: suspend (ItemDetail, MediaFile) -> Boolean = { _, _ -> true },
+        ): AppDownloads {
             val app = context.applicationContext
             val root = File(app.getExternalFilesDir(null) ?: app.filesDir, "downloads")
             val sources = object : DownloadSources {
@@ -386,18 +395,21 @@ class AppDownloads internal constructor(
                 reports = PendingReports(File(app.filesDir, "downloads/reports.json")),
                 gate = AndroidNetworkGate(app),
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+                playsHere = playsHere,
             )
         }
 
         /**
-         * The file of [files] that suits a phone best: the sharpest up to
-         * 1080p (the size a phone shows, far smaller than 4K), else the
-         * smallest there is.
+         * The file of [files] that suits a phone best: of those that play
+         * here as they are ([playsHere], all when none does), the sharpest
+         * up to 1080p (the size a phone shows, far smaller than 4K), else
+         * the smallest there is.
          */
-        internal fun pickFile(files: List<MediaFile>): MediaFile? {
+        internal fun pickFile(files: List<MediaFile>, playsHere: (MediaFile) -> Boolean = { true }): MediaFile? {
             if (files.size <= 1) return files.firstOrNull()
-            val fitting = files.filter { (it.height ?: 0) in 1..MAX_HEIGHT }
-            return fitting.maxByOrNull { it.height ?: 0 } ?: files.minByOrNull { if (it.size > 0) it.size else Long.MAX_VALUE }
+            val candidates = files.filter(playsHere).ifEmpty { files }
+            val fitting = candidates.filter { (it.height ?: 0) in 1..MAX_HEIGHT }
+            return fitting.maxByOrNull { it.height ?: 0 } ?: candidates.minByOrNull { if (it.size > 0) it.size else Long.MAX_VALUE }
         }
 
         private const val MAX_HEIGHT = 1080

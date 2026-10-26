@@ -25,6 +25,7 @@ import app.pley.android.model.format.formatBitrate
 import app.pley.android.model.format.resolutionLabel
 import app.pley.android.model.format.streamLabel
 import app.pley.android.network.ApiException
+import app.pley.android.network.OfflineException
 import app.pley.android.player.ChapterMark
 import app.pley.android.player.EngineSource
 import app.pley.android.player.PlayRequest
@@ -1241,7 +1242,9 @@ class SessionPlaybackController(
     }
 
     private fun failWith(error: Exception) {
-        val message = describe(error)
+        // A download that didn't play here as it is went to the server, which is out of reach.
+        val leftDownload = recovery.fallbackMode != null && file?.let { env.local.file(it.id) } != null
+        val message = if (leftDownload && error is OfflineException) texts.downloadNeedsServer else describe(error)
         val canRetry = !(error is ApiException && (error.status == 403 || error.status == 404 || error.signedOut))
         fail(message, canRetry)
     }

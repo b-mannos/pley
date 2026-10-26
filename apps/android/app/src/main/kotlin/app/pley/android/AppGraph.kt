@@ -2,6 +2,7 @@ package app.pley.android
 
 import android.app.Application
 import app.pley.android.auth.AuthGraph
+import app.pley.android.caps.CapsDecision
 import app.pley.android.caps.CapsGraph
 import app.pley.android.common.DeviceProfile
 import app.pley.android.common.UserAgent
@@ -13,6 +14,7 @@ import app.pley.android.network.NetworkGraph
 import app.pley.android.player.PlayerGraph
 import app.pley.android.screens.PlayerLauncher
 import app.pley.android.screens.ScreensGraph
+import kotlinx.coroutines.CancellationException
 import okhttp3.OkHttp
 import okhttp3.OkHttpClient
 
@@ -38,8 +40,22 @@ class AppGraph(private val app: Application) : ScreensGraph {
     override val caps: CapsGraph by lazy { CapsGraph.create(app, device) }
     override val player: PlayerGraph by lazy { PlayerGraph.create(app, data, network, caps, device) { localMedia } }
 
-    /** Phones and tablets only: TVs stay where the server is, and download nothing. */
-    val appDownloads: AppDownloads by lazy { AppDownloads.create(app, data, network) }
+    /**
+     * Phones and tablets only: TVs stay where the server is, and download
+     * nothing. Of several versions, one this device plays as it is.
+     */
+    val appDownloads: AppDownloads by lazy {
+        AppDownloads.create(app, data, network) { item, file ->
+            val snapshot = try {
+                caps.capabilities.warmUp()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+            snapshot == null || caps.policy.decide(item, file.id, snapshot) == CapsDecision.Direct
+        }
+    }
     override val downloads: Downloads get() = if (device.isTv) Downloads.None else appDownloads
 
     /** What the player plays from the device: the downloads, on phones and tablets. */

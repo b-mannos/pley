@@ -1,5 +1,7 @@
 package app.pley.android.player.session
 
+import app.pley.android.data.LocalFile
+import app.pley.android.data.LocalMedia
 import app.pley.android.fixtures.FixtureIds
 import app.pley.android.model.PlaybackMode
 import app.pley.android.player.PlayRequest
@@ -65,6 +67,23 @@ class RecoveryFlowTest {
             listOf("start", "progress stopped", "delete", "start", "progress stopped", "delete", "start"),
             h.timeline(),
         )
+    }
+
+    @Test
+    fun `a download this device can't decode, with the server away, says the server converts it`() {
+        val movie = runBlocking { h.api.item(FixtureIds.SAMPLE_1080P) }
+        h.local = object : LocalMedia {
+            override fun file(fileId: Long) = LocalFile("file:///downloads/movie.mkv").takeIf { fileId == movie.files.first().id }
+        }
+        val c = h.play(PlayRequest(FixtureIds.SAMPLE_1080P))
+        assertEquals("file:///downloads/movie.mkv", h.engine.source?.url)
+        h.engine.ready()
+        h.api.unreachable += "startPlayback"
+        h.engine.fail(EngineError.Unsupported(audio = false, container = false, detail = "ERROR_CODE_DECODING_FORMAT_UNSUPPORTED"))
+        h.settle()
+        val phase = c.state.value.phase as PlayerPhase.Error
+        assertEquals("This download doesn't play on this device as it is. It plays with the server in reach, which converts it.", phase.message)
+        assertTrue(phase.canRetry)
     }
 
     @Test

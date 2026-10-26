@@ -19,6 +19,7 @@ import app.pley.android.model.SessionStatus
 import app.pley.android.model.StreamChoice
 import app.pley.android.model.TrickplayInfo
 import app.pley.android.network.HttpPleyApi
+import app.pley.android.network.OfflineException
 import app.pley.android.network.PleyApi
 import app.pley.android.network.SubtitleText
 import app.pley.android.player.PlayRequest
@@ -68,7 +69,7 @@ class CountingApi(private val delegate: PleyApi) : PleyApi by delegate {
         inFlight.incrementAndGet()
         names += name
         try {
-            if (name in unreachable) throw IOException("$name: the server is away")
+            if (name in unreachable) throw OfflineException(IOException("$name: the server is away"))
             return block()
         } catch (e: Exception) {
             synchronized(failures) { failures += name to e }

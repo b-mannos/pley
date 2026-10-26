@@ -33,6 +33,9 @@ interface PlayerTexts {
     /** The method of a file played from its download: "Downloaded". */
     val downloaded: String get() = "Downloaded"
 
+    /** A download that doesn't play here as it is, with the server out of reach to convert it. */
+    val downloadNeedsServer: String get() = "This download doesn't play on this device as it is. It plays with the server in reach, which converts it."
+
     /** What [method] means, when nothing more specific is known. */
     fun why(method: PlaybackMethod): String
     fun fallback(reason: FallbackReason): String
@@ -130,6 +133,7 @@ class ResourcePlayerTexts(context: Context) : PlayerTexts {
 
     override val noFile: String get() = s(R.string.session_error_no_file)
     override val downloaded: String get() = s(R.string.session_method_downloaded)
+    override val downloadNeedsServer: String get() = s(R.string.session_error_download_needs_server)
 
     override fun stopped(message: String?, byAdmin: Boolean): String {
         val who = s(if (byAdmin) R.string.session_stopped_by_admin else R.string.session_stopped_elsewhere)
