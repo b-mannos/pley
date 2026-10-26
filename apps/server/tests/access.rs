@@ -372,6 +372,22 @@ fn directory_titles(container: &Value) -> Vec<String> {
 }
 
 #[tokio::test]
+async fn library_counts_leave_out_titles_above_the_age_limit() {
+    let w = world().await;
+    let (app, kid) = (&w.app, w.kid.as_str());
+    let count = |list: &Value, id: i64| {
+        list.as_array().unwrap().iter().find(|l| l["id"] == json!(id)).map(|l| l["item_count"].clone())
+    };
+    let theirs = app.get("/api/libraries", kid).await.body;
+    let all = app.get("/api/libraries", &w.admin).await.body;
+    assert_eq!(count(&theirs, w.movies), Some(json!(1)), "only Family Film");
+    assert_eq!(count(&all, w.movies), Some(json!(3)));
+    assert_eq!(count(&theirs, w.tv), Some(json!(1)), "only Kids Show");
+    assert_eq!(count(&theirs, w.music), Some(json!(1)), "music has no age limit");
+    assert_eq!(app.get(&format!("/api/libraries/{}", w.movies), kid).await.body["item_count"], json!(1));
+}
+
+#[tokio::test]
 async fn filter_choices_only_come_from_titles_the_user_can_see() {
     let w = world().await;
     let (app, kid) = (&w.app, w.kid.as_str());

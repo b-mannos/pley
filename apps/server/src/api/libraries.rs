@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use super::truthy;
 use crate::access;
 use crate::auth::{AdminUser, AuthUser};
-use crate::catalog::{self, ItemSummary, LibraryQuery, SortKey};
+use crate::catalog::{self, ItemSummary, LibraryQuery, ME_CTE, SortKey, VISIBLE, VISIBLE_ITEMS};
 use crate::error::{ApiResult, AppError};
 use crate::events::ServerEvent;
 use crate::library::{LibraryKind, LibraryRow, get_library, set_order};
@@ -30,12 +30,25 @@ pub struct LibraryDto {
     scanning: bool,
 }
 
-async fn to_dto(state: &AppState, lib: &LibraryRow) -> ApiResult<LibraryDto> {
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE library_id = ? AND kind = ?")
-        .bind(lib.id)
-        .bind(lib.kind().top_level_kind())
-        .fetch_one(&state.db.read)
-        .await?;
+/// `lib` as `viewer` sees it: its count leaves out the titles their age
+/// limit hides (administrators and profiles without one see them all).
+async fn to_dto(state: &AppState, lib: &LibraryRow, viewer: Option<&AuthUser>) -> ApiResult<LibraryDto> {
+    let kind = lib.kind().top_level_kind();
+    let count: i64 = match viewer {
+        Some(user) if !user.is_admin && user.max_age.is_some() => {
+            let sql = format!(
+                "{ME_CTE} SELECT COUNT(*) FROM {VISIBLE_ITEMS} WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ?"
+            );
+            sqlx::query_scalar(&sql).bind(user.id).bind(lib.id).bind(kind).fetch_one(&state.db.read).await?
+        }
+        _ => {
+            sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE library_id = ? AND kind = ?")
+                .bind(lib.id)
+                .bind(kind)
+                .fetch_one(&state.db.read)
+                .await?
+        }
+    };
     Ok(LibraryDto {
         id: lib.id,
         name: lib.name.clone(),
@@ -63,14 +76,14 @@ pub(crate) async fn visible_library(state: &AppState, user: &AuthUser, id: i64) 
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<LibraryDto>>> {
     let mut out = Vec::new();
     for lib in access::visible_libraries(&state.db, &user).await? {
-        out.push(for_user(&user, to_dto(&state, &lib).await?));
+        out.push(for_user(&user, to_dto(&state, &lib, Some(&user)).await?));
     }
     Ok(Json(out))
 }
 
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<Json<LibraryDto>> {
     let lib = visible_library(&state, &user, id).await?;
-    Ok(Json(for_user(&user, to_dto(&state, &lib).await?)))
+    Ok(Json(for_user(&user, to_dto(&state, &lib, Some(&user)).await?)))
 }
 
 /// Apps aren't told where the server keeps its media.
@@ -140,7 +153,7 @@ pub async fn create(
     state.watcher.reload().await;
     state.events.send(ServerEvent::LibrariesChanged);
     let lib = library_or_404(&state, id).await?;
-    Ok((StatusCode::CREATED, Json(to_dto(&state, &lib).await?)))
+    Ok((StatusCode::CREATED, Json(to_dto(&state, &lib, None).await?)))
 }
 
 #[derive(Deserialize)]
@@ -177,7 +190,7 @@ pub async fn update(
     }
     state.events.send(ServerEvent::LibrariesChanged);
     let lib = library_or_404(&state, id).await?;
-    Ok(Json(to_dto(&state, &lib).await?))
+    Ok(Json(to_dto(&state, &lib, None).await?))
 }
 
 #[derive(Deserialize)]

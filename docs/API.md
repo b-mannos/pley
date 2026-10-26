@@ -98,7 +98,7 @@ interface Library {
   name: string;
   kind: LibraryKind;
   paths: string[];              // empty for apps' tokens
-  item_count: number;           // number of top-level items (movies / shows / artists)
+  item_count: number;           // top-level items (movies / shows / artists) this user can see
   created_at: Timestamp;
   scanned_at: Timestamp | null;
   scanning: boolean;            // a scan is queued or running right now
