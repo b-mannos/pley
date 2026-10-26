@@ -351,6 +351,8 @@ export type ServerEvent =
   | { type: "libraries_changed" }
   | { type: "sessions_changed" }
   | { type: "watchlist_changed" }
+  /** Watch state changed here or on another device: the item, then its parent and grandparent; `children`: everything under the first too. */
+  | { type: "user_state_changed"; item_ids: Id[]; children?: boolean }
   | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean }
   | { type: "scan_started" | "scan_progress" | "scan_finished"; library_id: Id };
 

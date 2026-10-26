@@ -130,7 +130,15 @@ function creditsLine(item: ItemDetail): ComponentChildren {
 export function ItemScreen(p: { entry: Entry; id: number }) {
   const app = useApp();
   const ui = useUi();
-  const loaded = useLoad((c) => ui.api.item(p.id, c).then((d) => app.item(p.id).catch(() => d)), [p.id], { initial: app.cachedItem(p.id) });
+  const loaded = useLoad(
+    (c) =>
+      ui.api.item(p.id, c).then((d) => {
+        app.keepItem(d);
+        return d;
+      }),
+    [p.id],
+    { initial: app.cachedItem(p.id) },
+  );
   const item = loaded.data;
   // Items with pages of their own replace this one.
   useEffect(() => {

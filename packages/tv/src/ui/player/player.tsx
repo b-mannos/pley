@@ -76,6 +76,12 @@ export function PlayerScreen(p: { request: PlayRequest; pressedAt: number }) {
     };
   }, [controller]);
 
+  // While it plays, Home and the pages wait to ask the server again; after it, they do (its reports moved resume points).
+  useLayoutEffect(() => {
+    app.holdRefresh(true);
+    return () => app.holdRefresh(false);
+  }, []);
+
   // The TV hides the app (Home, another app): the playback ends, to start again where it was.
   useEffect(() => {
     let away: SavedPlayback | null = null;

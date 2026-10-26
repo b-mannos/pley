@@ -1,0 +1,104 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ItemDetail, ServerEvent } from "../src/api/types";
+import type { KeyValue } from "../src/auth/tokens";
+import type { Platform } from "../src/platform";
+import { AppState } from "../src/state";
+
+function memoryStore(): KeyValue {
+  const kept = new Map<string, string>();
+  return {
+    get: (k) => kept.get(k) ?? null,
+    set: (k, v) => void kept.set(k, v),
+    remove: (k) => void kept.delete(k),
+  };
+}
+
+/** An AppState with an API that only answers Home, and a way to hand it the server's events. */
+function setup() {
+  const platform = { name: "webos", clientId: "test", storage: memoryStore() } as unknown as Platform;
+  const app = new AppState(platform, () => Promise.reject(new Error("no network in tests")));
+  let homes = 0;
+  (app.api as { value: unknown }).value = {
+    home: () => {
+      homes++;
+      return Promise.resolve({ hubs: [] });
+    },
+  };
+  const hear = (e: ServerEvent) => (app as unknown as { handleEvent(e: ServerEvent): void }).handleEvent(e);
+  return { app, hear, homes: () => homes };
+}
+
+function detail(id: number, parent: number | null = null, grandparent: number | null = null): ItemDetail {
+  return { id, parent_id: parent, grandparent_id: grandparent } as ItemDetail;
+}
+
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("watch state changed here or elsewhere", () => {
+  it("forgets the items named, and asks again once for a burst", () => {
+    const { app, hear, homes } = setup();
+    app.keepItem(detail(1, 10, 100));
+    app.keepItem(detail(10, 100));
+    app.keepItem(detail(2));
+    const before = app.changes.value;
+    hear({ type: "user_state_changed", item_ids: [1, 10, 100] });
+    hear({ type: "library_changed", library_id: 1 });
+    vi.advanceTimersByTime(200);
+    hear({ type: "user_state_changed", item_ids: [1, 10, 100] });
+    expect(app.changes.value).toBe(before);
+    vi.advanceTimersByTime(100);
+    expect(app.cachedItem(1)).toBeNull();
+    expect(app.cachedItem(10)).toBeNull();
+    expect(app.cachedItem(2)).not.toBeNull();
+    expect(app.changes.value).toBe(before + 1);
+    expect(homes()).toBe(1);
+    // The library change went with it, not 1.5 s later.
+    vi.advanceTimersByTime(2_000);
+    expect(app.changes.value).toBe(before + 1);
+    expect(homes()).toBe(1);
+  });
+
+  it("forgets everything under a show marked as a whole", () => {
+    const { app, hear } = setup();
+    app.keepItem(detail(1, 10, 100));
+    app.keepItem(detail(10, 100));
+    app.keepItem(detail(2, 20, 200));
+    hear({ type: "user_state_changed", item_ids: [100], children: true });
+    vi.advanceTimersByTime(300);
+    expect(app.cachedItem(1)).toBeNull();
+    expect(app.cachedItem(10)).toBeNull();
+    expect(app.cachedItem(2)).not.toBeNull();
+  });
+
+  it("waits for the playback on top, then asks again and forgets what it kept", () => {
+    const { app, hear, homes } = setup();
+    app.keepItem(detail(1));
+    app.keepItem(detail(2));
+    const before = app.changes.value;
+    app.holdRefresh(true);
+    hear({ type: "user_state_changed", item_ids: [1] });
+    vi.advanceTimersByTime(300);
+    expect(app.cachedItem(1)).toBeNull();
+    expect(app.changes.value).toBe(before);
+    expect(homes()).toBe(0);
+    app.holdRefresh(false);
+    expect(app.changes.value).toBe(before + 1);
+    expect(homes()).toBe(1);
+    // Its own reports moved resume points: nothing kept from before it.
+    expect(app.cachedItem(2)).toBeNull();
+  });
+
+  it("keeps an item's details for 5 minutes", () => {
+    const { app } = setup();
+    app.keepItem(detail(3));
+    vi.advanceTimersByTime(4 * 60_000);
+    expect(app.cachedItem(3)).not.toBeNull();
+    vi.advanceTimersByTime(2 * 60_000);
+    expect(app.cachedItem(3)).toBeNull();
+  });
+});

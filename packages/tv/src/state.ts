@@ -43,6 +43,10 @@ const HOME_KEY = "pley.home";
 const HOUSEHOLD_KEY = "pley.household";
 const SERVERS_KEY = "pley.servers";
 const PROFILES_KEY = "pley.householdProfiles";
+/** How long an item's details are kept for pages and playbacks. */
+const ITEM_TTL_MS = 5 * 60_000;
+/** Watch state changes come in bursts (an episode, its season and show; a play reaching 90 %): gathered this long. */
+const STATE_GATHER_MS = 300;
 
 /** A server this TV signed in to or chose, newest first on the server list. */
 export interface SavedServer {
@@ -100,8 +104,14 @@ export class AppState {
   private events: EventStream | null = null;
   private readonly eventListeners: ((e: ServerEvent) => void)[] = [];
   private capsPromise: Promise<Probe | null> | null = null;
-  private readonly items = new Map<number, ItemDetail>();
+  private readonly items = new Map<number, { detail: ItemDetail; at: number }>();
   private libraryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Watch state changes heard in the last 0.3 s, asked for again in one round. */
+  private stateTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly stateIds = new Set<number>();
+  private readonly stateParents = new Set<number>();
+  /** Playbacks on top: Home and the pages wait to ask again until they end (their own reports change the watch state too). */
+  private holds = 0;
 
   constructor(platform: Platform, http: Transport = xhrTransport) {
     this.platform = platform;
@@ -296,18 +306,54 @@ export class AppState {
     }
   }
 
-  /** Item details the app saw lately, to start a page or a playback without waiting. */
+  /**
+   * Item details the app saw lately, to start a page or a playback without
+   * waiting. The server's events take out what changed; a detail older than
+   * 5 minutes goes anyway, in case one was missed (a resume point moved on
+   * another device while the event stream was down).
+   */
   cachedItem(id: number): ItemDetail | null {
-    return this.items.get(id) ?? null;
+    const kept = this.items.get(id);
+    if (!kept) return null;
+    if (Date.now() - kept.at > ITEM_TTL_MS) {
+      this.items.delete(id);
+      return null;
+    }
+    return kept.detail;
   }
 
   async item(id: number): Promise<ItemDetail> {
     const api = this.api.value!;
     const detail = await api.item(id);
-    this.items.delete(id);
-    this.items.set(id, detail);
-    if (this.items.size > 40) this.items.delete(this.items.keys().next().value!);
+    this.keepItem(detail);
     return detail;
+  }
+
+  /** Keeps a detail fetched elsewhere (an item page) for the next page or playback. */
+  keepItem(detail: ItemDetail): void {
+    this.items.delete(detail.id);
+    this.items.set(detail.id, { detail, at: Date.now() });
+    if (this.items.size > 40) this.items.delete(this.items.keys().next().value!);
+  }
+
+  /**
+   * A playback is on top (`true`) or has ended (`false`). Meanwhile Home and
+   * the pages wait to ask again; once it ends they do, and the details kept
+   * go, since its own reports moved resume points and watched marks.
+   */
+  holdRefresh(on: boolean): void {
+    this.holds = Math.max(0, this.holds + (on ? 1 : -1));
+    if (on || this.holds > 0) return;
+    this.items.clear();
+    void this.loadHome();
+    this.changes.value++;
+  }
+
+  /** Home and the pages that list things ask again; while a playback is on top, once it ends. */
+  private refresh(): void {
+    if (this.holds > 0) return;
+    void this.loadHome();
+    this.changes.value++;
   }
 
   // ---- the TV's capabilities
@@ -347,11 +393,11 @@ export class AppState {
   private lastSync = 0;
 
   private reconnected(): void {
-    // Nothing is replayed: what is older than 30 s is fetched again.
+    // Nothing is replayed: what is older than 30 s is fetched again, and the details kept go.
     if (Date.now() - this.lastSync > 30_000) {
       this.lastSync = Date.now();
-      void this.loadHome();
-      this.changes.value++;
+      this.items.clear();
+      this.refresh();
     }
   }
 
@@ -362,21 +408,43 @@ export class AppState {
         if (this.libraryTimer !== null) clearTimeout(this.libraryTimer);
         this.libraryTimer = setTimeout(() => {
           this.libraryTimer = null;
-          void this.loadHome();
-          this.changes.value++;
+          this.refresh();
         }, 1_500);
         break;
       case "libraries_changed":
         void this.loadAccount();
-        void this.loadHome();
+        this.refresh();
         break;
       case "watchlist_changed":
-        void this.loadHome();
-        this.changes.value++;
+        this.refresh();
         break;
+      case "user_state_changed": {
+        // The item, its parent and grandparent; with `children`, everything under the first as well.
+        for (const id of e.item_ids) this.stateIds.add(id);
+        if (e.children && e.item_ids.length) this.stateParents.add(e.item_ids[0]!);
+        if (this.stateTimer === null) this.stateTimer = setTimeout(() => this.applyStateChanges(), STATE_GATHER_MS);
+        break;
+      }
       default:
         break;
     }
     for (const l of this.eventListeners.slice()) l(e);
+  }
+
+  /** The watch state changes of the last 0.3 s: their details go, and Home and the pages ask again once (with a pending library change). */
+  private applyStateChanges(): void {
+    this.stateTimer = null;
+    for (const [id, kept] of Array.from(this.items.entries())) {
+      const d = kept.detail;
+      const under = (p: number | null | undefined) => p !== null && p !== undefined && this.stateParents.has(p);
+      if (this.stateIds.has(id) || under(d.parent_id) || under(d.grandparent_id)) this.items.delete(id);
+    }
+    this.stateIds.clear();
+    this.stateParents.clear();
+    if (this.libraryTimer !== null) {
+      clearTimeout(this.libraryTimer);
+      this.libraryTimer = null;
+    }
+    this.refresh();
   }
 }
