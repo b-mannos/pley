@@ -70,6 +70,7 @@ import app.pley.android.ui.phone.kit.PleyTopAppBar
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.shell.LocalPhoneShell
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
+import app.pley.android.ui.phone.theme.WidthClass
 
 /**
  * An item's page on phones and tablets (design spec §4.3, §4.4): a movie,
@@ -192,15 +193,24 @@ internal fun ItemPageContent(page: ItemPage, model: ItemViewModel, navigator: Na
 
 /**
  * The bar over the page (design spec §3.1): transparent over the backdrop
- * with a 96 dp scrim behind back and More, turning [bg][PleyColors.Bg] with
- * the title once the header has scrolled away. Read while drawing only.
+ * with a 96 dp scrim behind back and More. It turns [bg][PleyColors.Bg] as
+ * the header's title comes up to it, so that title slides under a solid
+ * bar, and shows the title itself only once the header's has gone under
+ * it: the two never show at once. Read while drawing only.
  */
 @Composable
 private fun ItemTopBar(page: ItemPage, list: LazyListState, onBack: () -> Unit, onMore: () -> Unit) {
     val density = LocalDensity.current
     val metrics = LocalPhoneMetrics.current
-    val solidAfter = with(density) { SOLID_AFTER.toPx() }
-    fun solid(): Float = if (list.firstVisibleItemIndex > 0) 1f else (list.firstVisibleItemScrollOffset / solidAfter).coerceIn(0f, 1f)
+    val titleTop = itemTitleTop(itemBackdropHeight(metrics.widthClass != WidthClass.Compact))
+    val barBottom = WindowInsets.safeDrawing.only(WindowInsetsSides.Top).getTop(density) + with(density) { BarHeight.toPx() }
+    // The scroll at which the header's title reaches the bar's bottom edge.
+    val meets = with(density) { titleTop.toPx() } - barBottom
+    val fade = with(density) { BAR_FADE.toPx() }
+    val under = with(density) { TITLE_UNDER.toPx() }
+    fun scrolled(): Float = if (list.firstVisibleItemIndex > 0) Float.POSITIVE_INFINITY else list.firstVisibleItemScrollOffset.toFloat()
+    fun solid(): Float = ((scrolled() - (meets - fade)) / fade).coerceIn(0f, 1f)
+    fun titleShown(): Float = ((scrolled() - (meets + under)) / fade).coerceIn(0f, 1f)
     Column(Modifier.fillMaxWidth()) {
         Box(
             Modifier
@@ -214,7 +224,7 @@ private fun ItemTopBar(page: ItemPage, list: LazyListState, onBack: () -> Unit, 
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)),
         ) {
             Row(
-                Modifier.fillMaxWidth().height(64.dp).padding(start = 4.dp + metrics.insetStart, end = 4.dp + metrics.insetEnd),
+                Modifier.fillMaxWidth().height(BarHeight).padding(start = 4.dp + metrics.insetStart, end = 4.dp + metrics.insetEnd),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 PleyIconButton(PleyIcons.ArrowLeft, stringResource(R.string.kit_back), onBack)
@@ -224,7 +234,7 @@ private fun ItemTopBar(page: ItemPage, list: LazyListState, onBack: () -> Unit, 
                     color = PleyColors.Fg,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp).graphicsLayer { alpha = solid() },
+                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp).graphicsLayer { alpha = titleShown() },
                 )
                 PleyIconButton(PleyIcons.Ellipsis, stringResource(R.string.item_more_actions), onMore)
             }
@@ -241,7 +251,7 @@ private fun ItemSkeleton(onBack: () -> Unit) {
     val loading = stringResource(R.string.item_loading)
     Box(Modifier.fillMaxSize().testTag(ITEM_SKELETON).semantics { contentDescription = loading }) {
         Column(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxWidth().height(BackdropHeight).skeleton(skeleton, RectangleShape))
+            Box(Modifier.fillMaxWidth().height(itemBackdropHeight(metrics.widthClass != WidthClass.Compact)).skeleton(skeleton, RectangleShape))
             Column(Modifier.padding(start = metrics.marginStart, end = metrics.marginEnd, top = 16.dp, bottom = 16.dp)) {
                 Bar(skeleton, 0.7f, 36.dp)
                 Spacer(Modifier.height(12.dp))
@@ -259,7 +269,7 @@ private fun ItemSkeleton(onBack: () -> Unit) {
         Row(
             Modifier
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
-                .height(64.dp)
+                .height(BarHeight)
                 .padding(start = 4.dp + metrics.insetStart, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -281,8 +291,14 @@ internal fun castTitle(title: CastTitle): String =
 /** The backdrop's height on compact widths (design spec §4.3). */
 internal val BackdropHeight = 300.dp
 
-/** Scrolled this far, the bar is solid. */
-private val SOLID_AFTER = 220.dp
+/** The bar over the page, under the status bar. */
+private val BarHeight = 64.dp
+
+/** How much scrolling the bar's background and its title each take to fade in. */
+private val BAR_FADE = 48.dp
+
+/** How far under the bar the header's title goes before the bar's own title begins to show. */
+private val TITLE_UNDER = 32.dp
 
 private const val EPISODE_SKELETONS = 4
 

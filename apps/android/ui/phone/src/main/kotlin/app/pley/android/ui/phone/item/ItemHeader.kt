@@ -32,6 +32,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -40,6 +42,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.pley.android.common.TestTags
 import app.pley.android.designsystem.PleyColors
@@ -78,7 +81,7 @@ internal fun ItemHeader(page: ItemPage, actions: PageActions) {
     val metrics = LocalPhoneMetrics.current
     val tier = LocalPhoneDeviceTier.current
     val wide = metrics.widthClass != WidthClass.Compact
-    val backdropHeight = if (wide) WideBackdropHeight else BackdropHeight
+    val backdropHeight = itemBackdropHeight(wide)
     val backdrop = remember(page.item, page.origin, tier) { ArtworkCandidates.backdrop(page.item, page.origin, tier) }
     Box(Modifier.fillMaxWidth()) {
         Artwork(
@@ -123,6 +126,23 @@ internal fun ItemHeader(page: ItemPage, actions: PageActions) {
         }
     }
 }
+
+/**
+ * The backdrop's height: 300 dp, 380 from 600 dp wide, but never more than
+ * [BACKDROP_MAX_SHARE] of the window's height, so a phone on its side
+ * shows Play without scrolling.
+ */
+@Composable
+internal fun itemBackdropHeight(wide: Boolean): Dp {
+    val spec = if (wide) WideBackdropHeight else BackdropHeight
+    val window = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
+    return if (window > 0.dp) minOf(spec, window * BACKDROP_MAX_SHARE) else spec
+}
+
+/** Where the header's text starts on a page whose backdrop is [backdropHeight] tall. */
+internal fun itemTitleTop(backdropHeight: Dp): Dp = backdropHeight - TitleOverlap
+
+private const val BACKDROP_MAX_SHARE = 0.62f
 
 @Composable
 private fun HeaderText(page: ItemPage, actions: PageActions, fullWidthPlay: Boolean) {
