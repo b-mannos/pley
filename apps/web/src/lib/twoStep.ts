@@ -1,4 +1,5 @@
 import { isApiError } from "@/api/client";
+import { saveFile } from "./download";
 
 /** The server's answer to a sign-in that needs its second step, or got a wrong code. */
 export function isTwoStepError(err: unknown): boolean {
@@ -32,11 +33,6 @@ export function recoveryCodesText(codes: string[], username: string, server?: st
 /** Saves `text` as a file called `name`. */
 export function downloadText(name: string, text: string) {
   const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = name;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+  saveFile(url, name);
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

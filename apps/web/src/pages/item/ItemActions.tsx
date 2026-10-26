@@ -1,25 +1,30 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Ellipsis, FastForward, FolderPlus, ListPlus, RefreshCw } from "lucide-react";
+import { Download, Ellipsis, FastForward, FolderPlus, ListPlus, RefreshCw } from "lucide-react";
 import { api, errorMessage } from "@/api/client";
 import { useRefreshItem } from "@/api/hooks";
 import { collectable } from "@/api/lists";
-import type { ItemDetail } from "@/api/types";
+import type { ItemDetail, MediaFile } from "@/api/types";
 import { useAuth } from "@/auth";
 import { useListMenu } from "@/components/lists/ListMenu";
 import { Menu, MenuItem, MenuSeparator } from "@/components/Menu";
 import { useToast } from "@/components/Toast";
 import { IconButton } from "@/components/ui";
+import { downloadName, fileUrl, saveFile } from "@/lib/download";
+import { formatBytes } from "@/lib/format";
+import { appShell } from "@/lib/shell";
 import { EditDialogs, editActions, type EditDialog } from "./EditMenu";
 
 /** Kinds whose intro and credits can be detected. */
 const ANALYZABLE = new Set(["movie", "show", "season", "episode"]);
 
 /**
- * The "More" menu of an item page: playlists and collections, then (for
- * administrators) editing and maintenance, each with its name.
+ * The "More" menu of an item page: downloading the file, playlists and
+ * collections, then (for administrators) editing and maintenance, each
+ * with its name. `file` is the version the page plays (the first if not
+ * given).
  */
-export function MoreActions({ item }: { item: ItemDetail }) {
+export function MoreActions({ item, file = item.files[0] }: { item: ItemDetail; file?: MediaFile }) {
   const user = useAuth();
   const lists = useListMenu();
   const toast = useToast();
@@ -31,7 +36,9 @@ export function MoreActions({ item }: { item: ItemDetail }) {
   const edits = admin ? editActions(item) : [];
   const canCollect = admin && collectable(item);
   const canAnalyze = admin && ANALYZABLE.has(item.kind);
-  if (!lists && !admin) return null;
+  // The Android app's web view keeps no files (the app downloads on its own).
+  const download = file && appShell() !== "android" ? file : null;
+  if (!lists && !admin && !download) return null;
 
   const findMarkers = () => {
     const scope = item.kind === "episode" ? "this season" : item.kind === "show" ? "every season" : "this item";
@@ -61,6 +68,13 @@ export function MoreActions({ item }: { item: ItemDetail }) {
       >
         {(close) => (
           <>
+            {download ? (
+              <MenuItem icon={<Download />} onClick={() => (close(), saveFile(fileUrl(download), downloadName(item, download)))}>
+                Download
+                <span className="ml-auto whitespace-nowrap pl-6 text-xs tabular-nums text-subtle">{formatBytes(download.size)}</span>
+              </MenuItem>
+            ) : null}
+            {download && lists ? <MenuSeparator /> : null}
             {lists ? (
               <MenuItem icon={<ListPlus />} onClick={() => (close(), lists.addToPlaylist(item))}>
                 Add to playlist…

@@ -173,7 +173,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
             ) : null}
             {item.kind === "movie" ? <MyListButton item={item} /> : null}
             <WatchedButton item={item} />
-            <MoreActions item={item} />
+            <MoreActions item={item} file={file} />
           </div>
 
           {item.kind === "movie" && item.tmdb_id == null ? <MissingKeyNotice className="max-w-3xl" /> : null}
