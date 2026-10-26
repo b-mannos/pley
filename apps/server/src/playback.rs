@@ -13,7 +13,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use pley_transcoder_api::{
     AudioCodec, AudioMode, AudioRequest, DolbyVisionMode, DynamicRange, JobRequest, JobStatus, MediaInfo, MediaStream,
-    StreamKind, SubtitleBurnRequest, VideoCodec, VideoMode, VideoRequest, dynamic_range_label,
+    OutputRange, StreamKind, SubtitleBurnRequest, VideoCodec, VideoMode, VideoRequest, dynamic_range_label,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
@@ -232,6 +232,10 @@ pub struct PlaybackRequest {
     /// thing at a time, so its previous sessions end when it starts a new one.
     #[serde(default)]
     pub client_id: Option<String>,
+    /// The transcoder keeps HDR in transcodes (its `hdr_transcode`
+    /// capability): set by the server, never read from the player.
+    #[serde(skip)]
+    pub hdr_transcodes: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -412,14 +416,16 @@ const DV_BL_HLG: i64 = 4;
 /// - SDR video needs a decoder entry that takes it: codec, profile (Main 10
 ///   for 10-bit), size, frame rate and level;
 /// - HDR10 needs `hdr10` on the screen, HDR10+ `hdr10plus` or `hdr10`, HLG
-///   `hlg`; otherwise it is tone-mapped to SDR;
+///   `hlg`; otherwise it is converted: to the HDR format the screen shows
+///   when the player takes that ([`hdr_transcode`], `converted`), else
+///   tone-mapped to SDR;
 /// - Dolby Vision plays as it is when the screen shows it and the profile
 ///   is listed. Otherwise profiles 8.1 and 8.4 (and 9, 10) play their
 ///   HDR10, HLG or SDR base layer by those rules; profile 7, whose
 ///   enhancement layer Media3 can't decode, is repackaged so its HDR10 base
-///   layer plays; profile 5, with no base layer, is tone-mapped, never
-///   repackaged (an MPEG-TS remux loses the Dolby Vision signalling, which
-///   leaves its colours wrong).
+///   layer plays; profile 5, with no base layer, is converted like the
+///   above, never repackaged (an MPEG-TS remux loses the Dolby Vision
+///   signalling, which leaves its colours wrong).
 ///
 /// Players that read multivariant playlists ([`Caps::master_playlist`])
 /// get Dolby Vision kept in remuxes, named in the playlist's `CODECS`:
@@ -428,15 +434,17 @@ const DV_BL_HLG: i64 = 4;
 /// repackaged without their HDR10+ for any player that would decode them
 /// as Dolby Vision, never played as they are (androidx/media#1895). Without
 /// a master playlist, those are repackaged as their base layer.
-fn video_v2(v: &MediaStream, caps: &Caps) -> VideoVerdict {
+fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange) -> VideoVerdict {
     let label = v.dynamic_range_label();
-    let to_sdr = || format!("{label} is converted to SDR for this screen.");
+    // What the video is converted to when the screen doesn't show it.
+    let out = converted.dynamic_range().label();
+    let elsewhere = || format!("{label} is converted to {out} for this screen.");
     match v.dynamic_range() {
         DynamicRange::Sdr => fits(v, caps),
         DynamicRange::Hdr10 if caps.shows("hdr10") => fits(v, caps),
         DynamicRange::Hdr10plus if caps.shows("hdr10plus") || caps.shows("hdr10") => fits(v, caps),
         DynamicRange::Hlg if caps.shows("hlg") => fits(v, caps),
-        DynamicRange::Hdr10 | DynamicRange::Hdr10plus | DynamicRange::Hlg => VideoVerdict::no(to_sdr()),
+        DynamicRange::Hdr10 | DynamicRange::Hdr10plus | DynamicRange::Hlg => VideoVerdict::no(elsewhere()),
         DynamicRange::DolbyVision => {
             let profile = v.dv_profile.unwrap_or(0);
             let decoder_of = |profile: i64| {
@@ -458,7 +466,7 @@ fn video_v2(v: &MediaStream, caps: &Caps) -> VideoVerdict {
             // What plays when Dolby Vision itself doesn't: the base layer.
             let compat = v.dv_bl_compat.or((profile == 8).then_some(DV_BL_HDR10));
             let base = match (profile, compat) {
-                (5, _) => VideoVerdict::no(format!("{label} needs a Dolby Vision screen: it's converted to SDR.")),
+                (5, _) => VideoVerdict::no(format!("{label} needs a Dolby Vision screen: it's converted to {out}.")),
                 (7, _) if caps.shows("hdr10") => {
                     let mut base = fits(v, caps);
                     if base.copy {
@@ -467,12 +475,12 @@ fn video_v2(v: &MediaStream, caps: &Caps) -> VideoVerdict {
                     }
                     base
                 }
-                (7, _) => VideoVerdict::no(to_sdr()),
+                (7, _) => VideoVerdict::no(elsewhere()),
                 (_, Some(DV_BL_HDR10)) if caps.shows("hdr10") => fits(v, caps),
                 (_, Some(DV_BL_HLG)) if caps.shows("hlg") => fits(v, caps),
                 (_, Some(DV_BL_SDR)) => fits(v, caps),
-                (_, Some(DV_BL_HDR10 | DV_BL_HLG)) => VideoVerdict::no(to_sdr()),
-                _ => VideoVerdict::no(format!("{label} needs a Dolby Vision screen: it's converted to SDR.")),
+                (_, Some(DV_BL_HDR10 | DV_BL_HLG)) => VideoVerdict::no(elsewhere()),
+                _ => VideoVerdict::no(format!("{label} needs a Dolby Vision screen: it's converted to {out}.")),
             };
             match decoder {
                 // Dolby Vision decoders show black, or freeze, when HDR10+
@@ -528,6 +536,50 @@ fn video_v2(v: &MediaStream, caps: &Caps) -> VideoVerdict {
             }
         }
     }
+}
+
+/// What a version 2 player gets when its HDR video is converted (docs/API.md,
+/// "HDR transcodes"): HEVC Main 10 in the HDR format its screen shows, when
+/// a hardware decoder takes HEVC Main 10 at the video's frame rate. HLG
+/// stays HLG on a screen that shows HLG, everything else goes to HDR10 (PQ)
+/// on a screen that shows HDR10 or HDR10+, and to HLG on one that shows
+/// only HLG. Otherwise, and for SDR video (Dolby Vision on an SDR base
+/// layer too), SDR.
+fn hdr_transcode(v: &MediaStream, caps: &Caps) -> OutputRange {
+    let range = v.dynamic_range();
+    let dv_base = |compat: i64| range == DynamicRange::DolbyVision && v.dv_bl_compat == Some(compat);
+    if !range.is_hdr() || dv_base(DV_BL_SDR) || hevc10_lines(caps, v.frame_rate).is_none() {
+        return OutputRange::Sdr;
+    }
+    let hlg_source = range == DynamicRange::Hlg || dv_base(DV_BL_HLG);
+    let (pq, hlg) = (caps.shows("hdr10") || caps.shows("hdr10plus"), caps.shows("hlg"));
+    match (hlg_source, pq, hlg) {
+        (true, _, true) => OutputRange::Hlg,
+        (_, true, _) => OutputRange::Hdr10,
+        (false, false, true) => OutputRange::Hlg,
+        _ => OutputRange::Sdr,
+    }
+}
+
+/// The most lines a version 2 player's hardware HEVC Main 10 decoders take
+/// at `fps` (what HDR transcodes are made in): `None` without one, `Some(None)`
+/// when one doesn't say.
+fn hevc10_lines(caps: &Caps, fps: Option<f64>) -> Option<Option<u32>> {
+    let decoders: Vec<&VideoDecoder> = caps
+        .video
+        .iter()
+        .flatten()
+        .filter(|d| d.codec.eq_ignore_ascii_case("hevc") && d.hardware)
+        .filter(|d| d.max_bit_depth.is_none_or(|b| b >= 10))
+        .filter(|d| d.profiles.is_empty() || listed(&d.profiles, "Main 10"))
+        .filter(|d| fps.zip(d.max_fps).is_none_or(|(fps, max)| fps <= max + 0.01))
+        .collect();
+    if decoders.is_empty() {
+        return None;
+    }
+    let lines =
+        decoders.iter().map(|d| d.max_height.zip(d.max_width).map(|(h, w)| h.min(w))).collect::<Option<Vec<_>>>();
+    Some(lines.and_then(|lines| lines.into_iter().max()).and_then(|l| u32::try_from(l).ok()))
 }
 
 /// Whether one of a version 2 player's decoders takes the stream: any one
@@ -733,10 +785,17 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     // What a copy does with Dolby Vision and HDR10+ (version 2).
     let mut copy_dolby_vision = DolbyVisionMode::Copy;
     let mut copy_strip_hdr10plus = false;
+    // What converted HDR video becomes (version 2, with a transcoder that
+    // keeps HDR): HEVC Main 10 in HDR10 or HLG, else SDR. Picture subtitles
+    // drawn onto it (converted video always has them drawn) make it SDR.
+    let hdr_out = match video {
+        Some(v) if v2 && req.hdr_transcodes && pictures.is_none() => hdr_transcode(v, caps),
+        _ => OutputRange::Sdr,
+    };
     let video_ok = match video {
         None => true,
         Some(v) if v2 => {
-            let verdict = video_v2(v, caps);
+            let verdict = video_v2(v, caps, hdr_out);
             reasons.extend(verdict.reasons);
             video_copy_ok = verdict.copy;
             copy_dolby_vision = verdict.dolby_vision;
@@ -838,9 +897,16 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             && bitrate_ok
             && size_ok
             && burn.is_none();
+        // HDR kept, in HEVC Main 10, unless subtitles are drawn on it.
+        let hdr = if copy || burn.is_some() { OutputRange::Sdr } else { hdr_out };
         // The original, converted: at the closest quality players offer.
-        // A version 2 player's H.264 decoders bound what it is converted to.
-        let most_lines = if v2 && !copy { h264_lines(caps) } else { None };
+        // A version 2 player's H.264 decoders bound what it is converted to
+        // (its HEVC Main 10 ones when HDR is kept).
+        let most_lines = match (v2 && !copy, hdr) {
+            (false, _) => None,
+            (true, OutputRange::Sdr) => h264_lines(caps),
+            (true, _) => hevc10_lines(caps, v.frame_rate).flatten(),
+        };
         let (max_height, max_bitrate) = if copy || req.max_bitrate.is_some() || req.max_height.is_some() {
             let max_height = match (req.max_height, most_lines) {
                 (Some(asked), Some(most)) => Some(asked.min(most)),
@@ -856,13 +922,13 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         VideoRequest {
             stream_index: Some(v.index),
             mode: if copy { VideoMode::Copy } else { VideoMode::Transcode },
-            codec: VideoCodec::H264,
+            codec: if hdr == OutputRange::Sdr { VideoCodec::H264 } else { VideoCodec::Hevc },
             max_width: None,
             max_height,
             max_bitrate_kbps: max_bitrate.map(|b| b.saturating_sub(192).max(500)),
             dolby_vision: if copy { copy_dolby_vision } else { DolbyVisionMode::Copy },
             strip_hdr10plus: copy && copy_strip_hdr10plus,
-            dynamic_range: Default::default(),
+            dynamic_range: hdr,
         }
     });
     let audio_req = audio.map(|a| {
@@ -1399,8 +1465,15 @@ pub fn transcode_info(job: &JobStatus) -> TranscodeInfo {
         }
         s
     });
-    let video_out = video
-        .map(|v| format!("{} {}×{}", codec_label(&v.codec_out), v.width_out.unwrap_or(0), v.height_out.unwrap_or(0)));
+    let video_out = video.map(|v| {
+        let mut s = format!("{} {}×{}", codec_label(&v.codec_out), v.width_out.unwrap_or(0), v.height_out.unwrap_or(0));
+        // A transcode that keeps HDR says which.
+        if let Some(range) = v.dynamic_range_out.filter(|r| r.is_hdr()) {
+            s.push(' ');
+            s.push_str(range.label());
+        }
+        s
+    });
     let audio_in = audio.map(|a| {
         format!("{} {}", codec_label(&a.codec_in), a.channels_in.map(channel_label).unwrap_or_default())
             .trim()
@@ -1603,6 +1676,7 @@ mod tests {
             caps: browser(),
             mode: PlaybackMode::Auto,
             client_id: None,
+            hdr_transcodes: false,
         }
     }
 

@@ -549,6 +549,7 @@ pub async fn universal_start(
         caps: hls_caps(),
         mode: if params.get("directStream") == Some("0") { PlaybackMode::Transcode } else { PlaybackMode::Remux },
         client_id,
+        hdr_transcodes: false,
     };
     let Json(info) =
         crate::api::playback::start(State(state.clone()), user, Json(request)).await.map_err(PlexError::from)?;

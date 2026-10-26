@@ -64,6 +64,8 @@ pub async fn start(
             hls.master_playlist = false;
         }
     }
+    // Transcodes keep HDR only with a transcoder that can (HEVC Main 10).
+    req.hdr_transcodes = state.transcoder.info().is_some_and(|info| info.capabilities.hdr_transcode);
     if !matches!(row.kind.as_str(), "movie" | "episode" | "track" | "extra") {
         return Err(AppError::bad_request("this item cannot be played directly"));
     }

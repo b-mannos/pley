@@ -25,7 +25,7 @@ use pley::catalog::FileRow;
 use pley::playback::{Decision, Method, PlaybackRequest, decide};
 use pley_transcoder_api::{
     API_VERSION, Capabilities, DolbyVisionMode, DynamicRange, ErrorBody, JobCreated, JobRequest, JobStatus, Limits,
-    MediaInfo, MediaStream, StreamKind, TranscoderInfo, VideoMode, VideoPlan,
+    MediaInfo, MediaStream, OutputRange, StreamKind, TranscoderInfo, VideoCodec, VideoMode, VideoPlan,
 };
 use serde_json::{Value, json};
 
@@ -285,6 +285,8 @@ const MASTER: &str = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-INDEPENDENT-SEGMENTS\n#E
 struct Fake {
     /// Answers `hls_master_playlist` in its capabilities.
     masters: Arc<AtomicBool>,
+    /// Answers `hdr_transcode` in its capabilities.
+    hdr: Arc<AtomicBool>,
     created: Arc<Mutex<Vec<JobRequest>>>,
 }
 
@@ -302,8 +304,9 @@ fn job_status(req: &JobRequest) -> JobStatus {
         video: req.video.as_ref().map(|v| VideoPlan {
             mode: v.mode,
             codec_in: "hevc".into(),
-            codec_out: "hevc".into(),
+            codec_out: if v.mode == VideoMode::Copy || v.codec == VideoCodec::Hevc { "hevc" } else { "h264" }.into(),
             dynamic_range_in: DynamicRange::DolbyVision,
+            dynamic_range_out: (v.mode == VideoMode::Transcode).then(|| v.dynamic_range.dynamic_range()),
             dv_profile: Some(7),
             dolby_vision: Some(v.dolby_vision),
             hdr10plus_stripped: v.strip_hdr10plus,
@@ -313,9 +316,10 @@ fn job_status(req: &JobRequest) -> JobStatus {
     }
 }
 
-async fn start_fake(masters: bool) -> (Fake, String) {
+async fn start_fake(masters: bool, hdr: bool) -> (Fake, String) {
     let fake = Fake::default();
     fake.masters.store(masters, Ordering::SeqCst);
+    fake.hdr.store(hdr, Ordering::SeqCst);
     let app = Router::new()
         .route(
             "/v1/info",
@@ -332,6 +336,7 @@ async fn start_fake(masters: bool) -> (Fake, String) {
                         ffmpeg_available: true,
                         ffprobe_available: true,
                         hls_master_playlist: fake.masters.load(Ordering::SeqCst),
+                        hdr_transcode: fake.hdr.load(Ordering::SeqCst),
                         ..Default::default()
                     },
                     limits: Limits { max_jobs: 8, max_hw_jobs: 0 },
@@ -398,7 +403,12 @@ async fn start_fake(masters: bool) -> (Fake, String) {
 /// pley with the stand-in as its transcoder and a movie: the admin's token
 /// and the movie's id.
 async fn world(masters: bool) -> (TestApp, Fake, String, i64) {
-    let (fake, url) = start_fake(masters).await;
+    world_with(masters, false).await
+}
+
+/// [`world`] with a stand-in that keeps HDR in transcodes or not.
+async fn world_with(masters: bool, hdr: bool) -> (TestApp, Fake, String, i64) {
+    let (fake, url) = start_fake(masters, hdr).await;
     let app = TestApp::with_config(|c| {
         c.transcoder_url = Some(url);
         c.transcoder_token = Some(TOKEN.into());
@@ -460,4 +470,26 @@ async fn older_transcoders_get_requests_as_before() {
     assert_eq!(started.body["reasons"], json!(["Dolby Vision P7 plays as its HDR10 base layer, repackaged."]));
     let video = fake.created.lock().last().cloned().unwrap().video.unwrap();
     assert_eq!((video.mode, video.dolby_vision), (VideoMode::Copy, DolbyVisionMode::Copy));
+}
+
+/// The profile 7 film converted for the Google TV Streamer: HEVC Main 10 in
+/// HDR10 from a transcoder that keeps HDR, H.264 in SDR from one that
+/// doesn't.
+#[tokio::test]
+async fn transcodes_keep_hdr_where_the_transcoder_can() {
+    for (hdr, codec, range, video_out) in [
+        (true, VideoCodec::Hevc, OutputRange::Hdr10, "HEVC 0×0 HDR10"),
+        (false, VideoCodec::H264, OutputRange::Sdr, "H.264 0×0"),
+    ] {
+        let (app, fake, admin, movie) = world_with(true, hdr).await;
+        let body = json!({"item_id": movie, "caps": google_tv_streamer(), "mode": "transcode"});
+        let started = app.post("/api/playback", &admin, body).await;
+        assert_eq!(started.body["method"], json!("transcode"), "{:?}", started.body);
+        let video = fake.created.lock().last().cloned().unwrap().video.unwrap();
+        assert_eq!((video.mode, video.codec, video.dynamic_range), (VideoMode::Transcode, codec, range));
+        // The player's details say what it comes out as.
+        let session = started.body["session_id"].as_str().unwrap();
+        let status = app.get(&format!("/api/playback/{session}"), &admin).await;
+        assert_eq!(status.body["transcode"]["video_out"], json!(video_out), "{:?}", status.body);
+    }
 }

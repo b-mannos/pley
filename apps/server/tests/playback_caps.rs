@@ -10,7 +10,9 @@
 
 use pley::catalog::FileRow;
 use pley::playback::{Decision, Method, PlaybackRequest, decide};
-use pley_transcoder_api::{AudioCodec, AudioMode, DynamicRange, MediaInfo, MediaStream, StreamKind, VideoMode};
+use pley_transcoder_api::{
+    AudioCodec, AudioMode, DynamicRange, MediaInfo, MediaStream, OutputRange, StreamKind, VideoCodec, VideoMode,
+};
 use serde_json::{Value, json};
 
 // ------------------------------------------------------------------ devices
@@ -388,6 +390,135 @@ fn the_picked_quality_still_limits_version_2_players() {
     let d = play_with(req, "mkv", &source("HDR10"));
     assert_eq!(outcome(&d), "T");
     assert_eq!(d.reasons, ["You picked a lower quality."]);
+}
+
+// ------------------------------------------------------------------ HDR transcodes
+
+/// Google TV Streamer on an HDR10 monitor: HEVC Main 10 to 4K60 in
+/// hardware, HDR10 only.
+fn google_tv_streamer() -> Value {
+    fixture("google_tv_streamer_v2")
+}
+
+/// A request through a transcoder that keeps HDR.
+fn with_hdr(caps: Value) -> PlaybackRequest {
+    let mut req = request(caps);
+    req.hdr_transcodes = true;
+    req
+}
+
+/// What the video is converted to: "HDR10" or "HLG" (HEVC), "SDR" (H.264);
+/// "D" and "R" when it isn't.
+fn converted_to(d: &Decision) -> &'static str {
+    match d.video.as_ref() {
+        Some(v) if v.mode == VideoMode::Transcode => match (v.codec, v.dynamic_range) {
+            (VideoCodec::Hevc, OutputRange::Hdr10) => "HDR10",
+            (VideoCodec::Hevc, OutputRange::Hlg) => "HLG",
+            (VideoCodec::H264, OutputRange::Sdr) => "SDR",
+            _ => "?",
+        },
+        _ => outcome(d),
+    }
+}
+
+#[test]
+fn transcodes_keep_hdr_for_screens_that_show_it() {
+    let rows = ["P5", "P7", "P8.1", "P8.4", "HDR10", "HDR10+", "HLG", "SDR"];
+    let mut hlg_only = fire_tv_lite();
+    hlg_only["hdr_types"] = json!(["hlg"]);
+    #[rustfmt::skip]
+    let table: [(&str, Value, [&str; 8]); 5] = [
+        //                                         P5       P7       8.1      8.4      HDR10    HDR10+   HLG      SDR
+        ("Google TV Streamer", google_tv_streamer(), ["HDR10", "HDR10", "HDR10", "HDR10", "HDR10", "HDR10", "HDR10", "SDR"]),
+        ("Fire TV Stick Lite", fire_tv_lite(),       ["HDR10", "HDR10", "HDR10", "HLG",   "HDR10", "HDR10", "HLG",   "SDR"]),
+        ("An HLG screen",      hlg_only,             ["HLG",   "HLG",   "HLG",   "HLG",   "HLG",   "HLG",   "HLG",   "SDR"]),
+        // No HEVC Main 10 decoder, no HDR screen; the web app.
+        ("SDR phone",          sdr_phone(),          ["SDR",   "SDR",   "SDR",   "SDR",   "SDR",   "SDR",   "SDR",   "SDR"]),
+        ("Chrome",             chrome(),             ["SDR",   "SDR",   "SDR",   "SDR",   "SDR",   "SDR",   "SDR",   "SDR"]),
+    ];
+    for (device, caps, expected) in table {
+        for (row, want) in rows.iter().zip(expected) {
+            // A lower quality than the file's: everything is converted.
+            let mut req = with_hdr(caps.clone());
+            req.max_bitrate = Some(8_000);
+            let d = play_with(req, "mkv", &source(row));
+            assert_eq!(converted_to(&d), want, "{device}, {row}: {:?}", d.reasons);
+        }
+    }
+    // A transcoder that can't: SDR, as before.
+    let mut req = request(google_tv_streamer());
+    req.max_bitrate = Some(8_000);
+    assert_eq!(converted_to(&play_with(req, "mkv", &source("HDR10"))), "SDR");
+}
+
+#[test]
+fn what_hdr_becomes_is_said() {
+    let reasons = |req: PlaybackRequest, row: &str| play_with(req, "mkv", &source(row)).reasons;
+    assert_eq!(
+        reasons(with_hdr(google_tv_streamer()), "P5"),
+        ["Dolby Vision P5 needs a Dolby Vision screen: it's converted to HDR10."]
+    );
+    assert_eq!(reasons(with_hdr(google_tv_streamer()), "HLG"), ["HLG is converted to HDR10 for this screen."]);
+    assert_eq!(
+        reasons(with_hdr(google_tv_streamer()), "P8.4"),
+        ["Dolby Vision P8.4 is converted to HDR10 for this screen."]
+    );
+    assert_eq!(
+        reasons(request(google_tv_streamer()), "P5"),
+        ["Dolby Vision P5 needs a Dolby Vision screen: it's converted to SDR."]
+    );
+    // Picture subtitles drawn onto the video: SDR (the Streamer shows PGS
+    // itself, but not on converted video).
+    let mut req = with_hdr(google_tv_streamer());
+    req.subtitle_index = Some(9);
+    let d = play_with(req, "mkv", &source("P5"));
+    assert_eq!((converted_to(&d), d.burn_index), ("SDR", Some(9)));
+    assert_eq!(
+        d.reasons,
+        [
+            "PGS subtitles are pictures, drawn onto the video.",
+            "Dolby Vision P5 needs a Dolby Vision screen: it's converted to SDR."
+        ]
+    );
+}
+
+#[test]
+fn hdr_transcodes_are_bound_by_the_hevc_main_10_decoders() {
+    // Blade Runner 2049 at "4K · 30 Mbps" on the Streamer: Dolby Vision 8.1
+    // over the cap, made HEVC Main 10 HDR10 in 4K.
+    let mut info = source("P8.1");
+    (info.streams[0].width, info.streams[0].height, info.streams[0].level) = (Some(3840), Some(2160), Some(153));
+    let mut remux = file("mkv");
+    remux.bitrate = Some(63_000_000);
+    let mut req = with_hdr(google_tv_streamer());
+    (req.max_height, req.max_bitrate) = (Some(2160), Some(30_000));
+    let d = decide(&remux, Some(&info), &info.streams, &req);
+    let v = d.video.as_ref().unwrap();
+    assert_eq!((converted_to(&d), v.max_height, v.max_bitrate_kbps), ("HDR10", Some(2160), Some(29_808)));
+    assert_eq!(d.reasons, ["You picked a lower quality."]);
+
+    // A 1080p HEVC Main 10 decoder: 1080p, also for the original.
+    let mut hdr10 = source("HDR10");
+    (hdr10.streams[0].width, hdr10.streams[0].height) = (Some(3840), Some(2160));
+    let d = decide(&remux, Some(&hdr10), &hdr10.streams, &with_hdr(fire_tv_lite()));
+    let v = d.video.as_ref().unwrap();
+    assert_eq!((converted_to(&d), d.quality, v.max_height), ("HDR10", Some("20m"), Some(1080)));
+
+    // Main 10 only in software, or not at the video's frame rate: SDR.
+    let mut caps = google_tv_streamer();
+    caps["video"][1]["hardware"] = json!(false);
+    let d = decide(&remux, Some(&info), &info.streams, &{
+        let mut req = with_hdr(caps);
+        req.max_bitrate = Some(30_000);
+        req
+    });
+    assert_eq!(converted_to(&d), "SDR");
+    let mut caps = google_tv_streamer();
+    caps["video"][1]["max_fps"] = json!(30.0);
+    info.streams[0].frame_rate = Some(60.0);
+    let mut req = with_hdr(caps);
+    req.max_bitrate = Some(30_000);
+    assert_eq!(converted_to(&decide(&remux, Some(&info), &info.streams, &req)), "SDR");
 }
 
 // ------------------------------------------------------------------ audio
