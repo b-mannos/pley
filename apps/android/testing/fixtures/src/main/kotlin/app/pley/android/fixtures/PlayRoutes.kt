@@ -12,6 +12,7 @@ import app.pley.android.model.PlaybackMethod
 import app.pley.android.model.PlaybackMode
 import app.pley.android.model.PlaybackRequest
 import app.pley.android.model.ProgressReport
+import app.pley.android.model.ProgressState
 import app.pley.android.model.RatingRequest
 import app.pley.android.model.ServerEvent
 import app.pley.android.model.SessionStatus
@@ -36,7 +37,8 @@ import mockwebserver3.MockResponse
  * subtitles as WebVTT (one track partial the first time) and pictures as
  * .mks, seek previews and chapter pictures; sessions stopped from elsewhere
  * (`session_stopped`, then 410); progress, watched marks, ratings, track
- * choices and track defaults, which change what the profile reads next.
+ * choices and track defaults, which change what the profile reads next
+ * (watch state changes tell its streams: `user_state_changed`).
  */
 internal class PlayRoutes(private val s: State) {
     private val catalog get() = s.catalog
@@ -398,6 +400,14 @@ internal class PlayRoutes(private val s: State) {
                 state.copy(positionMs = report.positionMs.coerceAtLeast(0), lastPlayedAt = now)
             }
         }
+        // The profile's devices hear of what changes what they show
+        // (`user_state_changed`): watched, a resume point started or
+        // cleared, or moved as the player pauses or stops; not every report.
+        val after = caller.profile.state(item.id)
+        val settled = report.state == ProgressState.Paused || report.state == ProgressState.Stopped
+        if (after.watched != before.watched || (after.positionMs > 0) != (before.positionMs > 0) || (settled && after.positionMs != before.positionMs)) {
+            s.events.emitTo(caller.profile.id, ServerEvent.UserStateChanged(lineage(item)))
+        }
         if (counts) {
             s.household.addHistory(caller.profile, item.id, now, call.header("User-Agent"))
             s.events.emit(ServerEvent.LibraryChanged(item.libraryId))
@@ -408,12 +418,21 @@ internal class PlayRoutes(private val s: State) {
     /** Watched or unwatched by hand (containers: all their episodes or tracks). Not a play. */
     private fun mark(caller: Caller, id: String, watched: Boolean): MockResponse {
         val item = playable(id) ?: return Reply.notFound("no such item")
-        for (leaf in catalog.leaves(item.id)) {
+        val leaves = catalog.leaves(item.id)
+        val changes = leaves.any { leaf -> caller.profile.state(leaf).let { it.watched != watched || it.positionMs > 0 } }
+        for (leaf in leaves) {
             caller.profile.update(leaf) { it.copy(watched = watched, positionMs = 0) }
+        }
+        if (changes) {
+            val children = item.kind in setOf(ItemKind.Show, ItemKind.Season, ItemKind.Album, ItemKind.Artist)
+            s.events.emitTo(caller.profile.id, ServerEvent.UserStateChanged(lineage(item), children))
         }
         s.events.emit(ServerEvent.LibraryChanged(item.libraryId))
         return Reply.noContent()
     }
+
+    /** [item], then its parent and grandparent: what `user_state_changed` names. */
+    private fun lineage(item: ItemDetail): List<Long> = listOfNotNull(item.id, item.parentId, item.grandparentId)
 
     /** PUT /api/items/{id}/streams: remembered for the movie, or for the whole show. */
     private fun streams(call: Call, caller: Caller, id: String): MockResponse {

@@ -26,6 +26,11 @@ class ServerEventTest {
         )
         assertEquals(ServerEvent.SessionStopped("s2", null, false), ServerEvent.parse("""{"type":"session_stopped","session_id":"s2","message":null,"by_admin":false}"""))
         assertEquals(ServerEvent.WatchlistChanged, ServerEvent.parse("""{"type":"watchlist_changed"}"""))
+        assertEquals(
+            ServerEvent.UserStateChanged(listOf(203, 202, 201), children = false),
+            ServerEvent.parse("""{"type":"user_state_changed","item_ids":[203,202,201],"children":false}"""),
+        )
+        assertEquals(ServerEvent.UserStateChanged(listOf(201), children = true), ServerEvent.parse("""{"type":"user_state_changed","item_ids":[201],"children":true}"""))
     }
 
     @Test
@@ -55,7 +60,18 @@ class ServerEventTest {
             PleyJson.encodeToString(ServerEvent.serializer(), ServerEvent.ScanProgress(1, ScanPhase.Probing, 2, 3)),
         )
         assertEquals("""{"type":"libraries_changed"}""", PleyJson.encodeToString(ServerEvent.serializer(), ServerEvent.LibrariesChanged))
-        for (event in listOf(ServerEvent.ScanStarted(4), ServerEvent.SessionsChanged, ServerEvent.WatchlistChanged, ServerEvent.Unknown("later"))) {
+        assertEquals(
+            """{"type":"user_state_changed","item_ids":[203,202,201],"children":false}""",
+            PleyJson.encodeToString(ServerEvent.serializer(), ServerEvent.UserStateChanged(listOf(203, 202, 201))),
+        )
+        val events = listOf(
+            ServerEvent.ScanStarted(4),
+            ServerEvent.SessionsChanged,
+            ServerEvent.WatchlistChanged,
+            ServerEvent.UserStateChanged(listOf(201), children = true),
+            ServerEvent.Unknown("later"),
+        )
+        for (event in events) {
             assertEquals(event, ServerEvent.parse(PleyJson.encodeToString(ServerEvent.serializer(), event)))
         }
     }

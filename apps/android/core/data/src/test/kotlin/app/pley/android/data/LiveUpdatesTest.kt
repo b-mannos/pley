@@ -1,10 +1,14 @@
 package app.pley.android.data
 
+import app.pley.android.model.ItemKind
+import app.pley.android.model.ItemList
+import app.pley.android.model.ItemSummary
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryKind
 import app.pley.android.model.ScanPhase
 import app.pley.android.model.ServerEvent
 import app.pley.android.network.LiveEvent
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -180,6 +184,135 @@ class LiveUpdatesTest {
         testScheduler.runCurrent()
 
         assertEquals(listOf(ScanState(1, null)), data.graph.liveUpdates.scans.value)
+    }
+
+    @Test
+    fun `watch state changed elsewhere, Home and what shows those items are asked again 300 ms later`() = runTest {
+        val data = signedIn(folder.newFolder())
+        collect(data.graph.hubs.home())
+        collect(data.graph.hubs.library(2))
+        collect(data.graph.items.detail(203))
+        collect(data.graph.items.children(202))
+        collect(data.graph.items.detail(101))
+        data.graph.liveUpdates.start()
+        testScheduler.runCurrent()
+        val home = data.api.calls("homeHubs").size
+        val items = data.api.calls("item").size
+
+        // An episode watched on another device: it, its season and its show.
+        data.events.send(LiveEvent.Event(ServerEvent.UserStateChanged(listOf(203, 202, 201))))
+        time(299)
+        assertEquals(home, data.api.calls("homeHubs").size)
+
+        time(1)
+        assertEquals(home + 1, data.api.calls("homeHubs").size)
+        assertEquals(listOf<Any?>(2L), data.api.calls("libraryHubs").drop(1).map { it.args.single() })
+        // The episode's page and its season's episodes; not the film's page.
+        assertEquals(listOf<Any?>(203L), data.api.calls("item").drop(items).map { it.args.single() })
+        assertEquals(listOf<Any?>(202L), data.api.calls("children").drop(1).map { it.args.single() })
+    }
+
+    @Test
+    fun `a library change heard with a watch state change is asked for in the same round`() = runTest {
+        val data = signedIn(folder.newFolder())
+        collect(data.graph.hubs.home())
+        collect(data.graph.hubs.library(1))
+        data.graph.liveUpdates.start()
+        testScheduler.runCurrent()
+
+        // A play that ends: its watch state, then its library's change.
+        data.events.send(LiveEvent.Event(ServerEvent.UserStateChanged(listOf(101))))
+        data.events.send(LiveEvent.Event(ServerEvent.LibraryChanged(1)))
+        time(300)
+        assertEquals(2, data.api.calls("homeHubs").size)
+        assertEquals(2, data.api.calls("libraryHubs").size)
+
+        // Not again when the library's 1,5 s would have ended.
+        time(1_500)
+        assertEquals(2, data.api.calls("homeHubs").size)
+        assertEquals(2, data.api.calls("libraryHubs").size)
+    }
+
+    @Test
+    fun `a change made here is asked for once, not again when the server tells of it`() = runTest {
+        val data = signedIn(folder.newFolder())
+        collect(data.graph.hubs.home())
+        collect(data.graph.items.detail(101))
+        data.graph.liveUpdates.start()
+        testScheduler.runCurrent()
+
+        data.api.hold()
+        val change = launch { data.graph.watchState.setWatched(101, true) }
+        testScheduler.runCurrent()
+        // The server tells every device of it, this one too, as it answers.
+        data.events.send(LiveEvent.Event(ServerEvent.UserStateChanged(listOf(101))))
+        time(100)
+        data.api.release()
+        testScheduler.runCurrent()
+        change.join()
+        assertEquals(2, data.api.calls("homeHubs").size)
+        assertEquals(2, data.api.calls("item").size)
+
+        time(200)
+        assertEquals(2, data.api.calls("homeHubs").size)
+        assertEquals(2, data.api.calls("item").size)
+    }
+
+    @Test
+    fun `a show marked watched elsewhere asks again for the pages of its episodes`() = runTest {
+        val data = signedIn(folder.newFolder())
+        collect(data.graph.items.detail(203))
+        collect(data.graph.items.children(202))
+        collect(data.graph.items.detail(101))
+        data.graph.liveUpdates.start()
+        testScheduler.runCurrent()
+        val items = data.api.calls("item").size
+
+        data.events.send(LiveEvent.Event(ServerEvent.UserStateChanged(listOf(201), children = true)))
+        time(300)
+
+        assertEquals(listOf<Any?>(203L), data.api.calls("item").drop(items).map { it.args.single() })
+        assertEquals(listOf<Any?>(202L), data.api.calls("children").drop(1).map { it.args.single() })
+    }
+
+    @Test
+    fun `watch state heard as the app leaves is asked for on coming back, not in the background`() = runTest {
+        val data = signedIn(folder.newFolder())
+        collect(data.graph.hubs.home())
+        data.graph.liveUpdates.start()
+        testScheduler.runCurrent()
+
+        data.events.send(LiveEvent.Event(ServerEvent.UserStateChanged(listOf(101))))
+        time(100)
+        data.foreground.value = false
+        time(5_000)
+        assertEquals(1, data.api.calls("homeHubs").size)
+
+        // Back well within 30 s: asked again all the same.
+        data.foreground.value = true
+        testScheduler.runCurrent()
+        assertEquals(2, data.api.calls("homeHubs").size)
+    }
+
+    @Test
+    fun `what a watch state change touches`() {
+        val ids = setOf(203L, 202L, 201L)
+        assertTrue(ServerLiveUpdates.touches(ids, emptySet(), SnapshotKeys.HOME, null))
+        assertTrue(ServerLiveUpdates.touches(ids, emptySet(), SnapshotKeys.libraryHubs(7), null))
+        assertTrue(ServerLiveUpdates.touches(ids, emptySet(), SnapshotKeys.item(203), null))
+        assertTrue(ServerLiveUpdates.touches(ids, emptySet(), SnapshotKeys.children(202), null))
+        assertTrue(ServerLiveUpdates.touches(ids, emptySet(), SnapshotKeys.onDeck(201), null))
+        assertFalse(ServerLiveUpdates.touches(ids, emptySet(), SnapshotKeys.item(101), null))
+        assertFalse(ServerLiveUpdates.touches(ids, emptySet(), SnapshotKeys.PLAYLISTS, null))
+
+        // Lists holding one of them, wherever they are.
+        val next = ItemSummary(id = 204, libraryId = 2, kind = ItemKind.Episode, title = "Next", parentId = 202, grandparentId = 201)
+        val film = ItemSummary(id = 101, libraryId = 1, kind = ItemKind.Movie, title = "Film")
+        assertTrue(ServerLiveUpdates.touches(ids, emptySet(), SnapshotKeys.search("next"), ItemList(listOf(film, next.copy(id = 203)))))
+        assertFalse(ServerLiveUpdates.touches(ids, emptySet(), SnapshotKeys.search("film"), ItemList(listOf(film))))
+        // What is under a show marked as a whole.
+        assertFalse(ServerLiveUpdates.touches(setOf(201), emptySet(), SnapshotKeys.related(9), ItemList(listOf(next))))
+        assertTrue(ServerLiveUpdates.touches(setOf(201), setOf(201), SnapshotKeys.related(9), ItemList(listOf(next))))
     }
 
     @Test

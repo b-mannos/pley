@@ -15,6 +15,7 @@ import app.pley.android.network.ServerEvents
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -43,6 +44,13 @@ import kotlinx.coroutines.launch
  * - `libraries_changed` asks again for the libraries and Home;
  * - `watchlist_changed` (My List changed on another device) asks again
  *   for My List, Home and the pages of movies and shows;
+ * - `user_state_changed` (something watched, started or taken out of
+ *   Continue Watching, here or on another device), gathered for
+ *   [STATE_MS], asks again for Home, the libraries' rows and what shows
+ *   those items ([touches]), but not for what was fetched since it was
+ *   heard (a change made here, asked for already); a library change
+ *   waiting then is asked for in the same round (a play that ends sends
+ *   both);
  * - a new connection (the server replays nothing) and every return to the
  *   foreground ask again for what is older than [STALE_MS];
  * - scans fill [scans] (GET /api/activity refuses apps' tokens).
@@ -99,6 +107,7 @@ internal class ServerLiveUpdates(
         // Back in the foreground (or just signed in): what is old is asked again.
         cache.revalidate(STALE_MS) { _, _ -> true }
         val pending = ConcurrentHashMap<Long, Job>()
+        val watchState = AtomicReference<WatchStateHeard?>(null)
         try {
             eventsOf(issuer).events().collect { live ->
                 when (live) {
@@ -107,7 +116,7 @@ internal class ServerLiveUpdates(
                         cache.revalidate(STALE_MS) { _, _ -> true }
                         if (session.meState.value?.fresh != true) launch { session.refresh() }
                     }
-                    is LiveEvent.Event -> handle(live.event, pending)
+                    is LiveEvent.Event -> handle(live.event, pending, watchState)
                 }
             }
         } catch (e: CancellationException) {
@@ -120,11 +129,16 @@ internal class ServerLiveUpdates(
                 job.cancel()
                 cache.markStale { key, value -> affects(libraryId, key, value) }
             }
+            watchState.getAndSet(null)?.let { heard -> cache.markStale { key, value -> touches(heard.ids, heard.under, key, value) } }
             _scans.value = emptyList()
         }
     }
 
-    private fun CoroutineScope.handle(event: ServerEvent, pending: MutableMap<Long, Job>) {
+    private fun CoroutineScope.handle(
+        event: ServerEvent,
+        pending: ConcurrentHashMap<Long, Job>,
+        watchState: AtomicReference<WatchStateHeard?>,
+    ) {
         heard.tryEmit(event)
         when (event) {
             is ServerEvent.ScanStarted -> scan(event.libraryId, null)
@@ -144,8 +158,33 @@ internal class ServerLiveUpdates(
             ServerEvent.WatchlistChanged -> cache.revalidate { key, value ->
                 key == SnapshotKeys.HOME || key == SnapshotKeys.WATCHLIST || (value is ItemDetail && value.kind.listable)
             }
+            is ServerEvent.UserStateChanged -> {
+                val now = cache.clock()
+                val first = watchState.getAndUpdate { it?.with(event, now) ?: WatchStateHeard.of(event, now) } == null
+                if (first) {
+                    launch {
+                        delay(STATE_MS)
+                        watchStateChanged(watchState.getAndSet(null) ?: return@launch, pending)
+                    }
+                }
+            }
             ServerEvent.SessionsChanged, is ServerEvent.SessionStopped, is ServerEvent.Unknown -> Unit
         }
+    }
+
+    /**
+     * What shows the watch state [heard] names is asked again, but not what
+     * was fetched since it was heard: a change made here asked for it
+     * already. Library changes waiting are asked for now with it, so a play
+     * that ends (which sends both) costs one round of requests.
+     */
+    private fun watchStateChanged(heard: WatchStateHeard, pending: ConcurrentHashMap<Long, Job>) {
+        for ((libraryId, job) in pending) {
+            if (!pending.remove(libraryId, job)) continue
+            job.cancel()
+            cache.revalidate { key, value -> affects(libraryId, key, value) }
+        }
+        cache.revalidate(olderThanMs = cache.clock() - heard.at) { key, value -> touches(heard.ids, heard.under, key, value) }
     }
 
     private fun scan(libraryId: Long, progress: Float?) {
@@ -155,9 +194,32 @@ internal class ServerLiveUpdates(
         }
     }
 
+    /**
+     * `user_state_changed` events heard and not acted on yet: the items they
+     * name, those everything under which changed, and when the last one
+     * came (on the cache's clock).
+     */
+    private class WatchStateHeard(val ids: Set<Long>, val under: Set<Long>, val at: Long) {
+        fun with(event: ServerEvent.UserStateChanged, now: Long): WatchStateHeard {
+            val next = of(event, now)
+            return WatchStateHeard(ids + next.ids, under + next.under, now)
+        }
+
+        companion object {
+            fun of(event: ServerEvent.UserStateChanged, now: Long) = WatchStateHeard(
+                ids = event.itemIds.toSet(),
+                under = if (event.children) setOfNotNull(event.itemIds.firstOrNull()) else emptySet(),
+                at = now,
+            )
+        }
+    }
+
     companion object {
         /** How long a library's changes are gathered before asking again. */
         const val DEBOUNCE_MS = 1_500L
+
+        /** How long watch state changes are gathered before asking again, from the first. */
+        const val STATE_MS = 300L
 
         /** What is older than this is asked again on reconnecting or coming back. */
         const val STALE_MS = 30_000L
@@ -178,6 +240,27 @@ internal class ServerLiveUpdates(
                 is Hubs -> value.hubs.any { h -> h.libraryId == libraryId || h.items.any { it.libraryId == libraryId } }
                 else -> false
             }
+        }
+
+        /**
+         * Whether the answer under [key], holding [value], shows the watch
+         * state of [ids] (items, with their seasons and shows) or of what is
+         * under [under] (a show or season marked as a whole): Home and the
+         * libraries' rows always (Continue Watching), the items' pages,
+         * children and on-deck, and any page or list holding one of them.
+         */
+        fun touches(ids: Set<Long>, under: Set<Long>, key: String, value: Any?): Boolean {
+            if (key == SnapshotKeys.HOME || key.startsWith("libhubs:")) return true
+            val about = key.substringAfter(':', "").toLongOrNull()
+            if (about in ids && (key.startsWith("item:") || key.startsWith("children:") || key.startsWith("ondeck:"))) return true
+            if (value == null) return false
+            fun changed(id: Long, parentId: Long?, grandparentId: Long?) = id in ids || parentId in under || grandparentId in under
+            var found = false
+            ItemPatch(
+                summary = { s -> s.also { if (changed(s.id, s.parentId, s.grandparentId)) found = true } },
+                detail = { d -> d.also { if (changed(d.id, d.parentId, d.grandparentId)) found = true } },
+            ).apply(value)
+            return found
         }
     }
 }

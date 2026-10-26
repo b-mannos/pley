@@ -116,6 +116,26 @@ sealed interface ServerEvent {
     }
 
     /**
+     * The profile's watch state of an item changed, here or on another
+     * device: watched or not, a resume point started, moved or cleared, in
+     * or out of Continue Watching. [itemIds] is the item, then its parent
+     * and grandparent (a season and its show), whose counts follow it;
+     * [children]: everything under the first one changed too (a show or a
+     * season marked as a whole).
+     */
+    @Serializable
+    data class UserStateChanged(
+        val itemIds: List<Long> = emptyList(),
+        val children: Boolean = false,
+    ) : ServerEvent {
+        override val type: String get() = TYPE
+
+        companion object {
+            const val TYPE = "user_state_changed"
+        }
+    }
+
+    /**
      * A playback session was stopped by the server (DELETE /api/sessions/{id}):
      * by an administrator when [byAdmin], else by the profile from another
      * device. [message] says why, when given.
@@ -160,6 +180,7 @@ sealed interface ServerEvent {
                 SessionsChanged.TYPE -> SessionsChanged
                 SessionStopped.TYPE -> json.decodeFromJsonElement(SessionStopped.serializer(), fields)
                 WatchlistChanged.TYPE -> WatchlistChanged
+                UserStateChanged.TYPE -> json.decodeFromJsonElement(UserStateChanged.serializer(), fields)
                 else -> Unknown(type)
             }
         }
@@ -173,6 +194,7 @@ sealed interface ServerEvent {
                 is ScanFinished -> json.encodeToJsonElement(ScanFinished.serializer(), value).jsonObject
                 is LibraryChanged -> json.encodeToJsonElement(LibraryChanged.serializer(), value).jsonObject
                 is SessionStopped -> json.encodeToJsonElement(SessionStopped.serializer(), value).jsonObject
+                is UserStateChanged -> json.encodeToJsonElement(UserStateChanged.serializer(), value).jsonObject
                 LibrariesChanged, SessionsChanged, WatchlistChanged, is Unknown -> emptyMap()
             }
             output.encodeJsonElement(JsonObject(mapOf<String, JsonElement>("type" to JsonPrimitive(value.type)) + fields))

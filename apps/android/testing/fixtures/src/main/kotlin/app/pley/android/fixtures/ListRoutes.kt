@@ -8,7 +8,8 @@ import mockwebserver3.MockResponse
 /**
  * My List and leaving Continue Watching (docs/API.md): GET, PUT and DELETE
  * /api/watchlist, and DELETE /api/continue-watching/{id}. My List changes
- * tell the profile's event streams (`watchlist_changed`).
+ * tell the profile's event streams (`watchlist_changed`), and so does
+ * leaving Continue Watching (`user_state_changed`).
  */
 internal class ListRoutes(private val s: State) {
     private val catalog get() = s.catalog
@@ -55,6 +56,7 @@ internal class ListRoutes(private val s: State) {
         }
         caller.profile.hiddenFromContinue[owner] = s.now()
         caller.profile.version++
+        s.events.emitTo(caller.profile.id, ServerEvent.UserStateChanged(listOf(owner)))
         return Reply.noContent()
     }
 }

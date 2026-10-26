@@ -133,4 +133,32 @@ class ListRoutesTest {
             assertEquals(ServerEvent.WatchlistChanged, ServerEvent.parse(line!!.removePrefix("data: ")))
         }
     }
+
+    @Test
+    fun watchStateChangesTellTheProfilesStreams() = withServer { server ->
+        val app = Client(server, server.accessToken())
+        val request = Request.Builder().url("${server.url}/api/events").header("Authorization", "Bearer ${server.accessToken()}").build()
+        app.http.newCall(request).execute().use { response ->
+            val source = response.body.source()
+            assertEquals(": connected", source.readUtf8Line())
+            // The next user_state_changed, past the libraries' changes that come with marks.
+            fun next(): ServerEvent = generateSequence {
+                var line = source.readUtf8Line()
+                while (line != null && !line.startsWith("data:")) line = source.readUtf8Line()
+                ServerEvent.parse(line!!.removePrefix("data: "))
+            }.first { it is ServerEvent.UserStateChanged }
+            // A film of an hour or two Alex hasn't played (the samples are short).
+            val movie = 100L
+
+            app.send("POST", "/api/items/$movie/watched")
+            assertEquals(ServerEvent.UserStateChanged(listOf(movie)), next())
+            app.send("POST", "/api/items/${FixtureIds.SHOW_SEASON_1}/unwatched")
+            assertEquals(ServerEvent.UserStateChanged(listOf(FixtureIds.SHOW_SEASON_1, FixtureIds.SHOW), children = true), next())
+            // Played again: a resume point starts.
+            app.send("POST", "/api/items/$movie/progress", """{"position_ms":30000,"state":"playing"}""")
+            assertEquals(ServerEvent.UserStateChanged(listOf(movie)), next())
+            app.send("DELETE", "/api/continue-watching/$movie")
+            assertEquals(ServerEvent.UserStateChanged(listOf(movie)), next())
+        }
+    }
 }
