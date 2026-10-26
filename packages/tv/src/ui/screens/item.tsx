@@ -1,5 +1,5 @@
 import type { ComponentChildren } from "preact";
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { errorMessage, isApiError } from "../../api/client";
 import type { Credit, ItemDetail, ItemSummary, MediaFile, MediaStream } from "../../api/types";
 import {
@@ -39,7 +39,13 @@ import { openPlayer, pageOf, prefetchPlayback, setInMyList, setWatched } from ".
 const TABS_LINE = 218;
 const EPISODES_LINE = 272;
 const ROWS_LINE = 172;
-const HERO_H = 371 - 52;
+/**
+ * The hero's section: 52 above what it holds, the focused button's label
+ * (23 under the row) and 8 below. It follows what the hero holds, as the
+ * Android app's list does; until measured, the spec's movie (ends at 371).
+ */
+const HERO_PAD = 52 + 23 + 8;
+const HERO_H = 371;
 
 type PanelKind = null | "tracks" | "more" | { actions: ItemSummary };
 
@@ -213,6 +219,14 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
   const restedEpisode = useRested(focusedEpisode);
   const [readOn, setReadOn] = useState(0);
   const [summaryCut, setSummaryCut] = useState(false);
+  const heroEl = useRef<HTMLDivElement | null>(null);
+  const [heroH, setHeroH] = useState(HERO_H);
+  useLayoutEffect(() => {
+    const el = heroEl.current;
+    if (!el) return;
+    const h = HERO_PAD + el.offsetHeight;
+    if (h !== heroH) setHeroH(h);
+  });
 
   // ---- the primary button
   const target: ItemSummary | null = kind === "show" || kind === "season" ? onDeck.data ?? null : item;
@@ -243,10 +257,11 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
   const sections: Section[] = [];
   sections.push({
     key: "hero",
-    height: HERO_H,
+    height: heroH,
     anchor: null,
     render: (onFocus) => (
       <ItemHero
+        heroRef={heroEl}
         item={item}
         target={target}
         file={file}
@@ -600,6 +615,7 @@ function MetaLineOf(p: { detail: ItemDetail; file: MediaFile | null; text: strin
 }
 
 function ItemHero(p: {
+  heroRef: { current: HTMLDivElement | null };
   item: ItemDetail;
   target: ItemSummary | null;
   file: MediaFile | null;
@@ -638,7 +654,7 @@ function ItemHero(p: {
     prefetchPlayback(app, p.target);
   };
   return (
-    <div class={`item-hero${p.hidden ? " hidden" : ""}`}>
+    <div ref={p.heroRef} class={`item-hero${p.hidden ? " hidden" : ""}`}>
       <div class="hero-title">
         <div class="t-hero c-fg lines-2">{title}</div>
       </div>

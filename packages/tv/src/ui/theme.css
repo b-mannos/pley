@@ -147,6 +147,8 @@ body {
   color: rgba(233, 235, 239, 0.7);
   box-sizing: border-box;
 }
+/* A word wider than the tile breaks onto the next line, as Android's text does, rather than being cut. */
+.tile-placeholder > .t-title { max-width: 100%; min-width: 0; word-wrap: break-word; overflow-wrap: break-word; }
 .tile-img {
   position: absolute;
   left: 0;
