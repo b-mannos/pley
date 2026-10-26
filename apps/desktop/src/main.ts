@@ -1,5 +1,6 @@
 import "./style.css";
 import { invoke } from "@tauri-apps/api/core";
+import { coming, describe, fraction, serverName, type Download } from "./downloads";
 import {
   candidates,
   displayAddress,
@@ -28,6 +29,9 @@ const addError = element<HTMLParagraphElement>("add-error");
 const chooser = element<HTMLElement>("choose-section");
 const connecting = element<HTMLElement>("connecting");
 const connectingText = element<HTMLParagraphElement>("connecting-text");
+const downloadsSection = element<HTMLElement>("downloads-section");
+const downloadsList = element<HTMLUListElement>("downloads");
+const downloadsStatus = element<HTMLParagraphElement>("downloads-status");
 
 let saved: SavedServer[] = [];
 let found: FoundServer[] = [];
@@ -38,6 +42,11 @@ let busy: string | null = null;
 let autoOpen: AbortController | null = null;
 /** An unencrypted address someone was warned about: connecting again goes ahead. */
 let warnedAbout: string | null = null;
+let downloads: Download[] = [];
+/** The download whose Delete was pressed once: pressed again, it goes. */
+let confirming: number | null = null;
+let confirmTimer = 0;
+let pollTimer = 0;
 
 function message(err: unknown): string {
   return typeof err === "string" ? err : err instanceof Error ? err.message : String(err);
@@ -94,6 +103,142 @@ function row(entry: ServerEntry): HTMLLIElement {
   return li;
 }
 
+const SVG = "http://www.w3.org/2000/svg";
+
+/** A small picture: filled, or drawn in lines. */
+function glyph(d: string, filled: boolean): SVGSVGElement {
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", "glyph");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(SVG, "path");
+  path.setAttribute("d", d);
+  if (filled) {
+    path.setAttribute("fill", "currentColor");
+  } else {
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", "2");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+  }
+  svg.append(path);
+  return svg;
+}
+
+const PLAY = "M8 5.14v13.72a1 1 0 0 0 1.52.85l10.6-6.86a1 1 0 0 0 0-1.7L9.52 4.3A1 1 0 0 0 8 5.14z";
+const ARROW = "M12 4v11m-5-5 5 5 5-5M5 20h14";
+const ALERT = "M12 8v5m0 3.5v.01M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z";
+
+/** What a row shows besides its words and bar: rebuilt when it changes. */
+const shapeOf = (d: Download) => `${d.state}:${confirming === d.id}`;
+
+function act(command: string, id: number, failure: string): void {
+  downloadsStatus.textContent = "";
+  invoke(command, { id })
+    .catch((err: unknown) => {
+      downloadsStatus.textContent = `${failure}: ${message(err)}`;
+    })
+    .finally(() => void refreshDownloads());
+}
+
+function actionButton(text: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "action";
+  button.textContent = text;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function downloadRow(d: Download): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = `download ${d.state}`;
+  li.dataset.id = String(d.id);
+  li.dataset.shape = shapeOf(d);
+  const playable = d.state === "done";
+  const main = document.createElement(playable ? "button" : "div");
+  main.className = playable ? "server playable" : "server";
+  if (main instanceof HTMLButtonElement) {
+    main.type = "button";
+    main.title = "Play in your video player";
+    main.addEventListener("click", () => act("play_download", d.id, "Couldn't play it"));
+  }
+  const name = document.createElement("span");
+  name.className = "name";
+  name.textContent = d.name;
+  const line = document.createElement("span");
+  line.className = "address";
+  main.append(glyph(playable ? PLAY : d.state === "failed" ? ALERT : ARROW, playable), name, line);
+  if (coming(d)) {
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    bar.append(document.createElement("span"));
+    main.append(bar);
+  }
+  li.append(main);
+  if (playable) li.append(actionButton("Show in folder", () => act("show_download", d.id, "Couldn't show it")));
+  if (d.state === "failed") li.append(actionButton("Retry", () => act("retry_download", d.id, "Couldn't retry it")));
+  const remove = document.createElement("button");
+  remove.type = "button";
+  const sure = confirming === d.id;
+  remove.className = sure ? "forget confirm" : "forget";
+  remove.textContent = sure ? "Delete" : "×";
+  remove.title = playable ? "Delete the file" : "Stop and delete what came";
+  remove.setAttribute("aria-label", sure ? `Delete ${d.name} for good` : `Delete ${d.name}`);
+  remove.addEventListener("click", () => {
+    window.clearTimeout(confirmTimer);
+    if (confirming === d.id) {
+      confirming = null;
+      act("remove_download", d.id, "Couldn't delete it");
+      return;
+    }
+    confirming = d.id;
+    confirmTimer = window.setTimeout(() => {
+      confirming = null;
+      renderDownloads();
+    }, 4000);
+    renderDownloads();
+    downloadsList.querySelector<HTMLButtonElement>(`li[data-id="${d.id}"] .forget`)?.focus();
+  });
+  li.append(remove);
+  updateRow(li, d);
+  return li;
+}
+
+/** The words and the bar of a row, as the download goes. */
+function updateRow(li: HTMLLIElement, d: Download): void {
+  const line = li.querySelector(".address");
+  if (line) line.textContent = describe(d, serverName(d.server, saved));
+  const fill = li.querySelector<HTMLElement>(".bar > span");
+  if (fill) fill.style.width = `${(fraction(d) ?? 0) * 100}%`;
+}
+
+function renderDownloads(): void {
+  downloadsSection.hidden = chooser.hidden || downloads.length === 0;
+  const rows = downloads.map((d) => {
+    const row = downloadsList.querySelector<HTMLLIElement>(`li[data-id="${d.id}"]`);
+    if (row?.dataset.shape !== shapeOf(d)) return downloadRow(d);
+    updateRow(row, d);
+    return row;
+  });
+  // The same rows in the same order stay where they are (and keep focus).
+  const same = rows.length === downloadsList.children.length && rows.every((row, i) => downloadsList.children[i] === row);
+  if (!same) downloadsList.replaceChildren(...rows);
+}
+
+/** The app's downloads, again every second while some are coming. */
+async function refreshDownloads(): Promise<void> {
+  window.clearTimeout(pollTimer);
+  try {
+    downloads = await invoke<Download[]>("downloads");
+  } catch (err) {
+    downloadsStatus.textContent = message(err);
+  }
+  renderDownloads();
+  if (downloads.some(coming)) pollTimer = window.setTimeout(() => void refreshDownloads(), 1000);
+}
+
 /** Checks the server, remembers it and shows its web app in this window. */
 async function openServer(url: string, id: string | null): Promise<void> {
   busy = url;
@@ -142,6 +287,7 @@ function showChooser(): void {
   autoOpen?.abort();
   connecting.hidden = true;
   chooser.hidden = false;
+  renderDownloads();
   void search();
 }
 
@@ -150,6 +296,7 @@ async function openLastUsed(server: SavedServer): Promise<void> {
   const cancelled = new AbortController();
   autoOpen = cancelled;
   chooser.hidden = true;
+  renderDownloads();
   connecting.hidden = false;
   connectingText.textContent = `Opening ${server.name}…`;
   try {
@@ -219,6 +366,7 @@ element<HTMLButtonElement>("choose").addEventListener("click", showChooser);
 
 async function start(): Promise<void> {
   saved = await invoke<SavedServer[]>("saved_servers");
+  void refreshDownloads();
   // "Switch server" in the web app comes back here with ?pick: no opening by itself then.
   const pick = new URLSearchParams(window.location.search).has("pick");
   const last = lastUsed(saved);

@@ -6,14 +6,17 @@
 //! through `/__app/servers`, which the window catches; links to other sites
 //! open in the browser (web links only: no other kind of address is handed
 //! to the system). Pages from servers get no access to the app's commands:
-//! only the picker, bundled with the app, has it.
+//! only the picker, bundled with the app, has it. The files a server's page
+//! downloads are fetched by the app, to play while the server is away
+//! (`downloads`).
 
 mod discovery;
+mod downloads;
 mod servers;
 
 use std::sync::Mutex;
 
-use tauri::webview::NewWindowResponse;
+use tauri::webview::{DownloadEvent, NewWindowResponse};
 use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
@@ -138,13 +141,20 @@ pub fn run() {
             servers::forget_server,
             servers::check_server,
             discovery::discover,
-            open_server
+            open_server,
+            downloads::downloads,
+            downloads::play_download,
+            downloads::show_download,
+            downloads::remove_download,
+            downloads::retry_download
         ])
         .setup(|app| {
             // While developing, the picker comes from Vite's dev server.
             if cfg!(dev) {
                 app.state::<Pages>().0.lock().unwrap().picker = app.config().build.dev_url.clone();
             }
+            let list = app.path().app_data_dir()?.join("downloads.json");
+            app.manage(downloads::Downloads::load(list, downloads::folder(app.handle())));
             let handle = app.handle().clone();
             let opener = app.handle().clone();
             // The picker's address is known once it loads (see `navigation`):
@@ -176,7 +186,23 @@ pub fn run() {
                     open_in_browser(&opener, &url);
                     NewWindowResponse::Deny
                 })
+                .on_download(|webview, event| {
+                    let app = webview.app_handle();
+                    let server = app.state::<Pages>().0.lock().unwrap().server.clone();
+                    match event {
+                        DownloadEvent::Requested { url, destination } => {
+                            downloads::requested(app, server.as_ref(), &url, destination)
+                        }
+                        DownloadEvent::Finished { url, path, success } => {
+                            downloads::finished(app, server.as_ref(), &url, path.as_deref(), success);
+                            true
+                        }
+                        _ => true,
+                    }
+                })
                 .build()?;
+            // After the window: downloads use its cookies (the servers' sessions).
+            tauri::async_runtime::spawn(downloads::run(app.handle().clone()));
             Ok(())
         })
         .run(tauri::generate_context!())

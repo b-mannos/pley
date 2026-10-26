@@ -10,6 +10,11 @@
     "allow-forget-server",
     "allow-check-server",
     "allow-discover",
-    "allow-open-server"
+    "allow-open-server",
+    "allow-downloads",
+    "allow-play-download",
+    "allow-show-download",
+    "allow-remove-download",
+    "allow-retry-download"
   ]
 }

@@ -252,6 +252,101 @@ button.primary:disabled {
   color: var(--danger);
 }
 
+.downloads {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.hint {
+  margin: 0.25rem 0 0.9rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.download .server {
+  cursor: default;
+}
+
+button.server.playable {
+  cursor: pointer;
+}
+
+.glyph {
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--subtle);
+}
+
+.playable .glyph {
+  color: var(--accent);
+}
+
+.failed .glyph {
+  color: var(--danger);
+}
+
+.download .address {
+  grid-column: 2 / span 2;
+  font-variant-numeric: tabular-nums;
+}
+
+.failed .address {
+  color: var(--danger);
+}
+
+.bar {
+  grid-column: 2 / span 2;
+  height: 3px;
+  margin-top: 0.45rem;
+  border-radius: 2px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 400ms linear;
+}
+
+.waiting .bar > span {
+  background: var(--subtle);
+}
+
+.action {
+  padding: 0 0.85rem;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.action:hover {
+  color: var(--fg);
+  background: var(--surface-2);
+}
+
+.forget.confirm {
+  width: auto;
+  padding: 0 0.85rem;
+  color: var(--danger);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
 .connecting {
   padding: 2rem 0;
 }

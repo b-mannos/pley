@@ -1,0 +1,122 @@
+import { useCallback, useRef, useState } from "react";
+import {
+  coming,
+  fractionOf,
+  useAppDownloadChanges,
+  useAppDownloads,
+  type AppDownload,
+} from "@/lib/appDownloads";
+import { cn } from "@/lib/cn";
+import { formatBytes } from "@/lib/format";
+import { useDismiss } from "@/lib/hooks";
+import { useToast } from "./Toast";
+
+/** Where the desktop app lists its downloads (the account menu's way to its server picker). */
+export const DOWNLOADS_PLACE = "Servers and downloads";
+
+/** A ring that fills as the downloads come (and turns while their size is unknown). */
+function Ring({ fraction }: { fraction: number | null }) {
+  const r = 7;
+  const around = 2 * Math.PI * r;
+  return (
+    <svg viewBox="0 0 18 18" className={cn("size-[18px] -rotate-90", fraction == null && "animate-spin")} aria-hidden>
+      <circle cx="9" cy="9" r={r} fill="none" strokeWidth="2" className="stroke-white/15" />
+      <circle
+        cx="9"
+        cy="9"
+        r={r}
+        fill="none"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeDasharray={around}
+        strokeDashoffset={around * (1 - (fraction ?? 0.25))}
+        className="stroke-accent transition-[stroke-dashoffset] duration-500 motion-reduce:transition-none"
+      />
+    </svg>
+  );
+}
+
+function progressLine(d: AppDownload): string {
+  if (d.state === "waiting") return "Waiting for the server to answer";
+  if (d.state === "queued") return "Waiting its turn";
+  return d.size ? `${formatBytes(d.received)} of ${formatBytes(d.size)}` : formatBytes(d.received);
+}
+
+/**
+ * In the desktop app, the files it downloads from this server: in the top
+ * bar while they come, with a word when each starts, is done or fails.
+ */
+export function AppDownloads() {
+  const toast = useToast();
+  const all = useAppDownloads();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(ref, open, () => setOpen(false));
+
+  const onChange = useCallback(
+    (d: AppDownload, before: AppDownload | undefined) => {
+      if (d.id === 0) {
+        // A file the page made, saved with the system's downloads.
+        if (d.state === "done") toast.success(`Saved ${d.name} in your Downloads folder`);
+        else toast.error(`Couldn't download ${d.name}. ${d.error ?? ""}`);
+        return;
+      }
+      if (d.state === before?.state) {
+        if (d.state === "done") toast.info(`${d.name} is downloaded already`);
+        return;
+      }
+      if (d.state === "done") toast.success(`Downloaded ${d.name}`);
+      else if (d.state === "failed") toast.error(`Couldn't download ${d.name}. ${d.error ?? ""}`);
+      else if (!before && d.state !== "waiting") toast.info(`Downloading ${d.name}`);
+    },
+    [toast],
+  );
+  useAppDownloadChanges(onChange);
+
+  const active = all.filter(coming);
+  if (!active.length) return null;
+  const fraction = fractionOf(active);
+  const percent = fraction == null ? null : `${Math.floor(fraction * 100)}%`;
+  const label = active.length === 1 ? `Downloading ${active[0]!.name}` : `Downloading ${active.length} files`;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-label={percent ? `${label}, ${percent}` : label}
+        className="flex h-9 items-center gap-2 rounded-full px-3 text-muted transition-colors hover:bg-white/5 hover:text-fg"
+      >
+        <Ring fraction={fraction} />
+        <span className="hidden max-w-48 truncate text-xs font-medium md:inline">{label}</span>
+        {percent ? <span className="hidden text-xs tabular-nums md:inline">{percent}</span> : null}
+      </button>
+      {open ? (
+        <div
+          aria-label="Downloads"
+          className="absolute right-0 top-full z-40 mt-2 w-80 max-w-[calc(100vw-2rem)] animate-pop-in space-y-3 rounded-lg border border-border bg-surface-2 px-4 py-3 shadow-xl shadow-black/50"
+        >
+          {active.map((d) => (
+            <div key={d.id} className="space-y-1.5">
+              <div className="truncate text-sm font-medium text-fg">{d.name}</div>
+              <div className="h-1 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-[width] duration-500 motion-reduce:transition-none",
+                    d.state === "downloading" ? "bg-accent" : "bg-subtle",
+                  )}
+                  style={{ width: `${d.size ? Math.min(100, (d.received / d.size) * 100) : 0}%` }}
+                />
+              </div>
+              <div className="text-xs tabular-nums text-subtle">{progressLine(d)}</div>
+            </div>
+          ))}
+          <p className="border-t border-border pt-2.5 text-xs text-muted">
+            Downloads play from {DOWNLOADS_PLACE} in the account menu, even with the server away.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}

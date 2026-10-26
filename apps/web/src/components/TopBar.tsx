@@ -8,6 +8,7 @@ import { useAuth } from "@/auth";
 import { cn } from "@/lib/cn";
 import { useDebouncedValue, useOnChange } from "@/lib/hooks";
 import { appShell, SWITCH_SERVER_PATH } from "@/lib/shell";
+import { AppDownloads, DOWNLOADS_PLACE } from "./AppDownloads";
 import { Avatar } from "./Avatar";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { IconButton } from "./ui";
@@ -213,7 +214,8 @@ function UserMenu() {
                 window.location.assign(SWITCH_SERVER_PATH);
               }}
             >
-              Switch server
+              {/* The desktop app's picker lists its downloads too. */}
+              {appShell() === "desktop" ? DOWNLOADS_PLACE : "Switch server"}
             </MenuItem>
           ) : null}
           <MenuItem
@@ -240,6 +242,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
       </IconButton>
       <SearchBox className="min-w-0 max-w-xl flex-1" />
       <div className="ml-auto flex items-center gap-1.5">
+        {appShell() === "desktop" ? <AppDownloads /> : null}
         <ScanIndicator />
         <UserMenu />
       </div>

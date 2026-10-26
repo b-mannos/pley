@@ -9,6 +9,11 @@ fn main() {
         "check_server",
         "discover",
         "open_server",
+        "downloads",
+        "play_download",
+        "show_download",
+        "remove_download",
+        "retry_download",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands)).expect("tauri build");
 }

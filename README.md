@@ -81,6 +81,11 @@ are than a browser, music in the background, and a remote-first interface
 on TVs. It signs in through the server's own page or, on a TV, with a code;
 installing it is in [docs/ANDROID.md](docs/ANDROID.md).
 
+**Offline**: on the home network everything works without the internet.
+Item pages download a file's original, which the Android app (phones and
+tablets) and the desktop app keep to play while the server is away; the
+Android app sends what was watched once it is back.
+
 **Performance**: single binaries; SQLite in WAL mode with one writer;
 listings filtered, sorted and paged in SQL; compressed responses; pictures
 resized once and cached; transcodes throttled to about twice real time.
