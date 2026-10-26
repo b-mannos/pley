@@ -33,6 +33,8 @@ const PROGRESS_EVERY: Duration = Duration::from_millis(500);
 const SAVE_EVERY: Duration = Duration::from_secs(15);
 /// A server that sends nothing for this long has dropped the download.
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long the server has to start answering (a share asleep can hold it).
+const ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
 /// Downloads waiting for their server try again after this, then twice as
 /// long each time up to [`RETRY_MAX`].
 const RETRY_FIRST: Duration = Duration::from_secs(5);
@@ -467,7 +469,7 @@ async fn download<R: Runtime>(
     let part = part_of(&d.path);
     let mut told = Instant::now();
     let mut saved = Instant::now();
-    let fetched = fetch(client, &url, cookie.as_deref(), &part, |received, size| {
+    let fetched = fetch(client, &url, cookie.as_deref(), &part, d.size, |received, size| {
         if !downloads.progress(d.id, received, size) {
             return false;
         }
@@ -598,14 +600,16 @@ fn content_range(headers: &reqwest::header::HeaderMap) -> Option<(Option<u64>, O
     Some((start, total.trim().parse().ok()))
 }
 
-/// Fetches `url` into `part`, going on from what `part` has. `progress`
-/// hears what is on the disk and the whole size as it comes, and stops it
-/// by answering `false`.
+/// Fetches `url` into `part`, going on from what `part` has when the file
+/// is still the one of `expected` bytes begun. `progress` hears what is on
+/// the disk and the whole size as it comes, and stops it by answering
+/// `false`.
 async fn fetch(
     client: &reqwest::Client,
     url: &Url,
     cookie: Option<&str>,
     part: &Path,
+    expected: Option<u64>,
     mut progress: impl FnMut(u64, Option<u64>) -> bool,
 ) -> Result<Fetched, Problem> {
     // A server that won't go on from the part (it changed) is asked once more for all of it.
@@ -618,10 +622,18 @@ async fn fetch(
         if have > 0 {
             request = request.header(reqwest::header::RANGE, format!("bytes={have}-"));
         }
-        let mut response = request.send().await.map_err(network)?;
+        let mut response = tokio::time::timeout(ANSWER_TIMEOUT, request.send())
+            .await
+            .map_err(|_| Problem::Network("The server didn't answer.".to_owned()))?
+            .map_err(network)?;
         let (append, size) = match response.status().as_u16() {
             206 => match content_range(response.headers()) {
-                Some((Some(start), total)) if start == have => (true, total),
+                // The rest of the same file: one of another size changed on the server since.
+                Some((Some(start), total))
+                    if start == have && (expected.is_none() || total.is_none() || total == expected) =>
+                {
+                    (true, total)
+                }
                 _ => {
                     let _ = tokio::fs::remove_file(part).await;
                     continue;
@@ -879,7 +891,7 @@ mod tests {
         let (url, mut asked) = serve(vec![answer("200 OK", &[], &body)]).await;
         let part = tempdir("whole").join("Alien (1979).mkv.part");
         let mut seen = 0;
-        let fetched = fetch(&reqwest::Client::new(), &url, Some("pley_token=abc"), &part, |received, size| {
+        let fetched = fetch(&reqwest::Client::new(), &url, Some("pley_token=abc"), &part, None, |received, size| {
             assert_eq!(size, Some(300_000));
             seen = received;
             true
@@ -905,10 +917,28 @@ mod tests {
         .await;
         let part = tempdir("resume").join("Alien (1979).mkv.part");
         std::fs::write(&part, &body[..100_000]).unwrap();
-        let fetched = fetch(&reqwest::Client::new(), &url, None, &part, |_, _| true).await.unwrap();
+        let fetched = fetch(&reqwest::Client::new(), &url, None, &part, None, |_, _| true).await.unwrap();
         assert_eq!(fetched, Fetched::Whole);
         assert_eq!(std::fs::read(&part).unwrap(), body);
         assert!(asked.recv().await.unwrap().to_ascii_lowercase().contains("range: bytes=100000-"));
+    }
+
+    #[tokio::test]
+    async fn a_file_changed_on_the_server_since_it_began_comes_whole_again() {
+        let body = body();
+        // Replaced by a longer one: what is down belongs to the file before.
+        let (url, mut asked) = serve(vec![
+            answer("206 Partial Content", &["Content-Range: bytes 100000-399999/400000"], &[0; 300_000]),
+            answer("200 OK", &[], &body),
+        ])
+        .await;
+        let part = tempdir("changed").join("Alien (1979).mkv.part");
+        std::fs::write(&part, vec![1; 100_000]).unwrap();
+        let fetched = fetch(&reqwest::Client::new(), &url, None, &part, Some(300_000), |_, _| true).await.unwrap();
+        assert_eq!(fetched, Fetched::Whole);
+        assert_eq!(std::fs::read(&part).unwrap(), body);
+        assert!(asked.recv().await.unwrap().to_ascii_lowercase().contains("range: bytes=100000-"));
+        assert!(!asked.recv().await.unwrap().to_ascii_lowercase().contains("range:"));
     }
 
     #[tokio::test]
@@ -917,7 +947,7 @@ mod tests {
         let (url, _) = serve(vec![answer("200 OK", &[], &body)]).await;
         let part = tempdir("ignored").join("Alien (1979).mkv.part");
         std::fs::write(&part, vec![9; 50_000]).unwrap();
-        fetch(&reqwest::Client::new(), &url, None, &part, |_, _| true).await.unwrap();
+        fetch(&reqwest::Client::new(), &url, None, &part, None, |_, _| true).await.unwrap();
         assert_eq!(std::fs::read(&part).unwrap(), body);
     }
 
@@ -926,7 +956,7 @@ mod tests {
         let (url, _) = serve(vec![answer("416 Range Not Satisfiable", &["Content-Range: bytes */5"], b"")]).await;
         let part = tempdir("whole-part").join("a.mkv.part");
         std::fs::write(&part, b"12345").unwrap();
-        assert_eq!(fetch(&reqwest::Client::new(), &url, None, &part, |_, _| true).await.unwrap(), Fetched::Whole);
+        assert_eq!(fetch(&reqwest::Client::new(), &url, None, &part, None, |_, _| true).await.unwrap(), Fetched::Whole);
     }
 
     #[tokio::test]
@@ -939,16 +969,17 @@ mod tests {
         .await;
         let part = tempdir("failures").join("a.mkv.part");
         let client = reqwest::Client::new();
-        assert!(matches!(fetch(&client, &url, None, &part, |_, _| true).await, Err(Problem::Gone)));
-        assert!(matches!(fetch(&client, &url, None, &part, |_, _| true).await, Err(Problem::SignedOut)));
-        assert!(matches!(fetch(&client, &url, None, &part, |_, _| true).await, Err(Problem::Network(_))));
+        assert!(matches!(fetch(&client, &url, None, &part, None, |_, _| true).await, Err(Problem::Gone)));
+        assert!(matches!(fetch(&client, &url, None, &part, None, |_, _| true).await, Err(Problem::SignedOut)));
+        assert!(matches!(fetch(&client, &url, None, &part, None, |_, _| true).await, Err(Problem::Network(_))));
     }
 
     #[tokio::test]
     async fn a_download_removed_while_it_comes_stops() {
         let (url, _) = serve(vec![answer("200 OK", &[], &body())]).await;
         let part = tempdir("stopped").join("a.mkv.part");
-        let fetched = fetch(&reqwest::Client::new(), &url, None, &part, |received, _| received < 1000).await.unwrap();
+        let fetched =
+            fetch(&reqwest::Client::new(), &url, None, &part, None, |received, _| received < 1000).await.unwrap();
         assert_eq!(fetched, Fetched::Stopped);
     }
 }
