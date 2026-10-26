@@ -7,12 +7,20 @@ import app.pley.android.data.valueOrNull
 import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.model.Library
 import app.pley.android.screens.ScreensGraph
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 
 /**
@@ -22,6 +30,9 @@ import kotlinx.coroutines.flow.map
 interface TvShellSource {
     /** The start gate's facts, from this device only (a disk read, no network). */
     suspend fun startFacts(): StartFacts
+
+    /** [startFacts] if they are known already, so the first frame can be the first screen; `null` until then. */
+    fun startFactsNow(): StartFacts? = null
 
     /** The libraries this profile sees, in the server's order; empty while unknown. */
     val libraries: Flow<List<Library>>
@@ -46,6 +57,9 @@ interface TvShellSource {
          * The app's: the startup read's server and tokens ([startup]),
          * "Always start as" from the settings, and the household's size as
          * the data module last saw it ([householdSize]; 1 until it says).
+         * The three are read at once, in the background, as soon as it is
+         * made: made before the activity's first frame, it usually knows
+         * them by then. Making it touches nothing else.
          */
         fun of(
             graph: ScreensGraph,
@@ -81,16 +95,30 @@ private class GraphShellSource(
     private val startup: suspend () -> Pair<String?, Boolean>,
     private val householdSize: suspend () -> Int,
 ) : TvShellSource {
-    override suspend fun startFacts(): StartFacts {
-        val (server, signedIn) = startup()
-        val settings = graph.data.settings.settings.first()
-        return StartFacts(server, signedIn, profiles = householdSize(), alwaysStartAs = settings.alwaysStartAs)
+    @Volatile
+    private var known: StartFacts? = null
+
+    private val facts = CoroutineScope(SupervisorJob() + Dispatchers.Default).async {
+        coroutineScope {
+            val start = async { startup() }
+            val settings = async { graph.data.settings.settings.first() }
+            val profiles = async { householdSize() }
+            val (server, signedIn) = start.await()
+            StartFacts(server, signedIn, profiles = profiles.await(), alwaysStartAs = settings.await().alwaysStartAs)
+        }.also { known = it }
     }
 
-    override val libraries: Flow<List<Library>> =
-        graph.data.libraries.libraries().map { it.valueOrNull.orEmpty() }.distinctUntilChanged()
+    override suspend fun startFacts(): StartFacts = facts.await()
 
-    override val profile: Flow<RailProfile?> = graph.data.session.session.map { session ->
+    override fun startFactsNow(): StartFacts? = known
+
+    // The graph's parts are made off the main thread (the app warms them as it
+    // starts): each flow reaches them only once collected, and on Default.
+
+    override val libraries: Flow<List<Library>> =
+        offMain { graph.data.libraries.libraries() }.map { it.valueOrNull.orEmpty() }.distinctUntilChanged()
+
+    override val profile: Flow<RailProfile?> = offMain { graph.data.session.session }.map { session ->
         val me = session?.me ?: return@map null
         RailProfile(
             name = me.name,
@@ -101,10 +129,13 @@ private class GraphShellSource(
 
     override suspend fun keepUpdated() {
         // Server events flow while something listens to them (the data module's LiveUpdates).
-        graph.data.liveUpdates.scans.collect { }
+        offMain { graph.data.liveUpdates.scans }.collect { }
     }
 
-    override val signedOut: Flow<String> = graph.auth.events.filterIsInstance<AuthEvent.SignedOut>().map { it.issuer }
+    override val signedOut: Flow<String> = offMain { graph.auth.events }.filterIsInstance<AuthEvent.SignedOut>().map { it.issuer }
 
-    override val reduceMotion: Flow<Boolean> = graph.data.settings.settings.map { it.reduceMotion }.distinctUntilChanged()
+    override val reduceMotion: Flow<Boolean> = offMain { graph.data.settings.settings }.map { it.reduceMotion }.distinctUntilChanged()
+
+    /** [upstream], made and collected on Default: the graph is never made on the main thread for it. */
+    private fun <T> offMain(upstream: () -> Flow<T>): Flow<T> = flow { emitAll(upstream()) }.flowOn(Dispatchers.Default)
 }

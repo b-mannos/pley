@@ -191,3 +191,34 @@ The budgets, and how they are measured, are kept here as they are
 measured on devices: cold start, scrolling, pictures, playback start and
 memory, on a mid-range phone, a 1 GB Fire TV stick and a Chromecast with
 Google TV HD. Emulator numbers never count.
+
+### TV cold start
+
+`:benchmark`'s `TvStartupBenchmark` signs in to the demo server once, then
+starts the TV app cold ten times with its Baseline Profile: the time to
+the first frame, to the first screen fully drawn (the app reports it once
+Home has its rows, or at once for another first screen) and the app's own
+startup steps, with a Perfetto trace of each start. Run it with adb on one
+device, never as a connected Gradle task, which installs the app on every
+device attached (a phone's own pley among them):
+
+```powershell
+.\gradlew.bat :app:assembleStoreBenchmarkRelease :benchmark:assembleBenchmarkRelease
+adb -s <device> install -r app\build\outputs\apk\store\benchmarkRelease\app-store-benchmarkRelease.apk
+adb -s <device> install -r benchmark\build\outputs\apk\benchmarkRelease\benchmark-benchmarkRelease.apk
+adb -s <device> shell am instrument -w -e class app.pley.android.benchmark.TvStartupBenchmark `
+  app.pley.android.benchmark/androidx.test.runner.AndroidJUnitRunner
+```
+
+On an emulator add `-e androidx.benchmark.suppressErrors EMULATOR`. The
+traces are in `/storage/emulated/0/Android/data/app.pley.android.benchmark/cache`.
+Benchmark builds start the demo server in the app's process, whose
+catalogue takes CPU and memory a release never spends.
+
+What a cold start does, in order: the startup read (the server, its
+tokens, Home's snapshot) and the graph's warm-up start in the
+background as the app starts; the TV's start facts (that read, "Always
+start as" and the household's size) are read together as its activity is
+made, so the first frame is the first screen; and the libraries'
+initializers that would run on the main thread before it (EmojiCompat's,
+OkHttp's) don't, OkHttp's running where the first client is made.

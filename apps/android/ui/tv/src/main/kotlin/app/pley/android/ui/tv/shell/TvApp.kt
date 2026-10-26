@@ -1,6 +1,8 @@
 package app.pley.android.ui.tv.shell
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.ReportDrawn
+import androidx.activity.compose.ReportDrawnWhen
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
@@ -50,6 +52,7 @@ import androidx.tv.material3.ModalNavigationDrawer
 import androidx.tv.material3.rememberDrawerState
 import app.pley.android.common.TestTags
 import app.pley.android.common.Tier
+import app.pley.android.common.perf.StartupSignals
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyMotion
 import app.pley.android.designsystem.PleyTv
@@ -102,7 +105,10 @@ fun TvApp(
         CompositionLocalProvider(LocalKeyRepeatGate provides gate, LocalBringIntoViewSpec provides root) {
             // No background: the window's is pley's (one full-screen fill, not two).
             Box(Modifier.fillMaxSize().keyRepeatGate(gate).testTag(TestTags.TV_ROOT)) {
-                val start by produceState<PleyKey?>(null, source) { value = startKey(source.startFacts()) }
+                // Known already (read as the activity started), the first screen is in the first frame.
+                val start by produceState(source.startFactsNow()?.let(::startKey), source) {
+                    if (value == null) value = startKey(source.startFacts())
+                }
                 start?.let { TvShell(it, source, onExit, placeholder) }
             }
         }
@@ -130,6 +136,14 @@ private fun TvShell(
     rail.shown = root !is PleyKey.Servers && root !is PleyKey.Link && root !is PleyKey.SignIn && root != PleyKey.Profiles
     val curtain = rememberCurtain(backStack.lastOrNull())
     ReturnFocus(rail, content)
+    // The app is fully drawn (Android's time to full display) once Home has its
+    // rows and pictures; a start elsewhere (sign-in, "Who's watching?") is at once.
+    if (start == PleyKey.Home) {
+        val homeDrawn by StartupSignals.homeDrawn.collectAsStateWithLifecycle()
+        ReportDrawnWhen { homeDrawn }
+    } else {
+        ReportDrawn()
+    }
     // A refused sign-in (the server ended it, or forgot it): that server's sign-in again, as on phones.
     LaunchedEffect(source, navigator) {
         source.signedOut.collect { issuer -> if (rail.shown) navigator.restart(PleyKey.Link(issuer)) }

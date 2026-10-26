@@ -34,21 +34,27 @@ class TvActivity : ComponentActivity() {
         val device = app.graph.device
         val tier = debugTier() ?: device.tier
         val demo = BuildConfig.DEBUG && intent.getBooleanExtra(EXTRA_DEMO, false)
+        // Made before the content, so what the first screen is chosen by is read
+        // (in the background) while the window comes up: the first frame shows it.
+        val source = if (demo) {
+            null
+        } else {
+            TvShellSource.of(
+                app.graph,
+                startup = { app.startup.await().let { it.server to it.signedIn } },
+                // "Who's watching?" at a cold start needs the household's size, saved on this device.
+                householdSize = {
+                    val startup = app.startup.await()
+                    Household.sizeAtStart(app, { app.graph }, startup.server, startup.signedIn)
+                },
+            )
+        }
         setContent {
-            if (demo) {
+            if (source == null) {
                 CompositionLocalProvider(LocalArtworkImageLoader provides TvShellDemo.imageLoader(this, device.copy(tier = tier))) {
                     TvApp(TvShellDemo.source, onExit = ::finish, tier = tier, placeholder = TvShellDemo.placeholder)
                 }
             } else {
-                val source = TvShellSource.of(
-                    app.graph,
-                    startup = { app.startup.await().let { it.server to it.signedIn } },
-                    // "Who's watching?" at a cold start needs the household's size, saved on this device.
-                    householdSize = {
-                        val startup = app.startup.await()
-                        Household.sizeAtStart(app, { app.graph }, startup.server, startup.signedIn)
-                    },
-                )
                 TvApp(source, onExit = ::finish, tier = tier)
             }
         }
