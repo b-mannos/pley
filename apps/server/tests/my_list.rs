@@ -205,7 +205,8 @@ async fn my_list_keeps_movies_until_watched_and_shows_until_removed() {
     let mut events = app.state.events.subscribe();
     progress(app, admin, alien, 95_000).await;
     assert_eq!(list().await, ["Show"]);
-    assert!(matches!(events.try_recv(), Ok(ServerEvent::WatchlistChanged { .. })));
+    let sent: Vec<ServerEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+    assert!(sent.iter().any(|e| matches!(e, ServerEvent::WatchlistChanged { .. })), "{sent:?}");
     progress(app, admin, pilot, 95_000).await;
     app.post(&format!("/api/items/{show}/watched"), admin, json!({})).await;
     assert_eq!(list().await, ["Show"]);

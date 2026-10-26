@@ -42,6 +42,18 @@ pub enum ServerEvent {
         #[serde(skip)]
         user_id: i64,
     },
+    /// The user's watch state of an item changed (watched or not, a resume
+    /// point started, moved or cleared, in or out of Continue Watching):
+    /// their devices fetch Home and that item's pages again. `item_ids` is
+    /// the item, then its parent and grandparent (a season and its show),
+    /// whose counts follow it; `children`: everything under the first one
+    /// changed too (a show or season marked as a whole).
+    UserStateChanged {
+        #[serde(skip)]
+        user_id: i64,
+        item_ids: Vec<i64>,
+        children: bool,
+    },
     /// A playback session was stopped by someone else than its player (an
     /// administrator, or its owner on another device): the player stops.
     /// `by_admin` is true when an administrator stopped another user's
@@ -66,6 +78,7 @@ impl ServerEvent {
             ServerEvent::LibrariesChanged
             | ServerEvent::SessionsChanged
             | ServerEvent::WatchlistChanged { .. }
+            | ServerEvent::UserStateChanged { .. }
             | ServerEvent::SessionStopped { .. } => None,
         }
     }
@@ -73,7 +86,9 @@ impl ServerEvent {
     /// The only user the event is for, if it is for one.
     pub fn user_id(&self) -> Option<i64> {
         match self {
-            ServerEvent::WatchlistChanged { user_id } | ServerEvent::SessionStopped { user_id, .. } => Some(*user_id),
+            ServerEvent::WatchlistChanged { user_id }
+            | ServerEvent::UserStateChanged { user_id, .. }
+            | ServerEvent::SessionStopped { user_id, .. } => Some(*user_id),
             _ => None,
         }
     }
@@ -124,6 +139,10 @@ mod tests {
         // Whom an event is for stays on the server.
         let json = serde_json::to_string(&ServerEvent::WatchlistChanged { user_id: 4 }).unwrap();
         assert_eq!(json, r#"{"type":"watchlist_changed"}"#);
+        let event = ServerEvent::UserStateChanged { user_id: 4, item_ids: vec![12, 11, 10], children: false };
+        assert_eq!(event.user_id(), Some(4));
+        let json = serde_json::to_string(&event).unwrap();
+        assert_eq!(json, r#"{"type":"user_state_changed","item_ids":[12,11,10],"children":false}"#);
         let json = serde_json::to_string(&ServerEvent::SessionStopped {
             user_id: 4,
             session_id: "s1".into(),

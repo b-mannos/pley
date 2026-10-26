@@ -248,7 +248,17 @@ pub async fn progress(
     }
     let duration = body.duration_ms.filter(|d| *d > 0).or(row.duration_ms).unwrap_or(0);
     let device = crate::accounts::device_name(headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()));
-    let recorded = catalog::record_progress(&state.db, user.id, id, body.position_ms, duration, Some(&device)).await?;
+    let recorded = catalog::record_progress(
+        &state.db,
+        &state.events,
+        user.id,
+        id,
+        body.position_ms,
+        duration,
+        Some(&device),
+        &body.state,
+    )
+    .await?;
     if recorded.left_watchlist {
         state.events.send(ServerEvent::WatchlistChanged { user_id: user.id });
     }
@@ -308,7 +318,7 @@ pub async fn set_rating(
 
 pub async fn watched(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<StatusCode> {
     let row = item_or_404(&state, user.id, id).await?;
-    if catalog::set_watched(&state.db, user.id, id, &row.kind, true).await? {
+    if catalog::set_watched(&state.db, &state.events, user.id, id, &row.kind, true).await? {
         state.events.send(ServerEvent::WatchlistChanged { user_id: user.id });
     }
     Ok(StatusCode::NO_CONTENT)
@@ -316,7 +326,7 @@ pub async fn watched(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 
 pub async fn unwatched(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<StatusCode> {
     let row = item_or_404(&state, user.id, id).await?;
-    catalog::set_watched(&state.db, user.id, id, &row.kind, false).await?;
+    catalog::set_watched(&state.db, &state.events, user.id, id, &row.kind, false).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

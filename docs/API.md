@@ -898,8 +898,8 @@ may open only some libraries see those, in that order.
 | GET | `/api/items/{id}/on-deck` | – | `{ item: ItemSummary \| null }` – for show/season: the episode to play when pressing *Play* (in progress, else next up as in [Continue Watching](#continue-watching), else the first unwatched, else the first) |
 | GET | `/api/items/{id}/related` | `limit` (default 20, max 60) | `{ items: ItemSummary[] }` – "More Like This" for movies and shows: the same library's titles sharing collections, directors, creators and top-billed cast, genres and a period, best first (empty for other kinds) |
 | GET | `/api/items/{id}/next` | – | `{ item: ItemSummary \| null }` – episode/track following this one (for autoplay) |
-| POST | `/api/items/{id}/progress` | `{ position_ms, duration_ms?, state: "playing"\|"paused"\|"stopped", session_id?, age_ms? }` | `204`. ≥ 90 % marks the item watched and clears the resume point. `age_ms`: how long ago a report sent late was made (a download played while the server was out of reach, up to 90 days); it changes nothing when the item's state changed since (played elsewhere, marked watched) |
-| POST | `/api/items/{id}/watched` | – | `204` (containers: all leaves) |
+| POST | `/api/items/{id}/progress` | `{ position_ms, duration_ms?, state: "playing"\|"paused"\|"stopped", session_id?, age_ms? }` | `204`. ≥ 90 % marks the item watched and clears the resume point. `age_ms`: how long ago a report sent late was made (a download played while the server was out of reach, up to 90 days); it changes nothing when the item's state changed since (played elsewhere, marked watched). A report that changes what the user's devices show (watched, a resume point started, cleared, or moved by a pause or stop) sends `user_state_changed` (see "Activity & events") |
+| POST | `/api/items/{id}/watched` | – | `204` (containers: all leaves); `user_state_changed` to the user's streams, unless nothing changed |
 | PATCH | `/api/items/{id}` *(admin)* | `{ title?, sort_title?, original_title?, year?, summary?, tagline?, studio?, content_rating?, release_date?, genres? }` | `ItemDetail`. A value edits and locks the field (refreshes and scans keep it); `null` unlocks it. `locked_fields` in `ItemDetail` lists locked fields. |
 | GET | `/api/items/{id}/matches?title=&year=` *(admin)* | – | TMDB candidates `{ tmdb_id, title, original_title, year, overview, poster_url }[]` for movies and shows (needs a TMDB key) |
 | POST | `/api/items/{id}/match` *(admin)* | `{ tmdb_id }` | `ItemDetail` after re-matching and refreshing. A show whose TV source is TVmaze or TheTVDB is found there by the chosen entry's IMDb and TheTVDB ids. |
@@ -909,7 +909,7 @@ may open only some libraries see those, in that order.
 | DELETE | `/api/items/{id}/artwork/{kind}` *(admin)* | – | `204`; back to local or downloaded artwork |
 | PUT | `/api/items/{id}/rating` | `{ rating: number \| null }` (0-10, rounded to half stars; `null` clears it) | `204`; the user's own rating, shown as `user_state.rating` |
 | PUT | `/api/items/{id}/streams` | `{ file_id?, audio_index, subtitle_index }` (`subtitle_index: null` = off) | `204`. Remembers the choice for the whole show (episodes) or the movie, as language/title/forced, so every episode starts with its own matching tracks. |
-| POST | `/api/items/{id}/unwatched` | – | `204` |
+| POST | `/api/items/{id}/unwatched` | – | `204`; `user_state_changed` to the user's streams, unless nothing changed |
 | POST | `/api/items/{id}/refresh` *(admin)* | – | `202` re-fetch metadata from the item's source (movies: TMDB; shows, seasons, episodes: the TV source; artists, albums, tracks: MusicBrainz). `400` when that source is off or lacks its key. |
 | POST | `/api/items/{id}/analyze` *(admin)* | – | `202` find the intro and credits again: a movie's chapters, or every episode of an episode's season, a season or a show. `400` for other kinds. |
 | GET | `/api/items/{id}/images/{poster\|backdrop\|thumb}` | query: `w=<px>` (optional resize, bucketed), `v=` (cache buster, ignored) | image bytes (`image/jpeg`), long-lived cache headers. Falls back to parent artwork (season → show). `404` if none. |
@@ -950,7 +950,8 @@ that movie or any episode of that show again: a progress report, or a
 watched mark, newer than the hide. Then it comes back as it would have.
 Progress and watched marks stay as they are. Other kinds answer `400`. The
 Plex API's `PUT /actions/removeFromContinueWatching?ratingKey=` does the
-same. No event: the client fetches Home again.
+same. Either sends `user_state_changed` for the movie or show to the
+user's event streams, so their other devices fetch Home again.
 
 ### My List
 
@@ -1477,6 +1478,33 @@ The Plex API's `GET /status/sessions/terminate?sessionId=&reason=`
 (Tautulli's) does the same for administrators, `reason` as the message. A
 Plex player's progress reports don't start its stopped session again.
 
+### Watch state on other devices
+
+`{ type: "user_state_changed", item_ids, children }` goes to the user's own
+event streams (only theirs, the device that made the change included) when
+their watch state changes in a way their screens show:
+
+- something marked watched or unwatched (`POST /api/items/{id}/watched`,
+  `…/unwatched`, the Plex API's `/:/scrobble` and `/:/unscrobble`), unless
+  nothing changed (marked watched again);
+- a progress report (pley's, or a Plex player's `/:/timeline` and
+  `/:/progress`) that crosses 90 %, starts a resume point (15 s in) or
+  clears one, or that pauses or stops the player somewhere new: where *Play*
+  on another device starts. Not the reports that only keep the place every
+  ~10 s, nor late ones that change nothing (`age_ms`);
+- a title taken out of Continue Watching, or back in it as it plays again.
+
+`item_ids` is the item, then its parent and grandparent: an episode with its
+season and show, a track with its album and artist, whose counts and On
+Deck follow it. A show, season, album or artist marked as a whole sends one
+event for itself, with `children: true`: everything under the first id
+changed too, without listing it. Clients ask again for Home and the
+libraries' rows (Continue Watching) and for what shows those items: their
+pages, children and On Deck, and lists holding them. A play reaching 90 %
+also sends `library_changed`, as before; pley's apps gather both for 0.3 s
+and ask once, and leave alone what they fetched since the event came (their
+own change).
+
 ```ts
 interface AnalysisStatus {          // intro/credits detection of one season
   item_id: Id;                      // the season
@@ -1539,6 +1567,7 @@ type ServerEvent =
   | { type: "libraries_changed" }                    // library created/updated/deleted, or the order changed
   | { type: "sessions_changed" }
   | { type: "watchlist_changed" }                    // the user's My List changed (their streams only)
+  | { type: "user_state_changed"; item_ids: Id[]; children: boolean } // the user's watch state changed (their streams only)
   | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean }; // their streams only
 ```
 

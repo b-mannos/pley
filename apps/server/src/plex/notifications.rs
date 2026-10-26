@@ -203,7 +203,9 @@ impl Listener {
             }
             // pley's own: Plex clients hear of a stopped session as of any
             // that ends (`sessions_changed` follows).
-            ServerEvent::WatchlistChanged { .. } | ServerEvent::SessionStopped { .. } => Ok(Vec::new()),
+            ServerEvent::WatchlistChanged { .. }
+            | ServerEvent::UserStateChanged { .. }
+            | ServerEvent::SessionStopped { .. } => Ok(Vec::new()),
         };
         result.unwrap_or_else(|err| {
             tracing::debug!("notification socket: {err}");

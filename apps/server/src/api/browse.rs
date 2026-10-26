@@ -67,7 +67,7 @@ pub async fn hide_continue_watching(
     let row = item_or_404(&state, user.id, id).await?;
     let title = catalog::continue_watching_title(&row)
         .ok_or_else(|| AppError::bad_request("only movies and shows are in Continue Watching"))?;
-    catalog::hide_from_continue_watching(&state.db, user.id, title).await?;
+    catalog::hide_from_continue_watching(&state.db, &state.events, user.id, title).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

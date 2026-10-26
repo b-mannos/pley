@@ -190,7 +190,9 @@ async fn report(
 ) -> PlexResult<()> {
     let duration = duration_ms.filter(|d| *d > 0).or(row.duration_ms).unwrap_or(0);
     let device = client.device_name.as_deref().or(client.product.as_deref());
-    let recorded = catalog::record_progress(&state.db, user.id, row.id, time_ms, duration, device).await?;
+    let recorded =
+        catalog::record_progress(&state.db, &state.events, user.id, row.id, time_ms, duration, device, play_state)
+            .await?;
     if recorded.left_watchlist {
         state.events.send(ServerEvent::WatchlistChanged { user_id: user.id });
     }
@@ -323,7 +325,7 @@ pub async fn rate(State(state): State<AppState>, PlexUser(user): PlexUser, param
 async fn set_watched(state: &AppState, user: &AuthUser, params: &Params, watched: bool) -> PlexResult<Node> {
     let id = rating_key(params)?;
     let row = catalog::item(&state.db, user.id, id).await?.ok_or(PlexError::NotFound)?;
-    if catalog::set_watched(&state.db, user.id, id, &row.kind, watched).await? {
+    if catalog::set_watched(&state.db, &state.events, user.id, id, &row.kind, watched).await? {
         state.events.send(ServerEvent::WatchlistChanged { user_id: user.id });
     }
     state.events.send(ServerEvent::LibraryChanged { library_id: row.library_id });
@@ -351,7 +353,7 @@ pub async fn remove_from_continue_watching(
     let row = catalog::item(&state.db, user.id, id).await?.ok_or(PlexError::NotFound)?;
     let title = catalog::continue_watching_title(&row)
         .ok_or_else(|| PlexError::BadRequest("only movies and shows are in Continue Watching".into()))?;
-    catalog::hide_from_continue_watching(&state.db, user.id, title).await?;
+    catalog::hide_from_continue_watching(&state.db, &state.events, user.id, title).await?;
     Ok(Node::container().attr("size", 0))
 }
 
