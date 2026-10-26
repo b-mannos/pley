@@ -152,6 +152,7 @@ class PhonePlayerActivity : ComponentActivity(), PlayerHost {
                             style = SubtitleChoice(PlayerLook.sizeIndex(chosen.subtitleSize), chosen.subtitleBackground == SubtitleBackground.DarkBox),
                             onStyle = ::chooseStyle,
                             inPip = inPip.value,
+                            showDetails = chosen.showPlaybackDetails,
                         )
                     }
                 }

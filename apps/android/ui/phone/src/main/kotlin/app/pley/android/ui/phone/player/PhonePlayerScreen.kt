@@ -82,6 +82,8 @@ fun PhonePlayerScreen(
     onStyle: (SubtitleChoice) -> Unit,
     inPip: Boolean,
     modifier: Modifier = Modifier,
+    /** Settings → Playback details: how it plays, over the video while the controls are hidden. */
+    showDetails: Boolean = false,
 ) {
     PlayerProbe.composed?.invoke("screen")
     val ui = controller.state.collectAsStateWithLifecycle()
@@ -128,6 +130,7 @@ fun PhonePlayerScreen(
                 .playerGestures(state, picture, host, scope),
         )
         Controls(state, picture, host) { if (heightPx > 0) widthPx.toFloat() / heightPx else 0f }
+        DetailsReadout(state, showDetails)
         SeekRunBadge(state)
         LevelIndicator(state)
         ModeLabel(state)

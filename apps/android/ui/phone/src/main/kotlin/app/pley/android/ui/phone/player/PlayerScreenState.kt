@@ -156,15 +156,24 @@ class PlayerScreenState(
         if (page == SheetPage.Details) controller.setDetailsOpen(true)
     }
 
+    /** The details readout over the video is showing (Settings → Playback details): its numbers stay live. */
+    private var readout = false
+
+    fun readout(shown: Boolean) {
+        if (readout == shown) return
+        readout = shown
+        controller.setDetailsOpen(shown || sheet == SheetPage.Details)
+    }
+
     /** Back inside the sheet: to Settings from one of its pages, else closed. */
     fun back() {
         val now = sheet ?: return
-        if (now == SheetPage.Details) controller.setDetailsOpen(false)
+        if (now == SheetPage.Details) controller.setDetailsOpen(readout)
         if (sheetRoot == SheetPage.Settings && now != SheetPage.Settings) sheet = SheetPage.Settings else closeSheet()
     }
 
     fun closeSheet() {
-        if (sheet == SheetPage.Details) controller.setDetailsOpen(false)
+        if (sheet == SheetPage.Details) controller.setDetailsOpen(readout)
         sheet = null
         sheetRoot = null
         touched()
