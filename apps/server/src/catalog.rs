@@ -1022,13 +1022,16 @@ struct EpisodeState {
     id: i64,
     watched: bool,
     position_ms: i64,
+    /// Times watched to the end: more than one is a rewatch.
+    play_count: i64,
     last_played_at: Option<i64>,
 }
 
 /// Episodes of a show in viewing order (specials last) with the user's state.
 async fn show_episodes(db: &Db, user_id: i64, show_id: i64) -> sqlx::Result<Vec<EpisodeState>> {
     sqlx::query_as(
-        "SELECT e.id, COALESCE(s.watched, 0) AS watched, COALESCE(s.position_ms, 0) AS position_ms, s.last_played_at
+        "SELECT e.id, COALESCE(s.watched, 0) AS watched, COALESCE(s.position_ms, 0) AS position_ms,
+                COALESCE(s.play_count, 0) AS play_count, s.last_played_at
          FROM items e JOIN items se ON se.id = e.parent_id
          LEFT JOIN user_item_state s ON s.item_id = e.id AND s.user_id = ?
          WHERE e.grandparent_id = ? AND e.kind = 'episode'
@@ -1040,7 +1043,18 @@ async fn show_episodes(db: &Db, user_id: i64, show_id: i64) -> sqlx::Result<Vec<
     .await
 }
 
-/// The episode after the most recently watched one, if unwatched and not started.
+/// The episode to watch after the most recently watched one, unless it is
+/// part way through for the first time (Continue Watching has it already; a
+/// seen one rewatched part of the way plays from its start, as apps do).
+///
+/// The one right after it when that one is unwatched. When it was seen
+/// before, it depends on what the user is doing:
+/// - going through the show again (the last one watched was a rewatch, and
+///   either nothing after it is left unwatched or the one before it was
+///   rewatched too, after anything later was seen): the one right after it,
+///   seen or not, so a rewatch doesn't jump over episodes;
+/// - otherwise (filling a gap, or one favourite seen again): the first
+///   unwatched one after it, where the user had got to.
 fn next_after_last_watched(episodes: &[EpisodeState]) -> Option<i64> {
     let last = episodes
         .iter()
@@ -1048,7 +1062,30 @@ fn next_after_last_watched(episodes: &[EpisodeState]) -> Option<i64> {
         .filter(|(_, e)| e.watched && e.last_played_at.is_some())
         .max_by_key(|(_, e)| e.last_played_at)
         .map(|(i, _)| i)?;
-    episodes[last + 1..].iter().find(|e| !e.watched).filter(|e| e.position_ms == 0).map(|e| e.id)
+    let after = &episodes[last + 1..];
+    let first_unwatched = after.iter().find(|e| !e.watched);
+    let next = match after.first() {
+        Some(next) if !next.watched => Some(next),
+        Some(next) if rewatching(episodes, last, first_unwatched.is_none()) => Some(next),
+        _ => first_unwatched,
+    };
+    next.filter(|e| e.watched || e.position_ms == 0).map(|e| e.id)
+}
+
+/// Whether episode `last` (the most recently watched) is part of a rewatch
+/// of the show, which goes on in order (see [`next_after_last_watched`]).
+fn rewatching(episodes: &[EpisodeState], last: usize, all_seen_after: bool) -> bool {
+    if episodes[last].play_count < 2 {
+        return false;
+    }
+    if all_seen_after {
+        return true;
+    }
+    // A run: the one before was rewatched too, after anything later was seen.
+    let later = episodes[last + 1..].iter().filter_map(|e| e.last_played_at).max();
+    last.checked_sub(1)
+        .map(|i| &episodes[i])
+        .is_some_and(|before| before.play_count >= 2 && before.last_played_at > later)
 }
 
 /// Episodes of several shows (as [`show_episodes`]), in one query.
@@ -1059,18 +1096,19 @@ async fn shows_episodes(db: &Db, user_id: i64, show_ids: &[i64]) -> sqlx::Result
     }
     let placeholders = vec!["?"; show_ids.len()].join(",");
     let sql = format!(
-        "SELECT e.grandparent_id, e.id, COALESCE(s.watched, 0), COALESCE(s.position_ms, 0), s.last_played_at
+        "SELECT e.grandparent_id, e.id, COALESCE(s.watched, 0), COALESCE(s.position_ms, 0), COALESCE(s.play_count, 0),
+                s.last_played_at
          FROM items e JOIN items se ON se.id = e.parent_id
          LEFT JOIN user_item_state s ON s.item_id = e.id AND s.user_id = ?
          WHERE e.grandparent_id IN ({placeholders}) AND e.kind = 'episode'
          ORDER BY e.grandparent_id, se.idx = 0, se.idx, e.idx IS NULL, e.idx, e.sort_title"
     );
-    let mut query = sqlx::query_as::<_, (i64, i64, bool, i64, Option<i64>)>(&sql).bind(user_id);
+    let mut query = sqlx::query_as::<_, (i64, i64, bool, i64, i64, Option<i64>)>(&sql).bind(user_id);
     for id in show_ids {
         query = query.bind(id);
     }
-    for (show, id, watched, position_ms, last_played_at) in query.fetch_all(&db.read).await? {
-        out.entry(show).or_default().push(EpisodeState { id, watched, position_ms, last_played_at });
+    for (show, id, watched, position_ms, play_count, last_played_at) in query.fetch_all(&db.read).await? {
+        out.entry(show).or_default().push(EpisodeState { id, watched, position_ms, play_count, last_played_at });
     }
     Ok(out)
 }
@@ -1463,7 +1501,12 @@ mod tests {
     }
 
     fn ep(id: i64, watched: bool, position_ms: i64, last: Option<i64>) -> EpisodeState {
-        EpisodeState { id, watched, position_ms, last_played_at: last }
+        EpisodeState { id, watched, position_ms, play_count: i64::from(watched), last_played_at: last }
+    }
+
+    /// An episode watched `count` times, last at `at`.
+    fn seen(id: i64, count: i64, at: i64) -> EpisodeState {
+        EpisodeState { id, watched: true, position_ms: 0, play_count: count, last_played_at: Some(at) }
     }
 
     #[test]
@@ -1471,7 +1514,8 @@ mod tests {
         let eps =
             vec![ep(1, true, 0, Some(10)), ep(2, true, 0, Some(20)), ep(3, false, 0, None), ep(4, false, 0, None)];
         assert_eq!(next_after_last_watched(&eps), Some(3));
-        // Rewatched an early episode most recently → next after it is already watched → skip to first unwatched after it.
+        // An early episode watched for the first time after a later one (a
+        // gap filled): on to the first unwatched one after it.
         let eps = vec![ep(1, true, 0, Some(30)), ep(2, true, 0, Some(20)), ep(3, false, 0, None)];
         assert_eq!(next_after_last_watched(&eps), Some(3));
         // Nothing watched → no next-up.
@@ -1482,6 +1526,38 @@ mod tests {
         // The last episode was watched last: nothing comes next.
         let eps = vec![ep(1, false, 0, None), ep(2, true, 0, Some(10))];
         assert_eq!(next_after_last_watched(&eps), None);
+    }
+
+    #[test]
+    fn a_rewatch_goes_on_in_order_without_skipping_what_was_seen() {
+        // A show seen through once (plays at 1..=4), started again: after the
+        // first episode, the second, though it was seen.
+        let eps = vec![seen(1, 2, 100), seen(2, 1, 2), seen(3, 1, 3), seen(4, 1, 4)];
+        assert_eq!(next_after_last_watched(&eps), Some(2));
+        // Further on in that rewatch: the next one, still in order.
+        let eps = vec![seen(1, 2, 100), seen(2, 2, 110), seen(3, 1, 3), seen(4, 1, 4)];
+        assert_eq!(next_after_last_watched(&eps), Some(3));
+        // A rewatch of seen episodes, with unseen ones still to come: a run of
+        // rewatched episodes goes on in order (not on to episode 5).
+        let eps = vec![seen(1, 2, 100), seen(2, 2, 110), seen(3, 1, 3), seen(4, 1, 4), ep(5, false, 0, None)];
+        assert_eq!(next_after_last_watched(&eps), Some(3));
+        // One favourite seen again while part way through the show: back to
+        // where the user had got to.
+        let eps = vec![seen(1, 1, 1), seen(2, 2, 100), seen(3, 1, 3), seen(4, 1, 4), ep(5, false, 0, None)];
+        assert_eq!(next_after_last_watched(&eps), Some(5));
+        // The one before was rewatched long ago, before the later ones were
+        // seen: not a run.
+        let eps = vec![seen(1, 2, 2), seen(2, 2, 100), seen(3, 1, 30), seen(4, 1, 40), ep(5, false, 0, None)];
+        assert_eq!(next_after_last_watched(&eps), Some(5));
+        // The rewatch reached the end of what was seen: on to the new ones.
+        let eps = vec![seen(1, 2, 100), seen(2, 2, 110), ep(3, false, 0, None)];
+        assert_eq!(next_after_last_watched(&eps), Some(3));
+        // The episode right after was rewatched part of the way before: it
+        // still comes next (apps play a seen episode from its start).
+        let mut stopped = seen(2, 1, 50);
+        stopped.position_ms = 600_000;
+        let eps = vec![seen(1, 2, 100), stopped, seen(3, 1, 3)];
+        assert_eq!(next_after_last_watched(&eps), Some(2));
     }
 
     #[test]

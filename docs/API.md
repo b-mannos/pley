@@ -895,7 +895,7 @@ may open only some libraries see those, in that order.
 | GET | `/api/items/{id}` | – | `ItemDetail`. For a movie or episode, the server also reads its video files ahead from where *Play* starts for the user (as `POST …/prefetch` does), without waiting for it |
 | POST | `/api/items/{id}/prefetch` | – | `202` at once. *Play* is about to be pressed (a card's Play button has the pointer or the focus): the transcoder reads ahead the parts of the video a playback from the user's resume point reads first (see `POST /v1/prefetch` in TRANSCODER.md), so they come from a cache when it starts; worth up to seconds for files on a network share. Movies, episodes and extras; a show or season: its on-deck episode; other kinds: nothing. At most once every two minutes per file. |
 | GET | `/api/items/{id}/children` | – | `{ items: ItemSummary[] }` (seasons of a show, episodes of a season, albums of an artist, tracks of an album), ordered by index |
-| GET | `/api/items/{id}/on-deck` | – | `{ item: ItemSummary \| null }` – for show/season: the episode to play when pressing *Play* (in progress, else next unwatched, else first) |
+| GET | `/api/items/{id}/on-deck` | – | `{ item: ItemSummary \| null }` – for show/season: the episode to play when pressing *Play* (in progress, else next up as in [Continue Watching](#continue-watching), else the first unwatched, else the first) |
 | GET | `/api/items/{id}/related` | `limit` (default 20, max 60) | `{ items: ItemSummary[] }` – "More Like This" for movies and shows: the same library's titles sharing collections, directors, creators and top-billed cast, genres and a period, best first (empty for other kinds) |
 | GET | `/api/items/{id}/next` | – | `{ item: ItemSummary \| null }` – episode/track following this one (for autoplay) |
 | POST | `/api/items/{id}/progress` | `{ position_ms, duration_ms?, state: "playing"\|"paused"\|"stopped", session_id?, age_ms? }` | `204`. ≥ 90 % marks the item watched and clears the resume point. `age_ms`: how long ago a report sent late was made (a download played while the server was out of reach, up to 90 days); it changes nothing when the item's state changed since (played elsewhere, marked watched) |
@@ -923,6 +923,23 @@ may open only some libraries see those, in that order.
 | GET | `/api/search` | `q`, `limit` (default 40) | `{ items: ItemSummary[], people: PersonSummary[] }`: items ranked by relevance; people whose name has words starting with each word of `q`, most credited first |
 
 ### Continue Watching
+
+Continue Watching holds the movies and episodes the user is part way
+through, and for each show they've been watching lately its *next up*
+episode, which is also what the show's *Play* starts (`on-deck`) when no
+episode is in progress. Next up is the episode right after the one watched
+most recently, when that one is unwatched. When it was seen before:
+
+- **a rewatch goes on in order:** the episode watched most recently was a
+  rewatch (seen twice or more), and either nothing after it is unwatched or
+  the episode before it was rewatched too, after anything later was seen.
+  Next up is then the episode right after it, seen or not, so going through
+  a show again never jumps over episodes;
+- **otherwise** (a gap filled, or one favourite seen again): the first
+  unwatched episode after it, where the user had got to.
+
+A seen episode stopped part of the way stays out of the in-progress rows
+(apps play a seen episode from its start), and can still be next up.
 
 `DELETE /api/continue-watching/{id}` takes what a Continue Watching row
 shows out of the user's own Continue Watching: a movie, or for an episode
