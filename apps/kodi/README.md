@@ -72,9 +72,16 @@ go to it.
   seconds while it plays and every 30 while it is paused (the server lets a
   player it hasn't heard from for 90 seconds go, and its conversion with
   it), and when it stops, then ends the session, so resume points, watched
-  marks and the server's dashboard follow Kodi. A stream an administrator
-  stops ends in Kodi with their message, whether Kodi plays the file as it
-  is or the server converts it.
+  marks and the server's dashboard follow Kodi.
+- **Other devices**: the service keeps the server's event stream open
+  (`events.py`, `GET /api/events`). When the watch state, My List or a
+  library changes, here or on another device, the pley listing on screen
+  is refreshed once: 0.3 s after the first event of a burst, at most every
+  2 seconds, and never behind a playing video, whose end refreshes it. A
+  stream stopped from elsewhere (an administrator, or another of the
+  person's devices) ends at once with what they wrote; without the stream,
+  the next progress report hears it (`410`), whether Kodi plays the file as
+  it is or the server converts it.
 - **Skip Intro, Skip Credits and Up Next**, by the web player's rules
   (`prompts.py`): a button over the video while it is full screen
   (`overlay.py`, `resources/skins/default/1080i/pley-overlay.xml`), which
@@ -113,6 +120,10 @@ Measured on Kodi 21.3 for Windows, against a server on the same computer:
 - The service starts with Kodi, in the background, loading in about 0.4 s
   (1 s while Python's `http.server` still read the Windows registry's MIME
   types as it loaded, which the proxy never uses).
+- Marked watched on another device, a title leaves Continue Watching on
+  screen 0.44 to 0.48 s later; stopped from elsewhere, playback ends in
+  0.02 to 0.05 s; stopped here, the listing shows the new place 0.18 s
+  later.
 - Seeking through the proxy takes as long as from the disk (1.24 to 1.36 s
   against 1.24 to 1.27 s for this file).
 - A server that is off is said within 4 seconds.

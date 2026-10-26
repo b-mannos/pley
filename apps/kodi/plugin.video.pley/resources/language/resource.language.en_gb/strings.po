@@ -173,6 +173,14 @@ msgctxt "#30077"
 msgid "Can't reach the server: trying again."
 msgstr ""
 
+msgctxt "#30078"
+msgid "Playback was stopped by the server's administrator."
+msgstr ""
+
+msgctxt "#30079"
+msgid "Playback was stopped from another of your devices."
+msgstr ""
+
 # Settings
 
 msgctxt "#30040"

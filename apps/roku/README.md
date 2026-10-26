@@ -79,11 +79,12 @@ Rules the code keeps:
   goes on, fast forward and rewind move 10 s; Back leaves the player as
   ever. While Up Next counts down, Back cancels it, and play, fast forward
   and rewind cancel it and do the same.
-- Home asks for its rows again only after something played (or when Home
-  is picked in its menu). The task makes again only the rows whose JSON
-  changed; the others stay as they are, scrolled where they were, the focus
-  stays on the same row and title, and the menu changes only with the
-  libraries.
+- Home asks for its rows again only after something played, when they are a
+  minute old (for what other devices played or marked meanwhile: a Roku's
+  HTTP can't follow the server's event stream), or when Home is picked in
+  its menu. The task makes again only the rows whose JSON changed; the
+  others stay as they are, scrolled where they were, the focus stays on the
+  same row and title, and the menu changes only with the libraries.
 - A screen shown again takes the focus at once, before any answer, so the
   remote works whatever comes back; an answer moves the focus only while its
   screen has it, so a dialog over it keeps it.

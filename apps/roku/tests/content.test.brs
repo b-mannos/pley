@@ -181,6 +181,13 @@ sub test_content_rebuilds_only_the_home_rows_that_changed()
     tkEqual(again.changed[1].key, "my_list")
 end sub
 
+sub test_content_home_asks_again_after_playing_or_a_minute()
+    tkFalse(contentHomeStale(3, 3, 0), "back from a title at once")
+    tkFalse(contentHomeStale(3, 3, 59))
+    tkTrue(contentHomeStale(4, 3, 5), "something played")
+    tkTrue(contentHomeStale(3, 3, 60), "other devices may have changed it")
+end sub
+
 sub test_content_up_next_card()
     nextEpisode = contentTestEpisode()
     nextEpisode.index = 2

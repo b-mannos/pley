@@ -212,7 +212,8 @@ async function signOut() {
 }
 
 const qr = { shown: false, hidden: false };
-const home = { kept: false };
+// Home asks again only after playing, or when its rows are a minute old.
+const home = { kept: false, loadedAt: 0 };
 
 async function walk() {
   // A cold start of brs-node can take a while.
@@ -245,6 +246,7 @@ async function walk() {
   since = mark();
   await press("back"); // Home, which asks for its rows again after playing
   await waitFor(/^GET \/api\/hubs\/home$/, since, "Home's rows after playing");
+  home.loadedAt = Date.now();
   await openFromMenu(1, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies");
   shoot("library");
   // Down until the next page is asked for: two rows before the first one ends.
@@ -267,11 +269,14 @@ async function walk() {
     await press("lit_o");
   });
   shoot("search");
-  // Back from Search nothing played: Home stays as it is.
+  // Back from Search nothing played: Home stays as it is, unless its rows
+  // are a minute old by now (a slow run), when it asks again.
   since = mark();
+  const age = Date.now() - home.loadedAt;
   await press("back");
   await settle();
-  home.kept = !seen(/^GET \/api\/hubs\/home$/, since);
+  const asked = seen(/^GET \/api\/hubs\/home$/, since);
+  home.kept = age < 55000 ? !asked : age > 65000 ? asked : true;
   await openFromMenu(4, /^GET \/api\/auth\/me$/, "Settings");
   shoot("settings");
   // The server goes away: a library can't load, and says so.
@@ -372,7 +377,7 @@ const checks = [
   ["closed the session it played", fixture.closed.length > 1],
   ["reported where it stopped", fixture.progress.some((p) => p.state === "stopped" && p.session_id)],
   ["loaded a library's next page", asked(/^GET \/api\/libraries\/1\/items\?.*offset=70/)],
-  ["came back to Home without asking for it again", home.kept],
+  ["came back to Home asking again only for rows a minute old", home.kept],
   ["loaded a season's episodes", asked(/^GET \/api\/items\/100\/children$/)],
   ["searched", asked(/^GET \/api\/search\?/)],
   ["asked again with a new token after a 401", new Set(fixture.requests.filter((r) => r.path === "/api/items/103").map((r) => r.auth)).size > 1],

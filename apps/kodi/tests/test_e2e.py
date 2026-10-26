@@ -1,6 +1,6 @@
 """The add-on against a real pley server: signing in with a code, browsing
-and playing through the proxy, progress reports, a renewed token and
-signing out.
+and playing through the proxy, progress reports and the events they send,
+a renewed token and signing out.
 
 Needs a built server and FFmpeg, so it runs only when asked:
 
@@ -23,6 +23,7 @@ import unittest
 import support  # noqa: F401
 from pley import api, auth, caps, service
 from pley.api import path_in
+from pley.events import Events
 from pley.proxy import Proxy
 
 PLEY_BIN = os.environ.get("PLEY_BIN")
@@ -164,11 +165,25 @@ class EndToEndTest(unittest.TestCase):
         with open(self.movie, "rb") as f:
             self.assertEqual(head.body, f.read(1024))
 
-        # The service's reports land on the item.
-        player = service.Player(holder, AGENT, service.Worker())
-        body = {"position_ms": 20_000, "duration_ms": info["duration_ms"], "state": "paused", "session_id": info["session_id"]}
-        player.call("POST", "/api/items/%d/progress" % item, body)
-        self.assertEqual(client.get("/api/items/%d" % item)["user_state"]["position_ms"], 20_000)
+        # The service's reports land on the item, and its event stream hears
+        # what changed: the resume point the report started, then the
+        # session stopped from elsewhere.
+        heard = []
+        listening = Events(holder, AGENT, heard.append, retry=(0.2,))
+        listening.start()
+        try:
+            wait_for(listening.open.is_set, 10, "the event stream")
+            player = service.Player(holder, AGENT, service.Worker())
+            body = {"position_ms": 20_000, "duration_ms": info["duration_ms"], "state": "paused", "session_id": info["session_id"]}
+            player.call("POST", "/api/items/%d/progress" % item, body)
+            self.assertEqual(client.get("/api/items/%d" % item)["user_state"]["position_ms"], 20_000)
+            changed = wait_for(lambda: [e for e in heard if e.get("type") == "user_state_changed"], 10, "user_state_changed")
+            self.assertEqual(changed[0]["item_ids"][0], item)
+            self.assertEqual(self.admin.request("DELETE", "/api/sessions/%s" % info["session_id"]).status, 204)
+            stopped = wait_for(lambda: [e for e in heard if e.get("type") == "session_stopped"], 10, "session_stopped")
+            self.assertEqual((stopped[0]["session_id"], stopped[0]["by_admin"]), (info["session_id"], False))
+        finally:
+            listening.stop()
         player.call("DELETE", "/api/playback/%s" % info["session_id"])
 
         # A lower quality is converted, as HLS through the proxy.

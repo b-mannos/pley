@@ -60,6 +60,8 @@ TEXT = {
     "waiting_one_minute": 30075,
     "signed_in": 30076,
     "retrying": 30077,
+    "stopped_by_admin": 30078,
+    "stopped_elsewhere": 30079,
 }
 
 
@@ -114,6 +116,13 @@ def addon_dir() -> str:
 
 def log(message: str, level: int = xbmc.LOGINFO) -> None:
     xbmc.log("[pley] " + message, level)
+
+
+def refresh_listing() -> None:
+    """Refreshes the listing on screen if it is pley's; others aren't
+    touched."""
+    if xbmc.getInfoLabel("Container.FolderPath").startswith("plugin://%s/" % ADDON_ID):
+        xbmc.executebuiltin("Container.Refresh")
 
 
 def notify(message: str, error: bool = False) -> None:

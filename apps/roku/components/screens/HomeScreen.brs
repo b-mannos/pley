@@ -12,8 +12,10 @@ sub init()
     m.rowSigs = {}
     ' Which asking for the rows the answer must be for.
     m.rowsAsked = 0
-    ' Playbacks at the last load: one more, and watch state moved on.
+    ' Playbacks at the last load (one more, and watch state moved on), and
+    ' how long ago it was.
     m.playedSeen = 0
+    m.loadedAgo = CreateObject("roTimespan")
     m.lastFocus = m.menu
     m.menu.observeField("itemSelected", "onMenu")
     m.rows.observeField("rowItemSelected", "onTile")
@@ -39,15 +41,16 @@ sub onActive()
     else
         m.menu.setFocus(true)
     end if
-    ' Back from playing: Continue Watching and the watched marks moved on.
-    ' From anywhere else, nothing did.
-    if m.top.getScene().played <> m.playedSeen then load()
+    ' Back from playing, Continue Watching and the watched marks moved on;
+    ' a minute on, other devices may have moved them.
+    if contentHomeStale(m.top.getScene().played, m.playedSeen, m.loadedAgo.TotalSeconds()) then load()
 end sub
 
 ' The libraries (the menu) and the rows, asked for together; the task
 ' makes the ContentNodes of the rows that changed.
 sub load()
     m.playedSeen = m.top.getScene().played
+    m.loadedAgo.Mark()
     if m.rowKeys.Count() = 0 then showMessage("Loading…")
     uiGet("/api/libraries", "onLibraries")
     m.rowsAsked = m.rowsAsked + 1

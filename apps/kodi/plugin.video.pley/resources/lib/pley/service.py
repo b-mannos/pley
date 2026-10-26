@@ -14,6 +14,7 @@ import time
 import xbmc
 
 from . import api, auth, kodi, overlay, prompts
+from .events import CHANGES, Events, Refresher
 from .proxy import Proxy, new_secret
 
 REPORT_EVERY = 10
@@ -122,11 +123,12 @@ class Worker:
 
 
 class Player(xbmc.Player):
-    def __init__(self, tokens: auth.Tokens, user_agent: str, worker: Worker):
+    def __init__(self, tokens: auth.Tokens, user_agent: str, worker: Worker, refresher: Refresher | None = None):
         super().__init__()
         self.tokens = tokens
         self.user_agent = user_agent
         self.worker = worker
+        self.refresher = refresher
         self.lock = threading.Lock()
         self.reports = None
         self.moments = None
@@ -138,7 +140,9 @@ class Player(xbmc.Player):
         self.ui = threading.RLock()
         self.lost_since = None
         self.fullscreen = False
-        self.stopped_at = 0.0
+        # The playback last stopped by the server, and when.
+        self.stopped_for = None
+        self.stopped_at = float("-inf")
 
     # ------------------------------------------------------------ requests
 
@@ -180,13 +184,33 @@ class Player(xbmc.Player):
         self.call("DELETE", path, timeout=LAST_TIMEOUT, fine=(404, 410))
 
     def stopped_by_server(self, message) -> None:
-        """A stream the server stopped: said once, however many of its
-        requests are refused."""
-        if time.monotonic() - self.stopped_at < 15:
+        """A stream the server stopped: said once for each playback, however
+        many of its requests are refused (and once in a while for requests
+        refused after it ended)."""
+        with self.lock:
+            playing = self.reports
+        now = time.monotonic()
+        if playing is not None and playing is self.stopped_for:
             return
-        self.stopped_at = time.monotonic()
+        if playing is None and now - self.stopped_at < 15:
+            return
+        self.stopped_for, self.stopped_at = playing, now
         kodi.notify(message or kodi.text("stream_stopped"), error=True)
         self.stop()
+
+    def heard(self, event: dict) -> None:
+        """An event of the server's stream, from its thread."""
+        kind = event.get("type")
+        if kind in CHANGES:
+            if self.refresher is not None:
+                self.refresher.later()
+        elif kind == "session_stopped":
+            with self.lock:
+                playing = self.reports.playing if self.reports is not None else None
+            if playing is None or event.get("session_id") != playing.get("session_id"):
+                return
+            by = "stopped_by_admin" if event.get("by_admin") else "stopped_elsewhere"
+            self.stopped_by_server(event.get("message") or kodi.text(by))
 
     # ----------------------------------------------------- what is playing
 
@@ -292,10 +316,10 @@ class Player(xbmc.Player):
             if self.fullscreen:
                 self.after_end = moments
         reports.finish(ended)
-        # Listings of pley show the new resume point and watched marks;
-        # others aren't touched.
-        if xbmc.getInfoLabel("Container.FolderPath").startswith("plugin://%s/" % kodi.ADDON_ID):
-            xbmc.executebuiltin("Container.Refresh")
+        # Listings of pley show the new resume point and watched marks once
+        # the server has the last report: after it, on the worker.
+        if self.refresher is not None:
+            self.worker.put(self.refresher.now)
 
     # ------------------------------------------------------------ the loop
 
@@ -441,13 +465,16 @@ def run() -> None:
     tokens = auth.Tokens(auth.Store(os.path.join(profile, "tokens.json")), user_agent)
     config = proxy_config(profile)
     worker = Worker()
-    player = Player(tokens, user_agent, worker)
+    refresher = Refresher(kodi.refresh_listing, busy=lambda: player.isPlaying())
+    player = Player(tokens, user_agent, worker, refresher)
     proxy = Proxy(tokens, user_agent, config["secret"], config["port"], on_stopped=player.stopped_by_server)
     port = proxy.start()
     if port != config["port"]:
         save_proxy_config(profile, {"port": port, "secret": config["secret"]})
     kodi.set_property(kodi.PROXY, proxy.base)
     kodi.log("proxy on 127.0.0.1:%d" % port)
+    events = Events(tokens, user_agent, player.heard)
+    events.start()
     while not monitor.waitForAbort(1):
         try:
             player.tick()
@@ -455,5 +482,7 @@ def run() -> None:
             kodi.log("service turn failed: %r" % e, xbmc.LOGERROR)
     player.close_overlay()
     kodi.clear_property(kodi.PROXY)
+    events.stop()
+    refresher.cancel()
     proxy.stop()
     worker.stop()

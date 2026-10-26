@@ -154,6 +154,15 @@ function contentSignature(value as object) as string
     return bytes.GetCRC32().ToStr() + ":" + bytes.Count().ToStr()
 end function
 
+' Whether Home asks for its rows again as it shows: after something played
+' here, or when they are a minute old, for what the person's other devices
+' played or marked meanwhile. Roku's HTTP can't read the server's event
+' stream as it comes; rows that didn't change cost
+' the server's answer only.
+function contentHomeStale(played as integer, playedSeen as integer, seconds as integer) as boolean
+    return played <> playedSeen or seconds >= 60
+end function
+
 ' Home's rows from GET /api/hubs/home (as contentHomeRows), made again only
 ' where they changed: known holds the fingerprint of each row Home shows
 ' ({ key: signature }), taken from the server's JSON, so a hub sent as
