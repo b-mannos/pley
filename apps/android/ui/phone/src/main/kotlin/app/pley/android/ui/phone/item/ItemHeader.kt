@@ -26,10 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
@@ -71,10 +68,11 @@ import app.pley.android.ui.phone.theme.WidthClass
 /**
  * The top of an item page (design spec §4.3, mockups phone-movie and
  * phone-show): the backdrop fading into the page, the breadcrumb and title
- * over its fade, the metadata line, genres and collections, Play or Resume
- * across the width with the progress under it, the actions (From start,
- * Watched, Playlist, Trailer), the tagline and a four-line summary, and
- * the profile's rating. From 600 dp the poster stands beside it.
+ * over its fade, the metadata line, what is left of a title being watched,
+ * genres and collections, Play or Resume across the width, the actions
+ * (From start, Watched, Playlist, Trailer), the tagline and a four-line
+ * summary, and the profile's rating. From 600 dp the poster stands beside
+ * it.
  */
 @Composable
 internal fun ItemHeader(page: ItemPage, actions: PageActions) {
@@ -155,6 +153,12 @@ private fun HeaderText(page: ItemPage, actions: PageActions, fullWidthPlay: Bool
     )
     Spacer(Modifier.height(10.dp))
     MetaLine(page.meta)
+    // How much is left of a title being watched, as the TV shows it: words, no bar.
+    val primary = page.primary
+    if (primary.kind == PrimaryAction.Kind.Resume && primary.timeLeft.isNotEmpty()) {
+        Spacer(Modifier.height(8.dp))
+        Text(primary.timeLeft, style = MaterialTheme.typography.labelLarge, color = PleyColors.Fg)
+    }
     if (page.genres.isNotEmpty()) {
         Spacer(Modifier.height(6.dp))
         Text(page.genres.joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = PleyColors.Muted)
@@ -260,7 +264,7 @@ internal fun MetaLine(parts: List<MetaPart>, modifier: Modifier = Modifier) {
     }
 }
 
-/** Play or Resume across the width, or "Unavailable"; when resuming, the progress and what is left under it. */
+/** Play or Resume across the width, or "Unavailable"; what is left of a title being watched is under the metadata. */
 @Composable
 private fun PlayBlock(page: ItemPage, actions: PageActions, fullWidth: Boolean) {
     val primary = page.primary
@@ -275,16 +279,6 @@ private fun PlayBlock(page: ItemPage, actions: PageActions, fullWidth: Boolean) 
         icon = PleyIcons.Play,
         modifier = width.testTag(TestTags.ITEM_PLAY),
     )
-    if (primary.kind == PrimaryAction.Kind.Resume && primary.progress > 0f) {
-        Spacer(Modifier.height(10.dp))
-        Row(if (fullWidth) Modifier.fillMaxWidth() else Modifier.width(320.dp), verticalAlignment = Alignment.CenterVertically) {
-            ProgressBar(primary.progress, Modifier.weight(1f))
-            if (primary.timeLeft.isNotEmpty()) {
-                Spacer(Modifier.width(12.dp))
-                Text(primary.timeLeft, style = MaterialTheme.typography.bodySmall, color = PleyColors.Muted)
-            }
-        }
-    }
 }
 
 /** "Resume", "Play S1 · E3", … */
@@ -297,20 +291,6 @@ internal fun primaryLabel(primary: PrimaryAction): String {
         episode != null -> stringResource(R.string.item_play_episode, episode)
         else -> stringResource(R.string.item_play)
     }
-}
-
-/** A 4 dp bar: [surface4][PleyColors.Surface4] track, [accent][PleyColors.Accent] played. */
-@Composable
-internal fun ProgressBar(fraction: Float, modifier: Modifier = Modifier) {
-    Box(
-        modifier
-            .height(4.dp)
-            .drawBehind {
-                val r = CornerRadius(size.height / 2f, size.height / 2f)
-                drawRoundRect(PleyColors.Surface4, cornerRadius = r)
-                drawRoundRect(PleyColors.Accent, size = Size(size.width * fraction.coerceIn(0f, 1f), size.height), cornerRadius = r)
-            },
-    )
 }
 
 /**
