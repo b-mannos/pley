@@ -37,8 +37,15 @@ createServer((req, res) => {
     },
   );
   upstream.on("error", (e) => {
+    // A stream the server dropped half way (the event stream, when it stops) just ends.
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
     res.writeHead(502, { "Content-Type": "text/plain" });
     res.end(String(e));
   });
+  // The page went (a reload, a closed event stream): so does its request.
+  res.on("close", () => upstream.destroy());
   req.pipe(upstream);
 }).listen(port, () => console.log(`pley for LG TV (development): http://localhost:${port} → ${target.origin}`));
