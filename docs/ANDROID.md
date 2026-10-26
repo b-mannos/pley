@@ -50,7 +50,8 @@ Wi-Fi even while the phone's default network is mobile data
 (`LocalRoute`). Away from the server, phones and tablets play downloads.
 
 Downloads (`:core:downloads`) keep the original file of a movie or an
-episode (of several versions, the sharpest up to 1080p), with its
+episode (of several versions, the sharpest up to 1080p of those the
+device plays as they are, by the player's capabilities), with its
 details, a picture and its text subtitles as WebVTT, in the app's own
 storage (removed with the app), per server and profile. They come in a
 foreground service of type dataSync with a notification, one at a time;
@@ -63,12 +64,17 @@ banner leads to as well.
 
 A downloaded file plays from the device whether the server answers or
 not ("Downloaded" in the player); a quality picked by hand streams from
-the server instead. While the server is out of reach, the item's saved
-details stand in for the server's, and progress is kept on the device,
-then sent when the server answers again (the app opening, a network
-coming up), each report with its `age_ms`: the server keeps what happened
-to the item since (docs/API.md). TVs stay where the server is and
-download nothing.
+the server instead. A download waits 1.5 s at most for the server's
+details, then starts from the ones saved with it (away from home, the
+server's address can take long to fail). Progress is kept on the device
+while the server is out of reach, then sent when it answers again (the
+app opening, a network coming up), each report with its `age_ms`: the
+server keeps what happened to the item since (docs/API.md). An episode
+played from a download goes on to the next one of its show downloaded
+when the server doesn't say what's next within 3 s. A download the device
+can't decode falls back to the server, which converts it; with the server
+away, the player says so. TVs stay where the server is and download
+nothing.
 
 ## Updating from the web view app
 
