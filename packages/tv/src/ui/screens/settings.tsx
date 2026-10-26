@@ -14,7 +14,7 @@ import { Icon, type IconName } from "../kit/icons";
 import { PanelRow } from "../kit/buttons";
 import { PanelTitle, SidePanel, useScrollToFocus, useTrap } from "../kit/panel";
 import type { Entry } from "../shell/navigator";
-import { Dialog, sentence, useApp } from "./common";
+import { Dialog, failedTitle, problem, sentence, useApp } from "./common";
 import { pageOf } from "./item-actions";
 import { ProfileAvatar, QrCode } from "./onboarding/kit";
 
@@ -640,7 +640,7 @@ export function HistoryScreen(p: { entry: Entry }) {
   if (!entries) {
     if (error) {
       return (
-        <HistoryMessage title="Couldn't load your watch history" body={sentence(errorMessage(error))} action="Try again" onAction={() => (setError(null), load(0))} />
+        <HistoryMessage title={failedTitle(error, "Couldn't load your watch history")} body={problem(error)} action="Try again" onAction={() => (setError(null), load(0))} />
       );
     }
     return (

@@ -44,6 +44,16 @@ export class EventStream {
     this.xhr = null;
   }
 
+  /** The server answers again: a stream waiting out its back-off connects now. False when none was waiting. */
+  retryNow(): boolean {
+    if (this.stopped || this.xhr || this.timer === null) return false;
+    clearTimeout(this.timer);
+    this.timer = null;
+    this.failures = 0;
+    void this.connect();
+    return true;
+  }
+
   private retryDelay(): number {
     let wait = FIRST_RETRY_MS;
     for (let i = 1; i < this.failures; i++) wait = Math.min(wait * 2, MAX_RETRY_MS);

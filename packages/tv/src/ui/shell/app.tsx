@@ -8,8 +8,9 @@ import { Input } from "../input";
 import { initMusic } from "../../player/music";
 import { AppContext, Dialog } from "../screens/common";
 import { Screen } from "../screens/screens";
+import { Icon } from "../kit/icons";
 import { Navigator, type Entry, type PageKey } from "./navigator";
-import { currentEntry, Rail, type RailApi } from "./rail";
+import { currentEntry, OFFLINE_TEXT, Rail, type RailApi } from "./rail";
 
 /** Pages without the rail: sign-in, "Who's watching?" and the player. */
 function railless(key: PageKey | undefined): boolean {
@@ -218,8 +219,16 @@ export function App(p: ShellProps) {
             libraries={state.libraries.value}
             me={state.me.value}
             current={currentEntry(stack[0]?.key ?? null, state.libraries.value)}
+            offline={state.offline.value && !state.offlineNotice.value}
             railRef={(r) => (rail.current = r)}
           />
+        )}
+        {showRail && state.offlineNotice.value && (
+          // Where toasts are; never focusable, as there is nothing to do but wait.
+          <div class="offline-notice t-label" role="status" aria-live="polite">
+            <Icon name="server-off" size={20} color="var(--muted)" />
+            <span>{OFFLINE_TEXT}</span>
+          </div>
         )}
         {exiting.value && (
           <Dialog

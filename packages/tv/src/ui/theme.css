@@ -672,6 +672,36 @@ body {
   justify-content: center;
   background: var(--surface3);
 }
+/* The server out of reach: a 16 px surface3 disc ringed 2 px in the page's colour, astride the avatar's lower right (6 past its edges). */
+.offline-mark {
+  position: absolute;
+  left: 34px;
+  top: 34px;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: var(--surface3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Where toasts are, for 6 s: the server-off icon and the line on surface3. */
+.offline-notice {
+  position: absolute;
+  right: 48px;
+  top: 27px;
+  display: flex;
+  align-items: center;
+  padding: 10px 20px;
+  border-radius: 999px;
+  background: var(--surface3);
+  color: var(--fg);
+  z-index: 50;
+  animation: info-in 150ms linear;
+}
+.offline-notice > * + * { margin-left: 10px; }
 .rail-spacer { flex: 1; }
 
 .curtain {

@@ -11,7 +11,7 @@ import { PanelTitle, SidePanel } from "../kit/panel";
 import { Row, rowHeight, SectionPage, type Section } from "../kit/row";
 import { ArtTile, SeeAllTile, SkeletonTile, Tile, TILES, type TileKind } from "../kit/tile";
 import type { Entry, LibraryTab } from "../shell/navigator";
-import { ColumnMessage, problem, useApp, useLoad } from "./common";
+import { ColumnMessage, failedTitle, problem, useApp, useLoad } from "./common";
 import { pageOf } from "./item-actions";
 import {
   AlphaIndex,
@@ -203,7 +203,7 @@ function LibraryGridTab(p: { entry: Entry; library: Library; initial: boolean; f
     message = (
       <ColumnMessage
         top={146}
-        title="Couldn't load this library"
+        title={failedTitle(listing.error, "Couldn't load this library")}
         body={problem(listing.error)}
         action={{ label: "Retry", icon: "refresh-cw", onSelect: () => setParams({ ...params }) }}
       />
@@ -473,7 +473,7 @@ function RecommendedTab(p: { entry: Entry; library: Library; initial: boolean; f
   const rowIndex = (p.entry.state.recIndex as Record<string, number> | undefined) ?? {};
   p.entry.state.recIndex = rowIndex;
   if (!hubs.data && hubs.error) {
-    return <ColumnMessage top={CHIPS_TOP} title="Couldn't load recommendations" body={problem(hubs.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: hubs.reload }} />;
+    return <ColumnMessage top={CHIPS_TOP} title={failedTitle(hubs.error, "Couldn't load recommendations")} body={problem(hubs.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: hubs.reload }} />;
   }
   if (!hubs.data) return <RowsSkeleton top={CHIPS_TOP} />;
   if (!rows.length && !cols.length) {
@@ -599,7 +599,7 @@ function CollectionsTab(p: { entry: Entry; library: Library; initial: boolean; f
   const loaded = useLoad((c) => ui.api.collections(lib.id, c), [lib.id]);
   const list = loaded.data?.collections ?? null;
   if (!list && loaded.error) {
-    return <ColumnMessage top={CHIPS_TOP} title="Couldn't load collections" body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
+    return <ColumnMessage top={CHIPS_TOP} title={failedTitle(loaded.error, "Couldn't load collections")} body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
   }
   if (!list) return null;
   if (!list.length) {

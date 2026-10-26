@@ -1,5 +1,5 @@
 import { batch, signal, type Signal } from "@preact/signals";
-import { ApiError, errorMessage, SessionStoppedError, type Api } from "../api/client";
+import { ApiError, errorMessage, SessionStoppedError, unreachable, type Api } from "../api/client";
 import type {
   ClientCaps,
   ItemDetail,
@@ -16,7 +16,6 @@ import type {
 import { SignedOutError } from "../auth/tokens";
 import { episodeLabel, streamLabel } from "../format/format";
 import { decide } from "../caps/policy";
-import { NetworkError } from "../net/transport";
 import { NOTHING_SHOWN, SubtitlePresenter, type ShownSubtitles } from "../subs/presenter";
 import { clampOffset, type OffsetStore } from "../subs/sync";
 import { buildDetails, fallbackText, methodText, stoppedText, T, type PlaybackDetails } from "./details";
@@ -219,12 +218,6 @@ interface Outage {
   timer: ReturnType<typeof setTimeout> | null;
   engineFailed: boolean;
   atMs: number;
-}
-
-/** No answer at all, or a gateway in front of the server saying it has none (Android's MediaLoading). */
-function unreachable(e: unknown): boolean {
-  if (e instanceof NetworkError) return !e.cancelled;
-  return e instanceof ApiError && (e.status === 502 || e.status === 503 || e.status === 504);
 }
 
 /**

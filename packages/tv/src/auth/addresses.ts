@@ -74,6 +74,22 @@ export function isLocalHost(host: string): boolean {
   return h === "::1" || /^f[cd][0-9a-f]{0,2}:/.test(h) || /^fe[89ab][0-9a-f]?:/.test(h);
 }
 
+/**
+ * Whether `url`'s server is on the home network itself (a private address,
+ * a name without dots, `.local`…), which accepts a connection at once or
+ * never: not a Tailscale address, which may be far away (the Android app's
+ * LocalRoute.isHomeHost).
+ */
+export function atHome(url: string): boolean {
+  const p = parse(url);
+  if (!p) return false;
+  const h = p.host.replace(/^\[/, "").replace(/\]$/, "");
+  if (/\.ts\.net$/.test(h)) return false;
+  const v4 = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(h);
+  if (v4 && Number(v4[1]) === 100 && Number(v4[2]) >= 64 && Number(v4[2]) <= 127) return false;
+  return isLocalHost(h);
+}
+
 /** Whether a connection to `url` would travel unencrypted beyond the local network. */
 export function unencrypted(url: string): boolean {
   const p = parse(url);

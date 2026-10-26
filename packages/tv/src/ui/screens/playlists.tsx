@@ -11,7 +11,7 @@ import { Icon } from "../kit/icons";
 import { SidePanel, useScrollToFocus } from "../kit/panel";
 import { ArtTile } from "../kit/tile";
 import type { Entry } from "../shell/navigator";
-import { ColumnMessage, problem, sentence, useApp, useLoad } from "./common";
+import { ColumnMessage, failedTitle, problem, sentence, useApp, useLoad } from "./common";
 import { openPlayer } from "./item-actions";
 import { musicPlayer } from "../../player/music";
 
@@ -26,7 +26,7 @@ export function PlaylistsScreen(p: { entry: Entry }) {
   const loaded = useLoad((c) => ui.api.playlists(c), []);
   const list = loaded.data?.playlists ?? null;
   if (!list && loaded.error) {
-    return <ColumnMessage top={80} title="Couldn't load your playlists" body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
+    return <ColumnMessage top={80} title={failedTitle(loaded.error, "Couldn't load your playlists")} body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
   }
   if (!list) return null;
   return (
@@ -75,7 +75,7 @@ export function PlaylistScreen(p: { entry: Entry; id: number }) {
   const listRef = useRef<HTMLDivElement>(null);
   const shift = useScrollToFocus(listRef, 540 - 150);
   if (!pl) {
-    if (loaded.error) return <ColumnMessage top={80} title="Couldn't load this playlist" body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
+    if (loaded.error) return <ColumnMessage top={80} title={failedTitle(loaded.error, "Couldn't load this playlist")} body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
     return null;
   }
   const entries = pl.entries;

@@ -6,7 +6,7 @@ import { Row, rowHeight, SectionPage, type Section } from "../kit/row";
 import { Tile } from "../kit/tile";
 import { Art } from "../kit/art";
 import type { Entry } from "../shell/navigator";
-import { Message, problem, useLoad } from "./common";
+import { failedTitle, Message, problem, useLoad } from "./common";
 import { pageOf } from "./item-actions";
 
 const ROLES: { role: CreditRole; title: string }[] = [
@@ -56,7 +56,7 @@ export function PersonScreen(p: { entry: Entry; id: number }) {
     if (loaded.error && isApiError(loaded.error, 404)) {
       return <Message icon="user-round" title="Person not found" body="No one by that link has anything in your libraries." action={{ label: "Back", onSelect: () => ui.nav.pop() }} />;
     }
-    if (loaded.error) return <Message title="Couldn't load this person" body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
+    if (loaded.error) return <Message title={failedTitle(loaded.error, "Couldn't load this person")} body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
     return (
       <div class="person-page" role="status" aria-label="Loading">
         <div class="person-photo" />

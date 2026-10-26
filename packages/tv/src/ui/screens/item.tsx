@@ -1,6 +1,6 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
-import { errorMessage, isApiError } from "../../api/client";
+import { errorMessage, isApiError, unreachable } from "../../api/client";
 import type { Credit, ItemDetail, ItemSummary, MediaFile, MediaStream } from "../../api/types";
 import {
   codecLabel,
@@ -32,7 +32,7 @@ import { Row, rowHeight, SectionPage, type Section } from "../kit/row";
 import { ArtTile, Tile, TILES } from "../kit/tile";
 import type { Entry } from "../shell/navigator";
 import { ActionsPanel } from "./actions";
-import { Message, PageBadge, problem, sentence, useApp, useLoad } from "./common";
+import { failedTitle, Message, PageBadge, problem, sentence, useApp, useLoad } from "./common";
 import { openPlayer, pageOf, prefetchPlayback, setInMyList, setWatched } from "./item-actions";
 
 /** Where the focused part of the page sits. */
@@ -146,15 +146,16 @@ export function ItemScreen(p: { entry: Entry; id: number }) {
     if (item.kind === "artist" || item.kind === "album" || item.kind === "track") ui.nav.replace(pageOf(item));
     else if (item.kind === "extra" && item.parent_id) ui.nav.replace({ name: "item", id: item.parent_id });
   }, [item?.kind]);
+  // A page that shows what was saved says nothing when the server doesn't answer: the shell's notice does.
   useEffect(() => {
-    if (item && loaded.error) ui.toast(problem(loaded.error), true);
+    if (item && loaded.error && !unreachable(loaded.error)) ui.toast(problem(loaded.error), true);
   }, [loaded.error]);
   if (!item) {
     if (loaded.error) {
       if (isApiError(loaded.error, 404)) {
         return <Message title="Item not found" body="It may have been removed, or this profile can't see it." action={{ label: "Back", onSelect: () => ui.nav.pop() }} />;
       }
-      return <Message title="Couldn't load this item" body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
+      return <Message title={failedTitle(loaded.error, "Couldn't load this item")} body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
     }
     return <ItemSkeleton />;
   }

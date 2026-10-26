@@ -62,6 +62,9 @@ export class Cancel {
   }
 }
 
+/** A request's timeout, as its error says it. */
+export const TIMED_OUT = "The server took too long to answer";
+
 /** Requests of more than this wait as long as they need: segments, images over a slow network. */
 export const DEFAULT_TIMEOUT_MS = 20_000;
 
@@ -102,7 +105,7 @@ export const xhrTransport: Transport = (req) =>
     };
     xhr.ontimeout = () => {
       forget?.();
-      reject(new NetworkError("The server took too long to answer"));
+      reject(new NetworkError(TIMED_OUT));
     };
     xhr.send(req.body ?? null);
   });

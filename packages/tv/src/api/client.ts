@@ -1,5 +1,6 @@
+import { atHome } from "../auth/addresses";
 import { SignedOutError, type Tokens } from "../auth/tokens";
-import { Cancel, NetworkError, withQuery, type HttpResponse, type Transport } from "../net/transport";
+import { Cancel, NetworkError, TIMED_OUT, withQuery, type HttpRequest, type HttpResponse, type Transport } from "../net/transport";
 import type {
   Collection,
   Hub,
@@ -56,6 +57,61 @@ export function errorMessage(e: unknown): string {
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
 }
 
+/** The server answered nothing: no connection, no answer in time, or a gateway in front of it saying it has none (502–504). */
+export function unreachable(e: unknown): boolean {
+  if (e instanceof NetworkError) return !e.cancelled;
+  return e instanceof ApiError && (e.status === 502 || e.status === 503 || e.status === 504);
+}
+
+/** Why the server answered nothing, as the Android app says it: "Nothing answers there." or "No answer in time." */
+export function unreachableReason(e: unknown): string {
+  return e instanceof NetworkError && e.message === TIMED_OUT ? "No answer in time." : "Nothing answers there.";
+}
+
+/** A server at home accepts at once or never: after this long without an answer, a quick question tells which. */
+export const HOME_WAIT_MS = 3_000;
+
+/**
+ * `req` to a server on the home network, which a TV can't give a connect
+ * timeout of its own (the Android app gives it 3 s): when it hasn't
+ * answered in 3 s, the server is asked a quick question, and if that gets
+ * no answer in 3 s either, `req` gives up with "no answer in time". A
+ * server that is only slow (a conversion starting) answers the question,
+ * and `req` waits as long as it was going to.
+ */
+function watched(http: Transport, req: HttpRequest, ping: string): Promise<HttpResponse> {
+  const own = new Cancel();
+  const forget = req.cancel?.onCancel(() => own.cancel());
+  return new Promise<HttpResponse>((resolve, reject) => {
+    let done = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = (then: () => void) => {
+      if (done) return;
+      done = true;
+      if (timer !== null) clearTimeout(timer);
+      forget?.();
+      then();
+    };
+    http({ ...req, cancel: own }).then(
+      (res) => finish(() => resolve(res)),
+      (e: unknown) => finish(() => reject(e)),
+    );
+    timer = setTimeout(() => {
+      timer = null;
+      http({ method: "GET", url: ping, headers: { Accept: "application/json" }, responseType: "json", timeoutMs: HOME_WAIT_MS, cancel: own }).then(
+        () => undefined,
+        (e: unknown) => {
+          if (!(e instanceof NetworkError) || e.cancelled) return;
+          finish(() => {
+            own.cancel();
+            reject(new NetworkError(TIMED_OUT));
+          });
+        },
+      );
+    }, HOME_WAIT_MS);
+  });
+}
+
 interface CallOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   query?: Record<string, string | number | boolean | null | undefined>;
@@ -75,11 +131,14 @@ export class Api {
   readonly server: string;
   private readonly tokens: Tokens;
   private readonly http: Transport;
+  /** The server is on the home network: a request it doesn't answer within 3 s gets a quick question. */
+  private readonly homeNetwork: boolean;
 
   constructor(server: string, tokens: Tokens, http: Transport) {
     this.server = server;
     this.tokens = tokens;
     this.http = http;
+    this.homeNetwork = atHome(server);
   }
 
   /** An absolute address on this server for `path` ("/api/…"). */
@@ -110,7 +169,7 @@ export class Api {
       body = JSON.stringify(opts.body);
     }
     if (opts.headers) for (const k in opts.headers) headers[k] = opts.headers[k]!;
-    return this.http({
+    const req: HttpRequest = {
       method: opts.method ?? "GET",
       url: withQuery(this.url(path), opts.query),
       headers,
@@ -118,7 +177,8 @@ export class Api {
       responseType: opts.responseType ?? "json",
       timeoutMs: opts.timeoutMs,
       cancel: opts.cancel,
-    });
+    };
+    return this.homeNetwork ? watched(this.http, req, this.url("/api/server")) : this.http(req);
   }
 
   async get<T>(path: string, opts: CallOptions = {}): Promise<T> {

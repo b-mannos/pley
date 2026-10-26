@@ -11,7 +11,7 @@ import { Icon } from "../kit/icons";
 import { Row, rowHeight, SectionPage, type Section } from "../kit/row";
 import { ArtTile, Tile } from "../kit/tile";
 import type { Entry } from "../shell/navigator";
-import { ColumnMessage, PageBadge, problem, sentence, useApp, useLoad } from "./common";
+import { ColumnMessage, failedTitle, PageBadge, problem, sentence, useApp, useLoad } from "./common";
 import { openPlayer, pageOf } from "./item-actions";
 import { collectionCount } from "./library";
 
@@ -33,7 +33,7 @@ export function CollectionsScreen(p: { entry: Entry; libraryId?: number }) {
   if (!app.libraries.value) return null;
   const groups = (loaded.data ?? []).filter((g) => g.collections.length > 0);
   if (!loaded.data && loaded.error) {
-    return <ColumnMessage top={ROWS_TOP} title="Couldn't load collections" body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
+    return <ColumnMessage top={ROWS_TOP} title={failedTitle(loaded.error, "Couldn't load collections")} body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
   }
   if (loaded.data && !groups.length) {
     return <ColumnMessage top={ROWS_TOP} title="No collections yet" body="Movies of the same TMDB collection are grouped here once two of them are in a library." />;
@@ -92,7 +92,7 @@ export function CollectionScreen(p: { entry: Entry; id: number }) {
   const [problemText, setProblemText] = useState<string | null>(null);
   const col = loaded.data;
   if (!col) {
-    if (loaded.error) return <ColumnMessage top={58} title="Couldn't load this collection" body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
+    if (loaded.error) return <ColumnMessage top={58} title={failedTitle(loaded.error, "Couldn't load this collection")} body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
     return (
       <div class="collection-page" role="status" aria-label="Loading">
         {[

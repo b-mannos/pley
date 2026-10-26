@@ -23,6 +23,7 @@ function setup() {
       homes++;
       return Promise.resolve({ hubs: [] });
     },
+    reachable: () => Promise.reject(new Error("nothing answers there")),
   };
   const hear = (e: ServerEvent) => (app as unknown as { handleEvent(e: ServerEvent): void }).handleEvent(e);
   return { app, hear, homes: () => homes };
@@ -91,6 +92,21 @@ describe("watch state changed here or elsewhere", () => {
     expect(homes()).toBe(1);
     // Its own reports moved resume points: nothing kept from before it.
     expect(app.cachedItem(2)).toBeNull();
+  });
+
+  it("says the server is out of reach for 6 s, then keeps the mark until it answers", () => {
+    const { app } = setup();
+    app.serverAway();
+    expect(app.offline.value).toBe(true);
+    expect(app.offlineNotice.value).toBe(true);
+    vi.advanceTimersByTime(6_000);
+    expect(app.offlineNotice.value).toBe(false);
+    expect(app.offline.value).toBe(true);
+    app.serverAnswered();
+    expect(app.offline.value).toBe(false);
+    // Going out of reach again says so again.
+    app.serverAway();
+    expect(app.offlineNotice.value).toBe(true);
   });
 
   it("keeps an item's details for 5 minutes", () => {

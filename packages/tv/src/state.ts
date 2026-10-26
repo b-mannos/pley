@@ -1,5 +1,5 @@
 import { signal } from "@preact/signals";
-import { Api } from "./api/client";
+import { Api, unreachable } from "./api/client";
 import { EventStream } from "./api/events";
 import type { Hub, HouseholdProfile, ItemDetail, Library, ServerEvent, User } from "./api/types";
 import { origin } from "./auth/addresses";
@@ -47,6 +47,10 @@ const PROFILES_KEY = "pley.householdProfiles";
 const ITEM_TTL_MS = 5 * 60_000;
 /** Watch state changes come in bursts (an episode, its season and show; a play reaching 90 %): gathered this long. */
 const STATE_GATHER_MS = 300;
+/** How long "Showing what pley had saved. Reconnecting…" shows: as long as an error's toast. */
+const OFFLINE_NOTICE_MS = 6_000;
+/** While the server is out of reach it is asked this often (and given as long to answer). */
+const OFFLINE_ASK_MS = 5_000;
 
 /** A server this TV signed in to or chose, newest first on the server list. */
 export interface SavedServer {
@@ -94,6 +98,15 @@ export class AppState {
   /** Whether the TV shows the app (not another app, its home screen or standby). */
   readonly visible = signal(true);
   /**
+   * The server answered a screen nothing (the Android app's TvOfflineState):
+   * what shows is what was saved. Raised by a load the server couldn't
+   * answer, lowered by its events connecting or a screen's fresh answer
+   * after a failure.
+   */
+  readonly offline = signal(false);
+  /** "Showing what pley had saved. Reconnecting…" shows, for 6 s from going offline; then the rail's avatar keeps a mark. */
+  readonly offlineNotice = signal(false);
+  /**
    * "Who's watching?" was answered in this launch (a profile picked, a PIN
    * checked, or a sign-in approved on a phone): the current profile's PIN
    * isn't asked again until the app starts over.
@@ -112,6 +125,8 @@ export class AppState {
   private readonly stateParents = new Set<number>();
   /** Playbacks on top: Home and the pages wait to ask again until they end (their own reports change the watch state too). */
   private holds = 0;
+  private noticeTimer: ReturnType<typeof setTimeout> | null = null;
+  private awayTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(platform: Platform, http: Transport = xhrTransport) {
     this.platform = platform;
@@ -298,12 +313,74 @@ export class AppState {
     if (!api) return;
     try {
       const { hubs } = await api.home();
+      const failedBefore = this.homeError.value !== null;
       this.home.value = hubs;
       this.homeError.value = null;
       this.store.set(HOME_KEY, JSON.stringify(hubs));
+      if (failedBefore) this.serverAnswered();
     } catch (e) {
       this.homeError.value = e;
+      if (unreachable(e)) this.serverAway();
     }
+  }
+
+  // ---- the server out of reach
+
+  /**
+   * A screen's load got no answer: the notice shows for 6 s (again each
+   * time the server goes), then the rail's mark. Meanwhile the server is
+   * asked every 5 s, so the event stream, backing off up to 30 s between
+   * tries, reconnects as soon as it answers and the screens come back.
+   */
+  serverAway(): void {
+    if (this.offline.value) return;
+    this.offline.value = true;
+    this.offlineNotice.value = true;
+    if (this.noticeTimer !== null) clearTimeout(this.noticeTimer);
+    this.noticeTimer = setTimeout(() => {
+      this.noticeTimer = null;
+      this.offlineNotice.value = false;
+    }, OFFLINE_NOTICE_MS);
+    this.askWhileAway();
+  }
+
+  private askWhileAway(): void {
+    if (this.awayTimer !== null) clearTimeout(this.awayTimer);
+    this.awayTimer = setTimeout(() => {
+      this.awayTimer = null;
+      const api = this.api.value;
+      if (!this.offline.value || !api) return;
+      if (!this.visible.value) {
+        this.askWhileAway();
+        return;
+      }
+      api.reachable(OFFLINE_ASK_MS).then(
+        () => {
+          if (!this.offline.value) return;
+          // A stream waiting to reconnect connects now, and its connection lowers it; one still
+          // connected (a page failed in a short blip) can't, so the app does, and asks again.
+          if (this.events?.retryNow()) {
+            this.askWhileAway();
+            return;
+          }
+          this.serverAnswered();
+          this.items.clear();
+          this.refresh();
+        },
+        () => this.askWhileAway(),
+      );
+    }, OFFLINE_ASK_MS);
+  }
+
+  /** The server answers again: its events connected, or a screen that had failed got a fresh answer. */
+  serverAnswered(): void {
+    if (!this.offline.value) return;
+    if (this.noticeTimer !== null) clearTimeout(this.noticeTimer);
+    this.noticeTimer = null;
+    if (this.awayTimer !== null) clearTimeout(this.awayTimer);
+    this.awayTimer = null;
+    this.offline.value = false;
+    this.offlineNotice.value = false;
   }
 
   /**
@@ -393,8 +470,10 @@ export class AppState {
   private lastSync = 0;
 
   private reconnected(): void {
-    // Nothing is replayed: what is older than 30 s is fetched again, and the details kept go.
-    if (Date.now() - this.lastSync > 30_000) {
+    // Nothing is replayed: what is older than 30 s, or anything after the server was out of reach, is fetched again.
+    const away = this.offline.value;
+    this.serverAnswered();
+    if (away || Date.now() - this.lastSync > 30_000) {
       this.lastSync = Date.now();
       this.items.clear();
       this.refresh();

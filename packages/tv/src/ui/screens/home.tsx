@@ -9,7 +9,7 @@ import { G } from "../kit/focusable";
 import { Row, rowHeight, SectionPage, type Section } from "../kit/row";
 import { SeeAllTile, Tile, TILES, type TileKind } from "../kit/tile";
 import type { Entry } from "../shell/navigator";
-import { Message, MetaLine, problem, useApp } from "./common";
+import { failedTitle, Message, MetaLine, problem, useApp } from "./common";
 import { pageOf, playItem, prefetchPlayback, setWatched } from "./item-actions";
 
 /** A row's tiles (rowShape): Continue Watching wide, music square, episodes wide, the rest posters. */
@@ -115,7 +115,7 @@ export function HomeScreen(p: { entry: Entry }) {
     if (error) {
       return (
         <Message
-          title="Couldn't load your home screen"
+          title={failedTitle(error, "Couldn't load your home screen")}
           body={problem(error)}
           action={{ label: "Retry", icon: "refresh-cw", onSelect: () => void app.loadHome() }}
         />

@@ -77,7 +77,11 @@ export function initial(name: string): string {
  * has focus (it is open exactly then). Left from a page's first column
  * comes here, to the current entry; Right goes back to where focus was.
  */
-export function Rail(p: { libraries: Library[] | null; me: User | null; current: string | null; railRef: (api: RailApi) => void }) {
+/** What the TV says while the server is out of reach: the shell's notice, then the avatar's mark. */
+export const OFFLINE_TEXT = "Showing what pley had saved. Reconnecting…";
+
+/** `offline`: the avatar wears the server-off mark (once the shell's notice has had its 6 s). */
+export function Rail(p: { libraries: Library[] | null; me: User | null; current: string | null; offline?: boolean; railRef: (api: RailApi) => void }) {
   const ui = useUi();
   const open = useSignal(false);
   const root = useRef<HTMLDivElement>(null);
@@ -168,7 +172,7 @@ export function Rail(p: { libraries: Library[] | null; me: User | null; current:
         <G kind="col" class="rail-items">
           <F
             class={`rail-item avatar${p.current === "profile" ? " current" : ""}`}
-            label="Switch profile"
+            label={p.offline ? `Switch profile. ${OFFLINE_TEXT}` : "Switch profile"}
             onSelect={() => select({ id: "profile", label: "Profiles", icon: "users", key: { name: "profiles" } })}
             onKey={(key) => {
               if (key === "right") {
@@ -182,6 +186,11 @@ export function Rail(p: { libraries: Library[] | null; me: User | null; current:
             <div class="rail-avatar t-label" style={color ? `background:${color}` : undefined}>
               <span style="font-weight:700">{initial(me?.name ?? "")}</span>
             </div>
+            {p.offline && (
+              <div class="offline-mark" aria-hidden="true">
+                <Icon name="server-off" size={9} color="var(--fg)" />
+              </div>
+            )}
             <span class="label" style="top:10px">
               <div class="t-label one-line">{me?.name ?? ""}</div>
               <div class="t-caption one-line" style="opacity:0.8">

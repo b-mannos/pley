@@ -9,7 +9,7 @@ import { PanelRow } from "../kit/buttons";
 import { G } from "../kit/focusable";
 import type { IconName } from "../kit/icons";
 import { PanelTitle, SidePanel } from "../kit/panel";
-import { Message, problem, useApp, useLoad } from "./common";
+import { failedTitle, Message, problem, useApp, useLoad } from "./common";
 import { hideFromContinueWatching, inMyList, pageOf, playItem, setInMyList, setWatched } from "./item-actions";
 
 export interface ItemAction {
@@ -106,7 +106,7 @@ export function ItemActionsScreen(p: { id: number; continueWatching: boolean }) 
     }, 16);
     return () => clearTimeout(t);
   }, [!!item]);
-  if (!item && loaded.error) return <Message title="Couldn't load this item" body={problem(loaded.error)} action={{ label: "Back", onSelect: () => ui.nav.pop() }} />;
+  if (!item && loaded.error) return <Message title={failedTitle(loaded.error, "Couldn't load this item")} body={problem(loaded.error)} action={{ label: "Back", onSelect: () => ui.nav.pop() }} />;
   if (!item) return null;
   const actions = itemActions(app, ui, item, { continueWatching: p.continueWatching, detail: item });
   const title = item.kind === "episode" ? item.grandparent_title || item.title : item.title;

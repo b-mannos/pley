@@ -1,6 +1,6 @@
 import { createContext, type ComponentChildren } from "preact";
-import { useContext, useEffect, useLayoutEffect, useState } from "preact/hooks";
-import { errorMessage } from "../../api/client";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { errorMessage, unreachable, unreachableReason } from "../../api/client";
 import type { ItemDetail, ItemSummary } from "../../api/types";
 import { SignedOutError } from "../../auth/tokens";
 import { formatRuntime, qualityBadges } from "../../format/format";
@@ -29,8 +29,14 @@ export function sentence(text: string): string {
   return /[.…!?]$/.test(s) ? s : `${s}.`;
 }
 
+/** Why a load failed; when the server answered nothing, what to check (the Android app's failedBody). */
 export function problem(e: unknown): string {
-  return sentence(errorMessage(e));
+  return unreachable(e) ? `${unreachableReason(e)} Check that the server is on and that this device is on its network.` : sentence(errorMessage(e));
+}
+
+/** A failed load's title: `title`, or "Can't reach your server" when the server answered nothing. */
+export function failedTitle(e: unknown, title: string): string {
+  return unreachable(e) ? "Can't reach your server" : title;
 }
 
 export interface Loaded<T> {
@@ -44,23 +50,32 @@ export interface Loaded<T> {
  * Data a screen shows: fetched when the screen opens and when `deps`
  * change, again after the server's changes (`state.changes`) unless
  * `live` is false. What was shown stays while a newer answer comes.
- * Answers for a screen that went away are dropped.
+ * Answers for a screen that went away are dropped. A load the server
+ * answers nothing tells the app it's out of reach; a fresh answer after
+ * that failure, that it's back.
  */
 export function useLoad<T>(load: (cancel: Cancel) => Promise<T>, deps: unknown[], opts: { live?: boolean; initial?: T | null } = {}): Loaded<T> {
   const app = useApp();
   const [n, setN] = useState(0);
   const changes = opts.live === false ? 0 : app.changes.value;
   const [s, setS] = useState<{ data: T | null; error: unknown; loading: boolean }>({ data: opts.initial ?? null, error: null, loading: true });
+  /** The last load got no answer from the server. */
+  const away = useRef(false);
   useEffect(() => {
     const cancel = new Cancel();
     setS((x) => (x.loading ? x : { ...x, loading: true }));
     load(cancel).then(
       (data) => {
-        if (!cancel.cancelled) setS({ data, error: null, loading: false });
+        if (cancel.cancelled) return;
+        if (away.current) app.serverAnswered();
+        away.current = false;
+        setS({ data, error: null, loading: false });
       },
       (error) => {
         if (cancel.cancelled || (error instanceof NetworkError && error.cancelled)) return;
         if (error instanceof SignedOutError) return;
+        away.current = unreachable(error);
+        if (away.current) app.serverAway();
         setS((x) => ({ data: x.data, error, loading: false }));
       },
     );

@@ -14,7 +14,7 @@ import { useScrollToFocus } from "../kit/panel";
 import { Row } from "../kit/row";
 import { Tile } from "../kit/tile";
 import type { Entry } from "../shell/navigator";
-import { sentence, useLoad } from "./common";
+import { failedTitle, problem, sentence, useLoad } from "./common";
 import { TrackLine } from "./playlists";
 
 /** A music page's message (MusicMessage): a title, a body, one button. */
@@ -60,7 +60,7 @@ export function ArtistScreen(p: { entry: Entry; id: number }) {
   const artist = detail.data;
   if (!artist) {
     if (detail.error && isApiError(detail.error, 404)) return <MusicMessage title="Artist not found" body="It may have been removed, or this profile can't see it." action="Back" onAction={() => ui.nav.pop()} />;
-    if (detail.error) return <MusicMessage title="Couldn't load this artist" body={sentence(errorMessage(detail.error))} action="Try again" onAction={detail.reload} />;
+    if (detail.error) return <MusicMessage title={failedTitle(detail.error, "Couldn't load this artist")} body={problem(detail.error)} action="Try again" onAction={detail.reload} />;
     return (
       <div class="music-page" role="status" aria-label="Loading">
         <div class="skeleton" style="position:absolute;left:96px;top:40px;width:120px;height:120px;border-radius:50%" />
@@ -184,7 +184,7 @@ export function AlbumScreen(p: { entry: Entry; id: number; trackId?: number }) {
   const album: ItemDetail | null = detail.data;
   if (!album) {
     if (detail.error && isApiError(detail.error, 404)) return <MusicMessage title="Album not found" body="It may have been removed, or this profile can't see it." action="Back" onAction={() => ui.nav.pop()} />;
-    if (detail.error) return <MusicMessage title="Couldn't load this album" body={sentence(errorMessage(detail.error))} action="Try again" onAction={detail.reload} />;
+    if (detail.error) return <MusicMessage title={failedTitle(detail.error, "Couldn't load this album")} body={problem(detail.error)} action="Try again" onAction={detail.reload} />;
     return (
       <div class="music-page" role="status" aria-label="Loading">
         <div class="skeleton" style="position:absolute;left:96px;top:40px;width:220px;height:220px;border-radius:4px" />
