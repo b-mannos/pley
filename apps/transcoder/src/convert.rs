@@ -162,12 +162,18 @@ impl Conversions {
                 }
                 return;
             }
+            let stopped = *conversion.stop.borrow();
             conversion.update(|s| match result {
                 Ok(size) => {
                     tracing::info!(conversion = %s.id, size, "conversion done");
                     s.state = ConversionState::Done;
                     s.progress = 1.0;
                     s.size = Some(size);
+                }
+                Err(err) if stopped => {
+                    tracing::info!(conversion = %s.id, "conversion stopped");
+                    s.state = ConversionState::Failed;
+                    s.error = Some(format!("{err:#}"));
                 }
                 Err(err) => {
                     tracing::warn!(conversion = %s.id, "conversion failed: {err:#}");
