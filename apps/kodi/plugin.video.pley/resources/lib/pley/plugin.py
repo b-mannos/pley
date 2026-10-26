@@ -10,16 +10,16 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 import urllib.parse
-import uuid
 
 import xbmc
 import xbmcgui
 import xbmcplugin
 
 from . import api, auth, caps, discovery, kodi, listing
-from .proxy import path_in
+from .api import path_in
 
 PAGE = 300
 # The quality setting's choices, as the web player's (apps/web/src/player/quality.ts).
@@ -79,7 +79,9 @@ class Plugin:
             li = listing.list_item(base, item)
             li.addContextMenuItems(self.menu(item))
             if item["kind"] in listing.PLAYABLE:
-                entries.append((self.url(route="play", id=item["id"]), li, False))
+                # The resume point goes along, so playing needs no details first.
+                position = (item.get("user_state") or {}).get("position_ms") or 0
+                entries.append((self.url(route="play", id=item["id"], pos=position), li, False))
             else:
                 entries.append((self.url(route="item", id=item["id"]), li, True))
         xbmcplugin.addDirectoryItems(self.handle, entries, len(entries))
@@ -117,14 +119,40 @@ class Plugin:
             handler()
         except api.ApiError as e:
             kodi.log("%s: %s %s" % (route, e.code, e.message), xbmc.LOGWARNING)
-            message = e.message if e.code in ("service_off", "signed_out") else kodi.text("server_error") % e.message
-            if e.code == "signed_out":
+            listing_route = self.handle >= 0 and route not in ACTIONS
+            if e.code == "unreachable" and listing_route:
+                # The server is off or out of reach (the internet needn't be
+                # there: pley works on the home network alone).
+                return self.unreachable()
+            if e.code == "unreachable":
+                message = kodi.text("cant_reach") % self.server_name()
+            elif e.code == "signed_out":
                 message = kodi.text("signed_out")
+            elif e.code == "service_off":
+                message = e.message
+            else:
+                message = kodi.text("server_error") % e.message
             kodi.notify(message, error=True)
             if route == "play":
                 xbmcplugin.setResolvedUrl(self.handle, False, xbmcgui.ListItem())
-            elif self.handle >= 0 and route not in ACTIONS:
+            elif listing_route:
                 self.end(False)
+
+    def server_name(self) -> str:
+        return kodi.setting("server_name") or server_setting()
+
+    def unreachable(self) -> None:
+        """What a listing shows when the server doesn't answer."""
+        li = xbmcgui.ListItem(kodi.text("cant_reach") % self.server_name(), offscreen=True)
+        li.setArt({"icon": "DefaultIconError.png", "thumb": "DefaultIconError.png"})
+        li.getVideoInfoTag().setPlot(kodi.text("cant_reach_hint"))
+        xbmcplugin.addDirectoryItem(self.handle, self.url(route="retry"), li, isFolder=False)
+        self.action(kodi.text("try_again"), {"route": "retry"}, "DefaultAddonsUpdates.png")
+        self.action(kodi.text("choose_server"), {"route": "choose_server"}, "DefaultNetwork.png")
+        self.end()
+
+    def route_retry(self) -> None:
+        xbmc.executebuiltin("Container.Refresh")
 
     def route_root(self) -> None:
         server = server_setting()
@@ -228,10 +256,21 @@ class Plugin:
         self.end()
 
     def route_play(self) -> None:
+        started = time.monotonic()
         client = self.client()
         item_id = int(self.params["id"])
-        detail = client.get("/api/items/%d" % item_id)
-        start_ms = (detail.get("user_state") or {}).get("position_ms", 0) if self.resume else 0
+        listed = self.params.get("pos")
+        details = {}
+        loader = None
+        if self.resume and listed is None:
+            # Not from a listing: the resume point is in the details.
+            details["item"] = client.get("/api/items/%d" % item_id)
+            start_ms = (details["item"].get("user_state") or {}).get("position_ms", 0)
+        else:
+            # The details (for Kodi's info) come while the server decides.
+            start_ms = int(listed or 0) if self.resume else 0
+            loader = threading.Thread(target=load_details, args=(client, item_id, details), daemon=True)
+            loader.start()
         max_bitrate, max_height = QUALITIES[quality_index()]
         request = {
             "item_id": item_id,
@@ -242,28 +281,40 @@ class Plugin:
             "max_height": max_height,
         }
         info = client.post("/api/playback", request)
-        li = listing.list_item(self.proxy_base, detail)
-        listing.video_details(li, detail, self.proxy_base)
-        li.setPath(path_in(self.proxy_base, info["url"]))
+        if loader:
+            loader.join(10)
+        detail = details.get("item")
+        url = path_in(self.proxy_base, info["url"])
+        if detail:
+            li = listing.list_item(self.proxy_base, detail)
+            listing.video_details(li, detail, self.proxy_base)
+        else:
+            li = xbmcgui.ListItem(offscreen=True)
+        li.setPath(url)
         if info.get("hls"):
-            # A file's type comes from Kodi asking the server (HEAD); a
-            # stream's is said here.
             li.setMimeType("application/vnd.apple.mpegurl")
             li.setContentLookup(False)
             # Text subtitles come beside a stream that carries none.
             subtitles = [path_in(self.proxy_base, s["url"]) for s in info.get("subtitles", []) if s.get("url")]
             if subtitles:
                 li.setSubtitles(subtitles)
+        else:
+            # Said here, Kodi needn't ask the server for the file's type first.
+            mime = file_mime(detail, info.get("file_id"))
+            if mime:
+                li.setMimeType(mime)
+                li.setContentLookup(False)
         playing = {
             "item_id": item_id,
+            "file_id": info.get("file_id"),
             "session_id": info["session_id"],
-            "duration_ms": info.get("duration_ms") or detail.get("duration_ms") or 0,
-            "path": path_in(self.proxy_base, info["url"]),
-            "kind": detail["kind"],
+            "duration_ms": info.get("duration_ms") or (detail or {}).get("duration_ms") or 0,
+            "path": url,
         }
         kodi.set_property(kodi.PLAYING, json.dumps(playing))
-        if info.get("reason"):
-            kodi.log("playing %d by %s: %s" % (item_id, info.get("method"), info["reason"]))
+        reason = info.get("reason")
+        elapsed = (time.monotonic() - started) * 1000
+        kodi.log("playing %d by %s, ready in %d ms%s" % (item_id, info.get("method"), elapsed, ": " + reason if reason else ""))
         xbmcplugin.setResolvedUrl(self.handle, True, li)
 
     # ---------------------------------------------------------------- actions
@@ -374,7 +425,43 @@ class Plugin:
 
 
 # Routes that run as actions, with no listing to end.
-ACTIONS = ("play", "watched", "my_list", "settings", "choose_server", "sign_in", "sign_out")
+ACTIONS = ("play", "watched", "my_list", "settings", "choose_server", "sign_in", "sign_out", "retry")
+
+
+MIME = {
+    "mkv": "video/x-matroska",
+    "matroska": "video/x-matroska",
+    "webm": "video/webm",
+    "mp4": "video/mp4",
+    "m4v": "video/mp4",
+    "mov": "video/quicktime",
+    "avi": "video/x-msvideo",
+    "ts": "video/mp2t",
+    "m2ts": "video/mp2t",
+    "mpegts": "video/mp2t",
+    "mp3": "audio/mpeg",
+    "flac": "audio/flac",
+    "m4a": "audio/mp4",
+    "ogg": "audio/ogg",
+    "opus": "audio/ogg",
+    "wav": "audio/wav",
+}
+
+
+def file_mime(detail, file_id):
+    """The type of a file played as it is, from its container (None when
+    unknown, and Kodi asks)."""
+    for file in (detail or {}).get("files") or []:
+        if file.get("id") == file_id:
+            return MIME.get((file.get("container") or "").lower())
+    return None
+
+
+def load_details(client: api.Client, item_id: int, into: dict) -> None:
+    try:
+        into["item"] = client.get("/api/items/%d" % item_id)
+    except api.ApiError as e:
+        kodi.log("details of %d: %s" % (item_id, e.message), xbmc.LOGWARNING)
 
 
 def quality_index() -> int:
@@ -401,7 +488,7 @@ def install_id() -> str:
                 return found
     except OSError:
         pass
-    made = "kodi-" + uuid.uuid4().hex
+    made = "kodi-" + os.urandom(16).hex()
     with open(path, "w", encoding="utf-8") as f:
         f.write(made)
     return made

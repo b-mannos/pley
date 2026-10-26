@@ -73,6 +73,17 @@ class Window:
         Window.properties.pop(key, None)
 
 
+class WindowXMLDialog:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def show(self):
+        pass
+
+    def close(self):
+        pass
+
+
 class Dialog:
     def notification(self, heading, message, icon="", time=0, sound=True):
         pass

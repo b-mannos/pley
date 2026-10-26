@@ -61,6 +61,30 @@ Settings has Sign out and Choose a server.
   seconds, on pause and when it stops, then ends the session, so resume
   points, watched marks and the server's dashboard follow Kodi. A stream
   an administrator stops ends in Kodi with their message.
+- **Skip Intro, Skip Credits and Up Next**, by the web player's rules
+  (`prompts.py`): a button over the video (`overlay.py`,
+  `resources/skins/default/1080i/pley-overlay.xml`), which doesn't pause
+  it, from a marker's start until a second before its end; an episode's
+  credits bring up the next one, which plays after 10 seconds unless it is
+  cancelled, also when the episode ends on its own.
+- **Without the server** (switched off, or another network), every screen
+  says "Can't reach <server>" with Try again and Choose a server. pley
+  needs no internet: sign-in, artwork and playback all come from the
+  server, and nothing else is ever asked.
+
+## How fast
+
+Measured on Kodi 21.3 for Windows, against a server on the same computer:
+
+- A listing takes 20 to 45 ms (the first after Kodi starts about 240 ms):
+  Kodi keeps the plugin's Python between calls (`reuselanguageinvoker`),
+  where loading Python's modules again took about 550 ms of each.
+- Play is ready in 14 to 47 ms: the server's answer and the item's
+  details are asked for together, and the resume point comes with the
+  listing. The file's type comes with it too, so Kodi doesn't ask first.
+- Seeking through the proxy takes as long as from the disk (1.24 to 1.36 s
+  against 1.24 to 1.27 s for this file).
+- A server that is off is said within 4 seconds.
 
 ## Checking it
 
@@ -87,12 +111,12 @@ add-on copied into `portable_data/addons` and Kodi's JSON-RPC on
 on this system) can be driven over TCP port 9090: `Files.GetDirectory` on
 `plugin://plugin.video.pley/…` lists the add-on's screens and `Player.Open`
 plays. Kodi 21.3 on Windows has been through sign-in, every listing, direct
-play with seeking, pause and resume, a converted stream and restarts.
+play with seeking, pause and resume, a converted stream, restarts, Skip
+Intro, Up Next to the next episode, and the server going away and coming
+back.
 
 ## Not yet
 
-- Up Next to the next episode, and Skip Intro and Skip Credits from the
-  server's markers.
 - "Who's watching?" and switching profiles (the `profiles` scope).
 - Making and editing playlists; people's pages.
 - Picture subtitles (PGS, VobSub) with a converted stream: only text

@@ -17,7 +17,6 @@ import json
 import secrets
 import socket
 import threading
-import urllib.parse
 
 from . import api
 from .auth import SignedOut, Tokens
@@ -122,14 +121,17 @@ class _Upstream:
 
     def __init__(self, proxy: Proxy, server: str):
         self.proxy = proxy
-        self.conn = api.connection(server, UPSTREAM_TIMEOUT)
+        self.server = server
+        self.conn = None
         self.sock = None
         self.response = None
 
     def send(self, method: str, path: str, body, headers: dict, token: str) -> http.client.HTTPResponse:
         sent = dict(headers)
         sent["Authorization"] = "Bearer " + token
-        self.conn.connect()
+        # Connected within seconds, or the server is out of reach; answers
+        # may take longer (a conversion's segments).
+        self.conn = api.connect(self.server, UPSTREAM_TIMEOUT)
         self.sock = self.conn.sock
         self.proxy.opened(self.sock)
         self.conn.request(method, path, body=body, headers=sent)
@@ -139,7 +141,8 @@ class _Upstream:
     def close(self) -> None:
         if self.response is not None:
             self.response.close()
-        self.conn.close()
+        if self.conn is not None:
+            self.conn.close()
         if self.sock is not None:
             self.proxy.closed(self.sock)
             self.sock.close()
@@ -297,9 +300,3 @@ def hard_close(sock: socket.socket) -> None:
             socket.socket(fileno=handle).close()
     except OSError:
         pass
-
-
-def path_in(base: str, url: str) -> str:
-    """The proxy's address for an address the server gave ("/api/…")."""
-    parts = urllib.parse.urlsplit(url)
-    return base + parts.path + ("?" + parts.query if parts.query else "")

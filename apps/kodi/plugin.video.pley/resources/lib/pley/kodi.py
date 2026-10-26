@@ -47,6 +47,14 @@ TEXT = {
     "server_error": 30026,
     "settings": 30027,
     "nothing_found": 30030,
+    "skip_intro": 30060,
+    "skip_credits": 30061,
+    "up_next": 30062,
+    "play_now": 30063,
+    "cancel": 30064,
+    "cant_reach": 30065,
+    "try_again": 30066,
+    "cant_reach_hint": 30067,
 }
 
 

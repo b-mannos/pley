@@ -22,7 +22,8 @@ import unittest
 
 import support  # noqa: F401
 from pley import api, auth, caps, service
-from pley.proxy import Proxy, path_in
+from pley.api import path_in
+from pley.proxy import Proxy
 
 PLEY_BIN = os.environ.get("PLEY_BIN")
 FFMPEG_DIR = os.environ.get("PLEY_FFMPEG_DIR")

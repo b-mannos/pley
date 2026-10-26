@@ -5,7 +5,7 @@ from __future__ import annotations
 import xbmc
 import xbmcgui
 
-from .proxy import path_in
+from .api import path_in
 
 # What plays, and what opens a listing.
 PLAYABLE = ("movie", "episode", "track", "extra")

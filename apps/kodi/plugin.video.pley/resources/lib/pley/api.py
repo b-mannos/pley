@@ -8,6 +8,9 @@ import urllib.parse
 
 DEFAULT_PORT = 7539
 TIMEOUT = 20
+# A server that is off answers nothing at all: waiting longer than this to
+# connect tells nobody more.
+CONNECT_TIMEOUT = 4
 
 
 class ApiError(Exception):
@@ -56,10 +59,15 @@ def normalize(address: str) -> str:
     return "{}://{}{}".format(parts.scheme, host, "" if port == default else ":%d" % port)
 
 
-def connection(base: str, timeout: float = TIMEOUT) -> http.client.HTTPConnection:
+def connect(base: str, timeout: float = TIMEOUT) -> http.client.HTTPConnection:
+    """A connection to `base`, made within CONNECT_TIMEOUT, that then waits
+    up to `timeout` for answers."""
     parts = urllib.parse.urlsplit(base)
     kind = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
-    return kind(parts.hostname, parts.port, timeout=timeout)
+    conn = kind(parts.hostname, parts.port, timeout=CONNECT_TIMEOUT)
+    conn.connect()
+    conn.sock.settimeout(timeout)
+    return conn
 
 
 def error_of(response: Response) -> ApiError:
@@ -109,8 +117,9 @@ class Client:
             body = urllib.parse.urlencode(form).encode("utf-8")
             sent["Content-Type"] = "application/x-www-form-urlencoded"
         sent.update(headers or {})
-        conn = connection(self.base, self.timeout)
+        conn = None
         try:
+            conn = connect(self.base, self.timeout)
             conn.request(method, target, body=body, headers=sent)
             answer = conn.getresponse()
             data = answer.read()
@@ -118,7 +127,8 @@ class Client:
         except (OSError, http.client.HTTPException) as e:
             raise ApiError(0, "unreachable", str(e))
         finally:
-            conn.close()
+            if conn is not None:
+                conn.close()
 
     def json(self, method: str, path: str, **kwargs):
         response = self.request(method, path, **kwargs)
@@ -137,3 +147,9 @@ class Client:
 
     def delete(self, path: str):
         return self.json("DELETE", path)
+
+
+def path_in(base: str, url: str) -> str:
+    """The proxy's address for an address the server gave ("/api/…")."""
+    parts = urllib.parse.urlsplit(url)
+    return base + parts.path + ("?" + parts.query if parts.query else "")

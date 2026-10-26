@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Skip Intro, Skip Credits and Up Next over the video (overlay.py). -->
+<window>
+  <defaultcontrol always="true">3001</defaultcontrol>
+  <zorder>1</zorder>
+  <controls>
+    <control type="group">
+      <right>80</right>
+      <bottom>150</bottom>
+      <width>620</width>
+      <height>160</height>
+      <control type="label" id="3003">
+        <left>0</left>
+        <top>0</top>
+        <width>620</width>
+        <height>50</height>
+        <align>right</align>
+        <aligny>center</aligny>
+        <font>font13</font>
+        <textcolor>FFFFFFFF</textcolor>
+        <shadowcolor>FF000000</shadowcolor>
+      </control>
+      <control type="grouplist">
+        <right>0</right>
+        <top>70</top>
+        <width>620</width>
+        <height>72</height>
+        <orientation>horizontal</orientation>
+        <align>right</align>
+        <itemgap>16</itemgap>
+        <control type="button" id="3002">
+          <width>200</width>
+          <height>72</height>
+          <font>font13</font>
+          <align>center</align>
+          <aligny>center</aligny>
+          <textcolor>FFFFFFFF</textcolor>
+          <focusedcolor>FF0F172A</focusedcolor>
+          <texturenofocus colordiffuse="B3000000">pley-white.png</texturenofocus>
+          <texturefocus colordiffuse="FF38BDF8">pley-white.png</texturefocus>
+          <onright>3001</onright>
+        </control>
+        <control type="button" id="3001">
+          <width>300</width>
+          <height>72</height>
+          <font>font13</font>
+          <align>center</align>
+          <aligny>center</aligny>
+          <textcolor>FFFFFFFF</textcolor>
+          <focusedcolor>FF0F172A</focusedcolor>
+          <texturenofocus colordiffuse="B3000000">pley-white.png</texturenofocus>
+          <texturefocus colordiffuse="FF38BDF8">pley-white.png</texturefocus>
+          <onleft>3002</onleft>
+        </control>
+      </control>
+    </control>
+  </controls>
+</window>

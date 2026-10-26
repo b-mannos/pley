@@ -113,6 +113,38 @@ msgctxt "#30030"
 msgid "Nothing found"
 msgstr ""
 
+msgctxt "#30060"
+msgid "Skip Intro"
+msgstr ""
+
+msgctxt "#30061"
+msgid "Skip Credits"
+msgstr ""
+
+msgctxt "#30062"
+msgid "Up next: %s"
+msgstr ""
+
+msgctxt "#30063"
+msgid "Play now (%d)"
+msgstr ""
+
+msgctxt "#30064"
+msgid "Cancel"
+msgstr ""
+
+msgctxt "#30065"
+msgid "Can't reach %s"
+msgstr ""
+
+msgctxt "#30066"
+msgid "Try again"
+msgstr ""
+
+msgctxt "#30067"
+msgid "Check that the server is on and that this device is on its network. pley doesn't need the internet."
+msgstr ""
+
 # Settings
 
 msgctxt "#30040"

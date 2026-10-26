@@ -9,7 +9,8 @@ import unittest
 
 import support
 from pley import auth
-from pley.proxy import Proxy, path_in
+from pley.api import path_in
+from pley.proxy import Proxy
 
 SECRET = "s3cret"
 MOVIE = bytes(range(256)) * 12_000  # 3 MB
@@ -141,6 +142,15 @@ class ProxyTest(unittest.TestCase):
         self.assertEqual(self.server.requests[-1].path, "/api/oauth/revoke")
         response, data = self.ask("GET", "/%s/api/libraries" % SECRET)
         self.assertEqual((response.status, json.loads(data)["code"]), (401, "signed_out"))
+
+    def test_a_server_out_of_reach_is_said_within_seconds(self):
+        # 192.0.2.1 is for documentation: nothing ever answers there, as a
+        # server that is switched off doesn't.
+        self.store.save(dict(self.store.load(), server="http://192.0.2.1:7539"))
+        started = time.monotonic()
+        response, data = self.ask("GET", "/%s/api/hubs/home" % SECRET)
+        self.assertEqual((response.status, json.loads(data)["code"]), (502, "unreachable"))
+        self.assertLess(time.monotonic() - started, 7)
 
     def test_stopping_ends_every_connection_at_once(self):
         # Kodi kills the service when its threads outlive 5 seconds.
