@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import http.client
 import json
+import socket
 import urllib.parse
 
 DEFAULT_PORT = 7539
@@ -59,9 +59,13 @@ def normalize(address: str) -> str:
     return "{}://{}{}".format(parts.scheme, host, "" if port == default else ":%d" % port)
 
 
-def connect(base: str, timeout: float = TIMEOUT) -> http.client.HTTPConnection:
-    """A connection to `base`, made within CONNECT_TIMEOUT, that then waits
-    up to `timeout` for answers."""
+def connect(base: str, timeout: float = TIMEOUT):
+    """An http.client connection to `base`, made within CONNECT_TIMEOUT, that
+    then waits up to `timeout` for answers."""
+    # Loaded when first needed: with ssl and email it is most of what a
+    # listing loads, and the plugin's own requests go without it (local).
+    import http.client
+
     parts = urllib.parse.urlsplit(base)
     kind = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
     conn = kind(parts.hostname, parts.port, timeout=CONNECT_TIMEOUT)
@@ -86,12 +90,16 @@ class Client:
     """Requests to `base` (a server, or the proxy's address with its secret
     path), with `token` as a bearer token when given."""
 
-    def __init__(self, base: str, user_agent: str, token: str | None = None, timeout: float = TIMEOUT):
+    def __init__(
+        self, base: str, user_agent: str, token: str | None = None, timeout: float = TIMEOUT, local: bool = False
+    ):
         self.base = base.rstrip("/")
         self.prefix = urllib.parse.urlsplit(self.base).path
         self.user_agent = user_agent
         self.token = token
         self.timeout = timeout
+        # The service's proxy, on this computer: plain HTTP over a socket.
+        self.local = local
 
     def request(
         self,
@@ -117,6 +125,10 @@ class Client:
             body = urllib.parse.urlencode(form).encode("utf-8")
             sent["Content-Type"] = "application/x-www-form-urlencoded"
         sent.update(headers or {})
+        if self.local:
+            return local_request(self.base, method, target, sent, body, self.timeout)
+        import http.client
+
         conn = None
         try:
             conn = connect(self.base, self.timeout)
@@ -153,3 +165,39 @@ def path_in(base: str, url: str) -> str:
     """The proxy's address for an address the server gave ("/api/…")."""
     parts = urllib.parse.urlsplit(url)
     return base + parts.path + ("?" + parts.query if parts.query else "")
+
+
+def local_request(base: str, method: str, target: str, headers: dict, body, timeout: float) -> Response:
+    """One request to the service's proxy: HTTP/1.1 with the connection
+    closed after the answer, which the proxy always sends whole (with its
+    length, or ending with the connection)."""
+    parts = urllib.parse.urlsplit(base)
+    lines = ["%s %s HTTP/1.1" % (method, target), "Host: %s:%d" % (parts.hostname, parts.port), "Connection: close"]
+    lines += ["%s: %s" % (name, value) for name, value in headers.items()]
+    if body is not None:
+        lines.append("Content-Length: %d" % len(body))
+    request = ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1") + (body or b"")
+    chunks = []
+    try:
+        with socket.create_connection((parts.hostname, parts.port), timeout=CONNECT_TIMEOUT) as sock:
+            sock.settimeout(timeout)
+            sock.sendall(request)
+            while True:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+    except OSError as e:
+        raise ApiError(0, "unreachable", str(e))
+    head, _, rest = b"".join(chunks).partition(b"\r\n\r\n")
+    status_line, *header_lines = head.decode("latin-1").split("\r\n")
+    try:
+        status = int(status_line.split(" ")[1])
+    except (IndexError, ValueError):
+        raise ApiError(0, "unreachable", "no answer from pley's service")
+    answer_headers = {}
+    for line in header_lines:
+        name, _, value = line.partition(":")
+        answer_headers[name.strip().lower()] = value.strip()
+    length = answer_headers.get("content-length")
+    return Response(status, answer_headers, rest[: int(length)] if length and length.isdigit() else rest)

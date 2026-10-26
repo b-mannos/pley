@@ -29,7 +29,11 @@ Open the add-on and choose a server: pley servers on the local network
 answer a broadcast (docs/API.md; `pley?` on UDP port 7539), and any other
 is typed in (`192.168.1.5`, `nas.local:7539`, `https://pley.example.com`).
 Kodi then shows a code, typed on the server's `/link` page from a phone
-or computer where someone is signed in, as on pley's Android TV app. The
+or computer where someone is signed in, as on pley's Android TV app, and
+the same as a QR code the server draws (`signin.py`,
+`resources/skins/default/1080i/pley-signin.xml`). The link page names
+this Kodi by what its User-Agent says (`pleyKodi/0.1.0 (Kodi 21.3;
+Windows)`), so two of them can be told apart. The
 add-on is one of pley's own apps (`https://hhaidar.github.io/pley/oauth/kodi.json`):
 it signs in only with a code and gets a viewer's rights, whoever allows it.
 Settings has Sign out and Choose a server.
@@ -76,12 +80,24 @@ Settings has Sign out and Choose a server.
 
 Measured on Kodi 21.3 for Windows, against a server on the same computer:
 
-- A listing takes 20 to 45 ms (the first after Kodi starts about 240 ms):
-  Kodi keeps the plugin's Python between calls (`reuselanguageinvoker`),
-  where loading Python's modules again took about 550 ms of each.
-- Play is ready in 14 to 47 ms: the server's answer and the item's
-  details are asked for together, and the resume point comes with the
-  listing. The file's type comes with it too, so Kodi doesn't ask first.
+- A listing takes 8 to 22 ms in the plugin, 15 to 45 ms asked through
+  Kodi's JSON-RPC: Kodi keeps the plugin's Python between calls
+  (`reuselanguageinvoker`), where loading Python's modules again took
+  about 550 ms of each. The first after Kodi starts takes about 200 ms
+  more: Kodi's Python on Windows has its standard library as source only,
+  compiled as it loads, so the plugin loads little (`json` and
+  `urllib.parse`); its requests to the proxy go over a socket of its own,
+  without `http.client`, `ssl` and `email`.
+- Play is ready in 9 to 13 ms (45 ms the first time after Kodi starts):
+  the server's answer and the item's details are asked for together, the
+  resume point and the file's type come with the listing, so Kodi doesn't
+  ask first, and what this Kodi is (its version and platform, for the
+  User-Agent) is asked once: each such question waits for Kodi's GUI,
+  which is busy for whole frames while playback starts (110 to 480 ms
+  when it was asked every time).
+- The service starts with Kodi, in the background, loading in about 0.5 s
+  (1 s while Python's `http.server` still read the Windows registry's MIME
+  types as it loaded, which the proxy never uses).
 - Seeking through the proxy takes as long as from the disk (1.24 to 1.36 s
   against 1.24 to 1.27 s for this file).
 - A server that is off is said within 4 seconds.

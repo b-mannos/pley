@@ -11,12 +11,19 @@ other programs (and web pages) on this computer out.
 
 from __future__ import annotations
 
+import base64
 import http.client
-import http.server
 import json
-import secrets
+import mimetypes
+import os
 import socket
 import threading
+
+# Python 3.8's http.server reads the system's MIME types as it loads (on
+# Windows from the registry, about half a second of a Kodi start); the
+# proxy never uses them.
+mimetypes.inited = True
+import http.server  # noqa: E402
 
 from . import api
 from .auth import SignedOut, Tokens
@@ -40,7 +47,9 @@ UPSTREAM_TIMEOUT = 120
 
 
 def new_secret() -> str:
-    return secrets.token_urlsafe(24)
+    """192 random bits, as secrets.token_urlsafe(24) makes them (without
+    loading what secrets loads)."""
+    return base64.urlsafe_b64encode(os.urandom(24)).decode("ascii").rstrip("=")
 
 
 class Proxy:

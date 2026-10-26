@@ -49,10 +49,6 @@ msgctxt "#30010"
 msgid "Sign in"
 msgstr ""
 
-msgctxt "#30011"
-msgid "On your phone or computer, open [B]%s[/B] and type the code [B]%s[/B]"
-msgstr ""
-
 msgctxt "#30012"
 msgid "Signed in as %s"
 msgstr ""
@@ -143,6 +139,26 @@ msgstr ""
 
 msgctxt "#30067"
 msgid "Check that the server is on and that this device is on its network. pley doesn't need the internet."
+msgstr ""
+
+msgctxt "#30070"
+msgid "On your phone or computer, go to"
+msgstr ""
+
+msgctxt "#30071"
+msgid "and enter this code"
+msgstr ""
+
+msgctxt "#30072"
+msgid "Or scan this"
+msgstr ""
+
+msgctxt "#30073"
+msgid "Waiting for approval. The code works for %d more minutes."
+msgstr ""
+
+msgctxt "#30074"
+msgid "Waiting for approval. The code works for less than a minute more."
 msgstr ""
 
 # Settings

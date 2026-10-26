@@ -3,6 +3,7 @@ properties the plugin and the service talk through, and what this Kodi is."""
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 
@@ -31,7 +32,6 @@ TEXT = {
     "enter_address": 30007,
     "looking": 30009,
     "sign_in": 30010,
-    "sign_in_steps": 30011,
     "signed_in_as": 30012,
     "signed_out": 30013,
     "code_expired": 30014,
@@ -55,6 +55,8 @@ TEXT = {
     "cant_reach": 30065,
     "try_again": 30066,
     "cant_reach_hint": 30067,
+    "waiting": 30073,
+    "waiting_last_minute": 30074,
 }
 
 
@@ -84,6 +86,10 @@ def profile_dir() -> str:
     return path
 
 
+def temp_dir() -> str:
+    return xbmcvfs.translatePath("special://temp/")
+
+
 def addon_dir() -> str:
     return xbmcvfs.translatePath(addon().getAddonInfo("path"))
 
@@ -109,11 +115,16 @@ def clear_property(name: str) -> None:
     xbmcgui.Window(HOME).clearProperty(name)
 
 
+# What this Kodi is doesn't change while it runs, and the plugin's Python
+# lives as long (reuselanguageinvoker): asked once. Each answer waits for
+# Kodi's GUI, which is busy for whole frames while playback starts.
+@functools.lru_cache(maxsize=None)
 def kodi_version() -> str:
     """"21.3" of "21.3 (21.3.0) Git:…"."""
     return xbmc.getInfoLabel("System.BuildVersion").split(" ")[0] or "unknown"
 
 
+@functools.lru_cache(maxsize=None)
 def platform() -> str:
     for condition, name in (
         ("System.Platform.Android", "Android"),
@@ -128,6 +139,7 @@ def platform() -> str:
     return "unknown"
 
 
+@functools.lru_cache(maxsize=None)
 def is_coreelec() -> bool:
     try:
         with open("/etc/os-release", encoding="utf-8") as release:
@@ -136,6 +148,7 @@ def is_coreelec() -> bool:
         return False
 
 
+@functools.lru_cache(maxsize=None)
 def user_agent() -> str:
     version = addon().getAddonInfo("version")
     return "pleyKodi/{} (Kodi {}; {})".format(version, kodi_version(), platform())

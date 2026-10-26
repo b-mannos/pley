@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import threading
 import time
 import urllib.parse
 
@@ -18,7 +17,7 @@ import xbmc
 import xbmcgui
 import xbmcplugin
 
-from . import api, auth, caps, discovery, kodi, listing
+from . import api, kodi, listing
 from .api import path_in
 
 PAGE = 300
@@ -53,7 +52,7 @@ class Plugin:
     def client(self) -> api.Client:
         if not self.proxy_base:
             self.proxy_base = self.proxy()
-        return api.Client(self.proxy_base, kodi.user_agent(), timeout=60)
+        return api.Client(self.proxy_base, kodi.user_agent(), timeout=60, local=True)
 
     def status(self) -> dict:
         client = self.client()
@@ -136,6 +135,12 @@ class Plugin:
             if route == "play":
                 xbmcplugin.setResolvedUrl(self.handle, False, xbmcgui.ListItem())
             elif listing_route:
+                self.end(False)
+        finally:
+            if route in ACTIONS and route != "play" and self.handle >= 0:
+                # An action opened as a folder (a skin's widget, JSON-RPC)
+                # lists nothing: Kodi keeps its Python between calls and
+                # waits for this, where it once waited for the script's end.
                 self.end(False)
 
     def server_name(self) -> str:
@@ -256,7 +261,7 @@ class Plugin:
         self.end()
 
     def route_play(self) -> None:
-        started = time.monotonic()
+        started = time.perf_counter()
         client = self.client()
         item_id = int(self.params["id"])
         listed = self.params.get("pos")
@@ -269,6 +274,8 @@ class Plugin:
         else:
             # The details (for Kodi's info) come while the server decides.
             start_ms = int(listed or 0) if self.resume else 0
+            import threading
+
             loader = threading.Thread(target=load_details, args=(client, item_id, details), daemon=True)
             loader.start()
         max_bitrate, max_height = QUALITIES[quality_index()]
@@ -313,7 +320,7 @@ class Plugin:
         }
         kodi.set_property(kodi.PLAYING, json.dumps(playing))
         reason = info.get("reason")
-        elapsed = (time.monotonic() - started) * 1000
+        elapsed = (time.perf_counter() - started) * 1000
         kodi.log("playing %d by %s, ready in %d ms%s" % (item_id, info.get("method"), elapsed, ": " + reason if reason else ""))
         xbmcplugin.setResolvedUrl(self.handle, True, li)
 
@@ -340,6 +347,8 @@ class Plugin:
         progress = xbmcgui.DialogProgressBG()
         progress.create("pley", kodi.text("looking"))
         try:
+            from . import discovery
+
             servers = discovery.find()
         finally:
             progress.close()
@@ -359,6 +368,8 @@ class Plugin:
                 return dialog.ok("pley", kodi.text("not_pley") % typed)
             name, server_id = server.split("://", 1)[1], ""
         try:
+            from . import auth
+
             auth.metadata(server, kodi.user_agent())
         except api.ApiError as e:
             kodi.log("%s isn't a pley server: %s" % (server, e.message), xbmc.LOGWARNING)
@@ -389,39 +400,54 @@ class Plugin:
             pass
 
     def sign_in(self, server: str, name: str, server_id: str) -> None:
-        dialog = xbmcgui.Dialog()
+        from . import auth, signin
+
         flow = auth.DeviceSignIn(server, kodi.user_agent())
         started = flow.start()
-        progress = xbmcgui.DialogProgress()
-        steps = kodi.text("sign_in_steps") % (started["verification_uri"], started["user_code"])
-        progress.create(kodi.text("sign_in_to") % name, steps)
         expires = time.time() + int(started.get("expires_in") or 600)
+        qr = fetch_qr(server, started["user_code"])
+        window = signin.SignIn("pley-signin.xml", kodi.addon_dir(), "default", "1080i")
+        window.fill(
+            kodi.text("sign_in_to") % name,
+            started["verification_uri"],
+            started["user_code"],
+            waiting_text(expires - time.time()),
+            qr,
+        )
+        window.show()
+        outcome = None
         try:
-            while True:
+            while outcome is None:
                 waited = 0.0
                 while waited < flow.interval:
-                    if progress.iscanceled():
+                    if window.cancelled:
                         return
-                    xbmc.sleep(250)
-                    waited += 0.25
-                left = max(expires - time.time(), 0)
-                progress.update(int(100 * left / max(int(started.get("expires_in") or 600), 1)), steps)
+                    xbmc.sleep(200)
+                    waited += 0.2
+                left = expires - time.time()
+                window.set_status(waiting_text(left))
                 state, tokens = flow.poll(started["device_code"])
                 if state == "allowed":
                     store = auth.Store(os.path.join(kodi.profile_dir(), "tokens.json"))
                     store.save(flow.record(tokens, name, server_id))
                     me = api.Client(server, kodi.user_agent(), tokens["access_token"]).get("/api/auth/me")
-                    kodi.notify(kodi.text("signed_in_as") % me.get("name", me.get("username", "")))
-                    xbmc.executebuiltin("Container.Refresh")
-                    return
-                if state == "denied":
-                    progress.close()
-                    return dialog.ok("pley", kodi.text("code_refused"))
-                if state == "expired" or left <= 0:
-                    progress.close()
-                    return dialog.ok("pley", kodi.text("code_expired"))
+                    outcome = kodi.text("signed_in_as") % me.get("name", me.get("username", ""))
+                elif state == "denied":
+                    outcome = kodi.text("code_refused")
+                elif state == "expired" or left <= 0:
+                    outcome = kodi.text("code_expired")
         finally:
-            progress.close()
+            window.close()
+            if qr:
+                try:
+                    os.remove(qr)
+                except OSError:
+                    pass
+        if state == "allowed":
+            kodi.notify(outcome)
+            xbmc.executebuiltin("Container.Refresh")
+        else:
+            xbmcgui.Dialog().ok("pley", outcome)
 
 
 # Routes that run as actions, with no listing to end.
@@ -455,6 +481,29 @@ def file_mime(detail, file_id):
         if file.get("id") == file_id:
             return MIME.get((file.get("container") or "").lower())
     return None
+
+
+def fetch_qr(server: str, user_code: str) -> str:
+    """The server's QR code of where to type `user_code`, as a file for Kodi
+    to show; "" when the server draws none (it predates them)."""
+    code = user_code.replace("-", "")
+    try:
+        answer = api.Client(server, kodi.user_agent()).request("GET", "/api/oauth/device/qr", query={"code": code})
+    except api.ApiError:
+        return ""
+    if answer.status != 200 or not answer.body.startswith(b"\x89PNG"):
+        return ""
+    path = os.path.join(kodi.temp_dir(), "pley-qr-%s.png" % code)
+    with open(path, "wb") as f:
+        f.write(answer.body)
+    return path
+
+
+def waiting_text(seconds_left: float) -> str:
+    minutes = int(seconds_left // 60)
+    if minutes < 1:
+        return kodi.text("waiting_last_minute")
+    return kodi.text("waiting") % minutes
 
 
 def load_details(client: api.Client, item_id: int, into: dict) -> None:
@@ -495,6 +544,8 @@ def install_id() -> str:
 
 
 def report() -> dict:
+    from . import caps
+
     settings = {
         name: kodi.setting_value(name)
         for name in ["audiooutput.passthrough", "audiooutput.channels"] + [n for n, _ in caps.PASSTHROUGH]

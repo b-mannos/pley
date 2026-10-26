@@ -8,7 +8,7 @@ import time
 import unittest
 
 import support
-from pley import auth
+from pley import api, auth
 from pley.api import path_in
 from pley.proxy import Proxy
 
@@ -142,6 +142,27 @@ class ProxyTest(unittest.TestCase):
         self.assertEqual(self.server.requests[-1].path, "/api/oauth/revoke")
         response, data = self.ask("GET", "/%s/api/libraries" % SECRET)
         self.assertEqual((response.status, json.loads(data)["code"]), (401, "signed_out"))
+
+    def test_the_plugins_own_client_reads_the_proxys_answers(self):
+        # The plugin talks to the proxy over a socket of its own (no
+        # http.client to load): JSON, bodies, big answers and refusals.
+        client = api.Client(self.proxy.base, "pleyKodi/test", timeout=10, local=True)
+        self.assertEqual(client.get("/status"), {"signed_in": True, "server": self.server.url})
+        self.assertEqual(client.get("/api/libraries", sort="title"), {"path": "/api/libraries?sort=title", "agent": "pleyKodi/test"})
+        body = {"position_ms": 5000, "state": "playing"}
+        self.assertEqual(client.post("/api/progress", body), body)
+        self.assertEqual(self.server.requests[-1].headers["content-type"], "application/json")
+        movie = client.request("GET", "/api/files/7/stream")
+        self.assertEqual((movie.status, movie.body), (200, MOVIE))
+        self.assertEqual(movie.headers["content-type"], "video/x-matroska")
+        self.store.clear()
+        with self.assertRaises(api.ApiError) as refused:
+            client.get("/api/libraries")
+        self.assertEqual((refused.exception.status, refused.exception.code), (401, "signed_out"))
+        self.proxy.stop()
+        with self.assertRaises(api.ApiError) as down:
+            client.get("/status")
+        self.assertEqual((down.exception.status, down.exception.code), (0, "unreachable"))
 
     def test_a_server_out_of_reach_is_said_within_seconds(self):
         # 192.0.2.1 is for documentation: nothing ever answers there, as a
