@@ -10,5 +10,7 @@ import { dirname, join } from "node:path";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const out = join(root, "out");
 mkdirSync(out, { recursive: true });
-const bin = process.platform === "win32" ? "ares-package.cmd" : "ares-package";
-execFileSync(bin, [join(root, "dist"), "--outdir", out, "--no-minify"], { stdio: "inherit", shell: process.platform === "win32" });
+const args = [join(root, "dist"), "--outdir", out, "--no-minify"];
+// Windows runs the CLI's .cmd through cmd.
+if (process.platform === "win32") execFileSync("cmd.exe", ["/d", "/c", "ares-package.cmd"].concat(args), { stdio: "inherit" });
+else execFileSync("ares-package", args, { stdio: "inherit" });
