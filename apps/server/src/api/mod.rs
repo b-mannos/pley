@@ -122,7 +122,7 @@ pub fn router(state: AppState) -> Router {
         .route("/playback/{session}/{file}", get(playback::hls_file))
         .route("/files/{id}/stream", get(playback::stream_file))
         .route("/conversions", post(playback::convert))
-        .route("/conversions/{id}", get(playback::conversion))
+        .route("/conversions/{id}", get(playback::conversion).delete(playback::cancel_conversion))
         .route("/conversions/{id}/file", get(playback::conversion_file))
         .route("/files/{id}/subtitles/{file}", get(playback::subtitles))
         .route("/files/{id}/trickplay", get(playback::trickplay))

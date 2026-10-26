@@ -393,6 +393,17 @@ impl Transcoder {
         if resp.status().is_success() || resp.status().as_u16() == 416 { Ok(resp) } else { Err(api_error(resp).await) }
     }
 
+    /// Stops a conversion and deletes what it made (gone already is fine).
+    pub async fn delete_conversion(&self, id: &str) -> TranscoderResult<()> {
+        let base = self.base()?;
+        let resp = self
+            .authed(self.http.delete(format!("{base}/v1/conversions/{id}")))
+            .timeout(Duration::from_secs(20))
+            .send()
+            .await?;
+        if resp.status().is_success() || resp.status().as_u16() == 404 { Ok(()) } else { Err(api_error(resp).await) }
+    }
+
     pub async fn delete_job(&self, id: &str) -> TranscoderResult<()> {
         let base = self.base()?;
         let resp = self

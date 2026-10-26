@@ -1242,6 +1242,11 @@ impl Sessions {
         self.conversions.lock().get(id).copied()
     }
 
+    /// Conversion `id` was stopped: unknown until asked for again.
+    pub fn forget_conversion(&self, id: &str) {
+        self.conversions.lock().remove(id);
+    }
+
     pub fn insert(&self, session: Session) -> Arc<Session> {
         let session = Arc::new(session);
         let mut map = self.map.lock();

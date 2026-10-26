@@ -6,7 +6,8 @@
 //! others. Asked again for the same input and request, the same conversion
 //! answers, or the file it made. The files live in `conversions/` under the
 //! work folder, which the janitor prunes ([`crate::cache`]); reading one
-//! counts as using it.
+//! counts as using it. One left waiting while nobody asks about it isn't
+//! made.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -20,6 +21,7 @@ use pley_transcoder_api::{ConversionState, ConversionStatus, JobRequest, MediaIn
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{Semaphore, watch};
+use tokio::time::Instant;
 
 use crate::adaptive::AUTO;
 use crate::error::{ApiError, ApiResult};
@@ -36,6 +38,10 @@ const TAIL_LINES: usize = 6;
 /// The software encoder's preset when the plan leaves it to the transcoder:
 /// a file isn't made in real time, so it can take a little more care.
 const SOFTWARE_PRESET: &str = "fast";
+/// A conversion nobody asked for or about this long while it waited (the
+/// device that wanted it went) isn't made when its turn comes. Devices
+/// look every few seconds; one that sleeps a while asks again on waking.
+const UNCLAIMED_AFTER: Duration = Duration::from_secs(60 * 60);
 
 pub struct Conversions {
     ff: Arc<Ffmpeg>,
@@ -52,11 +58,17 @@ struct Conversion {
     status: Mutex<ConversionStatus>,
     /// Set when the conversion is removed (or the transcoder stops): FFmpeg goes.
     stop: watch::Sender<bool>,
+    /// When it was last asked for or about.
+    asked: Mutex<Instant>,
 }
 
 impl Conversion {
     fn new(status: ConversionStatus) -> Arc<Self> {
-        Arc::new(Self { status: Mutex::new(status), stop: watch::channel(false).0 })
+        Arc::new(Self { status: Mutex::new(status), stop: watch::channel(false).0, asked: Mutex::new(Instant::now()) })
+    }
+
+    fn asked_now(&self) {
+        *self.asked.lock() = Instant::now();
     }
 
     fn update(&self, change: impl FnOnce(&mut ConversionStatus)) {
@@ -126,6 +138,7 @@ impl Conversions {
         let conversion = {
             let mut items = self.items.lock();
             if let Some(found) = items.get(&id).filter(|c| c.status.lock().state != ConversionState::Failed) {
+                found.asked_now();
                 return Ok(found.status.lock().clone());
             }
             if let Some(status) = self.finished(&id, duration_ms) {
@@ -141,6 +154,14 @@ impl Conversions {
         let this = self.clone();
         tokio::spawn(async move {
             let result = this.convert(&conversion, req).await;
+            if result.as_ref().is_err_and(|err| err.is::<Unclaimed>()) {
+                tracing::info!(conversion = %id, "conversion dropped: nobody asked about it while it waited");
+                let mut items = this.items.lock();
+                if items.get(&id).is_some_and(|c| Arc::ptr_eq(c, &conversion)) {
+                    items.remove(&id);
+                }
+                return;
+            }
             conversion.update(|s| match result {
                 Ok(size) => {
                     tracing::info!(conversion = %s.id, size, "conversion done");
@@ -161,6 +182,7 @@ impl Conversions {
     /// Conversion `id` as it stands; one made before a restart is known by its file.
     pub fn status(&self, id: &str) -> Option<ConversionStatus> {
         if let Some(found) = self.items.lock().get(id) {
+            found.asked_now();
             return Some(found.status.lock().clone());
         }
         self.finished(id, 0)
@@ -226,6 +248,9 @@ impl Conversions {
             turn = self.turn.clone().acquire_owned() => turn?,
             () = conversion.stopped() => bail!("removed"),
         };
+        if conversion.asked.lock().elapsed() > UNCLAIMED_AFTER {
+            return Err(Unclaimed.into());
+        }
         let id = conversion.status.lock().id.clone();
         let input = PathBuf::from(&req.input);
         let media: Arc<MediaInfo> = match req
@@ -327,6 +352,18 @@ impl Conversions {
         Ok(tokio::fs::metadata(&path).await?.len())
     }
 }
+
+/// Why a conversion wasn't made: nobody asked about it while it waited.
+#[derive(Debug)]
+struct Unclaimed;
+
+impl std::fmt::Display for Unclaimed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("nobody asked about it while it waited")
+    }
+}
+
+impl std::error::Error for Unclaimed {}
 
 /// The file being made for `path`.
 fn part_of(path: &Path) -> PathBuf {
@@ -553,6 +590,55 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "h264,90");
+    }
+
+    /// One left waiting while nobody asks about it (its device went) isn't
+    /// made when its turn comes, and asking again starts it again; one
+    /// asked about goes on.
+    #[tokio::test(start_paused = true)]
+    async fn a_conversion_nobody_asks_about_while_it_waits_is_dropped() {
+        use pley_transcoder_api::{Capabilities, Limits};
+        let dir = tempfile::tempdir().unwrap();
+        let input = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, b"not media").unwrap();
+            path.to_string_lossy().into_owned()
+        };
+        // FFmpeg and FFprobe that aren't there: nothing here gets as far as running them.
+        let ff = Arc::new(Ffmpeg {
+            ffmpeg: "pley-test-no-ffmpeg".into(),
+            ffprobe: "pley-test-no-ffprobe".into(),
+            caps: Capabilities { ffmpeg_available: true, ffprobe_available: true, ..Default::default() },
+            segment_times_relative: true,
+        });
+        let metrics = Arc::new(crate::metrics::Metrics::default());
+        let prober = Arc::new(Prober::new(ff.clone(), metrics, 1));
+        let slots = Arc::new(Slots::new(&Limits { max_jobs: 2, max_hw_jobs: 0 }));
+        let conversions = Conversions::new(ff, prober, slots, None, dir.path().join("conversions"));
+        // Another conversion's turn.
+        let turn = conversions.turn.clone().acquire_owned().await.unwrap();
+        let left_input = input("left.mkv");
+        let left = conversions.create(JobRequest { input: left_input.clone(), ..Default::default() }).await.unwrap();
+        let wanted = conversions.create(JobRequest { input: input("wanted.mkv"), ..Default::default() }).await.unwrap();
+        assert_eq!((left.state, wanted.state), (ConversionState::Queued, ConversionState::Queued));
+
+        tokio::time::advance(UNCLAIMED_AFTER - Duration::from_secs(60)).await;
+        assert!(conversions.status(&wanted.id).is_some());
+        tokio::time::advance(Duration::from_secs(120)).await;
+        drop(turn);
+        // Watched without asking about it: a look would count as one.
+        let known = |id: &str| conversions.items.lock().contains_key(id);
+        for _ in 0..100 {
+            if !known(&left.id) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(!known(&left.id), "dropped");
+        assert!(conversions.status(&left.id).is_none());
+        assert!(conversions.status(&wanted.id).is_some(), "made (here it fails: no FFprobe)");
+        let again = conversions.create(JobRequest { input: left_input, ..Default::default() }).await.unwrap();
+        assert_eq!((again.id, again.state), (left.id, ConversionState::Queued));
     }
 
     #[test]

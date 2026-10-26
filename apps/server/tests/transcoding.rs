@@ -73,6 +73,10 @@ struct Fake {
     tracks: Arc<Mutex<Vec<SubtitleRequest>>>,
     /// Conversions asked for, in order.
     conversions: Arc<Mutex<Vec<JobRequest>>>,
+    /// The conversion is still being made when looked at (else done).
+    conversion_running: Arc<AtomicBool>,
+    /// Conversions stopped, in order.
+    conversions_deleted: Arc<Mutex<Vec<String>>>,
 }
 
 /// The stand-in's one conversion: running when asked for, done when looked at again.
@@ -418,9 +422,19 @@ async fn start_fake() -> (Fake, String) {
         )
         .route(
             "/v1/conversions/{id}",
-            get(|Path(id): Path<String>| async move {
+            get(|State(fake): State<Fake>, Path(id): Path<String>| async move {
                 if id != CONVERSION {
                     return error(StatusCode::NOT_FOUND, "not_found");
+                }
+                if fake.conversion_running.load(Ordering::SeqCst) {
+                    return Json(ConversionStatus {
+                        id,
+                        state: ConversionState::Running,
+                        progress: 0.5,
+                        duration_ms: 60_000,
+                        ..Default::default()
+                    })
+                    .into_response();
                 }
                 Json(ConversionStatus {
                     id,
@@ -431,6 +445,10 @@ async fn start_fake() -> (Fake, String) {
                     ..Default::default()
                 })
                 .into_response()
+            })
+            .delete(|State(fake): State<Fake>, Path(id): Path<String>| async move {
+                fake.conversions_deleted.lock().push(id);
+                StatusCode::NO_CONTENT
             }),
         )
         .route(
@@ -603,6 +621,33 @@ async fn a_download_the_player_cannot_play_is_converted_and_comes_with_ranges() 
         assert_eq!(app.get(&path, &other).await.status, StatusCode::NOT_FOUND, "{path}");
     }
     assert_eq!(app.get("/api/conversions/ffffffffffffffffffffffffffffffff", admin).await.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_conversion_stops_when_its_download_goes_unless_its_file_is_made() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let feature = w.movies["Feature"];
+    let ask = || app.post("/api/conversions", admin, json!({"item_id": feature, "caps": phone()}));
+    assert_eq!(ask().await.status, StatusCode::OK);
+    let path = format!("/api/conversions/{CONVERSION}");
+
+    // Someone who can't see the movie can't stop it.
+    let (other, _) = app.user(admin, "other", json!({"all_libraries": false, "library_ids": []})).await;
+    assert_eq!(app.delete(&path, &other).await.status, StatusCode::NOT_FOUND);
+
+    // Made: the file stays for whoever asks for the same next.
+    assert_eq!(app.delete(&path, admin).await.status, StatusCode::NO_CONTENT);
+    assert!(w.fake.conversions_deleted.lock().is_empty());
+    assert_eq!(app.get(&path, admin).await.status, StatusCode::OK);
+
+    // Still being made: it stops, and is unknown until asked for again.
+    w.fake.conversion_running.store(true, Ordering::SeqCst);
+    assert_eq!(app.delete(&path, admin).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(*w.fake.conversions_deleted.lock(), [CONVERSION]);
+    assert_eq!(app.get(&path, admin).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(ask().await.status, StatusCode::OK);
+    assert_eq!(app.get(&path, admin).await.body["state"], json!("running"));
 }
 
 fn browser() -> Value {

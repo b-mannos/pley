@@ -693,6 +693,7 @@ sign-in settings among them.
 | GET | `/api/files/{id}/stream` | `play` |
 | POST | `/api/conversions` | `play` |
 | GET | `/api/conversions/{id}` | `play` |
+| DELETE | `/api/conversions/{id}` | `play` |
 | GET | `/api/conversions/{id}/file` | `play` |
 | GET | `/api/files/{id}/subtitles/{file}` | `play` |
 | GET | `/api/files/{id}/trickplay` | `play` |
@@ -1329,6 +1330,7 @@ stream, in one Matroska file.
 |---|---|---|---|
 | POST | `/api/conversions` | `POST /api/playback`'s body (`item_id`, `file_id?`, `caps`, `audio_index?`, `max_height?`, `max_bitrate?`, `mode?`) | `DownloadInfo` |
 | GET | `/api/conversions/{id}` | – | `DownloadInfo` |
+| DELETE | `/api/conversions/{id}` | – | `204`: stopped, unless done |
 | GET | `/api/conversions/{id}/file` | – | the converted file (`video/x-matroska`) once whole, with `Range` |
 
 ```ts
@@ -1357,7 +1359,11 @@ after their last download (a download cut short goes on with `Range`),
 within the transcoder's limit; once gone, asking again makes them again.
 A conversion is known to the server once asked for since it started (a
 `404` otherwise: ask again), and to those who may see its title. `503`
-with a transcoder too old to convert.
+with a transcoder too old to convert. A download deleted before its file
+is made stops the conversion (`DELETE`); a file made stays for whoever
+asks next. One nobody asks about for an hour while it waits its turn is
+dropped then (the device that wanted it went): asking again starts it
+again.
 
 ## Intro and credits detection
 

@@ -108,11 +108,13 @@ One conversion runs at a time, in a transcode slot like a job's process
 (a hardware session when one is free, else the software encoder); while
 every slot is in use it waits. Its id comes from the input (path, size,
 modification time) and the request's video, audio and subtitle parts, so
-the same file asked for twice is made once. Files live in
-`conversions/` under the work folder; the janitor deletes those unused
-for a week, and the least recently used past 64 GB. A transcoder that
-restarts knows the files it made by their names; half-made ones are
-deleted.
+the same file asked for twice is made once. One nobody asks for or about
+(`GET /v1/conversions/{id}`) for an hour while it waits isn't made when
+its turn comes: the device that wanted it went, and asking again starts
+it again. Files live in `conversions/` under the work folder; the janitor
+deletes those unused for a week, and the least recently used past 64 GB.
+A transcoder that restarts knows the files it made by their names;
+half-made ones are deleted.
 
 ## How HLS jobs work
 

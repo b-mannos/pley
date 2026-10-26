@@ -519,6 +519,24 @@ pub async fn conversion(
     Ok(Json(DownloadInfo::of(&status)))
 }
 
+/// `DELETE /api/conversions/{id}`: the download that wanted it went before
+/// the file was made, so the conversion stops. One done stays, for whoever
+/// asks for the same next.
+pub async fn cancel_conversion(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    conversion_of(&state, &user, &id).await?;
+    let status = state.transcoder.conversion(&id).await.map_err(|err| for_viewer(&user, err))?;
+    if status.state != ConversionState::Done {
+        state.transcoder.delete_conversion(&id).await.map_err(|err| for_viewer(&user, err))?;
+        state.sessions.forget_conversion(&id);
+        tracing::info!("conversion {id} stopped: its download was deleted");
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// `GET /api/conversions/{id}/file`: the converted file once whole, with
 /// ranges (a download cut short goes on), from the transcoder as it comes.
 pub async fn conversion_file(
