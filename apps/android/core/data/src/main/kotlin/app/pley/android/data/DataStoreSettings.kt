@@ -65,6 +65,7 @@ internal class DataStoreSettings(
                 gridDensity = p[GRID_DENSITY]?.let { enumOrNull<GridDensity>(it) } ?: defaults.gridDensity,
                 reduceMotion = p[REDUCE_MOTION] ?: defaults.reduceMotion,
                 allowSoftwareVideo = p[SOFTWARE_VIDEO] ?: defaults.allowSoftwareVideo,
+                downloadOnMobileData = p[DOWNLOAD_ON_MOBILE] ?: defaults.downloadOnMobileData,
             ),
         )
     }
@@ -88,6 +89,7 @@ internal class DataStoreSettings(
         p.keep(GRID_DENSITY, s.gridDensity.name, d.gridDensity.name)
         p.keep(REDUCE_MOTION, s.reduceMotion, d.reduceMotion)
         p.keep(SOFTWARE_VIDEO, s.allowSoftwareVideo, d.allowSoftwareVideo)
+        p.keep(DOWNLOAD_ON_MOBILE, s.downloadOnMobileData, d.downloadOnMobileData)
     }
 
     private fun <T : Any> MutablePreferences.keep(key: Preferences.Key<T>, value: T?, default: T?) {
@@ -111,6 +113,7 @@ internal class DataStoreSettings(
         private val GRID_DENSITY = stringPreferencesKey("grid_density")
         private val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
         private val SOFTWARE_VIDEO = booleanPreferencesKey("allow_software_video")
+        private val DOWNLOAD_ON_MOBILE = booleanPreferencesKey("download_on_mobile_data")
 
         private fun passthroughKey(format: String) = stringPreferencesKey("passthrough:$format")
 

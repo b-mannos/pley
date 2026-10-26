@@ -9,3 +9,9 @@ import app.pley.android.common.Tier
  * it from the device profile; phones are almost always T2.
  */
 val LocalPhoneDeviceTier = staticCompositionLocalOf { Tier.T2 }
+
+/** Where the offline banner leads: [label] ("Downloads") opens what still works without the server. */
+class OfflineAction(val label: String, val onClick: () -> Unit)
+
+/** The offline banner's way on; the shell provides it where there are downloads. `null`: the banner only says so. */
+val LocalOfflineAction = staticCompositionLocalOf<OfflineAction?> { null }

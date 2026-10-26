@@ -29,6 +29,7 @@ import app.pley.android.data.GridDensity
 import app.pley.android.data.Settings
 import app.pley.android.data.SubtitleBackground
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.screens.downloads.DownloadsViewModel
 import app.pley.android.screens.settings.SettingsUiState
 import app.pley.android.screens.settings.SettingsViewModel
 import app.pley.android.ui.phone.R
@@ -39,6 +40,7 @@ import app.pley.android.ui.phone.account.SettingsGroup
 import app.pley.android.ui.phone.account.SettingsRow
 import app.pley.android.ui.phone.account.SwitchRow
 import app.pley.android.ui.phone.account.versionOf
+import app.pley.android.ui.phone.kit.ConfirmDialog
 import app.pley.android.ui.phone.kit.PleySheet
 import app.pley.android.ui.phone.kit.PleyTopAppBar
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
@@ -56,6 +58,8 @@ import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 internal fun SettingsScreen() {
     val model: SettingsViewModel = viewModel(factory = SettingsViewModel.factory)
     val state by model.state.collectAsStateWithLifecycle()
+    val downloads: DownloadsViewModel = viewModel(factory = DownloadsViewModel.factory)
+    var confirmDeleteAll by rememberSaveable { mutableStateOf(false) }
     val navigator = LocalPhoneNavigator.current
     val shell = LocalPhoneShell.current
     LaunchedEffect(model) { model.errors.collect(shell::report) }
@@ -110,6 +114,26 @@ internal fun SettingsScreen() {
                         onChange = model::setPlaybackDetails,
                         icon = PleyIcons.Info,
                     )
+                }
+            }
+            if (downloads.available) {
+                item(key = "downloads") {
+                    SettingsGroup(stringResource(R.string.downloads_settings), Modifier.widthIn(max = MAX_WIDTH)) {
+                        SwitchRow(
+                            stringResource(R.string.downloads_mobile_data),
+                            subtitle = stringResource(R.string.downloads_mobile_data_value),
+                            checked = s.downloadOnMobileData,
+                            onChange = model::setDownloadOnMobileData,
+                            icon = PleyIcons.Download,
+                        )
+                        RowDivider()
+                        SettingsRow(
+                            stringResource(R.string.downloads_delete_all),
+                            icon = PleyIcons.Trash2,
+                            danger = true,
+                            onClick = { confirmDeleteAll = true },
+                        )
+                    }
                 }
             }
             item(key = "subtitles") {
@@ -185,6 +209,19 @@ internal fun SettingsScreen() {
         }
     }
     SettingsSheet(sheet, state, model, onDismiss = { sheet = null })
+    if (confirmDeleteAll) {
+        ConfirmDialog(
+            title = stringResource(R.string.downloads_delete_all_title),
+            body = stringResource(R.string.downloads_delete_all_body),
+            confirmLabel = stringResource(R.string.downloads_delete_all_confirm),
+            onConfirm = {
+                confirmDeleteAll = false
+                downloads.removeAll()
+            },
+            onDismiss = { confirmDeleteAll = false },
+            destructive = true,
+        )
+    }
 }
 
 /** The choice being made, if any. */

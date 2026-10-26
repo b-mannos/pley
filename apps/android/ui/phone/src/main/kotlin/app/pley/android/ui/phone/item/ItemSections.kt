@@ -92,6 +92,8 @@ import app.pley.android.screens.item.SeasonsSection
 import app.pley.android.screens.item.TrackChoice
 import app.pley.android.screens.item.extraSubtitle
 import app.pley.android.ui.phone.R
+import app.pley.android.ui.phone.downloads.DownloadIconButton
+import app.pley.android.ui.phone.downloads.DownloadMenu
 import app.pley.android.ui.phone.kit.HubRowModel
 import app.pley.android.ui.phone.kit.PleyIconButton
 
@@ -412,6 +414,39 @@ internal fun SeasonPicker(seasons: SeasonsSection, actions: PageActions, modifie
         }
         Spacer(Modifier.weight(1f))
         if (count != null) Text(count, style = MaterialTheme.typography.bodySmall, color = PleyColors.Muted)
+        SeasonDownload(seasons.episodes.orEmpty().map { it.item.id })
+    }
+}
+
+/** Downloads a season's episodes not downloaded yet; gone once they all are. */
+@Composable
+private fun SeasonDownload(episodeIds: List<Long>) {
+    val downloads = LocalItemDownloads.current ?: return
+    if (episodeIds.isEmpty() || downloads.hasAll(episodeIds)) return
+    PleyIconButton(
+        icon = PleyIcons.Download,
+        label = stringResource(R.string.downloads_download_season),
+        onClick = { downloads.download(episodeIds) },
+        modifier = Modifier.padding(start = 4.dp),
+    )
+}
+
+/** An episode row's download button, beside the watched tick. */
+@Composable
+private fun EpisodeDownload(itemId: Long, title: String) {
+    val downloads = LocalItemDownloads.current ?: return
+    val entry = downloads.of(itemId)
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        DownloadIconButton(
+            entry = entry,
+            title = title,
+            onDownload = { downloads.download(listOf(itemId)) },
+            onRetry = { downloads.retry(itemId) },
+            onMore = { menu = true },
+            modifier = Modifier.padding(start = 4.dp).size(36.dp),
+        )
+        DownloadMenu(entry, expanded = menu, onDismiss = { menu = false }, onPlay = downloads.play, onRemove = { downloads.remove(it.itemId) })
     }
 }
 
@@ -419,8 +454,9 @@ internal fun SeasonPicker(seasons: SeasonsSection, actions: PageActions, modifie
  * An episode in the list (design spec §4.4, mockup phone-show): a 128 by
  * 72 still with its progress, tick and a play circle (tapping it plays),
  * then "5. Glasshouse", its length and date, and two lines of summary
- * (tapping them opens the episode). The check toggles watched; holding
- * either part opens the episode's actions.
+ * (tapping them opens the episode). The arrow downloads it (its ring says
+ * how far; a downloaded one's menu plays or deletes it) and the check
+ * toggles watched; holding either part opens the episode's actions.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -462,6 +498,7 @@ internal fun EpisodeRow(episode: EpisodeLine, origin: String, actions: PageActio
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f).padding(top = 2.dp),
                 )
+                EpisodeDownload(item.id, episode.title)
                 PleyIconButton(
                     icon = if (episode.watched) PleyIcons.CircleCheck else PleyIcons.Check,
                     label = stringResource(if (episode.watched) R.string.item_mark_unwatched else R.string.item_mark_watched),

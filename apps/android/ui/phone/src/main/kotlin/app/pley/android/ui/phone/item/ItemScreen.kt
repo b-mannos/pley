@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -121,9 +122,17 @@ internal fun ItemScreen(itemId: Long) {
     }
 }
 
-/** The page: the header over the backdrop, then its sections, under a bar that turns solid as it scrolls. */
+/** The page, with its downloads (phones and tablets) for Download and the episodes' buttons. */
 @Composable
 internal fun ItemPageContent(page: ItemPage, model: ItemViewModel, navigator: Navigator) {
+    CompositionLocalProvider(LocalItemDownloads provides rememberItemDownloads()) {
+        ItemPageBody(page, model, navigator)
+    }
+}
+
+/** The page: the header over the backdrop, then its sections, under a bar that turns solid as it scrolls. */
+@Composable
+private fun ItemPageBody(page: ItemPage, model: ItemViewModel, navigator: Navigator) {
     val metrics = LocalPhoneMetrics.current
     val list = rememberLazyListState()
     val skeleton = rememberSkeleton(animated = true)

@@ -64,6 +64,8 @@ data class Settings(
     val reduceMotion: Boolean = false,
     /** Debug builds only (emulators): let software decoders play video beyond what the device's policy allows. */
     val allowSoftwareVideo: Boolean = false,
+    /** Downloads go on over mobile data too; else they wait for Wi-Fi or Ethernet. */
+    val downloadOnMobileData: Boolean = false,
 ) {
     /** The frame-rate matching a phone ([tv] false) or a TV uses: the choice, if it is one of the device's, else its default. */
     fun frameRateMatching(tv: Boolean): FrameRateMatching =

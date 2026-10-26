@@ -27,6 +27,7 @@ class PleyKeyTest {
         PleyKey.Playlist(5),
         PleyKey.Me,
         PleyKey.History,
+        PleyKey.Downloads,
         PleyKey.Settings,
         PleyKey.Diagnostics,
         PleyKey.NowPlaying,

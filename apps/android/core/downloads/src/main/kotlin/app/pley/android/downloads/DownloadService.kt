@@ -1,0 +1,147 @@
+package app.pley.android.downloads
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.os.IBinder
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import app.pley.android.data.DownloadState
+import app.pley.android.model.format.formatBytes
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+
+/**
+ * Fetches downloads in the foreground (type dataSync) while there are
+ * some, with a notification that says which and how far, then stops.
+ * The app starts it when downloads are asked for and when it opens.
+ */
+class DownloadService : Service() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var run: Job? = null
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val downloads = (application as? DownloadsOwner)?.appDownloads
+        if (downloads == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        channel()
+        try {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(shownOf(downloads.all.value)), foregroundType())
+        } catch (_: Exception) {
+            // Not allowed now (the app went to the background first): the app starts it again when it opens.
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (run?.isActive != true) {
+            run = scope.launch {
+                val shown = launch {
+                    downloads.all
+                        .map(::shownOf)
+                        .distinctUntilChanged()
+                        .collectLatest { manager().notify(NOTIFICATION_ID, notification(it)) }
+                }
+                downloads.runQueue()
+                shown.cancel()
+                ServiceCompat.stopForeground(this@DownloadService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+        }
+        return START_NOT_STICKY
+    }
+
+    /** Android 15 ends a dataSync service after its daily time: what is left goes on when the app opens. */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        run?.cancel()
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    private fun foregroundType(): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
+
+    private fun manager(): NotificationManager = getSystemService(NotificationManager::class.java)
+
+    private fun channel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val channel = NotificationChannel(CHANNEL, getString(R.string.downloads_channel), NotificationManager.IMPORTANCE_LOW).apply {
+            description = getString(R.string.downloads_channel_description)
+            setShowBadge(false)
+        }
+        manager().createNotificationChannel(channel)
+    }
+
+    /** What the notification shows: it changes only when one of these does (a whole percent). */
+    private data class Shown(val title: String?, val doneBytes: Long, val sizeBytes: Long, val percent: Int, val more: Int, val waiting: Boolean)
+
+    private fun shownOf(all: List<Saved>): Shown {
+        val active = all.firstOrNull { it.state == DownloadState.Downloading }
+        val left = all.count { it.state == DownloadState.Queued || it.state == DownloadState.Waiting || it.state == DownloadState.Downloading }
+        val percent = if (active != null && active.sizeBytes > 0) (active.downloadedBytes * 100 / active.sizeBytes).toInt().coerceIn(0, 100) else 0
+        // Sizes move with the percent: a step of 1 % keeps the text from changing more often than the bar.
+        val done = if (active != null && active.sizeBytes > 0) active.sizeBytes * percent / 100 else 0
+        return Shown(
+            title = active?.let { a -> a.showTitle?.let { "$it · ${a.title}" } ?: a.title },
+            doneBytes = done,
+            sizeBytes = active?.sizeBytes ?: 0,
+            percent = percent,
+            more = (left - 1).coerceAtLeast(0),
+            waiting = active == null && all.any { it.state == DownloadState.Waiting },
+        )
+    }
+
+    /** "Downloading The Distant Harbor", "1.2 GB of 4.6 GB · 2 more", its bar; or waiting for Wi-Fi. */
+    private fun notification(shown: Shown): Notification {
+        val open = packageManager.getLaunchIntentForPackage(packageName)?.let {
+            PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        }
+        val builder = NotificationCompat.Builder(this, CHANNEL)
+            .setSmallIcon(R.drawable.ic_download_notification)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setContentIntent(open)
+        when {
+            shown.title != null -> {
+                val size = formatBytes(shown.sizeBytes)
+                val done = formatBytes(shown.doneBytes)
+                builder.setContentTitle(getString(R.string.downloads_notification_downloading, shown.title))
+                    .setContentText(
+                        if (shown.more > 0) getString(R.string.downloads_notification_progress_more, done, size, shown.more)
+                        else getString(R.string.downloads_notification_progress, done, size),
+                    )
+                    .setProgress(100, shown.percent, shown.sizeBytes <= 0)
+            }
+            shown.waiting -> builder.setContentTitle(getString(R.string.downloads_notification_waiting))
+                .setContentText(getString(R.string.downloads_notification_waiting_text))
+            else -> builder.setContentTitle(getString(R.string.downloads_notification_starting)).setProgress(0, 0, true)
+        }
+        return builder.build()
+    }
+
+    private companion object {
+        const val CHANNEL = "downloads"
+        const val NOTIFICATION_ID = 7_700
+    }
+}

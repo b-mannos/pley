@@ -6,6 +6,8 @@ import androidx.tracing.trace
 import app.pley.android.common.TraceNames
 import app.pley.android.common.perf.StartupSignals
 import app.pley.android.designsystem.PleyImageLoader
+import app.pley.android.downloads.AppDownloads
+import app.pley.android.downloads.DownloadsOwner
 import app.pley.android.screens.PleyGraphOwner
 import app.pley.android.screens.ScreensGraph
 import coil3.ImageLoader
@@ -26,7 +28,7 @@ import kotlinx.coroutines.launch
  * disk read the first screen needs, and the graph's warm-up (AppGraph)
  * beside it, and returns (15 ms at most).
  */
-class PleyApplication : Application(), PleyGraphOwner, SingletonImageLoader.Factory {
+class PleyApplication : Application(), PleyGraphOwner, DownloadsOwner, SingletonImageLoader.Factory {
     val graph: AppGraph by lazy { AppGraph(this) }
 
     /** What the first screen is chosen by (StartupRead). */
@@ -35,6 +37,9 @@ class PleyApplication : Application(), PleyGraphOwner, SingletonImageLoader.Fact
 
     override val screensGraph: ScreensGraph
         get() = graph
+
+    override val appDownloads: AppDownloads
+        get() = graph.appDownloads
 
     override fun onCreate() {
         trace(TraceNames.APP_ON_CREATE) {
@@ -76,6 +81,8 @@ class PleyApplication : Application(), PleyGraphOwner, SingletonImageLoader.Fact
             graph.player
             // The probe itself, not only its holder: the first play needs its answer.
             runCatching { graph.caps.capabilities.warmUp() }
+            // The downloads' index, read before a download is played or listed.
+            if (!graph.device.isTv) runCatching { graph.downloads }
         }
     }
 

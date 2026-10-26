@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -42,6 +43,7 @@ import app.pley.android.auth.SignIn
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.model.SubtitleMode
+import app.pley.android.model.format.formatBytes
 import app.pley.android.screens.PleyKey
 import app.pley.android.screens.account.MeEvent
 import app.pley.android.screens.account.MeProfile
@@ -51,6 +53,7 @@ import app.pley.android.screens.account.SUBTITLE_MODES
 import app.pley.android.screens.account.TrackDefaultsUi
 import app.pley.android.screens.account.TrackField
 import app.pley.android.screens.account.TrackLanguages
+import app.pley.android.screens.downloads.DownloadsViewModel
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.Avatar
 import app.pley.android.ui.phone.kit.ConfirmDialog
@@ -65,14 +68,16 @@ import app.pley.android.ui.phone.theme.LocalPhoneMetrics
  * Me (design spec §4.8; apps/web/src/pages/AccountPage.tsx): who is signed
  * in, with Switch profile; the profile's audio and subtitle defaults,
  * saved on the server and read-only (to change on the web) where the server
- * doesn't let apps change them; watch history; this device's settings and
- * diagnostics; the account on the web, linking a TV, another server; and
- * Sign out, asked first.
+ * doesn't let apps change them; watch history; this device's downloads,
+ * settings and diagnostics; the account on the web, linking a TV, another
+ * server; and Sign out, asked first.
  */
 @Composable
 internal fun MeScreen() {
     val model: MeViewModel = viewModel(factory = MeViewModel.factory)
     val state by model.state.collectAsStateWithLifecycle()
+    val downloads: DownloadsViewModel = viewModel(factory = DownloadsViewModel.factory)
+    val downloaded by downloads.byItem.collectAsStateWithLifecycle()
     val navigator = LocalPhoneNavigator.current
     val shell = LocalPhoneShell.current
     val context = LocalContext.current
@@ -126,6 +131,25 @@ internal fun MeScreen() {
             }
             item(key = "device", contentType = "group") {
                 Group(stringResource(R.string.account_this_device)) {
+                    if (downloads.available) {
+                        val count = downloaded.size
+                        SettingsRow(
+                            stringResource(R.string.downloads_title),
+                            value = if (count == 0) {
+                                stringResource(R.string.downloads_me_value)
+                            } else {
+                                pluralStringResource(
+                                    R.plurals.downloads_me_count,
+                                    count,
+                                    count,
+                                    formatBytes(downloaded.values.sumOf { it.sizeBytes }),
+                                )
+                            },
+                            icon = PleyIcons.Download,
+                            onClick = { navigator.open(PleyKey.Downloads) },
+                        )
+                        RowDivider()
+                    }
                     SettingsRow(
                         stringResource(R.string.account_settings),
                         value = stringResource(R.string.account_settings_value),

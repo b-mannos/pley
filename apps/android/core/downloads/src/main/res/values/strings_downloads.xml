@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The notification's channel, in the system's settings. -->
+    <string name="downloads_channel">Downloads</string>
+    <string name="downloads_channel_description">How far downloads are</string>
+
+    <string name="downloads_notification_downloading">Downloading %1$s</string>
+    <!-- "1.2 GB of 4.6 GB". -->
+    <string name="downloads_notification_progress">%1$s of %2$s</string>
+    <!-- "1.2 GB of 4.6 GB · 2 more". -->
+    <string name="downloads_notification_progress_more">%1$s of %2$s · %3$d more</string>
+    <string name="downloads_notification_waiting">Downloads are waiting for Wi-Fi</string>
+    <string name="downloads_notification_waiting_text">They go on once the phone is on Wi-Fi, or on mobile data if Settings allow it.</string>
+    <string name="downloads_notification_starting">Getting downloads ready</string>
+</resources>

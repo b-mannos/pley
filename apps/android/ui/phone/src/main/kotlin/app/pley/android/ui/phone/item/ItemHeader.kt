@@ -264,7 +264,11 @@ internal fun MetaLine(parts: List<MetaPart>, modifier: Modifier = Modifier) {
     }
 }
 
-/** Play or Resume across the width, or "Unavailable"; what is left of a title being watched is under the metadata. */
+/**
+ * Play or Resume across the width, or "Unavailable", and Download under
+ * it for a movie or an episode; what is left of a title being watched is
+ * under the metadata.
+ */
 @Composable
 private fun PlayBlock(page: ItemPage, actions: PageActions, fullWidth: Boolean) {
     val primary = page.primary
@@ -279,6 +283,10 @@ private fun PlayBlock(page: ItemPage, actions: PageActions, fullWidth: Boolean) 
         icon = PleyIcons.Play,
         modifier = width.testTag(TestTags.ITEM_PLAY),
     )
+    if (page.kind == ItemKind.Movie || page.kind == ItemKind.Episode) {
+        Spacer(Modifier.height(8.dp))
+        DownloadButton(page.id, page.title, width)
+    }
 }
 
 /** "Resume", "Play S1 · E3", … */

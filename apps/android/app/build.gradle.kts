@@ -59,6 +59,7 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":core:caps"))
     implementation(project(":core:player"))
+    implementation(project(":core:downloads"))
     implementation(project(":core:designsystem"))
     implementation(project(":core:screens"))
     implementation(project(":ui:phone"))

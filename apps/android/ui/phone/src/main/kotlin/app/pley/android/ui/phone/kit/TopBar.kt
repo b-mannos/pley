@@ -125,7 +125,8 @@ fun PleyTopAppBar(
 /**
  * "Showing what pley had saved. Reconnecting…" (design spec §3.4): a
  * [surface3][PleyColors.Surface3] strip under the top bar while
- * [LocalOffline] holds, announced when it appears.
+ * [LocalOffline] holds, announced when it appears, with the way to the
+ * downloads at its end ([LocalOfflineAction]).
  */
 @Composable
 fun OfflineBanner(modifier: Modifier = Modifier) {
@@ -145,7 +146,10 @@ fun OfflineBanner(modifier: Modifier = Modifier) {
                 .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BusyLine(stringResource(R.string.shell_offline))
+            BusyLine(stringResource(R.string.shell_offline), Modifier.weight(1f))
+            LocalOfflineAction.current?.let { action ->
+                PleyTextButton(action.label, onClick = action.onClick)
+            }
         }
     }
 }

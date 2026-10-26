@@ -6,6 +6,8 @@ import app.pley.android.caps.CapsGraph
 import app.pley.android.common.DeviceProfile
 import app.pley.android.common.UserAgent
 import app.pley.android.data.DataGraph
+import app.pley.android.data.Downloads
+import app.pley.android.downloads.AppDownloads
 import app.pley.android.network.HttpRoot
 import app.pley.android.network.NetworkGraph
 import app.pley.android.player.PlayerGraph
@@ -34,6 +36,13 @@ class AppGraph(private val app: Application) : ScreensGraph {
     override val network: NetworkGraph by lazy { NetworkGraph.create(app, root, auth, device, app.cacheDir) }
     override val data: DataGraph by lazy { DataGraph.create(app, network, auth, device) }
     override val caps: CapsGraph by lazy { CapsGraph.create(app, device) }
-    override val player: PlayerGraph by lazy { PlayerGraph.create(app, data, network, caps, device) }
+    override val player: PlayerGraph by lazy { PlayerGraph.create(app, data, network, caps, device) { localMedia } }
+
+    /** Phones and tablets only: TVs stay where the server is, and download nothing. */
+    val appDownloads: AppDownloads by lazy { AppDownloads.create(app, data, network) }
+    override val downloads: Downloads get() = if (device.isTv) Downloads.None else appDownloads
+
+    /** What the player plays from the device: the downloads, on phones and tablets. */
+    private val localMedia: Downloads get() = downloads
     override val playerLauncher: PlayerLauncher by lazy { PlayerLauncherImpl(app, { player }, device) }
 }

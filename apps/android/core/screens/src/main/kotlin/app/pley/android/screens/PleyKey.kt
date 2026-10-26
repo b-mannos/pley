@@ -81,6 +81,10 @@ sealed interface PleyKey : NavKey {
     @Serializable
     data object History : PleyKey
 
+    /** What was downloaded to this device, to watch without the server. */
+    @Serializable
+    data object Downloads : PleyKey
+
     @Serializable
     data object Settings : PleyKey
 

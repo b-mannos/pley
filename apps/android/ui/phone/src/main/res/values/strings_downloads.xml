@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The Downloads page. -->
+    <string name="downloads_title">Downloads</string>
+    <string name="downloads_empty">Nothing downloaded yet</string>
+    <string name="downloads_empty_body">Download a movie or an episode from its page to watch it without your server: on a plane, on a train, anywhere.</string>
+    <!-- "4.2 GB on this phone · 51 GB free". -->
+    <string name="downloads_storage">%1$s on this device · %2$s free</string>
+    <!-- A show's group: "3 episodes · 4.2 GB". -->
+    <plurals name="downloads_episodes">
+        <item quantity="one">%1$d episode · %2$s</item>
+        <item quantity="other">%1$d episodes · %2$s</item>
+    </plurals>
+    <!-- Lines under a download's title. -->
+    <string name="downloads_queued">Waiting to download</string>
+    <string name="downloads_waiting">Waiting for Wi-Fi</string>
+    <!-- "Downloading · 45 % of 1.4 GB". -->
+    <string name="downloads_progress">Downloading · %1$d%% of %2$s</string>
+    <string name="downloads_failed">Didn\'t download: %1$s</string>
+    <!-- "1.4 GB · 1h 20m left". -->
+    <string name="downloads_left">%1$s · %2$s left</string>
+    <string name="downloads_watched">%1$s · Watched</string>
+    <!-- Its menu. -->
+    <string name="downloads_more">More for %1$s</string>
+    <string name="downloads_play">Play</string>
+    <string name="downloads_retry">Try again</string>
+    <string name="downloads_delete">Delete download</string>
+    <string name="downloads_cancel">Cancel download</string>
+    <string name="downloads_open">Go to the page</string>
+
+    <!-- Item pages. -->
+    <string name="downloads_download">Download</string>
+    <string name="downloads_downloaded">Downloaded</string>
+    <string name="downloads_try_again">Try again</string>
+    <!-- Under the item page's button while it waits. -->
+    <string name="downloads_queued_short">Queued</string>
+    <string name="downloads_waiting_short">Waiting</string>
+    <string name="downloads_download_season">Download season</string>
+    <!-- "Download Episode 2", for screen readers. -->
+    <string name="downloads_download_item">Download %1$s</string>
+    <string name="downloads_downloaded_item">%1$s is downloaded</string>
+    <string name="downloads_downloading_item">%1$s is downloading, %2$d%%</string>
+    <string name="downloads_failed_toast">Couldn\'t download: %1$s</string>
+    <string name="downloads_started">Downloading. It\'s in Downloads, under Me.</string>
+    <string name="downloads_started_action">Downloads</string>
+
+    <!-- The offline banner's way to them. -->
+    <string name="downloads_offline_action">Downloads</string>
+
+    <!-- Me and Settings. -->
+    <string name="downloads_me_value">Watch without your server</string>
+    <!-- "3 downloads · 4.2 GB". -->
+    <plurals name="downloads_me_count">
+        <item quantity="one">%1$d download · %2$s</item>
+        <item quantity="other">%1$d downloads · %2$s</item>
+    </plurals>
+    <string name="downloads_settings">Downloads</string>
+    <string name="downloads_mobile_data">Download on mobile data</string>
+    <string name="downloads_mobile_data_value">Otherwise downloads wait for Wi-Fi</string>
+    <string name="downloads_delete_all">Delete all downloads</string>
+    <string name="downloads_delete_all_title">Delete all downloads?</string>
+    <string name="downloads_delete_all_body">Every download on this device goes, for every server and profile. You can download them again from your server.</string>
+    <string name="downloads_delete_all_confirm">Delete all</string>
+    <string name="downloads_keep">Keep them</string>
+</resources>

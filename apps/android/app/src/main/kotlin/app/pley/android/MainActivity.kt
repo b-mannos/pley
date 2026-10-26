@@ -11,11 +11,14 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.lifecycleScope
 import app.pley.android.common.perf.PerfMonitor
 import app.pley.android.common.perf.StartupSignals
 import app.pley.android.ui.phone.shell.PhoneApp
 import app.pley.android.ui.phone.shell.PhoneStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 
 /**
  * The native app on phones and tablets. A TV that opens it is sent to
@@ -55,6 +58,19 @@ class MainActivity : ComponentActivity() {
                 graph = { app.graph },
             )
         }
+    }
+
+    /**
+     * Downloads that wait go on (Android lets the app start their service
+     * while it is in the foreground), and progress kept while offline goes
+     * to the server: off the main thread, as the downloads' index is read
+     * from disk the first time.
+     */
+    override fun onStart() {
+        super.onStart()
+        if (isFinishing) return
+        val app = application as PleyApplication
+        lifecycleScope.launch(Dispatchers.Default) { app.graph.downloads.resume() }
     }
 
     /** The startup read's answer if it has finished, without waiting. */

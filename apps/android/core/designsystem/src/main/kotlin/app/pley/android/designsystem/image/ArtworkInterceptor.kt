@@ -35,8 +35,9 @@ class ArtworkPolicy(val tier: Tier, screenWidthPx: Int) {
     /** The server's width for a box [px] wide ([maxWidth] when unknown), under [cap] when it has one. */
     fun width(px: Int?, cap: Int = 0): Int = ImageUrls.bucket(px ?: limit(cap), limit(cap))
 
-    /** [url] asking for [width]`(px, cap)`. */
-    fun sized(url: String, px: Int?, cap: Int = 0): String = ImageUrls.sized(url, px ?: limit(cap), limit(cap))
+    /** [url] asking for [width]`(px, cap)`; a picture on the device (a download's) as it is. */
+    fun sized(url: String, px: Int?, cap: Int = 0): String =
+        if (url.startsWith("file:")) url else ImageUrls.sized(url, px ?: limit(cap), limit(cap))
 
     private fun limit(cap: Int): Int = if (cap > 0) minOf(cap, maxWidth) else maxWidth
 

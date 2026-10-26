@@ -6,6 +6,7 @@ import app.pley.android.auth.AuthGraph
 import app.pley.android.caps.CapsGraph
 import app.pley.android.common.DeviceProfile
 import app.pley.android.data.DataGraph
+import app.pley.android.data.Downloads
 import app.pley.android.network.NetworkGraph
 import app.pley.android.player.PlayerGraph
 
@@ -21,6 +22,10 @@ interface ScreensGraph {
     val caps: CapsGraph
     val auth: AuthGraph
     val playerLauncher: PlayerLauncher
+
+    /** Downloads for watching away from the server: phones and tablets; none on TVs and in tests. */
+    val downloads: Downloads
+        get() = Downloads.None
 
     /**
      * Finding servers and checking addresses (discovery, the network

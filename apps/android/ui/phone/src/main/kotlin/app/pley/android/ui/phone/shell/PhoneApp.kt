@@ -49,8 +49,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.LayoutDirection
@@ -76,12 +76,16 @@ import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyMotion
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.reducedMotion
+import app.pley.android.screens.PleyKey
 import app.pley.android.screens.ScreensGraph
+import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.account.accountEntries
 import app.pley.android.ui.phone.home.homeEntries
 import app.pley.android.ui.phone.item.itemEntries
 import app.pley.android.ui.phone.kit.LocalOffline
+import app.pley.android.ui.phone.kit.LocalOfflineAction
 import app.pley.android.ui.phone.kit.LocalPhoneDeviceTier
+import app.pley.android.ui.phone.kit.OfflineAction
 import app.pley.android.ui.phone.kit.ToastHost
 import app.pley.android.ui.phone.library.libraryEntries
 import app.pley.android.ui.phone.music.musicEntries
@@ -148,10 +152,13 @@ internal fun PhoneShell(
 
     val tier = remember { graph().device.tier }
     val entries = remember { shellEntries() }
+    val downloadsLabel = stringResource(R.string.downloads_offline_action)
+    val offlineAction = remember(navigation, downloadsLabel) { OfflineAction(downloadsLabel) { navigation.open(PleyKey.Downloads) } }
     CompositionLocalProvider(
         LocalPhoneNavigator provides navigation,
         LocalPhoneShell provides shell,
         LocalOffline provides shell.offlineState,
+        LocalOfflineAction provides offlineAction.takeIf { navigation.inside },
         LocalPhoneDeviceTier provides tier,
     ) {
         if (navigation.inside) {

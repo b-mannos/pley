@@ -41,6 +41,35 @@ stands in for a Fire TV stick (see Emulators), apart from video decoding:
 its decoders are software only, which the app doesn't use on TVs, so it
 can't play video.
 
+## Offline
+
+The app needs no internet: the server signs pley's own apps in itself
+(their client documents are built in, never fetched), and on a phone
+whose Wi-Fi has no internet, traffic to the server at home goes over the
+Wi-Fi even while the phone's default network is mobile data
+(`LocalRoute`). Away from the server, phones and tablets play downloads.
+
+Downloads (`:core:downloads`) keep the original file of a movie or an
+episode (of several versions, the sharpest up to 1080p), with its
+details, a picture and its text subtitles as WebVTT, in the app's own
+storage (removed with the app), per server and profile. They come in a
+foreground service of type dataSync with a notification, one at a time;
+one cut short goes on from where it stopped (Range). They wait for Wi-Fi
+or Ethernet unless Settings → Downloads allows mobile data, and those
+waiting go on when the app opens. Download sits under Play on a movie's
+or an episode's page, beside each episode of a season (and for the whole
+season), and they are listed under Me → Downloads, which the offline
+banner leads to as well.
+
+A downloaded file plays from the device whether the server answers or
+not ("Downloaded" in the player); a quality picked by hand streams from
+the server instead. While the server is out of reach, the item's saved
+details stand in for the server's, and progress is kept on the device,
+then sent when the server answers again (the app opening, a network
+coming up), each report with its `age_ms`: the server keeps what happened
+to the item since (docs/API.md). TVs stay where the server is and
+download nothing.
+
 ## Updating from the web view app
 
 An update installed over the web view app keeps what matters and nothing
@@ -81,6 +110,7 @@ startup read). Each module sees only what it builds on.
 | `:core:data` | repositories, snapshots, servers, session, settings, live updates | network, auth, model |
 | `:core:caps` | what the device plays: decoders, Dolby Vision, HDR, display modes, passthrough, quirks | common, model, Media3 |
 | `:core:player` | the Media3 engine, playback sessions, subtitles, previews, markers, queues, music | caps, data, network |
+| `:core:downloads` | downloads for watching away from the server: the queue, its foreground service, the files and their index, progress kept while offline | data |
 | `:core:designsystem` | colours, icons, the image loader, artwork and tiles; Compose foundation only, never Material | common, model |
 | `:core:screens` | one ViewModel per screen, shared by phone and TV; the routes (`PleyKey`), `Navigator`, `PlayerLauncher` | data, player, caps, auth |
 | `:core:testing` | fakes, JSON fixtures written from docs/API.md, test rules; tests only | the contracts |

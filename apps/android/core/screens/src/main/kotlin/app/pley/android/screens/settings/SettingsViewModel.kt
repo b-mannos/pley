@@ -122,6 +122,8 @@ class SettingsViewModel(
 
     fun setSoftwareVideo(on: Boolean) = update { it.copy(allowSoftwareVideo = on) }
 
+    fun setDownloadOnMobileData(on: Boolean) = update { it.copy(downloadOnMobileData = on) }
+
     companion object {
         /** The qualities offered, best first: the original, then the transcodes. */
         val QUALITIES: List<QualityPreset> get() = Qualities.ALL
