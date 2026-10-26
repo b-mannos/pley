@@ -56,9 +56,9 @@
     <string name="tv_player_info_waiting">Asking the server…</string>
 
     <!-- Refresh rate, buffering and errors (design spec §2.7, §8). -->
-    <string name="tv_player_matching">Matching refresh rate…</string>
-    <string name="tv_player_hz">%1$s Hz</string>
-    <string name="tv_player_frame_rate_hint">Your TV didn\'t switch refresh rate. Turn on match content frame rate in its settings.</string>
+    <!-- A transcode the player chose, as the phone's player toasts it: the session's note, then where the way back is. -->
+    <string name="tv_player_transcode_toast">%1$s Play original is in Quality.</string>
+    <string name="tv_player_slow_server_toast">%1$s Choose one in Quality.</string>
     <string name="tv_player_buffering">Loading</string>
     <string name="tv_player_reconnecting">Reconnecting…</string>
     <string name="tv_player_error_title">Can\'t play this item</string>

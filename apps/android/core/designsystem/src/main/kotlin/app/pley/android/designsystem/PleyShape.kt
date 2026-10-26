@@ -69,6 +69,13 @@ object PleyFocus {
     /** How far the ring reaches past the tile's edge: [RingOffset] plus half the stroke. */
     val RingReach = 6.dp
 
+    /**
+     * A scrubber thumb's ring (TV player, Now Playing): slimmer and closer
+     * than a tile's, so the playhead stays a dot rather than a target.
+     */
+    val ThumbRingStroke = 2.dp
+    val ThumbRingOffset = 2.dp
+
     /** Tiles. */
     const val TILE_SCALE = 1.08f
 

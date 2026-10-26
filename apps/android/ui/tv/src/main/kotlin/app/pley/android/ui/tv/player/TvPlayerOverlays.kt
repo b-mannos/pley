@@ -401,31 +401,18 @@ private fun Modifier.underRing(gap: Dp): Modifier = layout { measurable, constra
 }
 
 /**
- * While the TV changes its display mode (design spec §2.7): black, with
- * "Matching refresh rate…" and the rate in body muted, centred.
+ * While the TV changes its display mode, or the playback its stream
+ * (design spec §2.7): black, under the buffering ring, and nothing said,
+ * as streaming apps' players do: the TV goes dark for a moment anyway.
  */
 @Composable
-internal fun BoxScope.TvSwitchingCover(hz: Float?) {
-    Column(
+internal fun BoxScope.TvSwitchingCover() {
+    Box(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
             .testTag(TAG_SWITCHING),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        BasicText(stringResource(R.string.tv_player_matching), style = PleyType.Tv.Body.copy(color = PleyColors.Muted))
-        if (hz != null && hz > 0f) {
-            Spacer(Modifier.height(4.dp))
-            BasicText(stringResource(R.string.tv_player_hz, formatHz(hz)), style = PleyType.Tv.Body.copy(color = PleyColors.Muted))
-        }
-    }
-}
-
-/** "23.976", "24", "59.94": as few decimals as the rate needs. */
-internal fun formatHz(hz: Float): String {
-    val rounded = Math.round(hz * 1000) / 1000.0
-    return if (rounded == Math.floor(rounded)) rounded.toLong().toString() else rounded.toBigDecimal().stripTrailingZeros().toPlainString()
+    )
 }
 
 /**

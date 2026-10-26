@@ -2,6 +2,7 @@ package app.pley.android.ui.tv.player
 
 import android.text.format.DateFormat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -55,6 +56,7 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
@@ -87,6 +89,7 @@ import app.pley.android.player.PlayerPhase
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.markers.Markers
 import app.pley.android.ui.tv.R
+import app.pley.android.player.R as PlayerR
 
 /*
  * The controls of design spec §2.7, on the 960 × 540 canvas: the title and
@@ -95,12 +98,13 @@ import app.pley.android.ui.tv.R
  * playhead is read where it is drawn, so the rest doesn't recompose with it.
  */
 
-/** The title, the episode's line, the clock and, while paused, when it ends. */
+/** The title, the episode's line, how it plays, the clock and, while paused, when it ends. */
 @Composable
 internal fun BoxScope.TvPlayerTopBar(state: State<PlayerUiState>, alpha: State<Float>, now: () -> Long) {
     val title by remember(state) { derivedStateOf { state.value.title } }
     val line by remember(state) { derivedStateOf { TvPlayerText.episodeLine(state.value.subtitle) } }
     val paused by remember(state) { derivedStateOf { state.value.phase == PlayerPhase.Paused } }
+    val method by remember(state) { derivedStateOf { state.value.method } }
     Column(
         Modifier
             .align(Alignment.TopStart)
@@ -121,7 +125,13 @@ internal fun BoxScope.TvPlayerTopBar(state: State<PlayerUiState>, alpha: State<F
         horizontalAlignment = Alignment.End,
     ) {
         val clock = rememberClock(now)
-        BasicText(clock, style = PleyType.Tv.Label.copy(color = PleyColors.Muted))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            method?.let {
+                MethodBadge(it)
+                Spacer(Modifier.width(12.dp))
+            }
+            BasicText(clock, style = PleyType.Tv.Label.copy(color = PleyColors.Muted))
+        }
         if (paused) {
             val context = LocalContext.current
             val ends by remember(state) {
@@ -134,6 +144,32 @@ internal fun BoxScope.TvPlayerTopBar(state: State<PlayerUiState>, alpha: State<F
             BasicText(stringResource(R.string.tv_player_ends_at, ends), style = PleyType.Tv.Label.copy(color = PleyColors.Muted))
         }
     }
+}
+
+/**
+ * How it plays, badged as the phone's and the web's players do: a file
+ * played as it is (direct play, or downloaded) in success, a direct stream
+ * in info, a transcode in the accent, on bg 80 % so a bright picture
+ * doesn't wash it out. Info, in the control row, says why.
+ */
+@Composable
+private fun MethodBadge(method: String) {
+    val direct = setOf(stringResource(PlayerR.string.session_method_direct), stringResource(PlayerR.string.session_method_downloaded))
+    val stream = setOf(stringResource(PlayerR.string.session_method_remux), stringResource(PlayerR.string.session_method_remux_audio))
+    val colour = when (method) {
+        in direct -> PleyColors.Success
+        in stream -> PleyColors.Info
+        else -> PleyColors.Accent
+    }
+    BasicText(
+        method,
+        style = PleyType.Tv.Caption.copy(color = colour, fontWeight = FontWeight.SemiBold),
+        maxLines = 1,
+        modifier = Modifier
+            .background(PleyColors.OnArt, PleyShape.Badge)
+            .background(colour.copy(alpha = 0.2f), PleyShape.Badge)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    )
 }
 
 /** The time of day, as the TV writes it (12 or 24 hours), changing on the minute. */
@@ -153,8 +189,9 @@ private fun rememberClock(now: () -> Long): String {
 
 /**
  * The scrubber (design spec §2.7) from x = 48 to 912, its track's centre
- * at y = 397: the played part in accent, buffered in fg 45 %, gaps at
- * chapter starts; the thumb grows with the focus ring while focused; the
+ * at y = 425: the played part in accent, buffered in fg 45 %, gaps at
+ * chapter starts; the thumb, 10 dp, grows to 12 with a slim ring while
+ * focused (18 dp across, where the tiles' ring made it 32); the
  * times above, a running marker's name below. Left and Right on it seek
  * ([TvSeeker], keys handled by the screen); it says its place to screen
  * readers as a slider.
@@ -245,15 +282,16 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrack(s: Player
         if (played > a) drawRoundRect(PleyColors.Accent, Offset(a, y), Size(minOf(played, b) - a, h), r)
     }
     val thumbX = x(target ?: s.positionMs)
-    val radius = (THUMB.toPx() + (THUMB_FOCUSED.toPx() - THUMB.toPx()) * focus) / 2f
+    val thumb = PleyTv.ScrubThumb.toPx()
+    val radius = (thumb + (PleyTv.ScrubThumbFocused.toPx() - thumb) * focus) / 2f
     val centre = Offset(thumbX.coerceIn(radius, w - radius), size.height / 2f)
     drawCircle(PleyColors.Fg, radius, centre)
     if (focus > 0f) {
         drawCircle(
             PleyColors.AccentBright.copy(alpha = focus),
-            radius + PleyFocus.RingOffset.toPx(),
+            radius + PleyFocus.ThumbRingOffset.toPx(),
             centre,
-            style = Stroke(PleyFocus.RingStroke.toPx()),
+            style = Stroke(PleyFocus.ThumbRingStroke.toPx()),
         )
     }
 }
@@ -283,7 +321,7 @@ private fun MarkerLabel(state: State<PlayerUiState>) {
 
 /**
  * The seek preview while scrubbing (design spec §2.7): 240 × 135 with a
- * 2 dp fg 20 % edge, its bottom at y = 319, centred on the thumb but kept
+ * 2 dp fg 20 % edge, its bottom at y = 347, centred on the thumb but kept
  * in the safe area; the target time under it and the chapter's name. The
  * server's seek previews when the file has them, else the chapter's
  * picture; without either, only the time and chapter show.
@@ -358,7 +396,7 @@ internal data class RowOptions(
 )
 
 /**
- * The control row, top y = 413 (design spec §2.7): Previous · −10 s ·
+ * The control row, top y = 441 (design spec §2.7): Previous · −10 s ·
  * Play/Pause · +10 s · Next centred; Subtitles · Audio · Quality · Info at
  * the right safe edge; Chapters, when the file has them, and the sleep
  * timer at the left one. Up goes back to the scrubber. As in streaming
@@ -380,7 +418,7 @@ internal fun BoxScope.TvControlRow(
         this.up = ui.requester(PlayerFocus.Scrubber)
         down = FocusRequester.Cancel
     }
-    // The 48 dp buttons sit this far down, so their centres line up with Play/Pause's.
+    // The 36 dp buttons sit this far down, so their centres line up with Play/Pause's.
     val beside = Modifier.padding(top = (PLAY_BUTTON - BUTTON) / 2).then(up)
     val skipSeconds = TvPlayerText.seconds(TvSeeker.STEP_MS)
     Box(
@@ -564,23 +602,27 @@ private val BUFFERED = PleyColors.Fg.copy(alpha = 0.45f)
 
 private val TRACK_HEIGHT = 4.dp
 private val CHAPTER_GAP = 2.dp
-private val THUMB = 14.dp
-private val THUMB_FOCUSED = 20.dp
 private val SCRUB_HEIGHT = 40.dp
 
-/** The control row's buttons: 48 dp with 24 dp icons, the transport's icons 28, Play/Pause 64 with 36. */
-private val BUTTON = 48.dp
-private val ICON = 24.dp
-private val TRANSPORT_ICON = 28.dp
-private val PLAY_BUTTON = 64.dp
-private val PLAY_ICON = 36.dp
-private val TRANSPORT_GAP = 24.dp
+/**
+ * The control row's buttons: 36 dp with 20 dp icons, the transport's icons
+ * 24 (the skips' seconds stay legible), Play/Pause 44 with 26. Near the
+ * TV's 40 dp buttons elsewhere, and a glyph alone until focused, as in
+ * streaming apps' players; at 48 and 64 dp the focused square took a
+ * tenth of the screen's height.
+ */
+private val BUTTON = 36.dp
+private val ICON = PleyTv.IconSize
+private val TRANSPORT_ICON = 24.dp
+private val PLAY_BUTTON = 44.dp
+private val PLAY_ICON = 26.dp
+private val TRANSPORT_GAP = 16.dp
 
-/** Where things sit on the 540 dp canvas (design spec §2.7). */
-internal val TIMES_TOP = 371.dp
-internal val TRACK_CENTRE = 397.dp
-internal val ROW_TOP = 413.dp
-internal val PREVIEW_TOP = 184.dp
+/** Where things sit on the 540 dp canvas (design spec §2.7): the row's focused labels end above the safe area's 513. */
+internal val TIMES_TOP = 399.dp
+internal val TRACK_CENTRE = 425.dp
+internal val ROW_TOP = 441.dp
+internal val PREVIEW_TOP = 212.dp
 internal val PREVIEW_WIDTH = 240.dp
 internal val PREVIEW_HEIGHT = 135.dp
 

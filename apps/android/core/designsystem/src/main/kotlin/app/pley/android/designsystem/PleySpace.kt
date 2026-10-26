@@ -86,6 +86,10 @@ object PleyTv {
     /** Icons in buttons, list rows and the rail. */
     val IconSize = 20.dp
 
+    /** A scrubber's thumb; focused, it grows and takes [PleyFocus.ThumbRingOffset]'s ring, 18 dp across in all. */
+    val ScrubThumb = 10.dp
+    val ScrubThumbFocused = 12.dp
+
     /** The rows' fade under the collapsed rail: [Bg][PleyColors.Bg] to this x… */
     val RailFadeSolidUntil = 56.dp
 

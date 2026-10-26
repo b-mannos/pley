@@ -333,16 +333,18 @@ class TvPlayerScreenTest {
     }
 
     @Test
-    fun `the screen says so while the TV matches its refresh rate`() {
+    fun `the screen goes black with the ring while the TV matches its refresh rate, saying nothing`() {
         val controller = playing { it.copy(phase = PlayerPhase.Paused) }
         val engine = FakePlayerEngine()
         engine.update { it.copy(switchingDisplayMode = true, switchingToHz = 23.976f) }
         controller.engine = engine
         show(controller)
-        compose.mainClock.advanceTimeBy(500)
+        compose.mainClock.advanceTimeBy(5_000)
         compose.waitForIdle()
-        compose.onNodeWithText("Matching refresh rate…").assertExists()
-        compose.onNodeWithText("23.976 Hz").assertExists()
+        compose.onNodeWithTag(TAG_SWITCHING).assertExists()
+        compose.onNodeWithTag(TAG_BUFFERING).assertExists()
+        compose.onNodeWithText("Matching refresh rate…", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("23.976", substring = true).assertDoesNotExist()
         engine.update { it.copy(switchingDisplayMode = false, switchingToHz = null) }
         compose.waitForIdle()
         compose.onNodeWithTag(TAG_SWITCHING).assertDoesNotExist()
@@ -359,6 +361,22 @@ class TvPlayerScreenTest {
         controller.update { it.copy(phase = PlayerPhase.Playing, reconnecting = false) }
         compose.waitForIdle()
         compose.onNodeWithTag(TAG_RECONNECTING).assertDoesNotExist()
+    }
+
+    @Test
+    fun `the top bar badges how it plays, and a transcode the player chose says why`() {
+        val controller = playing { it.copy(method = "Transcoding") }
+        show(controller)
+        press(Key.DirectionUp)
+        compose.onNodeWithText("Transcoding").assertExists()
+
+        controller.update { it.copy(note = "The original didn't play smoothly on this device.", canPlayOriginal = true) }
+        compose.waitForIdle()
+        compose.onNodeWithText("The original didn't play smoothly on this device. Play original is in Quality.").assertExists()
+
+        controller.update { it.copy(note = null, suggestLowerQuality = true) }
+        compose.waitForIdle()
+        compose.onNodeWithText("Choose one in Quality.", substring = true).assertExists()
     }
 
     @Test

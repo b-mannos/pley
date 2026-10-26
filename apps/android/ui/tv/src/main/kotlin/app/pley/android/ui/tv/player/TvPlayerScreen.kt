@@ -41,6 +41,7 @@ import app.pley.android.player.sleep.SleepTimer
 import app.pley.android.player.subtitles.CaptionLook
 import app.pley.android.player.subtitles.ScreenCaptions
 import app.pley.android.ui.tv.R
+import app.pley.android.player.R as PlayerR
 import kotlinx.coroutines.delay
 
 /**
@@ -87,7 +88,6 @@ internal fun TvPlayerScreen(
     val error = phase as? PlayerPhase.Error
     val switching by remember(engineState) { derivedStateOf { engineState.value?.switchingDisplayMode == true } }
     val reconnecting by remember(state) { derivedStateOf { state.value.reconnecting } }
-    val switchingHz by remember(engineState) { derivedStateOf { engineState.value?.switchingToHz } }
     val card by remember(state) { derivedStateOf { state.value.upNextCard } }
     val skipLabel by remember(state) { derivedStateOf { state.value.skipLabel } }
     val playing by remember(state) { derivedStateOf { state.value.phase.wantsToPlay() } }
@@ -337,9 +337,19 @@ internal fun TvPlayerScreen(
             controller.dismissNotice()
         }
     }
-    val hint by remember(engineState) { derivedStateOf { engineState.value?.frameRateHint == true } }
-    LaunchedEffect(hint) {
-        if (hint) ui.toast(resources.getString(R.string.tv_player_frame_rate_hint), TvPlayerUi.ERROR_TOAST_MS)
+    // As the phone's player does: a switch to a transcode the player made by itself says why, and
+    // a server that can't convert fast enough says so; both point to Quality, which has the way back.
+    val switchedToTranscode by remember(state) { derivedStateOf { state.value.canPlayOriginal } }
+    LaunchedEffect(switchedToTranscode) {
+        val why = state.value.note
+        if (switchedToTranscode && why != null) ui.toast(resources.getString(R.string.tv_player_transcode_toast, why), TvPlayerUi.ERROR_TOAST_MS)
+    }
+    val serverTooSlow by remember(state) { derivedStateOf { state.value.suggestLowerQuality } }
+    LaunchedEffect(serverTooSlow) {
+        if (serverTooSlow) {
+            val why = state.value.note ?: resources.getString(PlayerR.string.session_slow_server)
+            ui.toast(resources.getString(R.string.tv_player_slow_server_toast, why), TvPlayerUi.ERROR_TOAST_MS, error = true)
+        }
     }
     // The playback's details are asked for while the Info panel is open or Playback details show.
     val detailsShown = showDetails && !ui.controls && ui.panel == null && card == null && error == null
@@ -390,8 +400,8 @@ internal fun TvPlayerScreen(
         TvSleepNotice(state, noticeShown, ui.controls, ui, onKeep = controller::keepWatching)
         TvUpNextCard(card, ui, onPlay = controller::playNext, onCancel = controller::cancelUpNext)
         if (!ui.controls) TvSeekBadge(seeker.badgeMs)
-        TvBufferingRing(waiting = (phase == PlayerPhase.Buffering || phase == PlayerPhase.Preparing) && !switching, reconnecting = reconnecting)
-        if (switching || phase == PlayerPhase.Switching) TvSwitchingCover(switchingHz)
+        if (switching || phase == PlayerPhase.Switching) TvSwitchingCover()
+        TvBufferingRing(waiting = phase == PlayerPhase.Buffering || phase == PlayerPhase.Preparing || switching, reconnecting = reconnecting)
         TvPlayerPanels(ui, state, engineState, controller)
         if (error != null) {
             TvPlayerError(
