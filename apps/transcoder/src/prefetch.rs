@@ -15,8 +15,9 @@
 //!   (`CueClusterPosition`) or chunk (`stco`/`co64`).
 //!
 //! It is background work: one file at a time, never twice at once for a
-//! file, ten seconds at most, and none while a job is being created (a
-//! playback starting); one that starts meanwhile stops the reading.
+//! file, ten seconds at most, and none while a playback starts (a job being
+//! created, a job's FFmpeg starting, a direct play: see
+//! [`crate::background`]); one that starts meanwhile stops the reading.
 
 use std::collections::HashSet;
 use std::fs::File;
@@ -83,7 +84,7 @@ impl Prefetcher {
             elapsed_ms: started.elapsed().as_millis() as u64,
             ..Default::default()
         };
-        if self.jobs.created_within(YIELD) {
+        if self.starting() {
             return Ok(skipped("a playback is starting"));
         }
         let Some(_flight) = Flight::take(&self.reading, &path) else {
@@ -94,11 +95,12 @@ impl Prefetcher {
             return Ok(skipped("other files took the time"));
         };
         let _permit = permit.map_err(|e| ApiError::Internal(e.into()))?;
-        if self.jobs.created_within(YIELD) {
+        if self.starting() {
             return Ok(skipped("a playback is starting"));
         }
-        // Reading stops at the deadline, when a job creation begins, or when
-        // this request is dropped (the reads run on the blocking pool).
+        // Reading stops at the deadline, when a job creation or another
+        // playback start begins, or when this request is dropped (the reads
+        // run on the blocking pool).
         let stop = Arc::new(Stop {
             jobs: self.jobs.clone(),
             creations: self.jobs.creations(),
@@ -130,6 +132,10 @@ impl Prefetcher {
             if done.stopped { ", stopped" } else { "" }
         );
         Ok(done)
+    }
+
+    fn starting(&self) -> bool {
+        self.jobs.created_within(YIELD) || self.jobs.background.held()
     }
 }
 
@@ -163,6 +169,7 @@ impl Stop {
         self.dropped.load(Ordering::Relaxed)
             || Instant::now() >= self.deadline
             || self.jobs.creations() != self.creations
+            || self.jobs.background.held()
     }
 }
 
@@ -411,7 +418,8 @@ mod tests {
         });
         let metrics = Arc::new(Metrics::default());
         let prober = Arc::new(Prober::new(ff.clone(), metrics.clone(), 1));
-        let keyframes = KeyframeStore::new(ff.clone(), metrics.clone(), dir.join("keyframes"));
+        let background = crate::background::Background::new();
+        let keyframes = KeyframeStore::new(ff.clone(), metrics.clone(), background.clone(), dir.join("keyframes"));
         let extractor = Arc::new(Extractor::new(ff.clone(), prober.clone(), metrics.clone(), dir.join("subs"), 1));
         let jobs = JobManager::new(
             ff,
@@ -422,6 +430,7 @@ mod tests {
             dir.join("jobs"),
             None,
             Limits { max_jobs: 1, max_hw_jobs: 0 },
+            background,
         );
         (Prefetcher::new(jobs.clone(), keyframes.clone()), jobs, keyframes)
     }
@@ -505,5 +514,30 @@ mod tests {
         });
         assert!(done.stopped);
         assert!(done.bytes < 4 * MB, "{}", done.bytes);
+    }
+
+    #[tokio::test]
+    async fn other_playback_starts_come_first_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let (movie, _, _) = matroska(dir.path());
+        let (prefetcher, jobs, _) = prefetcher(dir.path());
+        let req = PrefetchRequest { path: movie.to_string_lossy().into_owned(), start_ms: Some(15_000) };
+
+        // A job's FFmpeg starting at a seek, or a direct play the server said is starting.
+        let start = jobs.background.start();
+        let done = prefetcher.prefetch(&req).await.unwrap();
+        assert_eq!((done.bytes, done.skipped.as_deref()), (0, Some("a playback is starting")));
+        let stop = Stop {
+            jobs: jobs.clone(),
+            creations: jobs.creations(),
+            deadline: Instant::now() + TIMEOUT,
+            dropped: false.into(),
+        };
+        assert!(stop.now(), "it stops the reading");
+        drop(start);
+        assert!(!stop.now());
+        let done = prefetcher.prefetch(&req).await.unwrap();
+        assert_eq!(done.skipped, None);
+        assert!(done.bytes > 0);
     }
 }

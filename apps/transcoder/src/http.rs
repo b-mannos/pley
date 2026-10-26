@@ -14,8 +14,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use pley_transcoder_api::{
-    ConversionStatus, CoverRequest, FileContainer, Fingerprint, FingerprintRequest, Frames, FramesRequest, JobCreated,
-    JobRequest, JobStatus, KeyframesRequest, MediaInfo, PrefetchRequest, Prefetched, ProbeRequest,
+    ConversionStatus, CoverRequest, FileContainer, Fingerprint, FingerprintRequest, Frames, FramesRequest, HoldRequest,
+    JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo, PrefetchRequest, Prefetched, ProbeRequest,
     SUBTITLES_COMPLETE_HEADER, SubtitleRequest, ThumbnailRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo,
     TrickplayRequest,
 };
@@ -112,6 +112,7 @@ impl AppState {
             hw_processes: hw,
             max_hw_jobs: self.jobs.limits.max_hw_jobs,
             work_dir_bytes,
+            background_paused: self.jobs.background.paused() as u32,
             counters: self.metrics.snapshot(),
             jobs: self.jobs.list().iter().map(|j| j.status()).collect(),
         }
@@ -131,6 +132,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/subtitles/mks", post(subtitles_matroska))
         .route("/keyframes", post(keyframes))
         .route("/prefetch", post(prefetch))
+        .route("/hold", post(hold))
         .route("/fingerprint", post(fingerprint))
         .route("/frames", post(frames))
         .route("/trickplay", post(trickplay))
@@ -192,6 +194,8 @@ async fn probe(State(state): Shared, Json(req): Json<ProbeRequest>) -> ApiResult
     if !path.is_file() {
         return Err(ApiError::NotFound(format!("file not found: {}", req.path)));
     }
+    // Library scans ask; jobs probe without asking. A playback starting goes first.
+    state.jobs.background.wait().await;
     let info = state.prober.probe(path).await.map_err(|e| {
         // Only a file ffprobe could not read is a definitive failure; timeouts
         // (sleeping NAS) and start-up problems are worth retrying later.
@@ -252,6 +256,11 @@ async fn keyframes(State(state): Shared, Json(req): Json<KeyframesRequest>) -> A
 
 async fn prefetch(State(state): Shared, Json(req): Json<PrefetchRequest>) -> ApiResult<Json<Prefetched>> {
     Ok(Json(state.prefetcher.prefetch(&req).await?))
+}
+
+async fn hold(State(state): Shared, Json(req): Json<HoldRequest>) -> StatusCode {
+    state.jobs.background.hold(Duration::from_millis(req.ms));
+    StatusCode::NO_CONTENT
 }
 
 async fn trickplay(State(state): Shared, Json(req): Json<TrickplayRequest>) -> ApiResult<Json<TrickplayInfo>> {
@@ -435,10 +444,11 @@ mod tests {
         });
         let metrics = Arc::new(Metrics::default());
         let prober = Arc::new(Prober::new(ff.clone(), metrics.clone(), 1));
-        let keyframes = KeyframeStore::new(ff.clone(), metrics.clone(), dir.join("keyframes"));
+        let background = crate::background::Background::new();
+        let keyframes = KeyframeStore::new(ff.clone(), metrics.clone(), background.clone(), dir.join("keyframes"));
         let extractor = Arc::new(Extractor::new(ff.clone(), prober.clone(), metrics.clone(), dir.join("subtitles"), 1));
-        let fingerprinter = Arc::new(Fingerprinter::new(ff.clone(), 1));
-        let trickplay = Arc::new(Trickplay::new(ff.clone(), prober.clone(), dir.join("trickplay")));
+        let fingerprinter = Arc::new(Fingerprinter::new(ff.clone(), background.clone(), 1));
+        let trickplay = Arc::new(Trickplay::new(ff.clone(), prober.clone(), background.clone(), dir.join("trickplay")));
         let limits = Limits { max_jobs: 3, max_hw_jobs: 1 };
         let jobs = JobManager::new(
             ff.clone(),
@@ -449,6 +459,7 @@ mod tests {
             dir.join("jobs"),
             None,
             limits.clone(),
+            background,
         );
         let info =
             TranscoderInfo { version: "1.2.3".into(), capabilities: ff.caps.clone(), limits, ..Default::default() };
@@ -696,6 +707,20 @@ mod tests {
         assert_eq!(done.bytes, 3 << 20);
         let ranges: Vec<_> = done.ranges.iter().map(|r| (r.part.as_str(), r.start, r.end)).collect();
         assert_eq!(ranges, vec![("head", 0, 3 << 20)], "no index: the head only");
+    }
+
+    #[tokio::test]
+    async fn a_hold_keeps_background_work_waiting() {
+        let dir = tempfile::tempdir().unwrap();
+        let addr = serve(dir.path(), None).await;
+        let input = dir.path().join("clip.ts");
+        std::fs::write(&input, vec![0x47u8; 1 << 20]).unwrap();
+        let hold = serde_json::json!({"ms": 30_000}).to_string();
+        assert_eq!(request(addr, "POST", "/v1/hold", None, Some(hold)).await.status, 204);
+        let req = serde_json::json!({"path": input}).to_string();
+        let answer = request(addr, "POST", "/v1/prefetch", None, Some(req)).await;
+        let done: Prefetched = serde_json::from_str(&answer.body).unwrap();
+        assert_eq!((done.bytes, done.skipped.as_deref()), (0, Some("a playback is starting")));
     }
 
     #[tokio::test]

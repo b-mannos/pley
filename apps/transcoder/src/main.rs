@@ -7,6 +7,7 @@
 //! FFmpeg; the media server talks to it over HTTP (docs/TRANSCODER.md).
 
 mod adaptive;
+mod background;
 mod cache;
 mod convert;
 mod dovi;
@@ -211,7 +212,10 @@ async fn run(args: Args) -> anyhow::Result<()> {
     );
     let metrics = Arc::new(metrics::Metrics::default());
     let prober = Arc::new(probe::Prober::new(ff.clone(), metrics.clone(), args.probe_concurrency));
-    let keyframes = keyframes::KeyframeStore::new(ff.clone(), metrics.clone(), work_dir.join("keyframes"));
+    // Seek previews, fingerprints, keyframe scans and probes wait for starting playbacks.
+    let background = background::Background::new();
+    let keyframes =
+        keyframes::KeyframeStore::new(ff.clone(), metrics.clone(), background.clone(), work_dir.join("keyframes"));
     let extractor = Arc::new(extract::Extractor::new(
         ff.clone(),
         prober.clone(),
@@ -219,8 +223,9 @@ async fn run(args: Args) -> anyhow::Result<()> {
         work_dir.join("subtitles"),
         args.probe_concurrency.div_ceil(2),
     ));
-    let fingerprinter = Arc::new(fingerprint::Fingerprinter::new(ff.clone(), 2));
-    let trickplay = Arc::new(trickplay::Trickplay::new(ff.clone(), prober.clone(), work_dir.join("trickplay")));
+    let fingerprinter = Arc::new(fingerprint::Fingerprinter::new(ff.clone(), background.clone(), 2));
+    let trickplay =
+        Arc::new(trickplay::Trickplay::new(ff.clone(), prober.clone(), background.clone(), work_dir.join("trickplay")));
     let limits = Limits { max_jobs: args.max_jobs.max(1), max_hw_jobs: args.max_hw_jobs };
     let jobs = job::JobManager::new(
         ff.clone(),
@@ -231,6 +236,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         jobs_dir.clone(),
         shader_cache(&work_dir),
         limits.clone(),
+        background,
     );
     jobs.spawn_reaper();
     let conversions = convert::Conversions::new(

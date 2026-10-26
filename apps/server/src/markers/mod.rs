@@ -17,9 +17,12 @@
 //!    Plex and Jellyfin's Intro Skipper find them.
 //!
 //! A single background worker analyses one season at a time after library
-//! scans (and on demand), at low priority and pausing while anything plays.
-//! A season being watched goes first, during playback: the episodes playing
-//! before the rest of it, and their players are told when they have markers.
+//! scans (and on demand), at low priority and pausing while anything plays:
+//! a playback that starts stops the request under way (it is made again at
+//! the worker's next turn). A season being watched goes first, during
+//! playback (the transcoder holds it back while a playback starts), one
+//! request at a time: the episodes playing before the rest of it, and their
+//! players are told when they have markers.
 
 #[cfg(test)]
 mod eval;
@@ -675,8 +678,9 @@ impl MarkerService {
         watched: bool,
     ) -> Result<HashMap<(usize, MarkerKind), Fp>, FpError> {
         let mut out = HashMap::new();
-        // Two at a time, like the transcoder's own limit.
-        for chunk in needed.chunks(2) {
+        // Two at a time, like the transcoder's own limit; one while it plays,
+        // which reads the disk too.
+        for chunk in needed.chunks(if watched { 1 } else { 2 }) {
             let mut fetches = Vec::with_capacity(chunk.len());
             for &(i, kind) in chunk {
                 fetches.push(self.fingerprint(&pool[i], kind, watched));
@@ -701,7 +705,8 @@ impl MarkerService {
     }
 
     /// Background work: playback has the machine to itself, except for the
-    /// markers of what plays.
+    /// markers of what plays (which the transcoder holds back while a
+    /// playback starts).
     async fn wait_turn(&self, watched: bool) -> Result<(), FpError> {
         while !watched && self.sessions.quiet_for() < QUIET_BEFORE_BACKGROUND_SECS {
             if !self.watched.lock().is_empty() {
@@ -710,6 +715,27 @@ impl MarkerService {
             let _ = tokio::time::timeout(Duration::from_secs(15), self.wake.notified()).await;
         }
         Ok(())
+    }
+
+    /// What `request` answers once it is this work's turn (see
+    /// [`MarkerService::wait_turn`]). Library work that a playback starting
+    /// interrupts (dropping the request stops the transcoder's FFmpeg) is
+    /// asked again at its next turn; the markers of what plays go on.
+    async fn in_turn<T, F: Future<Output = Result<T, TranscoderError>>>(
+        &self,
+        watched: bool,
+        request: impl Fn() -> F,
+    ) -> Result<Result<T, TranscoderError>, FpError> {
+        loop {
+            self.wait_turn(watched).await?;
+            let starts = self.sessions.starts();
+            tokio::select! {
+                result = request() => return Ok(result),
+                () = self.sessions.started_since(starts), if !watched => {
+                    tracing::debug!("intro/credits detection put off: a playback is starting");
+                }
+            }
+        }
     }
 
     /// The key frames of the credits window of `file`, from the cache or the
@@ -722,9 +748,8 @@ impl MarkerService {
         if let Some(frames) = std::fs::read(&cache).ok().and_then(|b| serde_json::from_slice(&b).ok()) {
             return Ok(Some(frames));
         }
-        self.wait_turn(watched).await?;
         let req = FramesRequest { path: file.path.clone(), start_ms, duration_ms };
-        match self.transcoder.frames(&req).await {
+        match self.in_turn(watched, || self.transcoder.frames(&req)).await? {
             Ok(frames) => {
                 if let Ok(bytes) = serde_json::to_vec(&frames.frames) {
                     write_cache_file(&self.cache_dir, &cache, file.file_id, &bytes);
@@ -745,9 +770,8 @@ impl MarkerService {
         if let Some(fp) = read_cached(&cache) {
             return Ok(Some(fp));
         }
-        self.wait_turn(watched).await?;
         let req = FingerprintRequest { path: file.path.clone(), stream_index: file.audio_index, start_ms, duration_ms };
-        match self.transcoder.fingerprint(&req).await {
+        match self.in_turn(watched, || self.transcoder.fingerprint(&req)).await? {
             Ok(fp) => {
                 let fp = Fp {
                     start_ms: fp.start_ms,

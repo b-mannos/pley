@@ -3,8 +3,9 @@
 //! muxer. The server compares them across the episodes of a season to find
 //! the intro and credits they share. And how dark the key frames of part of
 //! a video are, for credits with no audio in common (text on black).
-//! Background work: few at a time, at low process priority, so playback
-//! never waits for it.
+//! Background work: few at a time, at low process priority, and paused
+//! while a playback starts (see [`crate::background`]), so playback never
+//! waits for it.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -13,8 +14,8 @@ use std::time::Duration;
 use pley_transcoder_api::{Fingerprint, FingerprintRequest, FrameStats, Frames, FramesRequest};
 use tokio::sync::Semaphore;
 
+use crate::background::Background;
 use crate::error::{ApiError, ApiResult};
-use crate::extract::run_capture;
 use crate::ffmpeg::Ffmpeg;
 use crate::util::{MEDIA_INPUT_OPTIONS, background_priority, input_arg, secs};
 
@@ -26,12 +27,13 @@ const TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 pub struct Fingerprinter {
     ff: Arc<Ffmpeg>,
+    background: Arc<Background>,
     limiter: Semaphore,
 }
 
 impl Fingerprinter {
-    pub fn new(ff: Arc<Ffmpeg>, concurrency: usize) -> Self {
-        Self { ff, limiter: Semaphore::new(concurrency.max(1)) }
+    pub fn new(ff: Arc<Ffmpeg>, background: Arc<Background>, concurrency: usize) -> Self {
+        Self { ff, background, limiter: Semaphore::new(concurrency.max(1)) }
     }
 
     pub async fn fingerprint(&self, req: &FingerprintRequest) -> ApiResult<Fingerprint> {
@@ -62,7 +64,7 @@ impl Fingerprinter {
         background_priority(&mut cmd);
 
         let _permit = self.limiter.acquire().await.map_err(|e| ApiError::Internal(e.into()))?;
-        let (raw, _) = run_capture(cmd, TIMEOUT).await?;
+        let (raw, _) = self.background.run(cmd, TIMEOUT).await?;
         Ok(Fingerprint { start_ms, item_seconds: ITEM_SECONDS, data: parse_raw(&raw) })
     }
 
@@ -87,7 +89,7 @@ impl Fingerprinter {
         background_priority(&mut cmd);
 
         let _permit = self.limiter.acquire().await.map_err(|e| ApiError::Internal(e.into()))?;
-        let (_, log) = run_capture(cmd, TIMEOUT).await?;
+        let (_, log) = self.background.run(cmd, TIMEOUT).await?;
         Ok(Frames { frames: parse_frame_stats(&log, start_ms) })
     }
 }

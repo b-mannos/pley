@@ -1185,8 +1185,11 @@ pub struct Sessions {
     /// Transcode slots of play requests still creating their job (see
     /// [`Sessions::reserve_transcode`]). Only raised while `map` is locked.
     reserved: AtomicUsize,
-    /// Sessions started so far (see [`Sessions::started_since`]).
+    /// Sessions started so far (see [`Sessions::started_since`]), and play
+    /// requests begun.
     starts: AtomicU64,
+    /// Play requests on their way to a session (see [`Sessions::begin_start`]).
+    beginning: AtomicUsize,
     /// A session started or ended.
     changed: Notify,
     /// Sessions stopped from elsewhere, by id (see [`Sessions::stop`]).
@@ -1242,6 +1245,18 @@ impl Drop for TranscodeSlot<'_> {
     }
 }
 
+/// A play request on its way to a session (see [`Sessions::begin_start`]).
+pub struct Beginning<'a> {
+    sessions: &'a Sessions,
+}
+
+impl Drop for Beginning<'_> {
+    fn drop(&mut self) {
+        self.sessions.beginning.fetch_sub(1, Ordering::SeqCst);
+        self.sessions.changed.notify_waiters();
+    }
+}
+
 /// Quiet sessions are forgotten after this (a player that comes back later
 /// starts a new one).
 const SESSION_IDLE_SECS: i64 = 15 * 60;
@@ -1255,9 +1270,12 @@ const REAP_EVERY: Duration = Duration::from_secs(15);
 /// never takes the disk, the network or the GPU from someone watching (or
 /// about to start the next episode).
 pub const QUIET_BEFORE_BACKGROUND_SECS: i64 = 60;
-/// A playback is starting for this long after its session began: work that
-/// can wait (seek previews) keeps off the disk and the network meanwhile, so
-/// the player's first reads get them (see [`Sessions::starting_for`]).
+/// A playback is starting from its play request ([`Sessions::begin_start`])
+/// until this long after its session began: work that can wait (seek
+/// previews, intro detection) keeps off the disk and the network meanwhile,
+/// so the player's first reads get them (see [`Sessions::starting_for`]).
+/// The transcoder holds its own background work (scan probes too) for as
+/// long as the start really takes.
 pub const STARTING_SECS: i64 = 30;
 /// Direct plays a user has at most: the oldest go first. They cost only
 /// memory (transcodes have their own limit), but a client starting plays in
@@ -1332,6 +1350,17 @@ impl Sessions {
         self.changed.notify_waiters();
     }
 
+    /// A play request begins: a playback is starting from now on, before it
+    /// has a session (creating its transcode takes seconds, and reads the
+    /// file). Background work stops and waits ([`Sessions::started_since`]
+    /// resolves, [`Sessions::starting_for`] and [`Sessions::quiet_for`] count
+    /// it) until the guard is dropped; the session, once there, takes over.
+    pub fn begin_start(&self) -> Beginning<'_> {
+        self.beginning.fetch_add(1, Ordering::SeqCst);
+        self.started();
+        Beginning { sessions: self }
+    }
+
     /// How many sessions have started so far, for [`Sessions::started_since`].
     pub fn starts(&self) -> u64 {
         self.starts.load(Ordering::SeqCst)
@@ -1357,6 +1386,9 @@ impl Sessions {
     /// How long the newest session that hasn't stopped is still starting
     /// (it began less than [`STARTING_SECS`] ago), or `None` when none is.
     pub fn starting_for(&self) -> Option<Duration> {
+        if self.beginning.load(Ordering::SeqCst) > 0 {
+            return Some(Duration::from_secs(STARTING_SECS as u64));
+        }
         let now = now();
         let newest =
             self.map.lock().values().filter(|s| s.play.lock().state != "stopped").map(|s| s.started_at).max()?;
@@ -1482,6 +1514,9 @@ impl Sessions {
     /// from the last sign of the sessions still kept otherwise, and "long
     /// ago" without any.
     pub fn quiet_for(&self) -> i64 {
+        if self.beginning.load(Ordering::SeqCst) > 0 {
+            return 0;
+        }
         let now = now();
         let list = self.list();
         if list.iter().any(|s| s.is_active(now)) {
@@ -1770,6 +1805,31 @@ mod tests {
         assert!(futures_now(ended.as_mut()).is_some(), "the end is heard");
         assert_eq!(sessions.starting_for(), None);
         assert!(sessions.get(&old.id).is_some());
+    }
+
+    #[tokio::test]
+    async fn play_requests_are_starting_before_their_session_exists() {
+        let sessions = Sessions::default();
+        assert_eq!(sessions.quiet_for(), i64::MAX, "nothing ever played");
+        let seen = sessions.starts();
+        let stop = sessions.started_since(seen);
+        tokio::pin!(stop);
+        assert!(futures_now(stop.as_mut()).is_none());
+
+        // Creating a transcode takes seconds: background work stops at once.
+        let beginning = sessions.begin_start();
+        assert!(futures_now(stop.as_mut()).is_some(), "work under way stops");
+        assert_eq!(sessions.starting_for(), Some(Duration::from_secs(STARTING_SECS as u64)));
+        assert_eq!(sessions.quiet_for(), 0, "nothing new starts");
+        let over = sessions.changed();
+        tokio::pin!(over);
+        assert!(futures_now(over.as_mut()).is_none());
+
+        // The request failed (or its session took over): it is over.
+        drop(beginning);
+        assert!(futures_now(over.as_mut()).is_some(), "waiting work looks again");
+        assert_eq!(sessions.starting_for(), None);
+        assert_eq!(sessions.quiet_for(), i64::MAX);
     }
 
     /// Polls a future once.

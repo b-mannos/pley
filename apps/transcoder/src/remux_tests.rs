@@ -330,7 +330,13 @@ async fn jobs_edit_segments_before_serving_them() {
     let ff = Arc::new(ff());
     let metrics = Arc::new(crate::metrics::Metrics::default());
     let prober = Arc::new(crate::probe::Prober::new(ff.clone(), metrics.clone(), 1));
-    let keyframes = crate::keyframes::KeyframeStore::new(ff.clone(), metrics.clone(), dir.path().join("keyframes"));
+    let background = crate::background::Background::new();
+    let keyframes = crate::keyframes::KeyframeStore::new(
+        ff.clone(),
+        metrics.clone(),
+        background.clone(),
+        dir.path().join("keyframes"),
+    );
     let extractor = Arc::new(crate::extract::Extractor::new(
         ff.clone(),
         prober.clone(),
@@ -339,8 +345,17 @@ async fn jobs_edit_segments_before_serving_them() {
         1,
     ));
     let limits = pley_transcoder_api::Limits { max_jobs: 2, max_hw_jobs: 0 };
-    let jobs =
-        crate::job::JobManager::new(ff, prober, keyframes, extractor, metrics, dir.path().join("jobs"), None, limits);
+    let jobs = crate::job::JobManager::new(
+        ff,
+        prober,
+        keyframes,
+        extractor,
+        metrics,
+        dir.path().join("jobs"),
+        None,
+        limits,
+        background,
+    );
     let created = jobs
         .create(JobRequest {
             input: input.to_string_lossy().into_owned(),

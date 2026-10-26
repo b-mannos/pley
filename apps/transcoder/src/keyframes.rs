@@ -5,8 +5,9 @@
 //! Matroska and MP4/MOV files carry an index of their own (Cues; sample
 //! tables and fragment headers), read in milliseconds when a job is created.
 //! Other files, or ones whose index can't be trusted, need every packet
-//! header read: that runs in the background one file at a time, and jobs
-//! transcode until it is done.
+//! header read: that runs in the background one file at a time, out of the
+//! way of starting playbacks (see [`crate::background`]), and jobs transcode
+//! until it is done.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -20,6 +21,7 @@ use parking_lot::Mutex;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 
+use crate::background::Background;
 use crate::ffmpeg::Ffmpeg;
 use crate::metrics::Metrics;
 use crate::util::{MEDIA_INPUT_OPTIONS, background_priority, file_key, input_arg, touch, write_atomically};
@@ -29,6 +31,9 @@ const MEMORY_ENTRIES: usize = 256;
 /// thousands of movie fragments on slow storage comes near it); beyond that
 /// the job transcodes and the index is finished in the background.
 const READ_BUDGET: Duration = Duration::from_secs(2);
+/// The longest a scan of every packet header takes, paused time not counted
+/// (a whole file read over a slow share; it never stopped before).
+const SCAN_TIMEOUT: Duration = Duration::from_secs(12 * 3600);
 
 pub struct KeyframeStore {
     dir: PathBuf,
@@ -38,7 +43,7 @@ pub struct KeyframeStore {
 }
 
 impl KeyframeStore {
-    pub fn new(ff: Arc<Ffmpeg>, metrics: Arc<Metrics>, dir: PathBuf) -> Arc<Self> {
+    pub fn new(ff: Arc<Ffmpeg>, metrics: Arc<Metrics>, background: Arc<Background>, dir: PathBuf) -> Arc<Self> {
         let _ = std::fs::create_dir_all(&dir);
         let (tx, mut rx) = mpsc::unbounded_channel::<(String, PathBuf)>();
         let store = Arc::new(Self { dir, memory: Mutex::default(), pending: Mutex::default(), queue: tx });
@@ -46,6 +51,7 @@ impl KeyframeStore {
         tokio::spawn(async move {
             while let Some((key, path)) = rx.recv().await {
                 let Some(store) = worker.upgrade() else { break };
+                background.wait().await;
                 Metrics::inc(&metrics.keyframe_scans);
                 let started = Instant::now();
                 let own = {
@@ -54,7 +60,7 @@ impl KeyframeStore {
                 };
                 let result = match own {
                     Some((times, _)) => Ok(times),
-                    None => scan(&ff, &path).await,
+                    None => scan(&ff, &background, &path).await,
                 };
                 match result {
                     Ok(times) => {
@@ -171,7 +177,7 @@ fn container_index(path: &Path, deadline: Option<Instant>) -> Option<(Vec<i64>, 
 }
 
 /// Read every video packet header and collect keyframe timestamps.
-async fn scan(ff: &Ffmpeg, path: &Path) -> anyhow::Result<Vec<i64>> {
+async fn scan(ff: &Ffmpeg, background: &Background, path: &Path) -> anyhow::Result<Vec<i64>> {
     let mut cmd = ff.probe_command();
     cmd.args(["-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0"])
         .args(MEDIA_INPUT_OPTIONS)
@@ -183,14 +189,19 @@ async fn scan(ff: &Ffmpeg, path: &Path) -> anyhow::Result<Vec<i64>> {
     background_priority(&mut cmd);
     let mut child = cmd.spawn().context("spawning ffprobe")?;
     let stdout = child.stdout.take().context("no stdout")?;
-    let mut lines = BufReader::with_capacity(1 << 16, stdout).lines();
-    let mut times = Vec::new();
-    while let Some(line) = lines.next_line().await? {
-        if let Some(t) = parse_packet_line(&line) {
-            times.push(t);
+    let read = async {
+        let mut lines = BufReader::with_capacity(1 << 16, stdout).lines();
+        let mut times = Vec::new();
+        while let Some(line) = lines.next_line().await? {
+            if let Some(t) = parse_packet_line(&line) {
+                times.push(t);
+            }
         }
-    }
-    let status = child.wait().await?;
+        anyhow::Ok(times)
+    };
+    // Paused while a playback starts.
+    let (status, times) = tokio::join!(background.supervise(&mut child, SCAN_TIMEOUT), read);
+    let (status, mut times) = (status.map_err(|e| anyhow::anyhow!("{e:?}"))?, times?);
     if !status.success() && times.is_empty() {
         bail!("ffprobe exited with {status}");
     }
@@ -230,7 +241,7 @@ mod tests {
             caps: Default::default(),
             segment_times_relative: true,
         });
-        KeyframeStore::new(ff, Arc::new(Metrics::default()), dir.join("keyframes"))
+        KeyframeStore::new(ff, Arc::new(Metrics::default()), Background::new(), dir.join("keyframes"))
     }
 
     #[tokio::test]

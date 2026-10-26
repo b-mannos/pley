@@ -20,9 +20,9 @@ use axum::{Json, Router};
 use parking_lot::Mutex;
 use pley_transcoder_api::{
     API_VERSION, AudioMode, AudioPlan, Capabilities, ConversionState, ConversionStatus, EncoderInfo, ErrorBody,
-    FileContainer, HwAccel, JobCreated, JobRequest, JobStatus, Limits, MediaInfo, MediaStream, PrefetchRequest,
-    Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER, StreamKind, SubtitleRequest, TranscoderInfo, TranscoderStatus,
-    TrickplayInfo, TrickplayRequest, VideoCodec, VideoMode, VideoPlan,
+    FileContainer, HoldRequest, HwAccel, JobCreated, JobRequest, JobStatus, Limits, MediaInfo, MediaStream,
+    PrefetchRequest, Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER, StreamKind, SubtitleRequest, TranscoderInfo,
+    TranscoderStatus, TrickplayInfo, TrickplayRequest, VideoCodec, VideoMode, VideoPlan,
 };
 use serde_json::{Value, json};
 
@@ -77,6 +77,8 @@ struct Fake {
     conversion_running: Arc<AtomicBool>,
     /// Conversions stopped, in order.
     conversions_deleted: Arc<Mutex<Vec<String>>>,
+    /// Background holds asked for (ms), in order.
+    holds: Arc<Mutex<Vec<u64>>>,
 }
 
 /// The stand-in's one conversion: running when asked for, done when looked at again.
@@ -408,6 +410,13 @@ async fn start_fake() -> (Fake, String) {
             }),
         )
         .route("/v1/keyframes", post(|| async { StatusCode::ACCEPTED }))
+        .route(
+            "/v1/hold",
+            post(|State(fake): State<Fake>, Json(req): Json<HoldRequest>| async move {
+                fake.holds.lock().push(req.ms);
+                StatusCode::NO_CONTENT
+            }),
+        )
         .route(
             "/v1/conversions",
             post(|State(fake): State<Fake>, Json(req): Json<JobRequest>| async move {
@@ -1331,6 +1340,47 @@ async fn seek_previews_wait_while_a_playback_starts() {
     assert!(made, "the previews were made");
     assert_eq!(w.fake.previews_dropped.load(Ordering::SeqCst), 1);
     assert_eq!(app.state.trickplay.pending(), 0);
+}
+
+#[tokio::test]
+async fn seek_previews_stop_as_soon_as_play_is_pressed() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    app.put("/api/settings", admin, json!({"seek_previews": true})).await;
+    *w.fake.preview_delay.lock() = Duration::from_secs(60);
+    assert_eq!(app.get(&format!("/api/items/{}", w.movies["Clip"]), admin).await.status, StatusCode::OK);
+    eventually(|| w.fake.previews.lock().len() == 1).await;
+
+    // Creating the transcode reads the file too: the previews stop before it
+    // begins, not once the session exists.
+    *w.fake.job_delay.lock() = Duration::from_secs(1);
+    let body = json!({"item_id": w.movies["Feature"], "caps": browser(), "client_id": "tab"});
+    let request = app.post("/api/playback", admin, body);
+    tokio::pin!(request);
+    let dropped = async {
+        while w.fake.previews_dropped.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    };
+    tokio::select! {
+        reply = &mut request => panic!("answered before the previews stopped: {:?}", reply.body),
+        () = dropped => {}
+    }
+    assert_eq!(w.fake.created(), 0, "the job is still being created");
+    let started = request.await;
+    assert_eq!(started.status, StatusCode::OK, "{:?}", started.body);
+    assert_eq!(app.state.trickplay.pending(), 1, "still to be made");
+    assert!(w.fake.holds.lock().is_empty(), "the transcoder holds for its own jobs");
+}
+
+#[tokio::test]
+async fn direct_plays_hold_the_transcoders_background_work() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let clip = play(app, admin, json!({"item_id": w.movies["Clip"], "caps": browser(), "client_id": "tv"})).await;
+    assert_eq!((clip.status, clip.body["method"].clone()), (StatusCode::OK, json!("direct")));
+    eventually(|| w.fake.holds.lock().len() == 1).await;
+    assert_eq!(w.fake.holds.lock()[0], 10_000);
 }
 
 #[tokio::test]

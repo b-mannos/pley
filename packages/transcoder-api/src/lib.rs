@@ -452,6 +452,10 @@ pub struct TranscoderStatus {
     pub hw_processes: u32,
     pub max_hw_jobs: u32,
     pub work_dir_bytes: u64,
+    /// Background FFmpeg runs (seek previews, fingerprints, keyframe scans)
+    /// paused while a playback starts.
+    #[serde(default)]
+    pub background_paused: u32,
     pub counters: Counters,
     pub jobs: Vec<JobStatus>,
 }
@@ -923,6 +927,16 @@ pub const SUBTITLES_COMPLETE_HEADER: &str = "x-pley-complete";
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct KeyframesRequest {
     pub path: String,
+}
+
+/// `POST /v1/hold` → `204`: a playback the transcoder doesn't run itself (a
+/// direct play) is starting, so its background work (seek previews,
+/// fingerprints, key frames, keyframe scans, probes) waits, and its FFmpeg
+/// runs under way pause, for `ms` (a minute at most). Its own jobs' starts
+/// hold it without asking. Transcoders before this answer `404`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct HoldRequest {
+    pub ms: u64,
 }
 
 /// `POST /v1/prefetch` → [`Prefetched`]: read the parts of a file a playback

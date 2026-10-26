@@ -1,0 +1,418 @@
+// SPDX-License-Identifier: LicenseRef-Restricted
+//! Background work keeps out of a starting playback's way.
+//!
+//! Seek previews, audio fingerprints, the key frames of credits, keyframe
+//! scans and library probes read whole files, or long stretches of them, from
+//! the disk or network share the playbacks read too: on a network share a 4K
+//! remux needs all of it to start quickly. While a playback starts, none of
+//! them starts, and the FFmpeg runs under way are paused (their process
+//! suspended), then resumed once the start is over. A playback starts while a
+//! job is being created, while one of its FFmpeg processes (Play, a seek, a
+//! restart) hasn't made its first segments yet, and while the server says a
+//! direct play, which it serves itself, is starting ([`Background::hold`]).
+//!
+//! Starts last seconds ([`MAX_START`] at most), so a paused run only waits:
+//! nothing is lost, and its time limit counts the time it ran.
+
+use std::collections::HashMap;
+use std::process::{ExitStatus, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+use std::time::Duration;
+
+use parking_lot::Mutex;
+use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::process::{Child, Command};
+use tokio::sync::watch;
+use tokio::time::Instant;
+
+use crate::error::{ApiError, ApiResult};
+
+/// The longest a playback start holds background work (a process whose
+/// first segments are slow to come, a job creation probing a sleeping disk).
+pub const MAX_START: Duration = Duration::from_secs(20);
+/// The longest a hold asked for from outside lasts.
+pub const MAX_HOLD: Duration = Duration::from_secs(60);
+
+#[derive(Default)]
+struct State {
+    /// Playbacks starting, by id: until when each holds background work at most.
+    starts: HashMap<u64, Instant>,
+    next_id: u64,
+    /// Until when the server asked for background work to wait.
+    held_until: Option<Instant>,
+}
+
+impl State {
+    /// When background work may go on again, if it must wait now.
+    fn held_until(&self, now: Instant) -> Option<Instant> {
+        self.starts.values().copied().chain(self.held_until).filter(|until| *until > now).max()
+    }
+}
+
+pub struct Background {
+    state: Mutex<State>,
+    /// Sent on every change: waiting and paused runs look again.
+    changed: watch::Sender<()>,
+    /// Background processes paused now.
+    paused: AtomicUsize,
+}
+
+impl Background {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self { state: Mutex::default(), changed: watch::Sender::new(()), paused: AtomicUsize::new(0) })
+    }
+
+    /// A playback starts: background work waits until the guard is dropped,
+    /// or [`MAX_START`] at most.
+    pub fn start(self: &Arc<Self>) -> Starting {
+        let mut state = self.state.lock();
+        let id = state.next_id;
+        state.next_id += 1;
+        state.starts.insert(id, Instant::now() + MAX_START);
+        drop(state);
+        self.changed.send_replace(());
+        Starting { background: self.clone(), id }
+    }
+
+    /// Background work waits for `span` ([`MAX_HOLD`] at most) from now, or
+    /// longer when held already.
+    pub fn hold(&self, span: Duration) {
+        let until = Instant::now() + span.min(MAX_HOLD);
+        let mut state = self.state.lock();
+        if state.held_until.is_none_or(|held| held < until) {
+            state.held_until = Some(until);
+        }
+        drop(state);
+        self.changed.send_replace(());
+    }
+
+    /// Whether background work must wait now.
+    pub fn held(&self) -> bool {
+        self.held_until().is_some()
+    }
+
+    /// Background processes paused now.
+    pub fn paused(&self) -> usize {
+        self.paused.load(Relaxed)
+    }
+
+    fn held_until(&self) -> Option<Instant> {
+        self.state.lock().held_until(Instant::now())
+    }
+
+    /// Resolves once background work may go on.
+    pub async fn wait(&self) {
+        let mut changed = self.changed.subscribe();
+        // Seen before the look: no change slips in between.
+        changed.mark_unchanged();
+        while let Some(until) = self.held_until() {
+            tokio::select! {
+                _ = changed.changed() => {}
+                () = tokio::time::sleep_until(until) => {}
+            }
+        }
+    }
+
+    /// Run FFmpeg (or FFprobe) as background work: once nothing starts, and
+    /// paused while something does. Its output and log; an error when it
+    /// fails or runs longer than `timeout`.
+    pub async fn run(&self, mut cmd: Command, timeout: Duration) -> ApiResult<(Vec<u8>, String)> {
+        self.wait().await;
+        cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = cmd.spawn().map_err(|e| ApiError::Internal(anyhow::anyhow!("failed to start ffmpeg: {e}")))?;
+        let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
+            return Err(ApiError::Internal(anyhow::anyhow!("ffmpeg pipes unavailable")));
+        };
+        let (status, stdout, stderr) =
+            tokio::join!(self.supervise(&mut child, timeout), read_all(stdout), read_all(stderr));
+        let stderr = String::from_utf8_lossy(&stderr).trim().to_owned();
+        if !status?.success() {
+            let message = stderr.lines().last().unwrap_or("ffmpeg failed").to_owned();
+            return Err(ApiError::Failed(message));
+        }
+        Ok((stdout, stderr))
+    }
+
+    /// Wait for a background process to end, pausing it while a playback
+    /// starts; it is stopped once it has run for `timeout`, paused time not
+    /// counted.
+    pub async fn supervise(&self, child: &mut Child, timeout: Duration) -> ApiResult<ExitStatus> {
+        let mut changed = self.changed.subscribe();
+        changed.mark_unchanged();
+        let mut left = timeout;
+        let mut paused = Paused { background: self, on: false };
+        loop {
+            let until = self.held_until();
+            if until.is_some() != paused.on && pause(child, until.is_some()) {
+                paused.set(until.is_some());
+                let what = if paused.on { "paused: a playback is starting" } else { "resumed" };
+                tracing::debug!("background process {} {what}", child.id().unwrap_or_default());
+            }
+            let since = Instant::now();
+            tokio::select! {
+                status = child.wait() => {
+                    // Not resumed: it is gone.
+                    paused.set(false);
+                    return status.map_err(|e| ApiError::Internal(e.into()));
+                }
+                _ = changed.changed() => {}
+                () = tokio::time::sleep_until(until.unwrap_or(since)), if until.is_some() => {}
+                () = tokio::time::sleep(left), if !paused.on => {
+                    let _ = child.start_kill();
+                    let _ = child.wait().await;
+                    paused.set(false);
+                    return Err(ApiError::Timeout("ffmpeg took too long".into()));
+                }
+            }
+            if !paused.on {
+                left = left.saturating_sub(since.elapsed());
+            }
+        }
+    }
+}
+
+/// A playback starting (see [`Background::start`]); over when dropped.
+pub struct Starting {
+    background: Arc<Background>,
+    id: u64,
+}
+
+impl Drop for Starting {
+    fn drop(&mut self) {
+        self.background.state.lock().starts.remove(&self.id);
+        self.background.changed.send_replace(());
+    }
+}
+
+/// Counts a supervised process in [`Background::paused`] while it is paused.
+struct Paused<'a> {
+    background: &'a Background,
+    on: bool,
+}
+
+impl Paused<'_> {
+    fn set(&mut self, on: bool) {
+        if on != self.on {
+            self.on = on;
+            if on {
+                self.background.paused.fetch_add(1, Relaxed);
+            } else {
+                self.background.paused.fetch_sub(1, Relaxed);
+            }
+        }
+    }
+}
+
+impl Drop for Paused<'_> {
+    fn drop(&mut self) {
+        // A supervision dropped midway (its request went away) kills the
+        // process (`kill_on_drop`): no resuming needed.
+        self.set(false);
+    }
+}
+
+async fn read_all(mut pipe: impl AsyncRead + Unpin) -> Vec<u8> {
+    let mut out = Vec::new();
+    let _ = pipe.read_to_end(&mut out).await;
+    out
+}
+
+#[cfg(windows)]
+#[link(name = "ntdll.dll", kind = "raw-dylib", modifiers = "+verbatim")]
+unsafe extern "system" {
+    fn NtSuspendProcess(process: windows_sys::Win32::Foundation::HANDLE) -> i32;
+    fn NtResumeProcess(process: windows_sys::Win32::Foundation::HANDLE) -> i32;
+}
+
+/// Suspend (`true`) or resume a child process that hasn't been waited for;
+/// whether that was done. Only between polls of its `wait`, so that its pid
+/// can't have been reaped and given to another process meanwhile.
+fn pause(child: &Child, suspend: bool) -> bool {
+    #[cfg(windows)]
+    {
+        let Some(handle) = child.raw_handle() else { return false };
+        // SAFETY: the handle is the child's own, open for as long as `child` lives.
+        let status = unsafe { if suspend { NtSuspendProcess(handle) } else { NtResumeProcess(handle) } };
+        status >= 0
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let Some(pid) = child.id() else { return false };
+        let signal = if suspend { libc::SIGSTOP } else { libc::SIGCONT };
+        // SAFETY: plain syscall; the pid is the unreaped child's (see above).
+        unsafe { libc::kill(pid as libc::pid_t, signal) == 0 }
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = (child, suspend);
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    #[tokio::test(start_paused = true)]
+    async fn starts_hold_background_work_until_they_are_over() {
+        let bg = Background::new();
+        assert!(!bg.held());
+        let one = bg.start();
+        let two = bg.start();
+        assert!(bg.held());
+        drop(one);
+        assert!(bg.held(), "the other start goes on");
+        let waiting = tokio::spawn({
+            let bg = bg.clone();
+            async move { bg.wait().await }
+        });
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert!(!waiting.is_finished());
+        drop(two);
+        tokio::time::timeout(Duration::from_millis(10), waiting).await.expect("released").unwrap();
+        assert!(!bg.held());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_start_holds_for_a_while_at_most() {
+        let bg = Background::new();
+        let _forgotten = bg.start();
+        let started = Instant::now();
+        bg.wait().await;
+        assert_eq!(started.elapsed().as_secs(), MAX_START.as_secs());
+        assert!(!bg.held());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn holds_from_outside_last_what_they_ask_within_a_limit() {
+        let bg = Background::new();
+        bg.hold(Duration::from_secs(10));
+        bg.hold(Duration::from_secs(3));
+        let started = Instant::now();
+        bg.wait().await;
+        assert_eq!(started.elapsed().as_secs(), 10, "a shorter hold doesn't cut a longer one");
+        bg.hold(Duration::from_secs(3600));
+        let started = Instant::now();
+        bg.wait().await;
+        assert_eq!(started.elapsed().as_secs(), MAX_HOLD.as_secs());
+    }
+
+    /// A process that prints numbers as fast as its pipe takes them, for long.
+    #[cfg(any(windows, target_os = "linux"))]
+    fn chatty() -> Command {
+        let mut cmd = if cfg!(windows) {
+            let mut cmd = Command::new("cmd");
+            cmd.args(["/c", "for /l %i in (1,1,10000000) do @echo %i"]);
+            cmd
+        } else {
+            let mut cmd = Command::new("sh");
+            cmd.args(["-c", "i=0; while [ $i -lt 10000000 ]; do echo $i; i=$((i+1)); done"]);
+            cmd
+        };
+        cmd.kill_on_drop(true).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+        cmd
+    }
+
+    /// A process that takes about `secs` seconds and then succeeds.
+    #[cfg(any(windows, target_os = "linux"))]
+    fn slow(secs: u32) -> Command {
+        let mut cmd = if cfg!(windows) {
+            let mut cmd = Command::new("ping");
+            cmd.args(["-n", &(secs + 1).to_string(), "127.0.0.1"]);
+            cmd
+        } else {
+            let mut cmd = Command::new("sleep");
+            cmd.arg(secs.to_string());
+            cmd
+        };
+        cmd.kill_on_drop(true);
+        cmd
+    }
+
+    /// Whether a line comes from `lines` within `wait`.
+    async fn line_within(lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>, wait: Duration) -> bool {
+        matches!(tokio::time::timeout(wait, lines.next_line()).await, Ok(Ok(Some(_))))
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[tokio::test]
+    async fn a_paused_process_stops_until_it_is_resumed() {
+        let mut child = chatty().spawn().unwrap();
+        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+        assert!(line_within(&mut lines, Duration::from_secs(10)).await, "it runs");
+        assert!(pause(&child, true));
+        // What it wrote before is still in the pipe.
+        while line_within(&mut lines, Duration::from_millis(300)).await {}
+        assert!(!line_within(&mut lines, Duration::from_millis(700)).await, "nothing while paused");
+        assert!(pause(&child, false));
+        assert!(line_within(&mut lines, Duration::from_secs(5)).await, "it goes on");
+        child.kill().await.unwrap();
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[tokio::test]
+    async fn runs_are_paused_while_a_playback_starts() {
+        let bg = Background::new();
+        let mut child = chatty().spawn().unwrap();
+        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+        let supervised = tokio::spawn({
+            let bg = bg.clone();
+            async move { bg.supervise(&mut child, Duration::from_secs(3600)).await }
+        });
+        assert!(line_within(&mut lines, Duration::from_secs(10)).await);
+        let start = bg.start();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while bg.paused() == 0 && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(bg.paused(), 1);
+        while line_within(&mut lines, Duration::from_millis(300)).await {}
+        assert!(!line_within(&mut lines, Duration::from_millis(500)).await, "paused");
+        drop(start);
+        assert!(line_within(&mut lines, Duration::from_secs(5)).await, "resumed");
+        assert_eq!(bg.paused(), 0);
+        supervised.abort();
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[tokio::test]
+    async fn paused_time_does_not_count_against_the_time_limit() {
+        let bg = Background::new();
+        let run = tokio::spawn({
+            let bg = bg.clone();
+            async move { bg.run(slow(1), Duration::from_secs(3)).await.map(|_| ()) }
+        });
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        bg.hold(Duration::from_secs(4));
+        let done = tokio::time::timeout(Duration::from_secs(20), run).await.expect("it ends").unwrap();
+        assert!(done.is_ok(), "{done:?}");
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[tokio::test]
+    async fn running_too_long_is_an_error() {
+        let bg = Background::new();
+        let started = Instant::now();
+        let done = bg.run(slow(30), Duration::from_millis(500)).await;
+        assert!(matches!(done, Err(ApiError::Timeout(_))), "{done:?}");
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[tokio::test]
+    async fn nothing_starts_while_held() {
+        let bg = Background::new();
+        let start = bg.start();
+        let run = tokio::spawn({
+            let bg = bg.clone();
+            async move { bg.run(slow(0), Duration::from_secs(30)).await.map(|_| ()) }
+        });
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert!(!run.is_finished(), "waits for the start");
+        drop(start);
+        let done = tokio::time::timeout(Duration::from_secs(20), run).await.expect("it ends").unwrap();
+        assert!(done.is_ok(), "{done:?}");
+    }
+}

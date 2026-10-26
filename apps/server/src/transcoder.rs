@@ -19,9 +19,9 @@ use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
 use pley_transcoder_api::{
     Announce, ConversionStatus, CoverRequest, ErrorBody, Fingerprint, FingerprintRequest, Frames, FramesRequest,
-    JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo, PrefetchRequest, Prefetched, ProbeRequest,
-    SUBTITLES_COMPLETE_HEADER, SubtitleRequest, TOKEN_ENV, ThumbnailRequest, TranscoderInfo, TranscoderStatus,
-    TrickplayInfo, TrickplayRequest,
+    HoldRequest, JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo, PrefetchRequest, Prefetched,
+    ProbeRequest, SUBTITLES_COMPLETE_HEADER, SubtitleRequest, TOKEN_ENV, ThumbnailRequest, TranscoderInfo,
+    TranscoderStatus, TrickplayInfo, TrickplayRequest,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -291,6 +291,16 @@ impl Transcoder {
     /// Read the parts of a file a playback starting at `start_ms` reads first,
     /// so they come from a cache when it does (see docs/TRANSCODER.md). The
     /// transcoder gives up after 10 s, and yields to playbacks.
+    /// Keep the transcoder's background work (seek previews, fingerprints,
+    /// keyframe scans, probes) waiting for `span`: a direct play is starting,
+    /// which the transcoder doesn't see. Transcoders before `/v1/hold` answer
+    /// `404`, which changes nothing.
+    pub async fn hold_background(&self, span: Duration) -> TranscoderResult<()> {
+        let req = HoldRequest { ms: span.as_millis() as u64 };
+        self.post("/v1/hold", &req, Duration::from_secs(5)).await?;
+        Ok(())
+    }
+
     pub async fn prefetch(&self, path: &str, start_ms: i64) -> TranscoderResult<Prefetched> {
         let req = PrefetchRequest { path: path.to_owned(), start_ms: Some(start_ms.max(0)) };
         self.post_json("/v1/prefetch", &req, Duration::from_secs(20)).await

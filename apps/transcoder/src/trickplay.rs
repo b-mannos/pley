@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-Restricted
 //! Seek-bar preview thumbnails ("trickplay"): one small frame every few
 //! seconds, tiled into JPEG sprite sheets. Only keyframes are decoded, so even
-//! a long film takes seconds to a minute; HDR and Dolby Vision are tone-mapped
+//! a long film takes seconds to a minute (paused while a playback starts, see
+//! [`crate::background`]); HDR and Dolby Vision are tone-mapped
 //! so previews look like the transcoded picture. Results are cached per file
 //! version until every sheet has been fetched (the server keeps its own copy),
 //! or for a day (see `cache.rs`).
@@ -15,8 +16,8 @@ use parking_lot::Mutex;
 use pley_transcoder_api::{Tonemapper, TrickplayInfo, TrickplayRequest};
 use tokio::sync::Semaphore;
 
+use crate::background::Background;
 use crate::error::{ApiError, ApiResult};
-use crate::extract::run_capture;
 use crate::ffmpeg::Ffmpeg;
 use crate::plan::{ZSCALE_TONEMAP, untagged_hdr_fix};
 use crate::probe::Prober;
@@ -32,6 +33,7 @@ const MAX_TRACKED: usize = 1000;
 pub struct Trickplay {
     ff: Arc<Ffmpeg>,
     prober: Arc<Prober>,
+    background: Arc<Background>,
     dir: PathBuf,
     /// One generation at a time: it is background work.
     limiter: Semaphore,
@@ -46,9 +48,17 @@ pub fn default_interval_ms(duration_ms: i64) -> i64 {
 }
 
 impl Trickplay {
-    pub fn new(ff: Arc<Ffmpeg>, prober: Arc<Prober>, dir: PathBuf) -> Self {
+    pub fn new(ff: Arc<Ffmpeg>, prober: Arc<Prober>, background: Arc<Background>, dir: PathBuf) -> Self {
         let _ = std::fs::create_dir_all(&dir);
-        Self { ff, prober, dir, limiter: Semaphore::new(1), locks: Mutex::default(), served: Mutex::default() }
+        Self {
+            ff,
+            prober,
+            background,
+            dir,
+            limiter: Semaphore::new(1),
+            locks: Mutex::default(),
+            served: Mutex::default(),
+        }
     }
 
     pub fn sheet_path(&self, id: &str, n: u32) -> Option<PathBuf> {
@@ -145,7 +155,7 @@ impl Trickplay {
         cmd.arg(part.join("%d.jpg"));
         background_priority(&mut cmd);
         let started = std::time::Instant::now();
-        let result = run_capture(cmd, TIMEOUT).await;
+        let result = self.background.run(cmd, TIMEOUT).await;
         let sheets = count_sheets(&part);
         if let Err(err) = result {
             let _ = tokio::fs::remove_dir_all(&part).await;

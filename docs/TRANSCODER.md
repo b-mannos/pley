@@ -75,6 +75,7 @@ following status codes:
 | POST | `/v1/subtitles` | `SubtitleRequest {path, stream_index?, partial?}` | `text/vtt`: a text track of the file, or a subtitle file (see *Subtitle extraction*). With `partial` (embedded tracks): within a few seconds, the whole track when it's done by then (as a rule when it can be read through the file's Cues), else the cues read so far with `X-Pley-Complete: 0` while the extraction goes on in the background |
 | POST | `/v1/subtitles/mks` | `SubtitleRequest {path, stream_index?}` | `video/x-matroska`: the track (or the subtitle file, without `stream_index`) copied as it is into a Matroska file of its own, for players that show picture subtitles (PGS, VobSub with its palette, DVB) next to an HLS stream. Times are the original's from the start of the file. Anything but subtitles fails (`-vn -an -dn`). Reads the whole file, as one of the passes over whole files; not cached (the server caches it). Transcoders that serve it say `subtitle_matroska: true` in their capabilities |
 | POST | `/v1/keyframes` | `KeyframesRequest {path}` | `200` if indexed, `202` if queued |
+| POST | `/v1/hold` | `HoldRequest {ms}` | `204`: background work waits (and its FFmpeg runs pause) for `ms`, a minute at most: a playback the transcoder doesn't run, a direct play, is starting (see *Background work and playback*) |
 | POST | `/v1/prefetch` | `PrefetchRequest {path, start_ms?}` | `Prefetched {ranges: [{part, start, end}], bytes, elapsed_ms, skipped?, stopped}`: reads the parts of the file a playback starting at `start_ms` reads first, so they come from a cache when it does (see *Reading ahead*) |
 | POST | `/v1/trickplay` | `TrickplayRequest {path, interval_ms?, width?}` | `TrickplayInfo {id, interval_ms, width, height, columns, rows, count, sheets}`: seek-bar previews, cached per file version until all sheets have been fetched (or for a day). Keyframes only are decoded (seconds for a film); HDR and Dolby Vision are tone-mapped with libplacebo when available. |
 | GET | `/v1/trickplay/{id}/{n}.jpg` | – | sprite sheet `n` (`columns × rows` thumbnails); once every sheet of a set has been fetched, the set is deleted (fetch them all in one go and keep them) |
@@ -469,7 +470,8 @@ half-made ones are deleted.
 what Chromaprint analyses. Each value covers 1365 samples (0.124 s) and is
 returned as a plain number. The pley server compares the fingerprints of
 episodes to find shared intros and credits. Requests run two at a time, at
-below-normal process priority, so they never slow down playback. Whether the
+below-normal process priority, and pause while a playback starts (see
+*Background work and playback*), so they never slow down playback. Whether the
 FFmpeg build includes Chromaprint is reported as `capabilities.chromaprint`.
 
 `POST /v1/frames` decodes only the key frames of part of the first video
@@ -504,8 +506,30 @@ Ranges are read in 2 MB pieces, four at a time, each reader with its own
 handle. A keyframe index for remuxing is kept from the index read. It is
 background work: one file at a time, one request per file at once (another
 answers `skipped`), ten seconds at most, waiting included. None starts
-within 5 s of a job creation (`skipped`), and one that begins meanwhile
-stops the reading (`stopped`), as does the request going away.
+within 5 s of a job creation or while a playback starts (`skipped`, see
+*Background work and playback*), and one that begins meanwhile stops the
+reading (`stopped`), as does the request going away.
+
+## Background work and playback
+
+Seek previews (`/v1/trickplay`), fingerprints and key frames
+(`/v1/fingerprint`, `/v1/frames`) and keyframe scans (`/v1/keyframes`)
+read whole files or long stretches of them, and a library scan's probes
+(`/v1/probe`) the heads of many, from the disk or network share playbacks
+read too: a 4K remux on a share needs all of it to start in a second or
+two. So while a playback starts, none of them starts (probes wait), and the
+FFmpeg (or FFprobe) runs under way are paused, their process suspended
+(`NtSuspendProcess` on Windows, `SIGSTOP` on Linux; elsewhere they only
+wait to start), then resumed. Nothing is lost: a paused run's time limit
+counts the time it ran. A playback starts:
+
+- while a job is being created (probe, keyframe index, FFmpeg's start);
+- while one of its FFmpeg processes, at Play, a seek, a restart, hasn't
+  written its first 3 segments, 20 s at most;
+- for `ms` after `POST /v1/hold`, which the pley server sends for a direct
+  play (10 s): it serves those itself.
+
+`/v1/status` counts the runs paused now (`background_paused`).
 
 ## Metrics
 
@@ -515,6 +539,7 @@ stops the reading (`stopped`), as does the request going away.
   produced and served, bytes served, probes (with total probe time),
   thumbnails, subtitle extractions, keyframe scans
 - running and hardware processes against their limits
+- background FFmpeg runs paused for a starting playback
 - work-dir disk usage
 - per job: state, video and audio plans (input → output, encoder, decoder,
   tone mapper), ffmpeg progress (fps, speed, bitrate, position, dropped and

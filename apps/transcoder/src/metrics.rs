@@ -72,13 +72,14 @@ pub fn render_prometheus(status: &TranscoderStatus) -> String {
         let _ = writeln!(out, "# TYPE pley_transcoder_{name} counter");
         let _ = writeln!(out, "pley_transcoder_{name} {value}");
     }
-    let gauges: [(&str, &str, f64); 6] = [
+    let gauges: [(&str, &str, f64); 7] = [
         ("uptime_seconds", "Seconds since the transcoder started", status.uptime_secs as f64),
         ("running_processes", "ffmpeg transcode processes currently running", status.running_processes as f64),
         ("hardware_processes", "Running processes using a hardware encoder", status.hw_processes as f64),
         ("max_jobs", "Maximum concurrent transcode processes", status.max_jobs as f64),
         ("jobs", "Transcode jobs (sessions) currently known", status.jobs.len() as f64),
         ("work_dir_bytes", "Disk space used by segments and caches", status.work_dir_bytes as f64),
+        ("background_paused", "Background ffmpeg runs paused for a starting playback", status.background_paused as f64),
     ];
     for (name, help, value) in gauges {
         let _ = writeln!(out, "# HELP pley_transcoder_{name} {help}");

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
+use std::time::Duration;
 
 use axum::Json;
 use axum::body::{Body, Bytes};
@@ -37,6 +38,9 @@ use crate::streams;
 /// 4 s (by 0.35 s for 4K at 60 fps tone mapped, less for lighter video), for
 /// a keyframe every 2 s.
 const SEGMENT_SECONDS: f64 = 2.0;
+/// How long the transcoder's background work waits for a direct play's
+/// first reads (the head, the index, the start).
+const DIRECT_PLAY_HOLD: Duration = Duration::from_secs(10);
 
 fn label(row: &ItemRow) -> String {
     match row.kind.as_str() {
@@ -79,6 +83,10 @@ pub async fn start(
         Some(id) => files.into_iter().find(|f| f.id == id).ok_or_else(|| AppError::not_found("file not found"))?,
         None => files.into_iter().next().ok_or_else(|| AppError::not_found("this item has no media file"))?,
     };
+    // Background work (seek previews, intro detection) keeps off the disk
+    // and the network from here on: creating a transcode reads the file too,
+    // before the session exists.
+    let _starting = state.sessions.begin_start();
     let info = file.media_info();
     let streams = file.streams();
     // No audio track named: the one the user's choices pick (what the item's
@@ -123,6 +131,14 @@ pub async fn start(
         );
         session.app_grant = user.app.as_ref().map(|app| app.grant_id);
         session.media_key = req.keyed_urls.then(new_media_key);
+        // The transcoder doesn't see direct plays: its background work waits
+        // for the player's first reads too.
+        if state.transcoder.is_available() {
+            let transcoder = state.transcoder.clone();
+            tokio::spawn(async move {
+                let _ = transcoder.hold_background(DIRECT_PLAY_HOLD).await;
+            });
+        }
         let session = state.sessions.insert(session);
         state.events.send(ServerEvent::SessionsChanged);
         let url = match &session.media_key {
@@ -373,6 +389,8 @@ fn end_sessions(state: &AppState, sessions: Vec<Arc<Session>>) {
 /// new one.
 async fn replacement_job(state: &AppState, user: &AuthUser, session: &Session, failed: &str) -> ApiResult<String> {
     let _guard = session.recreate.lock().await;
+    // Its player waits: as much a start as the first one.
+    let _starting = state.sessions.begin_start();
     // Stopped while this request waited: its job went on purpose.
     if let Some(stopped) = state.sessions.stopped(&session.id) {
         return Err(AppError::SessionStopped(stopped.message));

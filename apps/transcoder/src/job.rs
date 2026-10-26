@@ -24,6 +24,7 @@ use tokio::process::{ChildStderr, ChildStdout};
 use tokio::sync::{Notify, oneshot, watch};
 
 use crate::adaptive;
+use crate::background::{Background, Starting};
 use crate::error::{ApiError, ApiResult};
 use crate::extract::Extractor;
 use crate::ffmpeg::Ffmpeg;
@@ -57,6 +58,10 @@ const PREEMPT_GRACE: Duration = Duration::from_secs(3);
 const STOP_COST: Duration = Duration::from_millis(300);
 /// Segments deleted per lock acquisition when pruning.
 const PRUNE_BATCH: usize = 32;
+/// A process starts (and background work waits, see [`crate::background`])
+/// until it has made this many segments: what players buffer before they
+/// play.
+const STARTED_AFTER: u32 = 3;
 
 /// Concurrency budget shared by all jobs.
 pub struct Slots {
@@ -109,6 +114,8 @@ pub struct JobManager {
     shader_cache: Option<PathBuf>,
     pub limits: Limits,
     pub slots: Arc<Slots>,
+    /// Background work, held while jobs start.
+    pub background: Arc<Background>,
     jobs: Mutex<HashMap<String, Arc<Job>>>,
     /// Set on shutdown: no new jobs are accepted.
     closed: AtomicBool,
@@ -235,9 +242,11 @@ impl JobManager {
         jobs_dir: PathBuf,
         shader_cache: Option<PathBuf>,
         limits: Limits,
+        background: Arc<Background>,
     ) -> Arc<Self> {
         Arc::new(Self {
             slots: Arc::new(Slots::new(&limits)),
+            background,
             ff,
             prober,
             keyframes,
@@ -287,6 +296,8 @@ impl JobManager {
             return Err(ApiError::Failed("ffmpeg is not available on the transcoder host".into()));
         }
         self.note_creation();
+        // Until its process takes over (see `spawn`).
+        let _starting = self.background.start();
         let input = PathBuf::from(&req.input);
         match tokio::fs::metadata(&input).await {
             Ok(m) if m.is_file() => {}
@@ -569,6 +580,7 @@ impl JobManager {
         tracing::debug!(job = %job.id, "ffmpeg {}", args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "));
         let mut cmd = self.ff.command();
         cmd.args(&args).current_dir(&job.dir).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let starting = self.background.start();
         let spawned = Instant::now();
         let mut child = match cmd.spawn() {
             Ok(child) => child,
@@ -607,7 +619,8 @@ impl JobManager {
         let next = Arc::new(AtomicU32::new(start));
         let tail = Arc::new(Mutex::new(VecDeque::new()));
         let pace = Arc::new(Mutex::new(Pace::default()));
-        let lister = tokio::spawn(read_segment_list(job.clone(), stdout, next.clone(), spawned, self.metrics.clone()));
+        let lister =
+            tokio::spawn(read_segment_list(job.clone(), stdout, next.clone(), spawned, starting, self.metrics.clone()));
         tokio::spawn(read_progress(job.clone(), stderr, start_ms, tail.clone(), pace.clone()));
 
         let (exit_tx, exit_rx) = watch::channel(false);
@@ -996,10 +1009,13 @@ async fn read_segment_list(
     stdout: ChildStdout,
     next: Arc<AtomicU32>,
     spawned: Instant,
+    starting: Starting,
     metrics: Arc<Metrics>,
 ) {
     let mut lines = BufReader::new(stdout).lines();
     let mut first = true;
+    let mut starting = Some(starting);
+    let mut made = 0;
     let edits = job.plan.segment_edits();
     while let Ok(Some(line)) = lines.next_line().await {
         if let Some(n) = parse_list_line(&line) {
@@ -1012,6 +1028,11 @@ async fn read_segment_list(
             }
             segment_written(&job, &next, n);
             Metrics::inc(&metrics.segments_produced);
+            made += 1;
+            if made == STARTED_AFTER {
+                // Started: background work goes on.
+                drop(starting.take());
+            }
         }
     }
 }
@@ -1339,18 +1360,24 @@ mod tests {
 
     /// A manager whose FFmpeg "works" but whose binaries are missing.
     fn manager(dir: &Path) -> Arc<JobManager> {
-        let ff = Arc::new(Ffmpeg {
+        let ff = Ffmpeg {
             ffmpeg: dir.join("no-ffmpeg"),
             ffprobe: dir.join("no-ffprobe"),
             caps: pley_transcoder_api::Capabilities { ffmpeg_available: true, ..Default::default() },
             segment_times_relative: true,
-        });
+        };
+        manager_with(dir, ff)
+    }
+
+    fn manager_with(dir: &Path, ff: Ffmpeg) -> Arc<JobManager> {
+        let ff = Arc::new(ff);
         let metrics = Arc::new(Metrics::default());
         let prober = Arc::new(Prober::new(ff.clone(), metrics.clone(), 1));
-        let keyframes = KeyframeStore::new(ff.clone(), metrics.clone(), dir.join("keyframes"));
+        let background = Background::new();
+        let keyframes = KeyframeStore::new(ff.clone(), metrics.clone(), background.clone(), dir.join("keyframes"));
         let extractor = Arc::new(Extractor::new(ff.clone(), prober.clone(), metrics.clone(), dir.join("subtitles"), 1));
         let limits = Limits { max_jobs: 2, max_hw_jobs: 0 };
-        JobManager::new(ff, prober, keyframes, extractor, metrics, dir.join("jobs"), None, limits)
+        JobManager::new(ff, prober, keyframes, extractor, metrics, dir.join("jobs"), None, limits, background)
     }
 
     #[tokio::test]
@@ -1385,6 +1412,72 @@ mod tests {
         let err = jobs.create(request(1_000_000_000_000_000)).await.unwrap_err();
         assert!(matches!(&err, ApiError::Failed(m) if m.contains("probe failed")), "{err:?}");
         assert_eq!(jobs.list().len(), 1);
+    }
+
+    /// Background work waits while a job is created and until its FFmpeg has
+    /// made its first segments. Needs FFmpeg on the PATH (skipped otherwise).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn starting_jobs_hold_background_work() {
+        use pley_transcoder_api::{VideoMode, VideoRequest};
+        let ok =
+            |tool: &str| std::process::Command::new(tool).arg("-version").output().is_ok_and(|o| o.status.success());
+        if !(ok("ffmpeg") && ok("ffprobe")) {
+            eprintln!("ffmpeg not found: skipped");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("clip.mkv");
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i"])
+            .arg("testsrc2=size=320x180:rate=25:duration=30")
+            .args(["-c:v", "libx264", "-preset", "ultrafast", "-g", "25"])
+            .arg(&input)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let ff = Ffmpeg {
+            ffmpeg: "ffmpeg".into(),
+            ffprobe: "ffprobe".into(),
+            caps: pley_transcoder_api::Capabilities {
+                ffmpeg_available: true,
+                ffprobe_available: true,
+                ..Default::default()
+            },
+            segment_times_relative: true,
+        };
+        let jobs = manager_with(dir.path(), ff);
+        let background = jobs.background.clone();
+        let seen = Arc::new(AtomicBool::new(false));
+        let watch = tokio::spawn({
+            let (background, seen) = (background.clone(), seen.clone());
+            async move {
+                loop {
+                    if background.held() {
+                        seen.store(true, Relaxed);
+                    }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            }
+        });
+        let created = jobs
+            .create(JobRequest {
+                input: input.to_string_lossy().into_owned(),
+                video: Some(VideoRequest { mode: VideoMode::Copy, ..Default::default() }),
+                segment_seconds: Some(2.0),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let job = jobs.get(&created.id).unwrap();
+        jobs.segment(&job, STARTED_AFTER - 1).await.unwrap();
+        watch.abort();
+        assert!(seen.load(Relaxed), "held while the job started");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while background.held() && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!background.held(), "free once its first segments are out");
+        jobs.remove(&created.id).await;
     }
 
     #[test]
