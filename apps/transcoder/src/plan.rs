@@ -611,7 +611,7 @@ impl Plan {
     /// The whole media as one Matroska file at `output` (a converted
     /// download): the streams the segments would have, made in one go, and
     /// every subtitle track of `media` in its order, as it is (MP4's text
-    /// made SRT), for the player to show itself, with the fonts they use.
+    /// made SRT), for the player to show itself.
     /// Players find a track by its place among the subtitle tracks, the
     /// original's as the file's.
     pub fn file_args(&self, ctx: &ArgsContext<'_>, media: &MediaInfo, output: &Path) -> Vec<OsString> {
@@ -641,7 +641,7 @@ impl Plan {
             name(&mut a, &format!("s:{n}"), s);
             n += 1;
         }
-        a.push_all(["-map", "0:t?", "-f", "matroska"]);
+        a.push_all(["-f", "matroska"]);
         a.push_os(output.as_os_str().to_owned());
         a.0
     }
@@ -1451,7 +1451,7 @@ mod tests {
             ),
             "{line}"
         );
-        assert!(line.contains("-map 0:5 -c:s:2 srt -map 0:t? -f matroska"), "{line}");
+        assert!(line.contains("-map 0:5 -c:s:2 srt -f matroska"), "{line}");
         assert!(line.contains("-metadata:s:a:0 language=eng"), "{line}");
         for absent in ["-segment", "-ss ", "-t ", "-readrate", "-output_ts_offset"] {
             assert!(!line.contains(absent), "{absent} in {line}");

@@ -38,6 +38,9 @@ const TAIL_LINES: usize = 6;
 /// The software encoder's preset when the plan leaves it to the transcoder:
 /// a file isn't made in real time, so it can take a little more care.
 const SOFTWARE_PRESET: &str = "fast";
+/// How far FFmpeg must have come for a file to be whole: a little short of
+/// the end, as containers' durations and the streams' ends differ a little.
+const WHOLE: f64 = 0.95;
 /// A conversion nobody asked for or about this long while it waited (the
 /// device that wanted it went) isn't made when its turn comes. Devices
 /// look every few seconds; one that sleeps a while asks again on waking.
@@ -137,7 +140,8 @@ impl Conversions {
         let duration_ms = req.media.as_ref().and_then(|m| m.duration_ms).unwrap_or(0);
         let conversion = {
             let mut items = self.items.lock();
-            if let Some(found) = items.get(&id).filter(|c| c.status.lock().state != ConversionState::Failed) {
+            // Failed, or done but its file pruned since: made again.
+            if let Some(found) = items.get(&id).filter(|c| self.standing(&id, c)) {
                 found.asked_now();
                 return Ok(found.status.lock().clone());
             }
@@ -185,13 +189,32 @@ impl Conversions {
         Ok(status)
     }
 
-    /// Conversion `id` as it stands; one made before a restart is known by its file.
+    /// Conversion `id` as it stands; one made before a restart is known by
+    /// its file, and one whose file was pruned since isn't any more (asked
+    /// for again, it is made again).
     pub fn status(&self, id: &str) -> Option<ConversionStatus> {
-        if let Some(found) = self.items.lock().get(id) {
+        let mut items = self.items.lock();
+        if let Some(found) = items.get(id) {
+            let done = found.status.lock().state == ConversionState::Done;
+            if done && !self.path(id).is_some_and(|p| p.is_file()) {
+                items.remove(id);
+                return None;
+            }
             found.asked_now();
             return Some(found.status.lock().clone());
         }
+        drop(items);
         self.finished(id, 0)
+    }
+
+    /// Whether `conversion` still answers for `id`: not failed, and when
+    /// done, with its file still there.
+    fn standing(&self, id: &str, conversion: &Conversion) -> bool {
+        match conversion.status.lock().state {
+            ConversionState::Failed => false,
+            ConversionState::Done => self.path(id).is_some_and(|p| p.is_file()),
+            ConversionState::Queued | ConversionState::Running => true,
+        }
     }
 
     /// The file conversion `id` made, once whole.
@@ -356,6 +379,13 @@ impl Conversions {
             }
             bail!("ffmpeg exited with {status}: {}", lines.join(" / "));
         }
+        // FFmpeg ends a file cut short by a read error (a share that went
+        // away) as if it were whole: it must reach the media's end.
+        let reached = conversion.status.lock().progress;
+        if reached < WHOLE {
+            let _ = tokio::fs::remove_file(&part).await;
+            bail!("the file stopped at {:.0} % of the media", reached * 100.0);
+        }
         tokio::fs::rename(&part, &path).await.context("couldn't keep the file")?;
         Ok(tokio::fs::metadata(&path).await?.len())
     }
@@ -510,6 +540,10 @@ mod tests {
             .arg(&srt)
             .args(["-map", "0", "-map", "1", "-map", "2"])
             .args(["-c:v", "libx264", "-preset", "ultrafast", "-c:a", "eac3", "-ac", "6", "-c:s", "srt"])
+            // A font, as files with styled subtitles carry.
+            .arg("-attach")
+            .arg(&srt)
+            .args(["-metadata:s:t", "mimetype=application/x-truetype-font"])
             .arg(&source)
             .status()
             .unwrap();
@@ -575,6 +609,20 @@ mod tests {
         // Asked again: the file made.
         let again = conversions.create(req.clone()).await.unwrap();
         assert_eq!((again.id, again.state), (id.clone(), ConversionState::Done));
+        // Pruned by the janitor: not done any more, and made again when asked for.
+        std::fs::remove_file(&file).unwrap();
+        assert!(conversions.status(&id).is_none());
+        let remade = conversions.create(req.clone()).await.unwrap();
+        assert_eq!(remade.id, id);
+        assert_ne!(remade.state, ConversionState::Done);
+        let status = loop {
+            let status = conversions.status(&id).unwrap();
+            if matches!(status.state, ConversionState::Done | ConversionState::Failed) {
+                break status;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
+        assert_eq!(status.state, ConversionState::Done, "{:?}", status.error);
         assert!(conversions.remove(&id).await);
         assert!(conversions.file(&id).is_none());
 

@@ -102,8 +102,11 @@ too big for it). Its streams are what a job's segments would be (the same
 plan: encoder, tone mapping, AAC), made at full speed (`throttle` is
 ignored) from the start (`start_ms` is too), with every subtitle track
 of the input as it is, in its order (MP4's text made SRT; teletext, which
-Matroska can't hold, left out), and the fonts they use: a player finds a
-track by its place among the subtitle tracks, as in the original. A remux whose segments would
+Matroska can't hold, left out), with its language and name: a player
+finds a track by its place among the subtitle tracks, as in the original.
+A conversion whose FFmpeg ends without error but short of the media's end
+(a share that went away) fails rather than keeping half a film. One whose
+file the janitor deleted is made again when asked for. A remux whose segments would
 be edited (Dolby Vision converted, HDR10+ left out) has its video made
 anew instead, as a file can't be edited the way segments are.
 
