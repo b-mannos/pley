@@ -19,6 +19,7 @@
     <website>https://github.com/hhaidar/pley</website>
     <assets>
       <icon>resources/icon.png</icon>
+      <fanart>resources/fanart.jpg</fanart>
     </assets>
     <news>First version: sign-in with a code, Home, libraries, search, playlists, playback with progress.</news>
   </extension>

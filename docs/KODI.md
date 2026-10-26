@@ -22,6 +22,11 @@ No add-on repository carries it yet. Pack it and install the zip:
 python apps/kodi/package.py        # dist/plugin.video.pley-<version>.zip
 ```
 
+Its icon (512 square, solid to the corners, as Kodi's add-on checker
+wants) and fanart (1920 × 1080) are rendered from pley's logo with the
+other apps' icons: `node scripts/render-icons.mjs` at the repository's
+root.
+
 In Kodi: Settings → System → Add-ons → Unknown sources on, then
 Settings → Add-ons → Install from zip file, and pick the zip (copy it to
 the device first, or reach it over the network).

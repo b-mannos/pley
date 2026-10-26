@@ -137,8 +137,12 @@ with a Node process of its own, one at a time, numbers transfers at random
 below 80 (the API task keeps those under way apart), drops a remote key now
 and then, and can't stand in for a Roku's speed.
 
-`npm run images` draws the icons, the dark splash screens and the watched
-mark again (`scripts/make_images.py`, Python's standard library only).
+`npm run images` draws the watched mark again (`scripts/make_images.py`,
+Python's standard library only). The home screen icons (540 × 405 and
+290 × 218, the P and the wordmark on pley's tile, as the Android TV app's
+banner) and the splash screens (the logo on the app's background) are
+rendered from pley's logo with the other apps' icons:
+`node scripts/render-icons.mjs` at the repository's root.
 
 ## Installing on a Roku
 

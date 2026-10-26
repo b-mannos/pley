@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Renders the icons the web app, the desktop app and the Samsung and LG TV
-// apps ship from the logo (apps/web/public/favicon.svg), through a headless
-// Chrome or Edge:
+// Renders the icons the web app, the desktop app and the TV apps (Samsung,
+// LG, Kodi, Roku) ship from the logo (apps/web/public/favicon.svg), through
+// a headless Chrome or Edge:
 //
 //   apps/web/public/icon-maskable-512.png   full bleed, the P as big as the native
 //                                           Android app's once Chrome masks it
@@ -17,8 +17,19 @@
 //                                           tile's colour, which appinfo.json's
 //                                           iconColor gives the TV's own tile
 //   apps/webos/assets/splash.png            LG's launch picture, 1920×1080
+//   apps/kodi/plugin.video.pley/resources/icon.png
+//                                           512 square, the tile's colour out to the
+//                                           corners: Kodi's add-on checker refuses
+//                                           transparency
+//   apps/kodi/plugin.video.pley/resources/fanart.jpg
+//                                           1920×1080, the TV banner's picture
+//   apps/roku/images/icon_focus_{fhd,hd}.png
+//                                           540×405 and 290×218, Roku's home screen
+//                                           tiles, as the Android TV app's banner
+//   apps/roku/images/splash_{fhd,hd,sd}.png the logo on the Roku app's background
 //
 // Chrome comes from $CHROME, else the usual place on Windows, macOS or Linux.
+// The banner's wordmark is in the system's bold sans (Roboto, else Segoe UI).
 //
 //   node scripts/render-icons.mjs
 
@@ -44,6 +55,32 @@ function maskable(size, s) {
 /** The P on the tile's colour to the edges of a width × height picture, the 64-unit logo at [s] with its top left at (x, y). */
 function onTile(width, height, s, x, y) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">${defs}<rect width="${width}" height="${height}" fill="${TILE}"/><g transform="translate(${x} ${y}) scale(${s})">${glyph}</g></svg>`;
+}
+
+/**
+ * A TV home screen's tile, as the Android TV app's banner (320 × 180): the P in its gradient and the
+ * wordmark on the tile's colour, the brand's deep blue glowing from the lower right corner. Other sizes
+ * get the same picture scaled to fit, the colours out to the edges.
+ */
+function banner(width, height) {
+  const s = Math.min(width / 320, height / 180);
+  const g = 81 / 41; // the P 81 high, from (68, 54)
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">${defs}
+  <radialGradient id="corner" cx="${width}" cy="${height}" r="${width * 0.52}" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#0369a1" stop-opacity="0.3"/><stop offset="1" stop-color="#0369a1" stop-opacity="0"/>
+  </radialGradient>
+  <rect width="${width}" height="${height}" fill="${TILE}"/><rect width="${width}" height="${height}" fill="url(#corner)"/>
+  <g transform="translate(${(width - 320 * s) / 2} ${(height - 180 * s) / 2}) scale(${s})">
+    <g transform="translate(${68 - 17 * g} ${54 - 14 * g}) scale(${g})">${glyph}</g>
+    <text x="160" y="107" font-family="Roboto, 'Segoe UI', system-ui, sans-serif" font-size="63" font-weight="700" letter-spacing="-1" fill="#e9ebef">pley</text>
+  </g></svg>`;
+}
+
+/** A splash screen: the logo, a fifth of the height, in the middle of the app's background [bg]. */
+function splash(width, height, bg) {
+  const size = height / 5;
+  const placed = logo.replace("<svg", `<svg x="${(width - size) / 2}" y="${(height - size) / 2}" width="${size}" height="${size}"`);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="${bg}"/>${placed}</svg>`;
 }
 
 /** Apple's macOS grid: the plate 824 of 1024 at (100, 100), corners about 185, a shadow 10 down. */
@@ -107,14 +144,19 @@ async function renderer() {
   await send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 0 } }, sessionId);
   const { frameTree } = await send("Page.getFrameTree", {}, sessionId);
 
+  /** [svg] drawn width × height, as a PNG, or a JPEG of [quality] (0 to 100). */
+  async function capture(svg, width, height, quality) {
+    await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
+    const sized = svg.replace("<svg", `<svg width="${width}" height="${height}" style="display:block"`);
+    await send("Page.setDocumentContent", { frameId: frameTree.frame.id, html: `<!doctype html><body style="margin:0">${sized}</body>` }, sessionId);
+    const format = quality === undefined ? { format: "png" } : { format: "jpeg", quality };
+    const { data } = await send("Page.captureScreenshot", { ...format, clip: { x: 0, y: 0, width, height, scale: 1 } }, sessionId);
+    return Buffer.from(data, "base64");
+  }
+
   return {
-    async png(svg, width, height = width) {
-      await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
-      const sized = svg.replace("<svg", `<svg width="${width}" height="${height}" style="display:block"`);
-      await send("Page.setDocumentContent", { frameId: frameTree.frame.id, html: `<!doctype html><body style="margin:0">${sized}</body>` }, sessionId);
-      const { data } = await send("Page.captureScreenshot", { format: "png", clip: { x: 0, y: 0, width, height, scale: 1 } }, sessionId);
-      return Buffer.from(data, "base64");
-    },
+    png: (svg, width, height = width) => capture(svg, width, height),
+    jpeg: (svg, width, height, quality) => capture(svg, width, height, quality),
     close() {
       socket.close();
       browser.kill();
@@ -284,7 +326,22 @@ try {
   writeFileSync(join(webos, "icon.png"), rgb72(await r.png(maskable(80, 80 / 64), 80)));
   writeFileSync(join(webos, "largeIcon.png"), rgb72(await r.png(maskable(130, 130 / 64), 130)));
   writeFileSync(join(webos, "splash.png"), rgb72(await r.png(onTile(1920, 1080, 5, 960 - 33 * 5, 540 - 34.5 * 5), 1920, 1080)));
-  console.log("rendered the web's maskable icon and PNG favicon, the desktop's .ico and .icns, and the Samsung and LG apps' icons and LG's splash");
+
+  // Kodi's: the favicon's P where it is, without the rounded corners; the fanart a JPEG (Kodi's
+  // checker takes up to 1000 KB).
+  const kodi = join(root, "apps/kodi/plugin.video.pley/resources");
+  writeFileSync(join(kodi, "icon.png"), rgb72(await r.png(maskable(512, 8), 512)));
+  writeFileSync(join(kodi, "fanart.jpg"), await r.jpeg(banner(1920, 1080), 1920, 1080, 90));
+
+  // Roku's home screen tiles, and splash screens on the app's background (components/shared/Ui.brs),
+  // as the manifest's splash_color.
+  const roku = join(root, "apps/roku/images");
+  writeFileSync(join(roku, "icon_focus_fhd.png"), rgb72(await r.png(banner(540, 405), 540, 405)));
+  writeFileSync(join(roku, "icon_focus_hd.png"), rgb72(await r.png(banner(290, 218), 290, 218)));
+  for (const [name, width, height] of [["splash_fhd.png", 1920, 1080], ["splash_hd.png", 1280, 720], ["splash_sd.png", 720, 480]]) {
+    writeFileSync(join(roku, name), rgb72(await r.png(splash(width, height, "#16191e"), width, height)));
+  }
+  console.log("rendered the web's maskable icon and PNG favicon, the desktop's .ico and .icns, the Samsung and LG apps' icons and LG's splash, Kodi's icon and fanart, and Roku's icons and splash screens");
 } finally {
   r.close();
 }
