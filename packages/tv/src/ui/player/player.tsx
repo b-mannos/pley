@@ -21,8 +21,6 @@ const HIDE_MS = 5_000;
 const RING_MS = 500;
 /** The player leaves this long after the server stopped it. */
 const STOPPED_LEAVE_MS = 20_000;
-/** Episodes played one after the other with no key pressed before "Still watching?". */
-const STILL_WATCHING_AFTER = 3;
 
 const MEDIA_KEYS: Key[] = ["playPause", "play", "pause", "stop", "fastForward", "rewind", "next", "previous", "captions", "audio"];
 
@@ -110,11 +108,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
   const [toast, setToast] = useState<{ text: string; ms: number; n: number } | null>(null);
   const [, setSeekTick] = useState(0);
   const [ring, setRing] = useState(false);
-  const [stillWatching, setStillWatching] = useState(false);
   const lastInput = useRef(Date.now());
-  const autoplayed = useRef(0);
-  const lastItem = useRef<number | null>(null);
-  const keysSinceItem = useRef(false);
   const rememberedSubtitle = useRef<number | null>(null);
   const seeker = useMemo(
     () =>
@@ -189,20 +183,6 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
     setPanel(null);
     setControls(false);
   }, [!!s.upNext, !!error]);
-
-  // Episodes played by themselves, one after the other, with nobody pressing a key: after the third, "Still watching?".
-  useEffect(() => {
-    if (lastItem.current !== null && s.itemId !== lastItem.current) {
-      autoplayed.current = keysSinceItem.current ? 0 : autoplayed.current + 1;
-      keysSinceItem.current = false;
-      if (autoplayed.current >= STILL_WATCHING_AFTER) {
-        autoplayed.current = 0;
-        c.pause();
-        setStillWatching(true);
-      }
-    }
-    lastItem.current = s.itemId;
-  }, [s.itemId]);
 
   // Controls hide 5 s after the last key while a video plays.
   useEffect(() => {
@@ -324,14 +304,12 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
   useEffect(
     () =>
       ui.input.push((key, e) => {
-        keysSinceItem.current = true;
         lastInput.current = Date.now();
         if (MEDIA_KEYS.indexOf(key) >= 0) {
           if (e.type === "down" && !e.repeat) media(key);
           return true;
         }
         const st = c.state.value;
-        if (stillWatchingRef.current) return false;
         if (st.phase.kind === "error") {
           if (key === "back") {
             if (e.type === "down") leave();
@@ -431,8 +409,6 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
   panelRef.current = panel;
   const skipShownRef = useRef(skipShown);
   skipShownRef.current = skipShown;
-  const stillWatchingRef = useRef(stillWatching);
-  stillWatchingRef.current = stillWatching;
 
   const openPanel = (which: PlayerPanel) => setPanel(which);
   const closePanel = () => {
@@ -543,23 +519,6 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
             ) : (
               <Pill label="Back" icon="arrow-left" fid="back" onSelect={leave} />
             )}
-          </G>
-        </div>
-      )}
-      {stillWatching && (
-        <div class="player-error">
-          <div class="t-page c-fg">Are you still watching?</div>
-          <G kind="row" class="buttons" style="margin-top:32px;justify-content:center">
-            <Pill
-              label="Keep watching"
-              icon="play"
-              initial
-              onSelect={() => {
-                setStillWatching(false);
-                c.play();
-              }}
-            />
-            <TextButton label="Back" onSelect={leave} />
           </G>
         </div>
       )}
