@@ -77,7 +77,7 @@ internal fun PhoneGallery() {
         PhoneSection("Recently Added in Shows")
         PhoneRow(GallerySamples.shows, TileKind.Poster, 118.dp)
 
-        PhoneSection("Season 2 Â· 8 episodes")
+        PhoneSection("Season 2 · 8 episodes")
         Column(Modifier.padding(horizontal = PleyPhone.MarginCompact), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             GallerySamples.episodes.take(4).forEach { episode ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -91,7 +91,7 @@ internal fun PhoneGallery() {
                     Spacer(Modifier.width(12.dp))
                     Column {
                         Label(episode.title, PleyType.Phone.TitleMedium)
-                        Label("${episode.subtitle} Â· Mar 12, 2024", PleyType.Phone.BodySmall, color = PleyColors.Muted)
+                        Label("${episode.subtitle} · Mar 12, 2024", PleyType.Phone.BodySmall, color = PleyColors.Muted)
                     }
                 }
             }
@@ -124,13 +124,13 @@ internal fun PhoneGallery() {
             Label("Headline medium 26", PleyType.Phone.HeadlineMedium)
             Label("Headline small 22", PleyType.Phone.HeadlineSmall)
             Label("Title large 19", PleyType.Phone.TitleLarge)
-            Label("Title medium 16 Â· 5. Glasshouse", PleyType.Phone.TitleMedium)
-            Label("Title small 14 Â· Low Orbit", PleyType.Phone.TitleSmall)
-            Label("Body large 16 Â· A volcanologist races the ash cloud.", PleyType.Phone.BodyLarge)
-            Label("Body medium 14 Â· Choose your server.", PleyType.Phone.BodyMedium, color = PleyColors.Muted)
-            Label("Body small 12 Â· S2 Â· E5 Â· 26 min left", PleyType.Phone.BodySmall, color = PleyColors.Muted)
-            Label("Label large 15 Â· Resume", PleyType.Phone.LabelLarge)
-            Label("Label medium 13 Â· 2025 Â· R Â· 2h 2m", PleyType.Phone.LabelMedium, color = PleyColors.Muted)
+            Label("Title medium 16 · 5. Glasshouse", PleyType.Phone.TitleMedium)
+            Label("Title small 14 · Low Orbit", PleyType.Phone.TitleSmall)
+            Label("Body large 16 · A volcanologist races the ash cloud.", PleyType.Phone.BodyLarge)
+            Label("Body medium 14 · Choose your server.", PleyType.Phone.BodyMedium, color = PleyColors.Muted)
+            Label("Body small 12 · S2 · E5 · 26 min left", PleyType.Phone.BodySmall, color = PleyColors.Muted)
+            Label("Label large 15 · Resume", PleyType.Phone.LabelLarge)
+            Label("Label medium 13 · 2025 · R · 2h 2m", PleyType.Phone.LabelMedium, color = PleyColors.Muted)
         }
 
         PhoneSection("Icons")

@@ -442,7 +442,7 @@ const BIF_MAGIC: [u8; 8] = [0x89, b'B', b'I', b'F', 0x0d, 0x0a, 0x1a, 0x0a];
 
 /// A BIF file (Roku's format, used by Plex): a 64-byte header, an index of
 /// (frame number, offset) pairs ending with 0xffffffff, then the JPEGs. Frame
-/// `n` shows the video at `n Ã— interval_ms`.
+/// `n` shows the video at `n × interval_ms`.
 fn bif_bytes(frames: &[Vec<u8>], interval_ms: u32) -> Vec<u8> {
     let index_len = (frames.len() + 1) * 8;
     let mut out = Vec::with_capacity(64 + index_len + frames.iter().map(Vec::len).sum::<usize>());

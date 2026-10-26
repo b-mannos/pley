@@ -66,7 +66,7 @@ internal object PlayerProbe {
 }
 
 /**
- * The phone and tablet player (design spec Â§3.5): the video on a
+ * The phone and tablet player (design spec §3.5): the video on a
  * SurfaceView, subtitles over the screen, gestures, the controls, Skip,
  * Up Next, the sheet, errors and notices. Nothing recomposes while it
  * plays with the controls hidden: parts read only their own fields of the
