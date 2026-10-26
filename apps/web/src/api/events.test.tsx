@@ -208,6 +208,88 @@ describe("useServerEvents", () => {
     expect(invalidated(client, keys.item(5))).toBe(true);
   });
 
+  it("refreshes Home and the items when watch state changed, after a moment", () => {
+    const { client, source } = setup();
+    client.setQueryData(keys.homeHubs, { hubs: [] });
+    client.setQueryData(keys.libraryHubs(1), { hubs: [] });
+    client.setQueryData(keys.watchlist, { items: [] });
+    client.setQueryData(keys.item(5), { id: 5 });
+    client.setQueryData(keys.children(4), { items: [] });
+    client.setQueryData(keys.item(9), { id: 9 });
+
+    act(() => source().send({ type: "user_state_changed", item_ids: [5, 4, 3], children: false }));
+    act(() => {
+      vi.advanceTimersByTime(299);
+    });
+    expect(invalidated(client, keys.homeHubs)).toBe(false);
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(invalidated(client, keys.homeHubs)).toBe(true);
+    expect(invalidated(client, keys.libraryHubs(1))).toBe(true);
+    expect(invalidated(client, keys.watchlist)).toBe(true);
+    expect(invalidated(client, keys.item(5))).toBe(true);
+    // The season's episodes.
+    expect(invalidated(client, keys.children(4))).toBe(true);
+    expect(invalidated(client, keys.item(9))).toBe(false);
+  });
+
+  it("refreshes every item when what is under one changed", () => {
+    const { client, source } = setup();
+    client.setQueryData(keys.item(9), { id: 9 });
+
+    act(() => source().send({ type: "user_state_changed", item_ids: [3], children: true }));
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(invalidated(client, keys.item(9))).toBe(true);
+  });
+
+  it("leaves alone what was fetched since the change was heard", () => {
+    const { client, source } = setup();
+    client.setQueryData(keys.homeHubs, { hubs: [] });
+    client.setQueryData(keys.item(5), { id: 5 });
+
+    act(() => source().send({ type: "user_state_changed", item_ids: [5], children: false }));
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    // This page made the change and fetched Home again already.
+    client.setQueryData(keys.homeHubs, { hubs: [] });
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(invalidated(client, keys.homeHubs)).toBe(false);
+    expect(invalidated(client, keys.item(5))).toBe(true);
+  });
+
+  it("refreshes a library change heard with a watch state change once, at once", () => {
+    const { client, source } = setup();
+    client.setQueryData(keys.library(1), library(1));
+    client.setQueryData(keys.homeHubs, { hubs: [] });
+
+    // A play that ends: its watch state, and its library's change.
+    act(() => {
+      source().send({ type: "user_state_changed", item_ids: [5], children: false });
+      source().send({ type: "library_changed", library_id: 1 });
+    });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(invalidated(client, keys.library(1))).toBe(true);
+    expect(invalidated(client, keys.homeHubs)).toBe(true);
+
+    // Fetched again: the library's flush doesn't come a second time.
+    client.setQueryData(keys.library(1), library(1));
+    client.setQueryData(keys.homeHubs, { hubs: [] });
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(invalidated(client, keys.library(1))).toBe(false);
+    expect(invalidated(client, keys.homeHubs)).toBe(false);
+  });
+
   it("passes events on to whoever listens", () => {
     const { source } = setup();
     const heard: ServerEvent[] = [];

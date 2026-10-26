@@ -559,6 +559,12 @@ export type ServerEvent =
   | { type: "sessions_changed" }
   /** My List changed on another of the user's devices. */
   | { type: "watchlist_changed" }
+  /**
+   * The user's watch state of an item changed, here or on another device:
+   * `item_ids` is the item, then its season and show (album and artist);
+   * `children`: everything under the first one changed too.
+   */
+  | { type: "user_state_changed"; item_ids: Id[]; children: boolean }
   /** A playback session was ended on the server (`DELETE /api/sessions/{id}`): the device playing it stops. */
   | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean };
 

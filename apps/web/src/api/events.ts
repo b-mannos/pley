@@ -21,6 +21,38 @@ export function onServerEvent(listener: Listener): () => void {
   };
 }
 
+/** `user_state_changed` events heard and not acted on yet. */
+interface WatchStateChange {
+  ids: Set<Id>;
+  /** Everything under one of them changed too (a show marked watched). */
+  children: boolean;
+  /** When the last one was heard (ms). */
+  heardAt: number;
+}
+
+/**
+ * Whether the query under `key` shows the user's watch state of what
+ * `change` names: Home, the libraries' rows and grids, My List, search, and
+ * the items' own queries (every item's when what is under one changed).
+ * What a flush of `libraries` refetches anyway is left to it.
+ */
+function showsWatchState(key: readonly unknown[], change: WatchStateChange, libraries: Id[]): boolean {
+  const flushed = libraries.length > 0;
+  switch (key[0]) {
+    case "hubs":
+    case "search":
+      return !flushed;
+    case "library":
+      return !libraries.includes(key[1] as Id);
+    case "watchlist":
+      return true;
+    case "item":
+      return !flushed && (change.children || change.ids.has(key[1] as Id));
+    default:
+      return false;
+  }
+}
+
 /**
  * Keeps one `EventSource('/api/events')` open while logged in and turns server
  * events into React Query cache updates/invalidations.
@@ -34,11 +66,13 @@ export function useServerEvents(enabled: boolean) {
     let es: EventSource | null = null;
     let retryTimer: number | undefined;
     let flushTimer: number | undefined;
+    let flushAt = 0;
     let closed = false;
     let failures = 0;
     let connectedBefore = false;
     let lostTimer: number | undefined;
     const pendingLibraries = new Set<Id>();
+    let pendingWatchState: WatchStateChange | null = null;
 
     // Down a while, and the server doesn't answer at all: the pages say so
     // (a stream refused, a sign-in that ended, is something else).
@@ -72,21 +106,52 @@ export function useServerEvents(enabled: boolean) {
     };
 
     // Metadata refreshes can emit many `library_changed` events in a burst;
-    // batch them so we refetch at most every ~1.5 s.
+    // batch them so we refetch at most every ~1.5 s. Watch state changes are
+    // batched for ~0.3 s, and bring a library flush due later forward: a play
+    // that ends sends both, and both are refetched once.
     const flush = () => {
+      window.clearTimeout(flushTimer);
       flushTimer = undefined;
-      for (const id of pendingLibraries) void qc.invalidateQueries({ queryKey: keys.library(id) });
+      const libraries = [...pendingLibraries];
       pendingLibraries.clear();
-      void qc.invalidateQueries({ queryKey: keys.libraries });
-      void qc.invalidateQueries({ queryKey: ["hubs"] });
-      void qc.invalidateQueries({ queryKey: ["item"] });
-      void qc.invalidateQueries({ queryKey: ["search"] });
-      // Finishing something is a library change too.
-      void qc.invalidateQueries({ queryKey: ["history"] });
+      const watchState = pendingWatchState;
+      pendingWatchState = null;
+      if (libraries.length > 0) {
+        for (const id of libraries) void qc.invalidateQueries({ queryKey: keys.library(id) });
+        void qc.invalidateQueries({ queryKey: keys.libraries });
+        void qc.invalidateQueries({ queryKey: ["hubs"] });
+        void qc.invalidateQueries({ queryKey: ["item"] });
+        void qc.invalidateQueries({ queryKey: ["search"] });
+        // Finishing something is a library change too.
+        void qc.invalidateQueries({ queryKey: ["history"] });
+      }
+      if (watchState) {
+        // Only what was fetched before the change was heard: what this page
+        // changed itself is refetched already.
+        void qc.invalidateQueries({
+          predicate: (q) =>
+            q.state.dataUpdatedAt <= watchState.heardAt && showsWatchState(q.queryKey, watchState, libraries),
+        });
+      }
+    };
+    const schedule = (delayMs: number) => {
+      const at = Date.now() + delayMs;
+      if (flushTimer !== undefined && flushAt <= at) return;
+      window.clearTimeout(flushTimer);
+      flushAt = at;
+      flushTimer = window.setTimeout(flush, delayMs);
     };
     const scheduleLibrary = (id: Id) => {
       pendingLibraries.add(id);
-      if (flushTimer === undefined) flushTimer = window.setTimeout(flush, 1500);
+      schedule(1500);
+    };
+    const scheduleWatchState = (itemIds: Id[], children: boolean) => {
+      const heardAt = Date.now();
+      const pending = pendingWatchState;
+      pendingWatchState = pending
+        ? { ids: new Set([...pending.ids, ...itemIds]), children: pending.children || children, heardAt }
+        : { ids: new Set(itemIds), children, heardAt };
+      schedule(300);
     };
 
     const setScanning = (id: Id, scanning: boolean) => {
@@ -153,6 +218,9 @@ export function useServerEvents(enabled: boolean) {
           void qc.invalidateQueries({ queryKey: keys.watchlist });
           void qc.invalidateQueries({ queryKey: keys.homeHubs });
           void qc.invalidateQueries({ queryKey: ["item"] });
+          break;
+        case "user_state_changed":
+          scheduleWatchState(ev.item_ids, ev.children);
           break;
       }
       for (const listener of listeners) listener(ev);
