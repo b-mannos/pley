@@ -92,10 +92,20 @@ class DownloadService : Service() {
     }
 
     /** What the notification shows: it changes only when one of these does (a whole percent). */
-    private data class Shown(val title: String?, val doneBytes: Long, val sizeBytes: Long, val percent: Int, val more: Int, val waiting: Boolean)
+    private data class Shown(
+        val title: String?,
+        val doneBytes: Long,
+        val sizeBytes: Long,
+        val percent: Int,
+        val more: Int,
+        val waiting: Boolean,
+        /** Nothing downloads, but the server makes one: its title, and how far (percent). */
+        val converting: Pair<String, Int>? = null,
+    )
 
     private fun shownOf(all: List<Saved>): Shown {
         val active = all.firstOrNull { it.state == DownloadState.Downloading }
+        val making = all.firstOrNull { it.converting != null && it.mediaUrl == null && it.state == DownloadState.Queued }
         val left = all.count { it.state == DownloadState.Queued || it.state == DownloadState.Waiting || it.state == DownloadState.Downloading }
         val percent = if (active != null && active.sizeBytes > 0) (active.downloadedBytes * 100 / active.sizeBytes).toInt().coerceIn(0, 100) else 0
         // Sizes move with the percent: a step of 1 % keeps the text from changing more often than the bar.
@@ -107,6 +117,9 @@ class DownloadService : Service() {
             percent = percent,
             more = (left - 1).coerceAtLeast(0),
             waiting = active == null && all.any { it.state == DownloadState.Waiting },
+            converting = making?.takeIf { active == null }?.let { m ->
+                (m.showTitle?.let { "$it · ${m.title}" } ?: m.title) to ((m.converting ?: 0f) * 100).toInt()
+            },
         )
     }
 
@@ -133,6 +146,9 @@ class DownloadService : Service() {
                     )
                     .setProgress(100, shown.percent, shown.sizeBytes <= 0)
             }
+            shown.converting != null -> builder.setContentTitle(getString(R.string.downloads_notification_converting, shown.converting.first))
+                .setContentText(getString(R.string.downloads_notification_converting_text, shown.converting.second))
+                .setProgress(100, shown.converting.second, false)
             shown.waiting -> builder.setContentTitle(getString(R.string.downloads_notification_waiting))
                 .setContentText(getString(R.string.downloads_notification_waiting_text))
             else -> builder.setContentTitle(getString(R.string.downloads_notification_starting)).setProgress(0, 0, true)

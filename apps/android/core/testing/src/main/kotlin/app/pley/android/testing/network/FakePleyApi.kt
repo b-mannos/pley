@@ -16,6 +16,8 @@ import app.pley.android.model.ItemsPage
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
 import app.pley.android.model.LibrarySort
+import app.pley.android.model.ConversionInfo
+import app.pley.android.model.ConversionState
 import app.pley.android.model.MaybeItem
 import app.pley.android.model.Me
 import app.pley.android.model.NewPlaylist
@@ -185,6 +187,15 @@ class FakePleyApi(val issuer: String = "http://127.0.0.1:7539") : PleyApi {
     override suspend fun onDeck(id: Long): MaybeItem = respond("onDeck", id) { fixture("items/on_deck.json") }
 
     override suspend fun next(id: Long): MaybeItem = respond("next", id) { fixture("items/next_none.json") }
+
+    /** Every file plays as it is here unless a test answers otherwise. */
+    override suspend fun convert(request: PlaybackRequest): ConversionInfo = respond("convert", request) {
+        ConversionInfo(state = ConversionState.Direct, progress = 1.0, url = "/api/files/${request.fileId}/stream")
+    }
+
+    override suspend fun conversion(id: String): ConversionInfo = respond("conversion", id) {
+        ConversionInfo(id = id, state = ConversionState.Done, progress = 1.0, url = "/api/conversions/$id/file")
+    }
 
     override suspend fun related(id: Long, limit: Int): ItemList = respond("related", id, limit) {
         val list = fixture<ItemList>("items/related.json")

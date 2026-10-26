@@ -66,6 +66,11 @@ data class Settings(
     val allowSoftwareVideo: Boolean = false,
     /** Downloads go on over mobile data too; else they wait for Wi-Fi or Ethernet. */
     val downloadOnMobileData: Boolean = false,
+    /**
+     * "Original", or a preset's name: downloads the server makes at that
+     * quality (smaller), else the original when it plays here as it is.
+     */
+    val downloadQuality: String = ORIGINAL,
 ) {
     /** The frame-rate matching a phone ([tv] false) or a TV uses: the choice, if it is one of the device's, else its default. */
     fun frameRateMatching(tv: Boolean): FrameRateMatching =

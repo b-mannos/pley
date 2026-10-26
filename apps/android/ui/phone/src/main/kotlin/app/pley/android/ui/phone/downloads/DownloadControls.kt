@@ -59,7 +59,8 @@ internal fun DownloadGlyph(entry: DownloadEntry?, size: Dp = 24.dp) {
         DownloadState.Done -> Icon(PleyIcons.CircleCheck, contentDescription = null, size = size, tint = PleyColors.AccentBright)
         DownloadState.Failed -> Icon(PleyIcons.CircleAlert, contentDescription = null, size = size, tint = PleyColors.DangerText)
         DownloadState.Queued, DownloadState.Waiting, DownloadState.Downloading -> {
-            val fraction = if (entry.state == DownloadState.Downloading) entry.fraction else 0f
+            // While the server prepares it, the ring is how far the server has come.
+            val fraction = entry.converting ?: if (entry.state == DownloadState.Downloading) entry.fraction else 0f
             Box(
                 Modifier
                     .size(size)
@@ -91,7 +92,8 @@ internal fun downloadDescription(entry: DownloadEntry?, title: String): String =
     null -> stringResource(R.string.downloads_download_item, title)
     DownloadState.Done -> stringResource(R.string.downloads_downloaded_item, title)
     DownloadState.Failed -> stringResource(R.string.downloads_failed_toast, entry.error.orEmpty())
-    else -> stringResource(R.string.downloads_downloading_item, title, (entry.fraction * 100).toInt())
+    else -> entry.converting?.let { stringResource(R.string.downloads_preparing_item, title, (it * 100).toInt()) }
+        ?: stringResource(R.string.downloads_downloading_item, title, (entry.fraction * 100).toInt())
 }
 
 /**
@@ -145,7 +147,7 @@ internal fun DownloadAction(
         DownloadState.Done -> stringResource(R.string.downloads_downloaded)
         DownloadState.Failed -> stringResource(R.string.downloads_try_again)
         DownloadState.Downloading -> "${(entry.fraction * 100).toInt()}%"
-        DownloadState.Queued -> stringResource(R.string.downloads_queued_short)
+        DownloadState.Queued -> entry.converting?.let { "${(it * 100).toInt()}%" } ?: stringResource(R.string.downloads_queued_short)
         DownloadState.Waiting -> stringResource(R.string.downloads_waiting_short)
     }
     val description = downloadDescription(entry, title)

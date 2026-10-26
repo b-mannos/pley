@@ -118,7 +118,18 @@ internal fun SettingsScreen() {
             }
             if (downloads.available) {
                 item(key = "downloads") {
-                    SettingsGroup(stringResource(R.string.downloads_settings), Modifier.widthIn(max = MAX_WIDTH)) {
+                    SettingsGroup(
+                        stringResource(R.string.downloads_settings),
+                        Modifier.widthIn(max = MAX_WIDTH),
+                        footer = stringResource(R.string.downloads_quality_hint),
+                    ) {
+                        SettingsRow(
+                            stringResource(R.string.downloads_quality),
+                            value = qualityLabel(s.downloadQuality),
+                            icon = PleyIcons.Gauge,
+                            onClick = { sheet = Sheet.DownloadQuality },
+                        )
+                        RowDivider()
                         SwitchRow(
                             stringResource(R.string.downloads_mobile_data),
                             subtitle = stringResource(R.string.downloads_mobile_data_value),
@@ -225,7 +236,7 @@ internal fun SettingsScreen() {
 }
 
 /** The choice being made, if any. */
-private enum class Sheet { QualityHome, QualityMobile, FrameRate, SubtitleSize, SubtitleBackground, GridDensity, Licences }
+private enum class Sheet { QualityHome, QualityMobile, DownloadQuality, FrameRate, SubtitleSize, SubtitleBackground, GridDensity, Licences }
 
 @Composable
 private fun SettingsSheet(sheet: Sheet?, state: SettingsUiState, model: SettingsViewModel, onDismiss: () -> Unit) {
@@ -241,6 +252,14 @@ private fun SettingsSheet(sheet: Sheet?, state: SettingsUiState, model: Settings
                 onDismiss = onDismiss,
             )
         }
+        Sheet.DownloadQuality -> ChoiceSheet(
+            title = stringResource(R.string.downloads_quality),
+            // Up to 1080p: what a phone shows.
+            choices = SettingsViewModel.QUALITIES.filter { it.original || (it.maxHeight ?: 0) <= 1080 }.map { Choice(it.id, qualityLabel(it.id)) },
+            selected = SettingsViewModel.presetOf(s.downloadQuality).id,
+            onPick = { id -> model.setDownloadQuality(SettingsViewModel.presetOf(id)) },
+            onDismiss = onDismiss,
+        )
         Sheet.FrameRate -> ChoiceSheet(
             title = stringResource(R.string.settings_refresh_rate),
             choices = state.frameRateChoices.map { Choice(it, frameRateLabel(it), frameRateHint(it)) },

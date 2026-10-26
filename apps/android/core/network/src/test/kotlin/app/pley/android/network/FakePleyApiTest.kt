@@ -1,5 +1,6 @@
 package app.pley.android.network
 
+import app.pley.android.model.ConversionState
 import app.pley.android.model.EntryIds
 import app.pley.android.model.ImageKind
 import app.pley.android.model.ItemIds
@@ -59,6 +60,8 @@ class FakePleyApiTest {
         assertNotNull(api.playbackStatus(hls.sessionId).transcode)
         assertEquals("other", api.playbackStatus("other").sessionId)
         api.stopPlayback(hls.sessionId)
+        assertEquals(ConversionState.Direct, api.convert(PlaybackRequest(itemId = 101, fileId = 601)).state)
+        assertEquals(ConversionState.Done, api.conversion("c1").state)
         assertTrue(api.subtitles(601, 3).complete)
         assertNotNull(api.trickplay(601))
         api.reportProgress(101, ProgressReport(positionMs = 1_000))

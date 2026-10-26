@@ -178,7 +178,8 @@ private fun DownloadRow(
             else -> listOfNotNull(entry.year?.takeIf { entry.kind == ItemKind.Movie }?.toString(), size).joinToString(" · ")
         }
         DownloadState.Downloading -> stringResource(R.string.downloads_progress, (entry.fraction * 100).toInt(), size)
-        DownloadState.Queued -> stringResource(R.string.downloads_queued)
+        DownloadState.Queued -> entry.converting?.let { stringResource(R.string.downloads_preparing, (it * 100).toInt()) }
+            ?: stringResource(R.string.downloads_queued)
         DownloadState.Waiting -> stringResource(R.string.downloads_waiting)
         DownloadState.Failed -> stringResource(R.string.downloads_failed, entry.error.orEmpty())
     }
@@ -211,9 +212,10 @@ private fun DownloadRow(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (entry.state == DownloadState.Downloading) {
+            val converting = entry.converting
+            if (entry.state == DownloadState.Downloading || converting != null) {
                 Spacer(Modifier.height(6.dp))
-                ProgressLine(entry.fraction)
+                ProgressLine(converting ?: entry.fraction)
             }
         }
         Box {

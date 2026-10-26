@@ -16,6 +16,7 @@ import app.pley.android.model.ItemsPage
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
 import app.pley.android.model.LibrarySort
+import app.pley.android.model.ConversionInfo
 import app.pley.android.model.MaybeItem
 import app.pley.android.model.Me
 import app.pley.android.model.NewPlaylist
@@ -209,6 +210,16 @@ interface PleyApi {
 
     /** POST /api/playback: starts a session; the answer says how and from where it plays. */
     suspend fun startPlayback(request: PlaybackRequest): PlaybackInfo
+
+    /**
+     * POST /api/conversions: what a download of [request]'s item takes on
+     * this device, decided as a playback would be: the original, or a file
+     * the server makes for it.
+     */
+    suspend fun convert(request: PlaybackRequest): ConversionInfo
+
+    /** GET /api/conversions/{id}: how the server's file for a download goes. */
+    suspend fun conversion(id: String): ConversionInfo
 
     /** GET /api/playback/{session}: how the session plays now, with its transcode's live numbers. */
     suspend fun playbackStatus(sessionId: String): SessionStatus

@@ -67,6 +67,42 @@ data class PlaybackRequest(
     val caps: ClientCaps = ClientCaps(),
 )
 
+/** Where a download stands on the server (apps/server/src/api/playback.rs, `DownloadState`). */
+@Serializable(with = ConversionState.Serializer::class)
+enum class ConversionState(override val wire: String) : WireEnum {
+    /** The original plays on this device as it is: download it. */
+    Direct("direct"),
+    Queued("queued"),
+    Running("running"),
+
+    /** The server's file for this device is whole. */
+    Done("done"),
+    Failed("failed"),
+    Unknown("unknown"),
+    ;
+
+    object Serializer : LenientEnumSerializer<ConversionState>("ConversionState", ConversionState.entries, ConversionState.Unknown)
+}
+
+/**
+ * POST /api/conversions and GET /api/conversions/{id}: what a download
+ * takes, decided as a playback is. The original ([ConversionState.Direct]),
+ * or a file the server makes for this device; [url] is where it comes
+ * from, with ranges.
+ */
+@Serializable
+data class ConversionInfo(
+    /** The conversion; `null` for the original. */
+    val id: String? = null,
+    val state: ConversionState = ConversionState.Unknown,
+    /** How far the server has come, 0 to 1. */
+    val progress: Double = 0.0,
+    /** Bytes: the original's, or the converted file's once done. */
+    val size: Long? = null,
+    val error: String? = null,
+    val url: String = "",
+)
+
 /** A subtitle track of the file being played. */
 @Serializable
 data class SubtitleTrack(

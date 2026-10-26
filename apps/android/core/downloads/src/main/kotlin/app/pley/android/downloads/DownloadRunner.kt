@@ -1,9 +1,12 @@
 package app.pley.android.downloads
 
 import app.pley.android.data.DownloadState
+import app.pley.android.model.ConversionState
 import app.pley.android.model.ItemDetail
+import app.pley.android.model.PlaybackRequest
 import app.pley.android.model.PleyJson
 import app.pley.android.model.StreamKind
+import app.pley.android.model.caps.ClientCaps
 import app.pley.android.network.ApiException
 import app.pley.android.network.HttpPleyApi
 import app.pley.android.network.PleyApi
@@ -29,7 +32,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 
-/** What a download needs of a server: its API, and clients for the file, subtitles and pictures. */
+/**
+ * What a download needs of a server: its API, and clients for the file,
+ * subtitles and pictures; and what this device plays, for a converted one.
+ */
 internal interface DownloadSources {
     fun api(server: String, userId: Long): PleyApi
 
@@ -38,7 +44,13 @@ internal interface DownloadSources {
     fun subtitles(server: String): OkHttpClient
 
     val images: OkHttpClient
+
+    /** This device's capabilities, as a playback sends them; `null` while unknown. */
+    suspend fun caps(): ClientCaps? = null
 }
+
+/** The server's converted file went (it keeps them a week): it is asked for again. */
+private class ConversionGone : IOException("the converted file is gone")
 
 /** A download that can't go on by itself: [message] says why, for the list. */
 internal class DownloadFailure(message: String) : Exception(message)
@@ -47,8 +59,11 @@ internal class DownloadFailure(message: String) : Exception(message)
  * Fetches downloads one at a time, oldest first: first the item's
  * details, a picture and its text subtitles as WebVTT, then the file
  * itself, picked up where it stopped (Range) after a lost network or a
- * restart. A network downloads may not use, or none, makes it wait;
- * errors the server gives fail the download until it is retried.
+ * restart. A download the server converts for this device is asked for,
+ * then left while the server makes it (the others go on meanwhile), and
+ * looked at again every few seconds until it is whole. A network
+ * downloads may not use, or none, makes it wait; errors the server gives
+ * fail the download until it is retried.
  */
 internal class DownloadRunner(
     private val store: DownloadStore,
@@ -58,6 +73,8 @@ internal class DownloadRunner(
     private val mobileAllowed: suspend () -> Boolean,
     private val io: CoroutineDispatcher = Dispatchers.IO,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** How often a conversion the server is making is looked at. */
+    private val conversionPollMs: Long = CONVERSION_POLL_MS,
 ) {
     @Volatile
     private var current: Pair<Key, Job>? = null
@@ -75,7 +92,15 @@ internal class DownloadRunner(
         var failures = 0
         while (true) {
             currentCoroutineContext().ensureActive()
-            val next = store.all.value.firstOrNull { it.state == DownloadState.Queued || it.state == DownloadState.Waiting } ?: return false
+            val pending = store.all.value.filter { it.state == DownloadState.Queued || it.state == DownloadState.Waiting }
+            if (pending.isEmpty()) return false
+            val now = clock()
+            val next = pending.firstOrNull { it.notBefore <= now }
+            if (next == null) {
+                // Every one left is being converted by the server: look again soon.
+                delay((pending.minOf { it.notBefore } - now).coerceIn(0, conversionPollMs))
+                continue
+            }
             val mobile = mobileAllowed()
             if (!gate.open(mobile)) {
                 markWaiting()
@@ -84,7 +109,7 @@ internal class DownloadRunner(
             }
             val outcome = runOne(next)
             when (outcome) {
-                Outcome.Done, Outcome.Removed -> failures = 0
+                Outcome.Done, Outcome.Removed, Outcome.Converting -> failures = 0
                 Outcome.Failed -> failures = 0
                 Outcome.Lost -> {
                     // The network went, or the server: wait a little longer each time.
@@ -96,7 +121,7 @@ internal class DownloadRunner(
         }
     }
 
-    private enum class Outcome { Done, Removed, Failed, Lost }
+    private enum class Outcome { Done, Removed, Failed, Lost, Converting }
 
     private suspend fun runOne(saved: Saved): Outcome {
         val key = saved.key
@@ -107,6 +132,7 @@ internal class DownloadRunner(
             withContext(job) {
                 var s = store.get(key) ?: return@withContext Outcome.Removed
                 if (!s.extrasSaved) s = saveExtras(s)
+                if (s.convert && s.mediaUrl == null) s = converted(s) ?: return@withContext Outcome.Converting
                 fetchMedia(s)
                 store.update(key) { it.copy(state = DownloadState.Done, downloadedBytes = it.sizeBytes, error = null) }
                 Outcome.Done
@@ -121,6 +147,9 @@ internal class DownloadRunner(
         } catch (e: ApiException) {
             store.update(key) { it.copy(state = DownloadState.Failed, error = messageFor(e)) }
             Outcome.Failed
+        } catch (_: ConversionGone) {
+            store.update(key) { it.copy(state = DownloadState.Queued, conversion = null, mediaUrl = null, converting = 0f) }
+            Outcome.Converting
         } catch (_: IOException) {
             store.update(key) { it.copy(state = DownloadState.Waiting) }
             Outcome.Lost
@@ -192,6 +221,55 @@ internal class DownloadRunner(
         }
     }
 
+    /**
+     * [saved] with its converted file's address, once the server has made
+     * it whole (or without converting, when the original plays here after
+     * all); `null` while it is being made, looked at again in a while.
+     */
+    private suspend fun converted(saved: Saved): Saved? {
+        val api = sources.api(saved.server, saved.userId)
+        val request = PlaybackRequest(
+            itemId = saved.itemId,
+            fileId = saved.fileId,
+            maxHeight = saved.maxHeight,
+            maxBitrate = saved.maxBitrateKbps,
+            caps = sources.caps() ?: ClientCaps(),
+        )
+        val info = try {
+            saved.conversion?.let { api.conversion(it) } ?: api.convert(request)
+        } catch (e: ApiException) {
+            when {
+                // The server restarted, or forgot it: asked for again.
+                e.status == 404 && saved.conversion != null -> api.convert(request)
+                // A server that can't convert: the original, unless a smaller file was asked for.
+                e.status == 503 && saved.maxHeight == null -> return keep(saved.key) { it.copy(convert = false, converting = null) }
+                e.status == 503 -> throw DownloadFailure(NO_CONVERSIONS)
+                else -> throw e
+            }
+        }
+        return when (info.state) {
+            ConversionState.Direct -> keep(saved.key) { it.copy(convert = false, converting = null) }
+            ConversionState.Done -> keep(saved.key) {
+                it.copy(conversion = info.id, mediaUrl = info.url, converting = null, sizeBytes = info.size ?: 0)
+            }
+            ConversionState.Failed -> throw DownloadFailure(info.error?.let { "$CONVERSION_FAILED: $it" } ?: CONVERSION_FAILED)
+            else -> {
+                keep(saved.key) {
+                    it.copy(
+                        state = DownloadState.Queued,
+                        conversion = info.id,
+                        converting = info.progress.toFloat().coerceIn(0f, 1f),
+                        notBefore = clock() + conversionPollMs,
+                    )
+                }
+                null
+            }
+        }
+    }
+
+    /** [change] made to [key]'s download, which must still be there. */
+    private fun keep(key: Key, change: (Saved) -> Saved): Saved = store.update(key, change = change) ?: throw CancellationException("removed")
+
     /** The file, from where its partial copy ends, then moved to its name. */
     private suspend fun fetchMedia(saved: Saved) {
         val part = store.partOf(saved)
@@ -203,12 +281,16 @@ internal class DownloadRunner(
         if (left > 0 && withContext(io) { store.freeBytes() } < left + SPACE_MARGIN) throw DownloadFailure(NO_SPACE)
         val api = sources.api(saved.server, saved.userId)
         val request = Request.Builder()
-            .url(api.url("/api/files/${saved.fileId}/stream"))
+            .url(api.url(saved.mediaUrl ?: "/api/files/${saved.fileId}/stream"))
             .apply { if (have > 0) header("Range", "bytes=$have-") }
             .build()
         call(sources.media(saved.server), request) { response ->
             when {
                 response.code == 416 && saved.sizeBytes > 0 && have >= saved.sizeBytes -> return@call
+                response.code == 404 && saved.mediaUrl != null -> {
+                    part.delete()
+                    throw ConversionGone()
+                }
                 response.code == 206 -> Unit
                 response.isSuccessful -> {
                     // The whole file again: the server didn't take the range.
@@ -325,6 +407,12 @@ internal class DownloadRunner(
         const val IMAGE_WIDTH = 640
         const val SUBTITLE_TRIES = 20
         const val SUBTITLE_WAIT_MS = 3_000L
+
+        /** How often a conversion the server is making is looked at. */
+        const val CONVERSION_POLL_MS = 5_000L
+
+        const val CONVERSION_FAILED = "The server couldn't make it for this device"
+        const val NO_CONVERSIONS = "The server can't make smaller downloads: choose Original in Settings → Downloads"
 
         /** Room kept free beside a download, so the device doesn't fill up. */
         const val SPACE_MARGIN = 500L * 1024 * 1024

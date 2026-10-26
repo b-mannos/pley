@@ -18,6 +18,7 @@ import app.pley.android.model.ItemsPage
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
 import app.pley.android.model.LibrarySort
+import app.pley.android.model.ConversionInfo
 import app.pley.android.model.MaybeItem
 import app.pley.android.model.Me
 import app.pley.android.model.NewPlaylist
@@ -194,6 +195,11 @@ class HttpPleyApi(
 
     override suspend fun startPlayback(request: PlaybackRequest): PlaybackInfo =
         send("POST", PlaybackInfo.serializer(), json(PlaybackRequest.serializer(), request), "api", "playback")
+
+    override suspend fun convert(request: PlaybackRequest): ConversionInfo =
+        send("POST", ConversionInfo.serializer(), json(PlaybackRequest.serializer(), request), "api", "conversions")
+
+    override suspend fun conversion(id: String): ConversionInfo = get(ConversionInfo.serializer(), "api", "conversions", id)
 
     override suspend fun playbackStatus(sessionId: String): SessionStatus =
         get(SessionStatus.serializer(), "api", "playback", sessionId)

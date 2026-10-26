@@ -12,6 +12,7 @@ import app.pley.android.data.DataGraph
 import app.pley.android.data.DownloadEntry
 import app.pley.android.data.DownloadState
 import app.pley.android.data.DownloadStorage
+import app.pley.android.data.DownloadTarget
 import app.pley.android.data.Downloads
 import app.pley.android.data.LocalFile
 import app.pley.android.data.Session
@@ -73,6 +74,8 @@ class AppDownloads internal constructor(
     private val clock: () -> Long = System::currentTimeMillis,
     /** Whether a version of an item plays here as it is: away from the server, nothing converts it. */
     private val playsHere: suspend (ItemDetail, MediaFile) -> Boolean = { _, _ -> true },
+    /** What Settings → Downloads → Quality asks for: `null` for the original. */
+    private val target: suspend () -> DownloadTarget? = { null },
 ) : Downloads {
     init {
         // Small, and read once: made off the main thread by the app's warm-up.
@@ -303,8 +306,11 @@ class AppDownloads internal constructor(
 
     private suspend fun savedOf(detail: ItemDetail, server: String, userId: Long): Saved? {
         if (detail.kind != ItemKind.Movie && detail.kind != ItemKind.Episode) return null
-        val playable = if (detail.files.size > 1) detail.files.filter { playsHere(detail, it) }.map { it.id }.toSet() else null
-        val file = pickFile(detail.files) { playable == null || it.id in playable } ?: return null
+        val playable = detail.files.filter { playsHere(detail, it) }.map { it.id }.toSet()
+        val file = pickFile(detail.files) { it.id in playable } ?: return null
+        // The server makes it for this device when asked to make it smaller, or when it doesn't play here as it is.
+        val smaller = target()
+        val convert = smaller != null || file.id !in playable
         val episode = detail.kind == ItemKind.Episode
         return Saved(
             server = server,
@@ -319,8 +325,12 @@ class AppDownloads internal constructor(
             episodeIndex = if (episode) detail.index else null,
             year = detail.year,
             durationMs = file.durationMs ?: detail.durationMs,
-            container = file.container,
-            sizeBytes = file.size,
+            // A converted file is Matroska, its size known once the server made it.
+            container = if (convert) "mkv" else file.container,
+            sizeBytes = if (convert) 0 else file.size,
+            convert = convert,
+            maxHeight = smaller?.maxHeight,
+            maxBitrateKbps = smaller?.maxBitrateKbps,
             addedAt = clock(),
             positionMs = if (detail.userState.watched) 0 else detail.userState.positionMs,
             watched = detail.userState.watched,
@@ -346,6 +356,7 @@ class AppDownloads internal constructor(
         positionMs = s.positionMs,
         watched = s.watched,
         error = s.error,
+        converting = s.converting?.takeIf { s.mediaUrl == null && s.state != DownloadState.Done && s.state != DownloadState.Failed },
     )
 
     companion object {
@@ -381,12 +392,19 @@ class AppDownloads internal constructor(
          * The app's downloads: kept in the app's own storage (removed with
          * the app), the server and profile signed in to now from [data].
          */
-        /** [playsHere]: whether a version of an item plays on this device as it is (the player's capabilities). */
+        /**
+         * [playsHere]: whether a version of an item plays on this device as
+         * it is; [caps]: what it plays, for the server to convert it (the
+         * player's capabilities); [target]: the quality downloads are made
+         * at, `null` for the original (Settings → Downloads).
+         */
         fun create(
             context: Context,
             data: DataGraph,
             network: NetworkGraph,
             playsHere: suspend (ItemDetail, MediaFile) -> Boolean = { _, _ -> true },
+            caps: suspend () -> ClientCaps? = { null },
+            target: suspend () -> DownloadTarget? = { null },
         ): AppDownloads {
             val app = context.applicationContext
             val root = File(app.getExternalFilesDir(null) ?: app.filesDir, "downloads")
@@ -398,6 +416,8 @@ class AppDownloads internal constructor(
                 override fun subtitles(server: String) = network.subtitles(server)
 
                 override val images get() = network.images
+
+                override suspend fun caps(): ClientCaps? = caps()
             }
             return AppDownloads(
                 context = app,
@@ -409,6 +429,7 @@ class AppDownloads internal constructor(
                 gate = AndroidNetworkGate(app),
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
                 playsHere = playsHere,
+                target = target,
             )
         }
 

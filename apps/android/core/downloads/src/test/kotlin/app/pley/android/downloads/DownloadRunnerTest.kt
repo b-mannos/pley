@@ -1,9 +1,12 @@
 package app.pley.android.downloads
 
 import app.pley.android.data.DownloadState
+import app.pley.android.model.ConversionInfo
+import app.pley.android.model.ConversionState
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ItemKind
 import app.pley.android.model.MediaFile
+import app.pley.android.network.ApiException
 import app.pley.android.network.PleyApi
 import app.pley.android.testing.network.FakePleyApi
 import kotlin.random.Random
@@ -115,6 +118,51 @@ class DownloadRunnerTest {
     }
 
     @Test
+    fun aFileTheServerMakesForThisPhoneIsWaitedForThenDownloaded() = runBlocking {
+        api.answer("convert", ConversionInfo(id = CONVERSION, state = ConversionState.Running, progress = 0.4, url = FILE))
+        api.answer("conversion", ConversionInfo(id = CONVERSION, state = ConversionState.Done, progress = 1.0, size = body.size.toLong(), url = FILE))
+        server.enqueue(MockResponse.Builder().code(200).body(Buffer().write(body)).build())
+        val saved = add(convert = true)
+
+        assertFalse("nothing waits", runner().run())
+
+        val done = store.get(saved.key)!!
+        assertEquals(DownloadState.Done, done.state)
+        assertArrayEquals(body, store.mediaOf(done).readBytes())
+        assertEquals("the server's file", FILE, server.takeRequest().url.encodedPath)
+        assertEquals((done.conversion to done.converting), CONVERSION to null)
+        // Asked for once, then looked at until whole.
+        assertEquals(1, api.calls("convert").size)
+        assertEquals(listOf(CONVERSION), api.calls("conversion").map { it.args.single() })
+    }
+
+    @Test
+    fun theOriginalComesWhenItPlaysHereAfterAll() = runBlocking {
+        server.enqueue(MockResponse.Builder().code(200).body(Buffer().write(body)).build())
+        val saved = add(convert = true)
+
+        runner().run()
+
+        assertEquals(DownloadState.Done, store.get(saved.key)!!.state)
+        assertEquals("/api/files/7/stream", server.takeRequest().url.encodedPath)
+    }
+
+    @Test
+    fun aServerThatCantConvertGivesTheOriginalUnlessASmallerFileWasAsked() = runBlocking {
+        api.fail("convert", ApiException(503, "unavailable", "the transcoder can't convert files"))
+        server.enqueue(MockResponse.Builder().code(200).body(Buffer().write(body)).build())
+        val playable = add(convert = true)
+        runner().run()
+        assertEquals(DownloadState.Done, store.get(playable.key)!!.state)
+
+        val smaller = add(convert = true, itemId = 43, maxHeight = 720)
+        runner().run()
+        val failed = store.get(smaller.key)!!
+        assertEquals(DownloadState.Failed, failed.state)
+        assertEquals(DownloadRunner.NO_CONVERSIONS, failed.error)
+    }
+
+    @Test
     fun theIndexIsReadBackAndACutDownloadWaitsItsTurn() {
         val saved = add()
         store.update(saved.key) { it.copy(state = DownloadState.Downloading) }
@@ -127,17 +175,20 @@ class DownloadRunnerTest {
         assertEquals(1234L, back.downloadedBytes)
     }
 
-    private fun add(): Saved {
+    private fun add(convert: Boolean = false, itemId: Long = 42, maxHeight: Int? = null): Saved {
         val saved = Saved(
             server = "http://nas:7539",
             userId = 2,
-            itemId = 42,
+            itemId = itemId,
             fileId = 7,
             kind = ItemKind.Movie,
             title = "Alien",
             container = "mkv",
-            sizeBytes = body.size.toLong(),
+            sizeBytes = if (convert) 0 else body.size.toLong(),
             addedAt = 1,
+            convert = convert,
+            maxHeight = maxHeight,
+            maxBitrateKbps = maxHeight?.let { 4_000 },
         )
         store.add(listOf(saved))
         return saved
@@ -160,7 +211,13 @@ class DownloadRunnerTest {
             override suspend fun await(mobile: Boolean, timeoutMs: Long) = open
         },
         mobileAllowed = { false },
+        conversionPollMs = 10,
     )
+
+    private companion object {
+        const val CONVERSION = "0123456789abcdef0123456789abcdef"
+        const val FILE = "/api/conversions/$CONVERSION/file"
+    }
 
     private fun detail() = ItemDetail(
         id = 42,

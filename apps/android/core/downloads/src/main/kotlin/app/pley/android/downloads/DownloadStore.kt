@@ -46,6 +46,18 @@ internal data class Saved(
     val positionMs: Long = 0,
     val watched: Boolean = false,
     val error: String? = null,
+    /** The server makes the file for this device ([maxHeight] and [maxBitrateKbps] when smaller). */
+    val convert: Boolean = false,
+    val maxHeight: Int? = null,
+    val maxBitrateKbps: Int? = null,
+    /** The server's conversion, once asked for. */
+    val conversion: String? = null,
+    /** How far the server has come making it, 0 to 1, until it is whole. */
+    val converting: Float? = null,
+    /** Where the converted file comes from, once whole. */
+    val mediaUrl: String? = null,
+    /** Not to be looked at again before this (unix ms): its conversion is being made. */
+    val notBefore: Long = 0,
 ) {
     val key: Key get() = Key(server, userId, itemId)
 }

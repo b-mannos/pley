@@ -14,6 +14,10 @@
     <!-- Lines under a download's title. -->
     <string name="downloads_queued">Waiting to download</string>
     <string name="downloads_waiting">Waiting for Wi-Fi</string>
+    <!-- While the server makes the file for this phone (smaller, or one it plays): "Preparing on the server · 42 %". -->
+    <string name="downloads_preparing">Preparing on the server · %1$d%%</string>
+    <!-- For screen readers: "Preparing Episode 2, 42 %". -->
+    <string name="downloads_preparing_item">Preparing %1$s, %2$d%%</string>
     <!-- "Downloading · 45 % of 1.4 GB". -->
     <string name="downloads_progress">Downloading · %1$d%% of %2$s</string>
     <string name="downloads_failed">Didn\'t download: %1$s</string>
@@ -55,6 +59,8 @@
         <item quantity="other">%1$d downloads · %2$s</item>
     </plurals>
     <string name="downloads_settings">Downloads</string>
+    <string name="downloads_quality">Quality</string>
+    <string name="downloads_quality_hint">Original keeps the file as it is when this phone plays it; the server prepares one it doesn\'t play. A smaller quality has the server make every download first: they take less space.</string>
     <string name="downloads_mobile_data">Download on mobile data</string>
     <string name="downloads_mobile_data_value">Otherwise downloads wait for Wi-Fi</string>
     <string name="downloads_delete_all">Delete all downloads</string>

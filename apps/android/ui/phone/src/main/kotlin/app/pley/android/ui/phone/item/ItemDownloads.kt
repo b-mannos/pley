@@ -129,12 +129,13 @@ internal fun DownloadButton(itemId: Long, title: String, modifier: Modifier = Mo
         null -> stringResource(R.string.downloads_download)
         DownloadState.Done -> stringResource(R.string.downloads_downloaded)
         DownloadState.Failed -> stringResource(R.string.downloads_try_again)
-        DownloadState.Queued -> stringResource(R.string.downloads_queued)
+        DownloadState.Queued -> entry.converting?.let { stringResource(R.string.downloads_preparing, (it * 100).toInt()) }
+            ?: stringResource(R.string.downloads_queued)
         DownloadState.Waiting -> stringResource(R.string.downloads_waiting)
         DownloadState.Downloading -> stringResource(R.string.downloads_progress, (entry.fraction * 100).toInt(), formatBytes(entry.sizeBytes))
     }
     val description = downloadDescription(entry, title)
-    val fraction = if (entry?.state == DownloadState.Downloading) entry.fraction else 0f
+    val fraction = entry?.converting ?: if (entry?.state == DownloadState.Downloading) entry.fraction else 0f
     Box(modifier) {
         Row(
             Modifier

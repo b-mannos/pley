@@ -43,6 +43,7 @@ internal class DataStoreSettings(
         allowSoftwareVideo = settings.allowSoftwareVideo && debuggable,
         qualityOnHomeNetwork = settings.qualityOnHomeNetwork.ifBlank { Settings.ORIGINAL },
         qualityOnMobile = settings.qualityOnMobile.ifBlank { Settings.ORIGINAL },
+        downloadQuality = settings.downloadQuality.ifBlank { Settings.ORIGINAL },
     )
 
     private fun read(p: Preferences): Settings {
@@ -66,6 +67,7 @@ internal class DataStoreSettings(
                 reduceMotion = p[REDUCE_MOTION] ?: defaults.reduceMotion,
                 allowSoftwareVideo = p[SOFTWARE_VIDEO] ?: defaults.allowSoftwareVideo,
                 downloadOnMobileData = p[DOWNLOAD_ON_MOBILE] ?: defaults.downloadOnMobileData,
+                downloadQuality = p[DOWNLOAD_QUALITY] ?: defaults.downloadQuality,
             ),
         )
     }
@@ -90,6 +92,7 @@ internal class DataStoreSettings(
         p.keep(REDUCE_MOTION, s.reduceMotion, d.reduceMotion)
         p.keep(SOFTWARE_VIDEO, s.allowSoftwareVideo, d.allowSoftwareVideo)
         p.keep(DOWNLOAD_ON_MOBILE, s.downloadOnMobileData, d.downloadOnMobileData)
+        p.keep(DOWNLOAD_QUALITY, s.downloadQuality, d.downloadQuality)
     }
 
     private fun <T : Any> MutablePreferences.keep(key: Preferences.Key<T>, value: T?, default: T?) {
@@ -114,6 +117,7 @@ internal class DataStoreSettings(
         private val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
         private val SOFTWARE_VIDEO = booleanPreferencesKey("allow_software_video")
         private val DOWNLOAD_ON_MOBILE = booleanPreferencesKey("download_on_mobile_data")
+        private val DOWNLOAD_QUALITY = stringPreferencesKey("download_quality")
 
         private fun passthroughKey(format: String) = stringPreferencesKey("passthrough:$format")
 

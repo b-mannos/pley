@@ -124,6 +124,9 @@ class SettingsViewModel(
 
     fun setDownloadOnMobileData(on: Boolean) = update { it.copy(downloadOnMobileData = on) }
 
+    /** The quality downloads are made at: the original, or a preset the server makes them at. */
+    fun setDownloadQuality(preset: QualityPreset) = update { it.copy(downloadQuality = idOf(preset)) }
+
     companion object {
         /** The qualities offered, best first: the original, then the transcodes. */
         val QUALITIES: List<QualityPreset> get() = Qualities.ALL

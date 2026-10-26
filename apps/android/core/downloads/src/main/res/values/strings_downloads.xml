@@ -12,4 +12,7 @@
     <string name="downloads_notification_waiting">Downloads are waiting for Wi-Fi</string>
     <string name="downloads_notification_waiting_text">They go on once the phone is on Wi-Fi, or on mobile data if Settings allow it.</string>
     <string name="downloads_notification_starting">Getting downloads ready</string>
+    <!-- While the server makes a smaller (or playable) file for this phone. -->
+    <string name="downloads_notification_converting">Preparing %1$s</string>
+    <string name="downloads_notification_converting_text">The server is making it for this phone · %1$d%%</string>
 </resources>

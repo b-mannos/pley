@@ -53,7 +53,13 @@ Downloads (`:core:downloads`) keep the original file of a movie or an
 episode (of several versions, the sharpest up to 1080p of those the
 device plays as they are, by the player's capabilities), with its
 details, a picture and its text subtitles as WebVTT, in the app's own
-storage (removed with the app), per server and profile. They come in a
+storage (removed with the app), per server and profile. A file the device
+doesn't play as it is, or every file when Settings → Downloads → Quality
+picks a smaller one, is made by the server first (`POST /api/conversions`
+with the player's capabilities, docs/API.md "Downloads"): the download
+shows "Preparing on the server" with the server's progress, looks again
+every 5 s, then downloads the made file. A server whose transcoder can't
+make files gives the original, unless a smaller quality was asked for. They come in a
 foreground service of type dataSync with a notification, one at a time;
 one cut short goes on from where it stopped (Range). They wait for Wi-Fi
 or Ethernet unless Settings → Downloads allows mobile data, and those
@@ -72,9 +78,9 @@ app opening, a network coming up), each report with its `age_ms`: the
 server keeps what happened to the item since (docs/API.md). An episode
 played from a download goes on to the next one of its show downloaded
 when the server doesn't say what's next within 3 s. A download the device
-can't decode falls back to the server, which converts it; with the server
-away, the player says so. TVs stay where the server is and download
-nothing.
+can't decode after all falls back to the server, which converts it; with
+the server away, the player says so. TVs stay where the server is and
+download nothing.
 
 ## Updating from the web view app
 

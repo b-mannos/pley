@@ -4,17 +4,21 @@ import android.app.Application
 import app.pley.android.auth.AuthGraph
 import app.pley.android.caps.CapsDecision
 import app.pley.android.caps.CapsGraph
+import app.pley.android.caps.CapsSnapshot
 import app.pley.android.common.DeviceProfile
 import app.pley.android.common.UserAgent
 import app.pley.android.data.DataGraph
+import app.pley.android.data.DownloadTarget
 import app.pley.android.data.Downloads
 import app.pley.android.downloads.AppDownloads
 import app.pley.android.network.HttpRoot
 import app.pley.android.network.NetworkGraph
 import app.pley.android.player.PlayerGraph
+import app.pley.android.player.session.Qualities
 import app.pley.android.screens.PlayerLauncher
 import app.pley.android.screens.ScreensGraph
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
 import okhttp3.OkHttp
 import okhttp3.OkHttpClient
 
@@ -42,20 +46,36 @@ class AppGraph(private val app: Application) : ScreensGraph {
 
     /**
      * Phones and tablets only: TVs stay where the server is, and download
-     * nothing. Of several versions, one this device plays as it is.
+     * nothing. Of several versions, one this device plays as it is; the
+     * server makes one that doesn't, or a smaller one when Settings →
+     * Downloads asks, from what this device plays.
      */
     val appDownloads: AppDownloads by lazy {
-        AppDownloads.create(app, data, network) { item, file ->
-            val snapshot = try {
-                caps.capabilities.warmUp()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                null
-            }
-            snapshot == null ||
-                (caps.policy.decide(item, file.id, snapshot) == CapsDecision.Direct && AppDownloads.soundPlays(file, snapshot.report))
-        }
+        AppDownloads.create(
+            app,
+            data,
+            network,
+            playsHere = { item, file ->
+                val snapshot = capsNow()
+                snapshot == null ||
+                    (caps.policy.decide(item, file.id, snapshot) == CapsDecision.Direct && AppDownloads.soundPlays(file, snapshot.report))
+            },
+            caps = { capsNow()?.report },
+            target = {
+                Qualities.byIdOrLabel(data.settings.settings.first().downloadQuality)
+                    .takeUnless { it.original }
+                    ?.let { DownloadTarget(maxHeight = it.maxHeight ?: 1080, maxBitrateKbps = it.maxBitrateKbps ?: 8_000) }
+            },
+        )
+    }
+
+    /** This device's capabilities, probed if they weren't; `null` when they can't be. */
+    private suspend fun capsNow(): CapsSnapshot? = try {
+        caps.capabilities.warmUp()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
     }
     override val downloads: Downloads get() = if (device.isTv) Downloads.None else appDownloads
 

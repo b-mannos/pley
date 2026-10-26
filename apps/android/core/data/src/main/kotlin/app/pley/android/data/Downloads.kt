@@ -91,10 +91,15 @@ data class DownloadEntry(
     val watched: Boolean = false,
     /** Why it failed, one short sentence. */
     val error: String? = null,
+    /** While the server makes this device's file: how far it has come, 0 to 1. */
+    val converting: Float? = null,
 ) {
     /** How much is down, 0 to 1. */
     val fraction: Float get() = if (sizeBytes <= 0) 0f else (downloadedBytes.toFloat() / sizeBytes).coerceIn(0f, 1f)
 }
+
+/** A download made smaller by the server: its picture's height at most, and its bitrate. */
+data class DownloadTarget(val maxHeight: Int, val maxBitrateKbps: Int)
 
 /** How much the downloads take, and what is left where they go. */
 data class DownloadStorage(val usedBytes: Long = 0, val freeBytes: Long = 0)
