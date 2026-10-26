@@ -1,5 +1,5 @@
 # Every library and plugin of the app, pinned. A release is taken once it is
-# a week old, as Dependabot's cooldown does for the rest of the repository.
+# a week old.
 [versions]
 agp = "9.4.1"
 kotlin = "2.4.21"

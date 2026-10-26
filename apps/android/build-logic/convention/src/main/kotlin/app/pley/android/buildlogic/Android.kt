@@ -48,6 +48,6 @@ internal fun Project.configureAndroid(android: CommonExtension) {
     )
     android.lint.abortOnError = true
     android.lint.checkReleaseBuilds = true
-    // Versions move through the catalog and Dependabot's cooldown, not lint.
+    // Versions move through the catalog, not lint.
     android.lint.disable += setOf("NewerVersionAvailable", "GradleDependency", "AndroidGradlePluginVersion")
 }

@@ -20,7 +20,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
 
-# Actions are pinned to commits (Dependabot keeps them current).
+# Actions are pinned to commits.
 jobs:
   ci:
     name: CI
