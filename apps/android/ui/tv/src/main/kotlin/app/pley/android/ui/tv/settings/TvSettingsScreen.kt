@@ -47,7 +47,6 @@ import androidx.media3.common.MediaLibraryInfo
 import androidx.media3.common.util.UnstableApi
 import app.pley.android.auth.Needs
 import app.pley.android.data.FrameRateMatching
-import app.pley.android.data.GridDensity
 import app.pley.android.data.Passthrough
 import app.pley.android.data.Settings
 import app.pley.android.data.SubtitleBackground
@@ -100,7 +99,6 @@ private sealed interface Picking {
     data class PassthroughOf(val format: String) : Picking
     data object SubtitleSize : Picking
     data object SubtitleBackground : Picking
-    data object GridDensity : Picking
 }
 
 /**
@@ -299,7 +297,6 @@ private fun rowKeyOf(p: Picking): String = when (p) {
     is Picking.PassthroughOf -> "row-passthrough-${p.format}"
     Picking.SubtitleSize -> "row-subtitle-size"
     Picking.SubtitleBackground -> "row-subtitle-background"
-    Picking.GridDensity -> "row-grid-density"
 }
 
 /** The rows of category [c]; the first one's requester is "first-<category>", for Select on the category. */
@@ -476,9 +473,6 @@ private fun LazyListScope.pane(
                     onClick = { pick(Picking.SubtitleBackground) },
                     modifier = keyed("row-subtitle-background"),
                 )
-            }
-            item(key = "row-grid-density") {
-                TvSettingRow(stringResource(R.string.tv_settings_grid_density), value = stringResource(densityLabel(s.gridDensity)), icon = PleyIcons.LayoutDashboard, onClick = { pick(Picking.GridDensity) }, modifier = keyed("row-grid-density"))
             }
             item(key = "row-reduce-motion") {
                 TvSettingRow(
@@ -684,15 +678,6 @@ private fun Panels(
             onClose,
             returnTo,
         )
-        Picking.GridDensity -> TvChoicePanel(
-            visible,
-            stringResource(R.string.tv_settings_grid_density),
-            GridDensity.entries.map { TvChoice(it, stringResource(densityLabel(it))) },
-            s.gridDensity,
-            settings::setGridDensity,
-            onClose,
-            returnTo,
-        )
         null -> Unit
     }
 }
@@ -796,12 +781,6 @@ private fun sizeLabel(size: Float): Int = when (Settings.SUBTITLE_SIZES.indexOf(
 private fun backgroundLabel(background: SubtitleBackground): Int = when (background) {
     SubtitleBackground.None -> R.string.tv_settings_background_none
     SubtitleBackground.DarkBox -> R.string.tv_settings_background_box
-}
-
-private fun densityLabel(density: GridDensity): Int = when (density) {
-    GridDensity.Small -> R.string.tv_settings_density_small
-    GridDensity.Medium -> R.string.tv_settings_density_medium
-    GridDensity.Large -> R.string.tv_settings_density_large
 }
 
 /** The app's version name, or an empty string when the system won't say. */

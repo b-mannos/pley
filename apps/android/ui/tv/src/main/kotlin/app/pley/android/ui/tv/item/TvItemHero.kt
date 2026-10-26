@@ -234,6 +234,14 @@ private fun HeroButtonsRow(
                 modifier = Modifier.rememberedFocus(memory, "myList").testTag(TV_MY_LIST_BUTTON),
             )
         }
+        page.trailer?.let { trailer ->
+            TvRoundButton(
+                label = stringResource(R.string.tv_item_trailer),
+                icon = PleyIcons.Film,
+                onClick = { actions.model.play(trailer, fromStart = true) },
+                modifier = Modifier.rememberedFocus(memory, "trailer"),
+            )
+        }
         TvRoundButton(
             label = stringResource(R.string.tv_item_add_to_playlist),
             icon = PleyIcons.ListPlus,

@@ -107,10 +107,6 @@
     <string name="tv_settings_subtitle_background">Subtitle background</string>
     <string name="tv_settings_background_none">None, with an outline</string>
     <string name="tv_settings_background_box">Dark box</string>
-    <string name="tv_settings_grid_density">Grid density</string>
-    <string name="tv_settings_density_small">More, smaller posters</string>
-    <string name="tv_settings_density_medium">Medium</string>
-    <string name="tv_settings_density_large">Fewer, larger posters</string>
 
     <!-- Server, Diagnostics, About. -->
     <string name="tv_settings_server_value">The server this TV uses</string>

@@ -11,6 +11,7 @@
     <string name="tv_item_mark_unwatched">Mark as unwatched</string>
     <string name="tv_item_tracks">Audio and subtitles</string>
     <string name="tv_item_add_to_playlist">Add to playlist</string>
+    <string name="tv_item_trailer">Trailer</string>
     <string name="tv_item_more">More</string>
     <string name="tv_item_full_summary">Full summary</string>
 
