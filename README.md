@@ -82,13 +82,8 @@ app; and pley for Android, a native app for phones, tablets, Android TV,
 Google TV and Fire TV, with its own player, which plays more files as they
 are than a browser, music in the background, and a remote-first interface
 on TVs. It signs in through the server's own page or, on a TV, with a code;
-installing it is in [docs/ANDROID.md](docs/ANDROID.md). And pley for Kodi,
-an add-on for Kodi 20 and newer (LibreELEC and CoreELEC boxes, Android TV
-boxes, computers) that plays with Kodi's own player, with Skip Intro and
-Up Next, and signs in with a code too
-([docs/KODI.md](docs/KODI.md)); and pley for Roku, a native
-app that signs in the same way, sideloaded for now
-([docs/ROKU.md](docs/ROKU.md)).
+installing it is in [docs/ANDROID.md](docs/ANDROID.md). Building and
+installing them is in [docs/TV_PLATFORMS.md](docs/TV_PLATFORMS.md).
 
 **Offline**: on the home network everything works without the internet.
 Item pages download a file's original, which the Android app (phones and
@@ -121,9 +116,11 @@ HTTP, so the two can have different licenses
 | `apps/android` | pley for Android phones, tablets and TVs (Kotlin, Compose, Media3) |
 | `apps/kodi` | pley for Kodi, an add-on (Python, GPL-2.0-or-later) |
 | `apps/roku` | pley for Roku (BrightScript, SceneGraph) |
+| `apps/tizen`, `apps/webos` | pley for Samsung TV and pley for LG TV |
+| `packages/tv` | The TV app both share (TypeScript, Preact) |
 | `packages/transcoder-api` | Protocol types shared by server and transcoder |
 | `deploy/` | Docker, systemd and launchd setups ([guide](deploy/README.md)) |
-| `docs/` | [HTTP API](docs/API.md), [Plex API](docs/PLEX.md), [transcoder](docs/TRANSCODER.md), [storage](docs/STORAGE.md) |
+| `docs/` | [HTTP API](docs/API.md), [Plex API](docs/PLEX.md), [transcoder](docs/TRANSCODER.md), [storage](docs/STORAGE.md), [Samsung and LG TVs](docs/TV_PLATFORMS.md) |
 | `scripts/` | Release build, transcoder source package, license check |
 
 ## Requirements
@@ -224,6 +221,9 @@ Archive belong to their owners.
   `store` and `direct`: `adb install
   app/build/outputs/apk/store/debug/app-store-debug.apk` installs the debug
   app. [docs/ANDROID.md](docs/ANDROID.md) has the modules and the rest.
+- `npm run tv:check` type-checks and tests the Samsung and LG TV apps;
+  `npm run tizen` and `npm run webos` package them with Samsung's and LG's
+  command-line tools ([docs/TV_PLATFORMS.md](docs/TV_PLATFORMS.md)).
 - `cargo clippy --workspace --all-targets` and `cargo fmt --all` lint and
   format the Rust code; `scripts/check-licenses.ps1` checks the license
   boundary.
