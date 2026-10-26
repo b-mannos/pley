@@ -1,5 +1,5 @@
 import { describe as group, expect, it } from "vitest";
-import { describe, formatBytes, serverName, type Download } from "./downloads";
+import { describe, formatBytes, fraction, serverName, type Download } from "./downloads";
 import type { SavedServer } from "./servers";
 
 const download = (over: Partial<Download>): Download => ({
@@ -33,6 +33,12 @@ group("downloads", () => {
     expect(describe(download({ state: "failed", error: "This file is no longer on the server." }), "Home")).toBe(
       "This file is no longer on the server.",
     );
+  });
+
+  it("fill their bar as the file comes, or as the server makes it", () => {
+    expect(fraction(download({ state: "downloading", received: 4_402_341_376 }))).toBe(0.5);
+    expect(fraction(download({ state: "preparing", preparing: 0.42, size: null }))).toBe(0.42);
+    expect(fraction(download({ state: "queued", size: null }))).toBeNull();
   });
 
   it("say sizes as the web app does", () => {

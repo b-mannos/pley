@@ -37,7 +37,8 @@ export const coming = (d: Download) =>
   d.state === "queued" || d.state === "preparing" || d.state === "downloading" || d.state === "waiting";
 
 /** How far `d` has come, 0 to 1 (`null` before its size is known). */
-export const fraction = (d: Download) => (d.size ? Math.min(1, d.received / d.size) : null);
+export const fraction = (d: Download) =>
+  d.state === "preparing" ? (d.preparing ?? null) : d.size ? Math.min(1, d.received / d.size) : null;
 
 /** The line under a download's name. */
 export function describe(d: Download, from: string): string {

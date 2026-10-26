@@ -45,6 +45,12 @@ function progressLine(d: AppDownload): string {
   return d.size ? `${formatBytes(d.received)} of ${formatBytes(d.size)}` : formatBytes(d.received);
 }
 
+/** How full a download's bar is: what came of the file, or how far the server has come making it. */
+function barOf(d: AppDownload): number {
+  if (d.state === "preparing") return d.preparing ?? 0;
+  return d.size ? Math.min(1, d.received / d.size) : 0;
+}
+
 /**
  * In the desktop app, the files it downloads from this server: in the top
  * bar while they come, with a word when each starts, is done or fails.
@@ -109,7 +115,7 @@ export function AppDownloads() {
                     "h-full rounded-full transition-[width] duration-500 motion-reduce:transition-none",
                     d.state === "downloading" ? "bg-accent" : "bg-subtle",
                   )}
-                  style={{ width: `${d.size ? Math.min(100, (d.received / d.size) * 100) : 0}%` }}
+                  style={{ width: `${barOf(d) * 100}%` }}
                 />
               </div>
               <div className="text-xs tabular-nums text-subtle">{progressLine(d)}</div>
