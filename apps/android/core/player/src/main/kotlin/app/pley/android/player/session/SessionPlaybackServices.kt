@@ -15,6 +15,7 @@ import app.pley.android.player.PlaybackServices
 import app.pley.android.player.PlayerEngine
 import app.pley.android.player.PlayerPhase
 import app.pley.android.player.PlayerUiState
+import app.pley.android.player.engine.PlayTrace
 import app.pley.android.player.subtitles.OkHttpPictureSource
 import app.pley.android.player.subtitles.OkHttpSubtitleFetcher
 import app.pley.android.player.subtitles.PreferencesSubtitleOffsets
@@ -44,6 +45,8 @@ class SessionPlaybackServices(
     private var counter = 0
 
     override fun prepare(request: PlayRequest): String {
+        // Play was pressed: the section ends at the first frame.
+        PlayTrace.tapped()
         controllers.values.toList().forEach { it.close() }
         val key = "play-${++counter}-${request.itemId}"
         val env = try {

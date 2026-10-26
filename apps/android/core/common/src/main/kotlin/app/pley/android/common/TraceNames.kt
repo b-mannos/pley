@@ -23,4 +23,7 @@ object TraceNames {
 
     /** From pressing play to the first video frame. */
     const val PLAY_TAP_TO_FIRST_FRAME = "pley.play.tapToFirstFrame"
+
+    /** From a seek to the first video frame at the new place. */
+    const val PLAY_SEEK_TO_FRAME = "pley.play.seekToFrame"
 }

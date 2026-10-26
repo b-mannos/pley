@@ -95,6 +95,7 @@ class PlaybackAnalytics(
     }
 
     override fun onRenderedFirstFrame(eventTime: AnalyticsListener.EventTime, output: Any, renderTimeMs: Long) {
+        SeekTrace.frame()
         if (stats.firstFrameMs != null) return
         PlayTrace.firstFrame()
         update(stats.copy(firstFrameMs = (now() - preparedAt).coerceAtLeast(0)))
@@ -158,6 +159,7 @@ class PlaybackAnalytics(
         reason: Int,
     ) {
         if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) seeking = true
+        if (reason == Player.DISCONTINUITY_REASON_SEEK) SeekTrace.seeked()
     }
 
     override fun onPlaybackStateChanged(eventTime: AnalyticsListener.EventTime, state: Int) {
@@ -213,5 +215,28 @@ object PlayTrace {
         if (!open) return
         open = false
         Trace.endAsyncSection(TraceNames.PLAY_TAP_TO_FIRST_FRAME, COOKIE)
+    }
+}
+
+/**
+ * The trace section from a seek to the first video frame at the new place
+ * (pley.play.seekToFrame): a seek before that frame starts it again.
+ */
+object SeekTrace {
+    private const val COOKIE = 0x7365656b
+
+    @Volatile
+    private var open = false
+
+    fun seeked() {
+        if (open) Trace.endAsyncSection(TraceNames.PLAY_SEEK_TO_FRAME, COOKIE)
+        Trace.beginAsyncSection(TraceNames.PLAY_SEEK_TO_FRAME, COOKIE)
+        open = true
+    }
+
+    fun frame() {
+        if (!open) return
+        open = false
+        Trace.endAsyncSection(TraceNames.PLAY_SEEK_TO_FRAME, COOKIE)
     }
 }
