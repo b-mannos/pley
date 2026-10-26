@@ -3,7 +3,8 @@
 //! are kept in the file's media folder ([`crate::store`]), so they follow the
 //! file when it is moved or renamed. Files are done one at a time in the
 //! background: first the titles people open (unless the server is busy
-//! transcoding, or a playback is starting), then whole libraries after scans
+//! transcoding, a playback is starting, or the title itself is playing),
+//! then whole libraries after scans
 //! when the setting allows, only while nothing plays. A playback that starts
 //! while previews are being made stops them; they are made again later.
 //!
@@ -27,6 +28,7 @@ use crate::playback::{QUIET_BEFORE_BACKGROUND_SECS, Sessions};
 use crate::settings::SettingsStore;
 use crate::store::Store;
 use crate::transcoder::Transcoder;
+use crate::util::now;
 
 /// Previews wait while this many transcodes run.
 const BUSY_TRANSCODES: usize = 2;
@@ -217,9 +219,18 @@ impl TrickplayService {
             // itself: even the titles people opened wait (their player asks
             // again every 20 s, so they still show up during the play).
             let starting = self.sessions.starting_for();
+            let playing = self.playing_files();
             let next = {
                 let mut queues = self.queues.lock();
-                let opened = if starting.is_none() { queues.opened.pop_front() } else { None };
+                // A title being played waits for its session to end: reading
+                // the whole file again would compete with the play's own reads
+                // (a 4K remux on a network share needs all of it).
+                let opened = if starting.is_none() {
+                    let at = queues.opened.iter().position(|id| !playing.contains(id));
+                    at.and_then(|at| queues.opened.remove(at))
+                } else {
+                    None
+                };
                 opened.map(|id| (id, true)).or_else(|| {
                     // A library's previews read whole files: only while nothing plays.
                     if self.sessions.quiet_for() >= QUIET_BEFORE_BACKGROUND_SECS {
@@ -263,6 +274,12 @@ impl TrickplayService {
                 }
             }
         }
+    }
+
+    /// The files sessions are playing now (paused ones included, until they go quiet).
+    fn playing_files(&self) -> HashSet<i64> {
+        let now = now();
+        self.sessions.list().iter().filter(|s| s.is_active(now)).map(|s| s.file_id).collect()
     }
 
     /// Put a file whose previews were put off back at the head of its queue.
