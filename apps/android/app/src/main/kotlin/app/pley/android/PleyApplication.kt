@@ -52,10 +52,26 @@ class PleyApplication : Application(), PleyGraphOwner, SingletonImageLoader.Fact
      * certificates, 300 ms on a Fire TV stick), the player and the device's
      * capabilities once Home is drawn. The graph's parts are made once, so
      * a screen that asks first waits for this instead of making them again.
+     *
+     * Two first uses that held everything behind them happen here too:
+     * - the picture cache's opening: Coil reads its journal (a line per
+     *   cached picture) the first time a picture is asked for, holding the
+     *   cache, so all of Home's first pictures waited (200 ms on a Google
+     *   TV Streamer with a big library);
+     * - the server's tokens, unsealed by the Keystore: the first requests
+     *   waited for it, one holding the store.
      */
     private fun warmGraph() {
         CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            launch(Dispatchers.IO) {
+                runCatching { SingletonImageLoader.get(this@PleyApplication).diskCache?.openSnapshot(WARM_UP_KEY)?.close() }
+            }
             graph.data
+            val start = startup.await()
+            val server = start.server
+            if (server != null && start.signedIn) {
+                launch(Dispatchers.IO) { runCatching { graph.auth.tokens(server).scopes() } }
+            }
             StartupSignals.homeDrawn.first { it }
             graph.player
             graph.caps.capabilities
@@ -82,6 +98,9 @@ class PleyApplication : Application(), PleyGraphOwner, SingletonImageLoader.Fact
     private companion object {
         /** The demo server's address on its usual port (the fixtures' FixtureDemoServerFactory.PORT). */
         const val DEMO_SERVER = "http://127.0.0.1:7740"
+
+        /** A key no picture has: looking it up opens the picture cache and finds nothing. */
+        const val WARM_UP_KEY = "pley-warm-up"
     }
 
     /** Coil's one loader, on the images client; made with the first picture. */
