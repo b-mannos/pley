@@ -3,9 +3,14 @@ package app.pley.android.ui.tv.theme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.unit.Density
+import kotlin.math.min
 import androidx.tv.material3.ColorScheme
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Shapes
@@ -16,6 +21,7 @@ import app.pley.android.designsystem.LocalReducedMotion
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyMotion
 import app.pley.android.designsystem.PleyShape
+import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
 
 /**
@@ -38,14 +44,42 @@ fun TvTheme(
     content: @Composable () -> Unit,
 ) {
     val reduced = reducedMotion ?: PleyMotion.systemReducedMotion(LocalContext.current)
-    MaterialTheme(colorScheme = TvColors, shapes = TvShapes, typography = TvTypography) {
-        CompositionLocalProvider(
-            LocalTvTier provides tier,
-            LocalReducedMotion provides reduced,
-            content = content,
-        )
+    CompositionLocalProvider(LocalDensity provides tvCanvasDensity()) {
+        MaterialTheme(colorScheme = TvColors, shapes = TvShapes, typography = TvTypography) {
+            CompositionLocalProvider(
+                LocalTvTier provides tier,
+                LocalReducedMotion provides reduced,
+                content = content,
+            )
+        }
     }
 }
+
+/**
+ * The density that makes the design's 960 × 540 dp canvas
+ * ([PleyTv.CanvasWidth] by [PleyTv.CanvasHeight]) fill the screen, whatever
+ * density the TV reports. Most 1080p TVs and sticks report 320 dpi, which is
+ * that already; boxes that report 240 or 213 would otherwise show every
+ * screen smaller or larger. On a screen that isn't 16:9 the canvas fits
+ * the tighter side and grows along the other. The TV's own text size still
+ * applies, up to [MAX_FONT_SCALE], so captions keep fitting their tiles.
+ */
+@Composable
+internal fun tvCanvasDensity(): Density {
+    val system = LocalDensity.current
+    val window = LocalWindowInfo.current.containerSize
+    return remember(window, system) { tvCanvasDensity(window.width, window.height, system.fontScale) ?: system }
+}
+
+/** [tvCanvasDensity] for a [width] by [height] px window; `null` before the window is measured. */
+internal fun tvCanvasDensity(width: Int, height: Int, fontScale: Float): Density? {
+    if (width <= 0 || height <= 0) return null
+    val scale = min(width / PleyTv.CanvasWidth.value, height / PleyTv.CanvasHeight.value)
+    return Density(scale, fontScale.coerceAtMost(MAX_FONT_SCALE))
+}
+
+/** The most the TV's text size setting enlarges text. */
+internal const val MAX_FONT_SCALE = 1.3f
 
 /**
  * The device's tier (architecture.md, design spec §6): T0 swaps backdrops
