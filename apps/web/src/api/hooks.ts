@@ -49,6 +49,7 @@ export const keys = {
   libraryFilters: (id: Id) => ["library", id, "filters"] as const,
   libraryHubs: (id: Id) => ["library", id, "hubs"] as const,
   homeHubs: ["hubs", "home"] as const,
+  watchlist: ["watchlist"] as const,
   item: (id: Id) => ["item", id] as const,
   children: (id: Id) => ["item", id, "children"] as const,
   onDeck: (id: Id) => ["item", id, "on-deck"] as const,
@@ -632,6 +633,99 @@ export function useSearch(q: string, limit = 60) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Continue Watching and My List
+// ---------------------------------------------------------------------------
+
+type HubsData = { hubs: Hub[] };
+
+/** Home's hubs and every library's. */
+const hubQueries = {
+  predicate: (q: { queryKey: readonly unknown[] }) =>
+    q.queryKey[0] === "hubs" || (q.queryKey[0] === "library" && q.queryKey[2] === "hubs"),
+};
+
+/** The hubs without `item` in their Continue Watching (an episode takes its show's other episodes along). */
+export function withoutContinuing(data: HubsData, item: Pick<ItemSummary, "id" | "kind" | "grandparent_id">): HubsData {
+  const show = item.kind === "episode" ? item.grandparent_id : null;
+  const gone = (i: ItemSummary) => i.id === item.id || (show != null && i.grandparent_id === show);
+  return {
+    ...data,
+    hubs: data.hubs.map((h) => (h.key.startsWith("continue") && h.items.some(gone) ? { ...h, items: h.items.filter((i) => !gone(i)) } : h)),
+  };
+}
+
+/**
+ * Hides a movie or show from Continue Watching until it is played again.
+ * The card leaves every Continue Watching at once, and comes back if the
+ * server says no.
+ */
+export function useRemoveFromContinueWatching() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (item: ItemSummary) => api.del<void>(`/api/continue-watching/${item.id}`),
+    onMutate: async (item) => {
+      await qc.cancelQueries(hubQueries);
+      const before = qc.getQueriesData<HubsData>(hubQueries);
+      qc.setQueriesData<HubsData>(hubQueries, (old) => (old ? withoutContinuing(old, item) : old));
+      return { before };
+    },
+    onError: (_err, _item, saved) => {
+      for (const [key, data] of saved?.before ?? []) qc.setQueryData(key, data);
+    },
+    onSettled: () => qc.invalidateQueries(hubQueries),
+  });
+}
+
+/** What can go on My List: movies and shows. */
+export function listable(item: Pick<ItemSummary, "kind">): boolean {
+  return item.kind === "movie" || item.kind === "show";
+}
+
+/** My List, newest added first. */
+export function useWatchlist(enabled = true) {
+  return useQuery({
+    queryKey: keys.watchlist,
+    queryFn: ({ signal }) => api.get<{ items: ItemSummary[] }>("/api/watchlist", { signal }),
+    select: (d) => d.items,
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+/** Puts a movie or show on My List or takes it off: shown at once, undone if the server says no. */
+export function useSetInWatchlist() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ item, on }: { item: ItemSummary; on: boolean }) =>
+      on ? api.put<void>(`/api/watchlist/${item.id}`) : api.del<void>(`/api/watchlist/${item.id}`),
+    onMutate: async ({ item, on }) => {
+      await Promise.all([
+        qc.cancelQueries({ queryKey: keys.watchlist }),
+        qc.cancelQueries({ queryKey: keys.item(item.id), exact: true }),
+      ]);
+      const list = qc.getQueryData<{ items: ItemSummary[] }>(keys.watchlist);
+      const detail = qc.getQueryData<ItemDetail>(keys.item(item.id));
+      if (list) {
+        const rest = list.items.filter((i) => i.id !== item.id);
+        qc.setQueryData(keys.watchlist, { items: on ? [item, ...rest] : rest });
+      }
+      if (detail) qc.setQueryData(keys.item(item.id), { ...detail, in_watchlist: on });
+      return { list, detail };
+    },
+    onError: (_err, { item }, saved) => {
+      if (saved?.list) qc.setQueryData(keys.watchlist, saved.list);
+      if (saved?.detail) qc.setQueryData(keys.item(item.id), saved.detail);
+    },
+    onSettled: (_data, _err, { item }) => {
+      void qc.invalidateQueries({ queryKey: keys.watchlist });
+      void qc.invalidateQueries({ queryKey: keys.item(item.id), exact: true });
+      // Home's My List hub.
+      void qc.invalidateQueries({ queryKey: keys.homeHubs });
+    },
+  });
+}
+
 /** Whose plays: your own (default), one user's or everyone's (administrators). */
 export interface HistoryScope {
   all?: boolean;
@@ -694,6 +788,27 @@ export function useActivity(opts: { poll?: number | false } = {}) {
       return scans.some((s) => s.phase !== "done") ? 4_000 : false;
     },
     refetchIntervalInBackground: false,
+  });
+}
+
+/**
+ * Ends someone's playback (administrators; anyone their own): the player
+ * stops and shows `message`.
+ */
+export function useStopSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, message }: { sessionId: string; message?: string }) =>
+      request<void>(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+        method: "DELETE",
+        body: message ? { message } : undefined,
+      }),
+    onSuccess: (_data, { sessionId }) => {
+      qc.setQueryData<Activity>(keys.activity, (old) =>
+        old ? { ...old, sessions: old.sessions.filter((s) => s.session_id !== sessionId) } : old,
+      );
+      void qc.invalidateQueries({ queryKey: keys.activity });
+    },
   });
 }
 

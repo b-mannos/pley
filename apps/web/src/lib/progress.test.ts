@@ -17,6 +17,19 @@ describe("progress reports", () => {
     expect(requests[0]?.body).toEqual({ position_ms: 1_000, state: "playing" });
   });
 
+  it("tell when the session was stopped on the server", async () => {
+    const { reportProgress } = await freshModule();
+    mockApi({
+      "POST /api/items/5/progress": () => apiError(410, "session_stopped", "Too many streams"),
+      "POST /api/items/6/progress": () => apiError(503, "unavailable", "restarting"),
+    });
+    const onStopped = vi.fn();
+
+    await reportProgress(5, { position_ms: 1_000, state: "playing", session_id: "s1" }, false, onStopped);
+    await reportProgress(6, { position_ms: 1_000, state: "playing", session_id: "s2" }, false, onStopped);
+    expect(onStopped).toHaveBeenCalledTimes(1);
+  });
+
   it("end a session with its final position, releasing it at the same time", async () => {
     const { endSession } = await freshModule();
     const requests = mockApi({

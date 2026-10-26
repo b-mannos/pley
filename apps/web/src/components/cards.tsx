@@ -53,7 +53,7 @@ export interface MediaCardProps {
   href?: string;
   /** Show a play button on hover. */
   playable?: boolean;
-  /** Continue-watching style titles (show name first, remaining time). */
+  /** A Continue Watching card: show name first, remaining time; its menu can take it off the row. */
   continueStyle?: boolean;
   /** Say what the files are like (bitrate, size, resolution…): sorted by bitrate. */
   media?: boolean;
@@ -120,7 +120,7 @@ export const MediaCard = memo(function MediaCard({
         lists
           ? (e) => {
               e.preventDefault();
-              lists.openMenu(item, e.clientX, e.clientY);
+              lists.openMenu(item, e.clientX, e.clientY, { continueWatching: continueStyle });
             }
           : undefined
       }

@@ -19,6 +19,7 @@ import {
   ItemArt,
   ItemPageShell,
   MetaLine,
+  MyListButton,
   RatingBadge,
   Summary,
   WatchedButton,
@@ -70,6 +71,7 @@ export function ShowView({ item }: { item: ItemDetail }) {
             >
               {playLabel}
             </Button>
+            <MyListButton item={item} />
             <WatchedButton item={item} />
             <MoreActions item={item} />
           </div>

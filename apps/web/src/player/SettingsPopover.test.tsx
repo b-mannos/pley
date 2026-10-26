@@ -22,6 +22,12 @@ function renderPopover(overrides: Partial<SettingsPopoverProps> = {}) {
     onSubtitle: vi.fn(),
     subtitleStyle: DEFAULT_SUBTITLE_STYLE,
     onSubtitleStyle: vi.fn(),
+    subtitleOffset: 0,
+    onSubtitleOffset: vi.fn(),
+    sleep: null,
+    sleepLeft: null,
+    sleepEndLabel: "End of this episode",
+    onSleep: vi.fn(),
     ...overrides,
   };
   render(<SettingsPopover {...props} />);
@@ -87,5 +93,66 @@ describe("SettingsPopover", () => {
   it("has no style to choose without text subtitles", () => {
     renderPopover({ subtitleStreams: [{ ...english, codec: "hdmv_pgs_subtitle", text_based: false }] });
     expect(screen.queryByRole("button", { name: /Subtitle style/ })).not.toBeInTheDocument();
+  });
+
+  it("moves text subtitles earlier or later, 0.1 s at a time", async () => {
+    const user = userEvent.setup();
+    const props = renderPopover({ subtitleStreams: [english], subtitleIndex: 3, subtitleOffset: 0.5 });
+    // Said next to the subtitles chosen.
+    await user.click(screen.getByRole("button", { name: /Subtitles.*\+0\.5 s/ }));
+    expect(screen.getByTestId("subtitle-offset")).toHaveTextContent("+0.5 s");
+
+    await user.click(screen.getByRole("button", { name: "Show subtitles later" }));
+    expect(props.onSubtitleOffset).toHaveBeenLastCalledWith(0.6);
+    await user.click(screen.getByRole("button", { name: "Show subtitles earlier" }));
+    expect(props.onSubtitleOffset).toHaveBeenLastCalledWith(0.4);
+    await user.click(screen.getByRole("button", { name: "Reset" }));
+    expect(props.onSubtitleOffset).toHaveBeenLastCalledWith(0);
+    // The menu stays open to try again.
+    expect(props.setOpen).not.toHaveBeenCalled();
+  });
+
+  it("stops at ten seconds, and has nothing to reset at 0", async () => {
+    const user = userEvent.setup();
+    renderPopover({ subtitleStreams: [english], subtitleIndex: 3, subtitleOffset: 10 });
+    await user.click(screen.getByRole("button", { name: /Subtitles/ }));
+    expect(screen.getByRole("button", { name: "Show subtitles later" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reset" })).toBeEnabled();
+  });
+
+  it("doesn't offer to move subtitles that are off or burned in", async () => {
+    const user = userEvent.setup();
+    const pgs: MediaStream = { ...english, index: 4, codec: "hdmv_pgs_subtitle", text_based: false };
+    renderPopover({ subtitleStreams: [english, pgs], subtitleIndex: 4, subtitleOffset: 0.5 });
+    expect(screen.getByRole("button", { name: /Subtitles/ })).not.toHaveTextContent("+0.5 s");
+    await user.click(screen.getByRole("button", { name: /Subtitles/ }));
+    expect(screen.queryByText("Timing")).not.toBeInTheDocument();
+  });
+
+  it("sets the sleep timer", async () => {
+    const user = userEvent.setup();
+    const props = renderPopover();
+    await user.click(screen.getByRole("button", { name: /Sleep timer\s*Off/ }));
+    expect(screen.getAllByRole("menuitemradio").map((o) => o.textContent)).toEqual([
+      "Off",
+      "15 minutes",
+      "30 minutes",
+      "45 minutes",
+      "60 minutes",
+      "90 minutes",
+      "End of this episode",
+    ]);
+    await user.click(screen.getByRole("menuitemradio", { name: "45 minutes" }));
+    expect(props.onSleep).toHaveBeenCalledWith(45);
+    expect(props.setOpen).toHaveBeenCalledWith(false);
+  });
+
+  it("says how long the sleep timer has left", async () => {
+    const user = userEvent.setup();
+    const props = renderPopover({ sleep: 30, sleepLeft: 754 });
+    await user.click(screen.getByRole("button", { name: /Sleep timer\s*12:34 left/ }));
+    expect(screen.getByRole("menuitemradio", { name: /30 minutes/ })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("menuitemradio", { name: "Off" }));
+    expect(props.onSleep).toHaveBeenCalledWith(null);
   });
 });

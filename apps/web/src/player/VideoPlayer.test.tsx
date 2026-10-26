@@ -1,7 +1,9 @@
-import { act, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ItemDetail, PlaybackInfo } from "@/api/types";
-import { makeItem } from "@/test/fixtures";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useServerEvents } from "@/api/events";
+import type { ItemDetail, PlaybackInfo, ServerEvent } from "@/api/types";
+import { makeItem, makeStream } from "@/test/fixtures";
 import { mockApi, renderWithProviders, type FakeRequest } from "@/test/render";
 import { VideoPlayer } from "./VideoPlayer";
 
@@ -218,6 +220,158 @@ describe("VideoPlayer switching sessions", () => {
     expect(paths.indexOf("DELETE /api/playback/s1")).toBeGreaterThanOrEqual(0);
     expect(paths.indexOf("DELETE /api/playback/s1")).toBeLessThan(paths.lastIndexOf("POST /api/playback"));
     await waitFor(() => expect(hlsInstances.map((h) => h.calls[0])).toEqual(["loadSource /api/playback/s2/index.m3u8"]));
+  });
+});
+
+/** Stands in for the browser's EventSource: `send` delivers a server event. */
+class FakeEventSource {
+  static readonly CLOSED = 2;
+  static last: FakeEventSource | null = null;
+  readyState = 1;
+  onopen: (() => void) | null = null;
+  onmessage: ((msg: { data: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  constructor() {
+    FakeEventSource.last = this;
+  }
+  close() {
+    this.readyState = FakeEventSource.CLOSED;
+  }
+  send(event: ServerEvent) {
+    this.onmessage?.({ data: JSON.stringify(event) });
+  }
+}
+
+/** The player with the app's event stream open, as signed in. */
+function PlayerWithEvents() {
+  useServerEvents(true);
+  return <VideoPlayer item={detail()} startMs={0} fileId={null} audio={null} sub={null} />;
+}
+
+describe("VideoPlayer stopped on the server", () => {
+  beforeEach(() => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const starts = (requests: FakeRequest[]) => requests.filter((r) => r.method === "POST" && r.path === "/api/playback");
+
+  it("stops, and says who stopped it and why", async () => {
+    const requests = serve([session("s1")], { "DELETE /api/playback/s1": () => undefined });
+    const { unmount } = renderWithProviders(<PlayerWithEvents />);
+    await waitFor(() => expect(hlsInstances[0]?.calls).toContain("attachMedia"));
+
+    // Someone else's session: nothing happens here.
+    act(() => FakeEventSource.last?.send({ type: "session_stopped", session_id: "other", message: null, by_admin: true }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    act(() => FakeEventSource.last?.send({ type: "session_stopped", session_id: "s1", message: "Server restarting", by_admin: true }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Playback was stopped by the server's administrator");
+    expect(alert).toHaveTextContent("Server restarting");
+    expect(hlsInstances[0]?.calls.at(-1)).toBe("destroy");
+
+    unmount();
+    // Nothing starts again, and there is nothing left to release.
+    expect(starts(requests)).toHaveLength(1);
+    expect(requests.some((r) => r.method === "DELETE" && r.path === "/api/playback/s1")).toBe(false);
+  });
+
+  it("stops when the stream is gone (410), with the server's message", async () => {
+    const requests = serve([session("s1")], {
+      "GET /api/playback/s1/index.m3u8": () =>
+        new Response(JSON.stringify({ error: "session_stopped", message: "Too many streams" }), {
+          status: 410,
+          headers: { "content-type": "application/json" },
+        }),
+    });
+    renderWithProviders(<PlayerWithEvents />);
+    await waitFor(() => expect(hlsInstances[0]?.calls).toContain("attachMedia"));
+
+    act(() => {
+      hlsInstances[0]?.emit("hlsError", { fatal: true, type: "networkError", details: "fragLoadError", response: { code: 410 } });
+    });
+
+    const alert = await screen.findByRole("alert");
+    await waitFor(() => expect(alert).toHaveTextContent("Too many streams"));
+    expect(alert).toHaveTextContent("Playback was stopped by the server's administrator");
+    expect(starts(requests)).toHaveLength(1);
+  });
+
+  it("says so when it was stopped from another of the user's devices", async () => {
+    serve([session("s1")]);
+    renderWithProviders(<PlayerWithEvents />);
+    await waitFor(() => expect(hlsInstances[0]?.calls).toContain("attachMedia"));
+    act(() => FakeEventSource.last?.send({ type: "session_stopped", session_id: "s1", message: null, by_admin: false }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Playback was stopped from another device");
+  });
+});
+
+/** Stands in for the browser's VTTCue. */
+class FakeCue {
+  line: number | "auto" = "auto";
+  snapToLines = true;
+  startTime: number;
+  endTime: number;
+  text: string;
+  constructor(startTime: number, endTime: number, text: string) {
+    this.startTime = startTime;
+    this.endTime = endTime;
+    this.text = text;
+  }
+  getCueAsHTML() {
+    const fragment = document.createDocumentFragment();
+    fragment.append(this.text);
+    return fragment;
+  }
+}
+
+describe("VideoPlayer subtitle timing", () => {
+  beforeEach(() => {
+    vi.stubGlobal("VTTCue", FakeCue);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const english = makeStream({ index: 3, kind: "subtitle", codec: "subrip", language: "eng", default: false, text_based: true });
+
+  it("shows the lines moved by the offset remembered for the file, until it is reset", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem("pley.subtitleOffsets", JSON.stringify({ f3: 1 }));
+    serve(
+      [
+        session("s1", {
+          subtitles: [
+            { index: 3, codec: "subrip", language: "eng", title: null, default: false, forced: false, external: false, text_based: true, url: "/api/subs/3.vtt" },
+          ],
+        }),
+      ],
+      { "GET /api/subs/3.vtt": () => new Response("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello", { status: 200 }) },
+    );
+    const item = detail();
+    const file = item.files[0];
+    if (!file) throw new Error("no file");
+    file.streams = [english];
+    const { container } = renderWithProviders(<VideoPlayer item={item} startMs={0} fileId={null} audio={null} sub={3} />);
+    const video = container.querySelector("video");
+    if (!video) throw new Error("no video element");
+    Object.defineProperty(video, "currentTime", { value: 2.5, configurable: true, writable: true });
+
+    // At 2.5 s, one second later than the file has it.
+    await waitFor(() => {
+      fireEvent.timeUpdate(video);
+      expect(screen.getByTestId("subtitles")).toHaveTextContent("Hello");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Playback settings" }));
+    await user.click(screen.getByRole("button", { name: /Subtitles.*\+1\.0 s/ }));
+    await user.click(screen.getByRole("button", { name: "Reset" }));
+    fireEvent.timeUpdate(video);
+    expect(screen.queryByTestId("subtitles")).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("pley.subtitleOffsets")).toBe("{}");
   });
 });
 

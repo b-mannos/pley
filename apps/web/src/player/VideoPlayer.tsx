@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type HlsType from "hls.js";
 import type { ErrorData } from "hls.js";
 import {
   ArrowLeft,
+  CircleStop,
   LoaderCircle,
   Maximize,
   Minimize,
@@ -19,8 +20,9 @@ import {
   VolumeX,
 } from "lucide-react";
 import { errorMessage } from "@/api/client";
+import { onServerEvent } from "@/api/events";
 import { fetchNext, invalidateWatchState, useTrickplay } from "@/api/hooks";
-import type { ItemDetail, ItemSummary, PlaybackInfo, PlaybackMode, PlaybackState } from "@/api/types";
+import type { ItemDetail, ItemSummary, PlaybackInfo, PlaybackMode, PlaybackState, ServerEvent } from "@/api/types";
 import { useOptionalAudioPlayer } from "@/audio/AudioPlayer";
 import { Slider } from "@/components/Slider";
 import { useToast } from "@/components/Toast";
@@ -38,8 +40,20 @@ import { SeekBar } from "./SeekBar";
 import { methodLabel, PlaybackDetails } from "./PlaybackDetails";
 import { SettingsPopover } from "./SettingsPopover";
 import { fileMarkers, SkipButton, skipTarget, useSkipMarkers } from "./SkipButton";
+import { carriedSleepTimer, sleepChoice, SleepNotice, useSleepTimer } from "./sleepTimer";
 import { SubtitleOverlay } from "./SubtitleOverlay";
-import { cuesAt, DEFAULT_SUBTITLE_STYLE, parseVtt, subtitleStyle, type SubtitleCue, type SubtitleStyle } from "./subtitles";
+import {
+  clampSubtitleOffset,
+  cuesAt,
+  DEFAULT_SUBTITLE_STYLE,
+  nextCueChange,
+  parseVtt,
+  storedSubtitleOffset,
+  storeSubtitleOffset,
+  subtitleStyle,
+  type SubtitleCue,
+  type SubtitleStyle,
+} from "./subtitles";
 import { UpNext } from "./UpNext";
 import { itemUrl } from "@/lib/urls";
 
@@ -97,6 +111,45 @@ function sameStart(before: VTTCue[], after: VTTCue[]): boolean {
   if (after.length < before.length) return false;
   const last = before.length - 1;
   return last < 0 || (after[last]?.startTime === before[last]?.startTime && after[last]?.text === before[last]?.text);
+}
+
+/** A copy of `cue` shown `shift` seconds later (positive: later), placed the same. */
+function movedCue(cue: VTTCue, shift: number): VTTCue {
+  const moved = new VTTCue(Math.max(0, cue.startTime + shift), Math.max(0, cue.endTime + shift), cue.text);
+  moved.line = cue.line;
+  moved.lineAlign = cue.lineAlign;
+  moved.position = cue.position;
+  moved.positionAlign = cue.positionAlign;
+  moved.size = cue.size;
+  moved.align = cue.align;
+  moved.snapToLines = cue.snapToLines;
+  moved.vertical = cue.vertical;
+  return moved;
+}
+
+/** Why playback was ended on the server (`DELETE /api/sessions/{id}`). */
+interface StoppedBy {
+  message: string | null;
+  /** `null`: not known (the stream only answered 410). */
+  byAdmin: boolean | null;
+}
+
+/**
+ * Whether the server ended this stream (it answers `410` once a session is
+ * stopped), with its message. `null`: it didn't, or it can't be asked.
+ */
+async function stoppedStream(url: string): Promise<StoppedBy | null> {
+  try {
+    const res = await fetch(url, { credentials: "same-origin", headers: { Range: "bytes=0-0" } });
+    if (res.status !== 410) {
+      void res.body?.cancel().catch(() => undefined);
+      return null;
+    }
+    const body = (await res.json().catch(() => null)) as { message?: unknown } | null;
+    return { message: typeof body?.message === "string" && body.message ? body.message : null, byAdmin: null };
+  } catch {
+    return null;
+  }
 }
 
 /** The text track pley gives subtitle cues to, one per video element. */
@@ -204,6 +257,16 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const [hoveringControls, setHoveringControls] = useState(false);
   const [ended, setEnded] = useState(false);
   const [upNext, setUpNext] = useState<ItemSummary | null>(null);
+  /** Ended on the server: nothing plays any more, and it says why. */
+  const [stopped, setStopped] = useState<StoppedBy | null>(null);
+  const stoppedRef = useRef(false);
+  // Text subtitles moved earlier or later, remembered for each file on this device.
+  const [offsetChoice, setOffsetChoice] = useState(() => ({
+    file: file?.id ?? null,
+    offset: storedSubtitleOffset(file?.id),
+  }));
+  const subtitleOffset =
+    offsetChoice.file === (file?.id ?? null) ? offsetChoice.offset : storedSubtitleOffset(file?.id);
 
   const duration = (info?.duration_ms ?? item.duration_ms ?? 0) / 1000 || mediaDuration;
   const isEpisode = item.kind === "episode";
@@ -220,6 +283,20 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const title = isEpisode ? (item.grandparent_title ?? item.title) : item.year ? `${item.title} (${item.year})` : item.title;
   const subtitle = isEpisode ? [episodeLabel(item), item.title].filter(Boolean).join(" — ") : null;
   useDocumentTitle(isEpisode ? `${title} ${episodeLabel(item)}` : item.title);
+
+  // The sleep timer starts off, but goes on to the next episode while it runs.
+  const location = useLocation();
+  const [carriedSleep] = useState(() => carriedSleepTimer(location.state));
+  const sleep = useSleepTimer({
+    initial: carriedSleep,
+    mediaLeft: duration > 0 ? duration - current : Number.POSITIVE_INFINITY,
+    onSleep: () => videoRef.current?.pause(),
+  });
+  const sleepEndLabel = isEpisode
+    ? "End of this episode"
+    : item.kind === "movie"
+      ? "End of this movie"
+      : "End of this video";
 
   const destroyHls = () => {
     hlsRef.current?.destroy();
@@ -240,6 +317,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     setLoadToken((t) => t + 1);
   }, []);
 
+  /** Set once mounted: a progress report that answers 410 stops playback. */
+  const progressGone = useRef<(sessionId: string) => void>(() => undefined);
   const report = useCallback(
     (state: PlaybackState, keepalive = false) => {
       const s = sessionRef.current;
@@ -253,6 +332,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           session_id: s.session_id,
         },
         keepalive,
+        () => progressGone.current(s.session_id),
       );
     },
     [item.id],
@@ -263,6 +343,61 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     if (idx > 0) void navigate(-1);
     else void navigate(home, { replace: true });
   }, [navigate, home]);
+
+  /**
+   * The server ended this session (an administrator, or the user elsewhere):
+   * let go of the stream without starting another, and say so. Called again
+   * with more to say (the event after a 410), it only adds that.
+   */
+  const stopPlayback = useEffectEvent((by: StoppedBy) => {
+    setStopped((old) => ({ message: by.message ?? old?.message ?? null, byAdmin: by.byAdmin ?? old?.byAdmin ?? null }));
+    if (stoppedRef.current) return;
+    stoppedRef.current = true;
+    // Nothing to release: the server has ended it.
+    sessionRef.current = null;
+    destroyHls();
+    const v = videoRef.current;
+    if (v) {
+      v.pause();
+      v.removeAttribute("src");
+      v.load();
+    }
+    window.clearTimeout(bufferingTimer.current);
+    bufferingTimer.current = undefined;
+    setBuffering(false);
+    setLoading(false);
+    setPlaying(false);
+    setUpNext(null);
+    sleep.clear();
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    invalidateWatchState(qc);
+  });
+
+  const onEvent = useEffectEvent((ev: ServerEvent) => {
+    if (ev.type !== "session_stopped") return;
+    const ours = sessionRef.current?.session_id ?? info?.session_id;
+    if (ev.session_id === ours) stopPlayback({ message: ev.message, byAdmin: ev.by_admin });
+  });
+  useEffect(() => onServerEvent(onEvent), []);
+
+  /** A progress report answered 410: stopped on the server, heard without the event stream. */
+  const onProgressGone = useEffectEvent((sessionId: string) => {
+    if (sessionRef.current?.session_id === sessionId) stopPlayback({ message: null, byAdmin: null });
+  });
+  useEffect(() => {
+    progressGone.current = onProgressGone;
+    return () => {
+      progressGone.current = () => undefined;
+    };
+  }, []);
+
+  /** The stream answered 410: stopped on the server. Its message comes from asking the stream once more. */
+  const streamGone = useEffectEvent((url: string) => {
+    stopPlayback({ message: null, byAdmin: null });
+    void stoppedStream(url).then((by) => {
+      if (by) stopPlayback(by);
+    });
+  });
 
   // Pause any music when a video starts.
   useEffect(() => {
@@ -275,7 +410,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   // ---------------------------------------------------------------------
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !file) return;
+    // Stopped on the server: nothing starts again here.
+    if (!video || !file || stoppedRef.current) return;
     let cancelled = false;
     const q = selectedQuality;
     const startSec = startMsRef.current / 1000;
@@ -338,7 +474,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         mode: requestMode,
         caps: videoCaps(),
       });
-      if (cancelled) {
+      if (cancelled || stoppedRef.current) {
         await stopSession(pinfo.session_id);
         return null;
       }
@@ -390,11 +526,16 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                 const r = recoveries.current;
                 if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
                   const code = data.response?.code;
+                  if (code === 410) {
+                    // Stopped on the server: another session would only be stopped again.
+                    streamGone(pinfo.url);
+                    return;
+                  }
                   const playlist =
                     data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
                     data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT ||
                     data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR;
-                  if (code === 404 || code === 410 || playlist) {
+                  if (code === 404 || playlist) {
                     // The session expired (idle timeout, server restart) or its
                     // playlist can't be loaded: only a new session helps.
                     if (r.recreate < 3) {
@@ -509,6 +650,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       void done.then(() => navigate(endUrl, { replace: true }));
       return;
     }
+    if (sleep.atEnd) {
+      // The sleep timer was for this one: nothing plays next.
+      sleep.clear();
+      return;
+    }
     findNext()
       .then((next) => {
         if (next) setUpNext(next);
@@ -517,26 +663,39 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       .catch(() => navigate(endUrl, { replace: true }));
   });
 
+  /** `at`: where playback was when the element failed. */
+  const recoverFromMediaError = useEffectEvent((s: PlaybackInfo, code: number, message: string, at: number) => {
+    const undecodable = code === MediaError.MEDIA_ERR_DECODE || code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
+    if (s.method === "direct" && undecodable && !fallbackModeRef.current) {
+      // The browser claimed support but can't decode this file: transcode it instead.
+      fallbackModeRef.current = "transcode";
+      restartAt(at);
+      return;
+    }
+    if (code === MediaError.MEDIA_ERR_NETWORK && recoveries.current.recreate < 3) {
+      // Server restart or connection drop: the same method will most likely work again.
+      recoveries.current.recreate += 1;
+      restartAt(at);
+      return;
+    }
+    setError(message || "This video can't be played in your browser.");
+  });
+
   const onMediaError = useEffectEvent(() => {
     const v = videoRef.current;
     if (!v || !v.error || hlsRef.current) return; // hls.js reports its own errors
     const s = sessionRef.current;
     if (!s) return; // the element was reset for the next session
     const code = v.error.code;
-    const undecodable = code === MediaError.MEDIA_ERR_DECODE || code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
-    if (s.method === "direct" && undecodable && !fallbackModeRef.current) {
-      // The browser claimed support but can't decode this file: transcode it instead.
-      fallbackModeRef.current = "transcode";
-      restartAt(livePosition());
-      return;
-    }
-    if (code === MediaError.MEDIA_ERR_NETWORK && recoveries.current.recreate < 3) {
-      // Server restart or connection drop: the same method will most likely work again.
-      recoveries.current.recreate += 1;
-      restartAt(livePosition());
-      return;
-    }
-    setError(v.error.message || "This video can't be played in your browser.");
+    const message = v.error.message;
+    const at = livePosition();
+    // A stream stopped on the server answers 410 (the element doesn't say
+    // which status it got): ask before starting another session.
+    void stoppedStream(s.url).then((by) => {
+      if (sessionRef.current !== s) return; // moved on meanwhile
+      if (by) stopPlayback(by);
+      else recoverFromMediaError(s, code, message, at);
+    });
   });
 
   // A stall without an error: the browser waits for data, or for a decoder
@@ -761,36 +920,72 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   }, [shownTextUrl, toast]);
   const shownCues = loadedCues && loadedCues.url === shownTextUrl ? loadedCues.cues : null;
   /** The cues on the track: more of the same subtitles only add the new ones. */
-  const trackCues = useRef<{ track: TextTrack | null; cues: VTTCue[] | null }>({ track: null, cues: null });
+  const trackCues = useRef<{ track: TextTrack | null; cues: VTTCue[] | null; shift: number }>({
+    track: null,
+    cues: null,
+    shift: 0,
+  });
   useEffect(() => {
     const v = videoRef.current;
     if (!v || typeof v.addTextTrack !== "function") return;
     // One track for the element's life: tracks added by script can't be removed.
     const track = pleyTrack(v);
+    // In native fullscreen the browser draws the track's cues at their own
+    // times, so moved subtitles go on it moved.
+    const shift = nativeFullscreen ? subtitleOffset : 0;
     const before = trackCues.current;
-    const more = before.track === track && !!before.cues && !!shownCues && sameStart(before.cues, shownCues);
+    const more =
+      before.track === track &&
+      before.shift === shift &&
+      !!before.cues &&
+      !!shownCues &&
+      sameStart(before.cues, shownCues);
     if (!more) for (const cue of Array.from(track.cues ?? [])) track.removeCue(cue);
-    for (const cue of (shownCues ?? []).slice(more ? (before.cues?.length ?? 0) : 0)) track.addCue(cue);
-    trackCues.current = { track, cues: shownCues };
+    for (const cue of (shownCues ?? []).slice(more ? (before.cues?.length ?? 0) : 0)) {
+      track.addCue(shift ? movedCue(cue, shift) : cue);
+    }
+    trackCues.current = { track, cues: shownCues, shift };
     track.mode = shownCues?.length ? (nativeFullscreen ? "showing" : "hidden") : "disabled";
     // The lines at the playhead, worked out here: after a seek the track's
     // own active cues stay as they were until the video plays again (seconds
-    // while it loads), and a line ending meanwhile never showed.
+    // while it loads), and a line ending meanwhile never showed. Moved
+    // subtitles (`subtitleOffset`, positive: later) show what the file has
+    // that much earlier.
+    let change: number | undefined;
     const update = () => {
-      const next = track.mode === "hidden" && shownCues ? cuesAt(shownCues, v.currentTime) : [];
+      window.clearTimeout(change);
+      const at = v.currentTime - subtitleOffset;
+      const shown = track.mode === "hidden" && shownCues;
+      const next = shown ? cuesAt(shownCues, at) : [];
       setCues((now) => (now.length === next.length && now.every((c, i) => c === next[i]) ? now : next));
+      // The track's `cuechange` comes at the file's times: moved, the next
+      // line is timed here (`timeupdate` alone comes only every ~250 ms).
+      if (shown && subtitleOffset !== 0 && !v.paused) {
+        const nextChange = nextCueChange(shownCues, at);
+        if (nextChange !== null)
+          change = window.setTimeout(update, ((nextChange - at) * 1000) / (v.playbackRate || 1) + 5);
+      }
     };
     track.addEventListener("cuechange", update);
     v.addEventListener("seeking", update);
     v.addEventListener("timeupdate", update);
+    v.addEventListener("pause", update);
     update();
     return () => {
+      window.clearTimeout(change);
       track.removeEventListener("cuechange", update);
       v.removeEventListener("seeking", update);
       v.removeEventListener("timeupdate", update);
+      v.removeEventListener("pause", update);
       setCues([]);
     };
-  }, [shownCues, nativeFullscreen]);
+  }, [shownCues, nativeFullscreen, subtitleOffset]);
+
+  const changeSubtitleOffset = (offset: number) => {
+    const value = clampSubtitleOffset(offset);
+    setOffsetChoice({ file: file?.id ?? null, offset: value });
+    storeSubtitleOffset(file?.id, value);
+  };
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -827,12 +1022,21 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   }, []);
 
   const showControls =
-    active || hoveringControls || !playing || settingsOpen || chaptersOpen || loading || !!error || needsGesture || ended;
-  const spinning = (loading || buffering) && !error && !needsGesture;
+    active ||
+    hoveringControls ||
+    !playing ||
+    settingsOpen ||
+    chaptersOpen ||
+    loading ||
+    !!error ||
+    needsGesture ||
+    ended ||
+    !!stopped;
+  const spinning = (loading || buffering) && !error && !needsGesture && !stopped;
 
   const togglePlay = () => {
     const v = videoRef.current;
-    if (!v || error) return;
+    if (!v || error || stopped) return;
     if (v.paused || v.ended) void v.play().catch(() => setNeedsGesture(true));
     else v.pause();
   };
@@ -914,7 +1118,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         toast.info(queue ? "This is the last one" : "This is the last episode");
         return;
       }
-      void navigate(nextUrl(next), { replace: true });
+      // A running sleep timer goes on with the next one.
+      const timer = sleep.timer && "endsAt" in sleep.timer ? sleep.timer : null;
+      void navigate(nextUrl(next), { replace: true, state: timer ? { sleep: timer } : null });
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -927,7 +1133,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     seconds: current,
     enabled: !!info && !loading && !error && !ended,
     onCredits: () => {
-      if (!hasNext || upNext) return;
+      if (!hasNext || upNext || sleep.atEnd) return;
       findNext()
         .then((next) => {
           if (next) setUpNext(next);
@@ -1083,7 +1289,31 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         </button>
       ) : null}
 
-      {error ? (
+      {stopped ? (
+        <div
+          role="alert"
+          className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-black/85 p-6 text-center"
+        >
+          <CircleStop className="size-12 text-accent" />
+          <div className="max-w-lg">
+            <div className="text-lg font-semibold">
+              {stopped.byAdmin === false
+                ? "Playback was stopped from another device"
+                : "Playback was stopped by the server's administrator"}
+            </div>
+            {stopped.message ? (
+              <p className="mt-2 whitespace-pre-line break-words text-sm text-white/80">{stopped.message}</p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={goBack}
+            className="rounded-md bg-white/10 px-5 py-2 text-sm font-semibold hover:bg-white/20"
+          >
+            Back
+          </button>
+        </div>
+      ) : error ? (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-black/85 p-6 text-center">
           <TriangleAlert className="size-12 text-accent" />
           <div className="max-w-lg">
@@ -1278,6 +1508,12 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             onSubtitle={changeSubtitle}
             subtitleStyle={subStyle}
             onSubtitleStyle={setSubtitleStyle}
+            subtitleOffset={subtitleOffset}
+            onSubtitleOffset={changeSubtitleOffset}
+            sleep={sleepChoice(sleep.timer)}
+            sleepLeft={sleep.timer && "endsAt" in sleep.timer ? sleep.secondsLeft : null}
+            sleepEndLabel={sleepEndLabel}
+            onSleep={sleep.choose}
           />
           <button
             type="button"
@@ -1292,6 +1528,10 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       </div>
 
       {marker && !upNext && !ended ? <SkipButton marker={marker} onSkip={skipMarker} lifted={active || !playing} /> : null}
+
+      {sleep.notice !== null && !stopped && !error && !ended ? (
+        <SleepNotice seconds={sleep.notice} onKeepWatching={sleep.keepWatching} lifted={active || !playing} />
+      ) : null}
 
       {upNext ? (
         <UpNext

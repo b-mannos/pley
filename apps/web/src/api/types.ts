@@ -206,6 +206,8 @@ export interface ItemDetail extends ItemSummary {
   cast?: Credit[];
   /** Creators, directors, writers and producers. */
   crew?: Credit[];
+  /** On the user's My List (movies and shows). */
+  in_watchlist?: boolean;
 }
 
 export type CreditRole = "actor" | "creator" | "director" | "writer" | "producer";
@@ -554,7 +556,11 @@ export type ServerEvent =
   | { type: "scan_finished"; library_id: Id; added: number; updated: number; removed: number }
   | { type: "library_changed"; library_id: Id }
   | { type: "libraries_changed" }
-  | { type: "sessions_changed" };
+  | { type: "sessions_changed" }
+  /** My List changed on another of the user's devices. */
+  | { type: "watchlist_changed" }
+  /** A playback session was ended on the server (`DELETE /api/sessions/{id}`): the device playing it stops. */
+  | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean };
 
 export type HwAccel = "auto" | "none" | "nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox";
 /** `auto`: the transcoder picks one from its load and how far ahead of the player it is, and changes it as they change. */

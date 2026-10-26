@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Eye, EyeOff, FolderPlus, ListPlus, Play, Shuffle } from "lucide-react";
+import { BookmarkMinus, BookmarkPlus, Eye, EyeOff, FolderPlus, ListPlus, ListX, Play, Shuffle } from "lucide-react";
 import { errorMessage } from "@/api/client";
-import { useSetWatched } from "@/api/hooks";
+import { listable, useRemoveFromContinueWatching, useSetInWatchlist, useSetWatched, useWatchlist } from "@/api/hooks";
 import { collectable } from "@/api/lists";
 import type { ItemSummary } from "@/api/types";
 import { useAuth } from "@/auth";
@@ -13,9 +13,15 @@ import { usePlayItem } from "@/lib/usePlayItem";
 import { AddToCollectionModal } from "./AddToCollectionModal";
 import { AddToPlaylistModal } from "./AddToPlaylistModal";
 
+/** Where a card is, for what its menu offers. */
+export interface CardMenuContext {
+  /** In a Continue Watching row: it can be taken off. */
+  continueWatching?: boolean;
+}
+
 interface ListMenuApi {
   /** The right-click menu of a card, at viewport coordinates. */
-  openMenu: (item: ItemSummary, x: number, y: number) => void;
+  openMenu: (item: ItemSummary, x: number, y: number, context?: CardMenuContext) => void;
   addToPlaylist: (item: ItemSummary) => void;
   /** Administrators, movies and shows. */
   addToCollection: (item: ItemSummary) => void;
@@ -30,22 +36,25 @@ export function useListMenu(): ListMenuApi | null {
 
 /** Card context menus and the "Add to playlist / collection" dialogs. */
 export function ListMenuProvider({ children }: { children: ReactNode }) {
-  const [menu, setMenu] = useState<{ item: ItemSummary; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ item: ItemSummary; x: number; y: number; context?: CardMenuContext } | null>(null);
   const [forPlaylist, setForPlaylist] = useState<ItemSummary | null>(null);
   const [forCollection, setForCollection] = useState<ItemSummary | null>(null);
   const api = useMemo<ListMenuApi>(
     () => ({
-      openMenu: (item, x, y) => setMenu({ item, x, y }),
+      openMenu: (item, x, y, context) => setMenu({ item, x, y, context }),
       addToPlaylist: setForPlaylist,
       addToCollection: setForCollection,
     }),
     [],
   );
+  const actions = useCardActions();
 
   return (
     <ListMenuContext.Provider value={api}>
       {children}
-      {menu ? <CardMenu key={`${menu.item.id}:${menu.x}:${menu.y}`} {...menu} api={api} onClose={() => setMenu(null)} /> : null}
+      {menu ? (
+        <CardMenu key={`${menu.item.id}:${menu.x}:${menu.y}`} {...menu} api={{ ...api, ...actions }} onClose={() => setMenu(null)} />
+      ) : null}
       {/* Keyed so a dialog starts blank for every item. */}
       <AddToPlaylistModal key={`p${forPlaylist?.id ?? 0}`} item={forPlaylist} onClose={() => setForPlaylist(null)} />
       <AddToCollectionModal key={`c${forCollection?.id ?? 0}`} item={forCollection} onClose={() => setForCollection(null)} />
@@ -60,12 +69,43 @@ function isWatched(item: ItemSummary): boolean {
   return item.user_state.watched;
 }
 
-function CardMenu({ item, x, y, api, onClose }: { item: ItemSummary; x: number; y: number; api: ListMenuApi; onClose: () => void }) {
+/**
+ * What a card's menu does after it has closed: here, so that a failure can
+ * still be told (a mutation's own callbacks end with the component).
+ */
+function useCardActions() {
+  const toast = useToast();
+  const setInWatchlist = useSetInWatchlist();
+  const removeContinuing = useRemoveFromContinueWatching();
+  const failed = (err: unknown) => toast.error(errorMessage(err));
+  return {
+    setInWatchlist: (item: ItemSummary, on: boolean) => setInWatchlist.mutate({ item, on }, { onError: failed }),
+    removeContinuing: (item: ItemSummary) => removeContinuing.mutate(item, { onError: failed }),
+  };
+}
+
+function CardMenu({
+  item,
+  x,
+  y,
+  context,
+  api,
+  onClose,
+}: {
+  item: ItemSummary;
+  x: number;
+  y: number;
+  context?: CardMenuContext;
+  api: ListMenuApi & ReturnType<typeof useCardActions>;
+  onClose: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
   const user = useAuth();
   const play = usePlayItem();
   const setWatched = useSetWatched();
+  const onList = listable(item);
+  const watchlist = useWatchlist(onList);
   const toast = useToast();
   useDismiss(ref, true, onClose);
 
@@ -99,6 +139,7 @@ function CardMenu({ item, x, y, api, onClose }: { item: ItemSummary; x: number; 
   const music = item.kind === "artist" || item.kind === "album";
   const watchable = item.kind === "movie" || item.kind === "episode" || item.kind === "show" || item.kind === "season";
   const watched = isWatched(item);
+  const inList = !!watchlist.data?.some((i) => i.id === item.id);
 
   return createPortal(
     <div
@@ -126,6 +167,16 @@ function CardMenu({ item, x, y, api, onClose }: { item: ItemSummary; x: number; 
           Add to collection…
         </MenuItem>
       ) : null}
+      {onList ? (
+        // Which one to offer is known once My List is in.
+        <MenuItem
+          icon={inList ? <BookmarkMinus /> : <BookmarkPlus />}
+          disabled={!watchlist.data}
+          onClick={run(() => api.setInWatchlist(item, !inList))}
+        >
+          {inList ? "Remove from My List" : "Add to My List"}
+        </MenuItem>
+      ) : null}
       {watchable ? (
         <>
           <MenuSeparator />
@@ -138,6 +189,11 @@ function CardMenu({ item, x, y, api, onClose }: { item: ItemSummary; x: number; 
             {watched ? "Mark as unwatched" : "Mark as watched"}
           </MenuItem>
         </>
+      ) : null}
+      {context?.continueWatching ? (
+        <MenuItem icon={<ListX />} onClick={run(() => api.removeContinuing(item))}>
+          Remove from Continue Watching
+        </MenuItem>
       ) : null}
     </div>,
     document.body,

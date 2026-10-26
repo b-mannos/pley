@@ -23,6 +23,7 @@ import {
   ItemArt,
   ItemPageShell,
   MetaLine,
+  MyListButton,
   QualityBadges,
   qualityBadgeLabels,
   RatingBadge,
@@ -170,6 +171,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
                 <span className="hidden sm:inline">From start</span>
               </Button>
             ) : null}
+            {item.kind === "movie" ? <MyListButton item={item} /> : null}
             <WatchedButton item={item} />
             <MoreActions item={item} />
           </div>

@@ -1,5 +1,18 @@
-import { describe, expect, it } from "vitest";
-import { cueAtTop, cuesAt, DEFAULT_SUBTITLE_STYLE, parseVtt, subtitleFontSize, subtitleStyle, type SubtitleCue } from "./subtitles";
+import { describe, expect, it, vi } from "vitest";
+import {
+  clampSubtitleOffset,
+  cueAtTop,
+  cuesAt,
+  DEFAULT_SUBTITLE_STYLE,
+  formatSubtitleOffset,
+  nextCueChange,
+  parseVtt,
+  storedSubtitleOffset,
+  storeSubtitleOffset,
+  subtitleFontSize,
+  subtitleStyle,
+  type SubtitleCue,
+} from "./subtitles";
 
 function cue(text: string, extra: Partial<SubtitleCue> = {}): SubtitleCue {
   return {
@@ -104,5 +117,53 @@ describe("parseVtt", () => {
   it("takes SubRip's comma too", () => {
     const cues = parseVtt("WEBVTT\n\n00:00:01,500 --> 00:00:02,000\nComma", Cue);
     expect(cues.map((c) => c.startTime)).toEqual([1.5]);
+  });
+});
+
+describe("subtitle offset", () => {
+  it("moves in tenths of a second, ten seconds at most either way", () => {
+    expect(clampSubtitleOffset(0.1 + 0.2)).toBe(0.3);
+    expect(clampSubtitleOffset(-0.04)).toBe(0);
+    expect(Object.is(clampSubtitleOffset(-0.04), -0)).toBe(false);
+    expect(clampSubtitleOffset(12)).toBe(10);
+    expect(clampSubtitleOffset(-10.3)).toBe(-10);
+    expect(clampSubtitleOffset(Number.NaN)).toBe(0);
+  });
+
+  it("is written with its sign", () => {
+    expect(formatSubtitleOffset(0.5)).toBe("+0.5 s");
+    expect(formatSubtitleOffset(-1.2)).toBe("−1.2 s");
+    expect(formatSubtitleOffset(0)).toBe("0.0 s");
+  });
+
+  it("is remembered for each file, and forgotten when reset", () => {
+    expect(storedSubtitleOffset(3)).toBe(0);
+    storeSubtitleOffset(3, 0.5);
+    storeSubtitleOffset(4, -1.5);
+    expect(storedSubtitleOffset(3)).toBe(0.5);
+    expect(storedSubtitleOffset(4)).toBe(-1.5);
+    storeSubtitleOffset(3, 0);
+    expect(storedSubtitleOffset(3)).toBe(0);
+    expect(JSON.parse(window.localStorage.getItem("pley.subtitleOffsets") ?? "")).toEqual({ f4: -1.5 });
+    expect(storedSubtitleOffset(null)).toBe(0);
+  });
+
+  it("keeps working without storage", () => {
+    window.localStorage.setItem("pley.subtitleOffsets", "not json");
+    expect(storedSubtitleOffset(3)).toBe(0);
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+    expect(() => storeSubtitleOffset(3, 1)).not.toThrow();
+    setItem.mockRestore();
+  });
+
+  it("knows when the lines showing change next", () => {
+    const cues = [cue("A", { startTime: 1, endTime: 2 }), cue("B", { startTime: 1.5, endTime: 4 })];
+    expect(nextCueChange(cues, 0)).toBe(1);
+    expect(nextCueChange(cues, 1.2)).toBe(1.5);
+    expect(nextCueChange(cues, 1.7)).toBe(2);
+    expect(nextCueChange(cues, 3)).toBe(4);
+    expect(nextCueChange(cues, 4)).toBeNull();
   });
 });

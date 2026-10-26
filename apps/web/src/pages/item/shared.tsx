@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
-import { Check, Eye, EyeOff, Star } from "lucide-react";
+import { BookmarkCheck, BookmarkPlus, Check, Eye, EyeOff, Star } from "lucide-react";
 import { errorMessage } from "@/api/client";
-import { useSetWatched } from "@/api/hooks";
+import { useSetInWatchlist, useSetWatched } from "@/api/hooks";
 import type { ItemDetail, ItemSummary } from "@/api/types";
 import { Artwork } from "@/components/Artwork";
 import { ASPECT_CLASS, type CardAspect } from "@/components/cards";
@@ -172,6 +172,24 @@ export function WatchedButton({ item, compact }: { item: ItemSummary; compact?: 
       title={label}
     >
       <span className="hidden sm:inline">{watched ? "Unwatched" : "Watched"}</span>
+    </Button>
+  );
+}
+
+/** Puts a movie or show on My List, or takes it off. */
+export function MyListButton({ item }: { item: ItemDetail }) {
+  const setInWatchlist = useSetInWatchlist();
+  const toast = useToast();
+  const inList = !!item.in_watchlist;
+  return (
+    <Button
+      variant="secondary"
+      size="lg"
+      onClick={() => setInWatchlist.mutate({ item, on: !inList }, { onError: (e) => toast.error(errorMessage(e)) })}
+      icon={inList ? <BookmarkCheck className="size-4 text-accent" /> : <BookmarkPlus className="size-4" />}
+      title={inList ? "Remove from My List" : "Add to My List"}
+    >
+      <span className="hidden sm:inline">{inList ? "In My List" : "Add to My List"}</span>
     </Button>
   );
 }

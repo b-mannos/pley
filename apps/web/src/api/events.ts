@@ -3,6 +3,20 @@ import { useQueryClient } from "@tanstack/react-query";
 import { keys } from "./hooks";
 import type { Activity, Id, Library, ServerEvent } from "./types";
 
+type Listener = (ev: ServerEvent) => void;
+const listeners = new Set<Listener>();
+
+/**
+ * Calls `listener` with each event from the server's event stream (the one
+ * {@link useServerEvents} keeps open) until the returned function is called.
+ */
+export function onServerEvent(listener: Listener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 /**
  * Keeps one `EventSource('/api/events')` open while logged in and turns server
  * events into React Query cache updates/invalidations.
@@ -32,6 +46,7 @@ export function useServerEvents(enabled: boolean) {
       void qc.invalidateQueries({ queryKey: ["item"] });
       void qc.invalidateQueries({ queryKey: ["search"] });
       void qc.invalidateQueries({ queryKey: ["history"] });
+      void qc.invalidateQueries({ queryKey: keys.watchlist });
     };
 
     // Metadata refreshes can emit many `library_changed` events in a burst;
@@ -112,7 +127,13 @@ export function useServerEvents(enabled: boolean) {
         case "sessions_changed":
           void qc.invalidateQueries({ queryKey: keys.activity });
           break;
+        case "watchlist_changed":
+          void qc.invalidateQueries({ queryKey: keys.watchlist });
+          void qc.invalidateQueries({ queryKey: keys.homeHubs });
+          void qc.invalidateQueries({ queryKey: ["item"] });
+          break;
       }
+      for (const listener of listeners) listener(ev);
     };
 
     const connect = () => {

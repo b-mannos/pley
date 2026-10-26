@@ -1,11 +1,22 @@
-import { api } from "@/api/client";
+import { api, isApiError } from "@/api/client";
 import type { Id, PlaybackInfo, PlaybackRequest, ProgressRequest } from "@/api/types";
 
-/** Fire-and-forget progress report. `keepalive` lets it survive page unloads. */
-export function reportProgress(itemId: Id, body: ProgressRequest, keepalive = false): Promise<void> {
+/**
+ * Fire-and-forget progress report. `keepalive` lets it survive page unloads.
+ * `onStopped` hears a 410: the session was stopped on the server (for a
+ * direct play, the only request that can tell).
+ */
+export function reportProgress(
+  itemId: Id,
+  body: ProgressRequest,
+  keepalive = false,
+  onStopped?: () => void,
+): Promise<void> {
   return api
     .post<void>(`/api/items/${itemId}/progress`, body, { keepalive, noAuthRedirect: keepalive })
-    .catch(() => undefined);
+    .catch((err: unknown) => {
+      if (isApiError(err, 410)) onStopped?.();
+    });
 }
 
 /** Remember the chosen tracks for this show (or movie); `subtitle_index: null` = off. */

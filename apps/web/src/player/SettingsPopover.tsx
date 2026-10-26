@@ -1,19 +1,29 @@
 import { useRef, useState, type ReactNode } from "react";
-import { Check, ChevronLeft, ChevronRight, Settings2 } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Minus, Plus, Settings2 } from "lucide-react";
 import type { MediaStream } from "@/api/types";
 import { cn } from "@/lib/cn";
-import { streamLabel } from "@/lib/format";
+import { formatClock, streamLabel } from "@/lib/format";
 import { useDismiss } from "@/lib/hooks";
 import { qualityById, type QualityOption } from "./quality";
-import { SUBTITLE_BACKGROUNDS, SUBTITLE_SIZES, type SubtitleStyle } from "./subtitles";
+import { SLEEP_MINUTES, type SleepChoice } from "./sleepTimer";
+import {
+  clampSubtitleOffset,
+  formatSubtitleOffset,
+  SUBTITLE_BACKGROUNDS,
+  SUBTITLE_OFFSET_MAX,
+  SUBTITLE_OFFSET_STEP,
+  SUBTITLE_SIZES,
+  type SubtitleStyle,
+} from "./subtitles";
 
-type Panel = "root" | "quality" | "audio" | "subtitles" | "style";
+type Panel = "root" | "quality" | "audio" | "subtitles" | "style" | "sleep";
 
 const PANEL_TITLE: Record<Exclude<Panel, "root">, string> = {
   quality: "Quality",
   audio: "Audio",
   subtitles: "Subtitles",
   style: "Subtitle style",
+  sleep: "Sleep timer",
 };
 
 function GroupLabel({ children }: { children: ReactNode }) {
@@ -48,7 +58,8 @@ function Option({
   );
 }
 
-function Nav({ label, value, onClick }: { label: string; value: string; onClick: () => void }) {
+/** `extra`: said after the value, never cut off ("+0.5 s"). */
+function Nav({ label, value, extra, onClick }: { label: string; value: string; extra?: string; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -56,9 +67,57 @@ function Nav({ label, value, onClick }: { label: string; value: string; onClick:
       className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors hover:bg-white/10"
     >
       <span className="flex-1">{label}</span>
-      <span className="max-w-40 truncate text-white/60">{value}</span>
-      <ChevronRight className="size-4 text-white/50" />
+      <span className="flex min-w-0 max-w-44 items-center gap-1.5 text-white/60">
+        <span className="truncate">{value}</span>
+        {extra ? <span className="shrink-0 tabular-nums text-accent">{extra}</span> : null}
+      </span>
+      <ChevronRight className="size-4 shrink-0 text-white/50" />
     </button>
+  );
+}
+
+function StepButton({ label, disabled, onClick, children }: { label: string; disabled?: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="flex size-8 shrink-0 items-center justify-center rounded-full bg-white/10 transition-colors hover:bg-white/20 disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Moves text subtitles earlier or later, 0.1 s at a time. */
+function SubtitleSync({ offset, onChange }: { offset: number; onChange: (offset: number) => void }) {
+  const step = (by: number) => onChange(clampSubtitleOffset(offset + by));
+  return (
+    <>
+      <div className="my-1 h-px bg-white/10" />
+      <GroupLabel>Timing</GroupLabel>
+      <div className="flex items-center gap-2 px-4 py-1.5">
+        <StepButton label="Show subtitles earlier" disabled={offset <= -SUBTITLE_OFFSET_MAX} onClick={() => step(-SUBTITLE_OFFSET_STEP)}>
+          <Minus className="size-4" />
+        </StepButton>
+        <span className="min-w-16 flex-1 text-center text-sm tabular-nums" aria-live="polite" data-testid="subtitle-offset">
+          {formatSubtitleOffset(offset)}
+        </span>
+        <StepButton label="Show subtitles later" disabled={offset >= SUBTITLE_OFFSET_MAX} onClick={() => step(SUBTITLE_OFFSET_STEP)}>
+          <Plus className="size-4" />
+        </StepButton>
+        <button
+          type="button"
+          disabled={offset === 0}
+          onClick={() => onChange(0)}
+          className="ml-1 h-8 rounded-md px-2.5 text-xs font-semibold transition-colors hover:bg-white/10 disabled:opacity-40"
+        >
+          Reset
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -84,12 +143,22 @@ export interface SettingsPopoverProps {
   /** How text subtitles look on this device. */
   subtitleStyle: SubtitleStyle;
   onSubtitleStyle: (style: SubtitleStyle) => void;
+  /** Seconds text subtitles are moved by (positive: later), for this file. */
+  subtitleOffset: number;
+  onSubtitleOffset: (offset: number) => void;
+  /** The sleep timer, if set, and how long it has left (seconds; for minutes). */
+  sleep: SleepChoice | null;
+  sleepLeft: number | null;
+  /** "End of this episode". */
+  sleepEndLabel: string;
+  onSleep: (choice: SleepChoice | null) => void;
 }
 
 export function SettingsPopover(props: SettingsPopoverProps) {
   const { open, setOpen, details, qualities, quality, originalHint, autoQuality, onQuality } = props;
   const { audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle } = props;
-  const { subtitleStyle, onSubtitleStyle } = props;
+  const { subtitleStyle, onSubtitleStyle, subtitleOffset, onSubtitleOffset } = props;
+  const { sleep, sleepLeft, sleepEndLabel, onSleep } = props;
   const [panel, setPanel] = useState<Panel>("root");
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(ref, open, () => {
@@ -99,6 +168,10 @@ export function SettingsPopover(props: SettingsPopoverProps) {
 
   const currentAudio = audioStreams.find((s) => s.index === audioIndex) ?? audioStreams.find((s) => s.default) ?? audioStreams[0];
   const currentSub = subtitleStreams.find((s) => s.index === subtitleIndex);
+  // Picture subtitles are burned into the video: they can't be moved.
+  const textSub = currentSub && currentSub.text_based !== false ? currentSub : undefined;
+  const sleepValue =
+    sleep === null ? "Off" : sleep === "end" ? sleepEndLabel : sleepLeft !== null ? `${formatClock(sleepLeft)} left` : `${sleep} min`;
   // The original, converted: at the closest quality, which the menu names.
   const auto = quality === "original" && autoQuality ? qualityById(autoQuality) : null;
   const qualityLabel = auto && auto.id !== "original" ? `${auto.label} (auto)` : (qualities.find((q) => q.id === quality)?.label ?? "Original");
@@ -145,6 +218,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
               <Nav
                 label="Subtitles"
                 value={currentSub ? streamLabel(currentSub) : subtitleStreams.length ? "Off" : "None"}
+                extra={textSub && subtitleOffset !== 0 ? formatSubtitleOffset(subtitleOffset) : undefined}
                 onClick={() => setPanel("subtitles")}
               />
               {subtitleStreams.some((s) => s.text_based !== false) ? (
@@ -154,6 +228,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                   onClick={() => setPanel("style")}
                 />
               ) : null}
+              <Nav label="Sleep timer" value={sleepValue} onClick={() => setPanel("sleep")} />
             </>
           ) : (
             <>
@@ -249,8 +324,24 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                       {s.text_based === false ? <span className="ml-1 text-xs text-white/50">(burn-in)</span> : null}
                     </Option>
                   ))}
+                  {textSub ? <SubtitleSync offset={subtitleOffset} onChange={onSubtitleOffset} /> : null}
                 </>
               ) : null}
+              {panel === "sleep"
+                ? ([null, ...SLEEP_MINUTES, "end"] as const).map((choice) => (
+                    <Option
+                      key={String(choice)}
+                      selected={choice === sleep}
+                      hint={choice !== null && choice !== "end" && choice === sleep ? sleepValue : undefined}
+                      onClick={() => {
+                        onSleep(choice);
+                        close();
+                      }}
+                    >
+                      {choice === null ? "Off" : choice === "end" ? sleepEndLabel : `${choice} minutes`}
+                    </Option>
+                  ))
+                : null}
             </>
           )}
         </div>

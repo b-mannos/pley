@@ -3,7 +3,7 @@ import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { testQueryClient } from "@/test/render";
-import { useServerEvents } from "./events";
+import { onServerEvent, useServerEvents } from "./events";
 import { keys } from "./hooks";
 import type { Activity, Library, ServerEvent } from "./types";
 
@@ -158,6 +158,30 @@ describe("useServerEvents", () => {
       vi.advanceTimersByTime(1);
     });
     expect(FakeEventSource.all).toHaveLength(3);
+  });
+
+  it("refreshes My List when it changed on another device", () => {
+    const { client, source } = setup();
+    client.setQueryData(keys.watchlist, { items: [] });
+    client.setQueryData(keys.homeHubs, { hubs: [] });
+    client.setQueryData(keys.item(5), { id: 5 });
+
+    act(() => source().send({ type: "watchlist_changed" }));
+    expect(invalidated(client, keys.watchlist)).toBe(true);
+    expect(invalidated(client, keys.homeHubs)).toBe(true);
+    expect(invalidated(client, keys.item(5))).toBe(true);
+  });
+
+  it("passes events on to whoever listens", () => {
+    const { source } = setup();
+    const heard: ServerEvent[] = [];
+    const stop = onServerEvent((ev) => heard.push(ev));
+    const stopped: ServerEvent = { type: "session_stopped", session_id: "s1", message: "Bye", by_admin: true };
+
+    act(() => source().send(stopped));
+    stop();
+    act(() => source().send({ type: "sessions_changed" }));
+    expect(heard).toEqual([stopped]);
   });
 
   it("ignores events it can't read", () => {

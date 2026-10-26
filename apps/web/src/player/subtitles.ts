@@ -109,6 +109,76 @@ export function parseVtt<C extends Pick<VTTCue, "line" | "snapToLines">>(
   return cues;
 }
 
+/** How far subtitles can be moved, either way (seconds), and the step. Positive: later. */
+export const SUBTITLE_OFFSET_MAX = 10;
+export const SUBTITLE_OFFSET_STEP = 0.1;
+const STEPS_PER_SECOND = 10;
+
+/** `offset` in whole steps, within the limits. */
+export function clampSubtitleOffset(offset: number): number {
+  if (!Number.isFinite(offset)) return 0;
+  const steps = Math.round(offset * STEPS_PER_SECOND);
+  const limit = SUBTITLE_OFFSET_MAX * STEPS_PER_SECOND;
+  // Divided rather than multiplied by the step, so 3 steps are 0.3, not 0.30000000000000004; `+ 0` turns -0 into 0.
+  return Math.max(-limit, Math.min(limit, steps)) / STEPS_PER_SECOND + 0;
+}
+
+/** `"+0.5 s"`, `"−1.2 s"`, `"0.0 s"`. */
+export function formatSubtitleOffset(offset: number): string {
+  const value = clampSubtitleOffset(offset);
+  const sign = value > 0 ? "+" : value < 0 ? "−" : "";
+  return `${sign}${Math.abs(value).toFixed(1)} s`;
+}
+
+/** Offsets by file, on this device: `{ "f12": 0.5 }`, the latest last. */
+const OFFSETS_KEY = "pley.subtitleOffsets";
+/** Files whose offsets are kept: the oldest go first. */
+const OFFSETS_KEPT = 300;
+
+function readOffsets(): Record<string, unknown> {
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(OFFSETS_KEY) ?? "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** The subtitle offset remembered for a file (0 when none). */
+export function storedSubtitleOffset(fileId: number | null | undefined): number {
+  if (fileId == null) return 0;
+  const value = readOffsets()[`f${fileId}`];
+  return typeof value === "number" ? clampSubtitleOffset(value) : 0;
+}
+
+/** Remembers a file's subtitle offset on this device; 0 forgets it. */
+export function storeSubtitleOffset(fileId: number | null | undefined, offset: number): void {
+  if (fileId == null) return;
+  const key = `f${fileId}`;
+  const offsets = readOffsets();
+  delete offsets[key];
+  const value = clampSubtitleOffset(offset);
+  if (value !== 0) offsets[key] = value;
+  try {
+    window.localStorage.setItem(OFFSETS_KEY, JSON.stringify(Object.fromEntries(Object.entries(offsets).slice(-OFFSETS_KEPT))));
+  } catch {
+    // storage full or unavailable: it lasts as long as the player
+  }
+}
+
+/**
+ * When the lines showing next change after `seconds`: the first start or
+ * end still to come (`null`: none).
+ */
+export function nextCueChange(cues: readonly Pick<SubtitleCue, "startTime" | "endTime">[], seconds: number): number | null {
+  let next: number | null = null;
+  for (const c of cues) {
+    const at = c.startTime > seconds ? c.startTime : c.endTime > seconds ? c.endTime : null;
+    if (at !== null && (next === null || at < next)) next = at;
+  }
+  return next;
+}
+
 /**
  * The cues showing at `seconds`, in order. (Not the text track's
  * `activeCues`: after a seek browsers keep those as they were until the

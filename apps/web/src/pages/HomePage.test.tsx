@@ -1,7 +1,8 @@
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { Hub, Library } from "@/api/types";
+import { ListMenuProvider } from "@/components/lists/ListMenu";
 import { makeItem } from "@/test/fixtures";
 import { apiError, mockApi, renderWithProviders, testUser } from "@/test/render";
 import { HomePage } from "./HomePage";
@@ -75,6 +76,98 @@ describe("HomePage", () => {
     serve({ libraries: [{ ...movies, scanning: true }], home: [] });
     renderWithProviders(<HomePage />);
     expect(await screen.findByText("Scanning your libraries…")).toBeInTheDocument();
+  });
+
+  it("has My List when the server sends it", async () => {
+    serve({ home: [...hubs, { key: "my_list", title: "My List", library_id: null, items: [makeItem({ id: 9, title: "Ran" })] }] });
+    renderWithProviders(<HomePage />);
+    const row = (await screen.findByRole("heading", { name: "My List" })).closest("section") as HTMLElement;
+    expect(within(row).getAllByRole("link", { name: "Ran" })).not.toHaveLength(0);
+  });
+
+  it("takes a card off Continue Watching at once", async () => {
+    const user = userEvent.setup();
+    let answer: (res: Response | undefined) => void = () => undefined;
+    const requests = mockApi({
+      "GET /api/libraries": () => [movies],
+      "GET /api/hubs/home": () => ({ hubs }),
+      "GET /api/watchlist": () => ({ items: [] }),
+      "DELETE /api/continue-watching/6": () => new Promise<Response | undefined>((resolve) => (answer = resolve)),
+    });
+    renderWithProviders(
+      <ListMenuProvider>
+        <HomePage />
+      </ListMenuProvider>,
+    );
+    const row = (await screen.findByRole("heading", { name: "Continue Watching" })).closest("section") as HTMLElement;
+    fireEvent.contextMenu(within(row).getAllByRole("link", { name: "Alien" })[0] as HTMLElement);
+    await user.click(screen.getByRole("menuitem", { name: "Remove from Continue Watching" }));
+
+    // Gone before the server answers.
+    expect(within(row).queryAllByRole("link", { name: "Alien" })).toHaveLength(0);
+    expect(within(row).getByText("S1 · E1 · Pilot")).toBeInTheDocument();
+    expect(requests.some((r) => r.method === "DELETE" && r.path === "/api/continue-watching/6")).toBe(true);
+    answer(undefined);
+  });
+
+  it("puts the card back when the server says no", async () => {
+    const user = userEvent.setup();
+    mockApi({
+      "GET /api/libraries": () => [movies],
+      "GET /api/hubs/home": () => ({ hubs }),
+      "GET /api/watchlist": () => ({ items: [] }),
+      "DELETE /api/continue-watching/6": () => apiError(500, "internal", "database is locked"),
+    });
+    renderWithProviders(
+      <ListMenuProvider>
+        <HomePage />
+      </ListMenuProvider>,
+    );
+    const row = (await screen.findByRole("heading", { name: "Continue Watching" })).closest("section") as HTMLElement;
+    fireEvent.contextMenu(within(row).getAllByRole("link", { name: "Alien" })[0] as HTMLElement);
+    await user.click(screen.getByRole("menuitem", { name: "Remove from Continue Watching" }));
+
+    expect(await screen.findByText("Database is locked")).toBeInTheDocument();
+    expect(await within(row).findAllByRole("link", { name: "Alien" })).not.toHaveLength(0);
+  });
+
+  it("only offers that in Continue Watching", async () => {
+    mockApi({
+      "GET /api/libraries": () => [movies],
+      "GET /api/hubs/home": () => ({ hubs }),
+      "GET /api/watchlist": () => ({ items: [] }),
+    });
+    renderWithProviders(
+      <ListMenuProvider>
+        <HomePage />
+      </ListMenuProvider>,
+    );
+    fireEvent.contextMenu((await screen.findAllByRole("link", { name: "Heat" }))[0] as HTMLElement);
+    expect(await screen.findByRole("menuitem", { name: "Add to My List" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Remove from Continue Watching" })).not.toBeInTheDocument();
+  });
+
+  it("puts a card on My List, or takes it off, from its menu", async () => {
+    const user = userEvent.setup();
+    const requests = mockApi({
+      "GET /api/libraries": () => [movies],
+      "GET /api/hubs/home": () => ({ hubs }),
+      "GET /api/watchlist": () => ({ items: [makeItem({ id: 8, title: "Heat" })] }),
+      "DELETE /api/watchlist/8": () => undefined,
+      "PUT /api/watchlist/6": () => undefined,
+    });
+    renderWithProviders(
+      <ListMenuProvider>
+        <HomePage />
+      </ListMenuProvider>,
+    );
+    fireEvent.contextMenu((await screen.findAllByRole("link", { name: "Heat" }))[0] as HTMLElement);
+    await user.click(await screen.findByRole("menuitem", { name: "Remove from My List" }));
+    await waitFor(() => expect(requests.some((r) => r.method === "DELETE" && r.path === "/api/watchlist/8")).toBe(true));
+
+    fireEvent.contextMenu(screen.getAllByRole("link", { name: "Alien" })[0] as HTMLElement);
+    await user.click(await screen.findByRole("menuitem", { name: "Add to My List" }));
+    await waitFor(() => expect(requests.some((r) => r.method === "PUT" && r.path === "/api/watchlist/6")).toBe(true));
   });
 
   it("retries after an error", async () => {

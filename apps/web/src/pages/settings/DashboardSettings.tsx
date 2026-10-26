@@ -1,8 +1,20 @@
-import type { ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Activity as ActivityIcon, Cpu, FastForward, History, Images, MonitorPlay, Pause, Play, RefreshCw, Square } from "lucide-react";
+import {
+  Activity as ActivityIcon,
+  CircleStop,
+  Cpu,
+  FastForward,
+  History,
+  Images,
+  MonitorPlay,
+  Pause,
+  Play,
+  RefreshCw,
+  Square,
+} from "lucide-react";
 import { errorMessage } from "@/api/client";
-import { useActivity, useSystemInfo, useTranscoderStatus } from "@/api/hooks";
+import { useActivity, useStopSession, useSystemInfo, useTranscoderStatus } from "@/api/hooks";
 import type {
   PlaybackMethod,
   ScanStatus,
@@ -15,8 +27,10 @@ import type {
 } from "@/api/types";
 import { Artwork } from "@/components/Artwork";
 import { HistoryList } from "@/components/HistoryList";
+import { Modal } from "@/components/Modal";
+import { useToast } from "@/components/Toast";
 import { StorageSection } from "./StorageSection";
-import { Badge, Card, EmptyState, ProgressBar, SectionTitle, Skeleton } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, Field, ProgressBar, SectionTitle, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatBytes, formatClock, formatUptime, fullTitle, transcodeSummary } from "@/lib/format";
 import { thumbCandidates } from "@/lib/images";
@@ -70,7 +84,68 @@ const PHASE_LABEL: Record<ScanStatus["phase"], string> = {
   done: "Finished",
 };
 
-function SessionCard({ s }: { s: SessionInfo }) {
+/** Most a stop message may say (the server's limit). */
+const STOP_MESSAGE_MAX = 200;
+
+/** Ends someone's playback, with a message for their screen if wanted. */
+function StopSessionModal({ session, onClose }: { session: SessionInfo | null; onClose: () => void }) {
+  const stop = useStopSession();
+  const toast = useToast();
+  const [message, setMessage] = useState("");
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!session) return;
+    stop.mutate(
+      { sessionId: session.session_id, message: message.trim() || undefined },
+      {
+        onSuccess: () => {
+          toast.success("Playback stopped");
+          onClose();
+        },
+        onError: (err) => toast.error(errorMessage(err)),
+      },
+    );
+  };
+  return (
+    <Modal
+      open={!!session}
+      onClose={onClose}
+      title="Stop playback"
+      size="sm"
+      locked={stop.isPending}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={stop.isPending}>
+            Cancel
+          </Button>
+          <Button variant="danger" type="submit" form="stop-session-form" loading={stop.isPending}>
+            Stop
+          </Button>
+        </>
+      }
+    >
+      {session ? (
+        <form id="stop-session-form" onSubmit={submit} className="space-y-4">
+          <p className="text-sm text-muted">
+            <span className="font-medium text-fg">{fullTitle(session.item)}</span> stops for {session.username} right away.
+          </p>
+          <Field label="Message" htmlFor="stop-session-message" hint="Optional. Shown on their screen.">
+            <textarea
+              id="stop-session-message"
+              rows={3}
+              value={message}
+              maxLength={STOP_MESSAGE_MAX}
+              onChange={(e) => setMessage(e.target.value)}
+              className="w-full resize-y rounded-md border border-border bg-surface-2 px-3 py-2 text-sm text-fg placeholder:text-subtle transition-colors focus:border-accent focus:outline-none"
+            />
+          </Field>
+        </form>
+      ) : null}
+    </Modal>
+  );
+}
+
+function SessionCard({ s, onStop }: { s: SessionInfo; onStop: () => void }) {
   const duration = s.item.duration_ms ?? 0;
   const method = METHOD[s.method];
   const t = s.transcode;
@@ -108,6 +183,16 @@ function SessionCard({ s }: { s: SessionInfo }) {
             {formatClock(s.position_ms / 1000)}
             {duration ? ` / ${formatClock(duration / 1000)}` : ""}
           </span>
+          <button
+            type="button"
+            onClick={onStop}
+            aria-label={`Stop ${fullTitle(s.item)} for ${s.username}`}
+            title="Stop playback"
+            className="-my-1 ml-auto flex items-center gap-1 rounded-md px-2 py-1 font-medium text-muted transition-colors hover:bg-danger/10 hover:text-danger"
+          >
+            <CircleStop className="size-3.5" />
+            Stop
+          </button>
         </div>
         {duration ? <ProgressBar value={s.position_ms / duration} className="h-1" /> : null}
         {t ? (
@@ -323,6 +408,7 @@ export function DashboardSettings() {
   const activity = useActivity({ poll: 5_000 });
   const system = useSystemInfo();
   const transcoder = useTranscoderStatus(2_500);
+  const [stopping, setStopping] = useState<SessionInfo | null>(null);
 
   const sessions = activity.data?.sessions ?? [];
   const scans = (activity.data?.scans ?? []).filter((s) => s.phase !== "done");
@@ -345,10 +431,12 @@ export function DashboardSettings() {
         ) : (
           <div className="grid gap-3 xl:grid-cols-2">
             {sessions.map((s) => (
-              <SessionCard key={s.session_id} s={s} />
+              <SessionCard key={s.session_id} s={s} onStop={() => setStopping(s)} />
             ))}
           </div>
         )}
+        {/* Keyed so the message starts blank for every session. */}
+        <StopSessionModal key={stopping?.session_id ?? ""} session={stopping} onClose={() => setStopping(null)} />
       </section>
 
       <section>
