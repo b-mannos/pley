@@ -29,7 +29,7 @@ use crate::ffmpeg::Ffmpeg;
 use crate::job::Slots;
 use crate::plan::{ArgsContext, MAX_DURATION_MS, Plan};
 use crate::probe::Prober;
-use crate::util::touch;
+use crate::util::{background_priority, touch};
 
 /// How often a conversion waiting for a transcode slot looks again.
 const SLOT_WAIT: Duration = Duration::from_secs(5);
@@ -329,6 +329,8 @@ impl Conversions {
         let args = plan.file_args(&ctx, &part);
         tracing::debug!(conversion = %id, "ffmpeg {}", args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "));
         let mut cmd = self.ff.command();
+        // A file for later: never at the cost of a playback.
+        background_priority(&mut cmd);
         cmd.args(&args).current_dir(&self.dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
         let mut child = cmd.spawn().context("failed to start ffmpeg")?;
         let stderr = child.stderr.take().ok_or_else(|| anyhow!("ffmpeg's error output is unavailable"))?;

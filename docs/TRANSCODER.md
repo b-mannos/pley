@@ -105,8 +105,9 @@ be edited (Dolby Vision converted, HDR10+ left out) has its video made
 anew instead, as a file can't be edited the way segments are.
 
 One conversion runs at a time, in a transcode slot like a job's process
-(a hardware session when one is free, else the software encoder); while
-every slot is in use it waits. Its id comes from the input (path, size,
+(a hardware session when one is free, else the software encoder), at low
+process priority so that playbacks keep the processor; while every slot
+is in use it waits. Its id comes from the input (path, size,
 modification time) and the request's video, audio and subtitle parts, so
 the same file asked for twice is made once. One nobody asks for or about
 (`GET /v1/conversions/{id}`) for an hour while it waits isn't made when
