@@ -64,14 +64,37 @@ object PlaybackPlan {
         return videos.firstOrNull { it.default } ?: videos.firstOrNull()
     }
 
-    /** The audio to start with: as asked, else the profile's choice, else the file's default, else the first. */
-    fun initialAudio(file: MediaFile?, requested: Long?): MediaStream? {
+    /**
+     * The audio to start with: as asked, else [serverAudio]. When that one
+     * doesn't play here (TrueHD or DTS on a TV whose output takes neither)
+     * and another track in its language does, that one: the file then plays
+     * as it is (a remux's E-AC-3 keeps its Atmos), instead of the server
+     * converting the first. Never a commentary.
+     */
+    fun initialAudio(file: MediaFile?, requested: Long?, caps: CapsSnapshot? = null): MediaStream? {
         val audio = audioStreams(file)
-        return requested?.let { r -> audio.firstOrNull { it.index.toLong() == r } }
-            ?: audio.firstOrNull { it.index == file?.selectedAudio }
+        requested?.let { r -> audio.firstOrNull { it.index.toLong() == r } }?.let { return it }
+        val chosen = serverAudio(file) ?: return null
+        if (caps?.report == null || audioPlaysHere(chosen, caps)) return chosen
+        return audio
+            .filter { it !== chosen && it.language == chosen.language && !isCommentary(it) && audioPlaysHere(it, caps) }
+            .maxWithOrNull(compareBy<MediaStream>({ it.channels ?: 0 }, { it.default }, { -it.index }))
+            ?: chosen
+    }
+
+    /**
+     * The audio the server plays when a request names none: the profile's
+     * choice (`selected_audio`, which its defaults fill in), else the file's
+     * default, else the first.
+     */
+    fun serverAudio(file: MediaFile?): MediaStream? {
+        val audio = audioStreams(file)
+        return audio.firstOrNull { it.index == file?.selectedAudio }
             ?: audio.firstOrNull { it.default }
             ?: audio.firstOrNull()
     }
+
+    private fun isCommentary(stream: MediaStream): Boolean = stream.title?.contains("commentary", ignoreCase = true) == true
 
     /**
      * The subtitles to start with: as asked, else the profile's choice (the
@@ -144,10 +167,13 @@ object PlaybackPlan {
     /** The body of POST /api/playback for [choices]. */
     fun request(itemId: Long, choices: Choices, clientId: String, caps: CapsSnapshot?): PlaybackRequest {
         val audioHere = audioPlaysHere(choices.audio, caps)
+        // Named when the server must convert it, or when it isn't the one the
+        // server would play (it judges a file played as it is by that one).
+        val notTheServers = choices.audio != null && choices.audio.index != serverAudio(choices.file)?.index
         return PlaybackRequest(
             itemId = itemId,
             fileId = choices.file.id,
-            audioIndex = choices.audio?.index?.takeIf { choices.streaming || !audioHere },
+            audioIndex = choices.audio?.index?.takeIf { choices.streaming || !audioHere || notTheServers },
             subtitleIndex = choices.subtitle?.index?.takeIf { choices.streaming && isImage(choices.subtitle) && !choices.sideload },
             maxBitrate = choices.quality.maxBitrateKbps,
             maxHeight = choices.quality.maxHeight,

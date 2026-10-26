@@ -237,7 +237,7 @@ class SessionPlaybackController(
         val downloaded = req.fileId ?: detail.files.firstOrNull { it.id in downloads }?.id
         val chosen = PlaybackPlan.file(detail, downloaded, caps, env.policy)
         file = chosen
-        audio = PlaybackPlan.initialAudio(chosen, req.audioIndex)
+        audio = PlaybackPlan.initialAudio(chosen, req.audioIndex, caps)
         subtitle = PlaybackPlan.initialSubtitle(chosen, req.subtitleIndex)
         val remembered = try {
             env.quality.remembered()

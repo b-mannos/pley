@@ -64,14 +64,16 @@ class PlaybackPlanTest {
     }
 
     @Test
-    fun `direct play carries no track index, a stream carries the audio, pictures burn only into streams`() {
-        val direct = PlaybackPlan.request(70, choices(audio = aac, subtitle = pgs), "c", tv)
+    fun `direct play names the audio only when it isn't the server's own, a stream always, pictures burn only into streams`() {
+        val direct = PlaybackPlan.request(70, choices(audio = ac3, subtitle = pgs), "c", tv)
         assertNull(direct.audioIndex)
         assertNull(direct.subtitleIndex)
         assertEquals(7L, direct.fileId)
         assertEquals(1_000L, direct.startMs)
         assertEquals("c", direct.clientId)
         assertEquals(tv.report, direct.caps)
+        // Another track than the server would play: named, so it judges that one.
+        assertEquals(2, PlaybackPlan.request(70, choices(audio = aac, subtitle = pgs), "c", tv).audioIndex)
 
         val stream = PlaybackPlan.request(70, choices(audio = aac, subtitle = pgs, streaming = true), "c", tv)
         assertEquals(2, stream.audioIndex)
@@ -86,6 +88,36 @@ class PlaybackPlanTest {
         assertFalse(PlaybackPlan.audioPlaysHere(ac3, noAc3))
         assertTrue(PlaybackPlan.audioPlaysHere(ac3, tv))
         assertEquals(1, PlaybackPlan.request(70, choices(audio = ac3), "c", noAc3).audioIndex)
+    }
+
+    /**
+     * A remux whose first track is TrueHD, with E-AC-3 beside it (as most
+     * are) and a commentary: a TV whose output takes E-AC-3 but not TrueHD
+     * plays the file as it is with the E-AC-3, named to the server, rather
+     * than having the server convert the TrueHD.
+     */
+    @Test
+    fun `audio that doesn't play here gives way to a track in its language that does`() {
+        val trueHd = MediaStream(index = 1, kind = StreamKind.Audio, codec = "truehd", language = "eng", default = true, channels = 8, title = "TrueHD 7.1 Atmos")
+        val eac3 = MediaStream(index = 2, kind = StreamKind.Audio, codec = "eac3", language = "eng", channels = 6, title = "DD+ 5.1 Atmos")
+        val commentary = MediaStream(index = 3, kind = StreamKind.Audio, codec = "aac", language = "eng", channels = 2, title = "Director's Commentary")
+        val french = MediaStream(index = 4, kind = StreamKind.Audio, codec = "ac3", language = "fre", channels = 6)
+        val remux = file.copy(streams = listOf(video, trueHd, eac3, commentary, french))
+
+        val started = PlaybackPlan.initialAudio(remux, null, tv)
+        assertEquals(eac3, started)
+        val sent = PlaybackPlan.request(70, choices(audio = started).copy(file = remux), "c", tv)
+        assertEquals("named: the server would judge the TrueHD", 2, sent.audioIndex)
+
+        // A receiver that takes TrueHD keeps it, unnamed as before.
+        val trueHdTv = TestCaps.hdrTv(passthrough = listOf("ac3", "eac3", "truehd"))
+        assertEquals(trueHd, PlaybackPlan.initialAudio(remux, null, trueHdTv))
+        assertNull(PlaybackPlan.request(70, choices(audio = trueHd).copy(file = remux), "c", trueHdTv).audioIndex)
+        // Asked for, a track is kept; so is one with nothing better in its language.
+        assertEquals(trueHd, PlaybackPlan.initialAudio(remux, 1, tv))
+        assertEquals(french, PlaybackPlan.initialAudio(remux.copy(selectedAudio = 4), null, tv))
+        val noEac3 = TestCaps.hdrTv(passthrough = emptyList())
+        assertEquals("never the commentary", trueHd, PlaybackPlan.initialAudio(remux, null, noEac3))
     }
 
     @Test
@@ -108,11 +140,14 @@ class PlaybackPlanTest {
     @Test
     fun `an unexpected stream is asked again with the indexes it needs`() {
         val info = PlaybackInfo(sessionId = "s", method = PlaybackMethod.Remux, url = "/x", hls = true, fileId = 7, audioIndex = 1)
-        val sent = PlaybackPlan.request(70, choices(audio = aac), "c", tv)
-        assertTrue(PlaybackPlan.needsIndexes(info, sent, choices(audio = aac)))
+        // The server's pick was thought to be the French track (its choice changed since), so none was named.
+        val stale = choices(audio = aac).copy(file = file.copy(selectedAudio = 2))
+        val sent = PlaybackPlan.request(70, stale, "c", tv)
+        assertNull(sent.audioIndex)
+        assertTrue(PlaybackPlan.needsIndexes(info, sent, stale))
         assertFalse(PlaybackPlan.needsIndexes(info, sent, choices(audio = ac3)))
         assertTrue(PlaybackPlan.needsIndexes(info, PlaybackPlan.request(70, choices(subtitle = pgs), "c", tv), choices(subtitle = pgs)))
-        assertFalse(PlaybackPlan.needsIndexes(info.copy(hls = false, method = PlaybackMethod.Direct), sent, choices(audio = aac)))
+        assertFalse(PlaybackPlan.needsIndexes(info.copy(hls = false, method = PlaybackMethod.Direct), sent, stale))
         val withIndex = PlaybackPlan.request(70, choices(audio = aac, streaming = true), "c", tv)
         assertFalse(PlaybackPlan.needsIndexes(info, withIndex, choices(audio = aac, streaming = true)))
     }
