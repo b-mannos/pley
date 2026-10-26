@@ -213,7 +213,7 @@ class DownloadRunnerTest {
         api.answer("item", detail(subtitles = true))
         server.enqueue(vtt(PARTIAL, whole = false))
         server.enqueue(MockResponse.Builder().code(200).body(Buffer().write(body)).build())
-        repeat(DownloadRunner.SUBTITLE_TRIES) { server.enqueue(vtt(PARTIAL, whole = false)) }
+        server.enqueue(vtt(PARTIAL, whole = false))
         val saved = add()
 
         assertFalse(runner().run())
@@ -228,7 +228,7 @@ class DownloadRunnerTest {
         val whole = store.get(saved.key)!!
         assertEquals(emptyList<Int>(), whole.partialSubtitles)
         assertEquals(WHOLE, store.subtitleOf(whole, 2).readText())
-        assertEquals(2 + DownloadRunner.SUBTITLE_TRIES + 1, server.requestCount)
+        assertEquals("asked once after the file, once on the next run", 4, server.requestCount)
     }
 
     @Test
@@ -291,6 +291,16 @@ class DownloadRunnerTest {
     }
 
     @Test
+    fun nothingRunsWhileNobodyIsSignedIn() = runBlocking {
+        val saved = add()
+
+        assertFalse(runner(profile = null).run())
+
+        assertEquals(DownloadState.Queued, store.get(saved.key)!!.state)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
     fun aDownloadWhoseServerIsAwayLetsTheOthersGo() = runBlocking {
         // The older one can't reach its server; the newer one comes meanwhile.
         api.fail("item", java.io.IOException("away"))
@@ -344,7 +354,7 @@ class DownloadRunnerTest {
         return saved
     }
 
-    private fun runner(open: Boolean = true, profile: Pair<String, Long>? = null) = DownloadRunner(
+    private fun runner(open: Boolean = true, profile: Pair<String, Long>? = "http://nas:7539" to 2L) = DownloadRunner(
         store = store,
         sources = object : DownloadSources {
             override fun api(server: String, userId: Long): PleyApi = api
@@ -363,7 +373,6 @@ class DownloadRunnerTest {
         mobileAllowed = { false },
         conversionPollMs = 10,
         backoffMs = 1,
-        subtitleWaitMs = 1,
         profile = { profile },
     )
 

@@ -47,6 +47,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** The Application, which holds the app's downloads: [DownloadService] runs them. */
 interface DownloadsOwner {
@@ -158,12 +159,15 @@ class AppDownloads internal constructor(
 
     override fun resume() {
         scope.launch {
-            current()?.let { (server, userId) -> flushReports(server, userId) }
+            // Only the signed-in profile's: known once the session says who it is.
+            val signedIn = current() ?: withTimeoutOrNull(PROFILE_WAIT_MS) { session.first { it?.me != null } }?.let { current() }
+                ?: return@launch
+            flushReports(signedIn.first, signedIn.second)
             if (store.all.value.any { it.state == DownloadState.Queued || it.state == DownloadState.Waiting }) {
                 start()
             } else {
                 // Subtitles kept cut short: no service for a few requests (it does them first when it runs).
-                runner.finishCutSubtitles(current())
+                runner.finishCutSubtitles(signedIn)
             }
         }
     }
@@ -390,6 +394,9 @@ class AppDownloads internal constructor(
     )
 
     companion object {
+        /** How long the app's opening waits for the session to say who is signed in. */
+        const val PROFILE_WAIT_MS = 10_000L
+
         /**
          * Whether [file] has a sound track this device decodes ([caps]'
          * decoders, not what it sends on to a receiver: a download plays

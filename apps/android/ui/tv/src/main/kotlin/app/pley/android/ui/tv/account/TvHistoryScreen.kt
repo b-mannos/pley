@@ -59,6 +59,8 @@ import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberedFocus
 import app.pley.android.ui.tv.settings.absolute
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.failedBody
+import app.pley.android.ui.tv.shell.failedTitle
 
 /**
  * Watch history on TV: the profile's plays, newest first, one row each
@@ -91,8 +93,8 @@ internal fun TvHistoryScreen() {
                 repeat(5) { Box(Modifier.size(560.dp, 52.dp).background(PleyColors.Surface2, PleyShape.Field)) }
             }
             is HistoryUiState.Failed -> Message(
-                title = stringResource(R.string.tv_account_history_failed),
-                body = sentenceOf(s.error),
+                title = failedTitle(s.error, stringResource(R.string.tv_account_history_failed)),
+                body = failedBody(s.error),
                 action = stringResource(R.string.tv_account_retry),
                 onAction = model::retry,
             )

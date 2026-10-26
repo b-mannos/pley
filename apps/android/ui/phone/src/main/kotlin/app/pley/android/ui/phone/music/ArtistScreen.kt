@@ -66,6 +66,7 @@ import app.pley.android.ui.phone.kit.TonalButton
 import app.pley.android.ui.phone.kit.fullWidth
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.shell.LocalPhoneShell
+import app.pley.android.ui.phone.shell.ReportLoad
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 
 /**
@@ -108,7 +109,7 @@ internal fun ArtistScreen(artistId: Long) {
             )
             is MusicPageState.Failed -> ErrorState(stringResource(R.string.music_artist_failed), s.error, onRetry = model::retry)
             is MusicPageState.Ready -> {
-                LaunchedEffect(s.status) { shell.report(s.status) }
+                ReportLoad(s.status)
                 ArtistContent(
                     s.page,
                     busy = s.busy,

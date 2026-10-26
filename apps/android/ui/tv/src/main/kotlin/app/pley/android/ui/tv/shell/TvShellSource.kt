@@ -55,6 +55,9 @@ interface TvShellSource {
     /** Music has a queue, playing or paused: the rail leads to Now Playing. */
     val music: Flow<Boolean> get() = flowOf(false)
 
+    /** Each time the server's events connect: it answers again (the offline mark goes). */
+    val serverAnswered: Flow<Unit> get() = emptyFlow()
+
     companion object {
         /**
          * The app's: the startup read's server and tokens ([startup]),
@@ -140,6 +143,8 @@ private class GraphShellSource(
     override val reduceMotion: Flow<Boolean> = offMain { graph.data.settings.settings }.map { it.reduceMotion }.distinctUntilChanged()
 
     override val music: Flow<Boolean> = offMain { graph.player.music.nowPlaying }.map { it != null }.distinctUntilChanged()
+
+    override val serverAnswered: Flow<Unit> = offMain { graph.data.liveUpdates.answered }
 
     /** [upstream], made and collected on Default: the graph is never made on the main thread for it. */
     private fun <T> offMain(upstream: () -> Flow<T>): Flow<T> = flow { emitAll(upstream()) }.flowOn(Dispatchers.Default)

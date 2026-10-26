@@ -54,6 +54,8 @@ import app.pley.android.ui.tv.kit.TvRow
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberedFocus
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.failedBody
+import app.pley.android.ui.tv.shell.failedTitle
 
 /**
  * An artist on TV (MusicViews.tsx ArtistView; design spec §4.10): their
@@ -88,8 +90,8 @@ internal fun TvArtistScreen(artistId: Long) {
                 onAction = navigator::back,
             )
             is MusicPageState.Failed -> MusicMessage(
-                title = stringResource(R.string.tv_music_artist_failed),
-                body = sentenceOf(s.error),
+                title = failedTitle(s.error, stringResource(R.string.tv_music_artist_failed)),
+                body = failedBody(s.error),
                 action = stringResource(R.string.tv_music_retry),
                 onAction = model::retry,
             )

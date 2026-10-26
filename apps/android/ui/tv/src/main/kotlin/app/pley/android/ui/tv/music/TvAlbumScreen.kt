@@ -60,6 +60,8 @@ import app.pley.android.ui.tv.kit.TvTextButton
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberedFocus
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.failedBody
+import app.pley.android.ui.tv.shell.failedTitle
 
 /**
  * An album on TV (MusicViews.tsx AlbumView; design spec §4.10): the art
@@ -97,8 +99,8 @@ internal fun TvAlbumScreen(albumId: Long, trackId: Long?) {
                 onAction = navigator::back,
             )
             is MusicPageState.Failed -> MusicMessage(
-                title = stringResource(R.string.tv_music_album_failed),
-                body = sentenceOf(s.error),
+                title = failedTitle(s.error, stringResource(R.string.tv_music_album_failed)),
+                body = failedBody(s.error),
                 action = stringResource(R.string.tv_music_retry),
                 onAction = model::retry,
             )

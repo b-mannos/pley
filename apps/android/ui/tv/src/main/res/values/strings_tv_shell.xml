@@ -12,6 +12,9 @@
 
     <!-- What shows came from what was saved: the server can't be reached. -->
     <string name="tv_shell_offline">Showing what pley had saved. Reconnecting…</string>
+    <!-- A page with nothing saved, the server out of reach: "No answer in time. Check that…". -->
+    <string name="tv_shell_offline_title">Can\'t reach your server</string>
+    <string name="tv_shell_offline_body">%1$s Check that the server is on and that this device is on its network.</string>
 
     <!-- The end of a row that has more. -->
 

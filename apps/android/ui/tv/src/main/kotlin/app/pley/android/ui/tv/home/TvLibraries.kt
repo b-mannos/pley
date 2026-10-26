@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +34,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.Surface
+import app.pley.android.data.Loadable
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyTv
@@ -52,7 +52,9 @@ import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberedFocus
 import app.pley.android.ui.tv.shell.LocalTvNavigator
-import app.pley.android.ui.tv.shell.LocalTvOffline
+import app.pley.android.ui.tv.shell.ReportOffline
+import app.pley.android.ui.tv.shell.failedBody
+import app.pley.android.ui.tv.shell.failedTitle
 
 /**
  * Every library (design spec §2.1): the rail shows the first three, and
@@ -65,17 +67,16 @@ import app.pley.android.ui.tv.shell.LocalTvOffline
 internal fun TvLibrariesScreen(vm: LibrariesViewModel = viewModel(factory = LibrariesViewModel.Factory)) {
     val state by vm.state.collectAsStateWithLifecycle()
     val navigator = LocalTvNavigator.current
-    val offline = LocalTvOffline.current
-    LaunchedEffect(state, offline) {
+    ReportOffline(
         when (val s = state) {
-            is LibrariesState.Ready -> offline.report(s.fresh, s.error)
-            is LibrariesState.Failed -> offline.report(fresh = false, error = s.error)
-            LibrariesState.Loading -> Unit
-        }
-    }
+            is LibrariesState.Ready -> s.error?.let { Loadable.Failed(it, Unit) } ?: Loadable.Ready(Unit, s.fresh)
+            is LibrariesState.Failed -> Loadable.Failed(s.error, Unit)
+            LibrariesState.Loading -> null
+        },
+    )
     when (val s = state) {
         LibrariesState.Loading -> Unit
-        is LibrariesState.Failed -> TvHomeNotice(stringResource(R.string.tv_libraries_failed), sentence(s.error), retry = vm::refresh)
+        is LibrariesState.Failed -> TvHomeNotice(failedTitle(s.error, stringResource(R.string.tv_libraries_failed)), failedBody(s.error), retry = vm::refresh)
         is LibrariesState.Ready -> if (s.libraries.isEmpty()) {
             TvHomeNotice(stringResource(R.string.tv_home_no_libraries), stringResource(R.string.tv_home_no_libraries_body))
         } else {

@@ -46,10 +46,10 @@ import app.pley.android.designsystem.PleyPhone
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.tile.TileKind
 import app.pley.android.designsystem.tile.rememberSkeleton
+import app.pley.android.model.HubKeys
 import app.pley.android.model.ItemSummary
 import app.pley.android.screens.Navigator
 import app.pley.android.screens.PleyKey
-import app.pley.android.model.HubKeys
 import app.pley.android.screens.home.HomeMessage
 import app.pley.android.screens.home.HomeProfile
 import app.pley.android.screens.home.HomeState
@@ -66,6 +66,7 @@ import app.pley.android.ui.phone.kit.rememberHubRowState
 import app.pley.android.ui.phone.shell.Brand
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.shell.LocalPhoneShell
+import app.pley.android.ui.phone.shell.ReportLoad
 import kotlinx.coroutines.delay
 
 /**
@@ -98,14 +99,14 @@ internal fun PhoneHomeScreen(vm: HomeViewModel = viewModel(factory = HomeViewMod
         }
     }
     val state = model?.state
-    LaunchedEffect(state) {
-        // The offline banner: up while what shows is what was saved, down once the server answers.
+    // The offline banner: up while what shows is what was saved, down once the server answers.
+    ReportLoad(
         when (state) {
-            is HomeState.Ready -> shell.report(state.error?.let { Loadable.Failed(it, Unit) } ?: Loadable.Ready(Unit, state.fresh))
-            is HomeState.Failed -> shell.report(Loadable.Failed<Unit>(state.error))
-            else -> Unit
-        }
-    }
+            is HomeState.Ready -> state.error?.let { Loadable.Failed(it, Unit) } ?: Loadable.Ready(Unit, state.fresh)
+            is HomeState.Failed -> Loadable.Failed(state.error, Unit)
+            else -> null
+        },
+    )
 
     Column(Modifier.fillMaxSize()) {
         PleyTopAppBar(

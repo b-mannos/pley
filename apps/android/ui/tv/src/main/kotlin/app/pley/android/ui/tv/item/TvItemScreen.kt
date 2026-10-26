@@ -50,7 +50,6 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.sentenceOf
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyMotion
 import app.pley.android.designsystem.PleyShape
@@ -87,6 +86,8 @@ import app.pley.android.ui.tv.kit.rememberRested
 import app.pley.android.ui.tv.shell.LocalTvNavigator
 import app.pley.android.ui.tv.shell.ReportOffline
 import app.pley.android.ui.tv.shell.TvNavigator
+import app.pley.android.ui.tv.shell.failedBody
+import app.pley.android.ui.tv.shell.failedTitle
 import app.pley.android.ui.tv.theme.LocalTvTier
 
 /**
@@ -129,8 +130,8 @@ internal fun TvItemScreen(model: ItemViewModel) {
                 onAction = navigator::back,
             )
             is ItemUiState.Failed -> TvMessage(
-                title = stringResource(R.string.tv_item_failed),
-                body = sentenceOf(s.error),
+                title = failedTitle(s.error, stringResource(R.string.tv_item_failed)),
+                body = failedBody(s.error),
                 action = stringResource(R.string.tv_item_retry),
                 onAction = model::retry,
             )

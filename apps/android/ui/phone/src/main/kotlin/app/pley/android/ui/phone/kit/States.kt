@@ -31,6 +31,7 @@ import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.network.OfflineException
 import app.pley.android.ui.phone.R
 import kotlinx.coroutines.delay
 
@@ -87,11 +88,16 @@ fun ErrorState(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val sentence = sentenceOf(error)
+    // The server answered nothing: said as the player says it, with what to check.
+    val offline = error is OfflineException
     EmptyState(
-        title = title,
-        body = sentence,
-        icon = PleyIcons.CircleAlert,
+        title = if (offline) stringResource(R.string.kit_offline_title) else title,
+        body = if (offline && !(error as OfflineException).blocked) {
+            stringResource(R.string.kit_offline_body, sentenceOf(error))
+        } else {
+            sentenceOf(error)
+        },
+        icon = if (offline) PleyIcons.ServerOff else PleyIcons.CircleAlert,
         modifier = modifier.semantics { liveRegion = LiveRegionMode.Polite },
         action = { TonalButton(stringResource(R.string.kit_retry), onClick = onRetry, icon = PleyIcons.RefreshCw) },
     )

@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.pley.android.common.TestTags
+import app.pley.android.data.Loadable
 import app.pley.android.designsystem.PleyMotion
 import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.image.rememberImagePrefetcher
@@ -53,7 +54,9 @@ import app.pley.android.ui.tv.kit.rememberBackdropPrefetcher
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberRested
 import app.pley.android.ui.tv.shell.LocalTvNavigator
-import app.pley.android.ui.tv.shell.LocalTvOffline
+import app.pley.android.ui.tv.shell.ReportOffline
+import app.pley.android.ui.tv.shell.failedBody
+import app.pley.android.ui.tv.shell.failedTitle
 import app.pley.android.ui.tv.theme.LocalTvTier
 import kotlinx.coroutines.launch
 
@@ -80,15 +83,13 @@ internal fun TvHomeScreen(vm: HomeViewModel = viewModel(factory = HomeViewModel.
     var message by remember { mutableStateOf<HomeMessage?>(null) }
     LaunchedEffect(vm) { vm.messages.collect { message = it } }
     // The offline notice: up while what shows is what was saved, down once the server answers.
-    val offline = LocalTvOffline.current
-    val reported = model?.state
-    LaunchedEffect(reported, offline) {
-        when (reported) {
-            is HomeState.Ready -> offline.report(reported.fresh, reported.error)
-            is HomeState.Failed -> offline.report(fresh = false, error = reported.error)
-            else -> Unit
-        }
-    }
+    ReportOffline(
+        when (val reported = model?.state) {
+            is HomeState.Ready -> reported.error?.let { Loadable.Failed(it, Unit) } ?: Loadable.Ready(Unit, reported.fresh)
+            is HomeState.Failed -> Loadable.Failed(reported.error, Unit)
+            else -> null
+        },
+    )
 
     Box(Modifier.fillMaxSize()) {
         val shown = model
@@ -97,8 +98,8 @@ internal fun TvHomeScreen(vm: HomeViewModel = viewModel(factory = HomeViewModel.
             null -> Unit
             HomeState.Loading -> TvHomeSkeleton()
             is HomeState.Failed -> TvHomeNotice(
-                title = stringResource(R.string.tv_home_failed),
-                body = sentence(state.error),
+                title = failedTitle(state.error, stringResource(R.string.tv_home_failed)),
+                body = failedBody(state.error),
                 retry = vm::refresh,
             )
             HomeState.NoLibraries -> TvHomeNotice(

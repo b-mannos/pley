@@ -1,5 +1,6 @@
 package app.pley.android.ui.tv.library
 
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,7 +26,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -64,6 +64,8 @@ import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberedFocus
 import app.pley.android.ui.tv.shell.LocalTvNavigator
 import app.pley.android.ui.tv.shell.ReportOffline
+import app.pley.android.ui.tv.shell.failedBody
+import app.pley.android.ui.tv.shell.failedTitle
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -126,8 +128,8 @@ private fun TvLibraryPage(state: LibraryUiState<ArtworkTileModel>, vm: LibraryVi
                 body = stringResource(R.string.tv_library_missing_body),
             )
             state.libraryError != null -> TvMessage(
-                title = stringResource(R.string.tv_library_failed),
-                body = sentence(state.libraryError!!),
+                title = failedTitle(state.libraryError!!, stringResource(R.string.tv_library_failed)),
+                body = failedBody(state.libraryError!!),
                 action = stringResource(R.string.tv_library_retry),
                 onAction = vm::retry,
             )
@@ -301,8 +303,8 @@ private fun TvLibraryTab(
             ReportOffline(state.grid.cells)
             when {
                 failed != null && cells == null -> TvMessage(
-                    title = stringResource(R.string.tv_library_failed),
-                    body = sentence(failed.error),
+                    title = failedTitle(failed.error, stringResource(R.string.tv_library_failed)),
+                    body = failedBody(failed.error),
                     action = stringResource(R.string.tv_library_retry),
                     onAction = vm::retry,
                     top = 24.dp,
@@ -394,8 +396,8 @@ private fun TvCollectionsTab(
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 list == null && collections is Loadable.Failed -> TvMessage(
-                    title = stringResource(R.string.tv_library_collections_failed),
-                    body = sentence(collections.error),
+                    title = failedTitle(collections.error, stringResource(R.string.tv_library_collections_failed)),
+                    body = failedBody(collections.error),
                     action = stringResource(R.string.tv_library_retry),
                     onAction = vm::retry,
                     top = 24.dp,

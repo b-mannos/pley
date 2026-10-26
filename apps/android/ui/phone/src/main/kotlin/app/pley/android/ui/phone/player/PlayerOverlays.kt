@@ -59,6 +59,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import app.pley.android.common.asSentence
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyMotion
 import app.pley.android.designsystem.PleyShape
@@ -401,7 +402,7 @@ internal fun ErrorOverlay(error: PlayerPhase.Error, onRetry: () -> Unit, onBack:
                 modifier = Modifier.padding(top = 16.dp).semantics { heading() },
             )
             Text(
-                error.message.replaceFirstChar { it.uppercase() }.let { if (it.endsWith('.')) it else "$it." },
+                asSentence(error.message),
                 style = MaterialTheme.typography.bodyMedium,
                 color = PleyColors.Muted,
                 textAlign = TextAlign.Center,

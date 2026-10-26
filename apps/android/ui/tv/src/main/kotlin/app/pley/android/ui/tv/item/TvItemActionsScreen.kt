@@ -21,7 +21,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.sentenceOf
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
@@ -36,6 +35,8 @@ import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.kit.BackdropScrim
 import app.pley.android.ui.tv.kit.TvBackdrop
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.failedBody
+import app.pley.android.ui.tv.shell.failedTitle
 import app.pley.android.ui.tv.theme.LocalTvTier
 import kotlinx.coroutines.delay
 
@@ -65,8 +66,8 @@ internal fun TvItemActionsScreen(itemId: Long, continueWatching: Boolean = false
         when (val s = state) {
             ItemActionsUiState.Loading -> Unit
             is ItemActionsUiState.Failed -> TvMessage(
-                title = stringResource(R.string.tv_item_failed),
-                body = sentenceOf(s.error),
+                title = failedTitle(s.error, stringResource(R.string.tv_item_failed)),
+                body = failedBody(s.error),
                 action = stringResource(R.string.tv_item_back),
                 onAction = navigator::back,
             )

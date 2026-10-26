@@ -53,8 +53,9 @@ import app.pley.android.ui.tv.kit.railOnLeftStopOnRight
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberedFocus
 import app.pley.android.ui.tv.library.TvMessage
-import app.pley.android.ui.tv.library.sentence
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.failedBody
+import app.pley.android.ui.tv.shell.failedTitle
 
 /**
  * The playlists page on TV (the web's PlaylistsPage; design spec §4.9):
@@ -103,8 +104,8 @@ internal fun TvPlaylistsContent(state: Loadable<List<PlaylistCard>>, onRetry: ()
         }
         when {
             list == null && state is Loadable.Failed -> TvMessage(
-                title = stringResource(R.string.tv_playlists_failed),
-                body = sentence(state.error),
+                title = failedTitle(state.error, stringResource(R.string.tv_playlists_failed)),
+                body = failedBody(state.error),
                 action = stringResource(R.string.tv_playlists_retry),
                 onAction = onRetry,
                 top = 40.dp,

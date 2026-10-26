@@ -33,10 +33,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxState
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.SwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -67,8 +67,8 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -107,6 +107,7 @@ import app.pley.android.ui.phone.kit.TonalButton
 import app.pley.android.ui.phone.library.PhoneTiles
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.shell.LocalPhoneShell
+import app.pley.android.ui.phone.shell.ReportLoad
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
@@ -151,7 +152,7 @@ internal fun PhonePlaylistScreen(playlistId: Long) {
             }
         }
     }
-    LaunchedEffect(state) { shell.report(state) }
+    ReportLoad(state)
     PlaylistContent(
         state = state,
         actions = PlaylistActions(

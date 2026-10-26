@@ -58,6 +58,7 @@ import app.pley.android.ui.phone.kit.PrimaryButton
 import app.pley.android.ui.phone.kit.cardPress
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.shell.LocalPhoneShell
+import app.pley.android.ui.phone.shell.ReportLoad
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 import kotlin.math.floor
 import kotlin.math.max
@@ -73,7 +74,7 @@ internal fun PhonePlaylistsScreen() {
     val vm: PlaylistsViewModel = viewModel(factory = PlaylistsViewModel.Factory)
     val state by vm.state.collectAsStateWithLifecycle()
     val shell = LocalPhoneShell.current
-    LaunchedEffect(state) { shell.report(state) }
+    ReportLoad(state)
     PlaylistsContent(state, onRetry = vm::retry)
 }
 

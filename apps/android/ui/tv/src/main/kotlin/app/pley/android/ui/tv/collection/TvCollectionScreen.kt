@@ -71,6 +71,8 @@ import app.pley.android.ui.tv.library.rememberTvGridState
 import app.pley.android.ui.tv.library.sentence
 import app.pley.android.ui.tv.library.tvCount
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.failedBody
+import app.pley.android.ui.tv.shell.failedTitle
 import kotlinx.coroutines.delay
 
 /**
@@ -107,8 +109,8 @@ internal fun TvCollectionScreen(key: PleyKey.Collection) {
     when {
         page != null -> CollectionContent(page, vm, message)
         state is Loadable.Failed -> TvMessage(
-            title = stringResource(R.string.tv_collection_failed),
-            body = sentence((state as Loadable.Failed).error),
+            title = failedTitle((state as Loadable.Failed).error, stringResource(R.string.tv_collection_failed)),
+            body = failedBody((state as Loadable.Failed).error),
             action = stringResource(R.string.tv_library_retry),
             onAction = vm::retry,
             top = 58.dp,

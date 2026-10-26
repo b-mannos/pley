@@ -59,6 +59,8 @@ import app.pley.android.ui.tv.kit.TvRowColumn
 import app.pley.android.ui.tv.kit.TvSidePanel
 import app.pley.android.ui.tv.kit.initialFocus
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.failedBody
+import app.pley.android.ui.tv.shell.failedTitle
 
 /**
  * A page or tab with nothing to show (design spec §8): the title in
@@ -123,8 +125,8 @@ internal fun TvRecommendedTab(
     val rows = recommended.valueOrNull
     when {
         rows == null && recommended is Loadable.Failed -> TvMessage(
-            title = stringResource(R.string.tv_library_recommended_failed),
-            body = sentence(recommended.error),
+            title = failedTitle(recommended.error, stringResource(R.string.tv_library_recommended_failed)),
+            body = failedBody(recommended.error),
             action = stringResource(R.string.tv_library_retry),
             onAction = vm::retry,
             top = RowsTop,

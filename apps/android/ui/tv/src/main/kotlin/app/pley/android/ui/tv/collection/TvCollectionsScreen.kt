@@ -33,7 +33,8 @@ import app.pley.android.ui.tv.kit.TvRowColumn
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.library.TvMessage
 import app.pley.android.ui.tv.library.TvTiles
-import app.pley.android.ui.tv.library.sentence
+import app.pley.android.ui.tv.shell.failedBody
+import app.pley.android.ui.tv.shell.failedTitle
 
 /**
  * The rail's Collections (design spec §2.1): every movie and show
@@ -54,8 +55,8 @@ internal fun TvCollectionsScreen(@Suppress("UNUSED_PARAMETER") key: PleyKey.Coll
     Box(Modifier.fillMaxSize()) {
         when {
             shelves == null && state is Loadable.Failed -> TvMessage(
-                title = stringResource(R.string.tv_library_collections_failed),
-                body = sentence((state as Loadable.Failed).error),
+                title = failedTitle((state as Loadable.Failed).error, stringResource(R.string.tv_library_collections_failed)),
+                body = failedBody((state as Loadable.Failed).error),
                 action = stringResource(R.string.tv_library_retry),
                 onAction = vm::retry,
                 top = RowsTop,

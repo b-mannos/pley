@@ -150,6 +150,8 @@ private fun TvShell(
     } else {
         ReportDrawn()
     }
+    // The server's events connected again: it answers, and the offline mark goes.
+    LaunchedEffect(source, offline) { source.serverAnswered.collect { offline.answered() } }
     // A refused sign-in (the server ended it, or forgot it): that server's sign-in again, as on phones.
     LaunchedEffect(source, navigator) {
         source.signedOut.collect { issuer -> if (rail.shown) navigator.restart(PleyKey.Link(issuer)) }

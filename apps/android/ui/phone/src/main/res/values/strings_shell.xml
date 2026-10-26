@@ -10,6 +10,9 @@
 
     <!-- Around every screen. -->
     <string name="shell_offline">Showing what pley had saved. Reconnecting…</string>
+    <!-- A page with nothing saved, the server out of reach: "No answer in time. Check that…". -->
+    <string name="kit_offline_title">Can\'t reach your server</string>
+    <string name="kit_offline_body">%1$s Check that the server is on and that this device is on its network.</string>
     <string name="shell_scope">pley wasn\'t allowed to do that: sign in again to allow it</string>
     <string name="shell_scope_action">Sign in</string>
     <string name="shell_now_playing">Open Now Playing</string>

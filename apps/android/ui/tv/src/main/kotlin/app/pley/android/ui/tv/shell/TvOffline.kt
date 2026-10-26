@@ -17,6 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -27,6 +28,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import app.pley.android.common.sentenceOf
 import app.pley.android.data.Loadable
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyMotion
@@ -60,37 +62,61 @@ internal class TvOfflineState {
     var announcing by mutableStateOf(false)
         private set
 
-    fun report(load: Loadable<*>) {
-        when (load) {
-            is Loadable.Ready -> if (load.fresh) {
-                offline = false
-                announcing = false
-            }
-            is Loadable.Failed -> if (load.error is OfflineException && !offline) {
+    /**
+     * A screen's [load], [before] it the one it reported last. A failure to
+     * reach the server raises it; a fresh answer lowers it only after the
+     * same screen's failure, as a fresh one may be the cache's of a minute
+     * ago.
+     */
+    fun report(load: Loadable<*>, before: Loadable<*>?) {
+        when {
+            load is Loadable.Failed && load.error is OfflineException -> if (!offline) {
                 offline = true
                 announcing = true
             }
-            Loadable.Loading -> Unit
+            load is Loadable.Ready && load.fresh && before is Loadable.Failed -> answered()
         }
+    }
+
+    /** The server answers again (its events connected, or a screen's fresh answer after a failure). */
+    fun answered() {
+        offline = false
+        announcing = false
     }
 
     /** The notice has been shown its time. */
     fun announced() {
         announcing = false
     }
-
-    /** A screen's state as fresh or not, and the error that kept it from the server's answer. */
-    fun report(fresh: Boolean, error: Throwable?) = report(if (error != null) Loadable.Failed(error, Unit) else Loadable.Ready(Unit, fresh))
 }
 
 /** The shell's; outside it (a screen on its own, in tests) one nobody shows. */
 internal val LocalTvOffline = staticCompositionLocalOf { TvOfflineState() }
 
-/** Reports [load] to the shell's [TvOfflineState] whenever it changes. */
+/** A failed load's title: [title], or "Can't reach your server" when the server answered nothing. */
+@Composable
+internal fun failedTitle(error: Throwable, title: String): String =
+    if (error is OfflineException) stringResource(R.string.tv_shell_offline_title) else title
+
+/** Why a load failed, and what to check when the server answered nothing. */
+@Composable
+internal fun failedBody(error: Throwable): String =
+    if (error is OfflineException && !error.blocked) {
+        stringResource(R.string.tv_shell_offline_body, sentenceOf(error))
+    } else {
+        sentenceOf(error)
+    }
+
+/** Reports [load] to the shell's [TvOfflineState] whenever it changes, with the one before. */
 @Composable
 internal fun ReportOffline(load: Loadable<*>?) {
     val offline = LocalTvOffline.current
-    LaunchedEffect(load, offline) { load?.let(offline::report) }
+    val before = remember { arrayOfNulls<Loadable<*>>(1) }
+    LaunchedEffect(load, offline) {
+        if (load == null || load is Loadable.Loading) return@LaunchedEffect
+        offline.report(load, before[0])
+        before[0] = load
+    }
 }
 
 /**

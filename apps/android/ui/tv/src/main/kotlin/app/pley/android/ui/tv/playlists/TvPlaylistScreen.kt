@@ -110,9 +110,10 @@ import app.pley.android.ui.tv.kit.railOnLeftStopOnRight
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberedFocus
 import app.pley.android.ui.tv.library.TvMessage
-import app.pley.android.ui.tv.library.sentence
 import app.pley.android.ui.tv.onboarding.TvDialog
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.failedBody
+import app.pley.android.ui.tv.shell.failedTitle
 import app.pley.android.ui.tv.theme.LocalTvTier
 import kotlinx.coroutines.launch
 
@@ -170,8 +171,8 @@ internal fun TvPlaylistScreen(vm: PlaylistViewModel<ArtworkTileModel>) {
                     )
                 } else {
                     TvMessage(
-                        title = stringResource(R.string.tv_playlist_failed),
-                        body = sentence(error),
+                        title = failedTitle(error, stringResource(R.string.tv_playlist_failed)),
+                        body = failedBody(error),
                         action = stringResource(R.string.tv_playlists_retry),
                         onAction = vm::retry,
                         top = 58.dp,

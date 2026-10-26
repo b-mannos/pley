@@ -1,9 +1,12 @@
 package app.pley.android.ui.phone.shell
 
 import android.content.res.Resources
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import app.pley.android.auth.AuthEvent
@@ -56,15 +59,21 @@ class PhoneShellState internal constructor(
         internal set
 
     /**
-     * A screen's load: saved data shown because the server couldn't be
-     * reached raises the offline banner; a fresh answer lowers it.
+     * A screen's [load], [before] it the one it reported last ([ReportLoad]):
+     * saved data shown because the server couldn't be reached raises the
+     * offline banner; a fresh answer lowers it only after the same screen's
+     * failure, as a fresh one may be the cache's of a minute ago.
      */
-    fun report(load: Loadable<*>) {
-        when (load) {
-            is Loadable.Ready -> if (load.fresh) offlineState.value = false
-            is Loadable.Failed -> if (load.error is OfflineException) offlineState.value = true
-            Loadable.Loading -> Unit
+    fun report(load: Loadable<*>, before: Loadable<*>?) {
+        when {
+            load is Loadable.Failed && load.error is OfflineException -> offlineState.value = true
+            load is Loadable.Ready && load.fresh && before is Loadable.Failed -> offlineState.value = false
         }
+    }
+
+    /** The server's events connected again: it answers now. */
+    fun answered() {
+        offlineState.value = false
     }
 
     /**
@@ -114,3 +123,15 @@ class PhoneShellState internal constructor(
 
 /** The shell around the screen: toasts, the offline banner, error handling. */
 val LocalPhoneShell = staticCompositionLocalOf<PhoneShellState> { error("No phone shell here") }
+
+/** Tells the shell how a screen's [load] went whenever it changes, with the one before (the offline banner). */
+@Composable
+fun ReportLoad(load: Loadable<*>?) {
+    val shell = LocalPhoneShell.current
+    val before = remember { arrayOfNulls<Loadable<*>>(1) }
+    LaunchedEffect(load, shell) {
+        if (load == null || load is Loadable.Loading) return@LaunchedEffect
+        shell.report(load, before[0])
+        before[0] = load
+    }
+}

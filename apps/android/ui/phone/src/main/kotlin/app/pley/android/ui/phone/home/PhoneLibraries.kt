@@ -60,7 +60,7 @@ import app.pley.android.ui.phone.kit.EmptyState
 import app.pley.android.ui.phone.kit.ErrorState
 import app.pley.android.ui.phone.kit.PleyTopAppBar
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
-import app.pley.android.ui.phone.shell.LocalPhoneShell
+import app.pley.android.ui.phone.shell.ReportLoad
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 import kotlinx.coroutines.delay
 
@@ -74,16 +74,15 @@ import kotlinx.coroutines.delay
 internal fun PhoneLibrariesScreen(vm: LibrariesViewModel = viewModel(factory = LibrariesViewModel.Factory)) {
     val state by vm.state.collectAsStateWithLifecycle()
     val navigator = LocalPhoneNavigator.current
-    val shell = LocalPhoneShell.current
     val list = rememberLazyListState()
-    LaunchedEffect(state) {
-        // The offline banner: up while the list is what was saved, down once the server answers.
+    // The offline banner: up while the list is what was saved, down once the server answers.
+    ReportLoad(
         when (val s = state) {
-            is LibrariesState.Ready -> shell.report(s.error?.let { Loadable.Failed(it, Unit) } ?: Loadable.Ready(Unit, s.fresh))
-            is LibrariesState.Failed -> shell.report(Loadable.Failed<Unit>(s.error))
-            LibrariesState.Loading -> Unit
-        }
-    }
+            is LibrariesState.Ready -> s.error?.let { Loadable.Failed(it, Unit) } ?: Loadable.Ready(Unit, s.fresh)
+            is LibrariesState.Failed -> Loadable.Failed(s.error, Unit)
+            LibrariesState.Loading -> null
+        },
+    )
     Column(Modifier.fillMaxSize()) {
         PleyTopAppBar(title = stringResource(R.string.home_libraries_title), scrolled = { list.canScrollBackward })
         PullToRefreshBox(

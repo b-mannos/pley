@@ -58,6 +58,7 @@ import app.pley.android.ui.phone.kit.PleyTopAppBar
 import app.pley.android.ui.phone.kit.fullWidth
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.shell.LocalPhoneShell
+import app.pley.android.ui.phone.shell.ReportLoad
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 
 /**
@@ -82,7 +83,7 @@ internal fun PersonScreen(personId: Long) {
             )
             is PersonUiState.Failed -> ErrorState(stringResource(R.string.person_failed), s.error, onRetry = model::retry)
             is PersonUiState.Ready -> {
-                LaunchedEffect(s.status) { shell.report(s.status) }
+                ReportLoad(s.status)
                 PersonContent(s.page, onOpen = { navigator.open(PleyKey.Item(it)) }, onActions = { navigator.open(PleyKey.ItemActions(it)) })
             }
         }

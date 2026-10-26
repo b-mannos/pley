@@ -44,8 +44,20 @@ fun interface ItemDetails {
          * without waiting on the network), else the server's.
          */
         fun snapshotFirst(items: ItemRepository, api: PleyApi): ItemDetails = ItemDetails { id ->
+            var before = true
             val first = try {
-                items.detail(id).first { it !is Loadable.Loading }
+                items.detail(id).first { state ->
+                    when {
+                        state is Loadable.Loading -> false
+                        // The cache shows what it held at once, a failure from before
+                        // included, while it asks again: its new answer decides.
+                        before && state is Loadable.Failed && state.stale == null && state.error is OfflineException -> {
+                            before = false
+                            false
+                        }
+                        else -> true
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {

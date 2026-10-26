@@ -161,6 +161,10 @@ impl Downloads {
         if let Some(d) = index.downloads.iter_mut().find(|d| d.server == server && d.file_id == file_id) {
             let kept = d.state == State::Done && d.path.is_file();
             if !kept && !matches!(d.state, State::Queued | State::Preparing | State::Downloading) {
+                if d.state == State::Failed {
+                    // A file the server failed to make is asked for anew.
+                    d.conversion = None;
+                }
                 d.state = State::Queued;
                 d.error = None;
             }
@@ -227,12 +231,13 @@ impl Downloads {
         Some(d)
     }
 
-    /// Download `id` again, after it failed.
+    /// Download `id` again, after it failed: a file the server failed to make is asked for anew.
     pub fn retry(&self, id: u64) -> Option<Download> {
         let d = self.update(id, |d| {
             if d.state == State::Failed {
                 d.state = State::Queued;
                 d.error = None;
+                d.conversion = None;
             }
         });
         self.wake.notify_one();
@@ -244,12 +249,36 @@ impl Downloads {
         self.index.lock().unwrap().downloads.iter().find(|d| d.state == State::Queued).cloned()
     }
 
-    /// Downloads that waited for their server, or for the file it makes, go again.
-    fn requeue_waiting(&self) {
+    /// Downloads in `state` (waiting for their server, or for the file it makes) go again.
+    fn requeue(&self, state: State) {
         let mut index = self.index.lock().unwrap();
-        for d in index.downloads.iter_mut().filter(|d| matches!(d.state, State::Waiting | State::Preparing)) {
+        for d in index.downloads.iter_mut().filter(|d| d.state == state) {
             d.state = State::Queued;
         }
+    }
+
+    /// Download `id` comes as conversion `conversion` the server makes: under an .mp4 name of its own
+    /// (none another download has, or will have), starting over. What came of another file goes.
+    fn switch_to(&self, id: u64, conversion: &str) -> Option<Download> {
+        let mut index = self.index.lock().unwrap();
+        let taken: Vec<PathBuf> = index.downloads.iter().filter(|d| d.id != id).map(|d| d.path.clone()).collect();
+        let d = index.downloads.iter_mut().find(|d| d.id == id)?;
+        if d.conversion.as_deref() != Some(conversion) {
+            let _ = std::fs::remove_file(part_of(&d.path));
+            d.received = 0;
+            d.size = None;
+            if d.path.extension().is_none_or(|e| !e.eq_ignore_ascii_case("mp4")) {
+                let name = Path::new(&d.name).with_extension("mp4").to_string_lossy().into_owned();
+                let dir = d.path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+                let taken: Vec<&Path> = taken.iter().map(PathBuf::as_path).collect();
+                d.path = free_path(&dir, &name, &taken);
+                d.name = d.path.file_name().map_or(name, |n| n.to_string_lossy().into_owned());
+            }
+            d.conversion = Some(conversion.to_owned());
+        }
+        let d = d.clone();
+        self.save(&index);
+        Some(d)
     }
 
     fn waiting(&self) -> bool {
@@ -461,26 +490,42 @@ pub async fn run<R: Runtime>(app: AppHandle<R>) {
     };
     let downloads = app.state::<Downloads>();
     let mut retry = RETRY_FIRST;
+    // When downloads waiting for their server go again: their pace, longer each time.
+    let mut waiting_until: Option<tokio::time::Instant> = None;
     loop {
         let Some(next) = downloads.next() else {
             let preparing = downloads.preparing();
-            if preparing || downloads.waiting() {
-                tokio::select! {
-                    () = downloads.wake.notified() => {}
-                    () = tokio::time::sleep(if preparing { PREPARING_POLL } else { retry }) => {
-                        downloads.requeue_waiting();
-                        if !preparing {
-                            retry = (retry * 2).min(RETRY_MAX);
-                        }
+            let waiting = downloads.waiting();
+            if !preparing && !waiting {
+                waiting_until = None;
+                downloads.wake.notified().await;
+                continue;
+            }
+            let now = tokio::time::Instant::now();
+            let waiting_due = waiting.then(|| *waiting_until.get_or_insert(now + retry));
+            let until = match (preparing, waiting_due) {
+                (true, Some(due)) => due.min(now + PREPARING_POLL),
+                (true, None) => now + PREPARING_POLL,
+                (false, due) => due.unwrap_or(now + RETRY_MAX),
+            };
+            tokio::select! {
+                () = downloads.wake.notified() => {}
+                () = tokio::time::sleep_until(until) => {
+                    if preparing {
+                        downloads.requeue(State::Preparing);
+                    }
+                    if waiting_due.is_some_and(|due| tokio::time::Instant::now() >= due) {
+                        downloads.requeue(State::Waiting);
+                        retry = (retry * 2).min(RETRY_MAX);
+                        waiting_until = None;
                     }
                 }
-            } else {
-                downloads.wake.notified().await;
             }
             continue;
         };
         if download(&app, &downloads, &client, &next).await {
             retry = RETRY_FIRST;
+            waiting_until = None;
         }
     }
 }
@@ -616,19 +661,10 @@ async fn for_quicktime<R: Runtime>(
     // A file of its own: named .mp4, and what came of another file goes.
     let Some(id) = made.id else { return Err(Problem::Gone) };
     let done = made.state == "done";
+    if downloads.switch_to(d.id, &id).is_none() {
+        return Ok(None);
+    }
     let changed = downloads.update(d.id, |d| {
-        if d.conversion.as_deref() != Some(id.as_str()) {
-            let _ = std::fs::remove_file(part_of(&d.path));
-            d.received = 0;
-            d.size = None;
-            if d.path.extension().is_none_or(|e| !e.eq_ignore_ascii_case("mp4")) {
-                let mp4 = Path::new(&d.name).with_extension("mp4");
-                let name = mp4.to_string_lossy().into_owned();
-                d.path = free_path(d.path.parent().unwrap_or(Path::new(".")), &name, &[]);
-                d.name = d.path.file_name().map_or(name, |n| n.to_string_lossy().into_owned());
-            }
-            d.conversion = Some(id.clone());
-        }
         if done {
             d.size = made.size.or(d.size);
         } else {
@@ -1048,6 +1084,42 @@ mod tests {
         let c = again.request("http://nas:7539", 7, None, "Alien (1979).mkv", 3);
         assert_eq!((c.id, c.path, c.item_id), (a.id, a.path, Some(42)));
         assert_eq!(again.request("http://nas:7539", 9, None, "Alien (1979).mkv", 4).name, "Alien (1979) (2).mkv");
+    }
+
+    #[test]
+    fn a_file_the_server_makes_takes_an_mp4_name_no_other_download_has() {
+        let dir = tempdir("switch");
+        let downloads = Downloads::load(dir.join("downloads.json"), dir.clone());
+        // Waiting its turn, nothing on the disk yet: its name is taken all the same.
+        let mp4 = downloads.request("http://nas:7539", 8, Some(41), "Alien (1979).mp4", 1);
+        let mkv = downloads.request("http://nas:7539", 7, Some(42), "Alien (1979).mkv", 2);
+        std::fs::write(part_of(&mkv.path), b"what came of the original").unwrap();
+
+        let switched = downloads.switch_to(mkv.id, MADE_ID).unwrap();
+
+        assert_eq!(switched.path, dir.join("Alien (1979) (2).mp4"));
+        assert_ne!(switched.path, mp4.path);
+        assert_eq!((switched.received, switched.conversion.as_deref()), (0, Some(MADE_ID)));
+        assert!(!part_of(&mkv.path).exists(), "what came of the original goes");
+        // The same conversion again changes nothing.
+        assert_eq!(downloads.switch_to(mkv.id, MADE_ID).unwrap().path, switched.path);
+    }
+
+    #[test]
+    fn a_file_the_server_failed_to_make_is_asked_for_anew() {
+        let dir = tempdir("retry");
+        let downloads = Downloads::load(dir.join("downloads.json"), dir.clone());
+        let d = downloads.request("http://nas:7539", 7, Some(42), "Alien (1979).mkv", 1);
+        downloads.switch_to(d.id, MADE_ID);
+        downloads.update(d.id, |d| d.state = State::Failed);
+
+        let again = downloads.retry(d.id).unwrap();
+        assert_eq!((again.state, again.conversion), (State::Queued, None));
+
+        downloads.switch_to(d.id, MADE_ID);
+        downloads.update(d.id, |d| d.state = State::Failed);
+        let asked = downloads.request("http://nas:7539", 7, Some(42), "Alien (1979).mkv", 2);
+        assert_eq!((asked.state, asked.conversion), (State::Queued, None));
     }
 
     #[test]

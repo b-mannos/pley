@@ -54,6 +54,7 @@ import app.pley.android.ui.phone.kit.PleyTopAppBar
 import app.pley.android.ui.phone.kit.TonalButton
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.shell.LocalPhoneShell
+import app.pley.android.ui.phone.shell.ReportLoad
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 
 /**
@@ -75,7 +76,7 @@ internal fun HistoryScreen() {
             HistoryUiState.Loading -> HistorySkeleton()
             is HistoryUiState.Failed -> ErrorState(stringResource(R.string.account_history_failed), s.error, onRetry = model::retry)
             is HistoryUiState.Ready -> {
-                LaunchedEffect(s.status) { shell.report(s.status) }
+                ReportLoad(s.status)
                 if (s.rows.isEmpty()) {
                     EmptyState(
                         title = stringResource(R.string.account_history_empty_title),

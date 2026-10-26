@@ -70,6 +70,7 @@ import app.pley.android.ui.phone.kit.PleyIconButton
 import app.pley.android.ui.phone.kit.PleyTopAppBar
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.shell.LocalPhoneShell
+import app.pley.android.ui.phone.shell.ReportLoad
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 import app.pley.android.ui.phone.theme.WidthClass
 
@@ -112,7 +113,7 @@ internal fun ItemScreen(itemId: Long) {
             navigator.open(s.key)
         }
         is ItemUiState.Ready -> {
-            LaunchedEffect(s.status) { shell.report(s.status) }
+            ReportLoad(s.status)
             LaunchedEffect(Unit) {
                 withFrameNanos { }
                 model.onShown()

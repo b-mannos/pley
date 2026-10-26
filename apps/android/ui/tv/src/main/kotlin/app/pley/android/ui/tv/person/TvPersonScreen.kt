@@ -25,7 +25,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.sentenceOf
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyTv
@@ -47,6 +46,8 @@ import app.pley.android.ui.tv.kit.TvRow
 import app.pley.android.ui.tv.kit.TvRowColumn
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.failedBody
+import app.pley.android.ui.tv.shell.failedTitle
 
 /**
  * A person's page on TV (design spec §4.9): the photo as a 160 dp circle
@@ -70,8 +71,8 @@ internal fun TvPersonScreen(personId: Long) {
                 icon = PleyIcons.UserRound,
             )
             is PersonUiState.Failed -> TvMessage(
-                title = stringResource(R.string.tv_person_failed),
-                body = sentenceOf(s.error),
+                title = failedTitle(s.error, stringResource(R.string.tv_person_failed)),
+                body = failedBody(s.error),
                 action = stringResource(R.string.tv_item_retry),
                 onAction = model::retry,
             )

@@ -71,6 +71,11 @@ internal class ServerLiveUpdates(
     override val events: Flow<ServerEvent>
         get() = heard.asSharedFlow().also { start() }
 
+    private val connected = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    override val answered: Flow<Unit>
+        get() = connected.asSharedFlow().also { start() }
+
     override fun start() {
         if (!started.compareAndSet(false, true)) return
         app.launch {
@@ -98,6 +103,7 @@ internal class ServerLiveUpdates(
             eventsOf(issuer).events().collect { live ->
                 when (live) {
                     LiveEvent.Reconnected -> {
+                        connected.tryEmit(Unit)
                         cache.revalidate(STALE_MS) { _, _ -> true }
                         if (session.meState.value?.fresh != true) launch { session.refresh() }
                     }

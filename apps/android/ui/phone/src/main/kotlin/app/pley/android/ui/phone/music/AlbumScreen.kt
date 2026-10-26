@@ -47,6 +47,7 @@ import app.pley.android.ui.phone.kit.PleyTopAppBar
 import app.pley.android.ui.phone.kit.StarRating
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.shell.LocalPhoneShell
+import app.pley.android.ui.phone.shell.ReportLoad
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 
 /**
@@ -91,7 +92,7 @@ internal fun AlbumScreen(albumId: Long, trackId: Long?) {
             )
             is MusicPageState.Failed -> ErrorState(stringResource(R.string.music_album_failed), s.error, onRetry = model::retry)
             is MusicPageState.Ready -> {
-                LaunchedEffect(s.status) { shell.report(s.status) }
+                ReportLoad(s.status)
                 val page = s.page
                 val metrics = LocalPhoneMetrics.current
                 // Opened from a track: it scrolls into view once the tracks are there.

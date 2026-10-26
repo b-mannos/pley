@@ -70,6 +70,7 @@ import androidx.tv.material3.Glow
 import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.Text
 import app.pley.android.common.Tier
+import app.pley.android.common.asSentence
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyFocus
 import app.pley.android.designsystem.PleyShape
@@ -427,7 +428,7 @@ internal fun BoxScope.TvPlayerError(
         BasicText(title, style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg, textAlign = TextAlign.Center))
         Spacer(Modifier.height(12.dp))
         BasicText(
-            message.replaceFirstChar { it.uppercase() }.let { if (it.endsWith('.')) it else "$it." },
+            asSentence(message),
             style = PleyType.Tv.Body.copy(color = PleyColors.Muted, textAlign = TextAlign.Center),
             maxLines = 4,
             overflow = TextOverflow.Ellipsis,

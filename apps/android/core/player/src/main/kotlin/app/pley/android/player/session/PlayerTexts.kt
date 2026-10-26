@@ -1,6 +1,7 @@
 package app.pley.android.player.session
 
 import android.content.Context
+import app.pley.android.common.asSentence
 import app.pley.android.model.PlaybackInfo
 import app.pley.android.model.PlaybackMethod
 import app.pley.android.player.R
@@ -37,8 +38,7 @@ interface PlayerTexts {
     val downloadNeedsServer: String get() = "This download doesn't play on this device as it is. It plays with the server in reach, which converts it."
 
     /** The server out of reach, for [reason] ("no answer in time"): what to check. */
-    fun unreachable(reason: String): String =
-        "${reason.replaceFirstChar { it.uppercase() }.trimEnd('.')}. Check that the server is on and that this device is on its network."
+    fun unreachable(reason: String): String = "${asSentence(reason)} Check that the server is on and that this device is on its network."
 
     /** What [method] means, when nothing more specific is known. */
     fun why(method: PlaybackMethod): String
@@ -139,8 +139,7 @@ class ResourcePlayerTexts(context: Context) : PlayerTexts {
     override val downloaded: String get() = s(R.string.session_method_downloaded)
     override val downloadNeedsServer: String get() = s(R.string.session_error_download_needs_server)
 
-    override fun unreachable(reason: String): String =
-        res.getString(R.string.session_error_unreachable, reason.replaceFirstChar { it.uppercase() }.trimEnd('.'))
+    override fun unreachable(reason: String): String = res.getString(R.string.session_error_unreachable, asSentence(reason))
 
     override fun stopped(message: String?, byAdmin: Boolean): String {
         val who = s(if (byAdmin) R.string.session_stopped_by_admin else R.string.session_stopped_elsewhere)

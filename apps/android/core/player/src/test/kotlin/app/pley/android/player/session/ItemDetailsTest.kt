@@ -4,6 +4,7 @@ import app.pley.android.data.ItemRepository
 import app.pley.android.data.Loadable
 import app.pley.android.model.CollectionSummary
 import app.pley.android.model.ItemDetail
+import app.pley.android.model.ItemKind
 import app.pley.android.model.ItemSummary
 import app.pley.android.network.OfflineException
 import app.pley.android.testing.network.FakePleyApi
@@ -21,13 +22,23 @@ class ItemDetailsTest {
 
     @Test
     fun aServerOutOfReachIsntAskedAgain() = runBlocking {
-        val away = OfflineException(IOException("no answer in time"))
-        val details = ItemDetails.snapshotFirst(items(Loadable.Failed(away)), api)
+        // What the cache held from before, then its new try, out of reach as well.
+        val details = ItemDetails.snapshotFirst(items(Loadable.Failed(away()), Loadable.Failed(away())), api)
 
         val error = runCatching { details.detail(7) }.exceptionOrNull()
 
         assertTrue(error is OfflineException)
         assertEquals("the repository's try was the one wait", 0, api.calls("item").size)
+    }
+
+    @Test
+    fun aFailureTheCacheHeldFromBeforeDoesntDecide() = runBlocking {
+        val alien = ItemDetail(id = 7, libraryId = 1, kind = ItemKind.Movie, title = "Alien")
+        // The server is back: the cache's new answer comes after what it held.
+        val details = ItemDetails.snapshotFirst(items(Loadable.Failed(away()), Loadable.Ready(alien, fresh = true)), api)
+
+        assertEquals(alien, details.detail(7))
+        assertEquals(0, api.calls("item").size)
     }
 
     @Test
@@ -39,8 +50,10 @@ class ItemDetailsTest {
         assertEquals(1, api.calls("item").size)
     }
 
-    private fun items(first: Loadable<ItemDetail>) = object : ItemRepository {
-        override fun detail(itemId: Long): Flow<Loadable<ItemDetail>> = flowOf(first)
+    private fun away() = OfflineException(IOException("no answer in time"))
+
+    private fun items(vararg answers: Loadable<ItemDetail>) = object : ItemRepository {
+        override fun detail(itemId: Long): Flow<Loadable<ItemDetail>> = flowOf(*answers)
 
         override fun children(itemId: Long): Flow<Loadable<List<ItemSummary>>> = flowOf(Loadable.Loading)
 

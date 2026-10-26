@@ -199,6 +199,11 @@ private fun AfterFirstFrame(shell: PhoneShellState, graph: () -> ScreensGraph) {
             val music = withContext(Dispatchers.Default) { g.player.music.nowPlaying }
             music.collect { shell.nowPlaying = it }
         }
+        launch {
+            // The server's events connected again: it answers, and the offline banner goes.
+            val answered = withContext(Dispatchers.Default) { g.data.liveUpdates.answered }
+            answered.collect { shell.answered() }
+        }
         launch(Dispatchers.Default) {
             runCatching { g.caps.capabilities.warmUp() }
         }

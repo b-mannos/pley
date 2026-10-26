@@ -26,6 +26,8 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
@@ -81,14 +83,15 @@ internal class DownloadRunner(
     private val conversionPollMs: Long = CONVERSION_POLL_MS,
     /** The wait after a lost network or server, longer each time. */
     private val backoffMs: Long = BACKOFF_MS,
-    /** The wait before asking again for a subtitle track the server is still reading. */
-    private val subtitleWaitMs: Long = SUBTITLE_WAIT_MS,
     /**
      * The server and profile signed in: only their downloads run, as the
-     * server's token is that profile's. `null`: every one (tests).
+     * server's token is that profile's. `null`: nobody is, and none runs.
      */
-    private val profile: () -> Pair<String, Long>? = { null },
+    private val profile: () -> Pair<String, Long>?,
 ) {
+    /** Subtitles are caught up one download at a time: the queue's, the app's opening and a run's never write the same file at once. */
+    private val catchingUp = Mutex()
+
     @Volatile
     private var current: Pair<Key, Job>? = null
 
@@ -120,15 +123,20 @@ internal class DownloadRunner(
      * network they may use for [waitMs]. Returns whether some still wait.
      * Subtitles that downloads kept cut short are asked for first.
      */
-    suspend fun run(waitMs: Long = WAIT_MS): Boolean {
-        finishCutSubtitles(profile())
+    suspend fun run(waitMs: Long = WAIT_MS): Boolean = coroutineScope {
+        // Beside the queue: a server out of reach mustn't hold the downloads up.
+        profile()?.let { launch { finishCutSubtitles(it) } }
+        runQueue(waitMs)
+    }
+
+    private suspend fun runQueue(waitMs: Long): Boolean {
         var failures = 0
         while (true) {
             currentCoroutineContext().ensureActive()
-            val signedIn = profile()
+            val signedIn = profile() ?: return false
             val pending = store.all.value.filter {
                 (it.state == DownloadState.Queued || it.state == DownloadState.Waiting) &&
-                    (signedIn == null || (it.server == signedIn.first && it.userId == signedIn.second))
+                    it.server == signedIn.first && it.userId == signedIn.second
             }
             if (pending.isEmpty()) return false
             val now = clock()
@@ -173,8 +181,8 @@ internal class DownloadRunner(
                 s = keep(key) { it.copy(state = DownloadState.Downloading) }
                 fetchMedia(s)
                 s = store.update(key) { it.copy(state = DownloadState.Done, downloadedBytes = it.sizeBytes, error = null) } ?: s
-                // Read whole by the server meanwhile, as a rule.
-                finishSubtitles(s, SUBTITLE_TRIES)
+                // Read whole by the server meanwhile, as a rule; else when the app opens again.
+                catchingUp.withLock { finishSubtitles(s) }
                 Outcome.Done
             }
         } catch (e: CancellationException) {
@@ -237,7 +245,7 @@ internal class DownloadRunner(
         val partial = mutableListOf<Int>()
         val subtitles = tracks.mapNotNull { track ->
             try {
-                if (!saveSubtitles(saved, api, track.index, tries = 1)) partial += track.index
+                if (!saveSubtitles(saved, api, track.index)) partial += track.index
                 track.index
             } catch (e: CancellationException) {
                 throw e
@@ -258,35 +266,28 @@ internal class DownloadRunner(
     }
 
     /**
-     * A text track as the server's WebVTT, asked for up to [tries] times
-     * while the server is still reading it out of the file, and saved as
-     * far as it goes. Whether it came whole.
+     * A text track as the server's WebVTT, saved as far as it goes: the
+     * server may still be reading it out of the file. Whether it came whole.
      */
-    private suspend fun saveSubtitles(saved: Saved, api: PleyApi, index: Int, tries: Int): Boolean {
+    private suspend fun saveSubtitles(saved: Saved, api: PleyApi, index: Int): Boolean {
         val client = sources.subtitles(saved.server)
         val url = api.url("/api/files/${saved.fileId}/subtitles/$index.vtt")
-        var attempt = 0
-        while (true) {
-            val (text, complete) = call(client, Request.Builder().url(url).header("Accept", "text/vtt").build()) { response ->
-                if (!response.isSuccessful) throw ApiException.from(response)
-                response.body.string() to (response.header(HttpPleyApi.SUBTITLES_COMPLETE_HEADER)?.trim() != "0")
-            }
-            if (complete || ++attempt >= tries) {
-                // Never into the folder of a download deleted meanwhile.
-                if (store.get(saved.key) != null) withContext(io) { writeWhole(store.subtitleOf(saved, index), text) }
-                return complete
-            }
-            delay(subtitleWaitMs)
+        val (text, complete) = call(client, Request.Builder().url(url).header("Accept", "text/vtt").build()) { response ->
+            if (!response.isSuccessful) throw ApiException.from(response)
+            response.body.string() to (response.header(HttpPleyApi.SUBTITLES_COMPLETE_HEADER)?.trim() != "0")
         }
+        // Never into the folder of a download deleted meanwhile.
+        if (store.get(saved.key) != null) withContext(io) { writeWhole(store.subtitleOf(saved, index), text) }
+        return complete
     }
 
-    /** The subtitle tracks of [saved] that came cut short, asked for again up to [tries] times each. */
-    private suspend fun finishSubtitles(saved: Saved, tries: Int) {
+    /** The subtitle tracks of [saved] that came cut short, asked for again. */
+    private suspend fun finishSubtitles(saved: Saved) {
         if (saved.partialSubtitles.isEmpty()) return
         val api = sources.api(saved.server, saved.userId)
         val whole = saved.partialSubtitles.filterTo(HashSet()) { index ->
             try {
-                saveSubtitles(saved, api, index, tries)
+                saveSubtitles(saved, api, index)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: IOException) {
@@ -298,17 +299,17 @@ internal class DownloadRunner(
     }
 
     /**
-     * Downloads of [signedIn] (every one when `null`) whose subtitles still
-     * fall short, the app closed before the server had read them whole:
-     * asked for once more, with their server in reach.
+     * Downloads of [signedIn] whose subtitles still fall short (the app
+     * closed before the server had read them whole): asked for once more,
+     * with their server in reach.
      */
-    internal suspend fun finishCutSubtitles(signedIn: Pair<String, Long>?) {
+    internal suspend fun finishCutSubtitles(signedIn: Pair<String, Long>) = catchingUp.withLock {
         val short = store.all.value.filter {
             it.state == DownloadState.Done && it.partialSubtitles.isNotEmpty() &&
-                (signedIn == null || (it.server == signedIn.first && it.userId == signedIn.second))
+                it.server == signedIn.first && it.userId == signedIn.second
         }
         for (saved in short) {
-            if (gate.open(mobileAllowed(), saved.server)) finishSubtitles(saved, tries = 1)
+            if (gate.open(mobileAllowed(), saved.server)) finishSubtitles(saved)
         }
     }
 
@@ -517,8 +518,6 @@ internal class DownloadRunner(
         const val PROGRESS_MS = 500L
         const val BUFFER_BYTES = 256 * 1024
         const val IMAGE_WIDTH = 640
-        const val SUBTITLE_TRIES = 20
-        const val SUBTITLE_WAIT_MS = 3_000L
 
         /** How often a conversion the server is making is looked at. */
         const val CONVERSION_POLL_MS = 5_000L

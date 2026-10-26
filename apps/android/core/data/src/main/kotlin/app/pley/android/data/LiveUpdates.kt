@@ -38,4 +38,10 @@ interface LiveUpdates {
      * listens for its session being stopped). Nothing is replayed.
      */
     val events: Flow<ServerEvent> get() = emptyFlow()
+
+    /**
+     * Each time the event stream connects, the first time or again after a
+     * break: the server answers now (the shells lower their offline notices).
+     */
+    val answered: Flow<Unit> get() = emptyFlow()
 }

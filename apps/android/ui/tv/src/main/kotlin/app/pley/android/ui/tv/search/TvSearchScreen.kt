@@ -1,5 +1,7 @@
 package app.pley.android.ui.tv.search
 
+import app.pley.android.ui.tv.shell.failedTitle
+import app.pley.android.ui.tv.shell.failedBody
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,7 +40,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.sentenceOf
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyTv
@@ -166,8 +167,8 @@ internal fun TvSearchContent(
                 stringResource(R.string.tv_search_none_body),
             )
             is SearchResultsState.Failed -> Notice(
-                stringResource(R.string.tv_search_failed),
-                sentenceOf(results.error),
+                failedTitle(results.error, stringResource(R.string.tv_search_failed)),
+                failedBody(results.error),
             )
             is SearchResultsState.Ready -> {
                 val names = groupNames()

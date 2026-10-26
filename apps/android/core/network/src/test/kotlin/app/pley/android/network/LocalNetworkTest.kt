@@ -76,9 +76,11 @@ class LocalNetworkTest {
         for (home in listOf("nas", "nas.local", "pley.lan", "box.home.arpa")) assertTrue(home, LocalRoute.isHomeName(home))
         for (away in listOf("localhost", "pley.example.com", "nas.tail1234.ts.net", "192.168.1.5", "fd00::1")) {
             assertFalse(away, LocalRoute.isHomeName(away))
-        for (home in listOf("192.168.1.20", "10.0.2.2", "fd00::20", "[fd00::20]", "fe80::1", "nas", "nas.local"))
+        }
+        for (home in listOf("192.168.1.20", "10.0.2.2", "fd00::20", "[fd00::20]", "fe80::1", "nas", "nas.local")) {
             assertTrue(home, LocalRoute.isHomeHost(home))
-        for (away in listOf("8.8.8.8", "100.101.102.103", "127.0.0.1", "pley.example.com", "box.tail1234.ts.net", "2001:db8::1", ""))
+        }
+        for (away in listOf("8.8.8.8", "100.101.102.103", "127.0.0.1", "pley.example.com", "box.tail1234.ts.net", "2001:db8::1", "")) {
             assertFalse(away, LocalRoute.isHomeHost(away))
         }
     }
