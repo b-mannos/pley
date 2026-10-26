@@ -145,7 +145,13 @@ fun PhonePlayerScreen(
                 it,
                 onRetry = state.controller::retry,
                 onBack = host::back,
-                title = stringResource(if (state.stoppedByServer) R.string.player_stopped_title else R.string.player_error_title),
+                title = stringResource(
+                    when {
+                        state.stoppedByServer -> R.string.player_stopped_title
+                        it.offline -> R.string.player_offline_title
+                        else -> R.string.player_error_title
+                    },
+                ),
             )
         }
         ToastHost(

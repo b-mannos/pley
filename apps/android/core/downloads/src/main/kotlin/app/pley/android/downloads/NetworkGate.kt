@@ -7,7 +7,6 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import app.pley.android.network.LocalRoute
-import java.net.InetAddress
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.first
@@ -75,14 +74,5 @@ internal class AndroidNetworkGate(context: Context) : NetworkGate {
     }
 
     /** Whether [server] is at a home address or name, which LocalRoute reaches over the home network. */
-    private fun atHome(server: String): Boolean {
-        val host = server.toHttpUrlOrNull()?.host ?: return false
-        val literal = host.contains(':') || host.all { it.isDigit() || it == '.' }
-        return if (literal) {
-            // A literal address is parsed, never looked up.
-            runCatching { LocalRoute.isHomeAddress(InetAddress.getByName(host)) }.getOrDefault(false)
-        } else {
-            LocalRoute.isHomeName(host)
-        }
-    }
+    private fun atHome(server: String): Boolean = server.toHttpUrlOrNull()?.host?.let(LocalRoute::isHomeHost) ?: false
 }

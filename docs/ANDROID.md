@@ -49,6 +49,16 @@ whose Wi-Fi has no internet, traffic to the server at home goes over the
 Wi-Fi even while the phone's default network is mobile data
 (`LocalRoute`). Away from the server, phones and tablets play downloads.
 
+With the server out of reach, the screens show what was saved of them,
+under "Showing what pley had saved. Reconnecting…": a banner under the
+top bar on phones (leading to the downloads), a notice at the top right
+on TVs. The server's event stream keeps trying, and the screens come back
+on their own once it answers. A home address or name (`192.168.…`,
+`nas.local`) has 3 s to accept a connection rather than OkHttp's 10, as
+one at home accepts at once or never (`HttpRoot.homeConnectTimeout`), so
+pressing play with the server off says "Can't reach your server" within
+seconds, with Try again.
+
 Downloads (`:core:downloads`) keep the original file of a movie or an
 episode (of several versions, the sharpest up to 1080p of those the
 device plays as they are, by the player's capabilities), with its
@@ -73,21 +83,20 @@ an episode's page, beside each episode of a season (and for the whole
 season), and they are listed under Me → Downloads, which the offline
 banner leads to as well.
 
-A downloaded file plays from the device whether the server answers or
-not ("Downloaded" in the player); a quality picked by hand streams from
-the server instead, and so does a download whose file isn't the one the
-server now has under that number (by its name and size: a server whose
-database was made anew numbers its files again). A download waits 1.5 s at most for the server's
-details, then starts from the ones saved with it (away from home, the
-server's address can take long to fail). Progress is kept on the device
-while the server is out of reach, then sent when it answers again (the
-app opening, a network coming up), each report with its `age_ms`: the
-server keeps what happened to the item since (docs/API.md). An episode
-played from a download goes on to the next one of its show downloaded
-when the server doesn't say what's next within 3 s. A download the device
-can't decode after all falls back to the server, which converts it; with
-the server away, the player says so. TVs stay where the server is and
-download nothing.
+A downloaded file plays from the device whether the server answers or not
+("Downloaded" in the player); a quality picked by hand streams from the
+server instead, and so does a download whose file isn't the one the server
+now has under that number (by its name and size: a server whose database was
+made anew numbers its files again). A download waits 1.5 s at most for the
+server's details, then starts from the ones saved with it (away from home,
+the server's address can take long to fail). Progress is kept on the device
+while the server is out of reach, then sent when it answers again (the app
+opening, a network coming up), each report with its `age_ms`: the server
+keeps what happened to the item since (docs/API.md). An episode played from
+a download goes on to the next one of its show downloaded when the server
+doesn't say what's next within 3 s. A download the device can't decode after
+all falls back to the server, which converts it; with the server away, the
+player says so. TVs stay where the server is and download nothing.
 
 ## Updating from the web view app
 

@@ -53,6 +53,7 @@ import app.pley.android.ui.tv.kit.rememberBackdropPrefetcher
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberRested
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.LocalTvOffline
 import app.pley.android.ui.tv.theme.LocalTvTier
 import kotlinx.coroutines.launch
 
@@ -78,6 +79,16 @@ internal fun TvHomeScreen(vm: HomeViewModel = viewModel(factory = HomeViewModel.
     val navigator = LocalTvNavigator.current
     var message by remember { mutableStateOf<HomeMessage?>(null) }
     LaunchedEffect(vm) { vm.messages.collect { message = it } }
+    // The offline notice: up while what shows is what was saved, down once the server answers.
+    val offline = LocalTvOffline.current
+    val reported = model?.state
+    LaunchedEffect(reported, offline) {
+        when (reported) {
+            is HomeState.Ready -> offline.report(reported.fresh, reported.error)
+            is HomeState.Failed -> offline.report(fresh = false, error = reported.error)
+            else -> Unit
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         val shown = model

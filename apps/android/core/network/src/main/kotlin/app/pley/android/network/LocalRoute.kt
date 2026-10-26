@@ -94,5 +94,17 @@ class LocalRoute internal constructor(private val bypass: () -> Lan?) {
             if (Regex("""^[\d.]+$""").matches(h) || h.contains(':')) return false
             return Servers.isLocalHost(h)
         }
+
+        /**
+         * Whether [host], as an address writes it, is on the home network: a
+         * home address (parsed, never looked up) or a home name.
+         */
+        fun isHomeHost(host: String): Boolean {
+            val h = host.removePrefix("[").removeSuffix("]")
+            if (h.isEmpty()) return false
+            val literal = h.contains(':') || h.all { it.isDigit() || it == '.' }
+            if (!literal) return isHomeName(h)
+            return runCatching { isHomeAddress(InetAddress.getByName(h)) }.getOrDefault(false)
+        }
     }
 }

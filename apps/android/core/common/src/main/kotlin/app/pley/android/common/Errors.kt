@@ -14,7 +14,7 @@ class NotBuiltYet(what: String) : UnsupportedOperationException("$what isn't bui
 
 /** Why a request failed, in a few words for people. */
 fun describe(error: Throwable): String = when (error) {
-    is java.net.ConnectException -> "nothing answers there"
+    is java.net.ConnectException, is java.net.NoRouteToHostException -> "nothing answers there"
     is java.net.SocketTimeoutException -> "no answer in time"
     is java.net.UnknownHostException -> "that address isn't known on this network"
     is javax.net.ssl.SSLException -> "its secure connection failed"

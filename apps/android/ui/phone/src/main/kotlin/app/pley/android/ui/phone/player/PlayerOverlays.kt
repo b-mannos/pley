@@ -392,7 +392,7 @@ internal fun ErrorOverlay(error: PlayerPhase.Error, onRetry: () -> Unit, onBack:
             Modifier.widthIn(max = 480.dp).padding(24.dp).semantics { liveRegion = LiveRegionMode.Assertive },
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(PleyIcons.TriangleAlert, contentDescription = null, size = 40.dp, tint = PleyColors.Muted)
+            Icon(if (error.offline) PleyIcons.ServerOff else PleyIcons.TriangleAlert, contentDescription = null, size = 40.dp, tint = PleyColors.Muted)
             Text(
                 title,
                 style = MaterialTheme.typography.titleLarge,

@@ -67,7 +67,9 @@
     <string name="session_error_stuck">This video doesn\'t play on this device: it stops at the same spot each time.</string>
     <string name="session_error_short">This video ends before the point it was to play from.</string>
     <string name="session_error_stopped">Playback stopped and couldn\'t get going again.</string>
-    <string name="session_error_network">The server can\'t be reached.</string>
+    <string name="session_error_network">Check that the server is on and that this device is on its network.</string>
+    <!-- "No answer in time. Check that…": why the server couldn\'t be reached, then what to check. -->
+    <string name="session_error_unreachable">%1$s. Check that the server is on and that this device is on its network.</string>
     <!-- "Playback failed (ERROR_CODE_DECODING_FAILED)." -->
     <string name="session_error_engine">Playback failed (%1$s).</string>
     <string name="session_error_no_file">This item has no file to play.</string>

@@ -399,7 +399,13 @@ internal fun TvPlayerScreen(
                 ui,
                 onRetry = controller::retry,
                 onBack = exit,
-                title = if (stopped) stringResource(R.string.tv_player_stopped_title) else stringResource(R.string.tv_player_error_title),
+                title = stringResource(
+                    when {
+                        stopped -> R.string.tv_player_stopped_title
+                        error.offline -> R.string.tv_player_offline_title
+                        else -> R.string.tv_player_error_title
+                    },
+                ),
             )
         }
         TvPlayerToast(ui.toast, ui.controls, ui::clearToast)

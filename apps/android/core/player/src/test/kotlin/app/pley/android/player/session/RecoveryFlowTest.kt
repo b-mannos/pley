@@ -289,7 +289,26 @@ class RecoveryFlowTest {
             h.settle()
         }
         assertEquals(4, starts())
-        assertEquals(PlayerPhase.Error("The server can't be reached.", canRetry = true), c.state.value.phase)
+        assertEquals(
+            PlayerPhase.Error("Check that the server is on and that this device is on its network.", canRetry = true, offline = true),
+            c.state.value.phase,
+        )
+    }
+
+    @Test
+    fun `a server out of reach when playing starts says so, and Try again plays once it answers`() {
+        h.api.unreachable += "startPlayback"
+        val c = h.play(PlayRequest(FixtureIds.SAMPLE_1080P))
+        val phase = c.state.value.phase as PlayerPhase.Error
+        assertTrue(phase.offline)
+        assertTrue(phase.canRetry)
+        assertEquals("StartPlayback: the server is away. Check that the server is on and that this device is on its network.", phase.message)
+
+        h.api.unreachable -= "startPlayback"
+        c.retry()
+        h.settle()
+        assertFalse(c.state.value.phase is PlayerPhase.Error)
+        assertEquals("asked once more", 2, h.api.count("startPlayback"))
     }
 
     @Test

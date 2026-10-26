@@ -1,6 +1,7 @@
 package app.pley.android.network
 
 import app.pley.android.common.DeviceProfile
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
@@ -21,6 +22,14 @@ object HttpRoot {
      * so a request never goes out on a connection the server is closing.
      */
     const val KEEP_ALIVE_SECONDS = 25L
+
+    /**
+     * How long a server at a home address or name (192.168.…, `nas.local`)
+     * has to accept a connection, in seconds: at home one accepts at once
+     * or not at all, and away from home its address leads nowhere, which
+     * OkHttp's 10 s (kept for names on the internet) only says later.
+     */
+    const val HOME_CONNECT_SECONDS = 3L
 
     /** Requests at once, for the whole app. */
     const val MAX_REQUESTS = 64
@@ -51,8 +60,25 @@ object HttpRoot {
         .followSslRedirects(false)
         .retryOnConnectionFailure(true)
         .addInterceptor(userAgent(userAgent))
+        .addInterceptor(homeConnectTimeout())
         .apply { localRoute?.applyTo(this) }
         .build()
+
+    /** Gives a connection to a home host [HOME_CONNECT_SECONDS] at most to be accepted. */
+    fun homeConnectTimeout(): Interceptor {
+        val limitMs = TimeUnit.SECONDS.toMillis(HOME_CONNECT_SECONDS).toInt()
+        val home = ConcurrentHashMap<String, Boolean>()
+        return Interceptor { chain ->
+            val request = chain.request()
+            val host = request.url.host
+            val current = chain.connectTimeoutMillis()
+            if ((current == 0 || current > limitMs) && home.getOrPut(host) { LocalRoute.isHomeHost(host) }) {
+                chain.withConnectTimeout(limitMs, TimeUnit.MILLISECONDS).proceed(request)
+            } else {
+                chain.proceed(request)
+            }
+        }
+    }
 
     /** Sets `User-Agent` on every request. */
     fun userAgent(value: String): Interceptor = Interceptor { chain ->

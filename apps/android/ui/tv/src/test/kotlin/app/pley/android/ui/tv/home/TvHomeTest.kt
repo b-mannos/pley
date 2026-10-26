@@ -17,6 +17,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -32,6 +33,7 @@ import app.pley.android.data.Loadable
 import app.pley.android.model.Hubs
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryKind
+import app.pley.android.network.OfflineException
 import app.pley.android.screens.PleyKey
 import app.pley.android.screens.home.HomeViewModel
 import app.pley.android.screens.home.LibrariesViewModel
@@ -39,9 +41,13 @@ import app.pley.android.testing.Fixtures
 import app.pley.android.ui.tv.kit.LocalTvRailFocus
 import app.pley.android.ui.tv.kit.TvRailFocus
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.LocalTvOffline
+import app.pley.android.ui.tv.shell.TvOfflineNotice
+import app.pley.android.ui.tv.shell.TvOfflineState
 import app.pley.android.ui.tv.shell.RailState
 import app.pley.android.ui.tv.shell.TvNavigator
 import app.pley.android.ui.tv.theme.TvTheme
+import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -125,6 +131,30 @@ class TvHomeTest {
         assertEquals("See all", focusedDescription())
         press(Key.DirectionLeft)
         assertTrue(focusedDescription(), focusedDescription().startsWith("Dune: Part Two"))
+    }
+
+    @Test
+    fun savedRowsWithTheServerAwaySaySoUntilItAnswers() {
+        val saved = Fixtures.decode<Hubs>("hubs/home.json")
+        sources.home.value = Loadable.Failed(OfflineException(IOException("no answer in time")), saved)
+        val offline = TvOfflineState()
+        val vm = HomeViewModel(sources, Dispatchers.Unconfined)
+        compose.setContent {
+            CompositionLocalProvider(LocalTvOffline provides offline) {
+                Box(Modifier.fillMaxSize()) {
+                    Page(vm)
+                    TvOfflineNotice(offline)
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Severance").assertExists()
+        compose.onNodeWithText("Showing what pley had saved. Reconnecting…").assertIsDisplayed()
+        compose.onNodeWithText("Resume").assertIsFocused()
+
+        sources.home.value = Loadable.Ready(saved, fresh = true)
+        compose.waitForIdle()
+        compose.onNodeWithText("Showing what pley had saved. Reconnecting…").assertDoesNotExist()
     }
 
     @Test

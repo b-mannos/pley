@@ -163,7 +163,7 @@ internal class HttpServerProbe(
 
     companion object {
         /** How long a home address has to accept the connection. */
-        const val LOCAL_CONNECT_SECONDS = 3L
+        const val LOCAL_CONNECT_SECONDS = HttpRoot.HOME_CONNECT_SECONDS
 
         /** How long a name on the internet has to accept it. */
         const val CONNECT_SECONDS = 10L

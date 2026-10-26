@@ -63,6 +63,7 @@ import app.pley.android.ui.tv.kit.FocusMemory
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberedFocus
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.ReportOffline
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -297,6 +298,7 @@ private fun TvLibraryTab(
         Spacer(Modifier.height(GridTop - ChipsTop - 40.dp - TileRoom))
         Box(Modifier.weight(1f).fillMaxWidth()) {
             val failed = state.grid.cells as? Loadable.Failed
+            ReportOffline(state.grid.cells)
             when {
                 failed != null && cells == null -> TvMessage(
                     title = stringResource(R.string.tv_library_failed),

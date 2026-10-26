@@ -643,7 +643,11 @@ class SessionPlaybackController(
                 }
             }
             Recovery.Action.SuggestLowerQuality -> ui.update { it.copy(suggestLowerQuality = true, note = texts.slowServer) }
-            is Recovery.Action.Fail -> fail(texts.failure(action.failure, action.detail), canRetry = action.failure != Failure.Unplayable)
+            is Recovery.Action.Fail -> fail(
+                texts.failure(action.failure, action.detail),
+                canRetry = action.failure != Failure.Unplayable,
+                offline = action.failure == Failure.Network,
+            )
         }
     }
 
@@ -1267,13 +1271,16 @@ class SessionPlaybackController(
 
     private fun notice(text: String) = ui.update { it.copy(notice = text) }
 
-    private fun fail(message: String, canRetry: Boolean) {
-        ui.update { it.copy(phase = PlayerPhase.Error(message, canRetry), skipLabel = null) }
+    private fun fail(message: String, canRetry: Boolean, offline: Boolean = false) {
+        ui.update { it.copy(phase = PlayerPhase.Error(message, canRetry, offline), skipLabel = null) }
     }
 
     private fun failWith(error: Exception) {
         // A download that didn't play here as it is went to the server, which is out of reach.
         val leftDownload = recovery.fallbackMode != null && file?.let { localFile(it.id) } != null
+        if (error is OfflineException && !leftDownload) {
+            return fail(if (error.blocked) describe(error) else texts.unreachable(describe(error)), canRetry = true, offline = true)
+        }
         val message = if (leftDownload && error is OfflineException) texts.downloadNeedsServer else describe(error)
         val canRetry = !(error is ApiException && (error.status == 403 || error.status == 404 || error.signedOut))
         fail(message, canRetry)

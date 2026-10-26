@@ -426,7 +426,12 @@ internal fun BoxScope.TvPlayerError(
     ) {
         BasicText(title, style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg, textAlign = TextAlign.Center))
         Spacer(Modifier.height(12.dp))
-        BasicText(message, style = PleyType.Tv.Body.copy(color = PleyColors.Muted, textAlign = TextAlign.Center), maxLines = 4, overflow = TextOverflow.Ellipsis)
+        BasicText(
+            message.replaceFirstChar { it.uppercase() }.let { if (it.endsWith('.')) it else "$it." },
+            style = PleyType.Tv.Body.copy(color = PleyColors.Muted, textAlign = TextAlign.Center),
+            maxLines = 4,
+            overflow = TextOverflow.Ellipsis,
+        )
         Spacer(Modifier.height(32.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             val first = Modifier

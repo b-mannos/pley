@@ -5,9 +5,13 @@ import app.pley.android.common.Tier
 import app.pley.android.testing.network.MockPley
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -31,6 +35,35 @@ class NetworkGraphTest {
         assertFalse(root.followSslRedirects)
         assertTrue(root.retryOnConnectionFailure)
         assertTrue(HttpRoot.KEEP_ALIVE_SECONDS < 30)
+    }
+
+    @Test
+    fun aHomeAddressHasThreeSecondsToAnswer() {
+        // What each request would connect with, read past the root's own interceptors.
+        val seen = mutableMapOf<String, Int>()
+        val client = HttpRoot.create(TEST_AGENT, testProfile()).newBuilder()
+            .addInterceptor(
+                Interceptor { chain ->
+                    seen[chain.request().url.host] = chain.connectTimeoutMillis()
+                    Response.Builder()
+                        .request(chain.request())
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(204)
+                        .message("No Content")
+                        .body(ByteArray(0).toResponseBody())
+                        .build()
+                },
+            )
+            .build()
+        val home = listOf("http://192.168.1.20:7539", "http://10.0.2.2:7712", "http://nas.local:7539", "http://nas:7539", "http://[fd00::20]:7539")
+        val away = listOf("https://pley.example.com", "http://100.101.102.103:7539", "http://8.8.8.8")
+        for (url in home + away) client.newCall(Request.Builder().url("$url/api/health").build()).execute().close()
+
+        for (url in home) assertEquals(url, 3_000, seen.getValue(url.toHttpUrl().host))
+        for (url in away) assertEquals("$url keeps the default", 10_000, seen.getValue(url.toHttpUrl().host))
+        val shorter = client.newBuilder().connectTimeout(1, java.util.concurrent.TimeUnit.SECONDS).build()
+        shorter.newCall(Request.Builder().url("http://192.168.1.20:7539/").build()).execute().close()
+        assertEquals("a shorter wait stays", 1_000, seen.getValue("192.168.1.20"))
     }
 
     @Test

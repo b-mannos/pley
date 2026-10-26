@@ -55,6 +55,7 @@
 
     <!-- Errors and notices. -->
     <string name="player_error_title">Can\'t play this item</string>
+    <string name="player_offline_title">Can\'t reach your server</string>
     <string name="player_try_again">Try again</string>
     <string name="player_play_original">Play original</string>
     <string name="player_lower_quality">Lower quality</string>

@@ -24,8 +24,11 @@ sealed interface PlayerPhase {
     /** The end, with nothing next: the screen goes back to where playing started. */
     data object Ended : PlayerPhase
 
-    /** It stopped: [message] for people, and whether trying again may help. */
-    data class Error(val message: String, val canRetry: Boolean) : PlayerPhase
+    /**
+     * It stopped: [message] for people, and whether trying again may help.
+     * [offline]: the server couldn't be reached ("Can't reach your server").
+     */
+    data class Error(val message: String, val canRetry: Boolean, val offline: Boolean = false) : PlayerPhase
 }
 
 /** An audio or subtitle track as the player's menus show it. */

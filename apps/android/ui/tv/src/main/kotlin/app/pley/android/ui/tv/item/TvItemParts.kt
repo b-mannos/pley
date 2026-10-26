@@ -64,6 +64,8 @@ import app.pley.android.designsystem.tile.TileStyle
 import app.pley.android.screens.item.MetaPart
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.kit.TvTextButton
+import app.pley.android.ui.tv.shell.LocalTvOffline
+import app.pley.android.ui.tv.shell.offlineStep
 import kotlinx.coroutines.delay
 
 /**
@@ -202,7 +204,12 @@ internal fun TvToastHost(state: TvToastState, modifier: Modifier = Modifier) {
             state.clear(toast)
         }
     }
-    Box(modifier.fillMaxSize().padding(horizontal = TvSafeArea.Horizontal, vertical = TvSafeArea.Vertical), contentAlignment = Alignment.TopEnd) {
+    // Under the offline notice while it shows.
+    val step = offlineStep(LocalTvOffline.current)
+    Box(
+        modifier.fillMaxSize().padding(horizontal = TvSafeArea.Horizontal, vertical = TvSafeArea.Vertical).padding(top = step),
+        contentAlignment = Alignment.TopEnd,
+    ) {
         AnimatedVisibility(toast != null, enter = fadeIn(PleyMotion.reveal()), exit = fadeOut(PleyMotion.reveal())) {
             val shown = remember { mutableStateOf(toast) }
             if (toast != null) shown.value = toast

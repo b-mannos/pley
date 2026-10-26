@@ -66,6 +66,7 @@ import app.pley.android.model.Credit
 import app.pley.android.model.CreditRole
 import app.pley.android.model.ItemKind
 import app.pley.android.model.ItemSummary
+import app.pley.android.network.OfflineException
 import app.pley.android.screens.item.CrewLine
 import app.pley.android.screens.item.EpisodeLine
 import app.pley.android.screens.item.ItemEvent
@@ -84,6 +85,7 @@ import app.pley.android.ui.tv.kit.readOn
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberRested
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.ReportOffline
 import app.pley.android.ui.tv.shell.TvNavigator
 import app.pley.android.ui.tv.theme.LocalTvTier
 
@@ -141,7 +143,9 @@ internal fun TvItemScreen(model: ItemViewModel) {
                     withFrameNanos { }
                     model.onShown()
                 }
-                (s.status as? app.pley.android.data.Loadable.Failed)?.let { failed ->
+                // Out of reach, the offline notice says so; another failure, a toast.
+                ReportOffline(s.status)
+                (s.status as? app.pley.android.data.Loadable.Failed)?.takeIf { it.error !is OfflineException }?.let { failed ->
                     LaunchedEffect(failed.error) { toasts.report(failed.error) }
                 }
                 TvItemPage(s.page, model, navigator, toasts)

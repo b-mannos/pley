@@ -134,6 +134,7 @@ private fun TvShell(
     val items = remember(libraries, music) { railItems(libraries, nowPlaying = music) }
     val content = remember { FocusRequester() }
     val rail = remember { RailState(content) }
+    val offline = remember { TvOfflineState() }
     val navigator = remember(backStack) { TvNavigator(backStack, rail, onExit) }
     val root = navigator.root ?: start
     rail.current = railCurrent(root, items + SettingsItem)
@@ -190,7 +191,11 @@ private fun TvShell(
                     if (a > 0f) drawRect(PleyColors.Bg.copy(alpha = a))
                 },
         ) {
-            CompositionLocalProvider(LocalTvNavigator provides navigator, LocalTvRailFocus provides rail.takeIf { it.shown }) {
+            CompositionLocalProvider(
+                LocalTvNavigator provides navigator,
+                LocalTvRailFocus provides rail.takeIf { it.shown },
+                LocalTvOffline provides offline,
+            ) {
                 NavDisplay(
                     backStack = backStack,
                     onBack = { navigator.back() },
@@ -214,6 +219,8 @@ private fun TvShell(
                     },
                 )
             }
+            // Signing in and choosing a profile say for themselves when the server can't be reached.
+            if (rail.shown) TvOfflineNotice(offline)
         }
     }
 }

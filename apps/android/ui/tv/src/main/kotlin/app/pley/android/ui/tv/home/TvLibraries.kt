@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +52,7 @@ import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberedFocus
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.LocalTvOffline
 
 /**
  * Every library (design spec §2.1): the rail shows the first three, and
@@ -63,6 +65,14 @@ import app.pley.android.ui.tv.shell.LocalTvNavigator
 internal fun TvLibrariesScreen(vm: LibrariesViewModel = viewModel(factory = LibrariesViewModel.Factory)) {
     val state by vm.state.collectAsStateWithLifecycle()
     val navigator = LocalTvNavigator.current
+    val offline = LocalTvOffline.current
+    LaunchedEffect(state, offline) {
+        when (val s = state) {
+            is LibrariesState.Ready -> offline.report(s.fresh, s.error)
+            is LibrariesState.Failed -> offline.report(fresh = false, error = s.error)
+            LibrariesState.Loading -> Unit
+        }
+    }
     when (val s = state) {
         LibrariesState.Loading -> Unit
         is LibrariesState.Failed -> TvHomeNotice(stringResource(R.string.tv_libraries_failed), sentence(s.error), retry = vm::refresh)

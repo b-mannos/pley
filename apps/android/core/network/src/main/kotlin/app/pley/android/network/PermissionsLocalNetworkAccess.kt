@@ -5,7 +5,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import app.pley.android.common.LocalNetwork
-import java.net.InetAddress
 import java.net.URI
 import java.net.URISyntaxException
 
@@ -36,17 +35,7 @@ internal class PermissionsLocalNetworkAccess(
     override fun isPermissionBlock(error: Throwable): Boolean = LocalNetwork.isPermissionBlock(error)
 
     /** Whether [host] is on the home network: a private or link-local address, or a name only it knows. */
-    private fun atHome(host: String): Boolean {
-        val h = host.removePrefix("[").removeSuffix("]")
-        val literal = Regex("""^[\d.]+$""").matches(h) || h.contains(':')
-        if (!literal) return LocalRoute.isHomeName(h)
-        return try {
-            // A literal address: no lookup happens.
-            LocalRoute.isHomeAddress(InetAddress.getByName(h))
-        } catch (_: Exception) {
-            false
-        }
-    }
+    private fun atHome(host: String): Boolean = LocalRoute.isHomeHost(host)
 
     companion object {
         /** This device's. */

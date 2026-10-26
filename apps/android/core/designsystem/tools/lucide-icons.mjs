@@ -38,7 +38,7 @@ const icons = [
   ["ChevronDown", "chevron-down"], ["ChevronLeft", "chevron-left"], ["ChevronRight", "chevron-right"],
   ["ChevronUp", "chevron-up"], ["ChevronsRight", "chevrons-right"],
   // Devices, servers, files
-  ["Server", "server"], ["Smartphone", "smartphone"], ["Laptop", "laptop"], ["Monitor", "monitor"], ["Wifi", "wifi"],
+  ["Server", "server"], ["ServerOff", "server-off"], ["Smartphone", "smartphone"], ["Laptop", "laptop"], ["Monitor", "monitor"], ["Wifi", "wifi"],
   ["HardDrive", "hard-drive"], ["Cpu", "cpu"], ["AppWindow", "app-window"], ["LayoutDashboard", "layout-dashboard"],
   ["Folder", "folder"], ["FolderOpen", "folder-open"], ["FolderPlus", "folder-plus"], ["FolderSearch", "folder-search"],
   ["ImageUp", "image-up"], ["ScanSearch", "scan-search"], ["DatabaseBackup", "database-backup"],

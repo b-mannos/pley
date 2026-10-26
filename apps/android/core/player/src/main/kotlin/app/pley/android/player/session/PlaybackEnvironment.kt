@@ -13,6 +13,7 @@ import app.pley.android.data.Loadable
 import app.pley.android.data.LocalMedia
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ServerEvent
+import app.pley.android.network.OfflineException
 import app.pley.android.network.PleyApi
 import app.pley.android.player.subtitles.Media3VttParser
 import app.pley.android.player.subtitles.PictureSource
@@ -52,7 +53,8 @@ fun interface ItemDetails {
             }
             when (first) {
                 is Loadable.Ready -> first.value
-                is Loadable.Failed -> first.stale ?: api.item(id)
+                // Out of reach, asking again would only wait as long again.
+                is Loadable.Failed -> first.stale ?: if (first.error is OfflineException) throw first.error else api.item(id)
                 else -> api.item(id)
             }
         }
