@@ -190,6 +190,7 @@ class AppDownloads internal constructor(
         return LocalFile(
             uri = Uri.fromFile(store.mediaOf(s)).toString(),
             subtitles = s.subtitles.associateWith { Uri.fromFile(store.subtitleOf(s, it)).toString() },
+            converted = s.mediaUrl != null,
         )
     }
 

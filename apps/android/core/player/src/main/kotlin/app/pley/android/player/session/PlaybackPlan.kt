@@ -48,6 +48,17 @@ object PlaybackPlan {
 
     fun subtitleStreams(file: MediaFile?): List<MediaStream> = file?.streams.orEmpty().filter { it.kind == StreamKind.Subtitle }
 
+    /**
+     * The subtitle tracks the server's conversion of [file] holds, in their
+     * order: those Matroska takes (MP4's text made SRT), not teletext and
+     * the like (apps/transcoder plan.rs, `MATROSKA_SUBTITLES`).
+     */
+    fun convertedSubtitleStreams(file: MediaFile?): List<MediaStream> =
+        subtitleStreams(file).filter { !it.external && it.codec.lowercase() in CONVERTED_SUBTITLES }
+
+    private val CONVERTED_SUBTITLES =
+        setOf("subrip", "ass", "ssa", "webvtt", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "mov_text")
+
     fun videoStream(file: MediaFile?): MediaStream? {
         val videos = file?.streams.orEmpty().filter { it.kind == StreamKind.Video }
         return videos.firstOrNull { it.default } ?: videos.firstOrNull()

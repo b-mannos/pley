@@ -14,6 +14,8 @@ data class LocalFile(
     val uri: String,
     /** Subtitles saved beside it, by the stream's index: `file:///…/subs/3.vtt`. */
     val subtitles: Map<Int, String> = emptyMap(),
+    /** Made by the server for this device: it holds the subtitle tracks a conversion keeps, in their order. */
+    val converted: Boolean = false,
 )
 
 /**

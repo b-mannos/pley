@@ -134,6 +134,9 @@ class SessionPlaybackController(
     /** A quality was picked by hand in this playback: a downloaded file streams from the server instead. */
     private var streamingPicked = false
 
+    /** A download the server made plays: its file holds the subtitle tracks a conversion keeps. */
+    private var playingConverted = false
+
     // ---------------------------------------------------------------- the session
 
     private val sessionState = MutableStateFlow<ServerPlaybackSession?>(null)
@@ -315,6 +318,7 @@ class SessionPlaybackController(
         ui.update { it.copy(phase = PlayerPhase.Preparing, positionMs = atMs, skipLabel = null) }
 
         val local = localFile(chosen.id)?.takeIf { recovery.fallbackMode == null && !streamingPicked }
+        playingConverted = local?.converted == true
         if (local != null) return beginLocal(detail, chosen, local, atMs)
 
         val mode = recovery.fallbackMode ?: guardMode?.takeIf { quality.original } ?: quality.mode
@@ -493,8 +497,12 @@ class SessionPlaybackController(
                     showServerSubtitles(sub)
                 }
                 else -> {
-                    val embedded = PlaybackPlan.subtitleStreams(chosenFile).filter { !it.external }
-                    engineLink.selectText(embedded.indexOf(sub), sub.language)
+                    val embedded = if (playingConverted) {
+                        PlaybackPlan.convertedSubtitleStreams(chosenFile)
+                    } else {
+                        PlaybackPlan.subtitleStreams(chosenFile).filter { !it.external }
+                    }
+                    engineLink.selectText(embedded.indexOf(sub).takeIf { it >= 0 }, sub.language)
                     hideServerSubtitles()
                 }
             }

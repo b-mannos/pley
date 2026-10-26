@@ -3,7 +3,9 @@ package app.pley.android.player.session
 import app.pley.android.data.LocalFile
 import app.pley.android.data.LocalMedia
 import app.pley.android.fixtures.FixtureIds
+import app.pley.android.model.MediaStream
 import app.pley.android.model.PlaybackMode
+import app.pley.android.model.StreamKind
 import app.pley.android.player.PlayRequest
 import app.pley.android.player.PlayerPhase
 import app.pley.android.testing.caps.TestDevices
@@ -100,6 +102,32 @@ class RecoveryFlowTest {
         h.play(PlayRequest(FixtureIds.SAMPLE_1080P))
         assertEquals("streamed", 1, h.playbackRequests().size)
         assertFalse(h.engine.source!!.url.startsWith("file:"))
+    }
+
+    @Test
+    fun `a converted download's subtitles are found among the tracks a conversion keeps`() {
+        // Teletext has no place in the server's Matroska: the French track is the file's first.
+        val movie = runBlocking { h.api.item(FixtureIds.SAMPLE_1080P) }
+        val file = movie.files.first()
+        val teletext = MediaStream(index = 20, kind = StreamKind.Subtitle, codec = "dvb_teletext", language = "eng", textBased = true)
+        val french = MediaStream(index = 21, kind = StreamKind.Subtitle, codec = "subrip", language = "fre", textBased = true)
+        val subtitled = movie.copy(files = listOf(file.copy(streams = file.streams.filter { it.kind != StreamKind.Subtitle } + teletext + french)))
+        // Away from the server: the details saved with the download.
+        h.api.unreachable += "item"
+        h.local = object : LocalMedia {
+            override fun file(fileId: Long) = LocalFile("file:///downloads/movie.mkv", converted = true).takeIf { fileId == file.id }
+
+            override suspend fun detail(itemId: Long) = subtitled.takeIf { itemId == movie.id }
+        }
+        val c = h.play(PlayRequest(FixtureIds.SAMPLE_1080P))
+        assertEquals("file:///downloads/movie.mkv", h.engine.source?.url)
+
+        c.selectSubtitle(french.index.toLong())
+        h.settle()
+        assertEquals(0 to "fre", h.engine.textChoices.last())
+        c.selectSubtitle(teletext.index.toLong())
+        h.settle()
+        assertEquals("not in the file", null to "eng", h.engine.textChoices.last())
     }
 
     @Test
