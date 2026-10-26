@@ -455,6 +455,7 @@ pub async fn convert(
     }
     let transcoder = state.transcoder.info();
     req.hdr_transcodes = transcoder.as_ref().is_some_and(|info| info.capabilities.hdr_transcode);
+    req.download = true;
     let files = catalog::files_for_item(&state.db, row.id).await?;
     let file = match req.file_id {
         Some(id) => files.into_iter().find(|f| f.id == id).ok_or_else(|| AppError::not_found("file not found"))?,

@@ -384,6 +384,52 @@ fn a_4k_file_converted_for_a_1080p_player_is_made_in_1080p() {
 }
 
 #[test]
+fn a_download_is_made_for_the_players_screen() {
+    let mut info = source("HDR10");
+    (info.streams[0].width, info.streams[0].height, info.streams[0].level) = (Some(3840), Some(2160), Some(153));
+    let mut big = file("mkv");
+    big.bitrate = Some(57_000_000);
+    let download = |caps: Value, file: &FileRow, info: &MediaInfo| {
+        let mut req = request(caps);
+        req.download = true;
+        decide(file, Some(info), &info.streams, &req)
+    };
+    let made = |d: &Decision| {
+        let v = d.video.as_ref().unwrap();
+        (v.mode, v.max_height, v.max_bitrate_kbps)
+    };
+
+    // A 4K film the phone can't play: 1080p, what its screen shows (its
+    // decoders go to 4K), at the quality a playback would aim for there.
+    let mut phone = hdr10_phone();
+    phone["video"].as_array_mut().unwrap().retain(|d| d["codec"] != "hevc");
+    let d = download(phone.clone(), &big, &info);
+    assert_eq!(made(&d), (VideoMode::Transcode, Some(1080), Some(19_808)));
+    // Streamed, the same film is made in 4K.
+    let streamed = play_with(request(phone.clone()), "mkv", &info);
+    assert_eq!(streamed.video.unwrap().max_height, Some(2160));
+
+    // With fewer bits than any 1080p quality: half again the original's.
+    let mut small = file("mkv");
+    small.bitrate = Some(2_000_000);
+    let d = download(phone.clone(), &small, &info);
+    assert_eq!(made(&d), (VideoMode::Transcode, Some(1080), Some(2_808)));
+    // A quality asked for, too.
+    let mut req = request(phone.clone());
+    (req.download, req.max_height, req.max_bitrate) = (true, Some(720), Some(4_000));
+    let d = decide(&small, Some(&info), &info.streams, &req);
+    assert_eq!(made(&d), (VideoMode::Transcode, Some(720), Some(2_808)));
+
+    // A 4K TV's screen takes 4K; copied video stays as it is.
+    let mut tv = shield();
+    tv["video"].as_array_mut().unwrap().retain(|d| d["codec"] != "hevc");
+    let d = download(tv, &big, &info);
+    assert_eq!(made(&d), (VideoMode::Transcode, Some(2160), Some(29_808)));
+    let d = download(fire_tv_4k_max(), &small, &source("P7"));
+    assert_eq!(made(&d), (VideoMode::Copy, None, None));
+}
+
+#[test]
 fn the_picked_quality_still_limits_version_2_players() {
     let mut req = request(fire_tv_4k_max());
     req.max_bitrate = Some(8_000);

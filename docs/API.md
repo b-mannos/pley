@@ -1346,13 +1346,16 @@ The server decides as for a playback with the same body: what the player
 plays as it is downloads as it is (`direct`); otherwise the transcoder makes
 the file (the video copied or made anew at `max_height` and `max_bitrate`,
 the sound made AAC), one conversion at a time, from the start and at full
-speed. Asked again for the same file and choices, from any device, the
-same conversion answers (or the file it made); a failed one is tried
-again. Look at `GET /api/conversions/{id}` every few seconds until it is
-`done`, then fetch `url`. Converted files are kept a week after their last
-download (a download cut short goes on with `Range`), within the
-transcoder's limit; once gone, asking again makes them again. A
-conversion is known to the server once asked for since it started (a
+speed. Video made anew is no bigger than a version 2 player's screen
+(`display`: 1080p for a phone, also of a 4K film) and never has more than
+1.5 times the original's bits, which a playback's quality for a file with
+few bits would. Asked again for the same file and choices, from any
+device, the same conversion answers (or the file it made); a failed one
+is tried again. Look at `GET /api/conversions/{id}` every few seconds
+until it is `done`, then fetch `url`. Converted files are kept a week
+after their last download (a download cut short goes on with `Range`),
+within the transcoder's limit; once gone, asking again makes them again.
+A conversion is known to the server once asked for since it started (a
 `404` otherwise: ask again), and to those who may see its title. `503`
 with a transcoder too old to convert.
 

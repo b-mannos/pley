@@ -243,6 +243,10 @@ pub struct PlaybackRequest {
     /// capability): set by the server, never read from the player.
     #[serde(skip)]
     pub hdr_transcodes: bool,
+    /// A file made for downloading (`POST /api/conversions`), kept on the
+    /// player: set by the server, never read from the player.
+    #[serde(skip)]
+    pub download: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -728,6 +732,14 @@ fn h264_lines(caps: &Caps) -> Option<u32> {
         .and_then(|l| u32::try_from(l).ok())
 }
 
+/// The most lines of a quality the version 2 player's screen shows: 1080p
+/// on a 1080×2316 phone and on a 1440×3088 one, 2160p on a 4K TV.
+fn screen_lines(caps: &Caps) -> Option<u32> {
+    let display = caps.display.as_ref().filter(|_| caps.is_v2())?;
+    let lines = display.width.min(display.height);
+    (lines > 0).then(|| [2160, 1080, 720, 480].into_iter().find(|l| i64::from(*l) <= lines).unwrap_or(480))
+}
+
 /// Video codecs HLS can carry in MPEG-TS segments, which players unpack
 /// (hls.js turns them into fragmented MP4 for the browser).
 fn hls_copyable(codec: &str) -> bool {
@@ -914,6 +926,11 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             (true, OutputRange::Sdr) => h264_lines(caps),
             (true, _) => hevc10_lines(caps, v.frame_rate).flatten(),
         };
+        // A download is watched on the player's screen: made no bigger.
+        let most_lines = match (most_lines, screen_lines(caps).filter(|_| req.download && !copy)) {
+            (Some(most), Some(screen)) => Some(most.min(screen)),
+            (most, screen) => most.or(screen),
+        };
         let (max_height, max_bitrate) = if copy || req.max_bitrate.is_some() || req.max_height.is_some() {
             let max_height = match (req.max_height, most_lines) {
                 (Some(asked), Some(most)) => Some(asked.min(most)),
@@ -925,6 +942,16 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             let (id, kbps, lines) = closest_quality_within(v.width, v.height, file.bitrate, most_lines);
             quality = Some(id);
             (Some(lines), Some(kbps))
+        };
+        // Nor with more bits than half again the original's: a file with
+        // fewer than its size's lowest quality would come out several times
+        // as big.
+        let max_bitrate = match file.bitrate.filter(|b| *b > 0 && req.download && !copy) {
+            Some(bits) => {
+                let most = u32::try_from(bits * 3 / 2000).unwrap_or(u32::MAX);
+                Some(max_bitrate.map_or(most, |max| max.min(most)))
+            }
+            None => max_bitrate,
         };
         VideoRequest {
             stream_index: Some(v.index),
@@ -1775,6 +1802,7 @@ mod tests {
             mode: PlaybackMode::Auto,
             client_id: None,
             hdr_transcodes: false,
+            download: false,
         }
     }
 
