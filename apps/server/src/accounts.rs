@@ -293,6 +293,12 @@ pub fn device_name(user_agent: Option<&str>) -> String {
     if ua.contains("pleyAndroid/") {
         return "pley for Android".into();
     }
+    if ua.contains("pleyKodi/") {
+        return "pley for Kodi".into();
+    }
+    if ua.contains("pleyRoku/") {
+        return "pley for Roku".into();
+    }
     let browser = if ua.contains("Edg/") {
         Some("Edge")
     } else if ua.contains("OPR/") || ua.contains("Opera") {
@@ -378,6 +384,8 @@ mod tests {
         let web_view = "Mozilla/5.0 (Linux; Android 16; Pixel 9; wv) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36 pleyAndroid/0.1.0";
         assert_eq!(device_name(Some(web_view)), "pley for Android");
         assert_eq!(device_name(Some("pleyAndroid/0.1.0 (Android 16)")), "pley for Android");
+        assert_eq!(device_name(Some("pleyKodi/0.1.0 (Kodi 21.2; Windows)")), "pley for Kodi");
+        assert_eq!(device_name(Some("pleyRoku/0.1.0 (Roku OS 14.5; Roku Ultra)")), "pley for Roku");
     }
 
     #[test]

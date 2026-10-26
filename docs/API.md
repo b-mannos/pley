@@ -564,7 +564,7 @@ TVs and other devices without a usable browser sign in with a code they
 show (OAuth 2.0 Device Authorization Grant, RFC 8628). pley's own apps only:
 anyone may start one, and pley reads no app's description for someone who
 isn't signed in. Today that is pley for Android, which also runs on Android
-TV and Fire TV.
+TV and Fire TV, pley for Kodi and pley for Roku.
 
 1. The TV asks **`POST /api/oauth/device`** with `client_id` and an optional
    `scope` (as at `/oauth/authorize`: none means `library`). The answer:
@@ -753,7 +753,7 @@ interface AppGrant {
   scopes: string[];
   profile: { id: Id; name: string };     // the profile it acts as
   approved_by: { id: Id; name: string };
-  device: string | null;            // of its last token request, e.g. "Chrome on Windows"; pley for Android: its platform, e.g. "Android 15"
+  device: string | null;            // of its last token request, e.g. "Chrome on Windows"; pley for Android, Kodi and Roku: their platform, e.g. "Android 15", "Kodi 21.2; Windows"
   ip: string | null;
   created_at: Timestamp;
   last_used_at: Timestamp;
@@ -776,12 +776,16 @@ Usernames, roles, libraries, age limits and sign-in settings are left out.
 |---|---|---|
 | pley for Android | `https://hhaidar.github.io/pley/oauth/android.json` | `app.pley.android:/oauth/callback` |
 | pley for desktop | `https://hhaidar.github.io/pley/oauth/desktop.json` | `http://127.0.0.1/oauth/callback`, `http://[::1]/oauth/callback` (any port) |
+| pley for Kodi | `https://hhaidar.github.io/pley/oauth/kodi.json` | none: a code only |
+| pley for Roku | `https://hhaidar.github.io/pley/oauth/roku.json` | none: a code only |
 
 Their descriptions are built into the server and never fetched, so they
-sign in to servers without internet access. Both get refresh tokens and may
+sign in to servers without internet access. All get refresh tokens and may
 ask for every scope; pley for Android may also sign in with a code, on a TV
-(see [TVs](#tvs)). The consent page marks them "pley's own app"; no other
-app may use a client ID on their host.
+(see [TVs](#tvs)), and pley for Kodi and pley for Roku sign in only that
+way: with no return address, `/oauth/authorize` never sends them a code.
+The consent page marks them "pley's own app"; no other app may use a client
+ID on their host.
 
 ### Apps by other publishers
 

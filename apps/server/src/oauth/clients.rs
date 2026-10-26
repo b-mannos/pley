@@ -30,8 +30,12 @@ const MAX_NAME_CHARS: usize = 64;
 pub const ANDROID_ID: &str = "https://hhaidar.github.io/pley/oauth/android.json";
 /// pley for desktop.
 pub const DESKTOP_ID: &str = "https://hhaidar.github.io/pley/oauth/desktop.json";
+/// pley for Kodi.
+pub const KODI_ID: &str = "https://hhaidar.github.io/pley/oauth/kodi.json";
+/// pley for Roku.
+pub const ROKU_ID: &str = "https://hhaidar.github.io/pley/oauth/roku.json";
 /// The client IDs of pley's own apps, matched as exact strings.
-pub const BUILTIN_IDS: &[&str] = &[ANDROID_ID, DESKTOP_ID];
+pub const BUILTIN_IDS: &[&str] = &[ANDROID_ID, DESKTOP_ID, KODI_ID, ROKU_ID];
 
 /// An app that may ask people to allow it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -196,8 +200,10 @@ fn present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error>
 /// Reads the client metadata document of `client_id`.
 ///
 /// `trusted` is for pley's own apps only: their return addresses needn't be
-/// on the client ID's host (rules (a) and (b) below); every other rule
-/// applies to them too. The client is never `first_party` here.
+/// on the client ID's host (rules (a) and (b) below), and those that run
+/// only on TVs sign in only with a code, without `authorization_code` and
+/// return addresses; every other rule applies to them too. The client is
+/// never `first_party` here.
 pub fn parse_document(client_id: &str, bytes: &[u8], trusted: bool) -> Result<Client, ClientError> {
     let bad = |why: &str| Err(ClientError::Document(why.to_owned()));
     let url = check_client_id(client_id)?;
@@ -235,16 +241,25 @@ pub fn parse_document(client_id: &str, bytes: &[u8], trusted: bool) -> Result<Cl
     // RFC 7591 §2: absent means ["authorization_code"]. pley reads
     // refresh_token and the device code grant from it; others are ignored.
     let grant_types = document.grant_types.unwrap_or_else(|| vec!["authorization_code".to_owned()]);
-    if !grant_types.iter().any(|g| g == "authorization_code") {
-        return bad("its grant_types leave out authorization_code");
-    }
     let refresh = grant_types.iter().any(|g| g == "refresh_token");
     let device = grant_types.iter().any(|g| g == DEVICE_GRANT);
-    if document.response_types.as_ref().is_some_and(|types| !types.iter().any(|t| t == "code")) {
-        return bad("its response_types leave out code");
-    }
-    if document.redirect_uris.is_empty() {
-        return bad("it has no redirect_uris");
+    // pley's apps for TVs that have no browser (Kodi, Roku) get no code:
+    // with no return address, none can be sent anywhere.
+    let code_only = trusted && device && !grant_types.iter().any(|g| g == "authorization_code");
+    if code_only {
+        if !document.redirect_uris.is_empty() || document.response_types.is_some() {
+            return bad("an app that signs in only with a code has redirect_uris or response_types");
+        }
+    } else {
+        if !grant_types.iter().any(|g| g == "authorization_code") {
+            return bad("its grant_types leave out authorization_code");
+        }
+        if document.response_types.as_ref().is_some_and(|types| !types.iter().any(|t| t == "code")) {
+            return bad("its response_types leave out code");
+        }
+        if document.redirect_uris.is_empty() {
+            return bad("it has no redirect_uris");
+        }
     }
     if document.redirect_uris.len() > MAX_REDIRECT_URIS {
         return bad("it has more than 10 redirect_uris");
@@ -436,15 +451,20 @@ fn is_format(c: char) -> bool {
 /// sign in to servers without internet access, and a lost domain can't
 /// change where their codes go.
 static BUILTINS: LazyLock<Vec<Client>> = LazyLock::new(|| {
-    [(ANDROID_ID, include_str!("builtin/android.json")), (DESKTOP_ID, include_str!("builtin/desktop.json"))]
-        .into_iter()
-        .map(|(id, json)| {
-            let mut client =
-                parse_document(id, json.as_bytes(), true).unwrap_or_else(|e| panic!("built-in client {id}: {e}"));
-            client.first_party = true;
-            client
-        })
-        .collect()
+    [
+        (ANDROID_ID, include_str!("builtin/android.json")),
+        (DESKTOP_ID, include_str!("builtin/desktop.json")),
+        (KODI_ID, include_str!("builtin/kodi.json")),
+        (ROKU_ID, include_str!("builtin/roku.json")),
+    ]
+    .into_iter()
+    .map(|(id, json)| {
+        let mut client =
+            parse_document(id, json.as_bytes(), true).unwrap_or_else(|e| panic!("built-in client {id}: {e}"));
+        client.first_party = true;
+        client
+    })
+    .collect()
 });
 
 /// One of pley's own apps, by its exact client ID.
@@ -817,7 +837,38 @@ mod tests {
         assert!(parse_document(ANDROID_ID, android_json.as_bytes(), false).is_err());
         assert!(parse_document(DESKTOP_ID, include_str!("builtin/desktop.json").as_bytes(), true).is_ok());
 
-        assert_eq!(BUILTIN_IDS.len(), 2);
+        // Kodi and Roku sign in only with a code: no return address, so no
+        // code can be sent to them, and only being built in allows that.
+        for (id, name, json) in [
+            (KODI_ID, "pley for Kodi", include_str!("builtin/kodi.json")),
+            (ROKU_ID, "pley for Roku", include_str!("builtin/roku.json")),
+        ] {
+            let tv = builtin(id).unwrap();
+            assert_eq!(tv.name.as_deref(), Some(name));
+            assert!(tv.first_party && tv.refresh && tv.device);
+            assert!(tv.redirect_uris.is_empty());
+            assert_eq!(tv.scope_cap.as_deref(), Some("library play playlists profiles"));
+            assert!(matches!(redirect_kind(tv, "app.pley.android:/oauth/callback"), Err(ClientError::Redirect(_))));
+            assert!(parse_document(id, json.as_bytes(), false).is_err());
+        }
+        let tv_only = |extra: &str| {
+            format!(
+                r#"{{"client_id": "{KODI_ID}", "grant_types": ["urn:ietf:params:oauth:grant-type:device_code"],
+                    {extra}}}"#
+            )
+        };
+        assert!(parse_document(KODI_ID, tv_only(r#""redirect_uris": []"#).as_bytes(), true).is_ok());
+        for refused in [
+            r#""redirect_uris": ["app.pley.kodi:/oauth/callback"]"#,
+            r#""redirect_uris": [], "response_types": ["code"]"#,
+        ] {
+            assert!(parse_document(KODI_ID, tv_only(refused).as_bytes(), true).is_err(), "{refused}");
+        }
+        let no_grant =
+            format!(r#"{{"client_id": "{KODI_ID}", "grant_types": ["refresh_token"], "redirect_uris": []}}"#);
+        assert!(parse_document(KODI_ID, no_grant.as_bytes(), true).is_err(), "a code or a return address");
+
+        assert_eq!(BUILTIN_IDS.len(), 4);
         assert!(BUILTIN_IDS.iter().all(|id| builtin(id).is_some_and(|c| c.id == *id)));
         for near in [
             "https://hhaidar.github.io/pley/oauth/android.json/",

@@ -20,6 +20,10 @@ use pley::{AppState, Config};
 pub const ANDROID_APP: &str = "https://hhaidar.github.io/pley/oauth/android.json";
 /// The client_id of pley's desktop app.
 pub const DESKTOP_APP: &str = "https://hhaidar.github.io/pley/oauth/desktop.json";
+/// The client_id of pley's Kodi add-on.
+pub const KODI_APP: &str = "https://hhaidar.github.io/pley/oauth/kodi.json";
+/// The client_id of pley's Roku app.
+pub const ROKU_APP: &str = "https://hhaidar.github.io/pley/oauth/roku.json";
 /// The Host the tests' browsers and apps reach pley at.
 pub const HOST: &str = "pley.local:7539";
 /// The issuer for [`HOST`].

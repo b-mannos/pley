@@ -14,7 +14,7 @@ use std::time::Duration;
 use axum::http::{Method, StatusCode, header};
 use serde_json::json;
 
-use common::{ANDROID_APP, DESKTOP_APP, HOST, ISSUER, Reply, TestApp};
+use common::{ANDROID_APP, DESKTOP_APP, HOST, ISSUER, KODI_APP, ROKU_APP, Reply, TestApp};
 use pley::oauth::fetch::Source;
 
 const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
@@ -720,6 +720,52 @@ async fn device_grants_act_like_other_app_grants() {
     assert_eq!(set.status, StatusCode::OK, "{}", set.text());
     assert_eq!(app.get("/api/auth/me", &access).await.status, StatusCode::UNAUTHORIZED);
     assert_eq!(oauth_error(&refresh(&app, &refresh_token).await).1, "invalid_grant");
+}
+
+#[tokio::test]
+async fn kodi_and_roku_sign_in_only_with_a_code() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    for (client_id, name, agent, platform) in [
+        (KODI_APP, "pley for Kodi", "pleyKodi/0.1.0 (Kodi 21.2; Windows)", "Kodi 21.2; Windows"),
+        (ROKU_APP, "pley for Roku", "pleyRoku/0.1.0 (Roku OS 14.5; Roku Ultra)", "Roku OS 14.5; Roku Ultra"),
+    ] {
+        let started = ask(&app, client_id, Some("library play"), &[("user-agent", agent)]).await;
+        assert_eq!(started.status, StatusCode::OK, "{}", started.text());
+        let device_code = started.body["device_code"].as_str().unwrap();
+        let shown = verify(&app, &admin, started.body["user_code"].as_str().unwrap()).await;
+        assert_eq!(shown.body["client"]["name"], name, "{}", shown.text());
+        assert_eq!(shown.body["client"]["first_party"], true);
+        let id = shown.body["id"].as_str().unwrap();
+        assert_eq!(decide(&app, &admin, id, true).await.status, StatusCode::OK);
+        let asked = form(&[("grant_type", DEVICE_GRANT), ("device_code", device_code), ("client_id", client_id)]);
+        let tokens = app.form_post("/api/oauth/token", &asked, &[("user-agent", agent)]).await;
+        let (access, refresh_token) = pair(&tokens);
+        assert_eq!(tokens.body["scope"], "library play");
+        assert_eq!(app.get("/api/auth/me", &access).await.body["username"], "admin");
+        let renewed =
+            form(&[("grant_type", "refresh_token"), ("refresh_token", &refresh_token), ("client_id", client_id)]);
+        let renewed = app.form_post("/api/oauth/token", &renewed, &[("user-agent", agent)]).await;
+        pair(&renewed);
+
+        // Listed by its name, with the platform it gave.
+        let listed = app.get("/api/me/apps", &admin).await;
+        let grant = listed.body.as_array().unwrap().iter().find(|g| g["client_id"] == client_id).unwrap();
+        assert_eq!((&grant["name"], &grant["device"]), (&json!(name), &json!(platform)));
+
+        // They have no browser: pley's sign-in page has no return address for
+        // them, so no code is ever sent anywhere.
+        let query = form(&[
+            ("response_type", "code"),
+            ("client_id", client_id),
+            ("redirect_uri", "app.pley.kodi:/oauth/callback"),
+            ("code_challenge", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"),
+            ("code_challenge_method", "S256"),
+        ]);
+        let page =
+            app.browser_call(Method::POST, "/api/oauth/requests", &admin, Some(json!({"query": query})), &[]).await;
+        assert_eq!(page.status, StatusCode::BAD_REQUEST, "{}", page.text());
+    }
 }
 
 #[tokio::test]

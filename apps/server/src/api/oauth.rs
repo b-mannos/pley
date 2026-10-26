@@ -1384,16 +1384,20 @@ impl From<GrantRow> for AppGrant {
 }
 
 /// What an app's grant was last used from, by the User-Agent of its token
-/// requests. pley's Android app says "pleyAndroid/1.0 (Android 15)": the
-/// row names the app already, so the platform it gives in brackets.
+/// requests. pley's apps say "pleyAndroid/1.0 (Android 15)",
+/// "pleyKodi/0.1.0 (Kodi 21.2; Windows)" or "pleyRoku/0.1.0 (Roku OS 14.5;
+/// Roku Ultra)": the row names the app already, so the platform it gives in
+/// brackets.
 fn grant_device(user_agent: &str) -> String {
-    if user_agent.contains("pleyAndroid/") {
-        let platform = user_agent
-            .split_once('(')
-            .and_then(|(_, rest)| rest.split_once(')'))
-            .map(|(inside, _)| inside.trim())
-            .filter(|inside| !inside.is_empty());
-        return platform.unwrap_or("Android").chars().take(60).collect();
+    for (app, platform) in [("pleyAndroid/", "Android"), ("pleyKodi/", "Kodi"), ("pleyRoku/", "Roku")] {
+        if user_agent.contains(app) {
+            let given = user_agent
+                .split_once('(')
+                .and_then(|(_, rest)| rest.split_once(')'))
+                .map(|(inside, _)| inside.trim())
+                .filter(|inside| !inside.is_empty());
+            return given.unwrap_or(platform).chars().take(60).collect();
+        }
     }
     crate::accounts::device_name(Some(user_agent))
 }
