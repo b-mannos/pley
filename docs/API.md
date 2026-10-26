@@ -54,6 +54,11 @@ don't open), `unavailable`, `internal`. The token and revocation endpoints
 of apps answer in OAuth's own form instead (see
 [Tokens](#tokens)).
 
+A playback session stopped from elsewhere answers its player's next
+requests with `410` `{ code: "session_stopped", error: "session_stopped",
+message }`, where `message` is what the one who stopped it wrote, or `null`
+(see [Stopping a stream](#stopping-a-stream)).
+
 ---
 
 ## Types
@@ -162,6 +167,7 @@ interface ItemDetail extends ItemSummary {
   extras: ItemSummary[];            // movies and shows: trailers and other bonus material (kind "extra"), trailers first
   cast: Credit[];                   // actors in billing order; episodes: guest stars; seasons: the show's
   crew: Credit[];                   // creators, directors, writers, producers
+  in_watchlist: boolean;            // in the user's My List (movies and shows)
 }
 
 interface Credit {
@@ -250,7 +256,7 @@ interface MediaStream {
 }
 
 interface Hub {
-  key: string;                      // "continue_watching" | "recently_added:<library_id>" | ...
+  key: string;                      // "continue_watching" | "my_list" | "recently_added:<library_id>" | ...
   title: string;
   library_id: Id | null;
   items: ItemSummary[];
@@ -677,6 +683,7 @@ sign-in settings among them.
 | GET | `/api/people/{id}/photo` | `library` |
 | GET | `/api/history` | `library` |
 | GET | `/api/hubs/home` | `library` |
+| GET | `/api/watchlist` | `library` |
 | GET | `/api/search` | `library` |
 | GET | `/api/events` | `library` |
 | POST | `/api/playback` | `play` |
@@ -695,6 +702,10 @@ sign-in settings among them.
 | PUT | `/api/items/{id}/streams` | `play` |
 | PUT | `/api/items/{id}/rating` | `play` |
 | DELETE | `/api/history/{id}` | `play` |
+| DELETE | `/api/continue-watching/{id}` | `play` |
+| PUT | `/api/watchlist/{id}` | `play` |
+| DELETE | `/api/watchlist/{id}` | `play` |
+| DELETE | `/api/sessions/{id}` | `play` |
 | PUT | `/api/me/track-defaults` | `play` |
 | POST | `/api/playlists` | `playlists` |
 | PATCH | `/api/playlists/{id}` | `playlists` |
@@ -899,8 +910,38 @@ may open only some libraries see those, in that order.
 
 | Method | Path | Query | Response |
 |---|---|---|---|
-| GET | `/api/hubs/home` | – | `{ hubs: Hub[] }` – `continue_watching` (in-progress + next up), then `recently_added:<library_id>` per library, in the libraries' order |
+| GET | `/api/hubs/home` | – | `{ hubs: Hub[] }` – `continue_watching` (in-progress + next up), then `my_list` ("My List", its 20 newest), then `recently_added:<library_id>` per library, in the libraries' order. Empty hubs are left out |
+| DELETE | `/api/continue-watching/{id}` | – | `204`. Takes a row out of the user's Continue Watching (see below) |
 | GET | `/api/search` | `q`, `limit` (default 40) | `{ items: ItemSummary[], people: PersonSummary[] }`: items ranked by relevance; people whose name has words starting with each word of `q`, most credited first |
+
+### Continue Watching
+
+`DELETE /api/continue-watching/{id}` takes what a Continue Watching row
+shows out of the user's own Continue Watching: a movie, or for an episode
+(in progress or next up) its whole show (a show's or a season's id does the
+same). It stays out of every Continue Watching (Home's, the libraries' hubs,
+the Plex API's On Deck and `continueWatching` hubs) until the user plays
+that movie or any episode of that show again: a progress report, or a
+watched mark, newer than the hide. Then it comes back as it would have.
+Progress and watched marks stay as they are. Other kinds answer `400`. The
+Plex API's `PUT /actions/removeFromContinueWatching?ratingKey=` does the
+same. No event: the client fetches Home again.
+
+### My List
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/api/watchlist` | – | `{ items: ItemSummary[] }`, newest added first |
+| PUT | `/api/watchlist/{id}` | – | `204`; adds a movie or a show (again: nothing changes). Other kinds: `400` |
+| DELETE | `/api/watchlist/{id}` | – | `204`; takes it out (not there: nothing changes) |
+
+Each user's own list. Titles the user can't see (library access, age
+limit) are left out of it, and come back when they can again. A movie
+leaves it once it is watched (played to the end, or marked watched here or
+through the Plex API); a show stays until it is removed. `ItemDetail` says
+`in_watchlist`. Every change, a movie leaving by itself included, sends
+`watchlist_changed` to the user's event streams (only theirs), so their
+other devices fetch Home again.
 
 ## Cast and crew
 
@@ -1027,6 +1068,7 @@ queue.
 | GET | `/api/playback/{session_id}/{n}.ts` | – | MPEG-TS segment |
 | GET | `/api/files/{id}/stream` | – | raw file, supports `Range` (direct play) |
 | GET | `/api/files/{id}/subtitles/{index}.vtt` | – | WebVTT (text subtitles; extracted/converted on demand and cached). Any embedded track may come partial: one still being read out of its file comes with the cues found so far and `X-Pley-Complete: 0` (not cached), so check that header and ask again for the rest. A Matroska file's track usually comes whole at once, read through its Cues when they list it. Requests for a subtitle file being converted share that conversion, which goes on (to the cache) when they stop waiting; one that failed is tried again on the next request |
+| GET | `/api/files/{id}/subtitles/{index}.mks` | – | a picture subtitle track (PGS, VobSub with its palette, DVB; in the file or a file next to it) copied as it is into a Matroska file of its own (`video/x-matroska`), for players that show it next to an HLS stream instead of having it drawn onto the video (`picture_subtitles_sideload`). Its times are the original's from the start of the file, so it lines up with the playback position (an HLS stream started at a seek point included). Made once per file version by the transcoder (which reads the whole file for it), cached, then served with `Range` support. `404` for a text track or anything but subtitles; `503` with a transcoder too old to make it |
 | GET | `/api/files/{id}/trickplay` | – | `{ id, interval_ms, width, height, columns, rows, count, sheets }` seek-bar previews; `404` while they are being made (asking, or opening the item, queues them). They are made one file at a time, never during a playback's first 30 s: a playback that starts puts off the file being done, which is made again later |
 | GET | `/api/files/{id}/trickplay/{n}.jpg?v={id}` | – | sprite sheet `n`: thumbnail `k` is at column `k % columns`, row `k / columns` of sheet `k / (columns × rows)` and shows the video at `k × interval_ms` |
 | GET | `/api/files/{id}/chapters/{n}.jpg` | – | picture of chapter `n` (0-based), cut from the seek previews (a few seconds into the chapter); `404` until the file has previews |
@@ -1069,6 +1111,7 @@ queue.
     audio_passthrough?: string[]; // sent as they are to a receiver: "ac3", "eac3", "truehd", "dts"
     audio_channels?: number;      // the most channels the output takes: 2, 6, 8
     subtitle_codecs?: string[];   // shown by the player itself, pictures included ("hdmv_pgs_subtitle")
+    picture_subtitles_sideload?: boolean; // shows picture subtitles from their `.mks` next to HLS too
     audio_track_switching?: boolean; // switches a file's audio tracks itself
     hls?: { master_playlist?: boolean; segments?: string[] }; // "ts", "fmp4"
     display?: { width: number; height: number; refresh_rates?: number[] };
@@ -1152,7 +1195,11 @@ always counts, and `video_codecs` or `audio_codecs` stand in only when
 - **Picture subtitles** (PGS, VobSub, DVB) in `subtitle_codecs` are shown by
   the player when the file plays as it is; when it doesn't, they are drawn
   onto the video as for version 1 (HLS segments carry no subtitles).
-  Subtitle files next to the media are always drawn.
+  Subtitle files next to the media are always drawn. A player that says
+  `picture_subtitles_sideload` shows them next to the HLS stream from
+  `/api/files/{id}/subtitles/{index}.mks` instead: it asks for no
+  `subtitle_index`, so nothing is drawn onto the video (and HDR can stay
+  HDR). A `subtitle_index` it does send is drawn as for any player.
 - **Converting.** Video is converted to H.264, no bigger than the player's
   largest H.264 entry (a 4K file is made in 1080p for a 1080p stick, also
   when a higher quality is picked); HDR video the player can show stays
@@ -1323,7 +1370,33 @@ interface HistoryEntry {
 | Method | Path | Response |
 |---|---|---|
 | GET | `/api/activity` | `{ scans: ScanStatus[], sessions: SessionInfo[], analysis: AnalysisStatus \| null }` (non-admins only see their own sessions and no analysis) |
+| DELETE | `/api/sessions/{id}` | `204`; body optional `{ message?: string }` (at most 200 characters, else `400`). Stops a playback session at once (see below) |
 | GET | `/api/events` | Server-Sent Events, `data:` is JSON `ServerEvent` |
+
+### Stopping a stream
+
+`DELETE /api/sessions/{id}` ends a playback session from elsewhere than its
+player: administrators stop any session (the dashboard's *Stop*), anyone
+else their own (another of their devices); someone else's answers `403`, an
+unknown one `404`, one stopped already `204`. Its transcode and HLS end at
+once. Then:
+
+- the user's event streams get `{ type: "session_stopped", session_id,
+  message, by_admin }`: `message` is the one given (trimmed) or `null`;
+  `by_admin` is true when an administrator stopped another user's session.
+  Only that user's streams get it; `sessions_changed` goes to everyone, as
+  when any session ends;
+- the session's next requests answer `410` `{ code: "session_stopped",
+  error: "session_stopped", message }` (its status, playlists and segments,
+  and progress reports naming it, which still keep the place), for 30
+  minutes, so a player without the event stream stops too. Closing it
+  (`DELETE /api/playback/{id}`) answers `204`;
+- the player stops, leaves, and says "Playback was stopped by the server's
+  administrator" with the message, if any.
+
+The Plex API's `GET /status/sessions/terminate?sessionId=&reason=`
+(Tautulli's) does the same for administrators, `reason` as the message. A
+Plex player's progress reports don't start its stopped session again.
 
 ```ts
 interface AnalysisStatus {          // intro/credits detection of one season
@@ -1385,7 +1458,9 @@ type ServerEvent =
   | { type: "scan_finished"; library_id: Id; added: number; updated: number; removed: number }
   | { type: "library_changed"; library_id: Id }      // items/metadata changed → refetch
   | { type: "libraries_changed" }                    // library created/updated/deleted, or the order changed
-  | { type: "sessions_changed" };
+  | { type: "sessions_changed" }
+  | { type: "watchlist_changed" }                    // the user's My List changed (their streams only)
+  | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean }; // their streams only
 ```
 
 ## Users *(admin)*

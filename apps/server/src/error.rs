@@ -35,6 +35,12 @@ pub enum AppError {
     /// would, or `None` when no scope opens it (see `crate::auth::scopes`).
     #[error("{}", scope_message(*.0))]
     InsufficientScope(Option<&'static str>),
+    /// A playback session that was stopped from elsewhere (an administrator,
+    /// or its owner on another device), with the message they left: `410`
+    /// `{ code: "session_stopped", error: "session_stopped", message }`,
+    /// where `message` is theirs or `null`.
+    #[error("playback was stopped")]
+    SessionStopped(Option<String>),
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
@@ -73,6 +79,7 @@ impl AppError {
             Self::InvalidToken => Self::InvalidToken,
             Self::TokenPlacement => Self::TokenPlacement,
             Self::InsufficientScope(scope) => Self::InsufficientScope(*scope),
+            Self::SessionStopped(m) => Self::SessionStopped(m.clone()),
             Self::Internal(err) => Self::Internal(anyhow::anyhow!("{err:#}")),
         }
     }
@@ -90,6 +97,7 @@ impl AppError {
             Self::InvalidToken => (StatusCode::UNAUTHORIZED, "unauthorized"),
             Self::TokenPlacement => (StatusCode::BAD_REQUEST, "bad_request"),
             Self::InsufficientScope(_) => (StatusCode::FORBIDDEN, "insufficient_scope"),
+            Self::SessionStopped(_) => (StatusCode::GONE, "session_stopped"),
             Self::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         }
     }
@@ -136,6 +144,10 @@ impl From<std::io::Error> for AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, code) = self.status_and_code();
+        if let Self::SessionStopped(message) = &self {
+            // The players' contract names it `error`; `code` as every error.
+            return (status, Json(json!({ "code": code, "error": code, "message": message }))).into_response();
+        }
         let challenge = self.challenge();
         let message = match &self {
             Self::Internal(err) => {
@@ -178,6 +190,7 @@ mod tests {
             (AppError::TokenPlacement, 400, "bad_request"),
             (AppError::InsufficientScope(None), 403, "insufficient_scope"),
             (AppError::InsufficientScope(Some("play")), 403, "insufficient_scope"),
+            (AppError::SessionStopped(None), 410, "session_stopped"),
         ] {
             let again = err.again();
             let (got, body) = answer(err).await;

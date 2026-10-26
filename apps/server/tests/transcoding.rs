@@ -69,6 +69,8 @@ struct Fake {
     /// subtitles fail, and the transcoder's words name the file, as
     /// FFmpeg's do.
     unreadable: Arc<AtomicBool>,
+    /// Subtitle tracks copied into Matroska files of their own, in order.
+    tracks: Arc<Mutex<Vec<SubtitleRequest>>>,
 }
 
 impl Fake {
@@ -231,6 +233,7 @@ async fn start_fake() -> (Fake, String) {
                             accel: HwAccel::None,
                             main10: false,
                         }],
+                        subtitle_matroska: true,
                         ..Default::default()
                     },
                     limits: Limits { max_jobs: 8, max_hw_jobs: 0 },
@@ -370,6 +373,16 @@ async fn start_fake() -> (Fake, String) {
                     return ([(header::CONTENT_TYPE, "text/vtt"), (more, "0")], so_far).into_response();
                 }
                 ([(header::CONTENT_TYPE, "text/vtt")], text).into_response()
+            }),
+        )
+        .route(
+            "/v1/subtitles/mks",
+            // An EBML header, then what was asked for.
+            post(|State(fake): State<Fake>, Json(req): Json<SubtitleRequest>| async move {
+                let mut mks = vec![0x1A, 0x45, 0xDF, 0xA3];
+                mks.extend(format!("{}#{:?}", req.path, req.stream_index).into_bytes());
+                fake.tracks.lock().push(req);
+                ([(header::CONTENT_TYPE, "video/x-matroska")], mks)
             }),
         )
         .route(
@@ -790,6 +803,37 @@ async fn subtitles_are_converted_once() {
         assert_eq!(reply.status, StatusCode::NOT_FOUND, "{missing}");
     }
     assert_eq!(w.fake.subtitles.lock().len(), 2);
+}
+
+#[tokio::test]
+async fn picture_subtitles_come_in_files_of_their_own() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let file = app.file_of(w.movies["Feature"]).await;
+    // The PGS track: copied once by the transcoder, then from the cache.
+    let uri = format!("/api/files/{file}/subtitles/3.mks");
+    let first = app.get(&uri, admin).await;
+    assert_eq!(first.status, StatusCode::OK, "{}", first.text());
+    assert_eq!(first.headers[header::CONTENT_TYPE], "video/x-matroska");
+    assert!(first.bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]));
+    assert!(first.text().ends_with("Feature (2021).mkv#Some(3)"), "{}", first.text());
+    assert_eq!(app.get(&uri, admin).await.bytes, first.bytes, "from the cache");
+    let ranged = app.call(Method::GET, &uri, Some(admin), None, &[("range", "bytes=0-3")]).await;
+    assert_eq!((ranged.status, ranged.bytes.len()), (StatusCode::PARTIAL_CONTENT, 4));
+    assert_eq!(w.fake.tracks.lock().len(), 1);
+    // Text tracks (in the file or next to it), other streams and unknown
+    // indexes: none.
+    for missing in ["4.mks", "1000.mks", "0.mks", "1.mks", "77.mks", "x.mks"] {
+        let reply = app.get(&format!("/api/files/{file}/subtitles/{missing}"), admin).await;
+        assert_eq!(reply.status, StatusCode::NOT_FOUND, "{missing}");
+    }
+    assert_eq!(w.fake.tracks.lock().len(), 1);
+    // Apps play it with the play scope.
+    let me = app.get("/api/auth/me", admin).await.body["id"].as_i64().unwrap();
+    let (browse, _) = app.app_token(me, "library").await;
+    let (play, _) = app.app_token(me, "library play").await;
+    assert_eq!(app.app_call(Method::GET, &uri, &browse, None).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(app.app_call(Method::GET, &uri, &play, None).await.bytes, first.bytes);
 }
 
 #[tokio::test]

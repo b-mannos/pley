@@ -186,6 +186,41 @@ impl Extractor {
         }
     }
 
+    /// A subtitle track copied as it is into a Matroska file of its own, for
+    /// players that show picture subtitles (PGS, VobSub, DVB) next to an HLS
+    /// stream; VobSub keeps its palette, which is in the track's codec
+    /// private data. Times are the original's from the start of the file
+    /// (FFmpeg takes the file's start time off, as the HLS streams do), so
+    /// the track lines up with the playback position. `stream = None`: `path`
+    /// is a subtitle file itself (`.sup`, `.idx`). Only subtitles come out:
+    /// any other track leaves FFmpeg nothing to write, and it fails. Copying
+    /// a track out reads the whole file, so this waits for one of the passes
+    /// over whole files. Written to a file, not a pipe, so the Matroska has
+    /// its Cues and duration and players can seek in it.
+    pub async fn subtitle_matroska(&self, path: &str, stream: Option<i64>) -> ApiResult<Vec<u8>> {
+        let path = existing(path)?;
+        let map = match stream {
+            Some(index) => format!("0:{index}"),
+            None => "0:s:0".to_owned(),
+        };
+        let out = self.subs_dir.join(format!(".{}.mks.tmp", uuid::Uuid::new_v4().simple()));
+        let mut cmd = self.ff.command();
+        cmd.args(["-loglevel", "error"])
+            .args(MEDIA_INPUT_OPTIONS)
+            .arg("-i")
+            .arg(input_arg(&path))
+            .args(["-map", &map, "-vn", "-an", "-dn", "-c", "copy", "-f", "matroska", "-y"])
+            .arg(input_arg(&out));
+        let _permit = self.passes.acquire().await.map_err(|e| ApiError::Internal(e.into()))?;
+        Metrics::inc(&self.metrics.subtitle_extractions);
+        let result = match run_capture(cmd, (self.pass_time)(&path)).await {
+            Ok(_) => tokio::fs::read(&out).await.map_err(ApiError::from),
+            Err(err) => Err(err),
+        };
+        let _ = tokio::fs::remove_file(&out).await;
+        result
+    }
+
     /// An embedded text track's WebVTT as far as it has been pulled out of the
     /// file, and whether that is all of it, after `wait` at most: the track's
     /// extraction (started now, unless it is under way) runs on its own, past

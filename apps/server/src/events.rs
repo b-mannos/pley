@@ -16,12 +16,43 @@ pub enum ScanPhase {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerEvent {
-    ScanStarted { library_id: i64 },
-    ScanProgress { library_id: i64, phase: ScanPhase, processed: u64, total: u64 },
-    ScanFinished { library_id: i64, added: u64, updated: u64, removed: u64 },
-    LibraryChanged { library_id: i64 },
+    ScanStarted {
+        library_id: i64,
+    },
+    ScanProgress {
+        library_id: i64,
+        phase: ScanPhase,
+        processed: u64,
+        total: u64,
+    },
+    ScanFinished {
+        library_id: i64,
+        added: u64,
+        updated: u64,
+        removed: u64,
+    },
+    LibraryChanged {
+        library_id: i64,
+    },
     LibrariesChanged,
     SessionsChanged,
+    /// The user's My List changed (added, removed, or a movie in it was
+    /// watched): their other devices fetch Home again.
+    WatchlistChanged {
+        #[serde(skip)]
+        user_id: i64,
+    },
+    /// A playback session was stopped by someone else than its player (an
+    /// administrator, or its owner on another device): the player stops.
+    /// `by_admin` is true when an administrator stopped another user's
+    /// session.
+    SessionStopped {
+        #[serde(skip)]
+        user_id: i64,
+        session_id: String,
+        message: Option<String>,
+        by_admin: bool,
+    },
 }
 
 impl ServerEvent {
@@ -32,7 +63,18 @@ impl ServerEvent {
             | ServerEvent::ScanProgress { library_id, .. }
             | ServerEvent::ScanFinished { library_id, .. }
             | ServerEvent::LibraryChanged { library_id } => Some(*library_id),
-            ServerEvent::LibrariesChanged | ServerEvent::SessionsChanged => None,
+            ServerEvent::LibrariesChanged
+            | ServerEvent::SessionsChanged
+            | ServerEvent::WatchlistChanged { .. }
+            | ServerEvent::SessionStopped { .. } => None,
+        }
+    }
+
+    /// The only user the event is for, if it is for one.
+    pub fn user_id(&self) -> Option<i64> {
+        match self {
+            ServerEvent::WatchlistChanged { user_id } | ServerEvent::SessionStopped { user_id, .. } => Some(*user_id),
+            _ => None,
         }
     }
 }
@@ -79,5 +121,16 @@ mod tests {
         })
         .unwrap();
         assert_eq!(json, r#"{"type":"scan_progress","library_id":1,"phase":"probing","processed":2,"total":3}"#);
+        // Whom an event is for stays on the server.
+        let json = serde_json::to_string(&ServerEvent::WatchlistChanged { user_id: 4 }).unwrap();
+        assert_eq!(json, r#"{"type":"watchlist_changed"}"#);
+        let json = serde_json::to_string(&ServerEvent::SessionStopped {
+            user_id: 4,
+            session_id: "s1".into(),
+            message: None,
+            by_admin: true,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"type":"session_stopped","session_id":"s1","message":null,"by_admin":true}"#);
     }
 }

@@ -122,8 +122,12 @@ pub async fn events(
     }
     // Dropped with the stream (the page went away): the check above stops.
     let gone = ended.clone().drop_guard();
+    let me = user.id;
     let stream = BroadcastStream::new(state.events.subscribe())
         .filter_map(|event| event.ok())
+        // Events for one user (their My List, their stopped session) go to
+        // that user's streams only.
+        .filter(move |event| event.user_id().is_none_or(|id| id == me))
         .filter(move |event| match (event.library_id(), &*libraries.read()) {
             (Some(id), Some(ids)) => ids.contains(&id),
             _ => true,

@@ -123,6 +123,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/thumbnail", post(thumbnail))
         .route("/cover", post(cover))
         .route("/subtitles", post(subtitles))
+        .route("/subtitles/mks", post(subtitles_matroska))
         .route("/keyframes", post(keyframes))
         .route("/prefetch", post(prefetch))
         .route("/fingerprint", post(fingerprint))
@@ -222,6 +223,11 @@ async fn subtitles(State(state): Shared, Json(req): Json<SubtitleRequest>) -> Ap
     }
     let text = state.extractor.subtitle(&req.path, req.stream_index).await?;
     Ok(([(header::CONTENT_TYPE, "text/vtt; charset=utf-8")], text).into_response())
+}
+
+async fn subtitles_matroska(State(state): Shared, Json(req): Json<SubtitleRequest>) -> ApiResult<Response> {
+    let bytes = state.extractor.subtitle_matroska(&req.path, req.stream_index).await?;
+    Ok(([(header::CONTENT_TYPE, "video/x-matroska")], bytes).into_response())
 }
 
 async fn keyframes(State(state): Shared, Json(req): Json<KeyframesRequest>) -> ApiResult<StatusCode> {

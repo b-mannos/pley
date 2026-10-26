@@ -241,8 +241,13 @@ async fn run(args: Args) -> anyhow::Result<()> {
         license: "LicenseRef-Restricted".into(),
         source: None,
         started_at_ms: util::now_ms(),
-        // Not FFmpeg's: this program's own (master playlists, segment edits).
-        capabilities: pley_transcoder_api::Capabilities { hls_master_playlist: true, ..ff.caps.clone() },
+        // Not FFmpeg's: this program's own (master playlists, segment edits,
+        // subtitle tracks copied into files of their own).
+        capabilities: pley_transcoder_api::Capabilities {
+            hls_master_playlist: true,
+            subtitle_matroska: true,
+            ..ff.caps.clone()
+        },
         limits,
     };
     let state = Arc::new(http::AppState::new(

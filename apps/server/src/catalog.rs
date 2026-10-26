@@ -279,6 +279,8 @@ pub struct ItemDetail {
     pub cast: Vec<crate::people::Credit>,
     /// Creators, directors, writers and producers.
     pub crew: Vec<crate::people::Credit>,
+    /// In the user's My List (movies and shows).
+    pub in_watchlist: bool,
 }
 
 pub fn image_url(id: i64, kind: &str, version: i64) -> String {
@@ -752,6 +754,7 @@ pub async fn item_detail(db: &Db, row: ItemRow) -> sqlx::Result<ItemDetail> {
         extras: Vec::new(),
         cast,
         crew,
+        in_watchlist: false,
     })
 }
 
@@ -833,9 +836,19 @@ pub async fn count_matching(db: &Db, user_id: i64, q: &ItemsQuery<'_>) -> sqlx::
 pub const WATCHED_THRESHOLD: f64 = 0.9;
 const MIN_RESUME_MS: i64 = 15_000;
 
+/// What a progress report did besides keeping the place.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Recorded {
+    /// The item became watched, counted as a play for the first time.
+    pub counted: bool,
+    /// A watched movie left the user's My List.
+    pub left_watchlist: bool,
+}
+
 /// Record playback progress. Crossing 90 % marks the item watched and, the
 /// first time for this play, counts it and adds it to the watch history from
-/// `device`; returns whether that happened.
+/// `device`. Any report brings the title back to Continue Watching if the
+/// user took it out, and a movie watched to the end leaves My List.
 pub async fn record_progress(
     db: &Db,
     user_id: i64,
@@ -843,9 +856,10 @@ pub async fn record_progress(
     position_ms: i64,
     duration_ms: i64,
     device: Option<&str>,
-) -> sqlx::Result<bool> {
+) -> sqlx::Result<Recorded> {
     let now = now();
     let position_ms = position_ms.max(0);
+    show_again(db, user_id, "", item_id).await?;
     if duration_ms > 0 && position_ms as f64 >= duration_ms as f64 * WATCHED_THRESHOLD {
         let mut tx = db.write.begin().await?;
         // Reports keep coming after the threshold: a play counts once, until
@@ -881,8 +895,15 @@ pub async fn record_progress(
                 .execute(&mut *tx)
                 .await?;
         }
+        // Of what plays, only movies are in My List (shows stay there).
+        let left = sqlx::query("DELETE FROM watchlist WHERE user_id = ? AND item_id = ?")
+            .bind(user_id)
+            .bind(item_id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
         tx.commit().await?;
-        return Ok(!counted);
+        return Ok(Recorded { counted: !counted, left_watchlist: left > 0 });
     }
     let stored = if position_ms >= MIN_RESUME_MS { position_ms } else { 0 };
     sqlx::query(
@@ -898,7 +919,7 @@ pub async fn record_progress(
     .bind(now)
     .execute(&db.write)
     .await?;
-    Ok(false)
+    Ok(Recorded::default())
 }
 
 /// Set (0-10) or clear the user's star rating of an item.
@@ -934,10 +955,23 @@ fn leaves_clause(kind: &str) -> &'static str {
     }
 }
 
-pub async fn set_watched(db: &Db, user_id: i64, item_id: i64, kind: &str, watched: bool) -> sqlx::Result<()> {
+/// Marks an item and what it covers (a show's episodes, …) watched or not.
+/// Marked watched, they count as played for Continue Watching (a title taken
+/// out of it comes back) and a movie leaves My List: returns whether one did.
+pub async fn set_watched(db: &Db, user_id: i64, item_id: i64, kind: &str, watched: bool) -> sqlx::Result<bool> {
     let leaves = leaves_clause(kind);
     let now = now();
+    let mut left_watchlist = false;
     if watched {
+        show_again(db, user_id, kind, item_id).await?;
+        left_watchlist = sqlx::query(&format!("DELETE FROM watchlist WHERE user_id = ?1 AND item_id IN ({leaves})"))
+            .bind(user_id)
+            .bind(now)
+            .bind(item_id)
+            .execute(&db.write)
+            .await?
+            .rows_affected()
+            > 0;
         sqlx::query(&format!(
             "INSERT INTO user_item_state (user_id, item_id, position_ms, watched, play_count, last_played_at, updated_at)
              SELECT ?1, id, 0, 1, 1, ?2, ?2 FROM items WHERE id IN ({leaves})
@@ -961,15 +995,19 @@ pub async fn set_watched(db: &Db, user_id: i64, item_id: i64, kind: &str, watche
         .execute(&db.write)
         .await?;
     }
-    Ok(())
+    Ok(left_watchlist)
 }
 
 // ------------------------------------------------------------------ hubs
 
+/// Movies and episodes the user is part way through, newest first (not
+/// those of titles they took out of Continue Watching).
 pub async fn in_progress(db: &Db, user_id: i64, library_id: Option<i64>, limit: i64) -> sqlx::Result<Vec<ItemRow>> {
     let scope = if library_id.is_some() { "AND i.library_id = ?" } else { "" };
     let sql = format!(
         "{SUMMARY_SELECT} WHERE {VISIBLE} AND s.position_ms > 0 AND s.watched = 0 AND i.kind IN ('movie', 'episode') {scope}
+           AND NOT EXISTS (SELECT 1 FROM continue_watching_hidden h
+                           WHERE h.user_id = (SELECT uid FROM me) AND h.item_id = COALESCE(i.grandparent_id, i.id))
          ORDER BY s.last_played_at DESC LIMIT ?"
     );
     let mut q = sqlx::query_as::<_, ItemRow>(&sql).bind(user_id);
@@ -1052,10 +1090,14 @@ pub async fn next_up(db: &Db, user_id: i64, library_id: Option<i64>, limit: i64)
     if let Some(lib) = library_id {
         q = q.bind(lib);
     }
+    let hidden: Vec<i64> = sqlx::query_scalar("SELECT item_id FROM continue_watching_hidden WHERE user_id = ?")
+        .bind(user_id)
+        .fetch_all(&db.read)
+        .await?;
     let mut shows: Vec<(i64, i64)> = Vec::new();
     let mut plays = q.fetch(&db.read);
     while let Some((show, at)) = plays.try_next().await? {
-        if !shows.iter().any(|(s, _)| *s == show) {
+        if !hidden.contains(&show) && !shows.iter().any(|(s, _)| *s == show) {
             shows.push((show, at));
             if shows.len() as i64 >= limit * 2 {
                 break;
@@ -1119,6 +1161,104 @@ pub async fn on_deck(db: &Db, user_id: i64, item: &ItemRow) -> sqlx::Result<Opti
         .or_else(|| next_after_last_watched(&episodes))
         .or_else(|| episodes.iter().find(|e| !e.watched).map(|e| e.id))
         .or_else(|| episodes.first().map(|e| e.id)))
+}
+
+// ------------------------------------------------------------------ Continue Watching and My List
+
+/// The title a Continue Watching row stands for, which taking it out hides:
+/// a movie itself, an episode's (or a season's) show. `None` for what is
+/// never in Continue Watching.
+pub fn continue_watching_title(row: &ItemRow) -> Option<i64> {
+    match row.kind.as_str() {
+        "movie" | "show" => Some(row.id),
+        "season" => row.parent_id,
+        "episode" => row.grandparent_id,
+        _ => None,
+    }
+}
+
+/// Takes a title ([`continue_watching_title`]) out of the user's Continue
+/// Watching, until they play it again (see [`show_again`]).
+pub async fn hide_from_continue_watching(db: &Db, user_id: i64, title_id: i64) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO continue_watching_hidden (user_id, item_id, hidden_at) VALUES (?, ?, ?)
+         ON CONFLICT(user_id, item_id) DO UPDATE SET hidden_at = excluded.hidden_at",
+    )
+    .bind(user_id)
+    .bind(title_id)
+    .bind(now())
+    .execute(&db.write)
+    .await?;
+    Ok(())
+}
+
+/// The user played `item_id` (of `kind`; what it covers when it is a show
+/// or a season) again: its movie or show comes back to Continue Watching
+/// if they took it out. Looked up first, since every progress report asks.
+async fn show_again(db: &Db, user_id: i64, kind: &str, item_id: i64) -> sqlx::Result<()> {
+    let titles = format!("SELECT COALESCE(grandparent_id, id) FROM items WHERE id IN ({})", leaves_clause(kind));
+    let hidden: bool = sqlx::query_scalar(&format!(
+        "SELECT EXISTS (SELECT 1 FROM continue_watching_hidden WHERE user_id = ?1 AND item_id IN ({titles}))"
+    ))
+    .bind(user_id)
+    .bind(0)
+    .bind(item_id)
+    .fetch_one(&db.read)
+    .await?;
+    if hidden {
+        sqlx::query(&format!("DELETE FROM continue_watching_hidden WHERE user_id = ?1 AND item_id IN ({titles})"))
+            .bind(user_id)
+            .bind(0)
+            .bind(item_id)
+            .execute(&db.write)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Adds a movie or a show to the user's My List; whether it wasn't there.
+pub async fn add_to_watchlist(db: &Db, user_id: i64, item_id: i64) -> sqlx::Result<bool> {
+    let added = sqlx::query(
+        "INSERT INTO watchlist (user_id, item_id, added_at) VALUES (?, ?, ?) ON CONFLICT(user_id, item_id) DO NOTHING",
+    )
+    .bind(user_id)
+    .bind(item_id)
+    .bind(now())
+    .execute(&db.write)
+    .await?;
+    Ok(added.rows_affected() > 0)
+}
+
+/// Takes an item out of the user's My List; whether it was there.
+pub async fn remove_from_watchlist(db: &Db, user_id: i64, item_id: i64) -> sqlx::Result<bool> {
+    let removed = sqlx::query("DELETE FROM watchlist WHERE user_id = ? AND item_id = ?")
+        .bind(user_id)
+        .bind(item_id)
+        .execute(&db.write)
+        .await?;
+    Ok(removed.rows_affected() > 0)
+}
+
+/// The user's My List, newest added first: what they may see of it (library
+/// access and age limit, as everywhere).
+pub async fn watchlist(db: &Db, user_id: i64, limit: Option<i64>) -> sqlx::Result<Vec<ItemRow>> {
+    sqlx::query_as(&format!(
+        "{SUMMARY_SELECT} JOIN watchlist w ON w.item_id = i.id AND w.user_id = (SELECT uid FROM me)
+         WHERE {VISIBLE} ORDER BY w.added_at DESC, w.rowid DESC LIMIT ?"
+    ))
+    .bind(user_id)
+    .bind(limit.unwrap_or(i64::MAX).max(0))
+    .fetch_all(&db.read)
+    .await
+}
+
+/// Whether the item is in the user's My List.
+pub async fn in_watchlist(db: &Db, user_id: i64, item_id: i64) -> sqlx::Result<bool> {
+    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM watchlist WHERE user_id = ? AND item_id = ?)")
+        .bind(user_id)
+        .bind(item_id)
+        .fetch_one(&db.read)
+        .await
 }
 
 /// The episode/track following `item` (crossing season/disc boundaries).
@@ -1471,26 +1611,26 @@ mod tests {
         let duration = 100_000;
 
         // The first seconds are not worth resuming.
-        assert!(!record_progress(&db, 1, 1, 14_999, duration, None).await.unwrap());
+        assert!(!record_progress(&db, 1, 1, 14_999, duration, None).await.unwrap().counted);
         assert_eq!(state_of(&db, 1).await, ((0, false, 0), 0));
         record_progress(&db, 1, 1, 15_000, duration, None).await.unwrap();
         assert_eq!(state_of(&db, 1).await, ((15_000, false, 0), 0));
 
         // 90 % is the end: watched, no resume point, one play from that device.
-        assert!(record_progress(&db, 1, 1, 90_000, duration, Some("TV")).await.unwrap());
+        assert!(record_progress(&db, 1, 1, 90_000, duration, Some("TV")).await.unwrap().counted);
         assert_eq!(state_of(&db, 1).await, ((0, true, 1), 1));
         let device: Option<String> =
             sqlx::query_scalar("SELECT device FROM play_history").fetch_one(&db.read).await.unwrap();
         assert_eq!(device.as_deref(), Some("TV"));
 
         // Reports keep coming during the credits: still one play.
-        assert!(!record_progress(&db, 1, 1, 99_000, duration, Some("TV")).await.unwrap());
+        assert!(!record_progress(&db, 1, 1, 99_000, duration, Some("TV")).await.unwrap().counted);
         assert_eq!(state_of(&db, 1).await, ((0, true, 1), 1));
 
         // Watching it again counts again; the watched flag stays meanwhile.
         record_progress(&db, 1, 1, 40_000, duration, None).await.unwrap();
         assert_eq!(state_of(&db, 1).await, ((40_000, true, 1), 1));
-        assert!(record_progress(&db, 1, 1, 95_000, duration, None).await.unwrap());
+        assert!(record_progress(&db, 1, 1, 95_000, duration, None).await.unwrap().counted);
         assert_eq!(state_of(&db, 1).await, ((0, true, 2), 2));
     }
 
@@ -1498,7 +1638,7 @@ mod tests {
     async fn progress_without_a_duration_never_completes() {
         let dir = tempfile::tempdir().unwrap();
         let db = db_with_movies(dir.path(), 1).await;
-        assert!(!record_progress(&db, 1, 1, 7_200_000, 0, None).await.unwrap());
+        assert!(!record_progress(&db, 1, 1, 7_200_000, 0, None).await.unwrap().counted);
         assert_eq!(state_of(&db, 1).await, ((7_200_000, false, 0), 0));
         // Negative positions (clock glitches) are treated as the start.
         record_progress(&db, 1, 1, -5_000, 100_000, None).await.unwrap();
@@ -1517,7 +1657,7 @@ mod tests {
         assert_eq!(state_of(&db, 1).await, ((0, true, 1), 0));
         // A play that ends after that is recorded.
         record_progress(&db, 1, 1, 20_000, 100_000, None).await.unwrap();
-        assert!(record_progress(&db, 1, 1, 91_000, 100_000, None).await.unwrap());
+        assert!(record_progress(&db, 1, 1, 91_000, 100_000, None).await.unwrap().counted);
         assert_eq!(state_of(&db, 1).await, ((0, true, 2), 1));
 
         // Unwatching clears the flag and the resume point but keeps the count.

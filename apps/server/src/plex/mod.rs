@@ -222,7 +222,9 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/playQueues/{id}/items/{entry}/move", put(queues::move_item))
         .route("/playQueues/{id}/shuffle", put(queues::shuffled))
         .route("/playQueues/{id}/unshuffle", put(queues::unshuffled))
+        .route("/actions/removeFromContinueWatching", put(playback::remove_from_continue_watching))
         .route("/status/sessions", get(playback::sessions))
+        .route("/status/sessions/terminate", get(playback::terminate))
         .route("/_/websockets/notifications", get(notifications::socket))
         .route("/status/sessions/history/all", get(server::history))
         .route("/status/sessions/history/{id}", delete(server::delete_history))
@@ -330,7 +332,7 @@ impl From<AppError> for PlexError {
                 PlexError::Unauthorized
             }
             AppError::Forbidden(_) | AppError::InsufficientScope(_) => PlexError::Forbidden,
-            AppError::NotFound(_) => PlexError::NotFound,
+            AppError::NotFound(_) | AppError::SessionStopped(_) => PlexError::NotFound,
             AppError::BadRequest(m) | AppError::Conflict(m) => PlexError::BadRequest(m),
             AppError::Unavailable(m) | AppError::TooManyRequests(m) => PlexError::Unavailable(m),
             AppError::Internal(e) => PlexError::Internal(e),

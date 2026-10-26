@@ -251,6 +251,22 @@ impl Transcoder {
         Ok(resp.text().await?)
     }
 
+    /// A subtitle track (`stream_index`, or the subtitle file at `path`)
+    /// copied into a Matroska file of its own, for players that show
+    /// picture subtitles next to an HLS stream. Copying a track out reads
+    /// the whole file: it may take as long as a text track's conversion.
+    pub async fn subtitle_matroska(&self, path: &str, stream_index: Option<i64>) -> TranscoderResult<Vec<u8>> {
+        let req = SubtitleRequest { path: path.to_owned(), stream_index, partial: false };
+        let resp = self.post("/v1/subtitles/mks", &req, Duration::from_secs(12 * 3600)).await?;
+        Ok(resp.bytes().await?.to_vec())
+    }
+
+    /// Whether the transcoder copies subtitle tracks into files of their
+    /// own ([`Transcoder::subtitle_matroska`]); older ones don't.
+    pub fn copies_subtitles(&self) -> bool {
+        self.info().is_some_and(|info| info.capabilities.subtitle_matroska)
+    }
+
     /// An embedded track's subtitles as far as they have been pulled out of
     /// the file, and whether that is all of them (the transcoder goes on
     /// pulling them out after answering). The transcoder answers within a

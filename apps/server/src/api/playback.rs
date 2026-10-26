@@ -3,14 +3,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use axum::Json;
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::{Path, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use dashmap::DashMap;
 use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
-use pley_transcoder_api::{AudioMode, JobRequest, SUBTITLES_COMPLETE_HEADER, VideoMode};
+use pley_transcoder_api::{AudioMode, JobRequest, SUBTITLES_COMPLETE_HEADER, StreamKind, VideoMode};
+use serde::Deserialize;
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
@@ -251,7 +252,14 @@ fn for_viewer(user: &AuthUser, err: impl Into<AppError>) -> AppError {
 }
 
 fn owned_session(state: &AppState, user: &AuthUser, id: &str) -> ApiResult<Arc<Session>> {
-    let session = state.sessions.get(id).ok_or_else(|| AppError::not_found("playback session expired"))?;
+    let Some(session) = state.sessions.get(id) else {
+        // Stopped from elsewhere: a player without the event stream learns
+        // it from its next request.
+        return Err(match state.sessions.stopped(id) {
+            Some(stopped) if stopped.user_id == user.id || user.is_admin => AppError::SessionStopped(stopped.message),
+            _ => AppError::not_found("playback session expired"),
+        });
+    };
     if session.user_id != user.id && !user.is_admin {
         return Err(AppError::forbidden("not your session"));
     }
@@ -259,11 +267,71 @@ fn owned_session(state: &AppState, user: &AuthUser, id: &str) -> ApiResult<Arc<S
 }
 
 pub async fn stop(State(state): State<AppState>, user: AuthUser, Path(id): Path<String>) -> ApiResult<StatusCode> {
-    let session = owned_session(&state, &user, &id)?;
+    let session = match owned_session(&state, &user, &id) {
+        // Over already: what the player wanted.
+        Err(AppError::SessionStopped(_)) => return Ok(StatusCode::NO_CONTENT),
+        other => other?,
+    };
     if let Some(session) = state.sessions.remove(&session.id) {
         end_sessions(&state, vec![session]);
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// The most a stopped session's message says.
+const STOP_MESSAGE_MAX: usize = 200;
+
+#[derive(Deserialize, Default)]
+pub struct StopSession {
+    #[serde(default)]
+    message: Option<String>,
+}
+
+/// `DELETE /api/sessions/{id}` with an optional `{ message }`: ends a
+/// playback session at once, from elsewhere than its player (the dashboard,
+/// another device). Administrators stop any session, others their own.
+pub async fn stop_session(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> ApiResult<StatusCode> {
+    let body: StopSession = if body.iter().all(u8::is_ascii_whitespace) {
+        StopSession::default()
+    } else {
+        serde_json::from_slice(&body).map_err(|err| AppError::bad_request(format!("invalid body: {err}")))?
+    };
+    let message = body.message.map(|m| m.trim().to_owned()).filter(|m| !m.is_empty());
+    if message.as_ref().is_some_and(|m| m.chars().count() > STOP_MESSAGE_MAX) {
+        return Err(AppError::bad_request(format!("the message is longer than {STOP_MESSAGE_MAX} characters")));
+    }
+    stop_by(&state, &user, &id, message)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Stops session `id` for `user` (an administrator: any session; anyone
+/// else: their own): its transcode ends, its player hears `session_stopped`
+/// and its next requests answer `410`. A session stopped already is fine.
+pub(crate) fn stop_by(state: &AppState, user: &AuthUser, id: &str, message: Option<String>) -> ApiResult<()> {
+    let Some(session) = state.sessions.get(id) else {
+        return match state.sessions.stopped(id) {
+            Some(stopped) if stopped.user_id == user.id || user.is_admin => Ok(()),
+            Some(_) => Err(AppError::forbidden("not your session")),
+            None => Err(AppError::not_found("no such session")),
+        };
+    };
+    if session.user_id != user.id && !user.is_admin {
+        return Err(AppError::forbidden("not your session"));
+    }
+    let Some(session) = state.sessions.stop(id, message.clone()) else { return Ok(()) };
+    state.events.send(ServerEvent::SessionStopped {
+        user_id: session.user_id,
+        session_id: session.id.clone(),
+        message,
+        by_admin: session.user_id != user.id,
+    });
+    end_sessions(state, vec![session]);
+    Ok(())
 }
 
 /// Forget sessions that were already removed from the registry and delete
@@ -288,6 +356,10 @@ fn end_sessions(state: &AppState, sessions: Vec<Arc<Session>>) {
 /// new one.
 async fn replacement_job(state: &AppState, user: &AuthUser, session: &Session, failed: &str) -> ApiResult<String> {
     let _guard = session.recreate.lock().await;
+    // Stopped while this request waited: its job went on purpose.
+    if let Some(stopped) = state.sessions.stopped(&session.id) {
+        return Err(AppError::SessionStopped(stopped.message));
+    }
     if let Some(current) = session.job_id() {
         if current != failed {
             return Ok(current);
@@ -307,6 +379,11 @@ async fn replacement_job(state: &AppState, user: &AuthUser, session: &Session, f
         *session.job_id.lock() = None;
         tracing::info!("transcode job for session {} cannot be recreated with the same layout", session.id);
         return Err(AppError::not_found("playback session expired"));
+    }
+    // Stopped while the job was being created: nothing else will delete it.
+    if let Some(stopped) = state.sessions.stopped(&session.id) {
+        let _ = state.transcoder.delete_job(&created.id).await;
+        return Err(AppError::SessionStopped(stopped.message));
     }
     tracing::info!("recreated transcode job for session {}", session.id);
     *session.job_id.lock() = Some(created.id.clone());
@@ -440,36 +517,25 @@ pub async fn stream_file(
     Ok(response)
 }
 
+/// `/api/files/{id}/subtitles/{index}.vtt`: a text track (or subtitle file)
+/// as WebVTT; `{index}.mks`: a picture track in a Matroska file of its own.
 pub async fn subtitles(
     State(state): State<AppState>,
     user: AuthUser,
     Path((id, name)): Path<(i64, String)>,
+    request: Request,
 ) -> ApiResult<Response> {
+    if let Some(index) = name.strip_suffix(".mks") {
+        let index: i64 = index.parse().map_err(|_| AppError::not_found("unknown subtitle file"))?;
+        let file = visible_file(&state, &user, id).await?;
+        return picture_track(&state, &user, file, index, request).await;
+    }
     let index: i64 = name
         .strip_suffix(".vtt")
         .and_then(|n| n.parse().ok())
         .ok_or_else(|| AppError::not_found("unknown subtitle file"))?;
     let file = visible_file(&state, &user, id).await?;
-    let sidecar = if index >= EXTERNAL_INDEX_BASE {
-        let sub = file
-            .external_subs()
-            .into_iter()
-            .find(|s| s.index == index)
-            .filter(|s| crate::library::walk::leads_to_its_kind(std::path::Path::new(&s.path)))
-            .ok_or_else(|| AppError::not_found("subtitle not found"))?;
-        Some(sub.path)
-    } else {
-        None
-    };
-    // A sidecar can be replaced without its video changing (subtitle
-    // downloaders upgrade them): its own time is part of the name too.
-    let version = match &sidecar {
-        Some(path) => {
-            let modified = tokio::fs::metadata(path).await.ok().and_then(|m| m.modified().ok());
-            format!("_{}", modified.map(crate::util::system_time_secs).unwrap_or(0))
-        }
-        None => String::new(),
-    };
+    let (sidecar, version) = subtitle_source(&file, index).await?;
     let cache =
         state.config.cache_dir().join("subtitles").join(format!("{}_{}_{}{version}.vtt", file.id, index, file.mtime));
     // Anything but WebVTT is a file cut short by an earlier version (written
@@ -486,7 +552,7 @@ pub async fn subtitles(
         let (text, complete) =
             state.transcoder.subtitles_so_far(&file.path, index).await.map_err(|err| for_viewer(&user, err))?;
         if complete {
-            cache_subtitles(&cache, &text).await;
+            cache_subtitles(&cache, text.as_bytes()).await;
             return Ok(vtt(text));
         }
         return Ok((
@@ -499,37 +565,131 @@ pub async fn subtitles(
         )
             .into_response());
     };
-    let text = extract_subtitles(&state, path, cache).await.map_err(|err| for_viewer(&user, err))?;
-    Ok(vtt((*text).clone()))
+    let transcoder = state.transcoder.clone();
+    let made = extract_once(cache, async move { Ok(transcoder.subtitles(&path, None).await?.into_bytes()) })
+        .await
+        .map_err(|err| for_viewer(&user, err))?;
+    Ok(vtt(String::from_utf8_lossy(&made).into_owned()))
+}
+
+/// Where subtitle `index` of `file` comes from: a sidecar's path (`None`:
+/// the track is in the file), and what tells its versions apart in cache
+/// names. A sidecar can be replaced without its video changing (subtitle
+/// downloaders upgrade them): its own time is part of the name too.
+async fn subtitle_source(file: &catalog::FileRow, index: i64) -> ApiResult<(Option<String>, String)> {
+    if index < EXTERNAL_INDEX_BASE {
+        return Ok((None, String::new()));
+    }
+    let sub = file
+        .external_subs()
+        .into_iter()
+        .find(|s| s.index == index)
+        .filter(|s| crate::library::walk::leads_to_its_kind(std::path::Path::new(&s.path)))
+        .ok_or_else(|| AppError::not_found("subtitle not found"))?;
+    let modified = tokio::fs::metadata(&sub.path).await.ok().and_then(|m| m.modified().ok());
+    Ok((Some(sub.path), format!("_{}", modified.map(crate::util::system_time_secs).unwrap_or(0))))
+}
+
+/// What `.mks` files are served as.
+const MATROSKA: &str = "video/x-matroska";
+
+/// A picture subtitle track (PGS, VobSub, DVB; in the file or next to it)
+/// copied as it is into a Matroska file of its own, for players that show
+/// it next to an HLS stream instead of having it drawn onto the video. Its
+/// times are the original's from the start of the file, as the stream's
+/// are. Made once per file version (by the transcoder) and cached, then
+/// served from the cache with ranges. `404` for a text track or anything
+/// but subtitles.
+async fn picture_track(
+    state: &AppState,
+    user: &AuthUser,
+    file: catalog::FileRow,
+    index: i64,
+    request: Request,
+) -> ApiResult<Response> {
+    let picture = file
+        .streams()
+        .iter()
+        .any(|s| s.index == index && s.kind == StreamKind::Subtitle && !s.text_based.unwrap_or(true));
+    if !picture {
+        return Err(AppError::not_found("no picture subtitle track has this index"));
+    }
+    let (sidecar, version) = subtitle_source(&file, index).await?;
+    let cache =
+        state.config.cache_dir().join("subtitles").join(format!("{}_{}_{}{version}.mks", file.id, index, file.mtime));
+    if !is_matroska(&cache).await {
+        if !state.transcoder.copies_subtitles() {
+            return Err(AppError::Unavailable("the transcoder can't copy subtitle tracks yet: update it".into()));
+        }
+        let (path, stream_index) = match sidecar {
+            Some(path) => (path, None),
+            None => (file.path.clone(), Some(index)),
+        };
+        let transcoder = state.transcoder.clone();
+        let made =
+            extract_once(cache.clone(), async move { Ok(transcoder.subtitle_matroska(&path, stream_index).await?) })
+                .await
+                .map_err(|err| for_viewer(user, err))?;
+        if !is_matroska(&cache).await {
+            // Not cached (a full disk): served as it is.
+            return Ok((
+                [(header::CONTENT_TYPE, MATROSKA), (header::CACHE_CONTROL, "private, max-age=3600")],
+                (*made).clone(),
+            )
+                .into_response());
+        }
+    }
+    let response =
+        ServeFile::new(&cache).oneshot(request).await.map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))?;
+    let mut response = response.map(Body::new);
+    response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static(MATROSKA));
+    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=3600"));
+    Ok(response)
+}
+
+/// Whether `path` is a whole Matroska file (cached ones are renamed into
+/// place whole, so the EBML header says enough).
+async fn is_matroska(path: &std::path::Path) -> bool {
+    use tokio::io::AsyncReadExt;
+    let mut head = [0u8; 4];
+    match tokio::fs::File::open(path).await {
+        Ok(mut file) => file.read_exact(&mut head).await.is_ok() && head == [0x1A, 0x45, 0xDF, 0xA3],
+        Err(_) => false,
+    }
 }
 
 /// A conversion under way, and which one it is.
 #[derive(Clone)]
 struct Extraction {
     id: u64,
-    result: Shared<BoxFuture<'static, Result<Arc<String>, Arc<AppError>>>>,
+    result: Shared<BoxFuture<'static, Made>>,
 }
+
+/// What a conversion made, shared by the requests that wait for it.
+type Made = Result<Arc<Vec<u8>>, Arc<AppError>>;
 
 /// Subtitles being pulled out of their files, by cache file.
 static EXTRACTIONS: LazyLock<DashMap<PathBuf, Extraction>> = LazyLock::new(DashMap::new);
 static NEXT_EXTRACTION: AtomicU64 = AtomicU64::new(0);
 
-/// The subtitle file at `path` (a sidecar) as WebVTT, made once and cached
-/// at `cache`: requests for the same subtitles wait for one conversion, which
-/// goes on to the cache when nobody waits any more (a player that moved on,
-/// or restarted).
-async fn extract_subtitles(state: &AppState, path: String, cache: PathBuf) -> ApiResult<Arc<String>> {
+/// What `work` makes (subtitles pulled out of their file), made once and
+/// cached at `cache`: requests for the same file wait for one conversion,
+/// which goes on to the cache when nobody waits any more (a player that
+/// moved on, or restarted). `work` is dropped unused when one is under way.
+async fn extract_once(
+    cache: PathBuf,
+    work: impl Future<Output = ApiResult<Vec<u8>>> + Send + 'static,
+) -> ApiResult<Arc<Vec<u8>>> {
     let extraction = EXTRACTIONS
         .entry(cache.clone())
         .or_insert_with(|| {
             let id = NEXT_EXTRACTION.fetch_add(1, Ordering::Relaxed);
-            let state = state.clone();
             let cache = cache.clone();
             let task = tokio::spawn(async move {
                 let _done = Forget { cache: cache.clone(), id };
-                let text = state.transcoder.subtitles(&path, None).await?;
-                cache_subtitles(&cache, &text).await;
-                Ok::<_, AppError>(Arc::new(text))
+                let made = work.await?;
+                cache_subtitles(&cache, &made).await;
+                Ok::<_, AppError>(Arc::new(made))
             });
             let result = async move {
                 match task.await {
@@ -565,12 +725,12 @@ fn vtt(text: String) -> Response {
 /// Caches converted subtitles whole or not at all: they go to a temporary
 /// file that is renamed into place, so a crash or a full disk never leaves a
 /// file cut short to be served from then on.
-async fn cache_subtitles(path: &std::path::Path, text: &str) {
+async fn cache_subtitles(path: &std::path::Path, data: &[u8]) {
     let Some(dir) = path.parent() else { return };
     let tmp = dir.join(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
     let written = async {
         tokio::fs::create_dir_all(dir).await?;
-        tokio::fs::write(&tmp, text).await?;
+        tokio::fs::write(&tmp, data).await?;
         tokio::fs::rename(&tmp, path).await
     }
     .await;

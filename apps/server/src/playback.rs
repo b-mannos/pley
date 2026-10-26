@@ -79,6 +79,13 @@ pub struct Caps {
     /// Subtitle codecs the player shows itself, pictures (PGS…) included.
     #[serde(default)]
     pub subtitle_codecs: Option<Vec<String>>,
+    /// The player shows picture subtitles (PGS, VobSub, DVB) itself also
+    /// when the file is repackaged or converted, from their own file
+    /// (`/api/files/{id}/subtitles/{index}.mks`) next to the HLS stream: it
+    /// asks for no `subtitle_index` then, and nothing is drawn onto the
+    /// video.
+    #[serde(default)]
+    pub picture_subtitles_sideload: Option<bool>,
     /// The player switches a file's audio tracks itself.
     #[serde(default)]
     pub audio_track_switching: Option<bool>,
@@ -1135,7 +1142,28 @@ pub struct Sessions {
     starts: AtomicU64,
     /// A session started or ended.
     changed: Notify,
+    /// Sessions stopped from elsewhere, by id (see [`Sessions::stop`]).
+    stopped: Mutex<HashMap<String, Stopped>>,
 }
+
+/// A session stopped from elsewhere (an administrator, or its owner on
+/// another device), remembered for [`STOPPED_KEPT_SECS`] so that its player's
+/// next requests learn it (`410 Gone`) and its reports don't start it again.
+#[derive(Debug, Clone)]
+pub struct Stopped {
+    pub user_id: i64,
+    pub client_id: Option<String>,
+    pub item_id: i64,
+    /// What the one who stopped it said, if anything.
+    pub message: Option<String>,
+    at: i64,
+}
+
+/// How long a stopped session is remembered: longer than a player keeps
+/// going without asking for anything (a direct play's buffer, a pause).
+const STOPPED_KEPT_SECS: i64 = 30 * 60;
+/// How many stopped sessions are remembered at most (the oldest go first).
+const STOPPED_KEPT: usize = 1_000;
 
 /// A transcode slot, held while the job is created. It counts against the
 /// limit until the session takes it over ([`Sessions::insert_transcode`]) or
@@ -1266,6 +1294,62 @@ impl Sessions {
             self.changed.notify_waiters();
         }
         removed
+    }
+
+    /// Ends a session from elsewhere than its player: it is removed (its
+    /// transcode is the caller's to stop) and remembered as stopped, with
+    /// `message`. `None` when there is no such session.
+    pub fn stop(&self, id: &str, message: Option<String>) -> Option<Arc<Session>> {
+        // Remembered before it is removed, so no request in between finds it
+        // merely gone (404 makes a player start over; 410 makes it stop).
+        let session = self.get(id)?;
+        let now = now();
+        let mut stopped = self.stopped.lock();
+        stopped.retain(|_, s| now - s.at <= STOPPED_KEPT_SECS);
+        if stopped.len() >= STOPPED_KEPT {
+            if let Some(oldest) = stopped.iter().min_by_key(|(_, s)| s.at).map(|(id, _)| id.clone()) {
+                stopped.remove(&oldest);
+            }
+        }
+        stopped.insert(
+            session.id.clone(),
+            Stopped {
+                user_id: session.user_id,
+                client_id: session.client_id.clone(),
+                item_id: session.item_id,
+                message,
+                at: now,
+            },
+        );
+        drop(stopped);
+        // Two stops at once: only the one that removes it ends it.
+        self.remove(&session.id)
+    }
+
+    /// The session `id` if it was stopped from elsewhere lately.
+    pub fn stopped(&self, id: &str) -> Option<Stopped> {
+        let now = now();
+        self.stopped.lock().get(id).filter(|s| now - s.at <= STOPPED_KEPT_SECS).cloned()
+    }
+
+    /// Whether a session of `user_id` playing `item_id` on `client_id` was
+    /// stopped from elsewhere lately (its player may not know yet).
+    pub fn was_stopped(&self, user_id: i64, client_id: Option<&str>, item_id: i64) -> bool {
+        let now = now();
+        self.stopped.lock().values().any(|s| {
+            s.user_id == user_id
+                && s.item_id == item_id
+                && s.client_id.as_deref() == client_id
+                && now - s.at <= STOPPED_KEPT_SECS
+        })
+    }
+
+    /// Forget that `user_id`'s session of `item_id` on `client_id` was
+    /// stopped: its player has stopped too, so its next play is a new one.
+    pub fn forget_stopped(&self, user_id: i64, client_id: Option<&str>, item_id: i64) {
+        self.stopped
+            .lock()
+            .retain(|_, s| !(s.user_id == user_id && s.item_id == item_id && s.client_id.as_deref() == client_id));
     }
 
     /// Remove the sessions of `user_id` playing on `client_id` (the client
@@ -2019,6 +2103,28 @@ mod tests {
         let mut req = request();
         req.subtitle_index = Some(5);
         assert_eq!(decide(&f, Some(&i), &streams, &req).method, Method::Direct);
+    }
+
+    #[test]
+    fn side_loaded_picture_subtitles_are_never_drawn() {
+        // DTS the player doesn't take: repackaged, with the PGS track (9)
+        // shown by the player from its own file.
+        let i = info("h264", &["dts"], DynamicRange::Sdr);
+        let f = file("mkv", 5_000_000);
+        let mut req = request();
+        req.caps = serde_json::from_value(serde_json::json!({
+            "containers": ["mkv", "mp4"], "video_codecs": ["h264"], "audio_codecs": ["aac"],
+            "caps_version": 2, "subtitle_codecs": ["hdmv_pgs_subtitle"], "picture_subtitles_sideload": true,
+        }))
+        .unwrap();
+        assert_eq!(req.caps.picture_subtitles_sideload, Some(true));
+        let d = decide(&f, Some(&i), &i.streams, &req);
+        assert_eq!(d.method, Method::Remux);
+        assert_eq!((d.burn_index, d.subtitle.is_none()), (None, true));
+        assert!(!d.reasons.iter().any(|r| r.contains("ubtitles")), "{:?}", d.reasons);
+        // Asked for by index, they are drawn as for any player.
+        req.subtitle_index = Some(9);
+        assert_eq!(decide(&f, Some(&i), &i.streams, &req).burn_index, Some(9));
     }
 
     #[test]

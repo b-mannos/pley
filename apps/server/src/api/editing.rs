@@ -25,6 +25,7 @@ async fn detail(state: &AppState, user_id: i64, id: i64) -> ApiResult<ItemDetail
     let row = item_or_404(state, user_id, id).await?;
     let mut detail = catalog::item_detail(&state.db, row).await?;
     detail.locked_fields = overrides::locked_fields(&state.db, id).await?;
+    detail.in_watchlist = catalog::in_watchlist(&state.db, user_id, id).await?;
     Ok(detail)
 }
 

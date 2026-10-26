@@ -190,11 +190,17 @@ async fn report(
 ) -> PlexResult<()> {
     let duration = duration_ms.filter(|d| *d > 0).or(row.duration_ms).unwrap_or(0);
     let device = client.device_name.as_deref().or(client.product.as_deref());
-    let became_watched = catalog::record_progress(&state.db, user.id, row.id, time_ms, duration, device).await?;
+    let recorded = catalog::record_progress(&state.db, user.id, row.id, time_ms, duration, device).await?;
+    if recorded.left_watchlist {
+        state.events.send(ServerEvent::WatchlistChanged { user_id: user.id });
+    }
 
     let existing = state.sessions.list().into_iter().find(|s| {
         s.user_id == user.id && s.item_id == row.id && (client.identifier.is_none() || s.client_id == client.identifier)
     });
+    // A session stopped from elsewhere isn't started again by the reports
+    // its player keeps sending until it hears of it.
+    let stopped = existing.is_none() && state.sessions.was_stopped(user.id, client.identifier.as_deref(), row.id);
     match existing {
         Some(session) => {
             let changed = session.update(time_ms, play_state);
@@ -210,7 +216,7 @@ async fn report(
                 state.events.send(ServerEvent::SessionsChanged);
             }
         }
-        None if play_state != "stopped" => {
+        None if play_state != "stopped" && !stopped => {
             if let Some(client_id) = &client.identifier {
                 end_sessions(state, state.sessions.take_client_sessions(user.id, client_id));
             }
@@ -232,9 +238,13 @@ async fn report(
                 state.events.send(ServerEvent::SessionsChanged);
             }
         }
+        // Its player has stopped as well: a play after this shows up again.
+        None if stopped && play_state == "stopped" => {
+            state.sessions.forget_stopped(user.id, client.identifier.as_deref(), row.id)
+        }
         None => {}
     }
-    if became_watched {
+    if recorded.counted {
         state.events.send(ServerEvent::LibraryChanged { library_id: row.library_id });
     }
     Ok(())
@@ -313,7 +323,9 @@ pub async fn rate(State(state): State<AppState>, PlexUser(user): PlexUser, param
 async fn set_watched(state: &AppState, user: &AuthUser, params: &Params, watched: bool) -> PlexResult<Node> {
     let id = rating_key(params)?;
     let row = catalog::item(&state.db, user.id, id).await?.ok_or(PlexError::NotFound)?;
-    catalog::set_watched(&state.db, user.id, id, &row.kind, watched).await?;
+    if catalog::set_watched(&state.db, user.id, id, &row.kind, watched).await? {
+        state.events.send(ServerEvent::WatchlistChanged { user_id: user.id });
+    }
     state.events.send(ServerEvent::LibraryChanged { library_id: row.library_id });
     Ok(Node::container().attr("size", 0))
 }
@@ -325,6 +337,22 @@ pub async fn scrobble(State(state): State<AppState>, PlexUser(user): PlexUser, p
 
 pub async fn unscrobble(State(state): State<AppState>, PlexUser(user): PlexUser, params: Params) -> PlexResult<Node> {
     set_watched(&state, &user, &params, false).await
+}
+
+/// `PUT /actions/removeFromContinueWatching?ratingKey=…`: takes the movie,
+/// or the episode's show, out of Continue Watching until it is played again
+/// (as `DELETE /api/continue-watching/{id}`).
+pub async fn remove_from_continue_watching(
+    State(state): State<AppState>,
+    PlexUser(user): PlexUser,
+    params: Params,
+) -> PlexResult<Node> {
+    let id = rating_key(&params)?;
+    let row = catalog::item(&state.db, user.id, id).await?.ok_or(PlexError::NotFound)?;
+    let title = catalog::continue_watching_title(&row)
+        .ok_or_else(|| PlexError::BadRequest("only movies and shows are in Continue Watching".into()))?;
+    catalog::hide_from_continue_watching(&state.db, user.id, title).await?;
+    Ok(Node::container().attr("size", 0))
 }
 
 // ------------------------------------------------------------------ sessions
@@ -460,6 +488,22 @@ pub async fn sessions(State(state): State<AppState>, PlexUser(user): PlexUser) -
     }
     mc.set("size", size);
     Ok(mc)
+}
+
+/// `/status/sessions/terminate?sessionId=…&reason=…` (Tautulli's "kill
+/// stream"): an administrator stops a session (its `Session` `id`), as
+/// `DELETE /api/sessions/{id}` does, with the reason as its message.
+pub async fn terminate(State(state): State<AppState>, PlexUser(user): PlexUser, params: Params) -> PlexResult<Node> {
+    if !user.is_admin {
+        return Err(PlexError::Forbidden);
+    }
+    let id = params
+        .get("sessionId")
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| PlexError::BadRequest("sessionId is required".into()))?;
+    let reason = params.get("reason").map(str::trim).filter(|r| !r.is_empty()).map(|r| r.chars().take(200).collect());
+    crate::api::playback::stop_by(&state, &user, id, reason)?;
+    Ok(Node::container().attr("size", 0))
 }
 
 /// Adds `decision` to the session's media part (Tautulli reads it).

@@ -154,6 +154,7 @@ pub const APP_ROUTES: &[(&str, &str, Need)] = &[
     ("GET", "/api/people/{id}/photo", Need::Scope(Library)),
     ("GET", "/api/history", Need::Scope(Library)),
     ("GET", "/api/hubs/home", Need::Scope(Library)),
+    ("GET", "/api/watchlist", Need::Scope(Library)),
     ("GET", "/api/search", Need::Scope(Library)),
     ("GET", "/api/events", Need::Scope(Library)),
     // play
@@ -173,6 +174,11 @@ pub const APP_ROUTES: &[(&str, &str, Need)] = &[
     ("PUT", "/api/items/{id}/streams", Need::Scope(Play)),
     ("PUT", "/api/items/{id}/rating", Need::Scope(Play)),
     ("DELETE", "/api/history/{id}", Need::Scope(Play)),
+    ("DELETE", "/api/continue-watching/{id}", Need::Scope(Play)),
+    ("PUT", "/api/watchlist/{id}", Need::Scope(Play)),
+    ("DELETE", "/api/watchlist/{id}", Need::Scope(Play)),
+    // the profile's own sessions (an administrator's: any session)
+    ("DELETE", "/api/sessions/{id}", Need::Scope(Play)),
     // the profile's track choices for every title (its name, picture and
     // sign-in stay in the web app)
     ("PUT", "/api/me/track-defaults", Need::Scope(Play)),
@@ -229,7 +235,7 @@ mod tests {
     fn every_app_route_is_on_a_real_path() {
         // Whether each names a route of api/mod.rs is checked by
         // tests/app_tokens.rs, which reads it.
-        assert_eq!(APP_ROUTES.len(), 49);
+        assert_eq!(APP_ROUTES.len(), 54);
         for (i, (method, path, _)) in APP_ROUTES.iter().enumerate() {
             assert!(["GET", "POST", "PUT", "PATCH", "DELETE"].contains(method), "{method} {path}");
             assert!(path.starts_with("/api/") && !path.ends_with('/'), "{path}");

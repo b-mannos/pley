@@ -27,6 +27,7 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i
     let resume = resume_ms(&row);
     let mut detail = catalog::item_detail(&state.db, row).await?;
     detail.locked_fields = crate::overrides::locked_fields(&state.db, id).await?;
+    detail.in_watchlist = catalog::in_watchlist(&state.db, user.id, id).await?;
     if matches!(detail.summary.kind.as_str(), "movie" | "show") {
         detail.extras = catalog::extras(&state.db, user.id, id).await?.iter().map(ItemRow::to_summary).collect();
     }
@@ -220,8 +221,20 @@ pub async fn progress(
     }
     let duration = body.duration_ms.filter(|d| *d > 0).or(row.duration_ms).unwrap_or(0);
     let device = crate::accounts::device_name(headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()));
-    let became_watched =
-        catalog::record_progress(&state.db, user.id, id, body.position_ms, duration, Some(&device)).await?;
+    let recorded = catalog::record_progress(&state.db, user.id, id, body.position_ms, duration, Some(&device)).await?;
+    if recorded.left_watchlist {
+        state.events.send(ServerEvent::WatchlistChanged { user_id: user.id });
+    }
+    if recorded.counted {
+        state.events.send(ServerEvent::LibraryChanged { library_id: row.library_id });
+    }
+    // The place is kept, but a session stopped from elsewhere is over: a
+    // direct play's player hears it here (its file requests name no session).
+    if let Some(stopped) = body.session_id.as_deref().and_then(|sid| state.sessions.stopped(sid)) {
+        if stopped.user_id == user.id {
+            return Err(AppError::SessionStopped(stopped.message));
+        }
+    }
     if let Some(session) = body.session_id.as_deref().and_then(|sid| state.sessions.get(sid)) {
         if session.user_id == user.id {
             let changed = session.update(body.position_ms, &body.state);
@@ -237,9 +250,6 @@ pub async fn progress(
                 state.events.send(ServerEvent::SessionsChanged);
             }
         }
-    }
-    if became_watched {
-        state.events.send(ServerEvent::LibraryChanged { library_id: row.library_id });
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -271,7 +281,9 @@ pub async fn set_rating(
 
 pub async fn watched(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<StatusCode> {
     let row = item_or_404(&state, user.id, id).await?;
-    catalog::set_watched(&state.db, user.id, id, &row.kind, true).await?;
+    if catalog::set_watched(&state.db, user.id, id, &row.kind, true).await? {
+        state.events.send(ServerEvent::WatchlistChanged { user_id: user.id });
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

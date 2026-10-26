@@ -389,6 +389,11 @@ pub struct Capabilities {
     /// transcoders lack it and always tone-map to SDR.
     #[serde(default)]
     pub hdr_transcode: bool,
+    /// `POST /v1/subtitles/mks` copies a subtitle track into a Matroska file
+    /// of its own (picture subtitles players show next to an HLS stream).
+    /// Older transcoders lack it.
+    #[serde(default)]
+    pub subtitle_matroska: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -817,7 +822,9 @@ pub struct CoverRequest {
     pub path: String,
 }
 
-/// `POST /v1/subtitles` → `text/vtt`.
+/// `POST /v1/subtitles` → `text/vtt`. `POST /v1/subtitles/mks` takes it too
+/// (`partial` aside): the track (or the subtitle file, `stream_index` left
+/// out) copied into Matroska.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct SubtitleRequest {
     pub path: String,
@@ -1017,7 +1024,7 @@ mod tests {
                 "subtitle_burn_image":false,"subtitle_burn_text":false,"readrate":false}"#,
         )
         .unwrap();
-        assert!(!caps.hdr_transcode);
+        assert!(!caps.hdr_transcode && !caps.subtitle_matroska);
     }
 
     #[test]

@@ -15,6 +15,7 @@ mod people;
 pub(crate) mod playback;
 mod playlists;
 mod two_step;
+mod watchlist;
 
 use std::time::Duration;
 
@@ -112,6 +113,9 @@ pub fn router(state: AppState) -> Router {
         .route("/history", get(history::list))
         .route("/history/{id}", delete(history::delete))
         .route("/hubs/home", get(browse::home))
+        .route("/continue-watching/{id}", delete(browse::hide_continue_watching))
+        .route("/watchlist", get(watchlist::list))
+        .route("/watchlist/{id}", put(watchlist::add).delete(watchlist::remove))
         .route("/search", get(browse::search))
         .route("/playback", post(playback::start))
         .route("/playback/{session}", get(playback::status).delete(playback::stop))
@@ -121,6 +125,7 @@ pub fn router(state: AppState) -> Router {
         .route("/files/{id}/trickplay", get(playback::trickplay))
         .route("/files/{id}/trickplay/{sheet}", get(playback::trickplay_sheet))
         .route("/files/{id}/chapters/{image}", get(playback::chapter_image))
+        .route("/sessions/{id}", delete(playback::stop_session))
         .route("/activity", get(activity::activity))
         .route("/events", get(activity::events))
         .route("/users", get(accounts::list_users).post(accounts::create_user))

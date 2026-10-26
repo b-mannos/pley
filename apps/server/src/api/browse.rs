@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use serde::Serialize;
 
+use super::items::item_or_404;
 use super::libraries::{Hub, Hubs};
 use crate::auth::AuthUser;
 use crate::catalog::{self, ItemSummary};
-use crate::error::ApiResult;
+use crate::error::{ApiResult, AppError};
 use crate::library::list_libraries;
 use crate::people::{self, PersonSummary};
 use crate::state::AppState;
@@ -15,8 +17,9 @@ use crate::state::AppState;
 pub async fn home(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Hubs>> {
     let libraries = list_libraries(&state.db).await?;
     // Every hub at the same time: they don't depend on each other.
-    let (continue_rows, recent) = tokio::try_join!(
+    let (continue_rows, my_list, recent) = tokio::try_join!(
         catalog::continue_watching(&state.db, user.id, None, 20),
+        catalog::watchlist(&state.db, user.id, Some(20)),
         futures::future::try_join_all(libraries.iter().map(|lib| catalog::recently_added(
             &state.db,
             user.id,
@@ -25,12 +28,20 @@ pub async fn home(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
             20
         )),),
     )?;
-    let mut hubs = vec![Hub {
-        key: "continue_watching".into(),
-        title: "Continue Watching".into(),
-        library_id: None,
-        items: continue_rows.iter().map(|r| r.to_summary()).collect(),
-    }];
+    let mut hubs = vec![
+        Hub {
+            key: "continue_watching".into(),
+            title: "Continue Watching".into(),
+            library_id: None,
+            items: continue_rows.iter().map(|r| r.to_summary()).collect(),
+        },
+        Hub {
+            key: "my_list".into(),
+            title: "My List".into(),
+            library_id: None,
+            items: my_list.iter().map(|r| r.to_summary()).collect(),
+        },
+    ];
     for (lib, rows) in libraries.iter().zip(recent) {
         hubs.push(Hub {
             key: format!("recently_added:{}", lib.id),
@@ -42,6 +53,22 @@ pub async fn home(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
     }
     hubs.retain(|h| !h.items.is_empty());
     Ok(Json(Hubs { hubs }))
+}
+
+/// `DELETE /api/continue-watching/{id}`: takes a row out of the user's
+/// Continue Watching (every one: Home's, the libraries', the Plex API's) until
+/// they play it again. An episode takes its whole show out. Progress and
+/// watched marks stay as they are.
+pub async fn hide_continue_watching(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<i64>,
+) -> ApiResult<StatusCode> {
+    let row = item_or_404(&state, user.id, id).await?;
+    let title = catalog::continue_watching_title(&row)
+        .ok_or_else(|| AppError::bad_request("only movies and shows are in Continue Watching"))?;
+    catalog::hide_from_continue_watching(&state.db, user.id, title).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Serialize)]

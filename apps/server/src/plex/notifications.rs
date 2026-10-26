@@ -201,6 +201,9 @@ impl Listener {
                 // Items a scan added that no change event reported yet.
                 self.items_added(library_id).await.map(|added| notes.into_iter().chain(added).collect())
             }
+            // pley's own: Plex clients hear of a stopped session as of any
+            // that ends (`sessions_changed` follows).
+            ServerEvent::WatchlistChanged { .. } | ServerEvent::SessionStopped { .. } => Ok(Vec::new()),
         };
         result.unwrap_or_else(|err| {
             tracing::debug!("notification socket: {err}");
