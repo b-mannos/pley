@@ -21,8 +21,4 @@
     <string name="sleep_keep_listening">Keep listening</string>
 
     <!-- Subtitle sync: moves the subtitles in time. -->
-    <string name="subtitle_sync">Sync</string>
-    <string name="subtitle_sync_earlier">Earlier</string>
-    <string name="subtitle_sync_later">Later</string>
-    <string name="subtitle_sync_reset">Reset</string>
 </resources>

@@ -75,6 +75,8 @@ internal class DownloadRunner(
     private val clock: () -> Long = System::currentTimeMillis,
     /** How often a conversion the server is making is looked at. */
     private val conversionPollMs: Long = CONVERSION_POLL_MS,
+    /** The wait after a lost network or server, longer each time. */
+    private val backoffMs: Long = BACKOFF_MS,
 ) {
     @Volatile
     private var current: Pair<Key, Job>? = null
@@ -133,7 +135,7 @@ internal class DownloadRunner(
                     // The network went, or the server: wait a little longer each time.
                     failures++
                     if (failures > MAX_LOST_IN_A_ROW) return true
-                    delay(BACKOFF_MS * failures)
+                    delay(backoffMs * failures)
                 }
             }
         }
@@ -143,7 +145,7 @@ internal class DownloadRunner(
 
     private suspend fun runOne(saved: Saved): Outcome {
         val key = saved.key
-        store.update(key) { it.copy(state = DownloadState.Downloading, error = null) } ?: return Outcome.Removed
+        store.update(key) { it.copy(state = DownloadState.Downloading, error = null, unreachable = false) } ?: return Outcome.Removed
         val job = Job(currentCoroutineContext()[Job])
         current = key to job
         return try {
@@ -169,7 +171,7 @@ internal class DownloadRunner(
             store.update(key) { it.copy(state = DownloadState.Queued, conversion = null, mediaUrl = null, converting = 0f) }
             Outcome.Converting
         } catch (_: IOException) {
-            store.update(key) { it.copy(state = DownloadState.Waiting) }
+            store.update(key) { it.copy(state = DownloadState.Waiting, unreachable = true) }
             Outcome.Lost
         } finally {
             job.complete()
@@ -179,7 +181,7 @@ internal class DownloadRunner(
 
     private fun markWaiting() {
         store.all.value.filter { it.state == DownloadState.Queued }.forEach { s ->
-            store.update(s.key) { it.copy(state = DownloadState.Waiting) }
+            store.update(s.key) { it.copy(state = DownloadState.Waiting, unreachable = false) }
         }
     }
 
@@ -254,14 +256,25 @@ internal class DownloadRunner(
             caps = sources.caps() ?: ClientCaps(),
         )
         val info = try {
-            saved.conversion?.let { api.conversion(it) } ?: api.convert(request)
+            saved.conversion?.let { id ->
+                try {
+                    api.conversion(id)
+                } catch (e: ApiException) {
+                    // The server restarted, or forgot it: asked for again.
+                    if (e.status == 404) null else throw e
+                }
+            } ?: api.convert(request)
         } catch (e: ApiException) {
-            when {
-                // The server restarted, or forgot it: asked for again.
-                e.status == 404 && saved.conversion != null -> api.convert(request)
-                // A server that can't convert: the original, unless a smaller file was asked for.
-                e.status == 503 && saved.maxHeight == null -> return keep(saved.key) { it.copy(convert = false, converting = null) }
-                e.status == 503 -> throw DownloadFailure(NO_CONVERSIONS)
+            when (e.status) {
+                // Its transcoder isn't running (starting, restarting): like a server away, tried again in a while.
+                503 -> throw IOException(e.message)
+                // A server that can't convert (its transcoder, or the server itself, too old):
+                // the original, unless a smaller file was asked for.
+                501, 404 -> if (saved.maxHeight == null) {
+                    return keep(saved.key) { it.copy(convert = false, converting = null) }
+                } else {
+                    throw DownloadFailure(NO_CONVERSIONS)
+                }
                 else -> throw e
             }
         }

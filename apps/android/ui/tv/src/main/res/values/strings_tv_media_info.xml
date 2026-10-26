@@ -18,7 +18,6 @@
     <string name="tv_readout_codec_string">Codec string</string>
     <string name="tv_readout_profile">Profile</string>
     <string name="tv_readout_resolution">Resolution</string>
-    <string name="tv_readout_plays_as">%1$s, plays as %2$s</string>
     <string name="tv_readout_frame_rate">Frame rate</string>
     <string name="tv_readout_interlaced">%1$s, interlaced</string>
     <string name="tv_readout_bit_depth">Bit depth</string>

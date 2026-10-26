@@ -56,7 +56,10 @@ enum class DownloadState {
 
     Downloading,
 
-    /** Waiting for a network it may use (Wi-Fi, unless mobile data is allowed). */
+    /**
+     * Waiting for a network it may use (Wi-Fi, unless mobile data is
+     * allowed), or for the server to answer ([DownloadEntry.serverAway]).
+     */
     Waiting,
 
     /** Stopped by an error: [DownloadEntry.error] says which; retried by hand. */
@@ -93,6 +96,8 @@ data class DownloadEntry(
     val error: String? = null,
     /** While the server makes this device's file: how far it has come, 0 to 1. */
     val converting: Float? = null,
+    /** Waiting because the server didn't answer (away from home, or its transcoder down), not for Wi-Fi. */
+    val serverAway: Boolean = false,
 ) {
     /** How much is down, 0 to 1. */
     val fraction: Float get() = if (sizeBytes <= 0) 0f else (downloadedBytes.toFloat() / sizeBytes).coerceIn(0f, 1f)

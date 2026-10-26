@@ -118,7 +118,8 @@ internal fun rememberItemDownloads(): ItemDownloads? {
  * Download under Play (design spec §3.3's secondary button, as streaming
  * apps put it): "Download", "Downloading · 45 %" over a bar filling the
  * button, "Waiting for Wi-Fi", "Downloaded" (its menu plays or deletes
- * it) or "Try again".
+ * it) or "Didn't download" (its menu says why, tries it again or deletes
+ * it).
  */
 @Composable
 internal fun DownloadButton(itemId: Long, title: String, modifier: Modifier = Modifier) {
@@ -128,10 +129,10 @@ internal fun DownloadButton(itemId: Long, title: String, modifier: Modifier = Mo
     val label = when (entry?.state) {
         null -> stringResource(R.string.downloads_download)
         DownloadState.Done -> stringResource(R.string.downloads_downloaded)
-        DownloadState.Failed -> stringResource(R.string.downloads_try_again)
+        DownloadState.Failed -> stringResource(R.string.downloads_failed_short)
         DownloadState.Queued -> entry.converting?.let { stringResource(R.string.downloads_preparing, (it * 100).toInt()) }
             ?: stringResource(R.string.downloads_queued)
-        DownloadState.Waiting -> stringResource(R.string.downloads_waiting)
+        DownloadState.Waiting -> stringResource(if (entry.serverAway) R.string.downloads_waiting_server else R.string.downloads_waiting)
         DownloadState.Downloading -> stringResource(R.string.downloads_progress, (entry.fraction * 100).toInt(), formatBytes(entry.sizeBytes))
     }
     val description = downloadDescription(entry, title)
@@ -147,11 +148,7 @@ internal fun DownloadButton(itemId: Long, title: String, modifier: Modifier = Mo
                     if (fraction > 0f) drawRect(PleyColors.Accent.copy(alpha = 0.22f), size = Size(size.width * fraction, size.height))
                 }
                 .clickable(role = Role.Button) {
-                    when (entry?.state) {
-                        null -> downloads.download(listOf(itemId))
-                        DownloadState.Failed -> downloads.retry(itemId)
-                        else -> menu = true
-                    }
+                    if (entry == null) downloads.download(listOf(itemId)) else menu = true
                 }
                 .semantics(mergeDescendants = true) { contentDescription = description }
                 .padding(horizontal = 20.dp, vertical = 8.dp),
@@ -162,6 +159,13 @@ internal fun DownloadButton(itemId: Long, title: String, modifier: Modifier = Mo
             Spacer(Modifier.width(8.dp))
             Text(label, style = MaterialTheme.typography.labelLarge, color = PleyColors.Fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        DownloadMenu(entry, expanded = menu, onDismiss = { menu = false }, onPlay = downloads.play, onRemove = { downloads.remove(it.itemId) })
+        DownloadMenu(
+            entry,
+            expanded = menu,
+            onDismiss = { menu = false },
+            onPlay = downloads.play,
+            onRetry = { downloads.retry(it.itemId) },
+            onRemove = { downloads.remove(it.itemId) },
+        )
     }
 }

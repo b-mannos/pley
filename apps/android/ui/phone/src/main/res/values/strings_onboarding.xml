@@ -8,11 +8,9 @@
     <string name="onboarding_searching">Looking for servers on this network…</string>
     <string name="onboarding_search_again">Search the network again</string>
     <string name="onboarding_on_network">On this network</string>
-    <string name="onboarding_saved">Saved</string>
     <string name="onboarding_unreachable">Can\'t reach it</string>
     <string name="onboarding_lookalike">Not your saved server</string>
     <string name="onboarding_unencrypted">Not encrypted</string>
-    <string name="onboarding_selected">%1$s, chosen</string>
     <string name="onboarding_enter_address">Enter an address</string>
     <string name="onboarding_address_label">Server address</string>
     <string name="onboarding_address_placeholder">nas, 192.168.1.20 or https://…</string>

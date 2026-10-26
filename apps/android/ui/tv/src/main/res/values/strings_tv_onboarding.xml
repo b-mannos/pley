@@ -3,7 +3,6 @@
     <!-- Choosing a server (design spec §4.7). -->
     <string name="tv_onboarding_servers_title">Choose your server</string>
     <string name="tv_onboarding_on_network">On this network</string>
-    <string name="tv_onboarding_saved">Saved</string>
     <string name="tv_onboarding_unreachable">Can\'t reach it</string>
     <string name="tv_onboarding_lookalike">Not your saved server</string>
     <string name="tv_onboarding_unencrypted">Not encrypted</string>
@@ -60,7 +59,6 @@
     <string name="tv_onboarding_signed_in">Signed in as %1$s</string>
     <string name="tv_onboarding_signed_in_plain">Signed in</string>
     <string name="tv_onboarding_code_label">The code: %1$s</string>
-    <string name="tv_onboarding_address_label">The address: %1$s</string>
 
     <!-- Who's watching? and the PIN pad (design spec §2.9). -->
     <string name="tv_onboarding_whos_watching">Who\'s watching?</string>
@@ -79,6 +77,5 @@
     <string name="tv_onboarding_approve_body">%1$s\'s profile needs its password: approve this code on a phone signed in to pley, and pick %1$s there.</string>
     <string name="tv_onboarding_another_profile">Sign in as another profile</string>
     <string name="tv_onboarding_another_body">Approve this code on a phone signed in to pley, and pick the profile there.</string>
-    <string name="tv_onboarding_profiles_failed">Couldn\'t load the profiles</string>
     <string name="tv_onboarding_retry">Retry</string>
 </resources>

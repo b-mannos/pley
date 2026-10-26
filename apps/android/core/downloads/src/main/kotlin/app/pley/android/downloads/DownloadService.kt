@@ -99,6 +99,8 @@ class DownloadService : Service() {
         val percent: Int,
         val more: Int,
         val waiting: Boolean,
+        /** What waits does so for the server, not for Wi-Fi. */
+        val away: Boolean = false,
         /** Nothing downloads, but the server makes one: its title, and how far (percent). */
         val converting: Pair<String, Int>? = null,
     )
@@ -117,13 +119,14 @@ class DownloadService : Service() {
             percent = percent,
             more = (left - 1).coerceAtLeast(0),
             waiting = active == null && all.any { it.state == DownloadState.Waiting },
+            away = all.filter { it.state == DownloadState.Waiting }.let { w -> w.isNotEmpty() && w.all { it.unreachable } },
             converting = making?.takeIf { active == null }?.let { m ->
                 (m.showTitle?.let { "$it · ${m.title}" } ?: m.title) to ((m.converting ?: 0f) * 100).toInt()
             },
         )
     }
 
-    /** "Downloading The Distant Harbor", "1.2 GB of 4.6 GB · 2 more", its bar; or waiting for Wi-Fi. */
+    /** "Downloading The Distant Harbor", "1.2 GB of 4.6 GB · 2 more", its bar; or waiting for Wi-Fi or the server. */
     private fun notification(shown: Shown): Notification {
         val open = packageManager.getLaunchIntentForPackage(packageName)?.let {
             PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -149,6 +152,8 @@ class DownloadService : Service() {
             shown.converting != null -> builder.setContentTitle(getString(R.string.downloads_notification_converting, shown.converting.first))
                 .setContentText(getString(R.string.downloads_notification_converting_text, shown.converting.second))
                 .setProgress(100, shown.converting.second, false)
+            shown.waiting && shown.away -> builder.setContentTitle(getString(R.string.downloads_notification_waiting_server))
+                .setContentText(getString(R.string.downloads_notification_waiting_server_text))
             shown.waiting -> builder.setContentTitle(getString(R.string.downloads_notification_waiting))
                 .setContentText(getString(R.string.downloads_notification_waiting_text))
             else -> builder.setContentTitle(getString(R.string.downloads_notification_starting)).setProgress(0, 0, true)

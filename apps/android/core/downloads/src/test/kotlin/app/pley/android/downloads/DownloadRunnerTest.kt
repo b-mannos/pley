@@ -148,8 +148,20 @@ class DownloadRunnerTest {
     }
 
     @Test
+    fun aTranscoderNotRunningIsWaitedForLikeAServerAway() = runBlocking {
+        api.fail("convert", ApiException(503, "unavailable", "the transcoder isn't running"))
+        val saved = add(convert = true)
+
+        assertTrue("it waits", runner().run(waitMs = 0))
+
+        val waiting = store.get(saved.key)!!
+        assertEquals(DownloadState.Waiting to true, waiting.state to waiting.unreachable)
+        assertEquals("nothing came", 0, server.requestCount)
+    }
+
+    @Test
     fun aServerThatCantConvertGivesTheOriginalUnlessASmallerFileWasAsked() = runBlocking {
-        api.fail("convert", ApiException(503, "unavailable", "the transcoder can't convert files"))
+        api.fail("convert", ApiException(501, "not_implemented", "the transcoder can't convert files"))
         server.enqueue(MockResponse.Builder().code(200).body(Buffer().write(body)).build())
         val playable = add(convert = true)
         runner().run()
@@ -223,6 +235,7 @@ class DownloadRunnerTest {
         },
         mobileAllowed = { false },
         conversionPollMs = 10,
+        backoffMs = 1,
     )
 
     private companion object {

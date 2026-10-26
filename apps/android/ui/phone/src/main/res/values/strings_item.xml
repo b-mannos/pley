@@ -38,7 +38,6 @@
         <item quantity="one">(%1$d version)</item>
         <item quantity="other">(%1$d versions)</item>
     </plurals>
-    <string name="item_left">%1$s left</string>
 
     <!-- Details (Credits.tsx, VideoItemView.tsx). -->
     <string name="item_created_by">Created by</string>

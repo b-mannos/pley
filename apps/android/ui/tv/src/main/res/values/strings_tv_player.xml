@@ -44,9 +44,6 @@
     <string name="tv_player_info_display">Display</string>
     <string name="tv_player_info_display_switched">Switched to match the video</string>
     <string name="tv_player_info_display_kept">Unchanged</string>
-    <string name="tv_player_info_audio">Audio</string>
-    <string name="tv_player_info_passthrough">passed through to the TV or receiver</string>
-    <string name="tv_player_info_decoded">decoded on this TV</string>
     <string name="tv_player_info_dropped">Dropped frames</string>
     <string name="tv_player_info_dropped_value">%1$d of %2$d</string>
     <string name="tv_player_info_buffer">Buffered ahead</string>

@@ -53,13 +53,6 @@
     <string name="tv_item_studio">Studio</string>
     <string name="tv_item_network">Network</string>
     <string name="tv_item_plays">Plays</string>
-    <string name="tv_item_info_file">File</string>
-    <string name="tv_item_info_container">Container</string>
-    <string name="tv_item_info_size">Size</string>
-    <string name="tv_item_info_duration">Duration</string>
-    <string name="tv_item_info_bitrate">Bitrate</string>
-    <string name="tv_item_info_video">Video</string>
-    <string name="tv_item_info_audio">Audio</string>
 
     <!-- Side panels (design spec §2.7). -->
     <string name="tv_item_version">Version</string>

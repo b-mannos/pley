@@ -11,6 +11,9 @@
     <string name="downloads_notification_progress_more">%1$s of %2$s · %3$d more</string>
     <string name="downloads_notification_waiting">Downloads are waiting for Wi-Fi</string>
     <string name="downloads_notification_waiting_text">They go on once the phone is on Wi-Fi, or on mobile data if Settings allow it.</string>
+    <!-- The server didn't answer: away from home, or it is off. -->
+    <string name="downloads_notification_waiting_server">Downloads are waiting for your server</string>
+    <string name="downloads_notification_waiting_server_text">They go on once it answers again, as when the app opens at home.</string>
     <string name="downloads_notification_starting">Getting downloads ready</string>
     <!-- While the server makes a smaller (or playable) file for this phone. -->
     <string name="downloads_notification_converting">Preparing %1$s</string>

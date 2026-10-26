@@ -442,11 +442,17 @@ private fun EpisodeDownload(itemId: Long, title: String) {
             entry = entry,
             title = title,
             onDownload = { downloads.download(listOf(itemId)) },
-            onRetry = { downloads.retry(itemId) },
             onMore = { menu = true },
             modifier = Modifier.padding(start = 4.dp).size(36.dp),
         )
-        DownloadMenu(entry, expanded = menu, onDismiss = { menu = false }, onPlay = downloads.play, onRemove = { downloads.remove(it.itemId) })
+        DownloadMenu(
+            entry,
+            expanded = menu,
+            onDismiss = { menu = false },
+            onPlay = downloads.play,
+            onRetry = { downloads.retry(it.itemId) },
+            onRemove = { downloads.remove(it.itemId) },
+        )
     }
 }
 

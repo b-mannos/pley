@@ -14,6 +14,7 @@
     <!-- Lines under a download's title. -->
     <string name="downloads_queued">Waiting to download</string>
     <string name="downloads_waiting">Waiting for Wi-Fi</string>
+    <string name="downloads_waiting_server">Waiting for your server</string>
     <!-- While the server makes the file for this phone (smaller, or one it plays): "Preparing on the server · 42 %". -->
     <string name="downloads_preparing">Preparing on the server · %1$d%%</string>
     <!-- For screen readers: "Preparing Episode 2, 42 %". -->
@@ -25,7 +26,6 @@
     <string name="downloads_left">%1$s · %2$s left</string>
     <string name="downloads_watched">%1$s · Watched</string>
     <!-- Its menu. -->
-    <string name="downloads_more">More for %1$s</string>
     <string name="downloads_play">Play</string>
     <string name="downloads_retry">Try again</string>
     <string name="downloads_delete">Delete download</string>
@@ -35,7 +35,8 @@
     <!-- Item pages. -->
     <string name="downloads_download">Download</string>
     <string name="downloads_downloaded">Downloaded</string>
-    <string name="downloads_try_again">Try again</string>
+    <!-- Its button when it failed: tapping says why, and tries it again or deletes it. -->
+    <string name="downloads_failed_short">Didn\'t download</string>
     <!-- Under the item page's button while it waits. -->
     <string name="downloads_queued_short">Queued</string>
     <string name="downloads_waiting_short">Waiting</string>

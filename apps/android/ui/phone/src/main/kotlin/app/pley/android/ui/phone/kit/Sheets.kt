@@ -149,6 +149,8 @@ fun ConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
     destructive: Boolean = false,
+    /** What not doing it is called ("Keep them"); Cancel by default. */
+    dismissLabel: String? = null,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -160,7 +162,7 @@ fun ConfirmDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss, colors = ButtonDefaults.textButtonColors(contentColor = PleyColors.Fg)) {
-                Text(stringResource(R.string.kit_cancel), style = MaterialTheme.typography.labelLarge)
+                Text(dismissLabel ?: stringResource(R.string.kit_cancel), style = MaterialTheme.typography.labelLarge)
             }
         },
         title = { Text(title, style = MaterialTheme.typography.headlineSmall) },

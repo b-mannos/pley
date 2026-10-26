@@ -231,6 +231,7 @@ internal fun SettingsScreen() {
             },
             onDismiss = { confirmDeleteAll = false },
             destructive = true,
+            dismissLabel = stringResource(R.string.downloads_keep),
         )
     }
 }

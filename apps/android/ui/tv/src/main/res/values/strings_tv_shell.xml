@@ -11,7 +11,6 @@
     <string name="tv_shell_switch_profile">Switch profile</string>
 
     <!-- The end of a row that has more. -->
-    <string name="tv_shell_see_all">See all</string>
 
     <!-- Screens not built yet. -->
     <string name="tv_shell_placeholder_title">%1$s isn\'t built yet</string>

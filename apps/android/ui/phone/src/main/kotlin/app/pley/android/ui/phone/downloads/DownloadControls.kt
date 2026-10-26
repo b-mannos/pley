@@ -6,14 +6,10 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -34,8 +30,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -44,6 +38,7 @@ import app.pley.android.data.DownloadState
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.icon.Icon
+import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.ui.phone.R
 
@@ -98,15 +93,14 @@ internal fun downloadDescription(entry: DownloadEntry?, title: String): String =
 
 /**
  * An episode row's download button: 48 dp around the glyph. Tapping
- * downloads, retries a failed one, or opens [onMore] for one there is
- * (cancel or delete it, play it).
+ * downloads, or opens [onMore] for one there is (play it, try it again,
+ * cancel or delete it).
  */
 @Composable
 internal fun DownloadIconButton(
     entry: DownloadEntry?,
     title: String,
     onDownload: () -> Unit,
-    onRetry: () -> Unit,
     onMore: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -116,66 +110,12 @@ internal fun DownloadIconButton(
             .size(48.dp)
             .clip(PleyShape.Circle)
             .clickable(role = Role.Button) {
-                when (entry?.state) {
-                    null -> onDownload()
-                    DownloadState.Failed -> onRetry()
-                    else -> onMore()
-                }
+                if (entry == null) onDownload() else onMore()
             }
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
         DownloadGlyph(entry)
-    }
-}
-
-/**
- * The item page's Download action (design spec §3.3's action column): the
- * glyph over "Download", "45 %", "Waiting", "Downloaded" or "Try again".
- */
-@Composable
-internal fun DownloadAction(
-    entry: DownloadEntry?,
-    title: String,
-    onDownload: () -> Unit,
-    onRetry: () -> Unit,
-    onMore: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val label = when (entry?.state) {
-        null -> stringResource(R.string.downloads_download)
-        DownloadState.Done -> stringResource(R.string.downloads_downloaded)
-        DownloadState.Failed -> stringResource(R.string.downloads_try_again)
-        DownloadState.Downloading -> "${(entry.fraction * 100).toInt()}%"
-        DownloadState.Queued -> entry.converting?.let { "${(it * 100).toInt()}%" } ?: stringResource(R.string.downloads_queued_short)
-        DownloadState.Waiting -> stringResource(R.string.downloads_waiting_short)
-    }
-    val description = downloadDescription(entry, title)
-    Column(
-        modifier
-            .width(72.dp)
-            .defaultMinSize(minHeight = 56.dp)
-            .clickable(role = Role.Button) {
-                when (entry?.state) {
-                    null -> onDownload()
-                    DownloadState.Failed -> onRetry()
-                    else -> onMore()
-                }
-            }
-            .semantics(mergeDescendants = true) { contentDescription = description },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { DownloadGlyph(entry) }
-        Spacer(Modifier.height(2.dp))
-        Text(
-            label,
-            style = MaterialTheme.typography.labelMedium,
-            color = PleyColors.Fg,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
@@ -209,7 +149,8 @@ internal fun rememberDownloadStarter(download: (List<Long>) -> Unit): (List<Long
 
 /**
  * What can be done with a download there is, under its button: play it
- * (when whole) and delete it, or cancel it while it comes.
+ * when whole, try it again when it failed, then delete it (or cancel it
+ * while it comes); [onOpen], where given, goes to its page.
  */
 @Composable
 internal fun DownloadMenu(
@@ -217,29 +158,52 @@ internal fun DownloadMenu(
     expanded: Boolean,
     onDismiss: () -> Unit,
     onPlay: (DownloadEntry) -> Unit,
+    onRetry: (DownloadEntry) -> Unit,
     onRemove: (DownloadEntry) -> Unit,
+    onOpen: ((DownloadEntry) -> Unit)? = null,
 ) {
     if (entry == null) return
+    val coming = entry.state != DownloadState.Done && entry.state != DownloadState.Failed
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, containerColor = PleyColors.Surface3) {
-        if (entry.state == DownloadState.Done) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.downloads_play)) },
-                leadingIcon = { Icon(PleyIcons.Play, contentDescription = null, size = 20.dp) },
-                onClick = {
-                    onDismiss()
-                    onPlay(entry)
-                },
+        // Why it failed, above what can be done about it.
+        val error = entry.error?.takeIf { entry.state == DownloadState.Failed }
+        if (error != null) {
+            Text(
+                error,
+                style = MaterialTheme.typography.bodySmall,
+                color = PleyColors.Muted,
+                modifier = Modifier.widthIn(max = 280.dp).padding(horizontal = 16.dp, vertical = 8.dp),
             )
         }
-        DropdownMenuItem(
-            text = {
-                Text(stringResource(if (entry.state == DownloadState.Done) R.string.downloads_delete else R.string.downloads_cancel))
-            },
-            leadingIcon = { Icon(if (entry.state == DownloadState.Done) PleyIcons.Trash2 else PleyIcons.X, contentDescription = null, size = 20.dp) },
-            onClick = {
+        when (entry.state) {
+            DownloadState.Done -> MenuAction(R.string.downloads_play, PleyIcons.Play) {
                 onDismiss()
-                onRemove(entry)
-            },
-        )
+                onPlay(entry)
+            }
+            DownloadState.Failed -> MenuAction(R.string.downloads_retry, PleyIcons.RotateCw) {
+                onDismiss()
+                onRetry(entry)
+            }
+            else -> Unit
+        }
+        if (onOpen != null) {
+            MenuAction(R.string.downloads_open, PleyIcons.Info) {
+                onDismiss()
+                onOpen(entry)
+            }
+        }
+        MenuAction(if (coming) R.string.downloads_cancel else R.string.downloads_delete, if (coming) PleyIcons.X else PleyIcons.Trash2) {
+            onDismiss()
+            onRemove(entry)
+        }
     }
+}
+
+@Composable
+private fun MenuAction(label: Int, icon: PleyIcon, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(stringResource(label)) },
+        leadingIcon = { Icon(icon, contentDescription = null, size = 20.dp) },
+        onClick = onClick,
+    )
 }

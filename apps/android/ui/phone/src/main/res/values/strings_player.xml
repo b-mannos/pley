@@ -75,7 +75,6 @@
     <string name="player_burn_in">(burn-in)</string>
     <string name="player_none">None</string>
     <string name="player_default">Default</string>
-    <string name="player_selected">Selected</string>
     <string name="player_details_device">This device</string>
     <string name="player_details_decoder">Decoder</string>
     <string name="player_details_hardware">%1$s (hardware)</string>

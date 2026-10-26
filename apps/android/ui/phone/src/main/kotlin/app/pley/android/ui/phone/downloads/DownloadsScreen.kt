@@ -115,6 +115,7 @@ internal fun DownloadsScreen() {
                         onPlay = model::play,
                         onRetry = { model.retry(it.itemId) },
                         onRemove = { model.remove(it.itemId) },
+                        onOpen = { navigator.open(PleyKey.Item(it.itemId)) },
                     )
                 }
             }
@@ -156,8 +157,8 @@ private fun ShowHeader(group: DownloadGroup, onOpen: () -> Unit) {
 
 /**
  * One download: its picture (16:9), its title and where it is, a bar
- * while it comes, and its button. Tapping plays it when it is whole and
- * tries a failed one again.
+ * while it comes, and its button. Tapping plays it when it is whole, else
+ * opens what can be done with it (a failed one tried again or deleted).
  */
 @Composable
 private fun DownloadRow(
@@ -166,6 +167,7 @@ private fun DownloadRow(
     onPlay: (DownloadEntry) -> Unit,
     onRetry: (DownloadEntry) -> Unit,
     onRemove: (DownloadEntry) -> Unit,
+    onOpen: (DownloadEntry) -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     val title = if (episode) listOf(episodeLabel(entry.seasonIndex, entry.episodeIndex), entry.title).filter { it.isNotEmpty() }.joinToString(" · ") else entry.title
@@ -180,7 +182,7 @@ private fun DownloadRow(
         DownloadState.Downloading -> stringResource(R.string.downloads_progress, (entry.fraction * 100).toInt(), size)
         DownloadState.Queued -> entry.converting?.let { stringResource(R.string.downloads_preparing, (it * 100).toInt()) }
             ?: stringResource(R.string.downloads_queued)
-        DownloadState.Waiting -> stringResource(R.string.downloads_waiting)
+        DownloadState.Waiting -> stringResource(if (entry.serverAway) R.string.downloads_waiting_server else R.string.downloads_waiting)
         DownloadState.Failed -> stringResource(R.string.downloads_failed, entry.error.orEmpty())
     }
     Row(
@@ -189,11 +191,7 @@ private fun DownloadRow(
             .heightIn(min = 72.dp)
             .clip(PleyShape.Card)
             .clickable(role = Role.Button) {
-                when (entry.state) {
-                    DownloadState.Done -> onPlay(entry)
-                    DownloadState.Failed -> onRetry(entry)
-                    else -> menu = true
-                }
+                if (entry.state == DownloadState.Done) onPlay(entry) else menu = true
             }
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -219,14 +217,16 @@ private fun DownloadRow(
             }
         }
         Box {
-            DownloadIconButton(
-                entry = entry,
-                title = entry.title,
-                onDownload = {},
-                onRetry = { onRetry(entry) },
-                onMore = { menu = true },
+            DownloadIconButton(entry = entry, title = entry.title, onDownload = {}, onMore = { menu = true })
+            DownloadMenu(
+                entry,
+                expanded = menu,
+                onDismiss = { menu = false },
+                onPlay = onPlay,
+                onRetry = onRetry,
+                onRemove = onRemove,
+                onOpen = onOpen,
             )
-            DownloadMenu(entry, expanded = menu, onDismiss = { menu = false }, onPlay = onPlay, onRemove = onRemove)
         }
     }
 }

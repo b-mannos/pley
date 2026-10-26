@@ -365,6 +365,7 @@ class AppDownloads internal constructor(
         watched = s.watched,
         error = s.error,
         converting = s.converting?.takeIf { s.mediaUrl == null && s.state != DownloadState.Done && s.state != DownloadState.Failed },
+        serverAway = s.state == DownloadState.Waiting && s.unreachable,
     )
 
     companion object {

@@ -58,6 +58,8 @@ internal data class Saved(
     val mediaUrl: String? = null,
     /** Not to be looked at again before this (unix ms): its conversion is being made. */
     val notBefore: Long = 0,
+    /** It waits because the server didn't answer, rather than for a network. */
+    val unreachable: Boolean = false,
 ) {
     val key: Key get() = Key(server, userId, itemId)
 }
