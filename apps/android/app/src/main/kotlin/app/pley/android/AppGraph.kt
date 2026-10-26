@@ -11,6 +11,7 @@ import app.pley.android.network.NetworkGraph
 import app.pley.android.player.PlayerGraph
 import app.pley.android.screens.PlayerLauncher
 import app.pley.android.screens.ScreensGraph
+import okhttp3.OkHttp
 import okhttp3.OkHttpClient
 
 /**
@@ -22,7 +23,13 @@ import okhttp3.OkHttpClient
 class AppGraph(private val app: Application) : ScreensGraph {
     override val device: DeviceProfile by lazy { DeviceProfile.of(app) }
     val userAgent: String by lazy { UserAgent.of(BuildConfig.VERSION_NAME) }
-    val root: OkHttpClient by lazy { HttpRoot.create(userAgent, device) }
+    val root: OkHttpClient by lazy {
+        // OkHttp's own startup step, which its androidx.startup initializer would
+        // run on the main thread as the app starts (the manifest leaves it out):
+        // its Android platform, with the app's context, before the first client.
+        OkHttp.initialize(app)
+        HttpRoot.create(userAgent, device)
+    }
     override val auth: AuthGraph by lazy { AuthGraph.create(app, root, userAgent) }
     override val network: NetworkGraph by lazy { NetworkGraph.create(app, root, auth, device, app.cacheDir) }
     override val data: DataGraph by lazy { DataGraph.create(app, network, auth, device) }

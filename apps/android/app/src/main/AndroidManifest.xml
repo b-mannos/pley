@@ -83,6 +83,11 @@
           Once, after an update from the web view app: its old session ends
           and its data goes (migration/WebViewCleanup). Run by AndroidX
           Startup's provider, which the libraries already bring.
+
+          Two of the libraries' initializers don't run as the app starts, on
+          the main thread: EmojiCompat's (the system's fonts draw what titles
+          hold, and Fire TV can't download its font anyway) and OkHttp's,
+          which AppGraph runs where it makes the first client, off it.
         -->
         <provider
             android:name="androidx.startup.InitializationProvider"
@@ -92,6 +97,12 @@
             <meta-data
                 android:name="app.pley.android.migration.WebViewCleanupInitializer"
                 android:value="androidx.startup" />
+            <meta-data
+                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+                tools:node="remove" />
+            <meta-data
+                android:name="okhttp3.internal.platform.PlatformInitializer"
+                tools:node="remove" />
         </provider>
 
         <!-- The sign-in module's return address is in core/auth's manifest. -->
