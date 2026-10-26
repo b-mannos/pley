@@ -1359,7 +1359,8 @@ after their last download (a download cut short goes on with `Range`),
 within the transcoder's limit; once gone, asking again makes them again.
 A conversion is known to the server once asked for since it started (a
 `404` otherwise: ask again), and to those who may see its title. `503`
-with a transcoder too old to convert. A download deleted before its file
+while the transcoder isn't running (ask again later); `501` with a
+transcoder too old to convert. A download deleted before its file
 is made stops the conversion (`DELETE`); a file made stays for whoever
 asks next. One nobody asks about for an hour while it waits its turn is
 dropped then (the device that wanted it went): asking again starts it

@@ -479,10 +479,16 @@ pub async fn convert(
             url: format!("/api/files/{}/stream", file.id),
         }));
     }
-    if !transcoder.is_some_and(|info| info.capabilities.conversions) {
-        return Err(AppError::Unavailable(
-            "this server's transcoder can't make files for downloading: update it, or download the original".into(),
-        ));
+    // Not running (starting, restarting): a moment's trouble. Running but
+    // too old to make files: for good.
+    match transcoder {
+        None => return Err(AppError::Unavailable("the transcoder isn't running: try again in a moment".into())),
+        Some(info) if !info.capabilities.conversions => {
+            return Err(AppError::NotImplemented(
+                "this server's transcoder can't make files for downloading: update it, or download the original".into(),
+            ));
+        }
+        Some(_) => {}
     }
     let job = JobRequest {
         input: file.path.clone(),

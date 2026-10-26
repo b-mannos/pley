@@ -19,6 +19,10 @@ pub enum AppError {
     Conflict(String),
     #[error("{0}")]
     Unavailable(String),
+    /// Something this server can't do at all (its transcoder is too old for
+    /// it): `501`, as opposed to `503`'s "not now".
+    #[error("{0}")]
+    NotImplemented(String),
     #[error("{0}")]
     TooManyRequests(String),
     /// The second step of a sign-in is missing or wrong (see `crate::two_step`).
@@ -74,6 +78,7 @@ impl AppError {
             Self::NotFound(m) => Self::NotFound(m.clone()),
             Self::Conflict(m) => Self::Conflict(m.clone()),
             Self::Unavailable(m) => Self::Unavailable(m.clone()),
+            Self::NotImplemented(m) => Self::NotImplemented(m.clone()),
             Self::TooManyRequests(m) => Self::TooManyRequests(m.clone()),
             Self::TwoStep(m) => Self::TwoStep(m.clone()),
             Self::InvalidToken => Self::InvalidToken,
@@ -92,6 +97,7 @@ impl AppError {
             Self::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
             Self::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             Self::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable"),
+            Self::NotImplemented(_) => (StatusCode::NOT_IMPLEMENTED, "not_implemented"),
             Self::TooManyRequests(_) => (StatusCode::TOO_MANY_REQUESTS, "too_many_requests"),
             Self::TwoStep(_) => (StatusCode::UNAUTHORIZED, "two_step"),
             Self::InvalidToken => (StatusCode::UNAUTHORIZED, "unauthorized"),

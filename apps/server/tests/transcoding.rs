@@ -624,6 +624,18 @@ async fn a_download_the_player_cannot_play_is_converted_and_comes_with_ranges() 
 }
 
 #[tokio::test]
+async fn a_download_waits_while_the_transcoder_isnt_running() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Feature (2021)/Feature (2021).mkv", 2048);
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let feature = app.ids(movies, &admin).await["Feature"];
+    // Matroska doesn't play in a browser: it would be converted.
+    let answer = app.post("/api/conversions", &admin, json!({"item_id": feature, "caps": browser()})).await;
+    assert_eq!((answer.status, &answer.body["code"]), (StatusCode::SERVICE_UNAVAILABLE, &json!("unavailable")));
+}
+
+#[tokio::test]
 async fn a_conversion_stops_when_its_download_goes_unless_its_file_is_made() {
     let w = world().await;
     let (app, admin) = (&w.app, w.admin.as_str());
