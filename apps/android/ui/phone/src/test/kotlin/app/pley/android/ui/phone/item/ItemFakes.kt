@@ -21,6 +21,7 @@ import app.pley.android.data.SessionRepository
 import app.pley.android.data.SnapshotStore
 import app.pley.android.data.TrackDefaultsRepository
 import app.pley.android.data.WatchStateRepository
+import app.pley.android.data.WatchlistRepository
 import app.pley.android.model.CollectionSummary
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ItemKind
@@ -38,9 +39,13 @@ import kotlinx.coroutines.flow.flowOf
 
 /** An item page's data for the phone's tests: the items set, and what was written. */
 internal class ItemData(vararg details: ItemDetail) : DataGraph {
-    private val held = details.associateBy { it.id }
+    private val held = details.associate { it.id to MutableStateFlow<Loadable<ItemDetail>>(Loadable.Ready(it, true)) }
     val streams = mutableListOf<List<Long?>>()
     val played = mutableListOf<PlayRequest>()
+    val hidden = mutableListOf<Long>()
+
+    /** My List's writes: the item, and whether it went in. */
+    val listed = mutableListOf<Pair<Long, Boolean>>()
 
     val launcher = object : PlayerLauncher {
         override fun play(request: PlayRequest) {
@@ -49,7 +54,7 @@ internal class ItemData(vararg details: ItemDetail) : DataGraph {
     }
 
     override val items: ItemRepository = object : ItemRepository {
-        override fun detail(itemId: Long): Flow<Loadable<ItemDetail>> = flowOf(held[itemId]?.let { Loadable.Ready(it, true) } ?: Loadable.Loading)
+        override fun detail(itemId: Long): Flow<Loadable<ItemDetail>> = held[itemId] ?: flowOf(Loadable.Loading)
         override fun children(itemId: Long): Flow<Loadable<List<ItemSummary>>> = flowOf(Loadable.Ready(emptyList(), true))
         override fun onDeck(itemId: Long): Flow<Loadable<ItemSummary?>> = flowOf(Loadable.Ready(null, true))
         override fun related(itemId: Long): Flow<Loadable<List<ItemSummary>>> = flowOf(Loadable.Ready(emptyList(), true))
@@ -63,6 +68,22 @@ internal class ItemData(vararg details: ItemDetail) : DataGraph {
         override suspend fun rate(itemId: Long, rating: Double?) = Unit
         override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) {
             streams += listOf(itemId, fileId, audioIndex?.toLong(), subtitleIndex?.toLong())
+        }
+
+        override suspend fun hideFromContinueWatching(itemId: Long) {
+            hidden += itemId
+        }
+    }
+
+    override val watchlist: WatchlistRepository = object : WatchlistRepository {
+        override fun watchlist(): Flow<Loadable<List<ItemSummary>>> = flowOf(Loadable.Loading)
+        override suspend fun add(itemId: Long) = list(itemId, true)
+        override suspend fun remove(itemId: Long) = list(itemId, false)
+        override suspend fun refresh() = Unit
+
+        private fun list(itemId: Long, inList: Boolean) {
+            listed += itemId to inList
+            held[itemId]?.let { flow -> (flow.value as? Loadable.Ready)?.let { flow.value = it.copy(value = it.value.copy(inWatchlist = inList)) } }
         }
     }
 

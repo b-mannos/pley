@@ -127,6 +127,7 @@ class AccountTestGraph : ScreensGraph {
             override suspend fun forget(origin: String) = Unit
             override suspend fun clientId(): String = "android-test"
         }
+        override val watchlist: app.pley.android.data.WatchlistRepository get() = unused()
         override val history = object : HistoryRepository {
             override fun history(): Flow<Loadable<HistoryPage>> = this@AccountTestGraph.history
             override suspend fun loadMore() {
@@ -165,6 +166,7 @@ class AccountTestGraph : ScreensGraph {
             override suspend fun setWatched(itemId: Long, watched: Boolean) = Unit
             override suspend fun rate(itemId: Long, rating: Double?) = Unit
             override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) = Unit
+            override suspend fun hideFromContinueWatching(itemId: Long) = Unit
         }
         override val liveUpdates: LiveUpdates get() = unused()
         override val snapshots: SnapshotStore get() = unused()

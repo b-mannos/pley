@@ -71,6 +71,10 @@ import app.pley.android.designsystem.reducedMotion
 import app.pley.android.player.PlaybackDetailsUi
 import app.pley.android.player.engine.EngineState
 import app.pley.android.player.engine.PlaybackStats
+import app.pley.android.player.sleep.SleepChoice
+import app.pley.android.player.sleep.SleepTexts
+import app.pley.android.player.subtitles.SubtitleSync
+import androidx.compose.ui.platform.LocalResources
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.DelayedSpinner
 import app.pley.android.ui.phone.kit.PleyIconButton
@@ -81,8 +85,9 @@ data class SubtitleChoice(val sizeIndex: Int = 1, val box: Boolean = false)
 /**
  * The player's sheet (design spec §3.4 in the player's window, so the
  * system bars stay hidden): Settings with Quality, Audio, Subtitles,
- * Subtitle style and Playback details, each also opened straight from the
- * bottom row, and Chapters. [surface2][PleyColors.Surface2], 20 dp top
+ * Subtitle style, Sleep timer and Playback details, each also opened
+ * straight from the bottom row, and Chapters. Subtitles has Sync while the
+ * subtitles chosen can move. [surface2][PleyColors.Surface2], 20 dp top
  * corners, over a 60 % scrim that closes it.
  */
 @Composable
@@ -148,6 +153,7 @@ private fun ColumnScope.SheetContent(page: SheetPage, state: PlayerScreenState, 
             SheetPage.Style -> R.string.player_subtitle_style
             SheetPage.Details -> R.string.player_details
             SheetPage.Chapters -> R.string.player_chapters
+            SheetPage.Sleep -> R.string.player_sleep_timer
         },
     )
     Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -180,6 +186,7 @@ private fun ColumnScope.SheetContent(page: SheetPage, state: PlayerScreenState, 
             }
             SheetPage.Subtitles -> {
                 val burn = stringResource(R.string.player_burn_in)
+                if (state.subtitleSync) SyncControl(state.subtitleOffsetMs, onChange = state.controller::setSubtitleOffset)
                 state.subtitles.forEach { track ->
                     OptionRow(track.selected, if (track.burnIn) "${track.label} $burn" else track.label) {
                         state.controller.selectSubtitle(track.index)
@@ -189,6 +196,7 @@ private fun ColumnScope.SheetContent(page: SheetPage, state: PlayerScreenState, 
             }
             SheetPage.Style -> StylePage(style, onStyle)
             SheetPage.Details -> DetailsPage(state)
+            SheetPage.Sleep -> SleepPage(state)
             SheetPage.Chapters -> Unit
         }
     }
@@ -210,12 +218,31 @@ private fun SettingsPage(state: PlayerScreenState, style: SubtitleChoice) {
             state.open(SheetPage.Audio)
         }
     }
-    val subtitle = state.subtitles.firstOrNull { it.selected }?.label ?: stringResource(R.string.player_none)
+    val chosen = state.subtitles.firstOrNull { it.selected && it.index != null }
+    val offset = state.subtitleOffsetMs.takeIf { chosen != null && state.subtitleSync && it != 0L }
+    val subtitle = chosen?.label?.let { label -> offset?.let { "$label · ${SubtitleSync.label(it)}" } ?: label }
+        ?: state.subtitles.firstOrNull { it.selected }?.label ?: stringResource(R.string.player_none)
     NavRow(PleyIcons.Captions, stringResource(R.string.player_subtitles), subtitle, enabled = state.subtitles.isNotEmpty()) {
         state.open(SheetPage.Subtitles)
     }
     NavRow(PleyIcons.SlidersHorizontal, stringResource(R.string.player_subtitle_style), sizeLabel(style.sizeIndex)) { state.open(SheetPage.Style) }
+    NavRow(MoonIcon, stringResource(R.string.player_sleep_timer), SleepTexts.summary(LocalResources.current, state.sleep)) { state.open(SheetPage.Sleep) }
     NavRow(PleyIcons.Info, stringResource(R.string.player_details), state.method.orEmpty()) { state.open(SheetPage.Details) }
+}
+
+/** The sleep timer's choices; the one running ticked, with its minutes left. */
+@Composable
+private fun SleepPage(state: PlayerScreenState) {
+    val resources = LocalResources.current
+    val sleep = state.sleep
+    SleepChoice.ALL.forEach { choice ->
+        val on = sleep.choice == choice
+        val hint = if (on && choice is SleepChoice.Minutes && sleep.minutesLeft != null) SleepTexts.summary(resources, sleep) else null
+        OptionRow(on, SleepTexts.choice(resources, choice), hint) {
+            state.controller.setSleep(choice)
+            state.closeSheet()
+        }
+    }
 }
 
 @Composable

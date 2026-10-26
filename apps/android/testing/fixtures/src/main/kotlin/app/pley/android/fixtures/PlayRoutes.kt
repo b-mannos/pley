@@ -24,14 +24,19 @@ import app.pley.android.model.TrackDefaults
 import app.pley.android.model.TranscodeInfo
 import app.pley.android.model.TrickplayInfo
 import java.util.UUID
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.MockResponse
 
 /**
  * Playing, and what playing writes (docs/API.md, "Playback", "Items"):
  * sessions answered direct or as HLS, the files with Range, the HLS stream,
- * subtitles as WebVTT (one track partial the first time), seek previews and
- * chapter pictures; progress, watched marks, ratings, track choices and
- * track defaults, which change what the profile reads next.
+ * subtitles as WebVTT (one track partial the first time) and pictures as
+ * .mks, seek previews and chapter pictures; sessions stopped from elsewhere
+ * (`session_stopped`, then 410); progress, watched marks, ratings, track
+ * choices and track defaults, which change what the profile reads next.
  */
 internal class PlayRoutes(private val s: State) {
     private val catalog get() = s.catalog
@@ -50,6 +55,22 @@ internal class PlayRoutes(private val s: State) {
             Reply.noContent()
         },
         route("GET", "/api/playback/*/*", PLAY) { _, c, v -> hls(v[0], v[1], c) },
+        route("DELETE", "/api/sessions/*", PLAY) { call, c, v -> stopSession(call, c, v[0]) },
+        // The fixtures' own (pley lists sessions in /api/activity, for its web app): to stop one by hand (adb forward, curl).
+        route("GET", "/api/sessions", PLAY) { _, c, _ ->
+            val admin = c.profile.id == FixtureIds.ALEX
+            val list = s.sessions.values.filter { admin || it.profileId == c.profile.id }.map { session ->
+                JsonObject(
+                    mapOf(
+                        "session_id" to JsonPrimitive(session.id),
+                        "profile_id" to JsonPrimitive(session.profileId),
+                        "item_id" to JsonPrimitive(session.itemId),
+                        "method" to JsonPrimitive(session.method.wire),
+                    ),
+                )
+            }
+            Reply.json(JsonObject(mapOf("sessions" to kotlinx.serialization.json.JsonArray(list))).toString())
+        },
         route("GET", "/api/files/*/stream", PLAY, free = true) { call, _, v -> stream(call, v[0]) },
         route("GET", "/api/files/*/subtitles/*", PLAY) { _, _, v -> subtitles(v[0], v[1]) },
         route("GET", "/api/files/*/trickplay", PLAY, free = true) { _, _, v ->
@@ -210,8 +231,38 @@ internal class PlayRoutes(private val s: State) {
         )
     }
 
+    /**
+     * DELETE /api/sessions/{id} with an optional `{ message }`: Alex (the
+     * administrator) stops any session, others their own. The player hears
+     * `session_stopped`; the session's stream answers 410 from then on.
+     */
+    private fun stopSession(call: Call, caller: Caller, id: String): MockResponse {
+        val admin = caller.profile.id == FixtureIds.ALEX
+        val session = s.sessions[id]
+        if (session == null) {
+            val stopped = s.stoppedSessions[id] ?: return Reply.notFound("no such session")
+            return if (stopped.profileId == caller.profile.id || admin) Reply.noContent() else Reply.error(403, "forbidden", "not your session")
+        }
+        if (session.profileId != caller.profile.id && !admin) return Reply.error(403, "forbidden", "not your session")
+        val message = call.body(StopBody.serializer())?.message?.trim()?.takeIf { it.isNotEmpty() }
+        if (message != null && message.length > 200) return Reply.badRequest("the message is longer than 200 characters")
+        s.sessions.remove(id)
+        s.stoppedSessions[id] = StoppedSession(session.profileId, message)
+        s.events.emitTo(session.profileId, ServerEvent.SessionStopped(id, message, byAdmin = session.profileId != caller.profile.id))
+        s.events.emit(ServerEvent.SessionsChanged)
+        return Reply.noContent()
+    }
+
+    /** The body of DELETE /api/sessions/{id}. */
+    @Serializable
+    private data class StopBody(val message: String? = null)
+
     /** GET /api/playback/{session}/{file}: the committed HLS stream of the 1080p clip, whatever the item. */
     private fun hls(sessionId: String, name: String, caller: Caller): MockResponse {
+        s.stoppedSessions[sessionId]?.takeIf { it.profileId == caller.profile.id }?.let { stopped ->
+            val body = JsonObject(mapOf("error" to JsonPrimitive("session_stopped"), "message" to (stopped.message?.let(::JsonPrimitive) ?: JsonNull)))
+            return Reply.json(body.toString(), code = 410)
+        }
         s.sessions[sessionId]?.takeIf { it.profileId == caller.profile.id && it.method != PlaybackMethod.Direct }
             ?: return Reply.notFound("playback session expired")
         val type = when {
@@ -251,6 +302,7 @@ internal class PlayRoutes(private val s: State) {
      */
     private fun subtitles(id: String, name: String): MockResponse {
         val (entry, file) = id.toLongOrNull()?.let(catalog::file) ?: return Reply.notFound("no such file")
+        if (name.endsWith(".mks")) return pictures(file, name)
         val index = name.removeSuffix(".vtt").toIntOrNull() ?: return Reply.notFound("no such track")
         val stream = file.streams.firstOrNull { it.index == index && it.kind == StreamKind.Subtitle }
             ?: return Reply.notFound("no such track")
@@ -265,6 +317,23 @@ internal class PlayRoutes(private val s: State) {
         } else {
             Reply.bytes(text.toByteArray(), "text/vtt; charset=utf-8", headers = mapOf("Cache-Control" to "private, max-age=3600"))
         }
+    }
+
+    /**
+     * GET /api/files/{id}/subtitles/{index}.mks: a track shown as pictures,
+     * alone in a Matroska file (PGS made here): a cue every 6 s, "PGS 1",
+     * "PGS 2"…, at the file's own times. 404 for text.
+     */
+    private fun pictures(file: MediaFile, name: String): MockResponse {
+        val index = name.removeSuffix(".mks").toIntOrNull() ?: return Reply.notFound("no such track")
+        val stream = file.streams.firstOrNull { it.index == index && it.kind == StreamKind.Subtitle && it.textBased == false }
+            ?: return Reply.notFound("no such picture subtitle track")
+        val duration = file.durationMs ?: 0
+        val cues = (0 until (duration / PICTURE_EVERY_MS).toInt().coerceIn(1, 400)).map { n ->
+            Triple(n * PICTURE_EVERY_MS + 500, n * PICTURE_EVERY_MS + 4_500, "PGS ${n + 1}")
+        }
+        val bytes = PgsMks.build(cues, duration, stream.language)
+        return Reply.bytes(bytes, "video/x-matroska", headers = mapOf("Cache-Control" to "private, max-age=3600"))
     }
 
     /** A track's cues: the sample's own, else one every 30 s. */
@@ -380,6 +449,9 @@ internal class PlayRoutes(private val s: State) {
     companion object {
         /** Segments of the committed HLS stream (20 s in 4 s segments). */
         const val HLS_SEGMENTS = 5
+
+        /** How often the .mks of picture subtitles has a cue. */
+        const val PICTURE_EVERY_MS = 6_000L
     }
 }
 

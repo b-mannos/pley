@@ -1,11 +1,13 @@
 package app.pley.android.player.music
 
+import android.os.SystemClock
 import app.pley.android.auth.AuthException
 import app.pley.android.model.ItemSummary
 import app.pley.android.model.PlaybackMethod
 import app.pley.android.model.PlaybackMode
 import app.pley.android.model.PlaybackRequest
 import app.pley.android.model.ProgressState
+import app.pley.android.model.ServerEvent
 import app.pley.android.model.caps.ClientCaps
 import app.pley.android.network.ApiException
 import app.pley.android.network.OfflineException
@@ -17,14 +19,19 @@ import app.pley.android.player.MusicQueueState
 import app.pley.android.player.NowPlaying
 import app.pley.android.player.session.ServerPlaybackSession
 import app.pley.android.player.session.SessionReporter
+import app.pley.android.player.sleep.SleepChoice
+import app.pley.android.player.sleep.SleepState
+import app.pley.android.player.sleep.SleepTimer
 import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -40,6 +47,10 @@ class MusicEnvironment(
     val reporter: SessionReporter,
     /** Makes the output, on the main thread, when music first plays. */
     val output: () -> MusicOutput,
+    /** A monotonic clock in ms, for the sleep timer. */
+    val now: () -> Long = SystemClock::elapsedRealtime,
+    /** The server's events, to hear of the track's session being stopped. */
+    val events: Flow<ServerEvent> = emptyFlow(),
 )
 
 /**
@@ -52,7 +63,9 @@ class MusicEnvironment(
  * - a track the device can't decode is asked for again as a transcode, and
  *   a session that expired (a long pause) is started again where it was,
  *   up to three times in a row;
- * - Previous restarts a track that has played more than 3 s.
+ * - Previous restarts a track that has played more than 3 s;
+ * - a sleep timer pauses after the minutes chosen, or at the end of the
+ *   track (the next one waits, paused).
  *
  * It lives as long as the app's process, so it plays on with no screen
  * open; the [MusicService] shows it in the notification and on the lock
@@ -85,6 +98,40 @@ class MusicPlayback(
     private var loading = false
     private var ended = false
     private var error: MusicError? = null
+
+    private val timer = SleepTimer(scope, env.now, ::trackLeftMs, { queue.current?.id }) { pause() }
+
+    /** The sleep timer. */
+    val sleep: StateFlow<SleepState> get() = timer.state
+
+    init {
+        scope.launch {
+            env.events.collect { event ->
+                if (event is ServerEvent.SessionStopped && event.sessionId == session?.id) stoppedByServer()
+            }
+        }
+    }
+
+    /**
+     * The server ended the track's session (an administrator, or the profile
+     * elsewhere): the music stops and says so, asking for no new session.
+     * Play starts the track again.
+     */
+    private fun stoppedByServer() {
+        session = null
+        loadJob?.cancel()
+        timer.cancel()
+        out?.stop()
+        fail(MusicError.Stopped)
+    }
+
+    fun setSleep(choice: SleepChoice) {
+        if (queue.isEmpty && choice != SleepChoice.Off) return
+        timer.set(choice)
+    }
+
+    /** "Keep listening": the same time again. */
+    fun keepListening() = timer.extend()
 
     /** Told when the queue is forgotten ([stop]): the service lets go of its session. */
     internal var onStopped: (() -> Unit)? = null
@@ -169,6 +216,7 @@ class MusicPlayback(
     fun stop() {
         loadJob?.cancel()
         stopTicker()
+        timer.cancel()
         endSession()
         out?.release()
         out = null
@@ -189,13 +237,13 @@ class MusicPlayback(
      * before. [sameTrack] keeps the transcode fallback and the count of
      * sessions asked for: it is the same track, asked again.
      */
-    private fun startTrack(atMs: Long, sameTrack: Boolean = false) {
+    private fun startTrack(atMs: Long, sameTrack: Boolean = false, play: Boolean? = null) {
         val track = queue.current ?: return
         if (!sameTrack) {
             fallback = null
             recreates = 0
         }
-        val wantPlay = !sameTrack || error != null || (out?.playWhenReady ?: true)
+        val wantPlay = play ?: (!sameTrack || error != null || (out?.playWhenReady ?: true))
         loadJob?.cancel()
         stopTicker()
         endSession()
@@ -244,6 +292,13 @@ class MusicPlayback(
     }
 
     private fun lastPosition(): Long = out?.positionMs?.coerceAtLeast(0) ?: 0
+
+    /** How long the track has left, for the sleep timer; `null` while it isn't playing. */
+    private fun trackLeftMs(): Long? {
+        if (session == null || ended || error != null) return null
+        val position = position()
+        return if (position.durationMs > 0) position.durationMs - position.positionMs else null
+    }
 
     /** Ends the current track's session at the output's position. */
     private fun endSession() {
@@ -295,6 +350,7 @@ class MusicPlayback(
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean) {
+            if (playWhenReady) timer.resumed()
             if (!playWhenReady && !ended) session?.progress(lastPosition(), ProgressState.Paused)
             publish()
         }
@@ -304,8 +360,10 @@ class MusicPlayback(
             session = null
             stopTicker()
             s?.end(s.info.durationMs.takeIf { it > 0 } ?: out?.durationMs ?: lastPosition())
+            // The sleep timer ends with this track: the next one waits, paused.
+            val sleeping = timer.itemEnded(queue.current?.id)
             if (queue.next()) {
-                startTrack(0)
+                startTrack(0, play = !sleeping)
             } else {
                 ended = true
                 playing = false
@@ -318,6 +376,7 @@ class MusicPlayback(
             val s = session
             val direct = s?.info?.method == PlaybackMethod.Direct
             when {
+                error == OutputError.Stopped -> stoppedByServer()
                 error == OutputError.Decode && direct && fallback == null -> {
                     fallback = PlaybackMode.Transcode
                     startTrack(lastPosition(), sameTrack = true)

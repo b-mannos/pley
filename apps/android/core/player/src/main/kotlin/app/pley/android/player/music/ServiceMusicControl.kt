@@ -18,6 +18,8 @@ import app.pley.android.player.NowPlaying
 import app.pley.android.player.PlayerEngine
 import app.pley.android.player.session.SessionReporter
 import app.pley.android.player.session.clientIdOf
+import app.pley.android.player.sleep.SleepChoice
+import app.pley.android.player.sleep.SleepState
 import com.google.common.util.concurrent.ListenableFuture
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
@@ -78,6 +80,12 @@ class ServiceMusicControl(
 
     override fun pauseForVideo() = onMain { playback.pauseForVideo() }
 
+    override val sleep: StateFlow<SleepState> get() = playback.sleep
+
+    override fun setSleep(choice: SleepChoice) = onMain { playback.setSleep(choice) }
+
+    override fun keepListening() = onMain { playback.keepListening() }
+
     /** Binds to the service, which then shows the session; once per run of music. */
     private fun connect() {
         if (controller != null || !playback.active) return
@@ -128,6 +136,7 @@ class ServiceMusicControl(
                         fetch(network, url)
                     }
                 },
+                events = data.liveUpdates.events,
             )
             val playback = MusicPlayback(env, main)
             MusicHub.playback = playback

@@ -109,6 +109,30 @@ sealed interface ServerEvent {
         override val type: String get() = TYPE
     }
 
+    /** The profile's My List changed on another device. */
+    data object WatchlistChanged : ServerEvent {
+        const val TYPE = "watchlist_changed"
+        override val type: String get() = TYPE
+    }
+
+    /**
+     * A playback session was stopped by the server (DELETE /api/sessions/{id}):
+     * by an administrator when [byAdmin], else by the profile from another
+     * device. [message] says why, when given.
+     */
+    @Serializable
+    data class SessionStopped(
+        val sessionId: String,
+        val message: String? = null,
+        val byAdmin: Boolean = false,
+    ) : ServerEvent {
+        override val type: String get() = TYPE
+
+        companion object {
+            const val TYPE = "session_stopped"
+        }
+    }
+
     /** An event this app doesn't know: skipped, but not an error. */
     data class Unknown(override val type: String) : ServerEvent
 
@@ -134,6 +158,8 @@ sealed interface ServerEvent {
                 LibraryChanged.TYPE -> json.decodeFromJsonElement(LibraryChanged.serializer(), fields)
                 LibrariesChanged.TYPE -> LibrariesChanged
                 SessionsChanged.TYPE -> SessionsChanged
+                SessionStopped.TYPE -> json.decodeFromJsonElement(SessionStopped.serializer(), fields)
+                WatchlistChanged.TYPE -> WatchlistChanged
                 else -> Unknown(type)
             }
         }
@@ -146,7 +172,8 @@ sealed interface ServerEvent {
                 is ScanProgress -> json.encodeToJsonElement(ScanProgress.serializer(), value).jsonObject
                 is ScanFinished -> json.encodeToJsonElement(ScanFinished.serializer(), value).jsonObject
                 is LibraryChanged -> json.encodeToJsonElement(LibraryChanged.serializer(), value).jsonObject
-                LibrariesChanged, SessionsChanged, is Unknown -> emptyMap()
+                is SessionStopped -> json.encodeToJsonElement(SessionStopped.serializer(), value).jsonObject
+                LibrariesChanged, SessionsChanged, WatchlistChanged, is Unknown -> emptyMap()
             }
             output.encodeJsonElement(JsonObject(mapOf<String, JsonElement>("type" to JsonPrimitive(value.type)) + fields))
         }

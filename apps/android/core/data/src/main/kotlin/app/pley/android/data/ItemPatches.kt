@@ -3,6 +3,7 @@ package app.pley.android.data
 import app.pley.android.model.CollectionDetail
 import app.pley.android.model.HistoryPage
 import app.pley.android.model.Hub
+import app.pley.android.model.HubKeys
 import app.pley.android.model.Hubs
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ItemKind
@@ -145,6 +146,25 @@ internal class ItemPatch(
             )
         }
 
+        /**
+         * [itemId] out of every Continue Watching; an episode takes its
+         * whole show with it ([target] is the item as it was, when known).
+         */
+        fun hiddenFromContinueWatching(itemId: Long, target: ItemSummary?): ItemPatch {
+            val show = target?.takeIf { it.kind == ItemKind.Episode }?.grandparentId
+            fun gone(s: ItemSummary) = s.id == itemId || (show != null && (s.id == show || s.grandparentId == show))
+            return ItemPatch(
+                summary = { it },
+                hub = { h -> if (h.continueWatching && h.items.any(::gone)) h.copy(items = h.items.filterNot(::gone)) else h },
+            )
+        }
+
+        /** [itemId]'s page says whether it is in My List. */
+        fun inWatchlist(itemId: Long, inList: Boolean): ItemPatch = ItemPatch(
+            summary = { it },
+            detail = { d -> if (d.id == itemId && d.inWatchlist != inList) d.copy(inWatchlist = inList) else d },
+        )
+
         /** The profile's own [rating] of [itemId] (`null`: none). */
         fun rating(itemId: Long, rating: Double?): ItemPatch = ItemPatch(
             summary = { s -> if (s.id == itemId) s.copy(userState = s.userState.copy(rating = rating)) else s },
@@ -180,6 +200,31 @@ internal class ItemPatch(
         }
 
         private const val CONTINUE_WATCHING = "continue_watching"
+
+        /**
+         * Home's [hubs] with [item] put first in My List, or taken out of it
+         * ([item] `null`: [itemId] leaves). A new My List goes after
+         * Continue Watching. `null` when nothing changes.
+         */
+        fun myList(hubs: Hubs, itemId: Long, item: ItemSummary?): Hubs? {
+            val at = hubs.hubs.indexOfFirst { it.key == HubKeys.MY_LIST }
+            val list = hubs.hubs.getOrNull(at)
+            if (item == null) {
+                if (list == null || list.items.none { it.id == itemId }) return null
+                val left = list.items.filterNot { it.id == itemId }
+                return Hubs(if (left.isEmpty()) hubs.hubs - list else hubs.hubs.map { if (it === list) it.copy(items = left) else it })
+            }
+            if (list != null) {
+                if (list.items.firstOrNull()?.id == itemId) return null
+                return Hubs(hubs.hubs.map { if (it === list) it.copy(items = listOf(item) + it.items.filterNot { s -> s.id == itemId }) else it })
+            }
+            val after = hubs.hubs.indexOfLast { it.key == HubKeys.CONTINUE_WATCHING } + 1
+            val hub = Hub(HubKeys.MY_LIST, MY_LIST_TITLE, null, listOf(item))
+            return Hubs(hubs.hubs.take(after) + hub + hubs.hubs.drop(after))
+        }
+
+        /** What the server calls Home's My List; it says so itself once asked again. */
+        private const val MY_LIST_TITLE = "My List"
 
         /** The first [itemId] found among [values], as a summary. */
         fun find(values: List<Any?>, itemId: Long): ItemSummary? {

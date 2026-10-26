@@ -22,6 +22,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,6 +41,8 @@ import kotlinx.coroutines.launch
  *   asks again for what shows that library: its rows, listings and
  *   collections, Home, the libraries, and the pages of its items;
  * - `libraries_changed` asks again for the libraries and Home;
+ * - `watchlist_changed` (My List changed on another device) asks again
+ *   for My List, Home and the pages of movies and shows;
  * - a new connection (the server replays nothing) and every return to the
  *   foreground ask again for what is older than [STALE_MS];
  * - scans fill [scans] (GET /api/activity refuses apps' tokens).
@@ -61,6 +65,11 @@ internal class ServerLiveUpdates(
         get() = readScans.also { start() }
 
     private val started = AtomicBoolean(false)
+
+    private val heard = MutableSharedFlow<ServerEvent>(extraBufferCapacity = HEARD_BUFFER)
+
+    override val events: Flow<ServerEvent>
+        get() = heard.asSharedFlow().also { start() }
 
     override fun start() {
         if (!started.compareAndSet(false, true)) return
@@ -110,6 +119,7 @@ internal class ServerLiveUpdates(
     }
 
     private fun CoroutineScope.handle(event: ServerEvent, pending: MutableMap<Long, Job>) {
+        heard.tryEmit(event)
         when (event) {
             is ServerEvent.ScanStarted -> scan(event.libraryId, null)
             is ServerEvent.ScanProgress ->
@@ -125,7 +135,10 @@ internal class ServerLiveUpdates(
                 }
             }
             ServerEvent.LibrariesChanged -> cache.revalidate { key, _ -> key == SnapshotKeys.LIBRARIES || key == SnapshotKeys.HOME }
-            ServerEvent.SessionsChanged, is ServerEvent.Unknown -> Unit
+            ServerEvent.WatchlistChanged -> cache.revalidate { key, value ->
+                key == SnapshotKeys.HOME || key == SnapshotKeys.WATCHLIST || (value is ItemDetail && value.kind.listable)
+            }
+            ServerEvent.SessionsChanged, is ServerEvent.SessionStopped, is ServerEvent.Unknown -> Unit
         }
     }
 
@@ -142,6 +155,9 @@ internal class ServerLiveUpdates(
 
         /** What is older than this is asked again on reconnecting or coming back. */
         const val STALE_MS = 30_000L
+
+        /** Events kept for slow listeners of [events]; more are dropped. */
+        private const val HEARD_BUFFER = 16
 
         /** Whether the answer under [key], holding [value], shows something of [libraryId]. */
         fun affects(libraryId: Long, key: String, value: Any?): Boolean {

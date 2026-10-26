@@ -33,6 +33,7 @@ import app.pley.android.common.TestTags
 import app.pley.android.designsystem.PleyMotion
 import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.image.rememberImagePrefetcher
+import app.pley.android.model.HubKeys
 import app.pley.android.model.ItemSummary
 import app.pley.android.screens.Navigator
 import app.pley.android.screens.PleyKey
@@ -67,7 +68,8 @@ import kotlinx.coroutines.launch
  *
  * Back from the rows gives focus to the rail's Home and puts the page back
  * at its hero, where focus lands when the rail closes. Coming back from an
- * item, focus lands on the tile it was opened from.
+ * item, focus lands on the tile it was opened from; when that tile's
+ * actions took it out of its row, on its neighbour.
  */
 @Composable
 internal fun TvHomeScreen(vm: HomeViewModel = viewModel(factory = HomeViewModel.Factory)) {
@@ -128,6 +130,9 @@ private fun TvHomeRows(model: TvHomeModel, hero: TvHero, origin: String, vm: Hom
 
     // In the rows, the backdrop and the info block show the tile focus rests on.
     val about: HomeInfo = if (inRows) info ?: hero.info else hero.info
+    // A tile its actions took away (Remove from Continue Watching): focus comes back to its neighbour.
+    val tileKeys = remember(model.rows) { model.rows.flatMapTo(HashSet()) { row -> row.tiles.map { "${row.key}/${it.id}" } } }
+    memory.settle { it in tileKeys }
     val backdrop = remember(about.item.id, origin, tier) {
         if (about.item.id == hero.info.item.id) hero.backdrop else TvHomeModel.backdropOf(about.item, origin, tier)
     }
@@ -183,7 +188,10 @@ private fun TvHomeRows(model: TvHomeModel, hero: TvHero, origin: String, vm: Hom
                         memory = memory,
                         seeAll = seeAll,
                         onOpen = { tile -> row.itemOf(tile)?.let { navigator.open(pageOf(it)) } },
-                        onActions = { tile -> navigator.open(PleyKey.ItemActions(tile.id)) },
+                        onActions = { tile ->
+                            memory.mayLeave("${row.key}/${tile.id}", model.standIn(row.key, tile.id))
+                            navigator.open(PleyKey.ItemActions(tile.id, continueWatching = HubKeys.isContinueWatching(row.key)))
+                        },
                         onFocus = { tile ->
                             inRows = true
                             row.itemOf(tile)?.let {

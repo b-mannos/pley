@@ -71,6 +71,11 @@ import app.pley.android.model.format.formatClockMs
 import app.pley.android.player.MusicError
 import app.pley.android.player.NowPlaying
 import app.pley.android.screens.PleyKey
+import app.pley.android.player.MusicControl
+import app.pley.android.player.sleep.SleepState
+import app.pley.android.ui.phone.player.SleepNotice
+import androidx.compose.foundation.layout.BoxScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import app.pley.android.screens.music.NowPlayingState
 import app.pley.android.screens.music.NowPlayingViewModel
 import app.pley.android.screens.music.QueueRow
@@ -84,7 +89,7 @@ import app.pley.android.ui.phone.shell.LocalPhoneNavigator
  * Now Playing on the phone (design spec §4.10): the art at 80 % of the
  * width over a faint copy of itself, the title, the artist and album, the
  * scrubber with its times, Shuffle, Previous, Play/Pause, Next, and the
- * queue in a sheet.
+ * queue in a sheet; the sleep timer at the top right.
  */
 @Composable
 internal fun NowPlayingScreen() {
@@ -94,6 +99,9 @@ internal fun NowPlayingScreen() {
     var queue by rememberSaveable { mutableStateOf(false) }
     val now = state.now
     val art = remember(now?.artUrl) { now?.artUrl?.let { ArtworkImage(listOf(it)) } }
+    val music = rememberMusicControl()
+    val noSleep = remember { MutableStateFlow(SleepState()) }
+    val sleep by (music?.sleep ?: noSleep).collectAsStateWithLifecycle()
     Box(Modifier.fillMaxSize().background(PleyColors.Bg).testTag(NOW_PLAYING_PAGE)) {
         // The art, faint and unblurred, fading into the page.
         if (art != null) {
@@ -125,7 +133,7 @@ internal fun NowPlayingScreen() {
                     textAlign = TextAlign.Center,
                     modifier = Modifier.weight(1f).semantics { heading() },
                 )
-                Spacer(Modifier.width(48.dp))
+                if (music != null && now != null) MusicSleepButton(sleep, music) else Spacer(Modifier.width(48.dp))
             }
             if (now == null) {
                 EmptyState(
@@ -174,8 +182,16 @@ internal fun NowPlayingScreen() {
                 Controls(now, model, onQueue = { queue = true })
             }
         }
+        MusicSleepNotice(sleep, music)
     }
     if (queue) QueueSheet(state, onPick = model::jumpTo, onDismiss = { queue = false })
+}
+
+/** The sleep timer's notice over Now Playing, under its top bar. */
+@Composable
+private fun BoxScope.MusicSleepNotice(sleep: SleepState, music: MusicControl?) {
+    if (music == null) return
+    SleepNotice(sleep.secondsLeft, music = true, onKeep = music::keepListening, modifier = Modifier.padding(top = 52.dp))
 }
 
 /** Loading or failing: one line under the byline. */
@@ -184,6 +200,7 @@ private fun StatusLine(now: NowPlaying) {
     val text = when {
         now.error == MusicError.Offline -> stringResource(R.string.music_error_offline)
         now.error == MusicError.SignedOut -> stringResource(R.string.music_error_signed_out)
+        now.error == MusicError.Stopped -> stringResource(R.string.music_error_stopped)
         now.error != null -> stringResource(R.string.music_error_unplayable)
         now.loading -> stringResource(R.string.music_loading)
         else -> null

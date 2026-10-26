@@ -57,6 +57,8 @@ data class ItemPage(
     val fromStart: Boolean,
     /** Watched: movies and episodes, or every episode of a show or season. */
     val watched: Boolean,
+    /** In My List; `null` where My List doesn't take the item (seasons, episodes). */
+    val myList: Boolean?,
     /** The profile's own rating, 0 to 10 (a half star each); `null`: unrated. Movies, shows and episodes. */
     val userRating: Int?,
     val rateable: Boolean,

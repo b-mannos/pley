@@ -128,6 +128,7 @@ object CapsBuilder {
             audioChannels = channels,
             subtitleCodecs = SUBTITLES,
             audioTrackSwitching = true,
+            pictureSubtitlesSideload = true,
             hls = HlsCaps(masterPlaylist = true, segments = listOf("ts", "fmp4")),
             display = displayCaps(input.display, device.isTv),
             device = DeviceCaps(

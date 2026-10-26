@@ -67,8 +67,11 @@ enum class OutputError {
     /** The device can't decode it: the server should convert it. */
     Decode,
 
-    /** The server's session is gone (404, 410): a new one is needed. */
+    /** The server's session is gone (404, it expired): a new one is needed. */
     Gone,
+
+    /** The server stopped the session (410): it is over, no new one is asked for. */
+    Stopped,
 
     /** The network failed on the way. */
     Network,

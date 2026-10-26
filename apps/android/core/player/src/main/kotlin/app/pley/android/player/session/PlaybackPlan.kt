@@ -25,7 +25,8 @@ import app.pley.android.player.PlayRequest
  * remuxes and burn-ins of files that play as they are):
  * - `audio_index` when the audio can't be played here (neither decoded nor
  *   passed through), or the session streams HLS (one audio track);
- * - `subtitle_index` only to burn subtitles shown as pictures into HLS.
+ * - `subtitle_index` only to burn subtitles shown as pictures into HLS,
+ *   and never when this player side-loads them (the server's .mks).
  * In direct play both are switched here, by the engine.
  */
 object PlaybackPlan {
@@ -75,6 +76,17 @@ object PlaybackPlan {
     /** Subtitles shown as pictures (PGS, VobSub): a stream burns them into the video. */
     fun isImage(stream: MediaStream?): Boolean = stream != null && stream.textBased == false
 
+    /**
+     * Whether pictures chosen for a stream are side-loaded (the .mks drawn
+     * by the player) rather than burned in: the report says so
+     * (`picture_subtitles_sideload`) and the player can read them.
+     */
+    fun sideloadsPictures(caps: CapsSnapshot?, canRead: Boolean = true): Boolean =
+        canRead && caps?.report?.pictureSubtitlesSideload == true
+
+    /** Where the server's .mks of picture subtitles [index] of [fileId] is. */
+    fun pictureSubtitlesPath(fileId: Long, index: Int): String = "/api/files/$fileId/subtitles/$index.mks"
+
     /** Whether this device decodes [stream]'s audio or sends it as it is to the receiver. */
     fun audioPlaysHere(stream: MediaStream?, caps: CapsSnapshot?): Boolean {
         if (stream == null) return true
@@ -114,6 +126,8 @@ object PlaybackPlan {
         val mode: PlaybackMode,
         /** The session will stream (HLS): the server needs the track indexes. */
         val streaming: Boolean,
+        /** Pictures are side-loaded by the player: none to burn in. */
+        val sideload: Boolean = false,
     )
 
     /** The body of POST /api/playback for [choices]. */
@@ -123,7 +137,7 @@ object PlaybackPlan {
             itemId = itemId,
             fileId = choices.file.id,
             audioIndex = choices.audio?.index?.takeIf { choices.streaming || !audioHere },
-            subtitleIndex = choices.subtitle?.index?.takeIf { choices.streaming && isImage(choices.subtitle) },
+            subtitleIndex = choices.subtitle?.index?.takeIf { choices.streaming && isImage(choices.subtitle) && !choices.sideload },
             maxBitrate = choices.quality.maxBitrateKbps,
             maxHeight = choices.quality.maxHeight,
             startMs = choices.startMs,
@@ -142,7 +156,7 @@ object PlaybackPlan {
         if (!info.hls) return false
         val audio = choices.audio
         val wrongAudio = audio != null && sent.audioIndex == null && info.audioIndex != null && info.audioIndex != audio.index
-        val missingBurn = isImage(choices.subtitle) && sent.subtitleIndex == null
+        val missingBurn = isImage(choices.subtitle) && sent.subtitleIndex == null && !choices.sideload
         return wrongAudio || missingBurn
     }
 

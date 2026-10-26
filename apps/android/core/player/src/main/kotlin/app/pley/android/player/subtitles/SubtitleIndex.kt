@@ -16,7 +16,7 @@ data class TimedCues(
  * arrives late never takes cues away. Lines showing stay as they were
  * (cues compare equal), so nothing flickers when more arrives.
  */
-class SubtitleIndex(entries: List<TimedCues>) {
+class SubtitleIndex(entries: List<TimedCues>) : TimedCueTrack {
     private val entries: List<TimedCues> = entries.sortedWith(compareBy<TimedCues> { it.startMs }.thenBy { it.endMs })
 
     /** Cue groups in all. */
@@ -35,8 +35,9 @@ class SubtitleIndex(entries: List<TimedCues>) {
         return out
     }
 
-    /** The next time after [positionMs] at which what shows changes; `null` when nothing changes any more. */
-    fun nextChangeAfter(positionMs: Long): Long? {
+    override suspend fun cuesAt(positionMs: Long): List<Cue> = at(positionMs)
+
+    override fun nextChangeAfter(positionMs: Long): Long? {
         var next: Long? = null
         for (entry in entries) {
             if (entry.startMs > positionMs) {

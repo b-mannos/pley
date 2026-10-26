@@ -48,6 +48,7 @@ class ClientCapsTest {
             audioChannels = 8,
             subtitleCodecs = listOf("subrip", "ass"),
             audioTrackSwitching = true,
+            pictureSubtitlesSideload = true,
             hls = HlsCaps(masterPlaylist = true, segments = listOf("ts", "fmp4")),
             display = DisplayCaps(3840, 2160, listOf(23.976f, 50f, 60f)),
             device = DeviceCaps(DeviceForm.Tv, tier = "high", fireTv = false, model = "Chromecast"),
@@ -57,7 +58,7 @@ class ClientCapsTest {
             listOf(
                 "containers", "video_codecs", "audio_codecs", "hdr", "dolby_vision", "caps_version", "video", "hdr_types",
                 "dolby_vision_profiles", "audio_decode", "audio_passthrough", "audio_channels", "subtitle_codecs",
-                "audio_track_switching", "hls", "display", "device",
+                "audio_track_switching", "picture_subtitles_sideload", "hls", "display", "device",
             ),
             body.keys.toList(),
         )

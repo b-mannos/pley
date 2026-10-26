@@ -44,6 +44,7 @@ import app.pley.android.model.LibraryKind
 import app.pley.android.model.SortOrder
 import app.pley.android.screens.LibraryTab
 import app.pley.android.screens.PleyKey
+import app.pley.android.model.HubKeys
 import app.pley.android.screens.library.LibraryUiState
 import app.pley.android.screens.library.LibraryViewModel
 import app.pley.android.screens.library.TileLook
@@ -139,6 +140,9 @@ internal fun TvRecommendedTab(
         else -> {
             val collections = stringResource(R.string.tv_library_tab_collections)
             val seeAll = stringResource(R.string.tv_library_see_all)
+            // A tile its actions took away (Remove from Continue Watching): focus comes back to its neighbour.
+            val tileKeys = remember(rows) { rows.flatMapTo(HashSet()) { row -> row.tiles.map { "${row.key}/${it.id}" } } }
+            memory.settle { it in tileKeys }
             TvRowColumn(
                 modifier = modifier.fillMaxSize(),
                 headerY = RowsTop,
@@ -152,7 +156,14 @@ internal fun TvRecommendedTab(
                             tiles = row.tiles,
                             kind = row.tileKind,
                             onOpen = { tile -> row.opens.getOrNull(row.tiles.indexOf(tile))?.let(navigator::open) },
-                            onActions = if (row.key == TileRow.COLLECTIONS) null else ({ tile -> navigator.open(PleyKey.ItemActions(tile.id)) }),
+                            onActions = if (row.key == TileRow.COLLECTIONS) {
+                                null
+                            } else {
+                                { tile ->
+                                    memory.mayLeave("${row.key}/${tile.id}", standIn(rows, row.key, tile.id))
+                                    navigator.open(PleyKey.ItemActions(tile.id, continueWatching = HubKeys.isContinueWatching(row.key)))
+                                }
+                            },
                             memory = memory,
                             initialFocus = initial && at == 0,
                             seeAll = if (row.key == TileRow.COLLECTIONS) SeeAll(seeAll) { vm.select(LibraryTab.Collections) } else null,
@@ -162,6 +173,17 @@ internal fun TvRecommendedTab(
             }
         }
     }
+}
+
+/** Where focus goes if tile [tileId] leaves row [rowKey]: the next tile, else the one before, else the next row's first. */
+private fun standIn(rows: List<TileRow<ArtworkTileModel>>, rowKey: String, tileId: Long): String? {
+    val at = rows.indexOfFirst { it.key == rowKey }
+    val row = rows.getOrNull(at) ?: return null
+    val i = row.tiles.indexOfFirst { it.id == tileId }
+    val beside = row.tiles.getOrNull(i + 1) ?: row.tiles.getOrNull(i - 1)?.takeIf { i > 0 }
+    if (beside != null) return "$rowKey/${beside.id}"
+    val other = rows.getOrNull(at + 1) ?: rows.getOrNull(at - 1) ?: return null
+    return other.tiles.firstOrNull()?.let { "${other.key}/${it.id}" }
 }
 
 private val TileRow<ArtworkTileModel>.tileKind: TileKind

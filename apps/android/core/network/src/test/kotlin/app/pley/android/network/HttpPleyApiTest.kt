@@ -110,6 +110,7 @@ class HttpPleyApiTest {
                 "GET /api/history?offset=50&limit=200&item_id=201&library_id=2&since=1761000000",
             ) { history(offset = 50, limit = 200, itemId = 201, libraryId = 2, since = 1761000000) },
             Golden("homeHubs", json("hubs/home.json"), "GET /api/hubs/home") { homeHubs() },
+            Golden("watchlist", json("watchlist/list.json"), "GET /api/watchlist") { watchlist() },
             Golden("search", json("search/results.json"), "GET /api/search?q=blade%20runner%20%26%202049&limit=60") {
                 search("blade runner & 2049")
             },
@@ -148,6 +149,9 @@ class HttpPleyApiTest {
                 body = PleyJson.encodeToString(RatingRequest.serializer(), rating),
             ) { setRating(101, rating) },
             Golden("deleteHistoryEntry", MockPley.noContent(), "DELETE /api/history/5") { deleteHistoryEntry(5) },
+            Golden("hideFromContinueWatching", MockPley.noContent(), "DELETE /api/continue-watching/204") { hideFromContinueWatching(204) },
+            Golden("addToWatchlist", MockPley.noContent(), "PUT /api/watchlist/201", body = "") { addToWatchlist(201) },
+            Golden("removeFromWatchlist", MockPley.noContent(), "DELETE /api/watchlist/201") { removeFromWatchlist(201) },
             Golden(
                 "createPlaylist",
                 json("playlists/detail.json"),

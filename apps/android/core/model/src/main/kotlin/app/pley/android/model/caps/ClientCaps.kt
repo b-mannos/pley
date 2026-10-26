@@ -49,6 +49,12 @@ data class ClientCaps(
     val subtitleCodecs: List<String>? = null,
     /** The player switches audio tracks of a file itself, without a new session. */
     val audioTrackSwitching: Boolean? = null,
+    /**
+     * Subtitles shown as pictures in a stream are fetched beside it
+     * (/api/files/{id}/subtitles/{index}.mks) and drawn by the player:
+     * nothing needs burning in.
+     */
+    val pictureSubtitlesSideload: Boolean? = null,
     val hls: HlsCaps? = null,
     val display: DisplayCaps? = null,
     val device: DeviceCaps? = null,

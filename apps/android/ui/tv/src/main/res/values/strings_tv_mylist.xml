@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- My List: the item page's button and the tiles' actions. -->
+    <string name="tv_item_add_to_my_list">Add to My List</string>
+    <string name="tv_item_in_my_list">In My List</string>
+    <string name="tv_item_remove_from_my_list">Remove from My List</string>
+    <!-- A Continue Watching tile's actions. -->
+    <string name="tv_item_remove_from_continue_watching">Remove from Continue Watching</string>
+</resources>

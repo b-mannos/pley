@@ -14,6 +14,7 @@ import app.pley.android.model.MediaStream
 import app.pley.android.model.PlaybackMethod
 import app.pley.android.model.PlaybackMode
 import app.pley.android.model.ProgressState
+import app.pley.android.model.ServerEvent
 import app.pley.android.model.StreamChoice
 import app.pley.android.model.TranscodeInfo
 import app.pley.android.model.format.episodeLabel
@@ -34,7 +35,13 @@ import app.pley.android.player.UpNextUi
 import app.pley.android.player.markers.CreditsGate
 import app.pley.android.player.markers.Markers
 import app.pley.android.player.queue.NextUp
+import app.pley.android.player.sleep.SleepChoice
+import app.pley.android.player.sleep.SleepTimer
+import app.pley.android.player.subtitles.PictureSubtitles
+import app.pley.android.player.subtitles.PictureTrack
 import app.pley.android.player.subtitles.ServerSubtitles
+import app.pley.android.player.subtitles.SubtitleSync
+import app.pley.android.player.subtitles.TimedCueTrack
 import app.pley.android.player.trickplay.TrickplayThumbnails
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
@@ -50,6 +57,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -70,6 +79,12 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   with PUT /api/items/{id}/streams.
  * - **Markers and Up Next.** Skip Intro and Skip Credits; entering credits,
  *   or the end, brings up what plays next with a 10 s countdown.
+ * - **Subtitles.** The server's WebVTT for streams and files beside the
+ *   media, and pictures side-loaded beside a stream (its .mks), drawn at
+ *   the playhead moved by the subtitle offset; a file's own text tracks
+ *   move through the server's WebVTT too while an offset is set.
+ * - **Sleep timer**, and a session the server stopped: it says so and
+ *   plays no more.
  *
  * Runs on [scope]'s dispatcher (the main thread); the engine's events come there too.
  */
@@ -128,6 +143,19 @@ class SessionPlaybackController(
     private val credits = CreditsGate()
     private val nextUp = NextUp(env.api)
     private val serverSubtitles = ServerSubtitles(scope, env.subtitles, env.parser, env.work, onError = { notice(texts.subtitlesFailed) })
+    private val pictureSubtitles = env.pictures?.let { PictureSubtitles(scope, it, onError = ::picturesFailed) }
+
+    private val offsetWrites = Mutex()
+
+    /** The server has no .mks of picture subtitles (an older server, or its transcoder): they are burned in. */
+    private var picturesUnavailable = false
+
+    /** The subtitle offset of the file playing: positive shows them later. */
+    private val offset = MutableStateFlow(0L)
+
+    /** The server stopped the playback: nothing plays again. */
+    private var stopped = false
+    private val sleep = SleepTimer(scope, env.now, ::itemLeftMs, { item?.id }, ::onSleep)
     private var trickplay: TrickplayThumbnails? = null
     private var trickplayWatch: Job? = null
 
@@ -154,6 +182,8 @@ class SessionPlaybackController(
         scope.launch { ticker() }
         scope.launch { progressReports() }
         scope.launch { subtitleCues() }
+        scope.launch { serverStops() }
+        scope.launch { sleep.state.collect { s -> ui.update { it.copy(sleep = s) } } }
     }
 
     private suspend fun prepareFirst() {
@@ -196,6 +226,15 @@ class SessionPlaybackController(
             null
         }
         quality = Qualities.choose(chosen, remembered)
+        offset.value = chosen?.let { f ->
+            try {
+                env.offsets.offset(offsetKey(f.id))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                0L
+            }
+        } ?: 0L
         markers = Markers.forFile(detail, chosen?.id)
         val episode = detail.kind == ItemKind.Episode
         ui.update {
@@ -227,6 +266,7 @@ class SessionPlaybackController(
      * The previous run of this is cancelled (a new choice wins).
      */
     private fun restart(atMs: Long) {
+        if (stopped) return
         sessionJob?.cancel()
         startJob?.cancel()
         sessionJob = scope.launch {
@@ -266,6 +306,7 @@ class SessionPlaybackController(
             quality = quality,
             mode = mode,
             streaming = PlaybackPlan.streams(mode, decision, chosen, audio, caps),
+            sideload = sideload,
         )
         var sent = PlaybackPlan.request(detail.id, choices, env.clientId(), caps)
         var started = ServerPlaybackSession.start(env.api, sent, env.reporter)
@@ -322,7 +363,11 @@ class SessionPlaybackController(
         return true
     }
 
-    /** The tracks chosen, where they play: the engine in direct play, the server's WebVTT for streams and files beside the media. */
+    /**
+     * The tracks chosen, where they play: the engine in direct play, the
+     * server's WebVTT for streams, files beside the media and text moved by
+     * an offset, the server's .mks for pictures beside a stream.
+     */
     private fun applyTracks() {
         val info = session?.info ?: return
         val engineLink = link ?: return
@@ -333,29 +378,74 @@ class SessionPlaybackController(
             when {
                 sub == null -> {
                     engineLink.selectText(null, null)
-                    serverSubtitles.hide()
+                    hideServerSubtitles()
                 }
-                sub.external -> {
+                sub.external || (offset.value != 0L && !PlaybackPlan.isImage(sub)) -> {
                     engineLink.selectText(null, null)
                     showServerSubtitles(sub)
                 }
                 else -> {
                     val embedded = PlaybackPlan.subtitleStreams(chosenFile).filter { !it.external }
                     engineLink.selectText(embedded.indexOf(sub), sub.language)
-                    serverSubtitles.hide()
+                    hideServerSubtitles()
                 }
             }
         } else {
             engineLink.selectText(null, null)
-            if (sub != null && !PlaybackPlan.isImage(sub)) showServerSubtitles(sub) else serverSubtitles.hide()
+            when {
+                sub == null -> hideServerSubtitles()
+                !PlaybackPlan.isImage(sub) -> showServerSubtitles(sub)
+                !info.burnSubtitles && sideload -> showPictures(sub)
+                else -> hideServerSubtitles()
+            }
         }
     }
 
     private fun showServerSubtitles(sub: MediaStream) {
         val info = session?.info ?: return
+        pictureSubtitles?.hide()
         val path = info.subtitles.firstOrNull { it.index == sub.index }?.url ?: "/api/files/${info.fileId}/subtitles/${sub.index}.vtt"
         serverSubtitles.show(info.fileId, sub.index, env.api.url(path))
     }
+
+    /** Pictures beside a stream: the server's .mks of the track, at the stream's own positions (the file's). */
+    private fun showPictures(sub: MediaStream) {
+        val info = session?.info ?: return
+        val pictures = pictureSubtitles ?: return
+        serverSubtitles.hide()
+        pictures.show(info.fileId, sub.index, env.api.url(PlaybackPlan.pictureSubtitlesPath(info.fileId, sub.index)))
+    }
+
+    private fun hideServerSubtitles() {
+        serverSubtitles.hide()
+        pictureSubtitles?.hide()
+    }
+
+    /** Pictures chosen for a stream are drawn by this player, not burned in. */
+    private val sideload: Boolean get() = !picturesUnavailable && PlaybackPlan.sideloadsPictures(caps, pictureSubtitles != null)
+
+    /**
+     * The pictures beside the stream couldn't be loaded. When the server
+     * can't make them at all (404: a server without the route; 503: its
+     * transcoder can't), the stream starts again with them burned in, as
+     * before side-loading; otherwise the screen says so.
+     */
+    private fun picturesFailed(error: Throwable) {
+        val status = (error as? ApiException)?.status
+        val info = session?.info
+        if ((status == 404 || status == 503) && !closed && !stopped && info != null && info.hls && !info.burnSubtitles) {
+            picturesUnavailable = true
+            if (PlaybackPlan.isImage(subtitle)) {
+                publishChoices()
+                restart(livePosition())
+                return
+            }
+        }
+        notice(texts.subtitlesFailed)
+    }
+
+    /** Where a file's subtitle offset is kept: the file's own address, so files of different servers don't mix. */
+    private fun offsetKey(fileId: Long): String = env.api.url("/api/files/$fileId")
 
     // ---------------------------------------------------------------- engine events
 
@@ -376,6 +466,7 @@ class SessionPlaybackController(
         if (closed) return
         val was = wantPlay.value
         wantPlay.value = playWhenReady
+        if (playWhenReady) sleep.resumed()
         if (session == null) return
         if (!playWhenReady) {
             struggle.reset()
@@ -405,6 +496,11 @@ class SessionPlaybackController(
     override fun onError(error: EngineError) {
         val s = session ?: return
         if (closed) return
+        if (error is EngineError.Stopped) {
+            // A stream answers 410 once the server stopped it, also to players that didn't hear the event.
+            stopByServer(error.message, byAdmin = true)
+            return
+        }
         val videoCodec = PlaybackPlan.videoStream(file)?.codec
         act(recovery.decide(error, s.info.method, videoCodec), starving = false)
     }
@@ -464,6 +560,8 @@ class SessionPlaybackController(
     private fun onEnded() {
         if (ended) return
         ended = true
+        // The sleep timer ends with this item: what comes next waits for the person.
+        val sleeping = sleep.itemEnded(item?.id)
         val s = session
         val duration = s?.info?.durationMs?.takeIf { it > 0 } ?: link?.durationMs?.takeIf { it > 0 } ?: lastPositionMs
         lastPositionMs = duration
@@ -474,10 +572,10 @@ class SessionPlaybackController(
         phase(PlayerPhase.Paused)
         val known = next
         if (known != null) {
-            showUpNext(known, restartCountdown = countdown?.isActive != true)
+            showUpNext(known, restartCountdown = !sleeping && countdown?.isActive != true)
             return
         }
-        lookUpNext { found -> if (found == null) phase(PlayerPhase.Ended) else showUpNext(found, restartCountdown = true) }
+        lookUpNext { found -> if (found == null) phase(PlayerPhase.Ended) else showUpNext(found, restartCountdown = !sleeping) }
     }
 
     // ---------------------------------------------------------------- the clock
@@ -544,21 +642,79 @@ class SessionPlaybackController(
         }
     }
 
-    /** The server's subtitles showing at the playhead, worked out when what shows changes. */
+    /**
+     * The server's subtitles showing at the playhead moved by the offset
+     * (text, or pictures beside a stream), worked out when what shows changes.
+     */
     private suspend fun subtitleCues() {
-        serverSubtitles.index.collectLatest { index ->
-            if (index == null) {
-                cueState.value = emptyList()
-                return@collectLatest
+        val pictures = pictureSubtitles?.track ?: MutableStateFlow<PictureTrack?>(null)
+        combine(serverSubtitles.index, pictures, offset) { text, picture, shift -> Pair<TimedCueTrack?, Long>(text ?: picture, shift) }
+            .collectLatest { (track, shift) ->
+                if (track == null) {
+                    cueState.value = emptyList()
+                    return@collectLatest
+                }
+                while (true) {
+                    val pos = livePosition()
+                    val showing = track.cuesAt(SubtitleSync.trackTime(pos, shift))
+                    if (showing != cueState.value) cueState.value = showing
+                    val change = SubtitleSync.untilChange(track, pos, shift)
+                    delay(change?.coerceIn(CUE_MIN_MS, CUE_MAX_MS) ?: CUE_IDLE_MS)
+                }
             }
-            while (true) {
-                val pos = livePosition()
-                val showing = index.at(pos)
-                if (showing != cueState.value) cueState.value = showing
-                val change = index.nextChangeAfter(pos)
-                delay(if (change == null) CUE_IDLE_MS else (change - pos).coerceIn(CUE_MIN_MS, CUE_MAX_MS))
-            }
+    }
+
+    /** The server's word that it stopped this playback's session (an administrator, or the profile elsewhere). */
+    private suspend fun serverStops() {
+        env.events.collect { event ->
+            if (event is ServerEvent.SessionStopped && event.sessionId == session?.id) stopByServer(event.message, event.byAdmin)
         }
+    }
+
+    /**
+     * The server ended the session: the engine stops, nothing more is asked
+     * of the server (only `stopped`, for the resume point), and the screen
+     * says why, without Try again, then leaves.
+     */
+    private fun stopByServer(message: String?, byAdmin: Boolean) {
+        if (closed || stopped) return
+        stopped = true
+        val position = livePosition()
+        lastPositionMs = position
+        session?.let { s ->
+            sessionState.value = null
+            s.stoppedByServer(position)
+        }
+        sessionJob?.cancel()
+        startJob?.cancel()
+        seekReport?.cancel()
+        nextLookup?.cancel()
+        hideUpNext()
+        hideServerSubtitles()
+        sleep.cancel()
+        link?.stop()
+        ui.update {
+            it.copy(
+                phase = PlayerPhase.Error(texts.stopped(message, byAdmin), canRetry = false),
+                skipLabel = null,
+                stoppedByServer = true,
+            )
+        }
+    }
+
+    /** How long the item playing has left, for the sleep timer; `null` while unknown. */
+    private fun itemLeftMs(): Long? {
+        if (session == null || !mediaShown || ended) return null
+        val duration = ui.value.durationMs.takeIf { it > 0 } ?: return null
+        return duration - livePosition()
+    }
+
+    /** The sleep timer ended: it pauses, and what plays next doesn't start by itself. */
+    private fun onSleep() {
+        countdown?.cancel()
+        countdown = null
+        ui.update { it.copy(upNextSecondsLeft = null, upNextCard = it.upNextCard?.copy(secondsLeft = null)) }
+        link?.pause()
     }
 
     private fun report(state: ProgressState) {
@@ -573,7 +729,7 @@ class SessionPlaybackController(
     // ---------------------------------------------------------------- the screen's commands
 
     override fun play() {
-        if (closed) return
+        if (closed || stopped) return
         if (ended) {
             restart(0)
             return
@@ -588,7 +744,7 @@ class SessionPlaybackController(
 
     override fun seekTo(positionMs: Long) {
         val engineLink = link ?: return
-        if (closed) return
+        if (closed || stopped) return
         val duration = ui.value.durationMs
         val target = if (duration > 0) positionMs.coerceIn(0, (duration - SEEK_END_MARGIN_MS).coerceAtLeast(0)) else positionMs.coerceAtLeast(0)
         hideUpNext()
@@ -634,8 +790,45 @@ class SessionPlaybackController(
         saveStreams()
         publishChoices()
         val info = session?.info ?: return
-        val burn = info.hls && PlaybackPlan.isImage(chosen)
+        val burn = info.hls && PlaybackPlan.isImage(chosen) && !sideload
         if (burn != info.burnSubtitles || (burn && info.subtitleIndex != chosen?.index)) restart(livePosition()) else applyTracks()
+    }
+
+    override fun setSubtitleOffset(offsetMs: Long) {
+        if (closed) return
+        val moved = SubtitleSync.clamp(offsetMs)
+        if (moved == offset.value) return
+        val wasZero = offset.value == 0L
+        offset.value = moved
+        ui.update { it.copy(subtitleOffsetMs = moved) }
+        file?.id?.let { id ->
+            val key = offsetKey(id)
+            scope.launch {
+                try {
+                    // One at a time, in the order chosen: a held key's steps don't land out of order.
+                    offsetWrites.withLock { env.offsets.remember(key, moved) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // Not remembered: this viewing keeps it all the same.
+                }
+            }
+        }
+        // A file's own text track moves through the server's WebVTT while an offset is set.
+        if (wasZero != (moved == 0L)) applyTracks()
+    }
+
+    override fun setSleep(choice: SleepChoice) {
+        if (closed || stopped) return
+        sleep.set(choice)
+    }
+
+    override fun keepWatching() {
+        if (closed || stopped) return
+        sleep.extend()
+        // What plays next was held for the timer: its countdown goes on.
+        val known = next
+        if (known != null && ui.value.upNextCard != null && countdown?.isActive != true && !ended) showUpNext(known, restartCountdown = true)
     }
 
     override fun selectQuality(name: String) {
@@ -657,7 +850,7 @@ class SessionPlaybackController(
     }
 
     override fun playNext() {
-        if (closed) return
+        if (closed || stopped) return
         val known = next
         if (known != null) {
             switchTo(known)
@@ -741,7 +934,7 @@ class SessionPlaybackController(
     )
 
     override fun retry() {
-        if (closed) return
+        if (closed || stopped) return
         recovery.retry()
         ui.update { it.copy(phase = PlayerPhase.Preparing) }
         if (item == null) {
@@ -757,7 +950,8 @@ class SessionPlaybackController(
         val position = livePosition()
         closed = true
         endSession(position)
-        serverSubtitles.hide()
+        sleep.cancel()
+        hideServerSubtitles()
         dropTrickplay()
         link?.setListener(null)
         link?.release()
@@ -816,7 +1010,7 @@ class SessionPlaybackController(
         if (!restartCountdown) return
         countdown?.cancel()
         countdown = scope.launch {
-            if (!env.autoplayNext()) return@launch
+            if (!env.autoplayNext() || sleep.endsWith(item?.id)) return@launch
             for (left in COUNTDOWN_SECONDS downTo 1) {
                 setSecondsLeft(left)
                 delay(1_000)
@@ -846,7 +1040,7 @@ class SessionPlaybackController(
         recovery.newItem()
         credits.reset()
         guardMode = null
-        serverSubtitles.hide()
+        hideServerSubtitles()
         dropTrickplay()
         ended = false
         mediaShown = false
@@ -865,6 +1059,7 @@ class SessionPlaybackController(
                 itemId = target.id,
                 title = it.title,
                 positionMs = req.startMs ?: 0,
+                sleep = it.sleep,
             )
         }
         sessionJob?.cancel()
@@ -897,8 +1092,11 @@ class SessionPlaybackController(
             emptyList()
         } else {
             listOf(TrackChoice(null, texts.subtitlesOff, subtitle == null)) +
-                subs.map { TrackChoice(it.index.toLong(), streamLabel(it), it.index == subtitle?.index, burnIn = streaming && PlaybackPlan.isImage(it)) }
+                subs.map { TrackChoice(it.index.toLong(), streamLabel(it), it.index == subtitle?.index, burnIn = streaming && PlaybackPlan.isImage(it) && !sideload) }
         }
+        val sub = subtitle
+        // Text moves always; pictures only when drawn here from the server's .mks.
+        val syncable = sub != null && (!PlaybackPlan.isImage(sub) || (streaming && sideload && info?.burnSubtitles != true))
         val auto = info?.autoQuality?.takeIf { quality.original }?.let { Qualities.byId(it) }?.takeIf { !it.original }
         val fileHint = chosenFile?.let { f ->
             listOfNotNull(resolutionLabel(f.width, f.height), formatBitrate(f.bitrate).ifEmpty { null }).joinToString(" · ").ifEmpty { null }
@@ -921,6 +1119,8 @@ class SessionPlaybackController(
                 subtitles = subtitleChoices,
                 qualities = qualities,
                 quality = if (auto != null) texts.autoQuality(auto) else texts.quality(quality),
+                subtitleSync = syncable,
+                subtitleOffsetMs = offset.value,
             )
         }
     }

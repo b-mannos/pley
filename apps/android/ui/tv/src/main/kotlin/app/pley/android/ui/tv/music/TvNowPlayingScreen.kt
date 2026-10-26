@@ -44,6 +44,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -70,11 +71,14 @@ import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.model.format.formatClockMs
 import app.pley.android.player.MusicError
 import app.pley.android.player.NowPlaying
+import app.pley.android.player.sleep.SleepChoice
+import app.pley.android.player.sleep.SleepTexts
 import app.pley.android.screens.music.NowPlayingState
 import app.pley.android.screens.music.NowPlayingViewModel
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.kit.TvRoundButton
 import app.pley.android.ui.tv.kit.initialFocus
+import app.pley.android.ui.tv.player.MoonIcon
 import app.pley.android.ui.tv.shell.LocalTvNavigator
 import kotlinx.coroutines.delay
 
@@ -133,7 +137,7 @@ internal fun TvNowPlayingScreen() {
                 BasicText(now.title, style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg), maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(4.dp))
                 BasicText(now.byline, style = PleyType.Tv.BodyLarge.copy(color = PleyColors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Status(now)
+                Status(now, model)
                 Spacer(Modifier.height(14.dp))
                 Scrubber(now, model)
                 Spacer(Modifier.height(16.dp))
@@ -145,12 +149,16 @@ internal fun TvNowPlayingScreen() {
 }
 
 @Composable
-private fun Status(now: NowPlaying) {
+private fun Status(now: NowPlaying, model: NowPlayingViewModel) {
+    val sleep by model.sleep.collectAsStateWithLifecycle()
+    val pausingIn = sleep.secondsLeft
     val text = when {
         now.error == MusicError.Offline -> stringResource(R.string.tv_music_error_offline)
         now.error == MusicError.SignedOut -> stringResource(R.string.tv_music_error_signed_out)
+        now.error == MusicError.Stopped -> stringResource(R.string.tv_music_error_stopped)
         now.error != null -> stringResource(R.string.tv_music_error_unplayable)
         now.loading -> stringResource(R.string.tv_music_loading)
+        pausingIn != null -> SleepTexts.notice(LocalResources.current, pausingIn)
         else -> ""
     }
     BasicText(
@@ -242,7 +250,39 @@ private fun Controls(now: NowPlaying, model: NowPlayingViewModel) {
         Box(Modifier.padding(top = 8.dp)) { TvRoundButton(stringResource(R.string.tv_music_previous), PleyIcons.SkipBack, onClick = model::previous, onArt = true) }
         PlayPause(now, onClick = model::toggle)
         Box(Modifier.padding(top = 8.dp)) { TvRoundButton(stringResource(R.string.tv_music_next), PleyIcons.SkipForward, onClick = model::next, onArt = true, enabled = now.hasNext) }
+        Box(Modifier.padding(top = 8.dp)) { SleepButton(model) }
     }
+}
+
+/**
+ * The sleep timer: each Select moves to the next choice (Off, 15 … 90 min,
+ * End of this track), its label saying the one running; during the
+ * timer's last 30 s it is "Keep listening".
+ */
+@Composable
+private fun SleepButton(model: NowPlayingViewModel) {
+    val sleep by model.sleep.collectAsStateWithLifecycle()
+    val resources = LocalResources.current
+    val notice = sleep.secondsLeft != null
+    val label = when {
+        notice -> SleepTexts.keep(resources, music = true)
+        sleep.choice == SleepChoice.Off -> SleepTexts.title(resources)
+        else -> SleepTexts.title(resources) + ": " + SleepTexts.summary(resources, sleep, music = true)
+    }
+    TvRoundButton(
+        label,
+        MoonIcon,
+        onClick = {
+            if (notice) {
+                model.keepListening()
+            } else {
+                val all = SleepChoice.ALL
+                model.setSleep(all[(all.indexOf(sleep.choice) + 1) % all.size])
+            }
+        },
+        modifier = Modifier.testTag(TV_MUSIC_SLEEP),
+        onArt = true,
+    )
 }
 
 /** Play/Pause: a 64 dp circle with a 32 dp glyph (design spec §2.7), the page's initial focus. */
@@ -316,3 +356,4 @@ private const val DIMMED = 0.3f
 internal const val TV_NOW_PLAYING_PAGE = "pley.tv.now_playing"
 internal const val TV_PLAY_PAUSE = "pley.tv.now_playing.play_pause"
 internal const val TV_QUEUE = "pley.tv.now_playing.queue"
+internal const val TV_MUSIC_SLEEP = "pley.tv.now_playing.sleep"

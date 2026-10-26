@@ -24,7 +24,8 @@ import okio.Buffer
  *   HLS stream, WebVTT subtitles, seek previews and chapter pictures, all
  *   from the committed clips (scripts/make-android-fixtures.ps1);
  * - writes (progress, watched, ratings, track choices, playlists, track
- *   defaults), which change what is read next and go to [journal];
+ *   defaults, My List, leaving Continue Watching), which change what is
+ *   read next and go to [journal];
  * - server events, with keep-alives and a scan every 30 s;
  * - pictures drawn per width bucket;
  * - signing in as pley's authorization server does: discovery, the
@@ -76,7 +77,8 @@ class FixtureServer(private val options: Options = Options()) : Closeable {
 
     private val state = State(options)
     private val routes: List<Route> =
-        state.oauth.routes() + BrowseRoutes(state).routes() + PlayRoutes(state).routes() + PlaylistRoutes(state).routes()
+        state.oauth.routes() + BrowseRoutes(state).routes() + PlayRoutes(state).routes() + PlaylistRoutes(state).routes() +
+            ListRoutes(state).routes()
     private val listening = Any()
     private var server = MockWebServer()
     private var port = 0

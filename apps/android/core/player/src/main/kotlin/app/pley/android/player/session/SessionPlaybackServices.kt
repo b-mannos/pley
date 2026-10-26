@@ -14,7 +14,10 @@ import app.pley.android.player.PlaybackServices
 import app.pley.android.player.PlayerEngine
 import app.pley.android.player.PlayerPhase
 import app.pley.android.player.PlayerUiState
+import app.pley.android.player.subtitles.OkHttpPictureSource
 import app.pley.android.player.subtitles.OkHttpSubtitleFetcher
+import app.pley.android.player.subtitles.PreferencesSubtitleOffsets
+import java.io.File
 import app.pley.android.player.trickplay.OkHttpSheetSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -77,6 +80,8 @@ class SessionPlaybackServices(
             val texts = ResourcePlayerTexts(app)
             val clientId = clientIdOf(app)
             val networkKind = networkKindOf(app)
+            val offsets = PreferencesSubtitleOffsets(app)
+            val pictureDir = File(app.cacheDir, PICTURE_SUBTITLES_DIR)
             return SessionPlaybackServices({
                 val session = data.session.session.value ?: error("Sign in to play")
                 val api = network.api(session.issuer, session.me?.id)
@@ -102,9 +107,15 @@ class SessionPlaybackServices(
                         }
                     },
                     lowMemory = profile.tier == Tier.T0,
+                    offsets = offsets,
+                    pictures = OkHttpPictureSource({ network.subtitles(session.issuer) }, pictureDir),
+                    events = data.liveUpdates.events,
                 )
             })
         }
+
+        /** Picture subtitles read beside a stream, in the app's cache while they show. */
+        private const val PICTURE_SUBTITLES_DIR = "picture-subtitles"
     }
 }
 

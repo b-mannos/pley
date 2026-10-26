@@ -104,6 +104,8 @@ internal class PageActions(private val model: ItemViewModel, private val navigat
 
     fun toggleWatched() = model.toggleWatched()
 
+    fun toggleMyList() = model.toggleMyList()
+
     fun setWatched(id: Long, watched: Boolean) = model.setWatched(id, watched)
 
     fun rate(rating: Int?) = model.rate(rating)

@@ -33,6 +33,7 @@ class TestHomeSources : HomeSources {
     val scanList = MutableStateFlow<List<ScanState>>(emptyList())
     val played: MutableList<PlayRequest> = Collections.synchronizedList(mutableListOf())
     val watched: MutableList<Pair<Long, Boolean>> = Collections.synchronizedList(mutableListOf())
+    val hidden: MutableList<Long> = Collections.synchronizedList(mutableListOf())
     var hubRefreshes = 0
     var libraryRefreshes = 0
 
@@ -81,6 +82,15 @@ class TestHomeSources : HomeSources {
 
         override suspend fun rate(itemId: Long, rating: Double?) = Unit
         override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) = Unit
+        // As the data side does: out of Continue Watching at once, the row gone with its last tile.
+        override suspend fun hideFromContinueWatching(itemId: Long) {
+            hidden += itemId
+            val shown = (home.value as? Loadable.Ready)?.value ?: return
+            val hubs = shown.hubs.mapNotNull { hub ->
+                if (!hub.continueWatching) hub else hub.copy(items = hub.items.filterNot { it.id == itemId }).takeIf { it.items.isNotEmpty() }
+            }
+            home.value = Loadable.Ready(Hubs(hubs), fresh = true)
+        }
     }
 
     override val launcher = object : PlayerLauncher {

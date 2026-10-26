@@ -700,6 +700,31 @@ object PleyIcons {
         "M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2",
     )
 
+    /** Lucide `bookmark-plus`. */
+    val BookmarkPlus = PleyIcon(
+        "bookmark-plus",
+        false,
+        "M12 7v6",
+        "M15 10H9",
+        "M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z",
+    )
+
+    /** Lucide `bookmark-check`. */
+    val BookmarkCheck = PleyIcon(
+        "bookmark-check",
+        false,
+        "M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z",
+        "m9 10 2 2 4-4",
+    )
+
+    /** Lucide `bookmark-minus`. */
+    val BookmarkMinus = PleyIcon(
+        "bookmark-minus",
+        false,
+        "M15 10H9",
+        "M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z",
+    )
+
     /** Lucide `arrow-left`. */
     val ArrowLeft = PleyIcon(
         "arrow-left",

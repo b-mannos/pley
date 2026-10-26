@@ -35,6 +35,12 @@ sealed interface EngineError {
     /** The server answered [status] for the media: 404 and 410 mean the session expired. */
     data class Http(val status: Int, override val detail: String) : EngineError
 
+    /**
+     * The server stopped the session (410 Gone, `session_stopped`): it won't
+     * play again. [message] is the one given, if any.
+     */
+    data class Stopped(val message: String?, override val detail: String) : EngineError
+
     /** The HLS playlist couldn't be loaded or read: only a new session helps. */
     data class Playlist(override val detail: String) : EngineError
 
@@ -99,6 +105,9 @@ interface EngineLink {
     fun play()
 
     fun pause()
+
+    /** Stops loading and lets go of the media, keeping the engine (a session the server stopped). */
+    fun stop() = pause()
 
     fun seekTo(positionMs: Long)
 

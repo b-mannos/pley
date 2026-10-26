@@ -176,7 +176,7 @@ class EndpointsTest {
         assertTrue(history.total > 5)
         assertEquals(history.entries.sortedByDescending { it.viewedAt }, history.entries)
         val home = app.read("/api/hubs/home", Hubs.serializer()).hubs
-        assertEquals(listOf("continue_watching", "recently_added:1", "recently_added:2", "recently_added:3"), home.map { it.key })
+        assertEquals(listOf("continue_watching", "my_list", "recently_added:1", "recently_added:2", "recently_added:3"), home.map { it.key })
     }
 
     @Test

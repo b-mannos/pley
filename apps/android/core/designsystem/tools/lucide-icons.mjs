@@ -30,6 +30,8 @@ const icons = [
   ["GripVertical", "grip-vertical"], ["List", "list"], ["ListOrdered", "list-ordered"], ["Square", "square"],
   ["LoaderCircle", "loader-circle"], ["CircleAlert", "circle-alert"], ["TriangleAlert", "triangle-alert"],
   ["ShieldCheck", "shield-check"], ["TicketX", "ticket-x"], ["MailPlus", "mail-plus"], ["Activity", "activity"],
+  // My List
+  ["BookmarkPlus", "bookmark-plus"], ["BookmarkCheck", "bookmark-check"], ["BookmarkMinus", "bookmark-minus"],
   // Arrows
   ["ArrowLeft", "arrow-left"], ["ArrowRight", "arrow-right"], ["ArrowUp", "arrow-up"], ["ArrowUpDown", "arrow-up-down"],
   ["ArrowDownWideNarrow", "arrow-down-wide-narrow"], ["ArrowUpNarrowWide", "arrow-up-narrow-wide"],

@@ -21,6 +21,9 @@ enum class ItemKind(override val wire: String) : WireEnum {
     /** Kinds that play themselves; the others hold items. */
     val playable: Boolean get() = this == Movie || this == Episode || this == Track || this == Extra
 
+    /** Kinds My List takes: movies and shows (GET /api/watchlist). */
+    val listable: Boolean get() = this == Movie || this == Show
+
     object Serializer : LenientEnumSerializer<ItemKind>("ItemKind", ItemKind.entries, ItemKind.Unknown)
 }
 
@@ -205,6 +208,8 @@ data class ItemDetail(
     val cast: List<Credit> = emptyList(),
     /** Creators, directors, writers and producers. */
     val crew: List<Credit> = emptyList(),
+    /** In the profile's My List (movies and shows). */
+    val inWatchlist: Boolean = false,
 ) {
     fun toSummary(): ItemSummary = ItemSummary(
         id = id,

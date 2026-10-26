@@ -31,6 +31,7 @@ class PleyKeyTest {
         PleyKey.Diagnostics,
         PleyKey.NowPlaying,
         PleyKey.ItemActions(4567),
+        PleyKey.ItemActions(204, continueWatching = true),
         PleyKey.AddToPlaylist(listOf(1, 2, 3)),
         PleyKey.NewPlaylist(listOf(4567)),
         PleyKey.SaveSmartPlaylist(3, "sort=year&order=desc&unwatched=1"),

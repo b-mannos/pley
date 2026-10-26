@@ -12,6 +12,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.navigation3.runtime.NavKey
 import app.pley.android.common.Tier
 import app.pley.android.player.NowPlaying
+import app.pley.android.player.sleep.SleepChoice
+import app.pley.android.player.sleep.SleepState
 import app.pley.android.screens.PleyKey
 import app.pley.android.ui.tv.kit.focused
 import app.pley.android.ui.tv.kit.press
@@ -96,5 +98,25 @@ class TvMusicFocusTest {
         compose.press(Key.DirectionDown, times = 2)
         compose.press(Key.DirectionCenter)
         assertEquals(1, graph.music.jumps.size)
+    }
+
+    @Test
+    fun theSleepTimerStepsThroughItsChoicesAndKeepsListeningDuringItsNotice() {
+        graph.music.now.value = NowPlaying(501, "Song 1", "Harbour Lights", playing = true, album = "Deep Water", count = 12, index = 0)
+        show { TvNowPlayingScreen() }
+        waitFor("Harbour Lights · Deep Water")
+        // Play/Pause, Next, then the timer.
+        compose.press(Key.DirectionRight, times = 2)
+        compose.press(Key.DirectionCenter)
+        assertEquals(0 to 0, graph.music.toggles to graph.music.nexts)
+        assertEquals(SleepChoice.Minutes(15), graph.music.sleepState.value.choice)
+        compose.press(Key.DirectionCenter)
+        assertEquals(SleepChoice.Minutes(30), graph.music.sleepState.value.choice)
+
+        graph.music.sleepState.value = SleepState(SleepChoice.Minutes(30), secondsLeft = 20)
+        waitFor("Pausing in 20 s")
+        compose.press(Key.DirectionCenter)
+        assertEquals(1, graph.music.keeps)
+        assertEquals(SleepChoice.Minutes(30), graph.music.sleepState.value.choice)
     }
 }

@@ -53,6 +53,9 @@ import app.pley.android.designsystem.reducedMotion
 import app.pley.android.player.PlaybackController
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.engine.EngineState
+import app.pley.android.player.sleep.SleepChoice
+import app.pley.android.player.sleep.SleepState
+import app.pley.android.player.sleep.SleepTexts
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.item.FactLine
 import app.pley.android.ui.tv.item.PanelHeading
@@ -61,8 +64,8 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
- * The player's side panels (design spec §2.7): Subtitles, Audio, Quality,
- * Chapters and Info. 360 dp (Info 440 dp) from the right edge, full height, surface2
+ * The player's side panels (design spec §2.7): Subtitles (with Sync while
+ * the subtitles chosen can move), Audio, Quality, Chapters, Sleep timer and Info. 360 dp (Info 440 dp) from the right edge, full height, surface2
  * with 16 dp left corners. It slides in on its own layer over 200 ms (in
  * place with reduced motion) and the scrim behind it fades by its colour
  * while drawing, so no layer covers the video. Focus starts on the current
@@ -118,6 +121,7 @@ private fun ChoicePanel(panel: PlayerPanel, state: State<PlayerUiState>, ui: TvP
             PlayerPanel.Quality -> R.string.tv_player_quality
             PlayerPanel.Chapters -> R.string.tv_player_chapters
             PlayerPanel.Info -> R.string.tv_player_info_title
+            PlayerPanel.Sleep -> R.string.tv_player_sleep
         },
     )
     val burnIn = stringResource(R.string.tv_player_burn_in)
@@ -127,8 +131,27 @@ private fun ChoicePanel(panel: PlayerPanel, state: State<PlayerUiState>, ui: TvP
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "title") { PanelTitle(title) }
         when (panel) {
-            PlayerPanel.Subtitles -> choices(s.subtitles.map { Row(it.label, it.selected, if (it.burnIn) burnIn else null) }, focus) { i ->
-                controller.selectSubtitle(s.subtitles[i].index)
+            PlayerPanel.Subtitles -> {
+                if (s.subtitleSync) {
+                    item(key = "sync") { SyncRow(s.subtitleOffsetMs, onChange = { controller.setSubtitleOffset(it) }) }
+                }
+                choices(
+                    s.subtitles.map { Row(it.label, it.selected, if (it.burnIn) burnIn else null) },
+                    focus,
+                ) { i ->
+                    controller.selectSubtitle(s.subtitles[i].index)
+                    ui.closePanel()
+                }
+            }
+            PlayerPanel.Sleep -> choices(
+                SleepChoice.ALL.map { choice ->
+                    val on = s.sleep.choice == choice
+                    val left = s.sleep.minutesLeft?.takeIf { on && choice is SleepChoice.Minutes }
+                    Row(SleepTexts.choice(resources, choice), on, left?.let { SleepTexts.summary(resources, s.sleep) })
+                },
+                focus,
+            ) { i ->
+                controller.setSleep(SleepChoice.ALL[i])
                 ui.closePanel()
             }
             PlayerPanel.Audio -> choices(s.audio.map { Row(it.label, it.selected, null) }, focus) { i ->
@@ -191,6 +214,9 @@ private data class PanelData(
     val canPlayOriginal: Boolean,
     /** To the chapter, so the chapters panel ticks the one playing. */
     val positionMs: Long,
+    val subtitleSync: Boolean,
+    val subtitleOffsetMs: Long,
+    val sleep: SleepState,
 ) {
     companion object {
         fun of(s: PlayerUiState) = PanelData(
@@ -201,6 +227,9 @@ private data class PanelData(
             note = s.note,
             canPlayOriginal = s.canPlayOriginal,
             positionMs = TvPlayerText.chapterAt(s.chapters, s.positionMs)?.let { s.chapters[it].startMs } ?: 0,
+            subtitleSync = s.subtitleSync,
+            subtitleOffsetMs = s.subtitleOffsetMs,
+            sleep = s.sleep,
         )
     }
 }

@@ -100,6 +100,7 @@ class FixturesTest {
         "people/detail.json" to PersonDetail.serializer(),
         "history/page.json" to HistoryPage.serializer(),
         "hubs/home.json" to Hubs.serializer(),
+        "watchlist/list.json" to ItemList.serializer(),
         "search/results.json" to SearchResults.serializer(),
         "playlists/list.json" to PlaylistList.serializer(),
         "playlists/detail.json" to PlaylistDetail.serializer(),
@@ -144,7 +145,7 @@ class FixturesTest {
         assertTrue("no fixtures found on the classpath", files.isNotEmpty())
         assertEquals("fixtures missing from the table", emptyList<String>(), files - table.keys)
         assertEquals("table entries without a file", emptyList<String>(), (table.keys - files.toSet()).toList())
-        assertEquals(62, files.size)
+        assertEquals(63, files.size)
     }
 
     @Test

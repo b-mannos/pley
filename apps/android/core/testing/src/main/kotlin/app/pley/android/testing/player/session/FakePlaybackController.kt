@@ -19,6 +19,8 @@ import app.pley.android.player.TrackChoice
 import app.pley.android.player.UpNextUi
 import app.pley.android.player.session.QualityPreset
 import app.pley.android.player.session.SavedPlaybackState
+import app.pley.android.player.sleep.SleepChoice
+import app.pley.android.player.sleep.SleepState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -82,6 +84,12 @@ class FakePlaybackController(initial: PlayerUiState = PlayerUiState()) : Playbac
 
     override fun selectQuality(name: String) = record("selectQuality", name)
 
+    override fun setSubtitleOffset(offsetMs: Long) = record("setSubtitleOffset", offsetMs)
+
+    override fun setSleep(choice: SleepChoice) = record("setSleep", choice)
+
+    override fun keepWatching() = record("keepWatching")
+
     override fun skip() = record("skip")
 
     override fun playNext() = record("playNext")
@@ -120,7 +128,8 @@ class FakePlaybackController(initial: PlayerUiState = PlayerUiState()) : Playbac
          * An episode playing with every field of [PlayerUiState] filled: a
          * stream at 8 Mbps with a fallback note, two audio tracks, subtitles
          * with one to burn in, the intro showing, chapters, previews, the
-         * details open, Up Next counting down and a notice.
+         * details open, Up Next counting down and a notice; the subtitles
+         * moved, a sleep timer running, and (only to fill it) a stop by the server.
          */
         fun everything(): PlayerUiState = PlayerUiState(
             phase = PlayerPhase.Playing,
@@ -163,6 +172,10 @@ class FakePlaybackController(initial: PlayerUiState = PlayerUiState()) : Playbac
                 engine = listOf("Video decoder: fake"),
             ),
             notice = "This is the last episode",
+            subtitleOffsetMs = 500,
+            subtitleSync = true,
+            sleep = SleepState(SleepChoice.Minutes(30), minutesLeft = 12),
+            stoppedByServer = true,
         )
     }
 }

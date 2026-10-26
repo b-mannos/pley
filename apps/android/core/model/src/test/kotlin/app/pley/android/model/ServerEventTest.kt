@@ -20,6 +20,12 @@ class ServerEventTest {
         assertEquals(ServerEvent.LibraryChanged(3), ServerEvent.parse("""{"type":"library_changed","library_id":3}"""))
         assertEquals(ServerEvent.LibrariesChanged, ServerEvent.parse("""{"type":"libraries_changed"}"""))
         assertEquals(ServerEvent.SessionsChanged, ServerEvent.parse("""{"type":"sessions_changed"}"""))
+        assertEquals(
+            ServerEvent.SessionStopped("s1", "Server maintenance", byAdmin = true),
+            ServerEvent.parse("""{"type":"session_stopped","session_id":"s1","message":"Server maintenance","by_admin":true}"""),
+        )
+        assertEquals(ServerEvent.SessionStopped("s2", null, false), ServerEvent.parse("""{"type":"session_stopped","session_id":"s2","message":null,"by_admin":false}"""))
+        assertEquals(ServerEvent.WatchlistChanged, ServerEvent.parse("""{"type":"watchlist_changed"}"""))
     }
 
     @Test
@@ -49,7 +55,7 @@ class ServerEventTest {
             PleyJson.encodeToString(ServerEvent.serializer(), ServerEvent.ScanProgress(1, ScanPhase.Probing, 2, 3)),
         )
         assertEquals("""{"type":"libraries_changed"}""", PleyJson.encodeToString(ServerEvent.serializer(), ServerEvent.LibrariesChanged))
-        for (event in listOf(ServerEvent.ScanStarted(4), ServerEvent.SessionsChanged, ServerEvent.Unknown("later"))) {
+        for (event in listOf(ServerEvent.ScanStarted(4), ServerEvent.SessionsChanged, ServerEvent.WatchlistChanged, ServerEvent.Unknown("later"))) {
             assertEquals(event, ServerEvent.parse(PleyJson.encodeToString(ServerEvent.serializer(), event)))
         }
     }

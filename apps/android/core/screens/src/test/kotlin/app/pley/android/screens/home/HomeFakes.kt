@@ -37,6 +37,7 @@ class FakeHomeSources : HomeSources {
     val scanList = MutableStateFlow<List<ScanState>>(emptyList())
     val played: MutableList<PlayRequest> = Collections.synchronizedList(mutableListOf())
     val watched: MutableList<Pair<Long, Boolean>> = Collections.synchronizedList(mutableListOf())
+    val hidden: MutableList<Long> = Collections.synchronizedList(mutableListOf())
     var hubRefreshes = 0
     var libraryRefreshes = 0
 
@@ -85,6 +86,9 @@ class FakeHomeSources : HomeSources {
 
         override suspend fun rate(itemId: Long, rating: Double?) = Unit
         override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) = Unit
+        override suspend fun hideFromContinueWatching(itemId: Long) {
+            hidden += itemId
+        }
     }
 
     override val launcher = object : PlayerLauncher {

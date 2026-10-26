@@ -359,8 +359,8 @@ internal data class RowOptions(
 /**
  * The control row, top y = 413 (design spec §2.7): Previous · −10 s ·
  * Play/Pause (64 dp) · +10 s · Next centred; Subtitles · Audio · Quality ·
- * Info at the right safe edge; Chapters, when the file has them, at the
- * left one. Up goes back to the scrubber.
+ * Info at the right safe edge; Chapters, when the file has them, and the
+ * sleep timer at the left one. Up goes back to the scrubber.
  */
 @Composable
 internal fun BoxScope.TvControlRow(
@@ -386,12 +386,14 @@ internal fun BoxScope.TvControlRow(
             .padding(horizontal = TvSafeArea.Horizontal)
             .graphicsLayer { this.alpha = alpha.value },
     ) {
-        if (options.chapters) {
-            PlayerRoundButton(
-                stringResource(R.string.tv_player_chapters), PleyIcons.ListVideo, { ui.openPanel(PlayerPanel.Chapters) },
-                Modifier.align(Alignment.TopStart).padding(top = 8.dp).then(up),
-                ui, PlayerFocus.Chapters,
-            )
+        Row(
+            Modifier.align(Alignment.TopStart).padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(PleyTv.ButtonGap),
+        ) {
+            if (options.chapters) {
+                PlayerRoundButton(stringResource(R.string.tv_player_chapters), PleyIcons.ListVideo, { ui.openPanel(PlayerPanel.Chapters) }, up, ui, PlayerFocus.Chapters)
+            }
+            PlayerRoundButton(stringResource(R.string.tv_player_sleep), MoonIcon, { ui.openPanel(PlayerPanel.Sleep) }, up, ui, PlayerFocus.Sleep)
         }
         Row(
             Modifier.align(Alignment.TopCenter),

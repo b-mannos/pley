@@ -15,6 +15,9 @@ object SnapshotKeys {
     /** GET /api/playlists. */
     const val PLAYLISTS = "playlists"
 
+    /** GET /api/watchlist. */
+    const val WATCHLIST = "watchlist"
+
     /** The first page of GET /api/history. */
     const val HISTORY = "history:head"
 

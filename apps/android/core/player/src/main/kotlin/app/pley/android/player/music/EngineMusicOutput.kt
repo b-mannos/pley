@@ -141,7 +141,11 @@ class EngineMusicOutput(
             var cause: Throwable? = error.cause
             while (cause != null) {
                 if (cause is HttpDataSource.InvalidResponseCodeException) {
-                    return if (cause.responseCode == 404 || cause.responseCode == 410) OutputError.Gone else OutputError.Other
+                    return when (cause.responseCode) {
+                        404 -> OutputError.Gone
+                        410 -> OutputError.Stopped
+                        else -> OutputError.Other
+                    }
                 }
                 cause = cause.cause
             }

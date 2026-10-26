@@ -23,6 +23,21 @@ internal data class TvHomeModel(
     val rows: List<TvHomeRow> = emptyList(),
     val hero: TvHero? = null,
 ) {
+    /**
+     * Where focus goes if tile [tileId] leaves row [rowKey], as a focus
+     * key: the tile after it, else the one before, else the first of the
+     * row below (or above) when the row goes with it.
+     */
+    fun standIn(rowKey: String, tileId: Long): String? {
+        val at = rows.indexOfFirst { it.key == rowKey }
+        val row = rows.getOrNull(at) ?: return null
+        val i = row.tiles.indexOfFirst { it.id == tileId }
+        val beside = row.tiles.getOrNull(i + 1) ?: row.tiles.getOrNull(i - 1)?.takeIf { i > 0 }
+        if (beside != null) return "$rowKey/${beside.id}"
+        val other = rows.getOrNull(at + 1) ?: rows.getOrNull(at - 1) ?: return null
+        return other.tiles.firstOrNull()?.let { "${other.key}/${it.id}" }
+    }
+
     companion object {
         /** The shaping for a device of [tier] (its backdrops' width). One per tier, so the ViewModel keeps one flow. */
         fun shaping(tier: Tier): (HomeState) -> TvHomeModel = SHAPINGS.getValue(tier)

@@ -364,7 +364,7 @@ internal fun BoxScope.UnlockButton(state: PlayerScreenState) {
  * error's own sentence, Try again when it may help, and Back, on black.
  */
 @Composable
-internal fun ErrorOverlay(error: PlayerPhase.Error, onRetry: () -> Unit, onBack: () -> Unit) {
+internal fun ErrorOverlay(error: PlayerPhase.Error, onRetry: () -> Unit, onBack: () -> Unit, title: String = stringResource(R.string.player_error_title)) {
     Box(
         Modifier
             .fillMaxSize()
@@ -379,7 +379,7 @@ internal fun ErrorOverlay(error: PlayerPhase.Error, onRetry: () -> Unit, onBack:
         ) {
             Icon(PleyIcons.TriangleAlert, contentDescription = null, size = 40.dp, tint = PleyColors.Muted)
             Text(
-                stringResource(R.string.player_error_title),
+                title,
                 style = MaterialTheme.typography.titleLarge,
                 color = PleyColors.Fg,
                 textAlign = TextAlign.Center,

@@ -21,6 +21,7 @@ import app.pley.android.data.SessionRepository
 import app.pley.android.data.SnapshotStore
 import app.pley.android.data.TrackDefaultsRepository
 import app.pley.android.data.WatchStateRepository
+import app.pley.android.data.WatchlistRepository
 import app.pley.android.model.CollectionSummary
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ItemKind
@@ -53,6 +54,13 @@ class FakeData : DataGraph {
     val watched = mutableListOf<Pair<Long, Boolean>>()
     val ratings = mutableListOf<Pair<Long, Double?>>()
     val streams = mutableListOf<StreamWrite>()
+    val hidden = mutableListOf<Long>()
+
+    /** My List's writes: the item, and whether it went in. */
+    val listed = mutableListOf<Pair<Long, Boolean>>()
+
+    /** What My List's writes throw, if anything. */
+    var listFailure: Exception? = null
     val active = MutableStateFlow<String?>(ORIGIN)
 
     data class StreamWrite(val itemId: Long, val fileId: Long?, val audio: Int?, val subtitle: Int?)
@@ -92,6 +100,29 @@ class FakeData : DataGraph {
 
         override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) {
             streams += StreamWrite(itemId, fileId, audioIndex, subtitleIndex)
+        }
+
+        override suspend fun hideFromContinueWatching(itemId: Long) {
+            hidden += itemId
+        }
+    }
+
+    /** As the app's: the page shows the change at once, and takes it back on a failure. */
+    override val watchlist: WatchlistRepository = object : WatchlistRepository {
+        override fun watchlist(): Flow<Loadable<List<ItemSummary>>> = flowOf(Loadable.Loading)
+        override suspend fun add(itemId: Long) = list(itemId, true)
+        override suspend fun remove(itemId: Long) = list(itemId, false)
+        override suspend fun refresh() = Unit
+
+        private fun list(itemId: Long, inList: Boolean) {
+            listed += itemId to inList
+            val flow = details[itemId] ?: return
+            val shown = (flow.value as? Loadable.Ready)?.value ?: return
+            flow.value = Loadable.Ready(shown.copy(inWatchlist = inList), fresh = true)
+            listFailure?.let {
+                flow.value = Loadable.Ready(shown, fresh = true)
+                throw it
+            }
         }
     }
 

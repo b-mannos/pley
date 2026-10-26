@@ -45,6 +45,7 @@ interface DataGraph {
     val playlists: PlaylistsRepository
     val history: HistoryRepository
     val watchState: WatchStateRepository
+    val watchlist: WatchlistRepository
     val trackDefaults: TrackDefaultsRepository
     val playItem: PlayItem
     val liveUpdates: LiveUpdates
@@ -172,6 +173,7 @@ class AppDataGraph(private val env: DataEnvironment) : DataGraph {
     override val playlists: PlaylistsRepository by lazy { CachedPlaylists(cache) }
     override val history: HistoryRepository by lazy { CachedHistory(cache) }
     override val watchState: WatchStateRepository by lazy { CachedWatchState(cache) }
+    override val watchlist: WatchlistRepository by lazy { CachedWatchlist(cache) }
     override val trackDefaults: TrackDefaultsRepository by lazy { SessionTrackDefaults(sessionImpl, env.trackDefaults) }
     override val playItem: PlayItem by lazy { CachedPlayItem(cache, itemsImpl) }
 

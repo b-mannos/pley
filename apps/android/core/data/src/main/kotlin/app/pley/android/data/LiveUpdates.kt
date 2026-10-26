@@ -1,6 +1,9 @@
 package app.pley.android.data
 
+import app.pley.android.model.ServerEvent
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
 
 /** A library scan the server is running. */
 data class ScanState(
@@ -29,4 +32,10 @@ interface LiveUpdates {
      * yet) asks again for what failed.
      */
     fun start() {}
+
+    /**
+     * Every event heard, as it comes, while the stream is open (the player
+     * listens for its session being stopped). Nothing is replayed.
+     */
+    val events: Flow<ServerEvent> get() = emptyFlow()
 }

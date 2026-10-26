@@ -5,6 +5,7 @@ import app.pley.android.model.MediaFile
 import app.pley.android.model.MediaStream
 import app.pley.android.model.PlaybackMethod
 import app.pley.android.model.TranscodeInfo
+import app.pley.android.player.sleep.SleepState
 
 /** Where a playback stands. */
 sealed interface PlayerPhase {
@@ -154,4 +155,12 @@ data class PlayerUiState(
     val details: PlaybackDetailsUi? = null,
     /** A short message for a toast, until [PlaybackController.dismissNotice]: "This is the last episode". */
     val notice: String? = null,
+    /** How far the subtitles are moved: positive shows them later ([PlaybackController.setSubtitleOffset]). */
+    val subtitleOffsetMs: Long = 0,
+    /** The subtitles chosen can be moved: text, or pictures drawn by the player from the server's .mks. */
+    val subtitleSync: Boolean = false,
+    /** The sleep timer. */
+    val sleep: SleepState = SleepState(),
+    /** The server stopped this playback (an administrator, or another device): the error says so, and the screen leaves. */
+    val stoppedByServer: Boolean = false,
 )

@@ -193,12 +193,14 @@ internal class BrowseRoutes(private val s: State) {
 
     // ---------------------------------------------------------------- hubs
 
+    /** Continue Watching: in progress, newest played first, but what was taken out of it. */
     private fun inProgress(profile: Profile, library: Long?): List<ItemDetail> =
         profile.states.entries
             .filter { (_, state) -> state.positionMs > 0 && !state.watched }
             .sortedByDescending { it.value.lastPlayedAt ?: 0L }
             .mapNotNull { catalog.item(it.key) }
             .filter { library == null || it.libraryId == library }
+            .filterNot { views.hiddenFromContinue(it, profile) }
             .take(20)
 
     /** The newest of a library: movies, shows, or albums. */
@@ -214,6 +216,8 @@ internal class BrowseRoutes(private val s: State) {
     private fun homeHubs(profile: Profile): List<Hub> = buildList {
         val watching = inProgress(profile, null)
         if (watching.isNotEmpty()) add(Hub("continue_watching", "Continue Watching", null, watching.map { views.summary(it, profile) }))
+        val listed = views.listed(profile)
+        if (listed.isNotEmpty()) add(Hub("my_list", "My List", null, listed.take(20).map { views.summary(it, profile) }))
         for (library in catalog.libraries) {
             add(Hub("recently_added:${library.id}", "Recently Added in ${library.name}", library.id, recent(library).map { views.summary(it, profile) }))
         }

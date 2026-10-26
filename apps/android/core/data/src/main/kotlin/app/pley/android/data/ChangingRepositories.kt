@@ -1,8 +1,10 @@
 package app.pley.android.data
 
 import app.pley.android.model.EntryIds
+import app.pley.android.model.Hubs
 import app.pley.android.model.ItemIds
 import app.pley.android.model.ItemKind
+import app.pley.android.model.ItemList
 import app.pley.android.model.ItemSummary
 import app.pley.android.model.Me
 import app.pley.android.model.NewPlaylist
@@ -159,10 +161,18 @@ internal class CachedWatchState(private val cache: ResourceCache) : WatchStateRe
             if (watched) api.markWatched(itemId) else api.markUnwatched(itemId)
         }
         val touched = patched.keys.toSet()
+        // A movie watched to the end leaves My List on the server.
         cache.revalidate { key, _ ->
             key in touched || key == SnapshotKeys.HOME || key.startsWith("libhubs:") || key.startsWith("ondeck:") ||
-                key == SnapshotKeys.HISTORY
+                key == SnapshotKeys.HISTORY || key == SnapshotKeys.WATCHLIST
         }
+    }
+
+    override suspend fun hideFromContinueWatching(itemId: Long) {
+        val target = ItemPatch.find(cache.nodes().map { it.current }, itemId)
+        val patched = cache.patchAll(ItemPatch.hiddenFromContinueWatching(itemId, target)::apply)
+        undoing(patched) { cache.api(cache.profile()).hideFromContinueWatching(itemId) }
+        cache.revalidate { key, _ -> key == SnapshotKeys.HOME || key.startsWith("libhubs:") }
     }
 
     override suspend fun rate(itemId: Long, rating: Double?) {
@@ -177,6 +187,46 @@ internal class CachedWatchState(private val cache: ResourceCache) : WatchStateRe
         undoing(patched) { cache.api(cache.profile()).setStreams(itemId, StreamChoice(fileId, audioIndex, subtitleIndex)) }
         // A show's episodes share the choice: their pages are asked again when shown.
         cache.revalidate { key, _ -> key.startsWith("item:") && key != SnapshotKeys.item(itemId) }
+    }
+}
+
+/**
+ * My List, changed at once in the list, Home's My List and the item's
+ * page, and put back when the server refuses; then asked again.
+ */
+internal class CachedWatchlist(private val cache: ResourceCache) : WatchlistRepository {
+    private val resource = Resource(SnapshotKeys.WATCHLIST, ItemList.serializer()) { api, _ -> api.watchlist() }
+
+    override fun watchlist(): Flow<Loadable<List<ItemSummary>>> = cache.observe(resource).map { it.map(ItemList::items) }
+
+    override suspend fun add(itemId: Long) = change(itemId, inList = true)
+
+    override suspend fun remove(itemId: Long) = change(itemId, inList = false)
+
+    override suspend fun refresh() = cache.refreshQuietly(resource)
+
+    private suspend fun change(itemId: Long, inList: Boolean) {
+        val item = if (inList) ItemPatch.find(cache.nodes().map { it.current }, itemId) else null
+        val inPages = cache.patchAll(ItemPatch.inWatchlist(itemId, inList)::apply)
+        val listed = cache.patchKey(SnapshotKeys.WATCHLIST) { value ->
+            val items = (value as ItemList).items
+            when {
+                !inList -> if (items.none { it.id == itemId }) null else ItemList(items.filterNot { it.id == itemId })
+                item == null || items.firstOrNull()?.id == itemId -> null
+                else -> ItemList(listOf(item) + items.filterNot { it.id == itemId })
+            }
+        }
+        // Adding something not held anywhere: the row comes with the answer asked for after.
+        val inHome = cache.patchKey(SnapshotKeys.HOME) { value -> if (inList && item == null) null else ItemPatch.myList(value as Hubs, itemId, item) }
+        val patched = ResourceCache.Patched(
+            inPages.keys + listed.keys + inHome.keys,
+            listOf(inPages::rollback, listed::rollback, inHome::rollback),
+        )
+        undoing(patched) {
+            val api = cache.api(cache.profile())
+            if (inList) api.addToWatchlist(itemId) else api.removeFromWatchlist(itemId)
+        }
+        cache.revalidate { key, _ -> key == SnapshotKeys.HOME || key == SnapshotKeys.WATCHLIST }
     }
 }
 

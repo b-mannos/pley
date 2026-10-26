@@ -182,6 +182,8 @@ class HttpPleyApi(
 
     override suspend fun homeHubs(): Hubs = get(Hubs.serializer(), "api", "hubs", "home")
 
+    override suspend fun watchlist(): ItemList = get(ItemList.serializer(), "api", "watchlist")
+
     override suspend fun search(query: String, limit: Int): SearchResults = get(
         SearchResults.serializer(),
         "api", "search",
@@ -243,6 +245,12 @@ class HttpPleyApi(
         call("PUT", json(RatingRequest.serializer(), rating), "api", "items", itemId, "rating")
 
     override suspend fun deleteHistoryEntry(id: Long) = call("DELETE", null, "api", "history", id)
+
+    override suspend fun hideFromContinueWatching(itemId: Long) = call("DELETE", null, "api", "continue-watching", itemId)
+
+    override suspend fun addToWatchlist(itemId: Long) = call("PUT", EMPTY, "api", "watchlist", itemId)
+
+    override suspend fun removeFromWatchlist(itemId: Long) = call("DELETE", null, "api", "watchlist", itemId)
 
     // ---------------------------------------------------------------- playlists (changing)
 

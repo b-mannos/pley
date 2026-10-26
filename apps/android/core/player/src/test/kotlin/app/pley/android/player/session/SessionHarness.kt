@@ -11,6 +11,7 @@ import app.pley.android.model.ItemDetail
 import app.pley.android.model.MaybeItem
 import app.pley.android.model.PlaybackInfo
 import app.pley.android.model.PlaybackRequest
+import app.pley.android.model.ServerEvent
 import app.pley.android.model.PleyJson
 import app.pley.android.model.ProgressReport
 import app.pley.android.model.SessionStatus
@@ -22,6 +23,7 @@ import app.pley.android.network.SubtitleText
 import app.pley.android.player.PlayRequest
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.subtitles.ApiSubtitleFetcher
+import app.pley.android.player.subtitles.PictureSource
 import app.pley.android.testing.caps.FakeDeviceCapabilities
 import app.pley.android.testing.caps.TestDevices
 import app.pley.android.testing.caps.capsOf
@@ -32,6 +34,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import okhttp3.OkHttpClient
@@ -101,6 +105,10 @@ class SessionHarness(
     val caps: CapsSnapshot = capsOf(TestDevices.sdrPhone),
     val autoplay: Boolean = true,
     val quality: String? = null,
+    /** Picture subtitles beside a stream; `null` burns them in. */
+    val pictures: PictureSource? = null,
+    /** The server's events, as the app's stream would bring them. */
+    val events: Flow<ServerEvent> = emptyFlow(),
 ) : AutoCloseable {
     val scheduler = TestCoroutineScheduler()
     private val dispatcher = StandardTestDispatcher(scheduler)
@@ -143,6 +151,8 @@ class SessionHarness(
         autoplayNext = { autoplay },
         now = { scheduler.currentTime },
         work = dispatcher,
+        pictures = pictures,
+        events = events,
     )
 
     /** Starts playing [request] and lets the server answer. */

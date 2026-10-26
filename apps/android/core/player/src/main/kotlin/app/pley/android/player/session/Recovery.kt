@@ -128,6 +128,8 @@ class Recovery {
         is EngineError.Playlist -> expired(error.detail)
         is EngineError.Network -> networkError(error.detail)
         is EngineError.Other -> Action.Fail(Failure.Engine, error.detail)
+        // The session handles a stop before asking: this is only a fallback.
+        is EngineError.Stopped -> Action.Fail(Failure.Stopped, error.detail)
     }
 
     private fun fallback(method: PlaybackMethod, videoCodec: String?, partial: Boolean, detail: String): Action {

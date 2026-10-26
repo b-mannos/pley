@@ -206,6 +206,8 @@ class FakePleyApi(val issuer: String = "http://127.0.0.1:7539") : PleyApi {
 
     override suspend fun homeHubs(): Hubs = respond("homeHubs") { fixture("hubs/home.json") }
 
+    override suspend fun watchlist(): ItemList = respond("watchlist") { fixture("watchlist/list.json") }
+
     override suspend fun search(query: String, limit: Int): SearchResults =
         respond("search", query, limit) { fixture("search/results.json") }
 
@@ -247,6 +249,12 @@ class FakePleyApi(val issuer: String = "http://127.0.0.1:7539") : PleyApi {
     override suspend fun setRating(itemId: Long, rating: RatingRequest) = respond("setRating", itemId, rating) { }
 
     override suspend fun deleteHistoryEntry(id: Long) = respond("deleteHistoryEntry", id) { }
+
+    override suspend fun hideFromContinueWatching(itemId: Long) = respond("hideFromContinueWatching", itemId) { }
+
+    override suspend fun addToWatchlist(itemId: Long) = respond("addToWatchlist", itemId) { }
+
+    override suspend fun removeFromWatchlist(itemId: Long) = respond("removeFromWatchlist", itemId) { }
 
     // ---------------------------------------------------------------- playlists (changing)
 

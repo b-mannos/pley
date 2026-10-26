@@ -26,6 +26,12 @@ internal class Profile(
 
     /** Track choices, by movie or show. */
     val streamChoices = HashMap<Long, StreamChoice>()
+
+    /** My List, by item, in the order added. */
+    val watchlist = LinkedHashMap<Long, Listed>()
+
+    /** Movies and shows taken out of Continue Watching, and when (unix seconds). */
+    val hiddenFromContinue = HashMap<Long, Long>()
     val history = mutableListOf<HistoryRecord>()
 
     /** Wrong PINs typed for this profile, by time (unix seconds). */
@@ -52,6 +58,12 @@ internal class Profile(
     }
 }
 
+/**
+ * An item of My List: when it was added (unix seconds), and whether it was
+ * watched then (a movie leaves the list once watched after that).
+ */
+internal class Listed(val itemId: Long, val addedAt: Long, var watchedThen: Boolean)
+
 internal class HistoryRecord(val id: Long, val itemId: Long, val viewedAt: Long, val device: String?)
 
 /** A playlist; a smart one has [smartFilter] and [libraryId] and no entries of its own. */
@@ -71,8 +83,8 @@ internal class Playlist(
 
 /**
  * The household (three profiles) and what they did before the app came:
- * Alex has things in progress, watched, rated, in the history and in three
- * playlists.
+ * Alex has things in progress, watched, rated, in the history, in three
+ * playlists and in My List.
  */
 internal class Household(catalog: Catalog) {
     val profiles: Map<Long, Profile> = listOf(
@@ -130,6 +142,12 @@ internal class Household(catalog: Catalog) {
             audio.entries += newEntry() to id
         }
         newPlaylist(FixtureIds.ALEX, "Unwatched Comedies", PlaylistKind.Video, SMART_PLAYLIST_FILTER, FixtureIds.MOVIES, BASE_TIME - 86_400L)
+
+        // My List: two shows and three movies, oldest first.
+        val listed = listOf(15L, catalog.topLevel[FixtureIds.SHOWS].orEmpty().getOrNull(1), 16L, FixtureIds.SHOW, 17L)
+        for ((n, id) in listed.filterNotNull().withIndex()) {
+            alex.watchlist[id] = Listed(id, BASE_TIME - (10 - n) * 3_600L, watchedThen = false)
+        }
     }
 
     companion object {

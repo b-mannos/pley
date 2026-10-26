@@ -17,7 +17,7 @@ import app.pley.android.ui.phone.shell.Placeholder
 fun EntryProviderScope<NavKey>.itemEntries() {
     entry<PleyKey.Item> { key -> WithGraph(key) { ItemScreen(key.itemId) } }
     entry<PleyKey.Person> { key -> WithGraph(key) { PersonScreen(key.personId) } }
-    entry<PleyKey.ItemActions> { key -> WithGraph(key) { ItemActionsSheet(key.itemId) } }
+    entry<PleyKey.ItemActions> { key -> WithGraph(key) { ItemActionsSheet(key.itemId, key.continueWatching) } }
 }
 
 /**

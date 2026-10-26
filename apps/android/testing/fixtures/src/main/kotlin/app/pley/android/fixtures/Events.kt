@@ -4,6 +4,7 @@ import app.pley.android.model.PleyJson
 import app.pley.android.model.ScanPhase
 import app.pley.android.model.ServerEvent
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -25,6 +26,9 @@ import okio.BufferedSink
  */
 internal class EventHub(private val state: State) {
     private val streams = CopyOnWriteArraySet<LinkedBlockingQueue<String>>()
+
+    /** The profile each stream is for. */
+    private val owners = ConcurrentHashMap<LinkedBlockingQueue<String>, Long>()
     private var scheduler: ScheduledExecutorService? = null
     private var scans = 0
 
@@ -56,6 +60,12 @@ internal class EventHub(private val state: State) {
         streams.forEach { it.offer(text) }
     }
 
+    /** Sends [event] to the streams of profile [profileId] only. */
+    fun emitTo(profileId: Long, event: ServerEvent) {
+        val text = PleyJson.encodeToString(ServerEvent.Serializer, event)
+        streams.forEach { if (owners[it] == profileId) it.offer(text) }
+    }
+
     private fun scan() {
         val library = state.catalog.libraries[scans++ % state.catalog.libraries.size]
         val total = library.itemCount.toLong()
@@ -74,6 +84,7 @@ internal class EventHub(private val state: State) {
             override val contentLength: Long = -1L
 
             override fun writeTo(sink: BufferedSink) {
+                owners[queue] = caller.profile.id
                 streams += queue
                 try {
                     // The headers go out with the first comment.
@@ -96,6 +107,7 @@ internal class EventHub(private val state: State) {
                     Thread.currentThread().interrupt()
                 } finally {
                     streams -= queue
+                    owners -= queue
                 }
             }
         }

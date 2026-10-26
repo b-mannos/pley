@@ -18,7 +18,7 @@ import app.pley.android.ui.tv.shell.Placeholder
 fun EntryProviderScope<NavKey>.itemEntries() {
     entry<PleyKey.Item> { key -> WithGraph(key) { TvItemScreen(key.itemId) } }
     entry<PleyKey.Person> { key -> WithGraph(key) { TvPersonScreen(key.personId) } }
-    entry<PleyKey.ItemActions> { key -> WithGraph(key) { TvItemActionsScreen(key.itemId) } }
+    entry<PleyKey.ItemActions> { key -> WithGraph(key) { TvItemActionsScreen(key.itemId, key.continueWatching) } }
 }
 
 /**

@@ -44,6 +44,8 @@ import app.pley.android.player.MusicControl
 import app.pley.android.player.MusicPosition
 import app.pley.android.player.MusicQueueState
 import app.pley.android.player.NowPlaying
+import app.pley.android.player.sleep.SleepChoice
+import app.pley.android.player.sleep.SleepState
 import app.pley.android.player.PlaybackServices
 import app.pley.android.player.PlayerEngine
 import app.pley.android.player.PlayerGraph
@@ -127,6 +129,7 @@ class TvAccountTestGraph : ScreensGraph {
             override suspend fun forget(origin: String) = Unit
             override suspend fun clientId(): String = "android-test"
         }
+        override val watchlist: app.pley.android.data.WatchlistRepository get() = unused()
         override val history = object : HistoryRepository {
             override fun history(): Flow<Loadable<HistoryPage>> = this@TvAccountTestGraph.history
             override suspend fun loadMore() {
@@ -165,6 +168,7 @@ class TvAccountTestGraph : ScreensGraph {
             override suspend fun setWatched(itemId: Long, watched: Boolean) = Unit
             override suspend fun rate(itemId: Long, rating: Double?) = Unit
             override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) = Unit
+            override suspend fun hideFromContinueWatching(itemId: Long) = Unit
         }
         override val liveUpdates: LiveUpdates get() = unused()
         override val snapshots: SnapshotStore get() = unused()
@@ -202,6 +206,16 @@ class TvAccountTestGraph : ScreensGraph {
             jumps += index
         }
         override fun pauseForVideo() = Unit
+
+        val sleepState = MutableStateFlow(SleepState())
+        var keeps = 0
+        override val sleep: StateFlow<SleepState> = sleepState
+        override fun setSleep(choice: SleepChoice) {
+            sleepState.value = SleepState(choice)
+        }
+        override fun keepListening() {
+            keeps++
+        }
     }
 
     companion object {

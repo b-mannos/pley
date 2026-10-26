@@ -18,6 +18,8 @@ import app.pley.android.model.format.formatClockMs
 import app.pley.android.network.ApiException
 import app.pley.android.player.MusicControl
 import app.pley.android.player.NowPlaying
+import app.pley.android.player.sleep.SleepChoice
+import app.pley.android.player.sleep.SleepState
 import app.pley.android.screens.screensGraph
 import java.util.Locale
 import kotlin.random.Random
@@ -327,6 +329,14 @@ class NowPlayingViewModel(
     fun jumpTo(position: Int) = music.jumpTo(position)
 
     fun setShuffle(shuffle: Boolean) = music.setShuffle(shuffle)
+
+    /** The music's sleep timer. */
+    val sleep: StateFlow<SleepState> get() = music.sleep
+
+    fun setSleep(choice: SleepChoice) = music.setSleep(choice)
+
+    /** "Keep listening" during the timer's notice: the same time again. */
+    fun keepListening() = music.keepListening()
 
     companion object {
         val factory: ViewModelProvider.Factory = viewModelFactory {

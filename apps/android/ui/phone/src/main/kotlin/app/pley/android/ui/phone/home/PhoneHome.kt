@@ -49,6 +49,7 @@ import app.pley.android.designsystem.tile.rememberSkeleton
 import app.pley.android.model.ItemSummary
 import app.pley.android.screens.Navigator
 import app.pley.android.screens.PleyKey
+import app.pley.android.model.HubKeys
 import app.pley.android.screens.home.HomeMessage
 import app.pley.android.screens.home.HomeProfile
 import app.pley.android.screens.home.HomeState
@@ -162,7 +163,7 @@ private fun HomeRows(model: PhoneHomeModel, list: LazyListState, vm: HomeViewMod
                 skeleton = skeleton,
                 state = rowState,
                 onOpen = { tile -> row.itemOf(tile)?.let { navigator.open(pageOf(it)) } },
-                onLongPress = { tile -> navigator.open(PleyKey.ItemActions(tile.id)) },
+                onLongPress = { tile -> navigator.open(PleyKey.ItemActions(tile.id, continueWatching = HubKeys.isContinueWatching(row.model.key))) },
                 onTitleClick = row.seeAll?.let { key -> { navigator.open(key) } },
                 modifier = Modifier.prefetchOnPress(rowState, row.items, vm::prefetch),
             )

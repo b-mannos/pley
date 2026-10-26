@@ -228,6 +228,9 @@ private fun actionLook(action: ItemAction): Pair<String, PleyIcon> = when (actio
     ItemAction.FromStart -> stringResource(R.string.tv_item_action_from_start) to PleyIcons.RotateCcw
     ItemAction.MarkWatched -> stringResource(R.string.tv_item_mark_watched) to PleyIcons.CircleCheck
     ItemAction.MarkUnwatched -> stringResource(R.string.tv_item_mark_unwatched) to PleyIcons.EyeOff
+    ItemAction.RemoveFromContinueWatching -> stringResource(R.string.tv_item_remove_from_continue_watching) to PleyIcons.X
+    ItemAction.AddToMyList -> stringResource(R.string.tv_item_add_to_my_list) to PleyIcons.BookmarkPlus
+    ItemAction.RemoveFromMyList -> stringResource(R.string.tv_item_remove_from_my_list) to PleyIcons.BookmarkMinus
     ItemAction.AddToPlaylist -> stringResource(R.string.tv_item_add_to_playlist) to PleyIcons.ListPlus
     ItemAction.GoToShow -> stringResource(R.string.tv_item_action_go_to_show) to PleyIcons.Tv
     ItemAction.GoToSeason -> stringResource(R.string.tv_item_action_go_to_season) to PleyIcons.Layers

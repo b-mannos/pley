@@ -22,6 +22,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,6 +31,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusDirection
@@ -61,6 +63,7 @@ import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.tile.ArtworkTileModel
 import app.pley.android.designsystem.tile.TileKind
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 /**
@@ -74,6 +77,9 @@ import kotlinx.coroutines.launch
  * - Left from the first tile enters the rail; Right stops at the end.
  * - Keys are the tiles' ids, and the content type their kind.
  * - While a key repeats, the row jumps a tile at a time without animating.
+ * - A focused tile that leaves the row (Remove from Continue Watching)
+ *   hands focus to the tile that takes its place; a row that goes with
+ *   its last tile hands it to the row that takes its place ([TvRowColumn]).
  *
  * [rowKey] names the row on its page; in a [TvRowColumn] it is also the
  * row's item key. [initialFocus] makes the first tile the page's initial
@@ -108,7 +114,20 @@ fun TvRow(
     if (column != null) {
         DisposableEffect(column, rowKey) {
             column.rows[rowKey] = group
-            onDispose { if (column.rows[rowKey] === group) column.rows.remove(rowKey) }
+            onDispose {
+                if (column.rows[rowKey] === group) column.rows.remove(rowKey)
+                // Its focus is cleared by then: whether it had it is what the column last saw.
+                if (column.focusedRow == rowKey && column.hadFocus) column.lost(rowKey)
+            }
+        }
+    }
+    // The focused tile left the row: the one now in its place takes focus.
+    val heir = remember(tiles) { row.heirOf(tiles) }
+    val heirFocus = remember { FocusRequester() }
+    if (heir != null) {
+        LaunchedEffect(heir) {
+            withFrameNanos { }
+            runCatching { heirFocus.requestFocus() }
         }
     }
     Column(
@@ -176,6 +195,7 @@ fun TvRow(
                         modifier = Modifier.onFocusChanged {
                             if (it.hasFocus) {
                                 row.focusedIndex = index
+                                row.focusedId = tile.id
                                 onFocus?.invoke(tile)
                             }
                         },
@@ -183,7 +203,7 @@ fun TvRow(
                             Modifier.rememberedFocus(memory, "$rowKey/${tile.id}", initial = initialFocus && index == 0)
                         } else {
                             Modifier.initialFocus(enabled = initialFocus && index == 0)
-                        },
+                        }.then(if (tile.id == heir) Modifier.focusRequester(heirFocus) else Modifier),
                     )
                 }
                 if (seeAll != null) {
@@ -236,6 +256,9 @@ fun TvRowColumn(
     val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
     val holder = remember { TvRowColumnFocus() }
+    holder.state = state
+    holder.scope = scope
+    holder.hadFocus = holder.hasFocus
     val tileTop = headerY + PleyTv.RowHeaderHeight + PleyTv.HeaderToTiles
     val spec = remember(density, tileTop, state, heroHeight) { TvScrolling.page(density, tileTop, state, heroHeight) }
     CompositionLocalProvider(LocalBringIntoViewSpec provides spec, LocalTvRowColumn provides holder) {
@@ -246,6 +269,7 @@ fun TvRowColumn(
             modifier = modifier
                 .railFade()
                 .clearAboveHeader(state, headerY, clearAbove)
+                .onFocusChanged { holder.hasFocus = it.hasFocus }
                 // Coming back from the rail: the row focus was in, then (its own restorer) the tile.
                 // focusRestorer here would pick by composition key, which lazy rows share.
                 .focusProperties {
@@ -309,6 +333,33 @@ internal class TvRowColumnFocus {
 
     /** Each row's focus group, by its key, while it is composed. */
     val rows = HashMap<Any, FocusRequester>()
+
+    /** Whether focus is in the column. */
+    var hasFocus = false
+
+    /** Whether it was when the column last composed: before rows went. */
+    var hadFocus = false
+    var state: LazyListState? = null
+    var scope: CoroutineScope? = null
+
+    /**
+     * Row [rowKey] went with focus in it (its last tile left): once the
+     * column has settled, the row now in its place takes focus, or the
+     * one above when it was the last. Not when focus went somewhere else
+     * meanwhile, nor once the column is gone (its scope with it).
+     */
+    fun lost(rowKey: Any) {
+        val list = state ?: return
+        val index = list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == rowKey }?.index ?: return
+        scope?.launch {
+            withFrameNanos { }
+            withFrameNanos { }
+            if (hasFocus) return@launch
+            val shown = list.layoutInfo.visibleItemsInfo.filter { it.key in rows }
+            val next = shown.firstOrNull { it.index >= index } ?: shown.lastOrNull { it.index < index } ?: return@launch
+            runCatching { rows[next.key]?.requestFocus() }
+        }
+    }
 }
 
 internal val LocalTvRowColumn = staticCompositionLocalOf<TvRowColumnFocus?> { null }
@@ -318,6 +369,21 @@ internal val LocalTvRowColumn = staticCompositionLocalOf<TvRowColumnFocus?> { nu
 private class RowFocus {
     var hasFocus by mutableStateOf(false)
     var focusedIndex = -1
+    var focusedId: Long? = null
+    private var tiles: List<ArtworkTileModel> = emptyList()
+
+    /**
+     * The row's tiles are now [next]: when the focused tile left them, the
+     * tile now at its place (or the last) that takes focus from it.
+     */
+    fun heirOf(next: List<ArtworkTileModel>): Long? {
+        val before = tiles
+        tiles = next
+        val focused = Snapshot.withoutReadObservation { hasFocus }
+        val gone = focusedId?.takeIf { id -> focused && next.none { it.id == id } } ?: return null
+        val at = before.indexOfFirst { it.id == gone }.takeIf { it >= 0 } ?: return null
+        return (next.getOrNull(at) ?: next.lastOrNull())?.id
+    }
 }
 
 /** The focused row draws over the rows around it, so its tile's ring and glow cross their edges (decided while placing). */

@@ -405,7 +405,14 @@ internal fun formatHz(hz: Float): String {
  * black.
  */
 @Composable
-internal fun BoxScope.TvPlayerError(message: String, canRetry: Boolean, ui: TvPlayerUi, onRetry: () -> Unit, onBack: () -> Unit) {
+internal fun BoxScope.TvPlayerError(
+    message: String,
+    canRetry: Boolean,
+    ui: TvPlayerUi,
+    onRetry: () -> Unit,
+    onBack: () -> Unit,
+    title: String = stringResource(R.string.tv_player_error_title),
+) {
     Column(
         Modifier
             .fillMaxSize()
@@ -415,7 +422,7 @@ internal fun BoxScope.TvPlayerError(message: String, canRetry: Boolean, ui: TvPl
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        BasicText(stringResource(R.string.tv_player_error_title), style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg, textAlign = TextAlign.Center))
+        BasicText(title, style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg, textAlign = TextAlign.Center))
         Spacer(Modifier.height(12.dp))
         BasicText(message, style = PleyType.Tv.Body.copy(color = PleyColors.Muted, textAlign = TextAlign.Center), maxLines = 4, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(32.dp))

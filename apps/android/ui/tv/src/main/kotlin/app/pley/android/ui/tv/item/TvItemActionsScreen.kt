@@ -46,8 +46,8 @@ import kotlinx.coroutines.delay
  * this area show the same actions in a side panel instead.
  */
 @Composable
-internal fun TvItemActionsScreen(itemId: Long) {
-    val model: ItemActionsViewModel = viewModel(factory = ItemActionsViewModel.factory(itemId))
+internal fun TvItemActionsScreen(itemId: Long, continueWatching: Boolean = false) {
+    val model: ItemActionsViewModel = viewModel(factory = ItemActionsViewModel.factory(itemId, continueWatching))
     val state by model.state.collectAsStateWithLifecycle()
     val navigator = LocalTvNavigator.current
     val toasts = remember { TvToastState() }
@@ -109,6 +109,9 @@ private fun label(action: ItemAction): String = stringResource(
         ItemAction.FromStart -> R.string.tv_item_action_from_start
         ItemAction.MarkWatched -> R.string.tv_item_mark_watched
         ItemAction.MarkUnwatched -> R.string.tv_item_mark_unwatched
+        ItemAction.RemoveFromContinueWatching -> R.string.tv_item_remove_from_continue_watching
+        ItemAction.AddToMyList -> R.string.tv_item_add_to_my_list
+        ItemAction.RemoveFromMyList -> R.string.tv_item_remove_from_my_list
         ItemAction.AddToPlaylist -> R.string.tv_item_add_to_playlist
         ItemAction.GoToShow -> R.string.tv_item_action_go_to_show
         ItemAction.GoToSeason -> R.string.tv_item_action_go_to_season

@@ -3,7 +3,7 @@ package app.pley.android.ui.tv.kit
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
@@ -75,7 +75,7 @@ fun Modifier.railOnLeftStopOnRight(rail: TvRailFocus?, stopRight: Boolean = true
  * even though the page's composition was gone meanwhile.
  */
 @Stable
-class FocusMemory internal constructor(key: String?) {
+class FocusMemory internal constructor(key: String?, private var fallback: Pair<String, String>? = null) {
     /** The last focused element's key; `null` before anything on the page had focus. */
     var key: String? = key
         internal set
@@ -83,8 +83,35 @@ class FocusMemory internal constructor(key: String?) {
     /** Set when the remembered element took focus back, so the page's initial focus stays put. */
     internal var restored = false
 
+    /**
+     * The element [from] may be gone when the page comes back (a tile's
+     * actions can take it out of its row): focus goes to [to] then, rather
+     * than to the page's initial focus.
+     */
+    fun mayLeave(from: String, to: String?) {
+        fallback = to?.let { from to it }
+    }
+
+    /**
+     * Before the page's elements are placed: when the remembered element is
+     * gone ([present] says which keys are there) and it had a stand-in
+     * ([mayLeave]), the stand-in is remembered instead.
+     */
+    fun settle(present: (String) -> Boolean) {
+        val (from, to) = fallback ?: return
+        if (key != from) {
+            fallback = null
+        } else if (!present(from)) {
+            fallback = null
+            if (present(to)) key = to
+        }
+    }
+
     internal companion object {
-        val Saver = Saver<FocusMemory, String>({ it.key ?: "" }, { FocusMemory(it.ifEmpty { null }) })
+        val Saver = listSaver<FocusMemory, String>(
+            save = { listOf(it.key.orEmpty(), it.fallback?.first.orEmpty(), it.fallback?.second.orEmpty()) },
+            restore = { (key, from, to) -> FocusMemory(key.ifEmpty { null }, if (from.isEmpty()) null else from to to) },
+        )
     }
 }
 

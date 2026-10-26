@@ -192,8 +192,11 @@ interface PleyApi {
         since: Long? = null,
     ): HistoryPage
 
-    /** GET /api/hubs/home: Continue Watching, then Recently Added of each library. */
+    /** GET /api/hubs/home: Continue Watching, My List, then Recently Added of each library. */
     suspend fun homeHubs(): Hubs
+
+    /** GET /api/watchlist: the profile's My List, movies and shows, newest added first. */
+    suspend fun watchlist(): ItemList
 
     /**
      * GET /api/search: titles by relevance, and people. [limit] at most
@@ -255,6 +258,19 @@ interface PleyApi {
 
     /** DELETE /api/history/{id}: forgets one of the profile's plays. */
     suspend fun deleteHistoryEntry(id: Long)
+
+    /**
+     * DELETE /api/continue-watching/{id}: leaves Continue Watching (an
+     * episode: its whole show) until it, or the show, is played again.
+     * Progress and watched marks stay.
+     */
+    suspend fun hideFromContinueWatching(itemId: Long)
+
+    /** PUT /api/watchlist/{id}: adds a movie or show to My List (again is fine). */
+    suspend fun addToWatchlist(itemId: Long)
+
+    /** DELETE /api/watchlist/{id}: takes it off My List. */
+    suspend fun removeFromWatchlist(itemId: Long)
 
     // ---------------------------------------------------------------- playlists (scope playlists)
 

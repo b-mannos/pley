@@ -180,8 +180,10 @@ class ItemViewModelTest {
         val allowed = setOf(
             ItemAction.Play, ItemAction.Resume, ItemAction.FromStart, ItemAction.MarkWatched, ItemAction.MarkUnwatched,
             ItemAction.AddToPlaylist, ItemAction.GoToShow, ItemAction.GoToSeason, ItemAction.Open,
+            ItemAction.RemoveFromContinueWatching, ItemAction.AddToMyList, ItemAction.RemoveFromMyList,
         )
         kinds.forEach { kind -> assertTrue(allowed.containsAll(itemActions(summary(1, kind, parentId = 2, grandparentId = 3)))) }
+        kinds.forEach { kind -> assertTrue(allowed.containsAll(itemActions(summary(1, kind), inWatchlist = true, continueWatching = true))) }
         assertEquals(allowed, ItemAction.entries.toSet())
     }
 

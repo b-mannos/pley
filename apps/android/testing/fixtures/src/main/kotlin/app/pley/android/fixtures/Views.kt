@@ -54,13 +54,55 @@ internal class Views(private val catalog: Catalog) {
 
     fun summary(id: Long, profile: Profile): ItemSummary? = catalog.item(id)?.let { summary(it, profile) }
 
-    /** GET /api/items/{id}: with the profile's state and track choices. */
+    /** GET /api/items/{id}: with the profile's state, track choices and whether it is in My List. */
     fun detail(item: ItemDetail, profile: Profile): ItemDetail = item.copy(
         userState = state(item, profile),
         viewedLeafCount = viewed(item, profile),
         files = item.files.map { file -> withChoices(item, file, profile) },
         extras = item.extras.map { extra -> extra.copy(userState = profile.state(extra.id)) },
+        inWatchlist = listed(profile).any { it.id == item.id },
     )
+
+    /**
+     * [profile]'s My List, newest added first. A movie leaves it once
+     * watched after it was added (by playing it to the end or by hand).
+     */
+    fun listed(profile: Profile): List<ItemDetail> {
+        val gone = mutableListOf<Long>()
+        for (entry in profile.watchlist.values) {
+            val item = catalog.item(entry.itemId)
+            if (item == null) {
+                gone += entry.itemId
+                continue
+            }
+            if (item.kind != ItemKind.Movie) continue
+            val state = profile.state(item.id)
+            when {
+                !state.watched -> entry.watchedThen = false
+                !entry.watchedThen || (state.lastPlayedAt ?: 0) > entry.addedAt -> gone += entry.itemId
+            }
+        }
+        if (gone.isNotEmpty()) {
+            gone.forEach(profile.watchlist::remove)
+            profile.version++
+        }
+        return profile.watchlist.values.sortedByDescending { it.addedAt }.mapNotNull { catalog.item(it.itemId) }
+    }
+
+    /**
+     * Whether [item] is out of Continue Watching for [profile]: taken out
+     * (an episode with its show), and not played since.
+     */
+    fun hiddenFromContinue(item: ItemDetail, profile: Profile): Boolean {
+        val owner = if (item.kind == ItemKind.Episode) item.grandparentId ?: item.id else item.id
+        val hiddenAt = profile.hiddenFromContinue[owner] ?: return false
+        val played = if (owner == item.id) {
+            profile.state(item.id).lastPlayedAt
+        } else {
+            catalog.leaves(owner).mapNotNull { profile.state(it).lastPlayedAt }.maxOrNull()
+        }
+        return (played ?: 0) <= hiddenAt
+    }
 
     private fun viewed(item: ItemDetail, profile: Profile): Int? =
         if (item.kind.playable || item.leafCount == null) null else catalog.leaves(item.id).count { profile.state(it).watched }

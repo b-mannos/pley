@@ -92,6 +92,14 @@ fun PhonePlayerScreen(
     var widthPx by remember { mutableIntStateOf(0) }
 
     PlayerEffects(state, picture, toasts, inPip)
+    // The server stopped the playback: the error says why, then the player leaves.
+    val currentHost by rememberUpdatedState(host)
+    LaunchedEffect(state) {
+        snapshotFlow { state.stoppedByServer }.filter { it }.collect {
+            delay(STOPPED_LEAVE_MS)
+            currentHost.back()
+        }
+    }
 
     BackHandler(enabled = state.sheet != null) { state.back() }
 
@@ -125,8 +133,16 @@ fun PhonePlayerScreen(
         UpNextCard(state)
         UnlockButton(state)
         Spinner(rememberSpinning(state))
+        SleepNoticeOf(state)
         PlayerSheet(state, style, onStyle)
-        (state.phase as? PlayerPhase.Error)?.let { ErrorOverlay(it, onRetry = state.controller::retry, onBack = host::back) }
+        (state.phase as? PlayerPhase.Error)?.let {
+            ErrorOverlay(
+                it,
+                onRetry = state.controller::retry,
+                onBack = host::back,
+                title = stringResource(if (state.stoppedByServer) R.string.player_stopped_title else R.string.player_error_title),
+            )
+        }
         ToastHost(
             toasts,
             Modifier
@@ -135,6 +151,12 @@ fun PhonePlayerScreen(
                 .padding(top = 64.dp),
         )
     }
+}
+
+/** The sleep timer's notice, read here so the rest of the screen doesn't recompose with its count. */
+@Composable
+private fun BoxScope.SleepNoticeOf(state: PlayerScreenState) {
+    SleepNotice(state.sleep.secondsLeft.takeIf { state.phase !is PlayerPhase.Error }, music = false, onKeep = state.controller::keepWatching)
 }
 
 /** The tag of the player's root, for tests. */

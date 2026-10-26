@@ -165,6 +165,7 @@ class TestGraph(server: String? = SERVER) : ScreensGraph {
         override val history: HistoryRepository get() = unused("history")
         override val watchState: WatchStateRepository get() = unused("watchState")
         override val trackDefaults: TrackDefaultsRepository get() = unused("trackDefaults")
+        override val watchlist: app.pley.android.data.WatchlistRepository get() = unused("watchlist")
         override val playItem: PlayItem get() = unused("playItem")
         override val settings: AppSettings get() = unused("settings")
     }

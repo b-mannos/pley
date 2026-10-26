@@ -86,6 +86,17 @@ class ServerPlaybackSession(
     }
 
     /**
+     * The server stopped the session itself: `stopped` at [positionMs]
+     * keeps the resume point (best effort), and nothing is deleted.
+     */
+    fun stoppedByServer(positionMs: Long) {
+        if (ended) return
+        ended = true
+        val report = report(positionMs, ProgressState.Stopped)
+        reporter.send { api.reportProgress(itemId, report) }
+    }
+
+    /**
      * Deletes a session that never played (asked for again another way):
      * no `stopped`, which would move the profile's resume point.
      */

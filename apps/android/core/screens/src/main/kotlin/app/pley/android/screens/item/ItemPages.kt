@@ -122,6 +122,7 @@ fun itemPage(input: PageInput): ItemPage {
         primary = primary,
         fromStart = primary.kind == PrimaryAction.Kind.Resume,
         watched = watched,
+        myList = if (kind.listable) d.inWatchlist else null,
         userRating = d.userState.rating?.roundToInt()?.coerceIn(0, 10)?.takeIf { it > 0 },
         rateable = kind == ItemKind.Movie || kind == ItemKind.Show || kind == ItemKind.Episode,
         tagline = d.tagline?.takeIf { it.isNotBlank() },

@@ -15,9 +15,10 @@ import app.pley.android.player.PlayerUiState
 import app.pley.android.player.QualityChoice
 import app.pley.android.player.TrackChoice
 import app.pley.android.player.UpNextUi
+import app.pley.android.player.sleep.SleepState
 
 /** A page of the player's sheet. */
-enum class SheetPage { Settings, Quality, Audio, Subtitles, Style, Details, Chapters }
+enum class SheetPage { Settings, Quality, Audio, Subtitles, Style, Details, Chapters, Sleep }
 
 /** A run of double-taps on one side: where it lands and how far it went. */
 data class SeekRun(val side: Int, val totalMs: Long, val at: Long)
@@ -55,6 +56,10 @@ class PlayerScreenState(
     val canPlayOriginal: Boolean by derivedStateOf { ui.value.canPlayOriginal }
     val suggestLowerQuality: Boolean by derivedStateOf { ui.value.suggestLowerQuality }
     val details by derivedStateOf { ui.value.details }
+    val subtitleSync: Boolean by derivedStateOf { ui.value.subtitleSync }
+    val subtitleOffsetMs: Long by derivedStateOf { ui.value.subtitleOffsetMs }
+    val sleep: SleepState by derivedStateOf { ui.value.sleep }
+    val stoppedByServer: Boolean by derivedStateOf { ui.value.stoppedByServer }
 
     /** An episode: Next episode is offered. */
     val episode: Boolean by derivedStateOf { ui.value.subtitle != null }

@@ -11,8 +11,11 @@ import app.pley.android.data.AppSettings
 import app.pley.android.data.ItemRepository
 import app.pley.android.data.Loadable
 import app.pley.android.model.ItemDetail
+import app.pley.android.model.ServerEvent
 import app.pley.android.network.PleyApi
 import app.pley.android.player.subtitles.Media3VttParser
+import app.pley.android.player.subtitles.PictureSource
+import app.pley.android.player.subtitles.SubtitleOffsets
 import app.pley.android.player.subtitles.SubtitleFetcher
 import app.pley.android.player.subtitles.VttParser
 import app.pley.android.player.trickplay.RegionSheetDecoder
@@ -22,6 +25,8 @@ import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 
 /** An item's details for playing: what was saved first, else the server's. */
@@ -146,4 +151,10 @@ class PlaybackEnvironment(
     val now: () -> Long = SystemClock::elapsedRealtime,
     /** Where subtitles are parsed and seek previews cut, off the main thread. */
     val work: CoroutineDispatcher = Dispatchers.Default,
+    /** Subtitle offsets per file, on this device. */
+    val offsets: SubtitleOffsets = SubtitleOffsets.memory(),
+    /** Reads picture subtitles beside a stream (the server's .mks); `null`: they are burned in instead. */
+    val pictures: PictureSource? = null,
+    /** The server's events, to hear of this playback being stopped. */
+    val events: Flow<ServerEvent> = emptyFlow(),
 )

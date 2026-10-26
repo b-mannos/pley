@@ -15,6 +15,7 @@ import androidx.media3.exoplayer.DecoderCounters
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import app.pley.android.model.PleyJson
 import app.pley.android.player.EngineSource
 import app.pley.android.player.PlayerEngine
 import java.util.Locale
@@ -116,6 +117,11 @@ class Media3EngineLink(override val engine: PlayerEngine) : EngineLink {
     }
 
     override fun pause() = player.pause()
+
+    override fun stop() {
+        player.pause()
+        player.stop()
+    }
 
     override fun seekTo(positionMs: Long) = player.seekTo(positionMs.coerceAtLeast(0))
 
@@ -235,9 +241,9 @@ class Media3EngineLink(override val engine: PlayerEngine) : EngineLink {
             val code = error.errorCode
             return when {
                 code == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS || code == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> {
-                    val status = (error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
-                        ?: if (code == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND) 404 else 0
-                    EngineError.Http(status, detail)
+                    val http = error.cause as? HttpDataSource.InvalidResponseCodeException
+                    val status = http?.responseCode ?: if (code == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND) 404 else 0
+                    if (status == GONE) EngineError.Stopped(stopMessage(http?.responseBody), detail) else EngineError.Http(status, detail)
                 }
                 code == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED ||
                     code == PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED -> EngineError.Playlist(detail)
@@ -251,6 +257,20 @@ class Media3EngineLink(override val engine: PlayerEngine) : EngineLink {
                 code in AUDIO_OUTPUT_ERRORS -> EngineError.Unsupported(audio = true, container = false, detail = detail)
                 code in NETWORK_ERRORS -> EngineError.Network(detail)
                 else -> EngineError.Other(detail)
+            }
+        }
+
+        /** The server stopped the session: its requests answer this. */
+        private const val GONE = 410
+
+        /** The `message` of a 410's body (`{ error: "session_stopped", message }`); `null` without one. */
+        internal fun stopMessage(body: ByteArray?): String? {
+            if (body == null || body.isEmpty()) return null
+            return try {
+                val json = PleyJson.parseToJsonElement(body.decodeToString()) as? kotlinx.serialization.json.JsonObject ?: return null
+                (json["message"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
+            } catch (_: Exception) {
+                null
             }
         }
 

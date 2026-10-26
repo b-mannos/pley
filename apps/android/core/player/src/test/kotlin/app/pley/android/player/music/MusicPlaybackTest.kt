@@ -10,6 +10,7 @@ import app.pley.android.model.PlaybackMode
 import app.pley.android.model.PlaybackRequest
 import app.pley.android.model.ProgressReport
 import app.pley.android.model.ProgressState
+import app.pley.android.model.ServerEvent
 import app.pley.android.model.caps.ClientCaps
 import app.pley.android.network.OfflineException
 import app.pley.android.player.EngineSource
@@ -19,6 +20,7 @@ import app.pley.android.testing.network.FakePleyApi
 import java.io.IOException
 import kotlin.random.Random
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -38,6 +40,7 @@ class MusicPlaybackTest {
     private val album = (1..3L).map { track(it) }
     private val api = FakePleyApi()
     private val output = FakeOutput()
+    private val events = MutableSharedFlow<ServerEvent>()
 
     private fun TestScope.music(): MusicPlayback {
         val env = MusicEnvironment(
@@ -46,6 +49,7 @@ class MusicPlaybackTest {
             clientId = { "android-test-music" },
             reporter = SessionReporter(backgroundScope),
             output = { output },
+            events = events,
         )
         return MusicPlayback(env, backgroundScope, Random(1))
     }
@@ -218,6 +222,29 @@ class MusicPlaybackTest {
     }
 
     @Test
+    fun aSessionStoppedByTheServerStaysStopped() = runTest {
+        val music = music()
+        music.play(album)
+        runCurrent()
+        output.startPlaying()
+        output.fail(OutputError.Stopped)
+        settle()
+        assertEquals(1, starts().size)
+        assertEquals(MusicError.Stopped, music.nowPlaying.value?.error)
+        assertTrue(api.calls("stopPlayback").isEmpty())
+
+        // Play starts it again, with a new session; then the event stops that one.
+        music.play()
+        settle()
+        assertEquals(2, starts().size)
+        assertNull(music.nowPlaying.value?.error)
+        events.emit(ServerEvent.SessionStopped(sessionId = DIRECT_SESSION, byAdmin = true))
+        runCurrent()
+        assertEquals(MusicError.Stopped, music.nowPlaying.value?.error)
+        assertEquals(2, starts().size)
+    }
+
+    @Test
     fun theServerOutOfReachShowsAsOffline() = runTest {
         api.fail("startPlayback", OfflineException(IOException("refused")))
         val music = music()
@@ -272,6 +299,11 @@ class MusicPlaybackTest {
         grandparentTitle = "Harbour Lights",
         durationMs = 180_000,
     )
+
+    private companion object {
+        /** The session of a direct play (fixtures/playback/info_direct.json). */
+        const val DIRECT_SESSION = "0b6d5e9a2c4f4a7e8d1c3b5a7f9e2d4c"
+    }
 
     /** An output whose sound the test plays, ends and fails. */
     private class FakeOutput : MusicOutput {

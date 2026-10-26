@@ -36,13 +36,14 @@ import app.pley.android.ui.phone.shell.LocalPhoneShell
 
 /**
  * An item's action sheet (PleyKey.ItemActions; design spec §3.4): its
- * name, then Play or Resume, From start, the watched mark, Add to
- * playlist, and Go to show or season. Choosing one closes the sheet; the
+ * name, then Play or Resume, From start, the watched mark, Remove from
+ * Continue Watching (from that row), My List, Add to playlist, and Go to
+ * show or season. Choosing one closes the sheet; the
  * action carries on after it.
  */
 @Composable
-internal fun ItemActionsSheet(itemId: Long) {
-    val model: ItemActionsViewModel = viewModel(factory = ItemActionsViewModel.factory(itemId))
+internal fun ItemActionsSheet(itemId: Long, continueWatching: Boolean = false) {
+    val model: ItemActionsViewModel = viewModel(factory = ItemActionsViewModel.factory(itemId, continueWatching))
     val state by model.state.collectAsStateWithLifecycle()
     val navigator = LocalPhoneNavigator.current
     val shell = LocalPhoneShell.current
@@ -112,6 +113,9 @@ private fun actionLook(action: ItemAction): Pair<String, PleyIcon> = when (actio
     ItemAction.FromStart -> stringResource(R.string.item_action_from_start) to PleyIcons.RotateCcw
     ItemAction.MarkWatched -> stringResource(R.string.item_action_mark_watched) to PleyIcons.Eye
     ItemAction.MarkUnwatched -> stringResource(R.string.item_action_mark_unwatched) to PleyIcons.EyeOff
+    ItemAction.RemoveFromContinueWatching -> stringResource(R.string.item_action_remove_from_continue_watching) to PleyIcons.X
+    ItemAction.AddToMyList -> stringResource(R.string.item_action_add_to_my_list) to PleyIcons.BookmarkPlus
+    ItemAction.RemoveFromMyList -> stringResource(R.string.item_action_remove_from_my_list) to PleyIcons.BookmarkMinus
     ItemAction.AddToPlaylist -> stringResource(R.string.item_action_add_to_playlist) to PleyIcons.ListPlus
     ItemAction.GoToShow -> stringResource(R.string.item_action_go_to_show) to PleyIcons.Tv
     ItemAction.GoToSeason -> stringResource(R.string.item_action_go_to_season) to PleyIcons.Layers

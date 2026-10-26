@@ -45,6 +45,7 @@ import app.pley.android.designsystem.tile.TileStyle
 import app.pley.android.model.LibraryKind
 import app.pley.android.screens.LibraryTab
 import app.pley.android.screens.PleyKey
+import app.pley.android.model.HubKeys
 import app.pley.android.screens.library.CollectionTile
 import app.pley.android.screens.library.LibraryUiState
 import app.pley.android.screens.library.LibraryViewModel
@@ -96,7 +97,11 @@ internal fun RecommendedPane(state: LibraryUiState<ArtworkTileModel>, vm: Librar
                         row = model,
                         onOpen = { tile -> row?.let { r -> r.opens.getOrNull(r.tiles.indexOf(tile))?.let(navigator::open) } },
                         skeleton = skeleton,
-                        onLongPress = if (row?.key == TileRow.COLLECTIONS) null else { tile -> navigator.open(PleyKey.ItemActions(tile.id)) },
+                        onLongPress = if (row?.key == TileRow.COLLECTIONS) {
+                            null
+                        } else {
+                            { tile -> navigator.open(PleyKey.ItemActions(tile.id, continueWatching = HubKeys.isContinueWatching(model.key))) }
+                        },
                         onTitleClick = if (row?.key == TileRow.COLLECTIONS) ({ vm.select(LibraryTab.Collections) }) else null,
                     )
                 }

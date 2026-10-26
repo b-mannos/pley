@@ -294,39 +294,65 @@ internal fun ProgressBar(fraction: Float, modifier: Modifier = Modifier) {
 }
 
 /**
- * The actions under Play (design spec §3.3): From start, Watched, Playlist
- * and Trailer, each a quarter of the width, as in the mockup.
+ * The actions under Play (design spec §3.3): From start, Watched, My List,
+ * Playlist and Trailer, sharing the width (a quarter each at least), as in
+ * the mockup.
  */
 @Composable
 private fun ActionRow(page: ItemPage, actions: PageActions) {
-    val items = buildList<Triple<PleyIcon, String, () -> Unit>> {
-        if (page.fromStart) add(Triple(PleyIcons.RotateCcw, stringResource(R.string.item_from_start)) { actions.play(fromStart = true) })
+    val watchedLabel = stringResource(if (page.watched) R.string.item_mark_unwatched else R.string.item_mark_watched)
+    val listLabel = stringResource(if (page.myList == true) R.string.item_in_my_list else R.string.item_not_in_my_list)
+    val items = buildList {
+        if (page.fromStart) add(HeaderAction(PleyIcons.RotateCcw, stringResource(R.string.item_from_start)) { actions.play(fromStart = true) })
         add(
-            Triple(
+            HeaderAction(
                 if (page.watched) PleyIcons.CircleCheck else PleyIcons.Check,
                 stringResource(R.string.item_watched),
+                selected = page.watched,
+                state = watchedLabel,
             ) { actions.toggleWatched() },
         )
-        add(Triple(PleyIcons.ListPlus, stringResource(R.string.item_playlist)) { actions.addToPlaylist(page.id) })
-        page.trailer?.let { trailer -> add(Triple(PleyIcons.Film, stringResource(R.string.item_trailer)) { actions.play(trailer) }) }
+        page.myList?.let { inList ->
+            add(
+                HeaderAction(
+                    if (inList) PleyIcons.BookmarkCheck else PleyIcons.BookmarkPlus,
+                    stringResource(R.string.item_my_list),
+                    selected = inList,
+                    state = listLabel,
+                    tag = ITEM_MY_LIST,
+                ) { actions.toggleMyList() },
+            )
+        }
+        add(HeaderAction(PleyIcons.ListPlus, stringResource(R.string.item_playlist)) { actions.addToPlaylist(page.id) })
+        page.trailer?.let { trailer -> add(HeaderAction(PleyIcons.Film, stringResource(R.string.item_trailer)) { actions.play(trailer) }) }
     }
-    val watchedLabel = stringResource(if (page.watched) R.string.item_mark_unwatched else R.string.item_mark_watched)
     Row(Modifier.fillMaxWidth()) {
-        items.forEach { (icon, label, onClick) ->
+        items.forEach { action ->
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                val watchedButton = icon == PleyIcons.CircleCheck || icon == PleyIcons.Check
                 ActionButton(
-                    icon = icon,
-                    label = label,
-                    onClick = onClick,
-                    selected = watchedButton && page.watched,
-                    modifier = if (watchedButton) Modifier.semantics { stateDescription = watchedLabel } else Modifier,
+                    icon = action.icon,
+                    label = action.label,
+                    onClick = action.onClick,
+                    selected = action.selected,
+                    modifier = Modifier
+                        .then(action.state?.let { s -> Modifier.semantics { stateDescription = s } } ?: Modifier)
+                        .then(action.tag?.let { Modifier.testTag(it) } ?: Modifier),
                 )
             }
         }
         repeat((ACTION_SLOTS - items.size).coerceAtLeast(0)) { Spacer(Modifier.weight(1f)) }
     }
 }
+
+/** A button of the action row: [selected] tints it, [state] is what screen readers hear it is. */
+private class HeaderAction(
+    val icon: PleyIcon,
+    val label: String,
+    val selected: Boolean = false,
+    val state: String? = null,
+    val tag: String? = null,
+    val onClick: () -> Unit,
+)
 
 /** The summary in four lines, "More" to read it all (Summary of shared.tsx). */
 @Composable
@@ -354,6 +380,8 @@ private fun Summary(text: String, key: Long) {
 const val SUMMARY_LINES = 4
 
 private const val ACTION_SLOTS = 4
+
+internal const val ITEM_MY_LIST = "pley.item.myList"
 
 /** The backdrop from 600 dp. */
 private val WideBackdropHeight = 380.dp

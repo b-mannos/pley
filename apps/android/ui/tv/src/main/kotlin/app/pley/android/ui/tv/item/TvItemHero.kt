@@ -56,7 +56,8 @@ import app.pley.android.ui.tv.kit.rememberedFocus
  * season) bottom-aligned in the logo's 72 dp box, an episode's context
  * line, the metadata line, genres, three lines of summary (More shows it
  * all when it runs longer), the credits, then the buttons: Resume or
- * Play, From start, Watched, Audio and subtitles, Add to playlist, More.
+ * Play, From start, Watched, Audio and subtitles, My List, Add to
+ * playlist, More.
  * Focus starts on Resume or Play; holding Select on it opens the item's
  * actions. Down from the buttons goes to [down] (the episode to watch).
  */
@@ -221,6 +222,14 @@ private fun HeroButtonsRow(
                 modifier = Modifier.rememberedFocus(memory, "tracks").focusRequester(buttons.tracks).testTag(TV_TRACKS_BUTTON),
             )
         }
+        page.myList?.let { inList ->
+            TvRoundButton(
+                label = stringResource(if (inList) R.string.tv_item_in_my_list else R.string.tv_item_add_to_my_list),
+                icon = if (inList) PleyIcons.BookmarkCheck else PleyIcons.BookmarkPlus,
+                onClick = actions.model::toggleMyList,
+                modifier = Modifier.rememberedFocus(memory, "myList").testTag(TV_MY_LIST_BUTTON),
+            )
+        }
         TvRoundButton(
             label = stringResource(R.string.tv_item_add_to_playlist),
             icon = PleyIcons.ListPlus,
@@ -263,3 +272,5 @@ private const val SUMMARY_LINES = 3
 private const val STARRING = 3
 
 internal const val TV_TRACKS_BUTTON = "pley.tv.item.tracks"
+
+internal const val TV_MY_LIST_BUTTON = "pley.tv.item.myList"

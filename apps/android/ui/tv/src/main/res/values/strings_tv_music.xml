@@ -30,5 +30,6 @@
     <string name="tv_music_nothing_playing_body">Play an album or an artist and it shows here.</string>
     <string name="tv_music_error_offline">Can\'t reach the server.</string>
     <string name="tv_music_error_signed_out">Sign in again to play.</string>
+    <string name="tv_music_error_stopped">Playback was stopped by the server.</string>
     <string name="tv_music_error_unplayable">This track can\'t be played.</string>
 </resources>

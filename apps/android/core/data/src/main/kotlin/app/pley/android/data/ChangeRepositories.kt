@@ -1,6 +1,7 @@
 package app.pley.android.data
 
 import app.pley.android.common.UserFacing
+import app.pley.android.model.ItemSummary
 import app.pley.android.model.PlaylistDetail
 import app.pley.android.model.PlaylistKind
 import app.pley.android.model.PlaylistSummary
@@ -52,6 +53,28 @@ interface WatchStateRepository {
 
     /** The version and tracks to play [itemId] with next time. */
     suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?)
+
+    /**
+     * Takes [itemId] out of Continue Watching, Home's and the libraries'
+     * (an episode: its whole show), until it is played again. Its progress
+     * and watched mark stay.
+     */
+    suspend fun hideFromContinueWatching(itemId: Long)
+}
+
+/**
+ * The profile's My List: movies and shows, newest added first. Adding and
+ * removing show at once in the list, Home's My List and the item's page,
+ * and are undone if the server refuses.
+ */
+interface WatchlistRepository {
+    fun watchlist(): Flow<Loadable<List<ItemSummary>>>
+
+    suspend fun add(itemId: Long)
+
+    suspend fun remove(itemId: Long)
+
+    suspend fun refresh()
 }
 
 /** The profile's audio and subtitle defaults; older servers don't offer them to apps. */

@@ -97,7 +97,10 @@ class PhoneHomeTest {
         compose.onAllNodesWithContentDescription("Dune: Part Two", substring = true).onFirst().performClick()
         assertEquals(PleyKey.Item(104), opened.last())
         compose.onAllNodesWithContentDescription("Half Loop", substring = true).onFirst().performTouchInput { longClick() }
-        assertEquals(PleyKey.ItemActions(204), opened.last())
+        // From Continue Watching, the actions offer to take it out of the row; elsewhere not.
+        assertEquals(PleyKey.ItemActions(204, continueWatching = true), opened.last())
+        compose.onAllNodesWithContentDescription("Dune: Part Two", substring = true).onFirst().performTouchInput { longClick() }
+        assertEquals(PleyKey.ItemActions(104), opened.last())
     }
 
     @Test

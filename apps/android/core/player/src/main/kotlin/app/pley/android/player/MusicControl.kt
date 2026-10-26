@@ -1,6 +1,8 @@
 package app.pley.android.player
 
 import app.pley.android.model.ItemSummary
+import app.pley.android.player.sleep.SleepChoice
+import app.pley.android.player.sleep.SleepState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,6 +54,9 @@ enum class MusicError {
 
     /** The server couldn't play the track, nor convert it. */
     Unplayable,
+
+    /** The server stopped the playback (an administrator, or the profile elsewhere). */
+    Stopped,
 }
 
 /** The queue in the order it plays, the current track at [index]. */
@@ -115,6 +120,16 @@ interface MusicControl {
 
     /** Pauses the music because a video starts. */
     fun pauseForVideo()
+
+    /** The sleep timer of the music. */
+    val sleep: StateFlow<SleepState> get() = NO_SLEEP
+
+    /** Sets the sleep timer (not remembered after the music stops). */
+    fun setSleep(choice: SleepChoice) {}
+
+    /** "Keep listening" during the sleep timer's notice: the same time again. */
+    fun keepListening() {}
 }
 
 private val NO_QUEUE: StateFlow<MusicQueueState> = MutableStateFlow(MusicQueueState()).asStateFlow()
+private val NO_SLEEP: StateFlow<SleepState> = MutableStateFlow(SleepState()).asStateFlow()

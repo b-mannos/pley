@@ -101,6 +101,7 @@ class TvTestGraph : ScreensGraph {
         }
         override val history: HistoryRepository get() = unused("history")
         override val trackDefaults: TrackDefaultsRepository get() = unused("trackDefaults")
+        override val watchlist: app.pley.android.data.WatchlistRepository get() = unused("watchlist")
         override val settings: AppSettings get() = unused("settings")
     }
 

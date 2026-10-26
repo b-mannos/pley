@@ -94,9 +94,13 @@ sealed interface PleyKey : NavKey {
 
     // Sheets, over the screen they were opened from.
 
-    /** What can be done with an item: play from the start, mark watched, add to a playlist… */
+    /**
+     * What can be done with an item: play from the start, mark watched, add
+     * to a playlist… Opened from a Continue Watching tile ([continueWatching]),
+     * also taking it out of that row.
+     */
     @Serializable
-    data class ItemActions(val itemId: Long) : PleyKey
+    data class ItemActions(val itemId: Long, val continueWatching: Boolean = false) : PleyKey
 
     @Serializable
     data class AddToPlaylist(val itemIds: List<Long>) : PleyKey

@@ -37,6 +37,7 @@ import app.pley.android.player.PlayerPhase
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.engine.EngineState
 import app.pley.android.player.engine.VideoSurface
+import app.pley.android.player.sleep.SleepTimer
 import app.pley.android.player.subtitles.CaptionLook
 import app.pley.android.player.subtitles.ScreenCaptions
 import app.pley.android.ui.tv.R
@@ -56,6 +57,9 @@ import kotlinx.coroutines.delay
  *   a key unless paused or in a panel.
  * - **Back** walks out: panel, then Up Next, then the controls, then the
  *   player ([onExit]).
+ * - **Sleep timer.** Its notice takes focus 30 s before it pauses (Keep
+ *   watching); paused by it for 10 minutes, the player leaves. A playback
+ *   the server stopped says why and leaves after 20 s.
  * - **Media keys** work whatever shows.
  *
  * [onExit] leaves the player for where playing started; [now] is the wall
@@ -101,6 +105,10 @@ internal fun TvPlayerScreen(
     val previewing by remember(seeker) { derivedStateOf { seeker.target != null } }
     // Skip shows while its marker runs, unless a seek preview, Up Next or an error is on screen.
     val skipShown = skipLabel != null && card == null && error == null && !switching && !(ui.controls && previewing)
+    val sleepNotice by remember(state) { derivedStateOf { state.value.sleep.secondsLeft != null } }
+    val sleepFired by remember(state) { derivedStateOf { state.value.sleep.fired } }
+    val stopped by remember(state) { derivedStateOf { state.value.stoppedByServer } }
+    val noticeShown = sleepNotice && error == null
 
     // ---------------------------------------------------------------- what the keys do
 
@@ -224,7 +232,8 @@ internal fun TvPlayerScreen(
         }
         val busy = state.value.phase == PlayerPhase.Preparing || switching
         if (!ui.controls) {
-            val key = TvPlayerKeys.hidden(code, skipShowing = skipShown && ui.focused == PlayerFocus.Skip) ?: return false
+            val buttonFocused = (skipShown && ui.focused == PlayerFocus.Skip) || (noticeShown && ui.focused == PlayerFocus.SleepNotice)
+            val key = TvPlayerKeys.hidden(code, skipShowing = buttonFocused) ?: return false
             return handle(key, native, busy)
         }
         ui.touch()
@@ -259,6 +268,27 @@ internal fun TvPlayerScreen(
         when {
             skipShown && !ui.controls && ui.panel == null -> ui.ask(PlayerFocus.Skip)
             !skipShown && ui.focused == PlayerFocus.Skip -> ui.ask(if (ui.controls) PlayerFocus.Scrubber else PlayerFocus.Video)
+        }
+    }
+    // The sleep timer's notice takes focus as Skip does (Skip first); when it goes, focus goes back.
+    LaunchedEffect(noticeShown) {
+        when {
+            noticeShown && !skipShown && !ui.controls && ui.panel == null && card == null -> ui.ask(PlayerFocus.SleepNotice)
+            !noticeShown && ui.focused == PlayerFocus.SleepNotice -> ui.ask(if (ui.controls) PlayerFocus.Scrubber else PlayerFocus.Video)
+        }
+    }
+    // Paused by the sleep timer for 10 minutes: the player leaves.
+    LaunchedEffect(sleepFired, phase) {
+        if (sleepFired && phase == PlayerPhase.Paused) {
+            delay(SleepTimer.LEAVE_AFTER_MS)
+            exit()
+        }
+    }
+    // The server stopped the playback: the error says why, then the player leaves.
+    LaunchedEffect(stopped) {
+        if (stopped) {
+            delay(STOPPED_LEAVE_MS)
+            exit()
         }
     }
     // Up Next takes the screen's attention: the controls and panels make way, Play now has focus.
@@ -355,12 +385,22 @@ internal fun TvPlayerScreen(
         }
         if (detailsShown) TvPlaybackDetails(state, engineState)
         TvSkipButton(state, skipShown, ui.controls, ui) { controller.skip() }
+        TvSleepNotice(state, noticeShown, ui.controls, ui, onKeep = controller::keepWatching)
         TvUpNextCard(card, ui, onPlay = controller::playNext, onCancel = controller::cancelUpNext)
         if (!ui.controls) TvSeekBadge(seeker.badgeMs)
         TvBufferingRing(waiting = (phase == PlayerPhase.Buffering || phase == PlayerPhase.Preparing) && !switching)
         if (switching || phase == PlayerPhase.Switching) TvSwitchingCover(switchingHz)
         TvPlayerPanels(ui, state, engineState, controller)
-        if (error != null) TvPlayerError(error.message, error.canRetry, ui, onRetry = controller::retry, onBack = exit)
+        if (error != null) {
+            TvPlayerError(
+                error.message,
+                error.canRetry,
+                ui,
+                onRetry = controller::retry,
+                onBack = exit,
+                title = if (stopped) stringResource(R.string.tv_player_stopped_title) else stringResource(R.string.tv_player_error_title),
+            )
+        }
         TvPlayerToast(ui.toast, ui.controls, ui::clearToast)
     }
 }

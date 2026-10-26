@@ -118,6 +118,7 @@
         "dvb_subtitle"
     ],
     "audio_track_switching": true,
+    "picture_subtitles_sideload": true,
     "hls": {
         "master_playlist": true,
         "segments": [

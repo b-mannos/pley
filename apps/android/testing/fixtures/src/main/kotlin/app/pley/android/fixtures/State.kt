@@ -69,6 +69,9 @@ internal class PlaySession(
     val clientId: String?,
 )
 
+/** A session the server stopped, and why. */
+internal class StoppedSession(val profileId: Long, val message: String?)
+
 /** The committed media (scripts/make-android-fixtures.ps1), read from the classpath once. */
 internal object Media {
     private const val ROOT = "app/pley/android/fixtures/media/"
@@ -99,6 +102,9 @@ internal class State(val options: FixtureServer.Options) {
     val oauth = OAuth(this)
     val events = EventHub(this)
     val sessions = LinkedHashMap<String, PlaySession>()
+
+    /** Sessions stopped by DELETE /api/sessions/{id}: their streams answer 410 with the message. */
+    val stoppedSessions = HashMap<String, StoppedSession>()
 
     /** How often each subtitle track was asked for, by "file:index". */
     val subtitleAsks = HashMap<String, Int>()

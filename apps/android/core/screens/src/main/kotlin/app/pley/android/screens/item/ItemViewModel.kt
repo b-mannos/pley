@@ -62,7 +62,7 @@ sealed interface ItemEvent {
  * episodes resume, shows play their next episode) and the [PlayerLauncher],
  * with the version and tracks chosen here. Choosing an audio or subtitle
  * track is saved for the item (PUT /api/items/{id}/streams), as on the web.
- * Watched marks and ratings show at once and are undone if the server
+ * Watched marks, ratings and My List show at once and are undone if the server
  * refuses.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -237,6 +237,13 @@ class ItemViewModel(
     fun toggleWatched() {
         val page = (state.value as? ItemUiState.Ready)?.page ?: return
         setWatched(page.id, !page.watched)
+    }
+
+    /** Adds the item to My List, or takes it off when it is in it. */
+    fun toggleMyList() {
+        val page = (state.value as? ItemUiState.Ready)?.page ?: return
+        val inList = page.myList ?: return
+        viewModelScope.launch { attempt { if (inList) data.watchlist.remove(page.id) else data.watchlist.add(page.id) } }
     }
 
     /** Marks [id] (this item, or one of its episodes) watched or not. */

@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.pley.android.data.DataGraph
 import app.pley.android.data.Loadable
+import app.pley.android.model.ItemDetail
 import app.pley.android.model.ItemKind
 import app.pley.android.model.ItemSummary
 import app.pley.android.model.format.cardSubtitle
@@ -33,8 +34,8 @@ import kotlinx.coroutines.launch
 /**
  * What can be done with an item from its action sheet, its TV panel or a
  * long press on its tile (ItemActions.tsx without the administrator's
- * part): playing, watched marks, playlists, and going to its show or
- * season. Editing, refreshing and analysing are the web's, for
+ * part): playing, watched marks, leaving Continue Watching, My List,
+ * playlists, and going to its show or season. Editing, refreshing and analysing are the web's, for
  * administrators: never offered here, whatever the server says of the
  * profile.
  */
@@ -44,6 +45,11 @@ enum class ItemAction {
     FromStart,
     MarkWatched,
     MarkUnwatched,
+
+    /** Opened from a Continue Watching tile: it (an episode: its show) leaves the row. */
+    RemoveFromContinueWatching,
+    AddToMyList,
+    RemoveFromMyList,
     AddToPlaylist,
     GoToShow,
     GoToSeason,
@@ -52,8 +58,13 @@ enum class ItemAction {
     Open,
 }
 
-/** The actions for [item], in the order they are listed. */
-fun itemActions(item: ItemSummary): List<ItemAction> = buildList {
+/**
+ * The actions for [item], in the order they are listed. My List is offered
+ * for movies and shows when it is known whether the item is in it
+ * ([inWatchlist]); leaving Continue Watching when the actions were opened
+ * from that row ([continueWatching]).
+ */
+fun itemActions(item: ItemSummary, inWatchlist: Boolean? = null, continueWatching: Boolean = false): List<ItemAction> = buildList {
     val kind = item.kind
     val music = kind == ItemKind.Artist || kind == ItemKind.Album || kind == ItemKind.Track
     if (music) {
@@ -69,6 +80,8 @@ fun itemActions(item: ItemSummary): List<ItemAction> = buildList {
     if (kind == ItemKind.Movie || kind == ItemKind.Episode || kind == ItemKind.Show || kind == ItemKind.Season) {
         add(if (watched(item)) ItemAction.MarkUnwatched else ItemAction.MarkWatched)
     }
+    if (continueWatching) add(ItemAction.RemoveFromContinueWatching)
+    if (inWatchlist != null && kind.listable) add(if (inWatchlist) ItemAction.RemoveFromMyList else ItemAction.AddToMyList)
     if (kind != ItemKind.Extra && kind != ItemKind.Unknown) add(ItemAction.AddToPlaylist)
     if (kind == ItemKind.Episode && item.grandparentId != null) add(ItemAction.GoToShow)
     if (kind == ItemKind.Episode && item.parentId != null) add(ItemAction.GoToSeason)
@@ -117,13 +130,16 @@ sealed interface ItemActionsUiState {
 
 /**
  * The action sheet of an item (PleyKey.ItemActions), opened by a long press
- * on its card or the page's More. Play and the watched marks are done
- * here; the rest open a page ([destination]).
+ * on its card or the page's More. Play, the watched marks, Continue
+ * Watching and My List are done here; the rest open a page ([destination]).
+ * Opened from a Continue Watching tile ([continueWatching]), it offers to
+ * take the item out of that row.
  */
 class ItemActionsViewModel(
     private val data: DataGraph,
     private val launcher: PlayerLauncher,
     val itemId: Long,
+    private val continueWatching: Boolean = false,
     compute: CoroutineDispatcher = Dispatchers.Default,
     /** Where actions run: they outlive the sheet, which closes as soon as one is chosen. */
     private val work: CoroutineScope = OutlivingWork,
@@ -136,14 +152,15 @@ class ItemActionsViewModel(
     val state: StateFlow<ItemActionsUiState> = combine(data.items.detail(itemId), data.servers.active) { load, origin ->
         when (load) {
             Loadable.Loading -> ItemActionsUiState.Loading
-            is Loadable.Failed -> load.stale?.let { ready(it.toSummary(), origin.orEmpty()) } ?: ItemActionsUiState.Failed(load.error)
-            is Loadable.Ready -> ready(load.value.toSummary(), origin.orEmpty())
+            is Loadable.Failed -> load.stale?.let { ready(it, origin.orEmpty()) } ?: ItemActionsUiState.Failed(load.error)
+            is Loadable.Ready -> ready(load.value, origin.orEmpty())
         }
     }
         .flowOn(compute)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(ItemViewModel.STOP_MS), ItemActionsUiState.Loading)
 
-    private fun ready(item: ItemSummary, origin: String): ItemActionsUiState.Ready {
+    private fun ready(detail: ItemDetail, origin: String): ItemActionsUiState.Ready {
+        val item = detail.toSummary()
         val episode = item.kind == ItemKind.Episode
         return ItemActionsUiState.Ready(
             item = item,
@@ -155,13 +172,14 @@ class ItemActionsViewModel(
             } else {
                 cardSubtitle(item)
             },
-            actions = itemActions(item),
+            actions = itemActions(item, detail.inWatchlist, continueWatching),
         )
     }
 
     /**
      * Does [action] if it is done here (play, from start, the watched
-     * marks): `true` once it is under way, so the sheet can close.
+     * marks, Continue Watching, My List): `true` once it is under way, so
+     * the sheet can close.
      */
     fun perform(action: ItemAction): Boolean {
         val item = (state.value as? ItemActionsUiState.Ready)?.item ?: return false
@@ -169,26 +187,34 @@ class ItemActionsViewModel(
             ItemAction.Play, ItemAction.Resume, ItemAction.FromStart -> work.launch {
                 playItem(data, launcher, item, fromStart = action == ItemAction.FromStart)?.let { eventChannel.trySend(it) }
             }
-            ItemAction.MarkWatched, ItemAction.MarkUnwatched -> work.launch {
-                try {
-                    data.watchState.setWatched(item.id, action == ItemAction.MarkWatched)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    // The marks are undone by then; the sheet, if still open, says why.
-                    eventChannel.trySend(ItemEvent.Failed(e))
-                }
-            }
+            ItemAction.MarkWatched, ItemAction.MarkUnwatched -> change { data.watchState.setWatched(item.id, action == ItemAction.MarkWatched) }
+            ItemAction.RemoveFromContinueWatching -> change { data.watchState.hideFromContinueWatching(item.id) }
+            ItemAction.AddToMyList -> change { data.watchlist.add(item.id) }
+            ItemAction.RemoveFromMyList -> change { data.watchlist.remove(item.id) }
             else -> return false
         }
         return true
     }
 
+    /** Runs [block] past the sheet; a change the data side undid is told. */
+    private fun change(block: suspend () -> Unit) {
+        work.launch {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The change is undone by then; the sheet, if still open, says why.
+                eventChannel.trySend(ItemEvent.Failed(e))
+            }
+        }
+    }
+
     companion object {
-        fun factory(itemId: Long): ViewModelProvider.Factory = viewModelFactory {
+        fun factory(itemId: Long, continueWatching: Boolean = false): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val graph = screensGraph()
-                ItemActionsViewModel(graph.data, graph.playerLauncher, itemId)
+                ItemActionsViewModel(graph.data, graph.playerLauncher, itemId, continueWatching)
             }
         }
     }

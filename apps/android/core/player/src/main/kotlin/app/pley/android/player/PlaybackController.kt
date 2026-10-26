@@ -3,6 +3,7 @@ package app.pley.android.player
 import android.graphics.Bitmap
 import androidx.media3.common.text.Cue
 import app.pley.android.player.session.SavedPlaybackState
+import app.pley.android.player.sleep.SleepChoice
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -35,6 +36,18 @@ interface PlaybackController {
 
     /** Another subtitle track, or none when [index] is `null`; remembered for the item. */
     fun selectSubtitle(index: Long?)
+
+    /**
+     * Moves the subtitles by [offsetMs] (positive: later), within ±10 s in
+     * 0.1 s steps; remembered for the file on this device. 0 resets.
+     */
+    fun setSubtitleOffset(offsetMs: Long) {}
+
+    /** Sets the sleep timer (not remembered after this playback). */
+    fun setSleep(choice: SleepChoice) {}
+
+    /** "Keep watching" during the sleep timer's notice: the same time again. */
+    fun keepWatching() {}
 
     /** "original" or a quality preset's id ("8m"); remembered for this device and network. */
     fun selectQuality(name: String)

@@ -37,6 +37,9 @@ interface PlayerTexts {
     fun failure(failure: Failure, detail: String?): String
     val noFile: String
 
+    /** The server stopped the playback: who did, and their [message] when given. */
+    fun stopped(message: String?, byAdmin: Boolean): String
+
     // The details' rows.
     val rowVideo: String
     val rowAudio: String
@@ -123,6 +126,11 @@ class ResourcePlayerTexts(context: Context) : PlayerTexts {
     }
 
     override val noFile: String get() = s(R.string.session_error_no_file)
+
+    override fun stopped(message: String?, byAdmin: Boolean): String {
+        val who = s(if (byAdmin) R.string.session_stopped_by_admin else R.string.session_stopped_elsewhere)
+        return if (message.isNullOrBlank()) who else res.getString(R.string.session_stopped_message, who, message.trim())
+    }
     override val rowVideo: String get() = s(R.string.session_row_video)
     override val rowAudio: String get() = s(R.string.session_row_audio)
     override val rowBitrate: String get() = s(R.string.session_row_bitrate)

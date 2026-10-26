@@ -65,6 +65,7 @@ class FakeWatchState : WatchStateRepository {
         ratings += itemId to rating
     }
     override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) = Unit
+    override suspend fun hideFromContinueWatching(itemId: Long) = Unit
 }
 
 const val ORIGIN = "http://192.168.1.20:7539"

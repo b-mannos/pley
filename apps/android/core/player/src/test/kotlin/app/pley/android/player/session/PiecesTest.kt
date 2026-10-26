@@ -36,8 +36,12 @@ class PiecesTest {
 
     @Test
     fun `Media3's errors are sorted for the recovery ladder`() {
-        val gone = HttpDataSource.InvalidResponseCodeException(410, "Gone", null, emptyMap(), DataSpec.Builder().setUri("http://x").build(), ByteArray(0))
-        assertEquals(410, (Media3EngineLink.errorOf(error(PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS, gone)) as EngineError.Http).status)
+        val missing = HttpDataSource.InvalidResponseCodeException(404, "Not Found", null, emptyMap(), DataSpec.Builder().setUri("http://x").build(), ByteArray(0))
+        assertEquals(404, (Media3EngineLink.errorOf(error(PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS, missing)) as EngineError.Http).status)
+        // 410: the server stopped the session, with its message.
+        val body = """{"error":"session_stopped","message":"Maintenance"}""".toByteArray()
+        val gone = HttpDataSource.InvalidResponseCodeException(410, "Gone", null, emptyMap(), DataSpec.Builder().setUri("http://x").build(), body)
+        assertEquals("Maintenance", (Media3EngineLink.errorOf(error(PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS, gone)) as EngineError.Stopped).message)
         assertEquals(EngineError.Network::class, Media3EngineLink.errorOf(error(PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED))::class)
         assertEquals(EngineError.Playlist::class, Media3EngineLink.errorOf(error(PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED))::class)
         val container = Media3EngineLink.errorOf(error(PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED)) as EngineError.Unsupported
