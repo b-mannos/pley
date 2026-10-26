@@ -72,7 +72,7 @@ impl Slots {
 
     /// Reserve a process slot. Returns whether a hardware session was granted,
     /// or `None` when every slot is taken.
-    fn acquire(&self, want_hw: bool) -> Option<bool> {
+    pub(crate) fn acquire(&self, want_hw: bool) -> Option<bool> {
         let mut used = self.used.lock();
         if used.0 >= self.max {
             return None;
@@ -85,7 +85,7 @@ impl Slots {
         Some(hw)
     }
 
-    fn release(&self, hw: bool) {
+    pub(crate) fn release(&self, hw: bool) {
         let mut used = self.used.lock();
         used.0 = used.0.saturating_sub(1);
         if hw {

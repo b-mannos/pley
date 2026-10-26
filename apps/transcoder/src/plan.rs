@@ -572,6 +572,55 @@ impl Plan {
     /// ffmpeg arguments producing segments `[start, end)`.
     pub fn ffmpeg_args(&self, ctx: &ArgsContext<'_>, start: u32, end: u32) -> Vec<OsString> {
         let start_ms = self.boundaries[start as usize];
+        let mut a = self.stream_args(ctx, start, end);
+
+        // Segmenting. Relative split times count from the first video packet,
+        // which is the boundary (a remux's seek point lies past it).
+        let times: Vec<String> = ((start + 1)..end)
+            .map(|k| {
+                let at = self.split_at[k as usize];
+                secs(if ctx.relative_split_times { at - start_ms } else { at })
+            })
+            .collect();
+        a.push_all([
+            "-f",
+            "segment",
+            "-segment_format",
+            "mpegts",
+            "-segment_format_options",
+            "avoid_negative_ts=disabled",
+        ]);
+        if !times.is_empty() {
+            a.push_all(["-segment_times", &times.join(",")]);
+        } else {
+            // Single segment window: never split.
+            a.push_all(["-segment_time", "999999"]);
+        }
+        a.push_all([
+            "-segment_start_number",
+            &start.to_string(),
+            "-segment_list",
+            "pipe:1",
+            "-segment_list_type",
+            "csv",
+            "%d.ts",
+        ]);
+        a.0
+    }
+
+    /// The whole media as one Matroska file at `output` (a converted
+    /// download): the streams the segments would have, made in one go.
+    pub fn file_args(&self, ctx: &ArgsContext<'_>, output: &Path) -> Vec<OsString> {
+        let mut a = self.stream_args(ctx, 0, self.segment_count());
+        a.push_all(["-f", "matroska"]);
+        a.push_os(output.as_os_str().to_owned());
+        a.0
+    }
+
+    /// Everything but the output: devices, inputs, the video and audio
+    /// streams, from segment `start` up to `end`.
+    fn stream_args(&self, ctx: &ArgsContext<'_>, start: u32, end: u32) -> Args {
+        let start_ms = self.boundaries[start as usize];
         let end_ms = self.boundaries[end as usize];
         let copy = self.video.as_ref().is_some_and(|v| v.copy);
         // Remux seeks land on the keyframe at or before the seek point, which
@@ -716,39 +765,7 @@ impl Plan {
             // (Counted from the seek point.)
             a.push_all(["-t", &secs(end_ms - seek_ms)]);
         }
-
-        // Segmenting. Relative split times count from the first video packet,
-        // which is the boundary (a remux's seek point lies past it).
-        let times: Vec<String> = ((start + 1)..end)
-            .map(|k| {
-                let at = self.split_at[k as usize];
-                secs(if ctx.relative_split_times { at - start_ms } else { at })
-            })
-            .collect();
-        a.push_all([
-            "-f",
-            "segment",
-            "-segment_format",
-            "mpegts",
-            "-segment_format_options",
-            "avoid_negative_ts=disabled",
-        ]);
-        if !times.is_empty() {
-            a.push_all(["-segment_times", &times.join(",")]);
-        } else {
-            // Single segment window: never split.
-            a.push_all(["-segment_time", "999999"]);
-        }
-        a.push_all([
-            "-segment_start_number",
-            &start.to_string(),
-            "-segment_list",
-            "pipe:1",
-            "-segment_list_type",
-            "csv",
-            "%d.ts",
-        ]);
-        a.0
+        a
     }
 
     fn filter_graph(
@@ -1354,6 +1371,33 @@ mod tests {
             .map(|a| a.to_string_lossy().into_owned())
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    #[test]
+    fn a_conversion_is_one_matroska_file_of_the_whole_media() {
+        let ff = ffmpeg_with(vec![x264()], vec![]);
+        let mut req = request();
+        req.options.throttle = false;
+        let plan = Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, None).unwrap();
+        let ctx = ArgsContext {
+            input: Path::new("/media/movie.mkv"),
+            encoder: None,
+            relative_split_times: true,
+            preset: Some("fast"),
+            shader_cache: None,
+        };
+        let args: Vec<String> = plan
+            .file_args(&ctx, Path::new("/work/conversions/abc.mkv.part"))
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let line = args.join(" ");
+        assert!(line.ends_with("-f matroska /work/conversions/abc.mkv.part"), "{line}");
+        assert!(line.contains("-c:v libx264") && line.contains("-preset fast"), "{line}");
+        assert!(line.contains("-c:a aac"), "{line}");
+        for absent in ["-segment", "-ss ", "-t ", "-readrate", "-output_ts_offset"] {
+            assert!(!line.contains(absent), "{absent} in {line}");
+        }
     }
 
     #[test]

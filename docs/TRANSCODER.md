@@ -88,6 +88,31 @@ following status codes:
 | GET | `/v1/jobs/{id}/index.m3u8` | – | HLS VOD playlist |
 | GET | `/v1/jobs/{id}/master.m3u8` | – | multivariant playlist: one variant (`index.m3u8`) with `CODECS`, `SUPPLEMENTAL-CODECS`, `RESOLUTION`, `FRAME-RATE`, `VIDEO-RANGE` and the bandwidth (see *Dolby Vision in remuxes*). Transcoders that serve it say `hls_master_playlist: true` in their capabilities |
 | GET | `/v1/jobs/{id}/{n}.ts` | – | MPEG-TS segment `n` (waits for it, or starts ffmpeg) |
+| POST | `/v1/conversions` | `JobRequest` | `ConversionStatus {id, state, progress, duration_ms, size?, error?, video?, audio?}`: the request made into one Matroska file (see *Conversions*). Asked again for the same input and request, the same conversion (or its file) answers; a failed one starts again. Transcoders that serve it say `conversions: true` in their capabilities |
+| GET | `/v1/conversions/{id}` | – | `ConversionStatus`: `queued`, `running` (with `progress`, 0 to 1), `done` (with `size`) or `failed` (with `error`) |
+| DELETE | `/v1/conversions/{id}` | – | `204` (stops ffmpeg, deletes the file) |
+| GET | `/v1/conversions/{id}/file` | – | `video/x-matroska`, once done; one range (`bytes=a-`, `bytes=a-b`) as asked, `416` past the end |
+
+## Conversions
+
+A conversion makes a `JobRequest` into one Matroska file, the whole media
+in one FFmpeg run: what a download is when the device that keeps it
+doesn't play the original as it is (sound it doesn't decode, a picture
+too big for it). Its streams are what a job's segments would be (the same
+plan: encoder, tone mapping, AAC), made at full speed (`throttle` is
+ignored) from the start (`start_ms` is too). A remux whose segments would
+be edited (Dolby Vision converted, HDR10+ left out) has its video made
+anew instead, as a file can't be edited the way segments are.
+
+One conversion runs at a time, in a transcode slot like a job's process
+(a hardware session when one is free, else the software encoder); while
+every slot is in use it waits. Its id comes from the input (path, size,
+modification time) and the request's video, audio and subtitle parts, so
+the same file asked for twice is made once. Files live in
+`conversions/` under the work folder; the janitor deletes those unused
+for a week, and the least recently used past 64 GB. A transcoder that
+restarts knows the files it made by their names; half-made ones are
+deleted.
 
 ## How HLS jobs work
 

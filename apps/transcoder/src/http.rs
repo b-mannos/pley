@@ -14,12 +14,13 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use pley_transcoder_api::{
-    CoverRequest, Fingerprint, FingerprintRequest, Frames, FramesRequest, JobCreated, JobRequest, JobStatus,
-    KeyframesRequest, MediaInfo, PrefetchRequest, Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER, SubtitleRequest,
-    ThumbnailRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
+    ConversionStatus, CoverRequest, Fingerprint, FingerprintRequest, Frames, FramesRequest, JobCreated, JobRequest,
+    JobStatus, KeyframesRequest, MediaInfo, PrefetchRequest, Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER,
+    SubtitleRequest, ThumbnailRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
 };
 use tokio_util::io::ReaderStream;
 
+use crate::convert::Conversions;
 use crate::error::{ApiError, ApiResult};
 use crate::extract::Extractor;
 use crate::fingerprint::Fingerprinter;
@@ -33,6 +34,7 @@ use crate::util::dir_size;
 
 pub struct AppState {
     pub jobs: Arc<JobManager>,
+    pub conversions: Arc<Conversions>,
     pub prober: Arc<Prober>,
     pub extractor: Arc<Extractor>,
     pub keyframes: Arc<KeyframeStore>,
@@ -52,6 +54,7 @@ impl AppState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         jobs: Arc<JobManager>,
+        conversions: Arc<Conversions>,
         prober: Arc<Prober>,
         extractor: Arc<Extractor>,
         keyframes: Arc<KeyframeStore>,
@@ -65,6 +68,7 @@ impl AppState {
         Self {
             prefetcher: Prefetcher::new(jobs.clone(), keyframes.clone()),
             jobs,
+            conversions,
             prober,
             extractor,
             keyframes,
@@ -133,7 +137,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/jobs", get(list_jobs).post(create_job))
         .route("/jobs/{id}", get(get_job).delete(delete_job))
         .route("/jobs/{id}/touch", post(touch_job))
-        .route("/jobs/{id}/{file}", get(job_file));
+        .route("/jobs/{id}/{file}", get(job_file))
+        .route("/conversions", post(create_conversion))
+        .route("/conversions/{id}", get(get_conversion).delete(delete_conversion))
+        .route("/conversions/{id}/file", get(conversion_file));
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/metrics", get(metrics))
@@ -293,6 +300,83 @@ async fn delete_job(State(state): Shared, Path(id): Path<String>) -> ApiResult<S
     }
 }
 
+async fn create_conversion(State(state): Shared, Json(req): Json<JobRequest>) -> ApiResult<Json<ConversionStatus>> {
+    Ok(Json(state.conversions.create(req).await?))
+}
+
+async fn get_conversion(State(state): Shared, Path(id): Path<String>) -> ApiResult<Json<ConversionStatus>> {
+    state.conversions.status(&id).map(Json).ok_or_else(|| ApiError::NotFound(format!("conversion {id} not found")))
+}
+
+async fn delete_conversion(State(state): Shared, Path(id): Path<String>) -> ApiResult<StatusCode> {
+    if state.conversions.remove(&id).await {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::NotFound(format!("conversion {id} not found")))
+    }
+}
+
+/// A conversion's file once whole, with ranges: a download cut short goes on.
+async fn conversion_file(State(state): Shared, Path(id): Path<String>, headers: HeaderMap) -> ApiResult<Response> {
+    let path = state.conversions.file(&id).ok_or_else(|| ApiError::NotFound(format!("conversion {id} has no file")))?;
+    serve_range(&path, &headers, "video/x-matroska").await
+}
+
+/// `path` whole (200), or the one range asked for (206, `bytes=a-` or
+/// `bytes=a-b`); 416 for a range past its end.
+async fn serve_range(path: &std::path::Path, headers: &HeaderMap, content_type: &'static str) -> ApiResult<Response> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let mut file = tokio::fs::File::open(path).await?;
+    let total = file.metadata().await?.len();
+    let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok()).and_then(|v| parse_range(v, total));
+    let builder = Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::ACCEPT_RANGES, "bytes")
+        .header(header::CACHE_CONTROL, "no-cache");
+    let response = match range {
+        None => builder
+            .header(header::CONTENT_LENGTH, total)
+            .body(Body::from_stream(ReaderStream::with_capacity(file, 256 * 1024))),
+        Some(None) => builder
+            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+            .header(header::CONTENT_RANGE, format!("bytes */{total}"))
+            .body(Body::empty()),
+        Some(Some((start, end))) => {
+            file.seek(std::io::SeekFrom::Start(start)).await?;
+            let len = end - start + 1;
+            builder
+                .status(StatusCode::PARTIAL_CONTENT)
+                .header(header::CONTENT_LENGTH, len)
+                .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{total}"))
+                .body(Body::from_stream(ReaderStream::with_capacity(file.take(len), 256 * 1024)))
+        }
+    };
+    response.map_err(|e| ApiError::Internal(e.into()))
+}
+
+/// `Range: bytes=a-` or `bytes=a-b` of a file of `total` bytes: `None` for
+/// none (or one this doesn't serve, several ranges: the whole file then),
+/// `Some(None)` past the end, else the inclusive byte range.
+fn parse_range(value: &str, total: u64) -> Option<Option<(u64, u64)>> {
+    let spec = value.trim().strip_prefix("bytes=")?;
+    if spec.contains(',') {
+        return None;
+    }
+    let (first, last) = spec.split_once('-')?;
+    let start: u64 = first.trim().parse().ok()?;
+    if start >= total {
+        return Some(None);
+    }
+    let end = match last.trim() {
+        "" => total - 1,
+        last => last.parse::<u64>().ok()?.min(total - 1),
+    };
+    if end < start {
+        return Some(None);
+    }
+    Some(Some((start, end)))
+}
+
 async fn touch_job(State(state): Shared, Path(id): Path<String>) -> ApiResult<StatusCode> {
     let job = state.jobs.get(&id).ok_or_else(|| ApiError::JobNotFound(format!("job {id} not found")))?;
     job.touch();
@@ -365,8 +449,11 @@ mod tests {
         );
         let info =
             TranscoderInfo { version: "1.2.3".into(), capabilities: ff.caps.clone(), limits, ..Default::default() };
+        let conversions =
+            Conversions::new(ff.clone(), prober.clone(), jobs.slots.clone(), None, dir.join("conversions"));
         let state = Arc::new(AppState::new(
             jobs,
+            conversions,
             prober,
             extractor,
             keyframes,
@@ -385,6 +472,8 @@ mod tests {
 
     struct Answer {
         status: u16,
+        /// The status line and headers, as sent (names lowercase).
+        head: String,
         body: String,
     }
 
@@ -396,11 +485,23 @@ mod tests {
 
     /// One HTTP/1.1 request, read until the server closes the connection.
     async fn request(addr: SocketAddr, method: &str, path: &str, auth: Option<&str>, json: Option<String>) -> Answer {
+        let headers: Vec<(&str, &str)> = auth.map(|auth| ("Authorization", auth)).into_iter().collect();
+        request_with(addr, method, path, &headers, json).await
+    }
+
+    /// [`request`] with headers of its own.
+    async fn request_with(
+        addr: SocketAddr,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        json: Option<String>,
+    ) -> Answer {
         let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
         let body = json.unwrap_or_default();
         let mut message = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n");
-        if let Some(auth) = auth {
-            message.push_str(&format!("Authorization: {auth}\r\n"));
+        for (name, value) in headers {
+            message.push_str(&format!("{name}: {value}\r\n"));
         }
         message.push_str(&format!("Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()));
         stream.write_all(message.as_bytes()).await.unwrap();
@@ -409,7 +510,65 @@ mod tests {
         let text = String::from_utf8_lossy(&raw).into_owned();
         let (head, body) = text.split_once("\r\n\r\n").expect("an HTTP response");
         let status = head.split_whitespace().nth(1).and_then(|s| s.parse().ok()).expect("a status line");
-        Answer { status, body: body.to_owned() }
+        Answer { status, head: head.to_ascii_lowercase(), body: body.to_owned() }
+    }
+
+    #[test]
+    fn ranges_are_read_as_downloaders_send_them() {
+        assert_eq!(parse_range("bytes=0-", 10), Some(Some((0, 9))));
+        assert_eq!(parse_range("bytes=4-6", 10), Some(Some((4, 6))));
+        assert_eq!(parse_range("bytes=4-60", 10), Some(Some((4, 9))));
+        assert_eq!(parse_range("bytes=10-", 10), Some(None), "past the end");
+        assert_eq!(parse_range("bytes=6-4", 10), Some(None));
+        assert_eq!(parse_range("bytes=0-1,4-5", 10), None, "several: the whole file");
+        assert_eq!(parse_range("items=0-1", 10), None);
+    }
+
+    #[tokio::test]
+    async fn a_conversions_file_comes_whole_or_from_where_a_download_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let addr = serve(dir.path(), None).await;
+        let id = "0123456789abcdef0123456789abcdef";
+        std::fs::create_dir_all(dir.path().join("conversions")).unwrap();
+        std::fs::write(dir.path().join("conversions").join(format!("{id}.mkv")), b"0123456789").unwrap();
+
+        // Made before a restart: known by its file.
+        let status = request(addr, "GET", &format!("/v1/conversions/{id}"), None, None).await;
+        let status: ConversionStatus = serde_json::from_str(&status.body).unwrap();
+        assert_eq!((status.state, status.size), (pley_transcoder_api::ConversionState::Done, Some(10)));
+
+        let file = format!("/v1/conversions/{id}/file");
+        let whole = request_with(addr, "GET", &file, &[], None).await;
+        assert_eq!((whole.status, whole.body.as_str()), (200, "0123456789"));
+        assert!(whole.head.contains("accept-ranges: bytes"), "{}", whole.head);
+        let rest = request_with(addr, "GET", &file, &[("Range", "bytes=4-")], None).await;
+        assert_eq!((rest.status, rest.body.as_str()), (206, "456789"));
+        assert!(rest.head.contains("content-range: bytes 4-9/10"), "{}", rest.head);
+        let past = request_with(addr, "GET", &file, &[("Range", "bytes=10-")], None).await;
+        assert_eq!(past.status, 416);
+        assert!(past.head.contains("content-range: bytes */10"), "{}", past.head);
+
+        let removed = request(addr, "DELETE", &format!("/v1/conversions/{id}"), None, None).await;
+        assert_eq!(removed.status, 204);
+        for path in [format!("/v1/conversions/{id}"), file] {
+            assert_eq!(request(addr, "GET", &path, None, None).await.status, 404, "{path}");
+        }
+        // What isn't an id names no file.
+        for id in ["..%2F..%2Fsecret", "0123456789abcdef", "0123456789abcdef0123456789abcdeg"] {
+            let answer = request(addr, "GET", &format!("/v1/conversions/{id}/file"), None, None).await;
+            assert_eq!(answer.status, 404, "{id}");
+        }
+    }
+
+    #[tokio::test]
+    async fn conversions_need_ffmpeg_and_their_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let addr = serve(dir.path(), None).await;
+        let input = dir.path().join("movie.mkv");
+        std::fs::write(&input, b"x").unwrap();
+        let body = serde_json::json!({"input": input}).to_string();
+        let answer = request(addr, "POST", "/v1/conversions", None, Some(body)).await;
+        assert_eq!((answer.status, answer.code()), (500, "ffmpeg_failed".to_owned()), "{}", answer.body);
     }
 
     #[tokio::test]

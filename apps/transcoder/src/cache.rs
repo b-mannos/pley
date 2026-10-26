@@ -43,6 +43,9 @@ pub fn policies(work_dir: &Path) -> Vec<(PathBuf, Policy)> {
         // mapping: rebuilt in a fraction of a second by the next process
         // that needs them.
         (work_dir.join("libplacebo"), Policy { max_age: 30 * DAY, max_bytes: 128 << 20 }),
+        // Converted downloads: made again when asked once gone, which takes
+        // minutes. A week unused, or more than this many movies' worth.
+        (work_dir.join("conversions"), Policy { max_age: 7 * DAY, max_bytes: 64 << 30 }),
     ]
 }
 

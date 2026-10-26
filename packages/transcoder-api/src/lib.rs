@@ -394,6 +394,11 @@ pub struct Capabilities {
     /// Older transcoders lack it.
     #[serde(default)]
     pub subtitle_matroska: bool,
+    /// `POST /v1/conversions` makes a [`JobRequest`] into one Matroska file
+    /// (a download that plays where the original doesn't). Older
+    /// transcoders lack it.
+    #[serde(default)]
+    pub conversions: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -728,6 +733,42 @@ pub struct JobCreated {
     pub video: Option<VideoPlan>,
     pub audio: Option<AudioPlan>,
     pub warnings: Vec<String>,
+}
+
+/// Where a conversion is.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum ConversionState {
+    /// Waiting its turn (one at a time) or for a free transcode slot.
+    #[default]
+    Queued,
+    Running,
+    /// The file is whole: `GET /v1/conversions/{id}/file`.
+    Done,
+    /// FFmpeg failed: see `error`.
+    Failed,
+}
+
+/// `POST /v1/conversions` and `GET /v1/conversions/{id}`: a [`JobRequest`]
+/// made into one Matroska file, at full speed. Its id comes from the input
+/// (path, size and time) and what the request asks of it, so asking again
+/// finds the same conversion (or the file it made).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ConversionStatus {
+    pub id: String,
+    pub state: ConversionState,
+    /// How far it has come, 0 to 1.
+    pub progress: f64,
+    pub duration_ms: i64,
+    /// The file's size, once done.
+    #[serde(default)]
+    pub size: Option<u64>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub video: Option<VideoPlan>,
+    #[serde(default)]
+    pub audio: Option<AudioPlan>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]

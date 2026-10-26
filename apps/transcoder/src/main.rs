@@ -8,6 +8,7 @@
 
 mod adaptive;
 mod cache;
+mod convert;
 mod dovi;
 mod error;
 mod extract;
@@ -232,6 +233,13 @@ async fn run(args: Args) -> anyhow::Result<()> {
         limits.clone(),
     );
     jobs.spawn_reaper();
+    let conversions = convert::Conversions::new(
+        ff.clone(),
+        prober.clone(),
+        jobs.slots.clone(),
+        shader_cache(&work_dir),
+        work_dir.join("conversions"),
+    );
     cache::spawn_janitor(work_dir.clone());
 
     let info = TranscoderInfo {
@@ -246,12 +254,14 @@ async fn run(args: Args) -> anyhow::Result<()> {
         capabilities: pley_transcoder_api::Capabilities {
             hls_master_playlist: true,
             subtitle_matroska: true,
+            conversions: true,
             ..ff.caps.clone()
         },
         limits,
     };
     let state = Arc::new(http::AppState::new(
         jobs.clone(),
+        conversions.clone(),
         prober,
         extractor,
         keyframes,
@@ -293,6 +303,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         _ = stop.wait_for(|stop| *stop) => {
             // Stop ffmpeg first: requests waiting for segments then fail right
             // away instead of keeping the graceful drain open.
+            conversions.shutdown();
             jobs.shutdown().await;
             if tokio::time::timeout(Duration::from_secs(5), &mut server).await.is_err() {
                 tracing::warn!("some requests were still running at shutdown");
