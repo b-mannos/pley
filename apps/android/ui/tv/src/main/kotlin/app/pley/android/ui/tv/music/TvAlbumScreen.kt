@@ -162,6 +162,7 @@ private fun AlbumContent(
                         page.artist!!,
                         onClick = { onArtist(artistId) },
                         color = PleyColors.AccentBright,
+                        link = true,
                         modifier = Modifier.padding(top = 2.dp).offset(x = (-16).dp).rememberedFocus(memory, "artist"),
                     )
                 } else {

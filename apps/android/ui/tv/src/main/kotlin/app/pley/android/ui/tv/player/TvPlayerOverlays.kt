@@ -228,6 +228,8 @@ internal fun BoxScope.TvUpNextCard(card: UpNextUi?, ui: TvPlayerUi, onPlay: () -
                         stringResource(R.string.tv_player_cancel),
                         onClick = onCancel,
                         modifier = Modifier
+                            // As tall as Play now beside it.
+                            .heightIn(min = 48.dp)
                             .onFocusChanged { if (it.isFocused) ui.focused = PlayerFocus.UpNext }
                             .focusProperties {
                                 up = FocusRequester.Cancel

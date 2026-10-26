@@ -194,7 +194,12 @@ fun TvRoundButton(
     }
 }
 
-/** A text button: Change server, Cancel, Clear filters. 40 tall, no fill until focused. */
+/**
+ * A text button: Change server, Cancel, Clear filters. 40 tall, its label
+ * on a faint fill, quieter than a pill's (no edge), so beside a focused
+ * button it still reads as one. A [link] (an album's artist, in a column
+ * of text) has no fill until focused.
+ */
 @Composable
 fun TvTextButton(
     label: String,
@@ -202,27 +207,29 @@ fun TvTextButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     color: Color = PleyColors.Fg,
+    link: Boolean = false,
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
     HandOffFocus(enabled, focused)
+    val fill = if (link) Color.Transparent else TextButtonFill
     Button(
         onClick = onClick,
         enabled = enabled,
         interactionSource = interactions,
         modifier = modifier
-            .heightIn(min = 40.dp)
+            .heightIn(min = PleyTv.ButtonHeight)
             .alpha(if (enabled) 1f else DISABLED_ALPHA)
             .focusProperties { canFocus = enabled || focused },
         shape = ButtonDefaults.shape(PleyShape.Control),
         colors = ButtonDefaults.colors(
-            containerColor = Color.Transparent,
+            containerColor = fill,
             contentColor = color,
             focusedContainerColor = PleyColors.Accent,
             focusedContentColor = PleyColors.OnAccent,
             pressedContainerColor = PleyColors.AccentBright,
             pressedContentColor = PleyColors.OnAccent,
-            disabledContainerColor = Color.Transparent,
+            disabledContainerColor = fill,
             disabledContentColor = color,
         ),
         scale = ButtonDefaults.scale(focusedScale = PleyFocus.PILL_SCALE, pressedScale = 1f),
@@ -235,6 +242,9 @@ fun TvTextButton(
 
 /** Disabled buttons are drawn at 40 %. */
 private const val DISABLED_ALPHA = 0.4f
+
+/** A text button's fill at rest: fg 8 %, under a pill's 12 %. */
+private val TextButtonFill = PleyColors.Fg.copy(alpha = 0.08f)
 
 /** A pill's least width, and the room either side of its label. */
 private val PillMinWidth = 128.dp
