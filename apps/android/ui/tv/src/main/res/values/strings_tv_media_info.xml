@@ -48,6 +48,7 @@
     <string name="tv_readout_shown">Shown</string>
     <string name="tv_readout_delivery_file">From the file, drawn by this TV</string>
     <string name="tv_readout_delivery_server">As WebVTT from the server, drawn by this TV</string>
+    <string name="tv_readout_delivery_pictures">As pictures from the server, drawn by this TV</string>
     <string name="tv_readout_delivery_burned">Burned into the picture by the server</string>
     <string name="tv_readout_off">Off</string>
     <string name="tv_readout_decoded">Decoded</string>

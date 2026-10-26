@@ -195,6 +195,7 @@ internal object TvReadout {
         val shown = when (d.subtitleDelivery) {
             SubtitleDelivery.File -> r.getString(R.string.tv_readout_delivery_file)
             SubtitleDelivery.Server -> r.getString(R.string.tv_readout_delivery_server)
+            SubtitleDelivery.ServerPictures -> r.getString(R.string.tv_readout_delivery_pictures)
             SubtitleDelivery.BurnedIn -> r.getString(R.string.tv_readout_delivery_burned)
             null -> null
         }

@@ -7,6 +7,7 @@ import app.pley.android.model.PlaybackInfo
 import app.pley.android.model.PlaybackMethod
 import app.pley.android.model.PlaybackMode
 import app.pley.android.model.StreamKind
+import app.pley.android.network.ApiException
 import app.pley.android.player.PlayRequest
 import app.pley.android.player.subtitles.PictureLoad
 import app.pley.android.player.subtitles.PictureSource
@@ -93,6 +94,30 @@ class SideloadTest {
         assertNull(h.playbackRequests().single().subtitleIndex)
         assertEquals(true, h.playbackRequests().single().caps.pictureSubtitlesSideload)
         assertEquals(1, asked.size)
+    }
+
+    @Test
+    fun `a server without the mks burns the pictures in instead`() {
+        // An older server: no .mks route.
+        val older = SessionHarness(
+            caps = capsOf(TestDevices.sdrPhone),
+            pictures = PictureSource { _, _, _ -> throw ApiException(404, "not_found", "Not found") },
+        )
+        try {
+            val movie = Catalogue.movieWithTracks(older.api)
+            val picture = movie.files.first().streams.first { it.kind == StreamKind.Subtitle && it.textBased == false }
+            val c = older.play(PlayRequest(movie.id, fromStart = true))
+            older.engine.ready()
+            c.selectSubtitle(picture.index.toLong())
+            older.settle()
+            val requests = older.playbackRequests()
+            assertEquals(2, requests.size)
+            assertNull(requests.first().subtitleIndex)
+            assertEquals(picture.index, requests.last().subtitleIndex)
+            assertTrue(c.state.value.subtitles.first { it.index == picture.index.toLong() }.burnIn)
+        } finally {
+            older.close()
+        }
     }
 }
 

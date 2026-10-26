@@ -142,9 +142,13 @@ object PlaybackDetails {
         )
     }
 
-    /** How [subtitle] reaches the screen in [info]: burned in, the server's WebVTT, or read from the file by the player. */
+    /**
+     * How [subtitle] reaches the screen in [info]: burned in, the server's
+     * .mks of pictures or its WebVTT, or read from the file by the player.
+     */
     fun deliveryOf(info: PlaybackInfo, subtitle: MediaStream): SubtitleDelivery = when {
         info.burnSubtitles && info.subtitleIndex == subtitle.index -> SubtitleDelivery.BurnedIn
+        info.hls && PlaybackPlan.isImage(subtitle) && !subtitle.external -> SubtitleDelivery.ServerPictures
         info.hls || subtitle.external -> SubtitleDelivery.Server
         else -> SubtitleDelivery.File
     }

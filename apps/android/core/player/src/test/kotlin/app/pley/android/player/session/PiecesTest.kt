@@ -132,6 +132,7 @@ class PiecesTest {
         val hls = direct.copy(method = PlaybackMethod.Transcode, hls = true)
         assertEquals(SubtitleDelivery.Server, PlaybackDetails.deliveryOf(hls, srt))
         assertEquals(SubtitleDelivery.BurnedIn, PlaybackDetails.deliveryOf(hls.copy(burnSubtitles = true, subtitleIndex = 4), pgs))
+        assertEquals(SubtitleDelivery.ServerPictures, PlaybackDetails.deliveryOf(hls, pgs))
         assertNull(PlaybackDetails.build(texts, direct, file, null, null, 0, null, emptyList()).subtitleDelivery)
     }
 

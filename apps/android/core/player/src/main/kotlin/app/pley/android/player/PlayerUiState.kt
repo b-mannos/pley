@@ -94,6 +94,9 @@ enum class SubtitleDelivery {
     /** The server's WebVTT (streams, and subtitle files beside the media), drawn by the player. */
     Server,
 
+    /** Picture subtitles beside a stream: the server's .mks of the track, drawn by the player. */
+    ServerPictures,
+
     /** Drawn into the picture by the server's transcode. */
     BurnedIn,
 }
