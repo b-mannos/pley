@@ -9,6 +9,7 @@ calls reach the server through the service's proxy, which adds the token.
 
 from __future__ import annotations
 
+import binascii
 import json
 import os
 import threading
@@ -31,7 +32,9 @@ def metadata(server: str, user_agent: str) -> dict:
     """The server's OAuth metadata (RFC 8414), checked to be its own: the
     issuer is the address asked (§3.3), and the endpoints are on it."""
     meta = Client(server, user_agent).get("/.well-known/oauth-authorization-server")
-    if not isinstance(meta, dict) or meta.get("issuer") != server:
+    if not isinstance(meta, dict):
+        raise ApiError(0, "issuer", "{} isn't a pley server".format(server))
+    if meta.get("issuer") != server:
         raise ApiError(0, "issuer", "the server says it is {}, not {}".format(meta.get("issuer"), server))
     for name in ("token_endpoint", "device_authorization_endpoint", "revocation_endpoint"):
         if not str(meta.get(name, "")).startswith(server + "/"):
@@ -95,6 +98,27 @@ class DeviceSignIn:
         }
 
 
+def write_private(path: str, text: str) -> None:
+    """Writes `path` whole, readable by this user only, and on the disk
+    before it replaces what was there: a refresh token written and lost to a
+    power cut is spent all the same. The plugin and the service each write
+    to a name of their own first."""
+    temporary = "%s.%s.new" % (path, binascii.hexlify(os.urandom(6)).decode("ascii"))
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        raise
+
+
 class Store:
     """The token file, written whole and atomically."""
 
@@ -117,10 +141,7 @@ class Store:
         return data if isinstance(data, dict) and data.get("refresh_token") else None
 
     def save(self, data: dict) -> None:
-        temporary = self.path + ".new"
-        with open(temporary, "w", encoding="utf-8") as f:
-            json.dump(data, f)
-        os.replace(temporary, self.path)
+        write_private(self.path, json.dumps(data))
 
     def clear(self) -> None:
         try:
@@ -178,14 +199,27 @@ class Tokens:
         form = {"grant_type": "refresh_token", "refresh_token": data["refresh_token"], "client_id": CLIENT_ID}
         response = client.request("POST", path_of(data["server"], data["token_endpoint"]), form=form)
         if response.status == 200:
-            tokens = response.json()
-            renewed = dict(data)
-            renewed.update(
-                access_token=tokens["access_token"],
-                refresh_token=tokens["refresh_token"],
-                expires_at=self.clock() + int(tokens.get("expires_in") or 3600),
-                scope=tokens.get("scope", data.get("scope")),
-            )
+            try:
+                tokens = response.json()
+                renewed = dict(data)
+                renewed.update(
+                    access_token=str(tokens["access_token"]),
+                    refresh_token=str(tokens["refresh_token"]),
+                    expires_at=self.clock() + int(tokens.get("expires_in") or 3600),
+                    scope=tokens.get("scope", data.get("scope")),
+                )
+            except (ValueError, KeyError, TypeError, AttributeError):
+                raise ApiError(response.status, "refresh", "the server's answer to a refresh wasn't tokens")
+            on_disk = self.store.load()
+            if not on_disk or on_disk.get("refresh_token") != data["refresh_token"]:
+                # Signed out, or in again, while this refresh was asked (the
+                # plugin): what it got belongs to no sign-in any more.
+                revoke(renewed, self.user_agent)
+                self.data, self.stamp = None, None
+                current = self.current()
+                if not current:
+                    raise SignedOut()
+                return current
             # Saved before it is used: the old refresh token is spent.
             self.store.save(renewed)
             self.data, self.stamp = renewed, self.store.stamp()
@@ -205,10 +239,21 @@ class Tokens:
         with self.lock:
             data = self.current()
             if data:
-                try:
-                    form = {"token": data["refresh_token"], "client_id": CLIENT_ID}
-                    path = path_of(data["server"], data["revocation_endpoint"])
-                    Client(data["server"], self.user_agent).request("POST", path, form=form)
-                except ApiError:
-                    pass
+                revoke(data, self.user_agent)
             self.forget()
+
+
+def revoke(record: dict, user_agent: str) -> bool:
+    """Ends the grant of a sign-in on its server (RFC 7009): whether the
+    server said so. Once more after a 503, which says to try again."""
+    form = {"token": record["refresh_token"], "client_id": CLIENT_ID}
+    path = path_of(record["server"], record["revocation_endpoint"])
+    for attempt in range(2):
+        try:
+            response = Client(record["server"], user_agent, timeout=5).request("POST", path, form=form)
+        except ApiError:
+            return False
+        if response.status != 503 or attempt:
+            return response.status == 200
+        time.sleep(2)
+    return False

@@ -17,6 +17,8 @@ class TokenServer:
         self.issued = 1
         self.refreshes = 0
         self.down = False
+        # What happens while a refresh is asked (another sign-in, say).
+        self.during_refresh = None
         self.lock = threading.Lock()
         self.server = support.FakeServer(self.handle)
         self.url = self.server.url
@@ -32,6 +34,8 @@ class TokenServer:
             return support.answer(503, {"error": "temporarily_unavailable"})
         form = request.form()
         assert form["client_id"] == auth.CLIENT_ID
+        if self.during_refresh:
+            self.during_refresh()
         with self.lock:
             if form.get("refresh_token") != "rt-%d" % self.issued:
                 return support.answer(400, {"error": "invalid_grant", "error_description": "used again"})
@@ -120,6 +124,19 @@ class TokensTest(unittest.TestCase):
         self.assertEqual(self.tokens.access(), "at-from-the-plugin")
         self.store.clear()
         self.assertIsNone(self.tokens.server())
+
+    def test_a_sign_in_made_during_a_refresh_is_kept(self):
+        # The plugin signs in again while the service refreshes: the new
+        # sign-in stays, and what the refresh got is ended.
+        self.server.during_refresh = lambda: self.store.save(self.record(access_token="at-new", refresh_token="rt-new"))
+        self.assertEqual(self.tokens.refreshed("at-1"), "at-new")
+        self.assertEqual(self.store.load()["refresh_token"], "rt-new")
+        revoked = [r.form()["token"] for r in self.server.server.requests if r.path == "/api/oauth/revoke"]
+        self.assertEqual(revoked, ["rt-2"])
+
+    @unittest.skipIf(os.name == "nt", "file modes are POSIX")
+    def test_tokens_are_readable_by_this_user_only(self):
+        self.assertEqual(os.stat(self.store.path).st_mode & 0o777, 0o600)
 
     def test_signing_out_ends_the_sign_in_on_the_server(self):
         self.tokens.sign_out()

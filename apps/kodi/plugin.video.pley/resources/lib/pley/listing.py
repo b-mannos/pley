@@ -40,7 +40,13 @@ def image(base: str, url, width: int):
     return path_in(base, url + ("&" if "?" in url else "?") + "w=%d" % width)
 
 
-def label(item: dict) -> str:
+def label(item: dict, with_show: bool = False) -> str:
+    """An item's name in a listing. Episodes away from their season (Home's
+    rows, search, playlists) say their show: "Show · S1 · E4 · Title"."""
+    if item["kind"] == "episode" and with_show and item.get("grandparent_title"):
+        if item.get("parent_index") is not None and item.get("index") is not None:
+            return "%s · S%d · E%d · %s" % (item["grandparent_title"], item["parent_index"], item["index"], item["title"])
+        return "%s · %s" % (item["grandparent_title"], item["title"])
     if item["kind"] == "episode" and item.get("index") is not None:
         return "%d. %s" % (item["index"], item["title"])
     if item["kind"] == "track" and item.get("index") is not None:
@@ -50,7 +56,13 @@ def label(item: dict) -> str:
 
 def art(base: str, item: dict) -> dict:
     poster = image(base, item.get("poster_url"), 500)
-    backdrop = image(base, item.get("backdrop_url"), 1920)
+    backdrop_url = item.get("backdrop_url")
+    if not backdrop_url and item["kind"] in ("movie", "show") and item.get("id") is not None:
+        # Library listings leave backdrops out (grids show posters); skins
+        # show one behind the list. Same version as the poster's.
+        version = (item.get("poster_url") or "").partition("?")[2]
+        backdrop_url = "/api/items/%d/images/backdrop%s" % (item["id"], "?" + version if version else "")
+    backdrop = image(base, backdrop_url, 1280)
     still = image(base, item.get("thumb_url"), 640)
     found = {}
     if item["kind"] == "episode":
@@ -66,9 +78,9 @@ def art(base: str, item: dict) -> dict:
     return {k: v for k, v in found.items() if v}
 
 
-def list_item(base: str, item: dict) -> xbmcgui.ListItem:
+def list_item(base: str, item: dict, with_show: bool = False) -> xbmcgui.ListItem:
     kind = item["kind"]
-    li = xbmcgui.ListItem(label(item), offscreen=True)
+    li = xbmcgui.ListItem(label(item, with_show), offscreen=True)
     li.setArt(art(base, item))
     state = item.get("user_state") or {}
     seconds = (item.get("duration_ms") or 0) // 1000
@@ -111,8 +123,10 @@ def list_item(base: str, item: dict) -> xbmcgui.ListItem:
             tag.setTvShowTitle(item.get("parent_title") or "")
             tag.setSeason(item.get("index") or 0)
         tag.setPlaycount(1 if state.get("watched") else 0)
-        if kind in PLAYABLE and state.get("position_ms") and seconds:
-            tag.setResumePoint(state["position_ms"] / 1000.0, float(seconds))
+        if kind in PLAYABLE:
+            # Said even when there is none: Kodi otherwise offers a resume
+            # point of its own, kept for this address from a playback before.
+            tag.setResumePoint((state.get("position_ms") or 0) / 1000.0, float(seconds))
         if kind in ("show", "season") and item.get("leaf_count") is not None:
             total = item["leaf_count"]
             watched = item.get("viewed_leaf_count") or 0

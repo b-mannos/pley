@@ -162,7 +162,7 @@ class ProxyTest(unittest.TestCase):
         self.proxy.stop()
         with self.assertRaises(api.ApiError) as down:
             client.get("/status")
-        self.assertEqual((down.exception.status, down.exception.code), (0, "unreachable"))
+        self.assertEqual((down.exception.status, down.exception.code), (0, "service_off"))
 
     def test_a_server_out_of_reach_is_said_within_seconds(self):
         # 192.0.2.1 is for documentation: nothing ever answers there, as a
@@ -194,6 +194,14 @@ class ProxyTest(unittest.TestCase):
 
     def proxy_threads(self):
         return [t for t in threading.enumerate() if t.name.startswith("pley-proxy") and t.is_alive()]
+
+    def test_subtitles_are_named_for_kodi(self):
+        named = api.subtitle_name("/api/files/7/subtitles/3.vtt", "ENG", True)
+        self.assertEqual(named, "/api/files/7/subtitles/3.eng.forced.vtt")
+        self.assertEqual(api.subtitle_name("/api/files/7/subtitles/3.vtt", None, False), "/api/files/7/subtitles/3.vtt")
+        self.assertEqual(api.subtitle_name("/api/files/7/subtitles/3.vtt", "x-1", False), "/api/files/7/subtitles/3.vtt")
+        response, data = self.ask("GET", "/%s/api/files/7/subtitles/1003.fre.forced.vtt" % SECRET)
+        self.assertEqual(json.loads(data)["path"], "/api/files/7/subtitles/1003.vtt", "the server's own name")
 
     def test_addresses_the_server_gives_become_the_proxys(self):
         base = "http://127.0.0.1:5000/s3cret"

@@ -165,7 +165,7 @@ class EndToEndTest(unittest.TestCase):
             self.assertEqual(head.body, f.read(1024))
 
         # The service's reports land on the item.
-        player = service.Player(holder, AGENT)
+        player = service.Player(holder, AGENT, service.Worker())
         body = {"position_ms": 20_000, "duration_ms": info["duration_ms"], "state": "paused", "session_id": info["session_id"]}
         player.call("POST", "/api/items/%d/progress" % item, body)
         self.assertEqual(client.get("/api/items/%d" % item)["user_state"]["position_ms"], 20_000)

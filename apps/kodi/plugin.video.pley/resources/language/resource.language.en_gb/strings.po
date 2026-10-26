@@ -161,6 +161,18 @@ msgctxt "#30074"
 msgid "Waiting for approval. The code works for less than a minute more."
 msgstr ""
 
+msgctxt "#30075"
+msgid "Waiting for approval. The code works for 1 more minute."
+msgstr ""
+
+msgctxt "#30076"
+msgid "Signed in"
+msgstr ""
+
+msgctxt "#30077"
+msgid "Can't reach the server: trying again."
+msgstr ""
+
 # Settings
 
 msgctxt "#30040"

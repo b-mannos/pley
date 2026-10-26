@@ -1183,8 +1183,11 @@ server restarts ffmpeg at the right segment on seeks. Audio-only items (tracks)
 use the same endpoint and get either a direct URL or an audio-only HLS stream.
 
 The player should send `POST /api/items/{id}/progress` every ~10 s while
-playing (with `session_id`), on pause, and with `state: "stopped"` when closing,
-then `DELETE /api/playback/{session_id}`. A downloaded file played as it is
+playing (with `session_id`), on pause and every ~30 s while paused, and with
+`state: "stopped"` when closing, then `DELETE /api/playback/{session_id}`. A
+session not heard from for 90 s has lost its player: it leaves "Now playing"
+and its conversion stops (segments then answer `404`, "playback session
+expired"); after 15 minutes it is forgotten. A downloaded file played as it is
 reports without a session; reports made while the server was out of reach are
 sent once it is back, each with its `age_ms`.
 

@@ -1,6 +1,6 @@
 import unittest
 
-import support  # noqa: F401
+import support
 from pley import api
 
 
@@ -23,6 +23,17 @@ class NormalizeTest(unittest.TestCase):
         for typed in ["ftp://nas", "http://", "http://nas/pley", "http://user@nas", "http://nas:99999", "nas?x=1"]:
             with self.assertRaises(ValueError, msg=typed):
                 api.normalize(typed)
+
+
+class NotPleyTest(unittest.TestCase):
+    def test_a_web_page_is_said_to_be_something_else(self):
+        server = support.FakeServer(lambda request: (200, {"Content-Type": "text/html"}, b"<html>router</html>"))
+        try:
+            with self.assertRaises(api.ApiError) as refused:
+                api.Client(server.url, "pleyKodi/test").get("/.well-known/oauth-authorization-server")
+            self.assertEqual(refused.exception.code, "not_pley")
+        finally:
+            server.close()
 
 
 class ErrorsTest(unittest.TestCase):

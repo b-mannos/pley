@@ -57,15 +57,33 @@ TEXT = {
     "cant_reach_hint": 30067,
     "waiting": 30073,
     "waiting_last_minute": 30074,
+    "waiting_one_minute": 30075,
+    "signed_in": 30076,
+    "retrying": 30077,
 }
 
 
+# One Addon and its strings for each call of the plugin (begin()): a listing
+# names each item's menu, and an Addon made each time reads the settings
+# again.
+_call = {}
+
+
+def begin() -> None:
+    _call.clear()
+
+
 def addon() -> xbmcaddon.Addon:
-    return xbmcaddon.Addon(ADDON_ID)
+    if "addon" not in _call:
+        _call["addon"] = xbmcaddon.Addon(ADDON_ID)
+    return _call["addon"]
 
 
 def text(name: str) -> str:
-    return addon().getLocalizedString(TEXT[name])
+    strings = _call.setdefault("strings", {})
+    if name not in strings:
+        strings[name] = addon().getLocalizedString(TEXT[name])
+    return strings[name]
 
 
 def setting(name: str) -> str:

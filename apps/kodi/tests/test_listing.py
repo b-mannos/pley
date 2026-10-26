@@ -42,8 +42,20 @@ class ListingTest(unittest.TestCase):
         self.assertNotIn("IsPlayable", li.properties)
         self.assertEqual((li.properties["TotalEpisodes"], li.properties["UnWatchedEpisodes"]), ("10", "6"))
         self.assertEqual(li.properties["TotalSeasons"], "2")
-        self.assertEqual(li.art, {})
+        # Library listings leave the backdrop out: it is asked for by id.
+        self.assertEqual(li.art, {"fanart": BASE + "/api/items/30/images/backdrop?w=1280"})
         self.assertNotIn("setResumePoint", li.video.values)
+
+    def test_episodes_away_from_their_season_say_their_show(self):
+        self.assertEqual(listing.label(EPISODE, with_show=True), "The Show · S2 · E1 · Pilot")
+        self.assertEqual(listing.list_item(BASE, EPISODE, with_show=True).label, "The Show · S2 · E1 · Pilot")
+        no_numbers = dict(EPISODE, index=None, parent_index=None)
+        self.assertEqual(listing.label(no_numbers, with_show=True), "The Show · Pilot")
+
+    def test_a_title_never_played_says_so(self):
+        # Kodi would otherwise offer a resume point of its own for the address.
+        fresh = dict(EPISODE, user_state={"position_ms": 0, "watched": False})
+        self.assertEqual(listing.list_item(BASE, fresh).video.values["setResumePoint"], (0.0, 1800.0))
 
     def test_tracks_are_music(self):
         track = {"id": 5, "library_id": 3, "kind": "track", "title": "Song", "sort_title": "Song", "index": 3,

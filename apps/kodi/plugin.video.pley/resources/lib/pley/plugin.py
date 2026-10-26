@@ -27,6 +27,7 @@ QUALITIES = [(None, None), (30000, 2160), (20000, 1080), (15000, 2160), (12000, 
 
 class Plugin:
     def __init__(self, argv):
+        kodi.begin()
         self.base_url = argv[0]
         self.handle = int(argv[1]) if len(argv) > 1 and argv[1].lstrip("-").isdigit() else -1
         query = argv[2][1:] if len(argv) > 2 and argv[2].startswith("?") else ""
@@ -61,9 +62,12 @@ class Plugin:
         except api.ApiError:
             return {"signed_in": False, "server": None}
 
-    def folder(self, title: str, params: dict, icon: str = "DefaultFolder.png") -> None:
+    def folder(self, title: str, params: dict, icon: str = "DefaultFolder.png", last: bool = False) -> None:
         li = xbmcgui.ListItem(title, offscreen=True)
         li.setArt({"icon": icon, "thumb": icon})
+        if last:
+            # After the items, however they're sorted ("Next page").
+            li.setProperty("SpecialSort", "bottom")
         xbmcplugin.addDirectoryItem(self.handle, self.url(**params), li, isFolder=True)
 
     def action(self, title: str, params: dict, icon: str = "DefaultAddonService.png") -> None:
@@ -71,11 +75,13 @@ class Plugin:
         li.setArt({"icon": icon, "thumb": icon})
         xbmcplugin.addDirectoryItem(self.handle, self.url(**params), li, isFolder=False)
 
-    def items(self, items: list, content: str | None = None) -> None:
+    def items(self, items: list, content: str | None = None, in_season: bool = False) -> None:
+        """`in_season`: a season's episodes, which need no show in their
+        names; elsewhere (Home's rows, search, playlists) they say it."""
         base = self.proxy_base
         entries = []
         for item in items:
-            li = listing.list_item(base, item)
+            li = listing.list_item(base, item, with_show=not in_season)
             li.addContextMenuItems(self.menu(item))
             if item["kind"] in listing.PLAYABLE:
                 # The resume point goes along, so playing needs no details first.
@@ -87,6 +93,9 @@ class Plugin:
         kinds = {item["kind"] for item in items}
         if content is None and len(kinds) == 1:
             content = listing.CONTENT.get(kinds.pop())
+        elif content is None and kinds and kinds <= {"movie", "show", "episode", "extra"}:
+            # A row of films and episodes: poster views still apply.
+            content = "movies"
         if content:
             xbmcplugin.setContent(self.handle, content)
 
@@ -128,7 +137,7 @@ class Plugin:
             elif e.code == "signed_out":
                 message = kodi.text("signed_out")
             elif e.code == "service_off":
-                message = e.message
+                message = kodi.text("service_off")
             else:
                 message = kodi.text("server_error") % e.message
             kodi.notify(message, error=True)
@@ -171,10 +180,11 @@ class Plugin:
             self.action(kodi.text("choose_server"), {"route": "choose_server"}, "DefaultNetwork.png")
             return self.end()
         client = self.client()
-        for hub in client.get("/api/hubs/home").get("hubs", []):
+        home, libraries = together(lambda: client.get("/api/hubs/home"), lambda: client.get("/api/libraries"))
+        for hub in home.get("hubs", []):
             self.folder(hub["title"], {"route": "hub", "key": hub["key"]}, "DefaultRecentlyAddedMovies.png")
         icons = {"movies": "DefaultMovies.png", "shows": "DefaultTVShows.png", "music": "DefaultMusicAlbums.png"}
-        for library in client.get("/api/libraries"):
+        for library in libraries:
             params = {"route": "library", "id": library["id"], "kind": library["kind"]}
             self.folder(library["name"], params, icons.get(library["kind"], "DefaultFolder.png"))
         self.folder(kodi.text("playlists"), {"route": "playlists"}, "DefaultPlaylist.png")
@@ -193,22 +203,24 @@ class Plugin:
         library, kind = self.params["id"], self.params.get("kind")
         offset = int(self.params.get("offset", 0))
         client = self.client()
+        items = lambda: client.get("/api/libraries/%s/items" % library, sort="title", offset=offset, limit=PAGE)  # noqa: E731
         if offset == 0 and kind in ("movies", "shows"):
-            collections = client.get("/api/libraries/%s/collections" % library).get("collections", [])
-            if collections:
+            sets, page = together(lambda: client.get("/api/libraries/%s/collections" % library), items)
+            if sets.get("collections"):
                 self.folder(kodi.text("collections"), {"route": "collections", "id": library}, "DefaultSets.png")
-        page = client.get("/api/libraries/%s/items" % library, sort="title", offset=offset, limit=PAGE)
+        else:
+            page = items()
         self.items(page.get("items", []))
         if offset + PAGE < page.get("total", 0):
             params = {"route": "library", "id": library, "kind": kind, "offset": offset + PAGE}
-            self.folder(kodi.text("next_page"), params, "DefaultFolder.png")
+            self.folder(kodi.text("next_page"), params, "DefaultFolder.png", last=True)
         xbmcplugin.addSortMethod(self.handle, xbmcplugin.SORT_METHOD_UNSORTED)
         xbmcplugin.addSortMethod(self.handle, xbmcplugin.SORT_METHOD_VIDEO_YEAR)
         self.end()
 
     def route_item(self) -> None:
         children = self.client().get("/api/items/%s/children" % self.params["id"]).get("items", [])
-        self.items(children)
+        self.items(children, in_season=True)
         if children and children[0]["kind"] in ("episode", "track"):
             xbmcplugin.addSortMethod(self.handle, xbmcplugin.SORT_METHOD_UNSORTED)
             xbmcplugin.addSortMethod(self.handle, xbmcplugin.SORT_METHOD_LABEL)
@@ -224,7 +236,10 @@ class Plugin:
                     "fanart": listing.image(self.proxy_base, collection.get("backdrop_url"), 1920),
                 }
             )
-            li.getVideoInfoTag().setPlot(collection.get("summary") or "")
+            tag = li.getVideoInfoTag()
+            tag.setMediaType("set")
+            tag.setTitle(collection["title"])
+            tag.setPlot(collection.get("summary") or "")
             xbmcplugin.addDirectoryItem(self.handle, self.url(route="collection", id=collection["id"]), li, isFolder=True)
         xbmcplugin.setContent(self.handle, "sets")
         self.end()
@@ -251,8 +266,12 @@ class Plugin:
         query = self.params.get("q")
         if not query:
             query = xbmcgui.Dialog().input(kodi.text("search"))
-            if not query:
-                return self.end(False)
+            self.end(False)
+            if query:
+                # The results' own address: a refresh (after playback, a
+                # watched mark) shows them again rather than the keyboard.
+                xbmc.executebuiltin("Container.Update(%s)" % self.url(route="search", q=query))
+            return
         found = self.client().get("/api/search", q=query, limit=100)
         items = found.get("items", [])
         if not items:
@@ -292,17 +311,27 @@ class Plugin:
             loader.join(10)
         detail = details.get("item")
         url = path_in(self.proxy_base, info["url"])
+        duration_ms = info.get("duration_ms") or (detail or {}).get("duration_ms") or 0
         if detail:
             li = listing.list_item(self.proxy_base, detail)
             listing.video_details(li, detail, self.proxy_base)
+            if detail["kind"] not in listing.MUSIC:
+                # Kodi starts where this says, whatever it was asked: where
+                # the server was told to start (none for "from the start").
+                li.getVideoInfoTag().setResumePoint(start_ms / 1000.0, duration_ms / 1000.0)
         else:
             li = xbmcgui.ListItem(offscreen=True)
         li.setPath(url)
         if info.get("hls"):
             li.setMimeType("application/vnd.apple.mpegurl")
             li.setContentLookup(False)
-            # Text subtitles come beside a stream that carries none.
-            subtitles = [path_in(self.proxy_base, s["url"]) for s in info.get("subtitles", []) if s.get("url")]
+            # Text subtitles come beside a stream that carries none, named so
+            # Kodi reads their language and whether they are forced.
+            subtitles = [
+                path_in(self.proxy_base, api.subtitle_name(s["url"], s.get("language"), s.get("forced")))
+                for s in info.get("subtitles", [])
+                if s.get("url")
+            ]
             if subtitles:
                 li.setSubtitles(subtitles)
         else:
@@ -311,12 +340,16 @@ class Plugin:
             if mime:
                 li.setMimeType(mime)
                 li.setContentLookup(False)
+        markers = [m for m in (detail or {}).get("markers") or [] if m.get("file_id") == info.get("file_id")]
         playing = {
             "item_id": item_id,
             "file_id": info.get("file_id"),
             "session_id": info["session_id"],
-            "duration_ms": info.get("duration_ms") or (detail or {}).get("duration_ms") or 0,
+            "duration_ms": duration_ms,
             "path": url,
+            # What the service needs for Skip and Up Next, so it asks for none of it again.
+            "kind": (detail or {}).get("kind"),
+            "markers": markers,
         }
         kodi.set_property(kodi.PLAYING, json.dumps(playing))
         reason = info.get("reason")
@@ -367,19 +400,23 @@ class Plugin:
             except ValueError:
                 return dialog.ok("pley", kodi.text("not_pley") % typed)
             name, server_id = server.split("://", 1)[1], ""
-        try:
-            from . import auth
+        from . import auth
 
+        try:
             auth.metadata(server, kodi.user_agent())
         except api.ApiError as e:
             kodi.log("%s isn't a pley server: %s" % (server, e.message), xbmc.LOGWARNING)
             message = kodi.text("not_reachable") if e.status == 0 and e.code == "unreachable" else kodi.text("not_pley")
             return dialog.ok("pley", message % server)
-        if server != server_setting():
-            self.sign_out_quietly()
-        kodi.set_setting("server_url", server)
-        kodi.set_setting("server_name", name)
-        kodi.set_setting("server_id", server_id)
+        current = auth.Store(os.path.join(kodi.profile_dir(), "tokens.json")).load()
+        if current and current.get("server") == server:
+            # Signed in there already.
+            choose(server, name, server_id or current.get("server_id", ""))
+            return xbmc.executebuiltin("Container.Refresh")
+        # The sign-in there stays until this one is made (cancelled, it's
+        # kept). A server found at a new address signs in again: anyone on
+        # the network can answer a broadcast with its id, and its tokens
+        # would go to them.
         self.sign_in(server, name, server_id)
 
     def route_sign_in(self) -> None:
@@ -389,15 +426,19 @@ class Plugin:
         self.sign_in(server, kodi.setting("server_name") or server, kodi.setting("server_id"))
 
     def route_sign_out(self) -> None:
-        self.sign_out_quietly()
-        kodi.notify(kodi.text("signed_out"))
+        if self.sign_out_quietly():
+            kodi.notify(kodi.text("signed_out"))
+        else:
+            kodi.notify(kodi.text("service_off"), error=True)
         xbmc.executebuiltin("Container.Refresh")
 
-    def sign_out_quietly(self) -> None:
+    def sign_out_quietly(self) -> bool:
+        """Signs out through the service, which holds the sign-in: whether it
+        could."""
         try:
-            self.client().request("POST", "/sign-out")
+            return self.client().request("POST", "/sign-out").status == 200
         except api.ApiError:
-            pass
+            return False
 
     def sign_in(self, server: str, name: str, server_id: str) -> None:
         from . import auth, signin
@@ -415,26 +456,44 @@ class Plugin:
             qr,
         )
         window.show()
+        monitor = xbmc.Monitor()
         outcome = None
+        state = None
         try:
             while outcome is None:
                 waited = 0.0
                 while waited < flow.interval:
-                    if window.cancelled:
+                    if window.cancelled or monitor.abortRequested():
                         return
                     xbmc.sleep(200)
                     waited += 0.2
                 left = expires - time.time()
+                if left <= 0:
+                    outcome = kodi.text("code_expired")
+                    break
+                try:
+                    state, tokens = flow.poll(started["device_code"])
+                except api.ApiError as e:
+                    if e.status != 0:
+                        raise
+                    # The network dropped: the person may have allowed it on
+                    # their phone already. Asked again until the code expires.
+                    window.set_status(kodi.text("retrying"))
+                    continue
                 window.set_status(waiting_text(left))
-                state, tokens = flow.poll(started["device_code"])
                 if state == "allowed":
                     store = auth.Store(os.path.join(kodi.profile_dir(), "tokens.json"))
-                    store.save(flow.record(tokens, name, server_id))
-                    me = api.Client(server, kodi.user_agent(), tokens["access_token"]).get("/api/auth/me")
-                    outcome = kodi.text("signed_in_as") % me.get("name", me.get("username", ""))
+                    previous = store.load()
+                    record = flow.record(tokens, name, server_id)
+                    store.save(record)
+                    choose(server, name, server_id)
+                    if previous and previous.get("refresh_token") != record["refresh_token"]:
+                        # The sign-in this one replaces ends on its server too.
+                        auth.revoke(previous, kodi.user_agent())
+                    outcome = signed_in_text(server, tokens["access_token"])
                 elif state == "denied":
                     outcome = kodi.text("code_refused")
-                elif state == "expired" or left <= 0:
+                elif state == "expired":
                     outcome = kodi.text("code_expired")
         finally:
             window.close()
@@ -483,6 +542,24 @@ def file_mime(detail, file_id):
     return None
 
 
+def choose(server: str, name: str, server_id: str) -> None:
+    """Makes `server` the one the add-on shows."""
+    kodi.set_setting("server_url", server)
+    kodi.set_setting("server_name", name)
+    kodi.set_setting("server_id", server_id)
+
+
+def signed_in_text(server: str, access_token: str) -> str:
+    """"Signed in as Alice", or "Signed in" when the server doesn't say
+    who (the sign-in worked all the same)."""
+    try:
+        me = api.Client(server, kodi.user_agent(), access_token, timeout=5).get("/api/auth/me") or {}
+        name = me.get("name") or me.get("username")
+    except (api.ApiError, AttributeError):
+        name = None
+    return kodi.text("signed_in_as") % name if name else kodi.text("signed_in")
+
+
 def fetch_qr(server: str, user_code: str) -> str:
     """The server's QR code of where to type `user_code`, as a file for Kodi
     to show; "" when the server draws none (it predates them)."""
@@ -503,7 +580,33 @@ def waiting_text(seconds_left: float) -> str:
     minutes = int(seconds_left // 60)
     if minutes < 1:
         return kodi.text("waiting_last_minute")
+    if minutes == 1:
+        return kodi.text("waiting_one_minute")
     return kodi.text("waiting") % minutes
+
+
+def together(*calls):
+    """The answers of `calls` (functions), asked at once: a slow server's
+    round trips overlap. The first refusal is raised."""
+    import threading
+
+    answers = [None] * len(calls)
+    refusals = []
+
+    def ask(at, call):
+        try:
+            answers[at] = call()
+        except api.ApiError as e:
+            refusals.append(e)
+
+    threads = [threading.Thread(target=ask, args=(at, call), daemon=True) for at, call in enumerate(calls)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(70)
+    if refusals:
+        raise refusals[0]
+    return answers
 
 
 def load_details(client: api.Client, item_id: int, into: dict) -> None:

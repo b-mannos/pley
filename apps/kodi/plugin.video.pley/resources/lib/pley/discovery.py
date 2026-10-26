@@ -8,6 +8,8 @@ import json
 import socket
 import time
 
+from .api import normalize
+
 PORT = 7539
 REQUEST = b"pley?"
 
@@ -28,7 +30,8 @@ def parse(data: bytes, address: str):
         "id": str(answer["id"]),
         "name": str(answer.get("name") or address),
         "version": str(answer.get("version") or ""),
-        "url": "http://%s:%d" % (host, port),
+        # Written as the server writes its issuer (port 80 left out).
+        "url": normalize("http://%s:%d" % (host, port)),
     }
 
 

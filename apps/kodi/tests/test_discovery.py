@@ -15,6 +15,9 @@ class DiscoveryTest(unittest.TestCase):
             {"id": "abc", "name": "Living room", "version": "0.2.0", "url": "http://192.168.1.5:7539"},
         )
         self.assertEqual(discovery.parse(answer.encode(), "fe80::1")["url"], "http://[fe80::1]:7539")
+        # On port 80 the address is written as the server writes its issuer.
+        on_80 = json.dumps({"pley": 1, "id": "abc", "name": "NAS", "port": 80})
+        self.assertEqual(discovery.parse(on_80.encode(), "192.168.1.5")["url"], "http://192.168.1.5")
         for junk in [b"pley?", b"{}", b'{"pley": 1, "id": "x", "port": 0}', b'{"id": "x", "port": 1}', b"\xff"]:
             self.assertIsNone(discovery.parse(junk, "10.0.0.1"), junk)
 

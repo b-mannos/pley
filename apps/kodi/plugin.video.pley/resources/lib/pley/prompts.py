@@ -12,6 +12,9 @@ TAIL_MS = 1000
 # Skip Intro lands this long before the intro ends, so it plays out.
 INTRO_LEAD_MS = 750
 COUNTDOWN = 10
+# A skip button holds the remote while it shows: it goes after this long,
+# as streaming apps' do (credits can last minutes).
+SKIP_SHOWN = 10
 
 
 def active(markers: list, position_ms: float):
@@ -42,6 +45,7 @@ class Moments:
         self.next_item = next_item
         self.clock = clock
         self.dismissed = set()
+        self.shown_since = {}
         self.next_cancelled = False
         self.next_since = None
 
@@ -50,8 +54,17 @@ class Moments:
         if marker and marker["kind"] == "credits" and self.next_item and not self.next_cancelled:
             return "next", marker
         if marker and key(marker) not in self.dismissed:
+            since = self.shown_since.setdefault(key(marker), self.clock())
+            if self.clock() - since >= SKIP_SHOWN:
+                self.dismiss(marker)
+                return None
             return "skip", marker
         return None
+
+    def credits_from(self):
+        """Where the credits start, if a marker says (ms)."""
+        starts = [m["start_ms"] for m in self.markers if m["kind"] == "credits"]
+        return min(starts) if starts else None
 
     def dismiss(self, marker: dict) -> None:
         self.dismissed.add(key(marker))

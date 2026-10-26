@@ -16,6 +16,7 @@ import http.client
 import json
 import mimetypes
 import os
+import re
 import socket
 import threading
 
@@ -111,7 +112,9 @@ class Proxy:
 
 class _Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = False
+    # Kodi restarted at once finds its port again (Linux holds a closed
+    # one for a minute without this; on Windows it would let two take it).
+    allow_reuse_address = os.name != "nt"
 
     def process_request(self, request, client_address):
         thread = threading.Thread(
@@ -225,6 +228,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return self.answer(200, {"signed_in": False, "server": None})
         if not rest.startswith("/api/"):
             return self.answer(404, {"code": "not_found", "message": "not found"})
+        rest = server_path(rest)
         length = int(self.headers.get("Content-Length") or 0)
         if length > MAX_BODY:
             return self.answer(413, {"code": "bad_request", "message": "too large"})
@@ -292,6 +296,19 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             # stopping: the connection ends, and Kodi asks again from where
             # it got to.
             self.close_connection = True
+
+
+# A subtitle named for Kodi (3.eng.forced.vtt): Kodi reads a side-loaded
+# track's language and flags from its name.
+SUBTITLE_NAME = re.compile(r"^(/api/files/\d+/subtitles/\d+)\.[A-Za-z.]+(\.vtt)(\?.*)?$")
+
+
+def server_path(path: str) -> str:
+    """The server's own path for one the proxy handed out."""
+    named = SUBTITLE_NAME.match(path)
+    if named:
+        return named.group(1) + named.group(2) + (named.group(3) or "")
+    return path
 
 
 def hard_close(sock: socket.socket) -> None:

@@ -55,6 +55,16 @@ class MomentsTest(unittest.TestCase):
         self.assertIsNone(self.moments.offer(10_000))
         self.assertEqual(self.moments.offer(81_000), ("next", CREDITS))
 
+    def test_a_skip_button_goes_after_ten_seconds(self):
+        self.assertEqual(self.moments.offer(6_000), ("skip", INTRO))
+        self.now = prompts.SKIP_SHOWN - 0.5
+        self.assertEqual(self.moments.offer(15_000), ("skip", INTRO))
+        self.now = prompts.SKIP_SHOWN
+        self.assertIsNone(self.moments.offer(16_000))
+        self.assertIsNone(self.moments.offer(20_000), "for the rest of that segment")
+        self.assertEqual(self.moments.credits_from(), 80_000)
+        self.assertIsNone(prompts.Moments([INTRO]).credits_from())
+
     def test_without_a_next_episode_credits_are_skipped(self):
         movie = prompts.Moments([CREDITS])
         self.assertEqual(movie.offer(85_000), ("skip", CREDITS))

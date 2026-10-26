@@ -67,11 +67,27 @@ def connect(base: str, timeout: float = TIMEOUT):
     import http.client
 
     parts = urllib.parse.urlsplit(base)
-    kind = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
-    conn = kind(parts.hostname, parts.port, timeout=CONNECT_TIMEOUT)
+    connect_timeout = min(CONNECT_TIMEOUT, timeout)
+    if parts.scheme == "https":
+        conn = http.client.HTTPSConnection(parts.hostname, parts.port, timeout=connect_timeout, context=tls())
+    else:
+        conn = http.client.HTTPConnection(parts.hostname, parts.port, timeout=connect_timeout)
     conn.connect()
     conn.sock.settimeout(timeout)
     return conn
+
+
+_tls = []
+
+
+def tls():
+    """One TLS context for every https connection: making one reads the
+    system's certificates again (about 70 ms each, on Windows)."""
+    if not _tls:
+        import ssl
+
+        _tls.append(ssl.create_default_context())
+    return _tls[0]
 
 
 def error_of(response: Response) -> ApiError:
@@ -146,7 +162,11 @@ class Client:
         response = self.request(method, path, **kwargs)
         if response.status >= 400:
             raise error_of(response)
-        return response.json()
+        try:
+            return response.json()
+        except ValueError:
+            # A web page, a router's: not pley.
+            raise ApiError(response.status, "not_pley", "the answer isn't pley's")
 
     def get(self, path: str, **query):
         return self.json("GET", path, query=query or None)
@@ -188,16 +208,30 @@ def local_request(base: str, method: str, target: str, headers: dict, body, time
                     break
                 chunks.append(chunk)
     except OSError as e:
-        raise ApiError(0, "unreachable", str(e))
+        # The proxy is the service's, on this computer: it isn't running.
+        raise ApiError(0, "service_off", str(e))
     head, _, rest = b"".join(chunks).partition(b"\r\n\r\n")
     status_line, *header_lines = head.decode("latin-1").split("\r\n")
     try:
         status = int(status_line.split(" ")[1])
     except (IndexError, ValueError):
-        raise ApiError(0, "unreachable", "no answer from pley's service")
+        raise ApiError(0, "service_off", "no answer from pley's service")
     answer_headers = {}
     for line in header_lines:
         name, _, value = line.partition(":")
         answer_headers[name.strip().lower()] = value.strip()
     length = answer_headers.get("content-length")
     return Response(status, answer_headers, rest[: int(length)] if length and length.isdigit() else rest)
+
+
+def subtitle_name(url: str, language, forced: bool) -> str:
+    """The server's subtitle address `url` (/api/files/7/subtitles/3.vtt)
+    named for Kodi: 3.eng.forced.vtt."""
+    parts = []
+    if language and str(language).isalpha():
+        parts.append(str(language).lower())
+    if forced:
+        parts.append("forced")
+    if not parts or not url.endswith(".vtt"):
+        return url
+    return url[: -len(".vtt")] + "." + ".".join(parts) + ".vtt"
