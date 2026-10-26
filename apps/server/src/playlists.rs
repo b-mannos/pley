@@ -93,9 +93,9 @@ async fn leaf_ids(db: &Db, item: &ItemRow) -> sqlx::Result<Vec<i64>> {
         "movie" | "episode" | "track" => return Ok(vec![item.id]),
         "show" => {
             "SELECT e.id FROM items e JOIN items se ON se.id = e.parent_id
-             WHERE e.grandparent_id = ? AND e.kind = 'episode' ORDER BY se.idx = 0, se.idx, e.idx"
+             WHERE e.grandparent_id = ? AND e.kind = 'episode' ORDER BY se.idx = 0, se.idx, e.idx IS NULL, e.idx, e.sort_title"
         }
-        "season" => "SELECT id FROM items WHERE parent_id = ? AND kind = 'episode' ORDER BY idx, sort_title",
+        "season" => "SELECT id FROM items WHERE parent_id = ? AND kind = 'episode' ORDER BY idx IS NULL, idx, sort_title",
         "album" => "SELECT id FROM items WHERE parent_id = ? AND kind = 'track' ORDER BY disc, idx, sort_title",
         "artist" => {
             "SELECT t.id FROM items t JOIN items a ON a.id = t.parent_id

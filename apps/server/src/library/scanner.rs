@@ -789,14 +789,28 @@ impl<'a> Writer<'a> {
         season.path = name.season_dir.as_deref().map(path_str);
         let season_id = self.container(conn, season).await?;
 
-        let title = name.title.clone().unwrap_or_else(|| match name.episode_end {
-            Some(end) => format!("Episodes {}-{end}", name.episode),
-            None => format!("Episode {}", name.episode),
-        });
-        let mut episode = NewItem::new("episode", format!("episode:{season_id}:{}", name.episode), title);
+        let (key, title) = match name.episode {
+            Some(number) => (
+                format!("episode:{season_id}:{number}"),
+                name.title.clone().unwrap_or_else(|| match name.episode_end {
+                    Some(end) => format!("Episodes {number}-{end}"),
+                    None => format!("Episode {number}"),
+                }),
+            ),
+            // No number in the name: the title tells the episode apart, so
+            // a season's unnumbered episodes never merge into one. Metadata
+            // may number it by its title (see `metadata`).
+            None => {
+                let title = name.title.clone().unwrap_or_else(|| {
+                    file.path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+                });
+                (format!("episode:{season_id}:title:{}", normalize_key(&title)), title)
+            }
+        };
+        let mut episode = NewItem::new("episode", key, title);
         episode.parent_id = Some(season_id);
         episode.grandparent_id = Some(show_id);
-        episode.idx = Some(name.episode);
+        episode.idx = name.episode;
         episode.duration_ms = duration;
         episode.release_date = name.air_date.clone();
         episode.year = name.air_date.as_deref().and_then(|d| d.get(..4)).and_then(|y| y.parse().ok());
@@ -856,7 +870,8 @@ async fn upsert_item(conn: &mut SqliteConnection, library_id: i64, item: &NewIte
             sort_title = CASE WHEN (items.metadata_at IS NULL OR items.kind IN ('artist', 'album')) AND items.metadata_locked = 0 THEN excluded.sort_title ELSE items.sort_title END,
             original_title = CASE WHEN (items.metadata_at IS NULL OR items.kind IN ('artist', 'album')) AND items.metadata_locked = 0 THEN excluded.original_title ELSE items.original_title END,
             year = CASE WHEN (items.metadata_at IS NULL OR items.kind IN ('artist', 'album')) AND items.metadata_locked = 0 THEN COALESCE(excluded.year, items.year) ELSE items.year END,
-            idx = excluded.idx,
+            -- A name without a number keeps the one metadata gave it by title.
+            idx = COALESCE(excluded.idx, items.idx),
             disc = excluded.disc,
             duration_ms = COALESCE(excluded.duration_ms, items.duration_ms),
             path = COALESCE(excluded.path, items.path),

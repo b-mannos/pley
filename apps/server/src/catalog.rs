@@ -485,7 +485,7 @@ pub async fn items_by_ids(db: &Db, user_id: i64, ids: &[i64]) -> sqlx::Result<Ve
 pub async fn children(db: &Db, user_id: i64, parent_id: i64) -> sqlx::Result<Vec<ItemRow>> {
     sqlx::query_as(&format!(
         "{SUMMARY_SELECT} WHERE {VISIBLE} AND i.parent_id = ? AND i.kind != 'extra'
-         ORDER BY CASE WHEN i.kind = 'season' AND i.idx = 0 THEN 1 ELSE 0 END, i.disc, i.idx, i.sort_title"
+         ORDER BY CASE WHEN i.kind = 'season' AND i.idx = 0 THEN 1 ELSE 0 END, i.disc, i.idx IS NULL, i.idx, i.sort_title"
     ))
     .bind(user_id)
     .bind(parent_id)
@@ -1032,7 +1032,7 @@ async fn show_episodes(db: &Db, user_id: i64, show_id: i64) -> sqlx::Result<Vec<
          FROM items e JOIN items se ON se.id = e.parent_id
          LEFT JOIN user_item_state s ON s.item_id = e.id AND s.user_id = ?
          WHERE e.grandparent_id = ? AND e.kind = 'episode'
-         ORDER BY se.idx = 0, se.idx, e.idx",
+         ORDER BY se.idx = 0, se.idx, e.idx IS NULL, e.idx, e.sort_title",
     )
     .bind(user_id)
     .bind(show_id)
@@ -1063,7 +1063,7 @@ async fn shows_episodes(db: &Db, user_id: i64, show_ids: &[i64]) -> sqlx::Result
          FROM items e JOIN items se ON se.id = e.parent_id
          LEFT JOIN user_item_state s ON s.item_id = e.id AND s.user_id = ?
          WHERE e.grandparent_id IN ({placeholders}) AND e.kind = 'episode'
-         ORDER BY e.grandparent_id, se.idx = 0, se.idx, e.idx"
+         ORDER BY e.grandparent_id, se.idx = 0, se.idx, e.idx IS NULL, e.idx, e.sort_title"
     );
     let mut query = sqlx::query_as::<_, (i64, i64, bool, i64, Option<i64>)>(&sql).bind(user_id);
     for id in show_ids {
@@ -1267,7 +1267,7 @@ pub async fn next_item(db: &Db, item: &ItemRow) -> sqlx::Result<Option<i64>> {
         "episode" => {
             let ids: Vec<i64> = sqlx::query_scalar(
                 "SELECT e.id FROM items e JOIN items se ON se.id = e.parent_id
-                 WHERE e.grandparent_id = ? AND e.kind = 'episode' ORDER BY se.idx = 0, se.idx, e.idx",
+                 WHERE e.grandparent_id = ? AND e.kind = 'episode' ORDER BY se.idx = 0, se.idx, e.idx IS NULL, e.idx, e.sort_title",
             )
             .bind(item.grandparent_id)
             .fetch_all(&db.read)

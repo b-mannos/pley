@@ -1125,3 +1125,60 @@ async fn late_progress_counts_unless_something_newer_happened() {
     assert_eq!(ronin["watched"], json!(true));
     assert_eq!(ronin["play_count"], json!(1));
 }
+
+/// Episodes named loosely (the way a collection gathered over years often
+/// is): every file is an episode of its own, in order, none merged into
+/// another or lost.
+#[tokio::test]
+async fn loosely_named_episodes_each_stay_an_episode() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    for name in [
+        // A number and a title, no S01E01.
+        "Babylon 5/Season 1/01 - Midnight on the Firing Line.mkv",
+        "Babylon 5/Season 1/04 - Infection.mkv",
+        // No number at all.
+        "Babylon 5/Season 1/Babylon 5 - The Parliament of Dreams.mkv",
+        "Babylon 5/Season 1/Mind War.mkv",
+        // Season and episode run together.
+        "The West Wing/Season 1/101 - Pilot.mkv",
+        "The West Wing/Season 1/102 - Post Hoc, Ergo Propter Hoc.mkv",
+    ] {
+        app.media_file(&format!("tv/{name}"), 1024);
+    }
+    let lib = app.library(&admin, "TV", "shows", "tv").await;
+    let shows = app.ids(lib, &admin).await;
+    let episodes = |show: &'static str| {
+        let (app, admin, show) = (&app, &admin, shows[show]);
+        async move {
+            let season = app.children(show, admin).await["Season 1"];
+            app.get(&format!("/api/items/{season}/children"), admin).await.body["items"].clone()
+        }
+    };
+
+    let listed: Vec<(Value, Value)> = episodes("Babylon 5")
+        .await
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| (e["index"].clone(), e["title"].clone()))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            (json!(1), json!("Midnight on the Firing Line")),
+            (json!(4), json!("Infection")),
+            // Without a number: after the numbered ones, by title.
+            (Value::Null, json!("Mind War")),
+            (Value::Null, json!("The Parliament of Dreams")),
+        ]
+    );
+
+    let west_wing = episodes("The West Wing").await;
+    assert_eq!(titles(&west_wing), ["Pilot", "Post Hoc, Ergo Propter Hoc"]);
+    assert_eq!(west_wing[1]["index"], json!(2));
+
+    // A rescan changes nothing.
+    rescan(&app, &admin, lib).await;
+    assert_eq!(episodes("Babylon 5").await.as_array().unwrap().len(), 4);
+}

@@ -2,6 +2,7 @@
 //! (v3 key or v4 read access token) is configured in the settings. Local
 //! artwork always wins over downloaded artwork.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -224,6 +225,49 @@ struct SeasonDetails {
     episodes: Vec<EpisodeDetails>,
 }
 
+/// An episode of the season the library has, as the season's metadata sees
+/// it: its number (`None` when its file name gave none), its title and the
+/// length of its file.
+struct SeasonItem<'a> {
+    number: Option<i64>,
+    title: &'a str,
+    duration_ms: Option<i64>,
+}
+
+/// The season's episode an item stands for: by its number, or for an episode
+/// whose file name gave none, by its title (the same words, any case and
+/// punctuation) when exactly one episode of the season has it, no other file
+/// of the season has its number, and its length is close to the file's. A
+/// film kept in a show's folder isn't taken for the episode of the same name
+/// (Firefly's pilot and the film are both "Serenity").
+fn season_episode<'a>(
+    episodes: &'a [EpisodeDetails],
+    item: &SeasonItem,
+    taken: &HashSet<i64>,
+) -> Option<&'a EpisodeDetails> {
+    if let Some(n) = item.number {
+        return episodes.iter().find(|e| e.episode_number == n);
+    }
+    let wanted = crate::util::normalize_key(item.title);
+    if wanted.is_empty() {
+        return None;
+    }
+    let mut same =
+        episodes.iter().filter(|e| e.name.as_deref().is_some_and(|n| crate::util::normalize_key(n) == wanted));
+    let ep = match (same.next(), same.next()) {
+        (Some(ep), None) => ep,
+        _ => return None,
+    };
+    let length_fits = match (ep.runtime.filter(|r| *r > 0), item.duration_ms.filter(|d| *d > 0)) {
+        (Some(minutes), Some(ms)) => {
+            let ratio = ms as f64 / (minutes as f64 * 60_000.0);
+            (0.7..=1.3).contains(&ratio)
+        }
+        _ => true,
+    };
+    (!taken.contains(&ep.episode_number) && length_fits).then_some(ep)
+}
+
 #[derive(Deserialize)]
 struct EpisodeDetails {
     episode_number: i64,
@@ -232,6 +276,9 @@ struct EpisodeDetails {
     air_date: Option<String>,
     still_path: Option<String>,
     vote_average: Option<f64>,
+    /// Minutes.
+    #[serde(default)]
+    runtime: Option<i64>,
     #[serde(default)]
     crew: Vec<people::CrewCredit>,
     #[serde(default)]
@@ -630,7 +677,7 @@ impl MetadataAgent {
                 format!(
                     "/tv/{}/season/{season}/episode/{}/images",
                     show_tmdb.context("the show is not matched yet")?,
-                    idx.unwrap_or(1)
+                    idx.context("the episode has no number yet")?
                 )
             }
             _ => bail!("{item_kind} items have no TMDB artwork"),
@@ -932,21 +979,28 @@ impl MetadataAgent {
             .await
             .map_err(|e| TmdbError::Other(e.into()))?;
 
-            let episodes: Vec<(i64, i64, Option<String>)> = sqlx::query_as(
-                "SELECT id, idx, thumb FROM items WHERE parent_id = ? AND kind = 'episode' AND metadata_locked = 0",
+            #[allow(clippy::type_complexity)]
+            let episodes: Vec<(i64, Option<i64>, String, Option<i64>, Option<String>)> = sqlx::query_as(
+                "SELECT id, idx, title, duration_ms, thumb FROM items
+                 WHERE parent_id = ? AND kind = 'episode' AND metadata_locked = 0",
             )
             .bind(season_id)
             .fetch_all(&self.db.read)
             .await
             .map_err(|e| TmdbError::Other(e.into()))?;
-            for (episode_id, ep_number, thumb) in episodes {
-                let Some(ep) = season.episodes.iter().find(|e| e.episode_number == ep_number) else { continue };
+            // Numbers the season's files have, which no other may take by its title.
+            let taken: HashSet<i64> = episodes.iter().filter_map(|e| e.1).collect();
+            for (episode_id, number, file_title, duration_ms, thumb) in episodes {
+                let item = SeasonItem { number, title: &file_title, duration_ms };
+                let Some(ep) = season_episode(&season.episodes, &item, &taken) else { continue };
+                let ep_number = ep.episode_number;
                 let still = self.artwork(thumb.as_deref(), ep.still_path.as_deref(), "w780").await;
                 let title = ep.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| format!("Episode {ep_number}"));
                 sqlx::query(
-                    "UPDATE items SET title = ?, sort_title = ?, summary = ?, release_date = ?, year = ?, rating = ?,
+                    "UPDATE items SET idx = ?, title = ?, sort_title = ?, summary = ?, release_date = ?, year = ?, rating = ?,
                         thumb = COALESCE(?, thumb), metadata_at = ?, updated_at = ? WHERE id = ?",
                 )
+                .bind(ep_number)
                 .bind(&title)
                 .bind(sort_title(&title))
                 .bind(ep.overview.clone().filter(|s| !s.is_empty()))
@@ -1037,6 +1091,61 @@ fn best_match(results: &[SearchResult], title: &str, year: Option<i64>) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn episodes_are_found_by_number_or_else_by_title() {
+        let season: SeasonDetails = serde_json::from_value(serde_json::json!({
+            "name": "Season 1", "overview": null, "poster_path": null, "air_date": null,
+            "episodes": [
+                {"episode_number": 1, "name": "Midnight on the Firing Line"},
+                {"episode_number": 4, "name": "Infection"},
+                {"episode_number": 6, "name": "Mind War"},
+                {"episode_number": 7, "name": "The War Prayer"},
+                {"episode_number": 8, "name": "The War Prayer"},
+            ],
+        }))
+        .unwrap();
+        let none = HashSet::new();
+        let found = |number, title| {
+            let item = SeasonItem { number, title, duration_ms: None };
+            season_episode(&season.episodes, &item, &none).map(|e| e.episode_number)
+        };
+        assert_eq!(found(Some(4), "Whatever the file said"), Some(4));
+        assert_eq!(found(Some(9), "Infection"), None, "a number wins over a title");
+        // Without a number: the title, any case and punctuation.
+        assert_eq!(found(None, "mind-war"), Some(6));
+        assert_eq!(found(None, "INFECTION"), Some(4));
+        assert_eq!(found(None, "Infection Part 2"), None);
+        // Two episodes of that title: none is taken.
+        assert_eq!(found(None, "The War Prayer"), None);
+        assert_eq!(found(None, ""), None);
+    }
+
+    /// Firefly's folder holds the film Serenity too, and TMDB calls the
+    /// pilot "Serenity": the film is no episode.
+    #[test]
+    fn a_title_never_takes_a_number_a_file_has_nor_a_length_far_off() {
+        let season: SeasonDetails = serde_json::from_value(serde_json::json!({
+            "name": "Season 1", "overview": null, "poster_path": null, "air_date": null,
+            "episodes": [
+                {"episode_number": 1, "name": "Serenity", "runtime": 86},
+                {"episode_number": 2, "name": "The Train Job", "runtime": 43},
+            ],
+        }))
+        .unwrap();
+        let film = |taken: &HashSet<i64>, duration_ms| {
+            let item = SeasonItem { number: None, title: "Serenity", duration_ms };
+            season_episode(&season.episodes, &item, taken).map(|e| e.episode_number)
+        };
+        // The pilot's file is there, numbered.
+        assert_eq!(film(&HashSet::from([1, 2]), None), None);
+        // It isn't, but the film runs two hours.
+        assert_eq!(film(&HashSet::from([2]), Some(119 * 60_000)), None);
+        // An unnumbered pilot of about its length is the pilot.
+        assert_eq!(film(&HashSet::from([2]), Some(85 * 60_000)), Some(1));
+        // Without a length, the title decides.
+        assert_eq!(film(&HashSet::from([2]), None), Some(1));
+    }
 
     fn result(id: i64, title: &str, date: &str, popularity: f64) -> SearchResult {
         SearchResult {

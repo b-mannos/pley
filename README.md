@@ -15,7 +15,10 @@ web app in React and TypeScript.
 - File names are read the way Plex names them: `Movie (2019)`, release names,
   `{tmdb-123}` hints, editions (`{edition-Director's Cut}`), `S01E02`, `1x02`,
   date-based and anime episodes, and extras (`Trailers/` folders,
-  `Movie (2019)-trailer.mkv`).
+  `Movie (2019)-trailer.mkv`). Looser episode names work too: `04 - Title` or
+  `104 - Title` in a `Season 1` folder, `Season 1 Episode 4`, and a title
+  alone, which TMDB numbers by its title; no two files ever merge into one
+  episode for lack of a number.
 
 **Metadata**
 

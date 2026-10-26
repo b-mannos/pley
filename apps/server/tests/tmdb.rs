@@ -137,7 +137,9 @@ fn answer(path: &str, query: &[(String, String)]) -> Option<Value> {
                  "crew": [{"id": 3, "name": "Jack Bender", "job": "Director", "department": "Directing", "profile_path": null}],
                  "guest_stars": [{"id": 4, "name": "Greg Grunberg", "character": "Pilot", "profile_path": null, "order": 0}]},
                 {"episode_number": 2, "name": "", "overview": "", "air_date": "2004-09-29", "still_path": null,
-                 "vote_average": 0.0, "crew": [], "guest_stars": []}
+                 "vote_average": 0.0, "crew": [], "guest_stars": []},
+                {"episode_number": 3, "name": "Tabula Rasa", "overview": "Kate's past.", "air_date": "2004-10-06",
+                 "still_path": null, "vote_average": 7.9, "crew": [], "guest_stars": []}
             ]
         }),
         path => {
@@ -458,4 +460,35 @@ async fn shows_seasons_and_episodes_from_tmdb() {
         app.get(&format!("/api/items/{}", episodes.body["items"][0]["id"]), &kid).await.status,
         StatusCode::NOT_FOUND
     );
+}
+
+/// An episode whose file name gives no number is numbered by its title, and
+/// keeps that number through rescans.
+#[tokio::test]
+async fn an_episode_without_a_number_is_found_by_its_title() {
+    let (app, _, admin, _) = world().await;
+    use_key(&app, &admin, KEY).await;
+    app.media_file("tv/Lost (2004)/Season 01/Lost - S01E01.mkv", 1024);
+    app.media_file("tv/Lost (2004)/Season 01/Lost - Tabula Rasa.mkv", 1024);
+    let tv = app.library(&admin, "TV", "shows", "tv").await;
+    let season = app.children(app.ids(tv, &admin).await["Lost"], &admin).await["Season 1"];
+    let listed = || async {
+        let episodes = app.get(&format!("/api/items/{season}/children"), &admin).await.body;
+        episodes["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| (e["index"].clone(), e["title"].clone()))
+            .collect::<Vec<_>>()
+    };
+    let numbered = vec![(json!(1), json!("Pilot (1)")), (json!(3), json!("Tabula Rasa"))];
+    assert_eq!(listed().await, numbered);
+    let tabula = app.children(season, &admin).await["Tabula Rasa"];
+    let detail = app.get(&format!("/api/items/{tabula}"), &admin).await.body;
+    assert_eq!(detail["summary"], json!("Kate's past."));
+
+    let rescan = app.post(&format!("/api/libraries/{tv}/scan"), &admin, json!({})).await;
+    assert_eq!(rescan.status, StatusCode::ACCEPTED);
+    app.wait_for_scans().await;
+    assert_eq!(listed().await, numbered);
 }

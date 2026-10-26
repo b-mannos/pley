@@ -3,7 +3,12 @@
 //! Supported layouts (the usual Plex/Jellyfin conventions):
 //! * `Movies/The Matrix (1999)/The Matrix (1999) - 1080p.mkv`, `The.Matrix.1999.1080p.BluRay.x264.mkv`
 //! * `TV/Show (2005)/Season 01/Show - S01E02 - Title.mkv`, `Show.S01E02E03.mkv`, `Show/1x02.mkv`,
-//!   `Show/Season 2/05 - Title.mkv`, `Daily Show/2024-05-01.mkv`, `[Group] Anime - 12 [1080p].mkv`
+//!   `Show/Season 2/05 - Title.mkv`, `Show/Season 1/Season 1 Episode 4.mkv`,
+//!   `Show/Season 1/104 - Title.mkv` (season and episode run together, in a
+//!   season folder of that number), `Daily Show/2024-05-01.mkv`,
+//!   `[Group] Anime - 12 [1080p].mkv`, and an episode without a number
+//!   (`Show/Season 1/Title.mkv`), which keeps its own place (see
+//!   [`EpisodeName::episode`])
 //! * `Music/Artist/Album (2001)/01 - Track.flac` (tags take precedence)
 
 use std::collections::BTreeMap;
@@ -11,6 +16,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
 
 use regex::Regex;
+
+use crate::util::normalize_key;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MovieName {
@@ -28,7 +35,9 @@ pub struct EpisodeName {
     pub show_tmdb_id: Option<i64>,
     pub season: i32,
     pub season_dir: Option<PathBuf>,
-    pub episode: i32,
+    /// `None` when the name gives none: such an episode is told apart by its
+    /// title, never merged with the season's other unnumbered episodes.
+    pub episode: Option<i32>,
     pub episode_end: Option<i32>,
     pub title: Option<String>,
     pub air_date: Option<String>,
@@ -49,6 +58,11 @@ pub struct TrackName {
 }
 
 static YEAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b((?:19|20)\d{2})\b").unwrap());
+/// `Season 1 Episode 4`, `season 2 - ep 5`.
+static SEASON_EPISODE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(?:^|[^a-z0-9])season[ ._-]*(\d{1,4})[ ._,-]*(?:episode|ep|e)[ ._-]*(\d{1,4})(?:[^0-9]|$)")
+        .unwrap()
+});
 static SXXEYY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?:^|[^a-z0-9])s(\d{1,4})[ ._-]*e(\d{1,4})(?:(?:[ ._]*-[ ._]*e?|[ ._]*e)(\d{1,4}))?").unwrap()
 });
@@ -59,6 +73,11 @@ static EP_ONLY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)(?:^|[^a-z0-9])(?:e|ep|episode)[ ._-]*(\d{1,4})(?:[^0-9]|$)").unwrap());
 static ANIME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s-\s(\d{1,4})(?:v\d)?(?:\s|$|\[|\()").unwrap());
 static LEADING_NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\d{1,4})(?:[ ._-]+|$)").unwrap());
+/// Tags in any brackets: `(Group)`, `[1080p]`, `{tmdb-1}`, `(x264)(CRC32)`.
+static TAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[[^\]]*\]|\{[^}]*\}|\([^)]*\)").unwrap());
+/// A name, then a number at the end or before ` - Title` (`Monster 01v2`).
+static NAME_NUMBER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(.+?)[ ._-]+(\d{1,4})(?:v\d+)?(?:\s+-\s+(.+))?$").unwrap());
 static SEASON_DIR: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^(?:season|series|staffel|saison|temporada|stagione|seizoen|s)[ ._-]*(\d{1,4})\b").unwrap()
 });
@@ -217,6 +236,7 @@ pub fn parse_episode(path: &Path, root: &Path) -> EpisodeName {
     // Show folder: the first directory below the library root, unless that
     // directory is itself a season folder.
     let show_folder = dirs.first().filter(|d| season_from_dir(d).is_none()).cloned();
+    let folder_show = show_folder.as_deref().map(|f| title_and_year(f).0).filter(|t| !t.is_empty());
     let mut season_dir = None;
     let mut dir_season = None;
     for (i, d) in dirs.iter().enumerate().rev() {
@@ -233,8 +253,16 @@ pub fn parse_episode(path: &Path, root: &Path) -> EpisodeName {
     let mut air_date = None;
     let mut prefix = String::new();
     let mut rest = String::new();
+    // The name starts with the number (`104 - Title`).
+    let mut leading = false;
 
-    if let Some(c) = SXXEYY.captures(&clean_stem) {
+    if let Some(c) = SEASON_EPISODE.captures(&clean_stem) {
+        let m = c.get(0).unwrap();
+        season = c[1].parse().ok();
+        episode = c[2].parse().ok();
+        prefix = clean_stem[..m.start()].to_owned();
+        rest = clean_stem[m.end()..].to_owned();
+    } else if let Some(c) = SXXEYY.captures(&clean_stem) {
         let m = c.get(0).unwrap();
         season = c[1].parse().ok();
         episode = c[2].parse().ok();
@@ -265,16 +293,39 @@ pub fn parse_episode(path: &Path, root: &Path) -> EpisodeName {
         let m = c.get(0).unwrap();
         episode = c[1].parse().ok();
         prefix = strip_brackets(&s[..m.start()]);
-        rest = String::new();
+        // A title may follow after another dash (`Show - 04 - Title`); what
+        // follows otherwise is release tags (`- 01 (Dual Audio 10bit)`).
+        let after = &s[c.get(1).unwrap().end()..];
+        let after =
+            after.strip_prefix('v').map(|r| r.trim_start_matches(|c: char| c.is_ascii_digit())).unwrap_or(after);
+        if after.trim_start().starts_with('-') {
+            rest = strip_brackets(after);
+        }
+    } else if let Some((number, after)) = folder_show.as_deref().and_then(|show| number_after_show(&stem, show)) {
+        // `(Group) Monster 01v2 (x264)`: the show's own name, then the number.
+        episode = Some(number);
+        rest = after;
     } else if let Some(c) = LEADING_NUMBER.captures(clean_stem.trim()) {
         let trimmed = clean_stem.trim();
         let m = c.get(0).unwrap();
         episode = c[1].parse().ok();
         rest = trimmed[m.end()..].to_owned();
+        leading = true;
+    }
+
+    // Season and episode run together (`104 - Title` for 1x04, `1012` for
+    // 10x12): only at the start of the name, in a season folder whose number
+    // is the hundreds. Anime numbers its episodes on from one season to the
+    // next (`Show - 104`), never at the start of the name.
+    if leading {
+        if let (Some(s), Some(n)) = (dir_season, episode) {
+            if s >= 1 && n >= 100 && n / 100 == s && n % 100 >= 1 {
+                episode = Some(n % 100);
+            }
+        }
     }
 
     let season = season.or(dir_season).unwrap_or(1);
-    let episode = episode.unwrap_or(0);
 
     let (show, show_year, show_tmdb_id) = match &show_folder {
         Some(folder) => {
@@ -294,6 +345,17 @@ pub fn parse_episode(path: &Path, root: &Path) -> EpisodeName {
         let t = PART_SUFFIX.replace(&t, "").into_owned();
         (!t.is_empty() && !t.eq_ignore_ascii_case(&show) && !JUNK.is_match(&t)).then_some(t)
     };
+    // Without a number, the name (less the show's) is the title, which tells
+    // the episode apart.
+    let title = match (episode, title) {
+        (None, None) => {
+            let t = clean_title(cut_at_junk(&spaces(&clean_stem)));
+            let t = without_prefix(&t, &show);
+            let t = PART_SUFFIX.replace(&t, "").into_owned();
+            (!t.is_empty() && !t.eq_ignore_ascii_case(&show)).then_some(t)
+        }
+        (_, title) => title,
+    };
 
     EpisodeName {
         show,
@@ -307,6 +369,45 @@ pub fn parse_episode(path: &Path, root: &Path) -> EpisodeName {
         title,
         air_date,
     }
+}
+
+/// `title` without `prefix` (the show's name) and the separators after it,
+/// when it starts with it: the same words, whatever the case and
+/// punctuation (`Full Metal Panic S4` in `Full Metal Panic!`).
+fn without_prefix(title: &str, prefix: &str) -> String {
+    match prefix_end(title, prefix) {
+        Some(end) => {
+            clean_title(title[end..].trim_start_matches(|c: char| c.is_whitespace() || "!?.:,-_–".contains(c)))
+        }
+        None => title.to_owned(),
+    }
+}
+
+/// Where `name` ends at the start of `text`, compared as
+/// [`normalize_key`] does; `None` when `text` doesn't start with it as whole
+/// words ("Lost" doesn't start "Lostboys").
+fn prefix_end(text: &str, name: &str) -> Option<usize> {
+    let wanted = normalize_key(name);
+    if wanted.is_empty() {
+        return None;
+    }
+    text.char_indices()
+        .map(|(i, c)| i + c.len_utf8())
+        .find(|&end| normalize_key(&text[..end]) == wanted)
+        .filter(|&end| !text[end..].starts_with(char::is_alphanumeric))
+}
+
+/// The episode number in a name made of the show's name and a number
+/// (`(Group) Monster 01v2 (x264)`, `Monster 05 - Title`), with what follows
+/// it; `None` for any other name, and for a year.
+fn number_after_show(stem: &str, show: &str) -> Option<(i32, String)> {
+    let bare = spaces(&TAGS.replace_all(stem, " "));
+    let c = NAME_NUMBER.captures(&bare)?;
+    if normalize_key(&c[1]) != normalize_key(show) {
+        return None;
+    }
+    let number: i32 = c[2].parse().ok()?;
+    (!(1900..=2099).contains(&number)).then(|| (number, c.get(3).map(|t| t.as_str().to_owned()).unwrap_or_default()))
 }
 
 fn tag<'a>(tags: &'a BTreeMap<String, String>, keys: &[&str]) -> Option<&'a str> {
@@ -448,33 +549,33 @@ mod tests {
         let e = episode("Breaking Bad (2008)/Season 01/Breaking Bad - S01E02 - Cat's in the Bag.mkv");
         assert_eq!(e.show, "Breaking Bad");
         assert_eq!(e.show_year, Some(2008));
-        assert_eq!((e.season, e.episode), (1, 2));
+        assert_eq!((e.season, e.episode), (1, Some(2)));
         assert_eq!(e.title.as_deref(), Some("Cat's in the Bag"));
         assert_eq!(e.season_dir, Some(PathBuf::from("/media/tv/Breaking Bad (2008)/Season 01")));
         assert_eq!(e.show_dir, Some(PathBuf::from("/media/tv/Breaking Bad (2008)")));
 
         let e = episode("The.Office.US.S03E10E11.720p.HDTV.x264.mkv");
         assert_eq!(e.show, "The Office US");
-        assert_eq!((e.season, e.episode, e.episode_end), (3, 10, Some(11)));
+        assert_eq!((e.season, e.episode, e.episode_end), (3, Some(10), Some(11)));
         assert_eq!(e.title, None);
 
         let e = episode("Firefly/1x05 - Safe.avi");
         assert_eq!(e.show, "Firefly");
-        assert_eq!((e.season, e.episode), (1, 5));
+        assert_eq!((e.season, e.episode), (1, Some(5)));
         assert_eq!(e.title.as_deref(), Some("Safe"));
     }
 
     #[test]
     fn folder_based_episodes() {
         let e = episode("Show Name/Season 2/05 - Some Title.mkv");
-        assert_eq!((e.show.as_str(), e.season, e.episode), ("Show Name", 2, 5));
+        assert_eq!((e.show.as_str(), e.season, e.episode), ("Show Name", 2, Some(5)));
         assert_eq!(e.title.as_deref(), Some("Some Title"));
 
         let e = episode("Show Name/Specials/Show Name - S00E01.mkv");
-        assert_eq!((e.season, e.episode), (0, 1));
+        assert_eq!((e.season, e.episode), (0, Some(1)));
 
         let e = episode("Show Name/Season 3/Episode 7.mkv");
-        assert_eq!((e.season, e.episode), (3, 7));
+        assert_eq!((e.season, e.episode), (3, Some(7)));
     }
 
     #[test]
@@ -482,17 +583,91 @@ mod tests {
         let e = episode("The Daily Show/The Daily Show 2024-05-01.mkv");
         assert_eq!(e.show, "The Daily Show");
         assert_eq!(e.air_date.as_deref(), Some("2024-05-01"));
-        assert_eq!((e.season, e.episode), (2024, 501));
+        assert_eq!((e.season, e.episode), (2024, Some(501)));
 
         let e = episode("Frieren/[SubsPlease] Sousou no Frieren - 12 (1080p) [ABCD1234].mkv");
         assert_eq!(e.show, "Frieren");
-        assert_eq!((e.season, e.episode), (1, 12));
+        assert_eq!((e.season, e.episode, e.title), (1, Some(12), None));
+        let e = episode("Frieren/[Group] Frieren - 12v2 [GRP].mkv");
+        assert_eq!((e.episode, e.title), (Some(12), None));
+    }
+
+    #[test]
+    fn loosely_named_episodes() {
+        // A number and a title in a season folder (no S01E04).
+        let e = episode("Babylon 5/Season 1/04 - Infection.mkv");
+        assert_eq!((e.show.as_str(), e.season, e.episode), ("Babylon 5", 1, Some(4)));
+        assert_eq!(e.title.as_deref(), Some("Infection"));
+        let e = episode("Babylon 5/Season 1/Babylon 5 - 04 - Infection.mkv");
+        assert_eq!((e.season, e.episode, e.title.as_deref()), (1, Some(4), Some("Infection")));
+
+        // Season and episode run together, in a season folder of that number.
+        let e = episode("The West Wing/Season 1/101 - Pilot.mkv");
+        assert_eq!((e.season, e.episode, e.title.as_deref()), (1, Some(1), Some("Pilot")));
+        let e = episode("The West Wing/Season 2/222 - Two Cathedrals.mkv");
+        assert_eq!((e.season, e.episode, e.title.as_deref()), (2, Some(22), Some("Two Cathedrals")));
+        let e = episode("Long Show/Season 10/1012 - Late One.mkv");
+        assert_eq!((e.season, e.episode), (10, Some(12)));
+        // Not when the hundreds aren't the folder's season, nor without a
+        // season folder, nor for anime's running numbers.
+        let e = episode("Long Show/Season 2/104 - Title.mkv");
+        assert_eq!((e.season, e.episode), (2, Some(104)));
+        let e = episode("Long Show/104 - Title.mkv");
+        assert_eq!((e.season, e.episode), (1, Some(104)));
+        let e = episode("One Piece/Season 1/[Group] One Piece - 104 [1080p].mkv");
+        assert_eq!((e.season, e.episode), (1, Some(104)));
+
+        // Spelled out.
+        let e = episode("Voyager/Season 3/Season 3 Episode 26 - Scorpion.mkv");
+        assert_eq!((e.season, e.episode, e.title.as_deref()), (3, Some(26), Some("Scorpion")));
+        let e = episode("Voyager/Voyager season 4 ep 1.mkv");
+        assert_eq!((e.season, e.episode), (4, Some(1)));
+    }
+
+    #[test]
+    fn the_shows_name_then_a_number() {
+        // Anime named without ` - `, tags in parentheses.
+        let e = episode("Monster (2004)/(G_P) Monster 01v2(x264)(53CFA614).mkv");
+        assert_eq!((e.show.as_str(), e.season, e.episode, e.title), ("Monster", 1, Some(1), None));
+        let e = episode("Monster (2004)/Monster 05 - The Night of the Execution.mkv");
+        assert_eq!((e.episode, e.title.as_deref()), (Some(5), Some("The Night of the Execution")));
+        // Only the show's own name, and never a year.
+        let e = episode("Monster (2004)/Pluto 05.mkv");
+        assert_eq!(e.episode, None);
+        let e = episode("Monster (2004)/Monster 2004.mkv");
+        assert_eq!(e.episode, None);
+        // A number that is part of the show's name isn't an episode's.
+        let e = episode("Babylon 5 (1994)/Season 1/Babylon 5.mkv");
+        assert_eq!(e.episode, None);
+    }
+
+    #[test]
+    fn release_tags_after_a_number_are_no_title() {
+        let e =
+            episode("Star Blazers 2199 (2012)/[DB]Uchuu Senkan Yamato 2199_-_01_(Dual Audio_10bit_BD1080p_x265).mkv");
+        assert_eq!((e.episode, e.title), (Some(1), None));
+    }
+
+    #[test]
+    fn episodes_without_a_number_keep_their_title() {
+        let e = episode("Babylon 5/Season 1/Infection.mkv");
+        assert_eq!((e.season, e.episode, e.title.as_deref()), (1, None, Some("Infection")));
+        let e = episode("Babylon 5/Season 1/Babylon 5 - The Parliament of Dreams.mkv");
+        assert_eq!((e.episode, e.title.as_deref()), (None, Some("The Parliament of Dreams")));
+        let e = episode("Babylon 5/Season 1/Babylon.5.Mind.War.720p.mkv");
+        assert_eq!((e.episode, e.title.as_deref()), (None, Some("Mind War")));
+        // A title that starts like the show's name keeps it.
+        let e = episode("Lost/Season 1/Lostboys.mkv");
+        assert_eq!(e.title.as_deref(), Some("Lostboys"));
+        // The show's name with other punctuation is still the show's name.
+        let e = episode("Full Metal Panic! (2002)/Season 4/[Judas] Full Metal Panic S4 - Special 01.mkv");
+        assert_eq!((e.season, e.episode, e.title.as_deref()), (4, None, Some("S4 - Special 01")));
     }
 
     #[test]
     fn resolution_is_not_an_episode() {
         let e = episode("Show/Show S01E01 1920x1080.mkv");
-        assert_eq!((e.season, e.episode), (1, 1));
+        assert_eq!((e.season, e.episode), (1, Some(1)));
     }
 
     #[test]
