@@ -40,6 +40,8 @@
   --accent-bright: #7dd3fc;
   --on-accent: #03131f;
   --danger-text: #ff6b70;
+  --success: #3fb27f;
+  --info: #4c9aff;
   --on-art: rgba(11, 13, 16, 0.8);
   --scrim: rgba(11, 13, 16, 0.6);
   --focus-ease: cubic-bezier(0.4, 0, 0.2, 1);
@@ -360,7 +362,9 @@ body {
   transition: opacity 150ms linear;
   color: var(--fg);
 }
-.text-btn { height: 40px; padding: 0 16px; min-width: 58px; background: transparent; }
+.text-btn { height: 40px; padding: 0 16px; min-width: 58px; background: rgba(233, 235, 239, 0.08); }
+.text-btn.link { background: transparent; }
+.text-btn.tall { height: 48px; }
 .chip { height: 40px; padding: 0 16px; background: var(--surface3); }
 .chip .icon { margin-right: 8px; }
 .tab { height: 40px; padding: 0 16px; background: transparent; color: var(--muted); }

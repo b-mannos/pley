@@ -220,7 +220,7 @@ export function AlbumScreen(p: { entry: Entry; id: number; trackId?: number }) {
         </div>
         {album.parent_id ? (
           <div style="margin:2px 0 0 -16px">
-            <TextButton label={album.parent_title ?? "Artist"} color="var(--accent-bright)" fid="artist" onSelect={() => ui.nav.open({ name: "artist", id: album.parent_id! })} />
+            <TextButton label={album.parent_title ?? "Artist"} color="var(--accent-bright)" variant="link" fid="artist" onSelect={() => ui.nav.open({ name: "artist", id: album.parent_id! })} />
           </div>
         ) : (
           album.parent_title && <div class="t-label c-fg" style="margin-top:2px">{album.parent_title}</div>

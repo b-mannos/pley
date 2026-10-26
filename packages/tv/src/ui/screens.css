@@ -630,8 +630,14 @@
 .scrub-played { position: absolute; left: 0; top: 0; bottom: 0; }
 .scrub-buffered { background: rgba(233, 235, 239, 0.45); }
 .scrub-played { background: var(--accent); }
-.scrub-thumb { position: absolute; top: 5px; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: var(--fg); }
-.scrub-box[data-focused] .scrub-thumb { top: 2px; width: 20px; height: 20px; margin-left: -10px; box-shadow: 0 0 0 4.5px var(--bg), 0 0 0 7.5px var(--accent-bright); }
+/* The video scrubber's thumb: 10 px, 12 with a 2 px ring 1 px clear of it while focused. */
+.scrub-thumb { position: absolute; top: 12px; width: 0; height: 0; }
+.scrub-thumb::before,
+.scrub-thumb::after { content: ""; position: absolute; left: 0; top: 0; border-radius: 50%; transform: translate(-50%, -50%); }
+.scrub-thumb::before { width: 10px; height: 10px; background: var(--fg); transition: width 150ms var(--focus-ease), height 150ms var(--focus-ease); }
+.scrub-thumb::after { width: 18px; height: 18px; box-sizing: border-box; border: 2px solid var(--accent-bright); opacity: 0; transition: opacity 150ms var(--focus-ease); }
+.scrub-box[data-focused] .scrub-thumb::before { width: 12px; height: 12px; }
+.scrub-box[data-focused] .scrub-thumb::after { opacity: 1; }
 .scrub-times { display: flex; justify-content: space-between; margin-top: 4px; }
 .now-controls { display: flex; align-items: flex-start; margin-top: 16px; height: 88px; }
 .now-controls > * + * { margin-left: 16px; }
@@ -691,70 +697,97 @@ html.avplay .engine-host { background: transparent; }
 .cue.boxed { background: rgba(0, 0, 0, 0.66); padding: 0.04em 0.28em; border-radius: 0.12em; text-shadow: none; -webkit-box-decoration-break: clone; }
 .picture-subtitles { position: absolute; left: 0; top: 0; width: 960px; height: 540px; pointer-events: none; z-index: 2; }
 
+/*
+ * The controls (the Android TV app's TvPlayerControls): one black scrim over
+ * the whole picture, under the subtitles, fading with them; the title and
+ * clock at the top; the times at 399, the track's centre at 425, the row at
+ * 441, so the focused labels end above the safe area's 513.
+ */
+.player-scrim {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 960px;
+  height: 540px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.65) 0%, rgba(0, 0, 0, 0.25) 22%, rgba(0, 0, 0, 0.25) 55%, rgba(0, 0, 0, 0.7) 78%, rgba(0, 0, 0, 0.9) 100%);
+  opacity: 0;
+  transition: opacity 200ms var(--focus-ease);
+  pointer-events: none;
+  z-index: 1;
+}
+.player-scrim.in { opacity: 1; }
 .player-controls { position: absolute; left: 0; top: 0; width: 960px; height: 540px; opacity: 0; transition: opacity 200ms var(--focus-ease); z-index: 3; pointer-events: none; }
 .player-controls.in { opacity: 1; pointer-events: auto; }
-.reduced .player-controls { transition: none; }
-.scrim-top { position: absolute; left: 0; right: 0; top: 0; height: 120px; background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0)); }
-.scrim-bottom { position: absolute; left: 0; right: 0; bottom: 0; height: 200px; background: linear-gradient(to bottom, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.85)); }
+.reduced .player-controls,
+.reduced .player-scrim { transition: none; }
 .player-top { position: absolute; left: 48px; right: 48px; top: 27px; display: flex; }
-.player-clock { text-align: right; flex: none; }
-.player-times { position: absolute; left: 48px; right: 48px; top: 371px; display: flex; justify-content: space-between; }
-.scrubber { position: absolute; left: 48px; top: 377px; width: 864px; height: 40px; }
+.player-clock { flex: none; display: flex; flex-direction: column; align-items: flex-end; }
+.player-clock-row { display: flex; align-items: center; }
+.player-clock-row > * + * { margin-left: 12px; }
+/* How it plays: success for a file played as it is, info for a direct stream, the accent for a transcode; on art at 80 %. */
+.method-badge { padding: 3px 8px; border-radius: 2px; font-weight: 600; white-space: nowrap; background: var(--on-art); }
+.method-badge.direct { color: var(--success); background: linear-gradient(rgba(63, 178, 127, 0.2), rgba(63, 178, 127, 0.2)), var(--on-art); }
+.method-badge.stream { color: var(--info); background: linear-gradient(rgba(76, 154, 255, 0.2), rgba(76, 154, 255, 0.2)), var(--on-art); }
+.method-badge.transcode { color: var(--accent); background: linear-gradient(rgba(56, 189, 248, 0.2), rgba(56, 189, 248, 0.2)), var(--on-art); }
+.player-times { position: absolute; left: 48px; right: 48px; top: 399px; display: flex; justify-content: space-between; }
+.scrubber { position: absolute; left: 48px; top: 405px; width: 864px; height: 40px; }
 .scrubber .bar { position: absolute; left: 0; right: 0; top: 18px; height: 4px; border-radius: 2px; background: rgba(233, 235, 239, 0.25); overflow: hidden; }
 .bar-buffered,
 .bar-played { position: absolute; left: 0; top: 0; bottom: 0; }
 .bar-buffered { background: rgba(233, 235, 239, 0.45); }
 .bar-played { background: var(--accent); }
 .bar-gap { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #000; }
-.scrubber .thumb {
-  position: absolute;
-  top: 13px;
-  width: 14px;
-  height: 14px;
-  margin-left: -7px;
-  border-radius: 50%;
-  background: var(--fg);
-  transition: transform 150ms var(--focus-ease);
-}
-.scrubber[data-focused] .thumb { transform: scale(1.43); box-shadow: 0 0 0 3.2px rgba(0, 0, 0, 0), 0 0 0 5.3px var(--accent-bright); }
-.marker-label { position: absolute; top: 403px; transform: translateX(-50%); white-space: nowrap; }
-.player-row { position: absolute; left: 48px; right: 48px; top: 413px; height: 100px; }
+/* The thumb, 10 px, grows to 12 with a 2 px ring 1 px clear of it (18 across) while focused; the ring fades with focus. */
+.scrubber .thumb { position: absolute; top: 20px; width: 0; height: 0; }
+.scrubber .thumb::before,
+.scrubber .thumb::after { content: ""; position: absolute; left: 0; top: 0; border-radius: 50%; transform: translate(-50%, -50%); }
+.scrubber .thumb::before { width: 10px; height: 10px; background: var(--fg); transition: width 150ms var(--focus-ease), height 150ms var(--focus-ease); }
+.scrubber .thumb::after { width: 18px; height: 18px; box-sizing: border-box; border: 2px solid var(--accent-bright); opacity: 0; transition: opacity 150ms var(--focus-ease); }
+.scrubber[data-focused] .thumb::before { width: 12px; height: 12px; }
+.scrubber[data-focused] .thumb::after { opacity: 1; }
+.marker-label { position: absolute; top: 431px; transform: translateX(-50%); white-space: nowrap; }
+.player-row { position: absolute; left: 48px; right: 48px; top: 441px; height: 80px; }
+/* The 36 px buttons sit 4 down, so their centres line up with Play/Pause's 44. */
 .row-left,
-.row-right { position: absolute; top: 8px; display: flex; }
+.row-right { position: absolute; top: 4px; display: flex; }
 .row-left { left: 0; }
 .row-right { right: 0; }
 .row-centre { position: absolute; left: 50%; top: 0; transform: translateX(-50%); display: flex; align-items: flex-start; }
 .row-left > * + *,
 .row-right > * + * { margin-left: 10px; }
-.row-centre > * + * { margin-left: 20px; }
-.row-centre > .pbtn-box:not(.big) { margin-top: 8px; }
-.pbtn-box { position: relative; width: 48px; flex: none; }
-.pbtn-box.big { width: 64px; }
+.row-centre > * + * { margin-left: 16px; }
+.row-centre > .pbtn-box:not(.big) { margin-top: 4px; }
+.pbtn-box { position: relative; width: 36px; flex: none; }
+.pbtn-box.big { width: 44px; }
+/* The glyph alone on the scrim until focused, as streaming apps' players draw it. */
 .pbtn {
-  width: 48px;
-  height: 48px;
+  position: relative;
+  width: 36px;
+  height: 36px;
   border-radius: 6px;
-  background: var(--on-art);
   color: var(--fg);
   display: flex;
   align-items: center;
   justify-content: center;
   transition: transform 120ms var(--unfocus-ease);
 }
-.pbtn.big { width: 64px; height: 64px; }
+.pbtn.big { width: 44px; height: 44px; }
 .pbtn[data-focused] { background: var(--accent); color: var(--on-accent); transform: scale(1.08); transition: transform 150ms var(--focus-ease); }
 .pbtn[data-pressed] { background: var(--accent-bright); }
+/* −10 s and +10 s: the turning arrow with the number inside, 0.36 of the icon. */
+.skip-glyph { position: relative; width: 24px; height: 24px; }
+.skip-glyph > span { position: absolute; left: 0; top: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 8.64px; line-height: 1; font-weight: 700; letter-spacing: -0.02em; }
 .pbtn-label {
   position: absolute;
   left: 50%;
-  top: 56px;
+  top: 44px;
   transform: translateX(-50%);
   white-space: nowrap;
   color: var(--fg);
   opacity: 0;
   transition: opacity 150ms linear;
 }
-.pbtn-box.big .pbtn-label { top: 72px; }
+.pbtn-box.big .pbtn-label { top: 52px; }
 .pbtn[data-focused] + .pbtn-label { opacity: 1; }
 
 .seek-preview { position: absolute; width: 240px; z-index: 4; }
@@ -775,6 +808,9 @@ html.avplay .engine-host { background: transparent; }
   transition: transform 120ms var(--unfocus-ease);
 }
 .skip-pill[data-focused] { background: var(--accent); color: var(--on-accent); transform: scale(1.05); transition: transform 150ms var(--focus-ease); }
+/* What's left of the marker: 4 px along the bottom, inset half the button's height each side. */
+.skip-bar { position: absolute; left: 24px; right: 24px; bottom: 0; height: 4px; background: var(--accent); transform-origin: left center; }
+.skip-pill[data-focused] .skip-bar { background: var(--on-accent); }
 .sleep-notice {
   position: absolute;
   left: 48px;

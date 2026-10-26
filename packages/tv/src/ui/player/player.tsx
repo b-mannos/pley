@@ -4,6 +4,7 @@ import { initMusic } from "../../player/music";
 import { PlaybackController, type PlayerEnv, type SavedPlayback } from "../../player/controller";
 import { T } from "../../player/details";
 import type { PlayRequest } from "../../player/plan";
+import { activeMarker } from "../../player/markers";
 import { thumbnailAt, sheetPath } from "../../player/nextup";
 import { badgeText, MEDIA_STEP_MS, Seeker, STEP_MS } from "../../player/seeker";
 import { LEAVE_AFTER_MS } from "../../player/sleep";
@@ -112,7 +113,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
   const settings = app.settings.value;
   const [controls, setControls] = useState(false);
   const [panel, setPanel] = useState<PlayerPanel | null>(null);
-  const [toast, setToast] = useState<{ text: string; ms: number; n: number } | null>(null);
+  const [toast, setToast] = useState<{ text: string; ms: number; n: number; error: boolean } | null>(null);
   const [, setSeekTick] = useState(0);
   const [ring, setRing] = useState(false);
   const lastInput = useRef(Date.now());
@@ -132,7 +133,15 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
     c.close();
     ui.nav.pop();
   };
-  const say = (text: string, ms = 3500) => setToast({ text, ms, n: Date.now() });
+  const say = (text: string, ms = 3500, error = false) => setToast({ text, ms, n: Date.now(), error });
+
+  // What the player did about the quality, and where to change it (6 s, as an error's toast).
+  useEffect(() => {
+    if (s.canPlayOriginal && s.note) say(`${s.note} Play original is in Quality.`, 6_000);
+  }, [s.canPlayOriginal]);
+  useEffect(() => {
+    if (s.suggestLowerQuality && s.note) say(`${s.note} Choose one in Quality.`, 6_000, true);
+  }, [s.suggestLowerQuality]);
 
   // The TV keeps the screen on while a video plays.
   useEffect(() => {
@@ -216,6 +225,11 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
     } else c.play();
   };
   const skipShown = !!s.skipLabel && !s.upNext && !error && !(controls && seeker.target !== null);
+  // What's left of the intro or credits, in whole seconds: the skip button's bar shrinks with it, once a second.
+  const skipMarker = skipShown ? activeMarker(s.markers, clock.positionMs) : null;
+  const skipLeft = skipMarker
+    ? Math.ceil(Math.max(0, skipMarker.end_ms - clock.positionMs) / 1000) / Math.max(1, Math.ceil((skipMarker.end_ms - skipMarker.start_ms) / 1000))
+    : null;
   const sleepShown = s.sleep.secondsLeft !== null && !error;
 
   // A new Skip or sleep notice takes focus while nothing else is up; the hidden-controls focus holder otherwise.
@@ -426,7 +440,8 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
 
   const target = seeker.target;
   const thumbPos = target ?? position;
-  const endsAt = duration > 0 ? formatTimeOfDay(new Date(Date.now() + Math.max(0, duration - position)), app.platform.clock24()) : null;
+  // When it ends, while paused, as the Android TV app says it.
+  const endsAt = s.phase.kind === "paused" && duration > 0 ? formatTimeOfDay(new Date(Date.now() + Math.max(0, duration - position)), app.platform.clock24()) : null;
   const engineStats = () => c.engine?.stats() ?? null;
   const readoutShown = settings.playbackDetails && !controls && !panel && !s.upNext && !error;
   return (
@@ -437,19 +452,22 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
         }}
         class="engine-host"
       />
+      {/* Under the subtitles, so they stay clear over it. */}
+      <div class={`player-scrim${controls ? " in" : ""}`} />
       {shown.picture && <PictureSubtitles frame={shown.picture} />}
       {shown.cues.length > 0 && <TextSubtitles cues={shown.cues} size={settings.subtitleSize} box={settings.subtitleBox} lifted={controls} />}
       <F class="video-holder" fid="video" disabled={controls} label="Video" />
       <div class={`player-controls${controls ? " in" : ""}`} aria-hidden={!controls}>
-        <div class="scrim-top" />
-        <div class="scrim-bottom" />
         <div class="player-top">
           <div style="min-width:0;flex:1;padding-right:300px">
             <div class="t-title c-fg one-line">{s.title}</div>
-            {s.subtitle && <div class="t-label c-muted one-line" style="margin-top:4px">{s.subtitle.replace(" — ", " · ")}</div>}
+            {s.subtitle && <div class="t-label c-muted one-line" style="margin-top:4px">{s.subtitle}</div>}
           </div>
           <div class="player-clock">
-            <div class="t-label c-muted">{formatTimeOfDay(new Date(), app.platform.clock24())}</div>
+            <div class="player-clock-row">
+              {s.method && <span class={`method-badge t-caption ${methodClass(s.method)}`}>{s.method}</span>}
+              <span class="t-label c-muted">{formatTimeOfDay(new Date(), app.platform.clock24())}</span>
+            </div>
             {endsAt && <div class="t-label c-muted">{`Ends at ${endsAt}`}</div>}
           </div>
         </div>
@@ -465,11 +483,11 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
             <PlayerButton fid="sleep" icon="moon" label="Sleep timer" onSelect={() => openPanel("sleep")} />
           </div>
           <div class="row-centre">
-            {hasPrevNext && <PlayerButton fid="previous" icon="skip-back" label="Previous" onSelect={() => media("previous")} />}
-            <PlayerButton fid="back10" icon="rotate-ccw" label="Back 10 seconds" onSelect={() => seeker.press(-1, STEP_MS, position, duration)} />
+            {hasPrevNext && <PlayerButton fid="previous" icon="skip-back" iconSize={24} label="Previous" onSelect={() => media("previous")} />}
+            <PlayerButton fid="back10" icon="rotate-ccw" skipSeconds={STEP_MS / 1000} label="Back 10 seconds" onSelect={() => seeker.press(-1, STEP_MS, position, duration)} />
             <PlayerButton fid="playpause" icon={playing ? "pause" : "play"} label={playing ? "Pause" : "Play"} big onSelect={playPause} />
-            <PlayerButton fid="fwd10" icon="rotate-cw" label="Forward 10 seconds" onSelect={() => seeker.press(1, STEP_MS, position, duration)} />
-            {hasPrevNext && <PlayerButton fid="next" icon="skip-forward" label="Next" onSelect={() => media("next")} />}
+            <PlayerButton fid="fwd10" icon="rotate-cw" skipSeconds={STEP_MS / 1000} label="Forward 10 seconds" onSelect={() => seeker.press(1, STEP_MS, position, duration)} />
+            {hasPrevNext && <PlayerButton fid="next" icon="skip-forward" iconSize={24} label="Next" onSelect={() => media("next")} />}
           </div>
           <div class="row-right">
             {s.subtitles.length > 0 && <PlayerButton fid="subtitles" icon="captions" label="Subtitles" onSelect={() => openPanel("subtitles")} />}
@@ -485,6 +503,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
           <F class="skip-pill t-label" fid="skip" label={s.skipLabel!} onSelect={() => c.skip()}>
             <Icon name="chevrons-right" size={22} />
             <span style="margin-left:10px">{s.skipLabel}</span>
+            {skipLeft !== null && <div class="skip-bar" style={`transform:scaleX(${skipLeft})`} />}
           </F>
         </G>
       )}
@@ -534,23 +553,42 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
           </G>
         </div>
       )}
-      {toast && <div class={`toast in t-label${controls ? " low" : ""}`}>{toast.text}</div>}
+      {toast && <div class={`toast in t-label${controls ? " low" : ""}${toast.error ? " error" : ""}`}>{toast.text}</div>}
     </div>
   );
 }
 
-/** A button of the control row: 48 px (Play/Pause 64), its label under it while focused. */
-function PlayerButton(p: { fid: string; icon: IconName; label: string; big?: boolean; onSelect: () => void }) {
+/**
+ * A button of the control row (the Android TV app's PlayerRoundButton): 36 px
+ * with a 20 px glyph (Play/Pause 44 and 26; the transport's 24), the glyph
+ * alone until focused, its label 8 under it while focused. `skipSeconds`
+ * draws the turning arrow with its number inside.
+ */
+function PlayerButton(p: { fid: string; icon: IconName; label: string; big?: boolean; iconSize?: number; skipSeconds?: number; onSelect: () => void }) {
   return (
     <div class={`pbtn-box${p.big ? " big" : ""}`}>
       <F class={`pbtn${p.big ? " big" : ""}`} fid={p.fid} label={p.label} onSelect={p.onSelect}>
-        <Icon name={p.icon} size={p.big ? 32 : 24} />
+        {p.skipSeconds ? (
+          <span class="skip-glyph" aria-hidden="true">
+            <Icon name={p.icon} size={24} />
+            <span>{p.skipSeconds}</span>
+          </span>
+        ) : (
+          <Icon name={p.icon} size={p.big ? 26 : p.iconSize ?? 20} />
+        )}
       </F>
       <div class="pbtn-label t-caption" aria-hidden="true">
         {p.label}
       </div>
     </div>
   );
+}
+
+/** The badge's colour for how it plays: a file as it is, a direct stream, or a transcode. */
+function methodClass(method: string): string {
+  if (method.indexOf("Direct play") === 0 || method.indexOf("Downloaded") === 0) return "direct";
+  if (method.indexOf("Direct stream") === 0) return "stream";
+  return "transcode";
 }
 
 /** The scrubber: played, buffered, chapter gaps, the thumb at the seek target, the marker's name under it. */
@@ -571,7 +609,8 @@ function Scrubber(p: { positionMs: number; bufferedMs: number; durationMs: numbe
               <div key={ms} class="bar-gap" style={`left:${frac(ms) * 100}%`} />
             ))}
         </div>
-        <div class="thumb" style={`left:${frac(p.targetMs) * 100}%`} />
+        {/* Kept a radius in from either end, as the Android app draws it. */}
+        <div class="thumb" style={`left:${Math.max(6, Math.min(BAR_WIDTH - 6, frac(p.targetMs) * BAR_WIDTH))}px`} />
       </F>
       {marker && (
         <div class="marker-label t-caption c-muted" style={`left:${markerX}px`}>
@@ -602,7 +641,7 @@ function SeekPreview(p: { state: ReturnType<PlaybackController["state"]["peek"]>
   const picture = (tile && sheetUrl) || chapterImage;
   const scale = tp ? 240 / tp.info.width : 1;
   return (
-    <div class="seek-preview" style={`left:${Math.max(48 + 120, Math.min(912 - 120, x)) - 120}px;top:${picture ? 184 : 325}px`}>
+    <div class="seek-preview" style={`left:${Math.max(48 + 120, Math.min(912 - 120, x)) - 120}px;top:${picture ? 212 : 353}px`}>
       {tile && sheetUrl && tp ? (
         <div class="preview-box">
           <div
@@ -663,7 +702,7 @@ function UpNextCard(p: { card: NonNullable<ReturnType<PlaybackController["state"
                 </svg>
               ))}
           </F>
-          <TextButton label="Cancel" onSelect={p.onCancel} />
+          <TextButton label="Cancel" variant="tall" onSelect={p.onCancel} />
         </G>
       </div>
     </div>

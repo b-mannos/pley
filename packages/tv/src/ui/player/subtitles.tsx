@@ -32,7 +32,7 @@ export function TextSubtitles(p: { cues: Cue[]; size: Settings["subtitleSize"]; 
     );
   };
   return (
-    <div class="subtitles" style={`font-size:${px}px;padding:27px 48px ${p.lifted ? 181 : 40}px 48px`} aria-live="off">
+    <div class="subtitles" style={`font-size:${px}px;padding:27px 48px ${p.lifted ? 153 : 40}px 48px`} aria-live="off">
       <div class="cues-top">{top.map(cue)}</div>
       <div class="cues-bottom">{bottom.map(cue)}</div>
     </div>

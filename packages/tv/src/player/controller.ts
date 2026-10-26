@@ -95,7 +95,7 @@ export interface PlayerState {
   itemId: number;
   /** A movie's "Title (Year)", an episode's show. */
   title: string;
-  /** An episode's "S1 · E2 — Title". */
+  /** An episode's "S1 · E2 · Title", as it reads everywhere. */
   subtitle: string | null;
   audio: TrackChoice[];
   subtitles: TrackChoice[];
@@ -379,7 +379,7 @@ export class PlaybackController {
     this.update({
       itemId: detail.id,
       title: episode ? detail.grandparent_title || detail.title : detail.year != null ? `${detail.title} (${detail.year})` : detail.title,
-      subtitle: episode ? [episodeLabel(detail.parent_index, detail.index), detail.title].filter(Boolean).join(" — ") : null,
+      subtitle: episode ? [episodeLabel(detail.parent_index, detail.index), detail.title].filter(Boolean).join(" · ") : null,
       markers: this.markers,
       chapters: (chosen?.chapters ?? []).map((c) => ({
         title: c.title,

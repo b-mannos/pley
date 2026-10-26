@@ -44,9 +44,14 @@ export function Round(p: ButtonProps & { label: string; icon: IconName; offArt?:
   );
 }
 
-export function TextButton(p: ButtonProps & { label: string; color?: string }) {
+/**
+ * A text button (TvTextButton): fg at 8 % behind its label at rest, so it
+ * reads as a button before it has focus; `link` stays bare (an album's
+ * artist), `tall` is 48 high (Up Next's Cancel).
+ */
+export function TextButton(p: ButtonProps & { label: string; color?: string; variant?: "link" | "tall" }) {
   return (
-    <F class="text-btn t-label" fid={p.fid} initial={p.initial} disabled={p.disabled} label={p.label} onSelect={p.onSelect} onFocus={p.onFocus}>
+    <F class={`text-btn t-label${p.variant ? ` ${p.variant}` : ""}`} fid={p.fid} initial={p.initial} disabled={p.disabled} label={p.label} onSelect={p.onSelect} onFocus={p.onFocus}>
       <span style={p.color ? `color:${p.color}` : undefined}>{p.label}</span>
     </F>
   );
