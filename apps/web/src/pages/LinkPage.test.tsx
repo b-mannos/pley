@@ -126,6 +126,26 @@ describe("LinkPage", () => {
     expect(screen.getByText("Enter the code your TV shows.")).toBeInTheDocument();
   });
 
+  it("says which device is asking: what it says it is, and where from", async () => {
+    const kodi: ConsentRequest = {
+      ...tvRequest(),
+      client: { id: "https://hhaidar.github.io/pley/oauth/kodi.json", host: "hhaidar.github.io", name: "pley for Kodi", first_party: true },
+      redirect: { kind: "device", to: "BCDF-GHJK", device: "Kodi 21.3; Windows", address: "192.168.1.20" },
+    };
+    serve({ verify: () => kodi });
+    renderPage(URL_CODE);
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Continue" }));
+    await screen.findByRole("heading", { name: "pley for Kodi wants to use your pley account" });
+    expect(screen.getByText("It says it is Kodi 21.3; Windows, at 192.168.1.20.")).toBeInTheDocument();
+  });
+
+  it("names a device that says nothing by its address alone", async () => {
+    serve({ verify: () => ({ ...tvRequest(), redirect: { kind: "device", to: "BCDF-GHJK", device: null, address: "10.0.0.7" } }) });
+    renderPage(URL_CODE);
+    await continueWith(null);
+    expect(screen.getByText("It says it is a device, at 10.0.0.7.")).toBeInTheDocument();
+  });
+
   it("asks for the rest of a code the address cut short", async () => {
     serve();
     renderPage("/link?code=bcd");

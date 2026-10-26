@@ -877,13 +877,18 @@ fn start_on_device(
     let scopes = asked_scopes(form.get("scope"), client).map_err(|err| OAuthError::new(err.error, err.description))?;
     let issuer = issuer(headers).map_err(|_| OAuthError::invalid_request("the Host header is missing or wrong"))?;
     let app = AppSnapshot::from(client);
+    // What the device says it is, so the person typing the code can tell
+    // which one is signing in.
+    let device = user_agent(headers).map(|agent| grant_device(&agent)).as_deref().and_then(clients::clean_name);
+    let asker = devices::Asker { address: source, device };
+    let from = source.map_or_else(|| "an unknown address".to_owned(), |source| source.to_string());
+    let said = asker.device.as_deref().map(|device| format!(" ({device})")).unwrap_or_default();
     // When full, nothing in progress is dropped to make room.
-    let started = state.oauth.devices.create(app.clone(), scopes, source).map_err(|_| OAuthError {
+    let started = state.oauth.devices.create(app.clone(), scopes, asker).map_err(|_| OAuthError {
         status: StatusCode::TOO_MANY_REQUESTS,
         ..OAuthError::new("temporarily_unavailable", BUSY)
     })?;
-    let from = source.map_or_else(|| "an unknown address".to_owned(), |source| source.to_string());
-    tracing::info!("{} asked to sign in with a code from {from}", app.label());
+    tracing::info!("{}{said} asked to sign in with a code from {from}", app.label());
     let body = json!({
         "device_code": started.device_code,
         "user_code": devices::shown(&started.user_code),
@@ -954,12 +959,13 @@ pub async fn verify_user_code(
         state.oauth.pending.remove(before);
     }
     let app = &found.app;
+    let address = found.asker.address.map(|address| address.to_canonical().to_string());
     Ok(Json(json!({
         "status": "consent",
         "id": id,
         "expires_at": now() + lifetime.as_secs() as i64,
         "client": ClientDto { id: &app.id, host: &app.host, name: app.name.as_deref(), first_party: app.first_party },
-        "redirect": {"kind": "device", "to": devices::shown(&code)},
+        "redirect": {"kind": "device", "to": devices::shown(&code), "device": found.asker.device, "address": address},
         "scopes": found.scopes.names(),
     })))
 }

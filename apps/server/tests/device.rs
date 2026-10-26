@@ -163,7 +163,12 @@ async fn a_tv_signs_in_with_a_code_shown_on_screen() {
         shown.body["client"],
         json!({"id": ANDROID_APP, "host": "hhaidar.github.io", "name": "pley for Android", "first_party": true})
     );
-    assert_eq!(shown.body["redirect"], json!({"kind": "device", "to": user_code}));
+    // An agent that isn't one of pley's apps is named as the sign-ins list
+    // names it; the test's connection has no address.
+    assert_eq!(
+        shown.body["redirect"],
+        json!({"kind": "device", "to": user_code, "device": "pley-android/1.0", "address": null})
+    );
     assert_eq!(shown.body["scopes"], json!(["library", "play"]));
     let expires_at = shown.body["expires_at"].as_i64().unwrap();
     assert!((pley::util::now() + 590..=pley::util::now() + 600).contains(&expires_at), "{expires_at}");
@@ -730,12 +735,21 @@ async fn kodi_and_roku_sign_in_only_with_a_code() {
         (KODI_APP, "pley for Kodi", "pleyKodi/0.1.0 (Kodi 21.2; Windows)", "Kodi 21.2; Windows"),
         (ROKU_APP, "pley for Roku", "pleyRoku/0.1.0 (Roku OS 14.5; Roku Ultra)", "Roku OS 14.5; Roku Ultra"),
     ] {
-        let started = ask(&app, client_id, Some("library play"), &[("user-agent", agent)]).await;
+        let asked = form(&[("client_id", client_id), ("scope", "library play")]);
+        let started =
+            app.form_post_from("192.168.1.20:51515", "/api/oauth/device", &asked, &[("user-agent", agent)]).await;
         assert_eq!(started.status, StatusCode::OK, "{}", started.text());
         let device_code = started.body["device_code"].as_str().unwrap();
-        let shown = verify(&app, &admin, started.body["user_code"].as_str().unwrap()).await;
+        let user_code = started.body["user_code"].as_str().unwrap();
+        let shown = verify(&app, &admin, user_code).await;
         assert_eq!(shown.body["client"]["name"], name, "{}", shown.text());
         assert_eq!(shown.body["client"]["first_party"], true);
+        // The page says which device is asking: what it says it is, and
+        // where from.
+        assert_eq!(
+            shown.body["redirect"],
+            json!({"kind": "device", "to": user_code, "device": platform, "address": "192.168.1.20"})
+        );
         let id = shown.body["id"].as_str().unwrap();
         assert_eq!(decide(&app, &admin, id, true).await.status, StatusCode::OK);
         let asked = form(&[("grant_type", DEVICE_GRANT), ("device_code", device_code), ("client_id", client_id)]);

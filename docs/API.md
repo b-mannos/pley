@@ -594,8 +594,10 @@ TV and Fire TV, pley for Kodi and pley for Roku.
    case, with or without the dash and spaces). From the QR code it comes
    filled in, and is sent only once they continue. The page shows the same
    consent as `/oauth/authorize`, saying the answer goes to the TV showing
-   that code, and to allow it only when the code is on a screen in front of
-   them. Nothing goes back through the browser.
+   that code, what that device said it is and where it asked from (two TVs
+   with the same app look alike otherwise), and to allow it only when the
+   code is on a screen in front of them. Nothing goes back through the
+   browser.
 3. Meanwhile the TV asks the token endpoint every `interval` seconds with
    **`grant_type=urn:ietf:params:oauth:grant-type:device_code`**,
    `device_code` and `client_id`:
@@ -849,7 +851,7 @@ of them answers CORS.
 | Method | Path | Body | Response |
 |---|---|---|---|
 | POST | `/api/oauth/requests` | `{ query }`: the page's query without `?`, at most 8 KiB | `{ status: "consent", id, expires_at, client: { id, host, name, first_party }, redirect: { kind: "web" \| "app" \| "loopback", to }, scopes }`; or a mistake that goes back to the app, `{ status: "error", error, message, back_url, client, redirect }`, `redirect` saying where "Back to the app" goes. `400` for an app or return address pley can't accept, `429` with too many descriptions read, `503` with too many sign-ins in progress |
-| POST | `/api/oauth/device/verify` | `{ user_code }`: the code a TV shows, as typed | the consent as above, with `redirect: { kind: "device", to: "BCDF-GHJK" }`. `400` for something that can't be a code, `404` for a code no TV shows (it counts as a wrong one), `409` for one answered already or shown on another session's page, `429` past the wrong codes' limit, `503` with too many sign-ins in progress. A code shown on a page whose session ended since (signed out, or switched profile) goes to whoever types it next; typed again in the same session, the page before can't answer any more |
+| POST | `/api/oauth/device/verify` | `{ user_code }`: the code a TV shows, as typed | the consent as above, with `redirect: { kind: "device", to: "BCDF-GHJK", device, address }`: `device` is what the TV said it is when it asked for the code (pley's apps give their platform in their User-Agent's brackets, "Kodi 21.3; Windows"; anything else is named as the sign-ins list names it; unchecked, since anyone may ask), `address` where it asked from, each `null` when unknown. The page shows both, so the person can tell which device is signing in. `400` for something that can't be a code, `404` for a code no TV shows (it counts as a wrong one), `409` for one answered already or shown on another session's page, `429` past the wrong codes' limit, `503` with too many sign-ins in progress. A code shown on a page whose session ended since (signed out, or switched profile) goes to whoever types it next; typed again in the same session, the page before can't answer any more |
 | POST | `/api/oauth/requests/{id}` | `{ allow: boolean }` | `{ continue_url }`, or `{ done: true }` for a TV's request, whose answer the TV gets when it next asks. The same answer again gets the same reply, the other one `409`; `404` when the request is over (a TV's too once the TV's code expired) |
 | GET | `/api/oauth/requests/{id}/continue` | – | `303` to the app with the answer. It repeats while the code works and wasn't exchanged, and for a minute after a refusal or a mistake. After that a browser following the link is sent (`303`) to the web app's `/oauth/over` page, which says the request is over; a script gets `404`. Never for a TV's request |
 

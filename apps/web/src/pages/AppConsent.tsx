@@ -95,6 +95,12 @@ function Destination({ redirect }: { redirect: ConsentRequest["redirect"] }) {
           the TV or device showing{" "}
           <span className="font-mono font-semibold tracking-wider">{redirect.to}</span>
         </p>
+        {redirect.device || redirect.address ? (
+          <p className="mt-1 text-muted">
+            It says it is {redirect.device ?? "a device"}
+            {redirect.address ? `, at ${redirect.address}` : ""}.
+          </p>
+        ) : null}
         <p className="mt-1 text-danger">
           Only allow this if that code is on a screen in front of you right now. Never use a code someone sent you.
         </p>

@@ -144,6 +144,9 @@ struct Entry {
     scopes: Scopes,
     /// 8 letters, without the dash.
     user_code: String,
+    /// Who asked: shown on the consent page, so the person can tell which
+    /// device is signing in.
+    asker: Asker,
     /// The [`network`] it came from, when known.
     network: Option<IpAddr>,
     created: Instant,
@@ -194,6 +197,22 @@ fn forget_old(times: &mut VecDeque<Instant>, now: Instant) {
     }
 }
 
+/// The device asking for a code.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Asker {
+    /// The address it asked from, as [`crate::auth::SourceIp`] reads it.
+    pub address: Option<IpAddr>,
+    /// What it says it is, from its User-Agent ("Kodi 21.3; Windows"):
+    /// unchecked, since anyone may start a request.
+    pub device: Option<String>,
+}
+
+impl From<Option<IpAddr>> for Asker {
+    fn from(address: Option<IpAddr>) -> Self {
+        Asker { address, device: None }
+    }
+}
+
 /// A request just made: what the device shows and keeps.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Started {
@@ -211,6 +230,8 @@ pub struct Found {
     pub key: String,
     pub app: AppSnapshot,
     pub scopes: Scopes,
+    /// The device that asked.
+    pub asker: Asker,
     /// How long it has left.
     pub left: Duration,
     /// The pending request whose consent page shows it already, if any.
@@ -276,13 +297,12 @@ pub struct Devices {
 }
 
 impl Devices {
-    /// Starts a request of `app` for `scopes`, made from `address` (as
-    /// [`crate::auth::SourceIp`] reads it): what the device shows and keeps.
-    /// Refused while that address (its /64 for IPv6) has 20 in progress or
-    /// everyone 1,000: only requests that are over make room. Requests from
-    /// unknown addresses count together.
-    pub fn create(&self, app: AppSnapshot, scopes: Scopes, address: Option<IpAddr>) -> Result<Started, Full> {
-        self.create_drawing(app, scopes, address, new_user_code)
+    /// Starts a request of `app` for `scopes`, made by `asker`: what the
+    /// device shows and keeps. Refused while its address (its /64 for IPv6)
+    /// has 20 in progress or everyone 1,000: only requests that are over make
+    /// room. Requests from unknown addresses count together.
+    pub fn create(&self, app: AppSnapshot, scopes: Scopes, asker: impl Into<Asker>) -> Result<Started, Full> {
+        self.create_drawing(app, scopes, asker.into(), new_user_code)
     }
 
     /// [`Devices::create`], with user codes from `draw`.
@@ -290,11 +310,11 @@ impl Devices {
         &self,
         app: AppSnapshot,
         scopes: Scopes,
-        address: Option<IpAddr>,
+        asker: Asker,
         mut draw: impl FnMut() -> String,
     ) -> Result<Started, Full> {
         let now = self.now();
-        let network = address.map(network);
+        let network = asker.address.map(network);
         let mut state = self.state.lock();
         if state.requests.len() >= MAX_REQUESTS {
             state.drop_over(now);
@@ -318,6 +338,7 @@ impl Devices {
             app,
             scopes,
             user_code: user_code.clone(),
+            asker,
             network,
             created: now,
             interval: INTERVAL,
@@ -356,6 +377,7 @@ impl Devices {
                     key: key.clone(),
                     app: entry.app.clone(),
                     scopes: entry.scopes,
+                    asker: entry.asker.clone(),
                     left: LIFETIME.saturating_sub(now.duration_since(entry.created)),
                     deciding,
                 })
@@ -567,7 +589,7 @@ mod tests {
 
     /// A request whose user code is `code`.
     fn start_with(devices: &Devices, code: &str) -> Started {
-        devices.create_drawing(app(), library(), ip("203.0.113.2"), || code.to_owned()).unwrap()
+        devices.create_drawing(app(), library(), ip("203.0.113.2").into(), || code.to_owned()).unwrap()
     }
 
     /// The request of `started`, typed in by `user_id` and shown on the page
@@ -607,8 +629,8 @@ mod tests {
         // Unique among the codes kept: a clash is drawn again...
         let devices = Devices::default();
         let mut draws = ["BBBBBBBB", "BBBBBBBB", "CCCCCCCC"].into_iter().map(str::to_owned);
-        let first = devices.create_drawing(app(), library(), None, || draws.next().unwrap()).unwrap();
-        let second = devices.create_drawing(app(), library(), None, || draws.next().unwrap()).unwrap();
+        let first = devices.create_drawing(app(), library(), Asker::default(), || draws.next().unwrap()).unwrap();
+        let second = devices.create_drawing(app(), library(), Asker::default(), || draws.next().unwrap()).unwrap();
         assert_eq!((first.user_code.as_str(), second.user_code.as_str()), ("BBBBBBBB", "CCCCCCCC"));
         assert_eq!(devices.find("CCCCCCCC", 1).unwrap().key, hash_token(&second.device_code));
         // The letters only: the dash is for people.

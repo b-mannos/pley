@@ -32,9 +32,11 @@ export interface ConsentRequest {
   client: OAuthClient;
   /**
    * Where the answer goes: back to a website (its host) or an app (its
-   * scheme), or to the TV showing a code ("BCDF-GHJK").
+   * scheme), or to the TV showing a code ("BCDF-GHJK"), with what that
+   * device says it is ("Kodi 21.3; Windows", unchecked) and the address it
+   * asked from.
    */
-  redirect: AppRedirect | { kind: "device"; to: string };
+  redirect: AppRedirect | { kind: "device"; to: string; device?: string | null; address?: string | null };
   scopes: (OAuthScope | (string & {}))[];
 }
 
