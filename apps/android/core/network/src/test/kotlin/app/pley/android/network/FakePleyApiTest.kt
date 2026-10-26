@@ -62,6 +62,7 @@ class FakePleyApiTest {
         api.stopPlayback(hls.sessionId)
         assertEquals(ConversionState.Direct, api.convert(PlaybackRequest(itemId = 101, fileId = 601)).state)
         assertEquals(ConversionState.Done, api.conversion("c1").state)
+        api.cancelConversion("c1")
         assertTrue(api.subtitles(601, 3).complete)
         assertNotNull(api.trickplay(601))
         api.reportProgress(101, ProgressReport(positionMs = 1_000))

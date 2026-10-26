@@ -197,6 +197,8 @@ class FakePleyApi(val issuer: String = "http://127.0.0.1:7539") : PleyApi {
         ConversionInfo(id = id, state = ConversionState.Done, progress = 1.0, url = "/api/conversions/$id/file")
     }
 
+    override suspend fun cancelConversion(id: String) = respond("cancelConversion", id) { }
+
     override suspend fun related(id: Long, limit: Int): ItemList = respond("related", id, limit) {
         val list = fixture<ItemList>("items/related.json")
         list.copy(items = list.items.take(limit))

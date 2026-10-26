@@ -85,6 +85,24 @@ internal class DownloadRunner(
     }
 
     /**
+     * Tells the server that [saved], deleted, no longer wants the file it
+     * was making for it, which then stops. A file made stays on the server
+     * for whoever asks for the same; away from the server, the server
+     * drops a waiting one itself once nobody asks about it for an hour.
+     */
+    suspend fun forget(saved: Saved) {
+        val id = saved.conversion ?: return
+        if (saved.state == DownloadState.Done || saved.mediaUrl != null) return
+        try {
+            sources.api(saved.server, saved.userId).cancelConversion(id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Away from the server, or gone already.
+        }
+    }
+
+    /**
      * Runs downloads until none is left to do, or none can go on: no
      * network they may use for [waitMs]. Returns whether some still wait.
      */

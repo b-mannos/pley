@@ -221,6 +221,9 @@ interface PleyApi {
     /** GET /api/conversions/{id}: how the server's file for a download goes. */
     suspend fun conversion(id: String): ConversionInfo
 
+    /** DELETE /api/conversions/{id}: the download went before its file was made; the server stops making it. */
+    suspend fun cancelConversion(id: String)
+
     /** GET /api/playback/{session}: how the session plays now, with its transcode's live numbers. */
     suspend fun playbackStatus(sessionId: String): SessionStatus
 

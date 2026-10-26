@@ -123,12 +123,20 @@ class AppDownloads internal constructor(
     override fun remove(itemId: Long) {
         val key = keyOf(itemId) ?: return
         runner.cancel(key)
-        scope.launch(io) { store.remove(key) }
+        val saved = store.get(key)
+        scope.launch(io) {
+            store.remove(key)
+            saved?.let { runner.forget(it) }
+        }
     }
 
     override fun removeAll() {
-        store.all.value.forEach { runner.cancel(it.key) }
-        scope.launch(io) { store.clear() }
+        val all = store.all.value
+        all.forEach { runner.cancel(it.key) }
+        scope.launch(io) {
+            store.clear()
+            all.forEach { runner.forget(it) }
+        }
     }
 
     override fun retry(itemId: Long) {

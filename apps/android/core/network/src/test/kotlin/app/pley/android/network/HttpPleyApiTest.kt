@@ -1,5 +1,6 @@
 package app.pley.android.network
 
+import app.pley.android.model.ConversionState
 import app.pley.android.model.EntryIds
 import app.pley.android.model.ImageKind
 import app.pley.android.model.ItemIds
@@ -33,6 +34,10 @@ import org.junit.rules.TemporaryFolder
  * in their fixed order), the body, and the headers every request carries.
  */
 class HttpPleyApiTest {
+    private companion object {
+        const val CONVERSION = "0123456789abcdef0123456789abcdef"
+    }
+
     @get:Rule val folder = TemporaryFolder()
 
     private lateinit var server: MockWebServer
@@ -123,6 +128,14 @@ class HttpPleyApiTest {
             Golden("playbackStatus", json("playback/status_transcode.json"), "GET /api/playback/6f1c2a9e") { playbackStatus("6f1c2a9e") },
             Golden("stopPlayback", MockPley.noContent(), "DELETE /api/playback/6f1c2a9e") { stopPlayback("6f1c2a9e") },
             Golden(
+                "convert",
+                json("conversions/direct.json"),
+                "POST /api/conversions",
+                body = PleyJson.encodeToString(PlaybackRequest.serializer(), playback),
+            ) { convert(playback) },
+            Golden("conversion", json("conversions/running.json"), "GET /api/conversions/$CONVERSION") { conversion(CONVERSION) },
+            Golden("cancelConversion", MockPley.noContent(), "DELETE /api/conversions/$CONVERSION") { cancelConversion(CONVERSION) },
+            Golden(
                 "subtitles",
                 MockResponse.Builder().setHeader("Content-Type", "text/vtt").body("WEBVTT\n").build(),
                 "GET /api/files/601/subtitles/3.vtt",
@@ -212,6 +225,16 @@ class HttpPleyApiTest {
             val written = PleyJson.encodeToString(s, PleyJson.decodeFromString(s, Fixtures.text(path)))
             assertEquals(path, Json.parseToJsonElement(Fixtures.text(path)), Json.parseToJsonElement(written))
         }
+    }
+
+    @Test
+    fun conversionsAreDecoded() = runTest {
+        server.enqueue(MockPley.fixture("conversions/direct.json"))
+        val direct = api.convert(PlaybackRequest(itemId = 101, fileId = 601))
+        assertEquals(Triple(ConversionState.Direct, null, "/api/files/601/stream"), Triple(direct.state, direct.id, direct.url))
+        server.enqueue(MockPley.fixture("conversions/running.json"))
+        val running = api.conversion(CONVERSION)
+        assertEquals(Triple(ConversionState.Running, 0.42, null), Triple(running.state, running.progress, running.size))
     }
 
     @Test

@@ -163,6 +163,17 @@ class DownloadRunnerTest {
     }
 
     @Test
+    fun aDeletedDownloadStopsTheFileTheServerIsMakingButNotOneMade() = runBlocking {
+        val making = add(convert = true).copy(conversion = CONVERSION)
+        runner().forget(making)
+        assertEquals(listOf(CONVERSION), api.calls("cancelConversion").map { it.args.single() })
+
+        runner().forget(making.copy(state = DownloadState.Done, mediaUrl = FILE))
+        runner().forget(add(itemId = 43))
+        assertEquals("a file made, or none asked for: nothing to stop", 1, api.calls("cancelConversion").size)
+    }
+
+    @Test
     fun theIndexIsReadBackAndACutDownloadWaitsItsTurn() {
         val saved = add()
         store.update(saved.key) { it.copy(state = DownloadState.Downloading) }

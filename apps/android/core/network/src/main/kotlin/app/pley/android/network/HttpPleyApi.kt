@@ -201,6 +201,8 @@ class HttpPleyApi(
 
     override suspend fun conversion(id: String): ConversionInfo = get(ConversionInfo.serializer(), "api", "conversions", id)
 
+    override suspend fun cancelConversion(id: String) = call("DELETE", null, "api", "conversions", id)
+
     override suspend fun playbackStatus(sessionId: String): SessionStatus =
         get(SessionStatus.serializer(), "api", "playback", sessionId)
 
