@@ -76,6 +76,8 @@ export interface Platform {
   keepAwake(on: boolean): void;
   /** Closes the app (Back on the rail). */
   exit(): void;
+  /** Asks "Exit pley?" first: Samsung's rule for Back on the first screen. LG's Back shows the TV's own exit popup. */
+  asksBeforeExit?: boolean;
   /** Tells the app when the TV hides or shows it (Home key, another app, standby). */
   onVisibility(listener: (visible: boolean) => void): void;
   /** Whether the TV draws in 24-hour time. */

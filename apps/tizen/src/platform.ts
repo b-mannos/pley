@@ -140,6 +140,7 @@ export function tizenPlatform(): Platform {
         // Not on a TV.
       }
     },
+    asksBeforeExit: true,
     exit() {
       try {
         tizen!.application.getCurrentApplication().exit();

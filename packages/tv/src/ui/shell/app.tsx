@@ -6,7 +6,7 @@ import { FocusManager } from "../focus";
 import { ImageLoader } from "../images";
 import { Input } from "../input";
 import { initMusic } from "../../player/music";
-import { AppContext } from "../screens/common";
+import { AppContext, Dialog } from "../screens/common";
 import { Screen } from "../screens/screens";
 import { Navigator, type Entry, type PageKey } from "./navigator";
 import { currentEntry, Rail, type RailApi } from "./rail";
@@ -37,6 +37,7 @@ export function App(p: ShellProps) {
   const rail = useRef<RailApi | null>(null);
   const toast = useSignal<{ text: string; error: boolean; id: number } | null>(null);
   const curtain = useSignal(0);
+  const exiting = useSignal(false);
   const pageRoot = useRef<HTMLDivElement>(null);
   const api = state.api.value;
   const tier = useMemo(() => state.platform.tier(), []);
@@ -111,16 +112,20 @@ export function App(p: ShellProps) {
       // Left with nothing further left, anywhere on a page, goes to the rail.
       if (dir === "left" && !rail.current?.hasFocus() && focus.root === pageRoot.current) toRail();
     };
+    const exit = () => {
+      if (state.platform.asksBeforeExit) exiting.value = true;
+      else state.platform.exit();
+    };
     const off = input.push((key, e) => {
       if (key !== "back") return false;
       if (e.type !== "down" || e.repeat) return true;
       if (rail.current?.hasFocus()) {
-        state.platform.exit();
+        exit();
         return true;
       }
       if (nav.pop()) return true;
       if (toRail()) return true;
-      state.platform.exit();
+      exit();
       return true;
     });
     state.platform.registerKeys?.();
@@ -214,6 +219,16 @@ export function App(p: ShellProps) {
             me={state.me.value}
             current={currentEntry(stack[0]?.key ?? null, state.libraries.value)}
             railRef={(r) => (rail.current = r)}
+          />
+        )}
+        {exiting.value && (
+          <Dialog
+            title="Exit pley?"
+            onDismiss={() => (exiting.value = false)}
+            buttons={[
+              { label: "Cancel", onSelect: () => (exiting.value = false) },
+              { label: "Exit", initial: true, onSelect: () => state.platform.exit() },
+            ]}
           />
         )}
         {curtain.value > 0 && <div key={curtain.value} class="curtain fade" />}
