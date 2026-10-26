@@ -255,6 +255,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
             hls_master_playlist: true,
             subtitle_matroska: true,
             conversions: true,
+            conversions_mp4: true,
             ..ff.caps.clone()
         },
         limits,

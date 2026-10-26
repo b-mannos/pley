@@ -399,6 +399,10 @@ pub struct Capabilities {
     /// transcoders lack it.
     #[serde(default)]
     pub conversions: bool,
+    /// Conversions make MP4 files too ([`JobRequest::container`]). Older
+    /// transcoders make Matroska only.
+    #[serde(default)]
+    pub conversions_mp4: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -674,6 +678,38 @@ pub struct JobRequest {
     pub start_ms: Option<i64>,
     #[serde(default)]
     pub options: TranscodeOptions,
+    /// What a conversion's file is (`POST /v1/conversions` only): Matroska
+    /// when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<FileContainer>,
+}
+
+/// What a conversion's file is: Matroska, which keeps every track, or MP4
+/// for players that open no Matroska (QuickTime), its text subtitles made
+/// MP4's own and its picture ones left out.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum FileContainer {
+    #[default]
+    Matroska,
+    Mp4,
+}
+
+impl FileContainer {
+    /// The file's extension.
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Matroska => "mkv",
+            Self::Mp4 => "mp4",
+        }
+    }
+
+    pub fn content_type(self) -> &'static str {
+        match self {
+            Self::Matroska => "video/x-matroska",
+            Self::Mp4 => "video/mp4",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

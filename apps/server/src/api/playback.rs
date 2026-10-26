@@ -11,7 +11,8 @@ use dashmap::DashMap;
 use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 use pley_transcoder_api::{
-    AudioMode, ConversionState, ConversionStatus, JobRequest, SUBTITLES_COMPLETE_HEADER, StreamKind, VideoMode,
+    AudioMode, ConversionState, ConversionStatus, FileContainer, JobRequest, SUBTITLES_COMPLETE_HEADER, StreamKind,
+    VideoMode,
 };
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt;
@@ -161,6 +162,7 @@ pub async fn start(
         segment_seconds: Some(SEGMENT_SECONDS),
         start_ms: Some(start_ms),
         options: settings.transcode_options(),
+        container: None,
     };
     let created = state.transcoder.create_job(&job_request).await.map_err(|err| for_viewer(&user, err))?;
     let method = match (&created.video, &created.audio) {
@@ -489,6 +491,8 @@ pub async fn convert(
             url: format!("/api/files/{}/stream", file.id),
         }));
     }
+    // A player that opens no Matroska (QuickTime) gets MP4.
+    let container = req.caps.download_container();
     // Not running (starting, restarting): a moment's trouble. Running but
     // too old to make files: for good.
     match transcoder {
@@ -496,6 +500,11 @@ pub async fn convert(
         Some(info) if !info.capabilities.conversions => {
             return Err(AppError::NotImplemented(
                 "this server's transcoder can't make files for downloading: update it, or download the original".into(),
+            ));
+        }
+        Some(info) if container == FileContainer::Mp4 && !info.capabilities.conversions_mp4 => {
+            return Err(AppError::NotImplemented(
+                "this server's transcoder can't make MP4 files: update it, or download the original".into(),
             ));
         }
         Some(_) => {}
@@ -511,6 +520,7 @@ pub async fn convert(
         segment_seconds: None,
         start_ms: None,
         options: state.settings.get().transcode_options(),
+        container: (container == FileContainer::Mp4).then_some(container),
     };
     let status = state.transcoder.create_conversion(&job).await.map_err(|err| match AppError::from(err) {
         // The file can't be read now (a share asleep, unmounted): a moment's

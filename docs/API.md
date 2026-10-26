@@ -1341,14 +1341,15 @@ it: `transcode.dolby_vision` (`"kept"`, `"converted to 8.1"`) and
 A device that keeps a title to play away from the server downloads its
 original (`GET /api/files/{id}/stream`, with ranges) when it plays it as it
 is, else a file the server makes for it: the streams a playback would
-stream, in one Matroska file.
+stream, in one Matroska file, or MP4 for a player whose `caps.containers`
+name `mp4` but not `mkv` (QuickTime).
 
 | Method | Path | Body | Response |
 |---|---|---|---|
 | POST | `/api/conversions` | `POST /api/playback`'s body (`item_id`, `file_id?`, `caps`, `audio_index?`, `max_height?`, `max_bitrate?`, `mode?`) | `DownloadInfo` |
 | GET | `/api/conversions/{id}` | – | `DownloadInfo` |
 | DELETE | `/api/conversions/{id}` | – | `204`: stopped, unless done |
-| GET | `/api/conversions/{id}/file` | – | the converted file (`video/x-matroska`) once whole, with `Range` |
+| GET | `/api/conversions/{id}/file` | – | the converted file (`video/x-matroska`, or `video/mp4`) once whole, with `Range` |
 
 ```ts
 interface DownloadInfo {
@@ -1377,7 +1378,7 @@ within the transcoder's limit; once gone, asking again makes them again.
 A conversion is known to the server once asked for since it started (a
 `404` otherwise: ask again), and to those who may see its title. `503`
 while the transcoder isn't running or the file can't be read (ask again
-later); `501` with a transcoder too old to convert. Video is copied into
+later); `501` with a transcoder too old to convert, or to make MP4. Video is copied into
 a download's file only when the player plays it as it is (a Dolby Vision
 profile it doesn't decode would stay in the file); otherwise it is made
 anew. Apps aren't told why a conversion failed (`error` is `null`): the

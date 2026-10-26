@@ -14,9 +14,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use pley_transcoder_api::{
-    ConversionStatus, CoverRequest, Fingerprint, FingerprintRequest, Frames, FramesRequest, JobCreated, JobRequest,
-    JobStatus, KeyframesRequest, MediaInfo, PrefetchRequest, Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER,
-    SubtitleRequest, ThumbnailRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
+    ConversionStatus, CoverRequest, FileContainer, Fingerprint, FingerprintRequest, Frames, FramesRequest, JobCreated,
+    JobRequest, JobStatus, KeyframesRequest, MediaInfo, PrefetchRequest, Prefetched, ProbeRequest,
+    SUBTITLES_COMPLETE_HEADER, SubtitleRequest, ThumbnailRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo,
+    TrickplayRequest,
 };
 use tokio_util::io::ReaderStream;
 
@@ -319,7 +320,9 @@ async fn delete_conversion(State(state): Shared, Path(id): Path<String>) -> ApiR
 /// A conversion's file once whole, with ranges: a download cut short goes on.
 async fn conversion_file(State(state): Shared, Path(id): Path<String>, headers: HeaderMap) -> ApiResult<Response> {
     let path = state.conversions.file(&id).ok_or_else(|| ApiError::NotFound(format!("conversion {id} has no file")))?;
-    serve_range(&path, &headers, "video/x-matroska").await
+    let container =
+        if path.extension().is_some_and(|e| e == "mp4") { FileContainer::Mp4 } else { FileContainer::Matroska };
+    serve_range(&path, &headers, container.content_type()).await
 }
 
 /// `path` whole (200), or the one range asked for (206, `bytes=a-` or

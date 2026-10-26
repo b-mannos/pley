@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow, bail};
 use parking_lot::Mutex;
-use pley_transcoder_api::{ConversionState, ConversionStatus, JobRequest, MediaInfo, VideoMode};
+use pley_transcoder_api::{ConversionState, ConversionStatus, FileContainer, JobRequest, MediaInfo, VideoMode};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{Semaphore, watch};
@@ -229,19 +229,22 @@ impl Conversions {
 
     /// Stops conversion `id` and deletes what it made: whether there was one.
     pub async fn remove(&self, id: &str) -> bool {
-        let Some(path) = self.path(id) else { return false };
+        let Some(paths) = self.paths(id) else { return false };
         let known = self.items.lock().remove(id);
         if let Some(conversion) = &known {
             conversion.stop.send_replace(true);
         }
-        let had_file = tokio::fs::remove_file(&path).await.is_ok();
-        // FFmpeg may still hold the half-made file a moment.
-        let part = part_of(&path);
-        for _ in 0..20 {
-            if tokio::fs::remove_file(&part).await.is_ok() || !part.exists() {
-                break;
+        let mut had_file = false;
+        for path in paths {
+            had_file |= tokio::fs::remove_file(&path).await.is_ok();
+            // FFmpeg may still hold the half-made file a moment.
+            let part = part_of(&path);
+            for _ in 0..20 {
+                if tokio::fs::remove_file(&part).await.is_ok() || !part.exists() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
         }
         known.is_some() || had_file
     }
@@ -253,9 +256,18 @@ impl Conversions {
         }
     }
 
-    /// Where conversion `id`'s file goes; `None` for an id that isn't one.
+    /// Where conversion `id`'s file is: its MP4, else its Matroska file
+    /// (the container is in the id); `None` for an id that isn't one.
     fn path(&self, id: &str) -> Option<PathBuf> {
-        (id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())).then(|| self.dir.join(format!("{id}.mkv")))
+        let [mkv, mp4] = self.paths(id)?;
+        Some(if mp4.is_file() { mp4 } else { mkv })
+    }
+
+    /// Where conversion `id`'s file may be, in each container.
+    fn paths(&self, id: &str) -> Option<[PathBuf; 2]> {
+        (id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())).then(|| {
+            [FileContainer::Matroska, FileContainer::Mp4].map(|c| self.dir.join(format!("{id}.{}", c.extension())))
+        })
     }
 
     /// The status of a conversion whose file is there already.
@@ -340,7 +352,8 @@ impl Conversions {
             .map(|v| if v.preset == AUTO { SOFTWARE_PRESET } else { v.preset.as_str() });
 
         tokio::fs::create_dir_all(&self.dir).await?;
-        let path = self.dir.join(format!("{id}.mkv"));
+        let container = req.container.unwrap_or_default();
+        let path = self.dir.join(format!("{id}.{}", container.extension()));
         let part = part_of(&path);
         let ctx = ArgsContext {
             input: &input,
@@ -349,7 +362,7 @@ impl Conversions {
             preset,
             shader_cache: self.shader_cache.as_deref(),
         };
-        let args = plan.file_args(&ctx, &media, &part);
+        let args = plan.file_args(&ctx, &media, &part, container);
         tracing::debug!(conversion = %id, "ffmpeg {}", args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "));
         let mut cmd = self.ff.command();
         // A file for later: never at the cost of a playback.
@@ -418,7 +431,7 @@ const MADE: u32 = 2;
 /// and what the request makes of it, not who asked or where a playback
 /// would have started.
 fn conversion_id(req: &JobRequest, size: u64, modified_ms: u128) -> String {
-    let what = serde_json::json!({
+    let mut what = serde_json::json!({
         "made": MADE,
         "input": req.input,
         "size": size,
@@ -427,6 +440,10 @@ fn conversion_id(req: &JobRequest, size: u64, modified_ms: u128) -> String {
         "audio": req.audio,
         "subtitle": req.subtitle,
     });
+    // An MP4 is another file; Matroska ones keep the ids they had.
+    if let Some(container) = req.container.filter(|c| *c != FileContainer::Matroska) {
+        what["container"] = serde_json::json!(container);
+    }
     let digest = Sha256::digest(what.to_string().as_bytes());
     hex::encode(&digest[..16])
 }
@@ -491,6 +508,18 @@ mod tests {
     }
 
     #[test]
+    fn an_mp4_is_another_conversion_and_matroska_ones_keep_their_ids() {
+        let mkv = conversion_id(&request(1080), 1_000, 7);
+        assert_eq!(
+            mkv,
+            conversion_id(&JobRequest { container: Some(FileContainer::Matroska), ..request(1080) }, 1_000, 7)
+        );
+        let mp4 = conversion_id(&JobRequest { container: Some(FileContainer::Mp4), ..request(1080) }, 1_000, 7);
+        assert_ne!(mkv, mp4);
+        assert_eq!(mp4.len(), 32);
+    }
+
+    #[test]
     fn a_conversion_is_named_by_its_input_and_what_it_makes() {
         let id = conversion_id(&request(1080), 100, 5);
         assert_eq!(id.len(), 32);
@@ -515,6 +544,103 @@ mod tests {
             eprintln!("ffmpeg not found: skipped");
         }
         found
+    }
+
+    /// An MP4 conversion, for players that open no Matroska (skipped without
+    /// FFmpeg and its x265): HEVC copied and tagged hvc1, SubRip made MP4's
+    /// own text, and the index ahead of the media, as QuickTime wants them.
+    #[tokio::test]
+    async fn an_mp4_conversion_is_one_quicktime_plays() {
+        use pley_transcoder_api::{
+            AudioCodec, AudioMode, AudioRequest, Capabilities, EncoderInfo, HwAccel, Limits, VideoCodec, VideoRequest,
+        };
+        if !has_ffmpeg() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.mkv");
+        let srt = dir.path().join("source.srt");
+        std::fs::write(&srt, "1\n00:00:01,000 --> 00:00:02,000\nHello\n").unwrap();
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-y"])
+            .args(["-f", "lavfi", "-i", "testsrc2=duration=2:size=320x180:rate=24"])
+            .args(["-f", "lavfi", "-i", "sine=frequency=440:duration=2"])
+            .arg("-i")
+            .arg(&srt)
+            .args(["-map", "0", "-map", "1", "-map", "2"])
+            .args(["-c:v", "libx265", "-preset", "ultrafast", "-x265-params", "log-level=error"])
+            .args(["-c:a", "aac", "-c:s", "srt"])
+            .arg(&source)
+            .status()
+            .unwrap();
+        if !made.success() {
+            eprintln!("no x265 here: skipped");
+            return;
+        }
+        let ff = Arc::new(Ffmpeg {
+            ffmpeg: "ffmpeg".into(),
+            ffprobe: "ffprobe".into(),
+            caps: Capabilities {
+                ffmpeg_available: true,
+                ffprobe_available: true,
+                encoders: vec![EncoderInfo {
+                    name: "libx264".into(),
+                    codec: VideoCodec::H264,
+                    hardware: false,
+                    accel: HwAccel::None,
+                    main10: false,
+                }],
+                ..Default::default()
+            },
+            segment_times_relative: true,
+        });
+        let metrics = Arc::new(crate::metrics::Metrics::default());
+        let prober = Arc::new(Prober::new(ff.clone(), metrics, 1));
+        let slots = Arc::new(Slots::new(&Limits { max_jobs: 2, max_hw_jobs: 0 }));
+        let conversions = Conversions::new(ff, prober, slots, None, dir.path().join("conversions"));
+        let req = JobRequest {
+            input: source.to_string_lossy().into_owned(),
+            video: Some(VideoRequest { mode: VideoMode::Copy, ..Default::default() }),
+            audio: Some(AudioRequest { mode: AudioMode::Copy, codec: AudioCodec::Aac, ..Default::default() }),
+            container: Some(FileContainer::Mp4),
+            ..Default::default()
+        };
+
+        let id = conversions.create(req).await.unwrap().id;
+        let status = loop {
+            let status = conversions.status(&id).unwrap();
+            if matches!(status.state, ConversionState::Done | ConversionState::Failed) {
+                break status;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
+        assert_eq!(status.state, ConversionState::Done, "{:?}", status.error);
+        let file = conversions.file(&id).unwrap();
+        assert_eq!(file.extension().unwrap(), "mp4");
+        let out = std::process::Command::new("ffprobe")
+            .args(["-v", "error", "-show_entries", "stream=codec_name,codec_tag_string", "-of", "csv=p=0"])
+            .arg(&file)
+            .output()
+            .unwrap();
+        let streams = String::from_utf8_lossy(&out.stdout).replace("\r", "");
+        assert_eq!(streams.trim(), "hevc,hvc1\naac,mp4a\nmov_text,tx3g", "{streams}");
+        // Its index ahead of the media: it plays as soon as it opens.
+        let bytes = std::fs::read(&file).unwrap();
+        let mut boxes = Vec::new();
+        let mut at = 0;
+        while at + 8 <= bytes.len() {
+            let size = u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+            boxes.push(String::from_utf8_lossy(&bytes[at + 4..at + 8]).into_owned());
+            if size < 8 {
+                break;
+            }
+            at += size;
+        }
+        let place = |name: &str| boxes.iter().position(|b| b == name).unwrap();
+        assert!(place("moov") < place("mdat"), "{boxes:?}");
+
+        assert!(conversions.remove(&id).await);
+        assert!(!file.exists());
     }
 
     /// A conversion made by FFmpeg (skipped without it on the PATH): a 4 s

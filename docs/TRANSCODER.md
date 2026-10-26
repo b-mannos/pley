@@ -88,10 +88,10 @@ following status codes:
 | GET | `/v1/jobs/{id}/index.m3u8` | – | HLS VOD playlist |
 | GET | `/v1/jobs/{id}/master.m3u8` | – | multivariant playlist: one variant (`index.m3u8`) with `CODECS`, `SUPPLEMENTAL-CODECS`, `RESOLUTION`, `FRAME-RATE`, `VIDEO-RANGE` and the bandwidth (see *Dolby Vision in remuxes*). Transcoders that serve it say `hls_master_playlist: true` in their capabilities |
 | GET | `/v1/jobs/{id}/{n}.ts` | – | MPEG-TS segment `n` (waits for it, or starts ffmpeg) |
-| POST | `/v1/conversions` | `JobRequest` | `ConversionStatus {id, state, progress, duration_ms, size?, error?, video?, audio?}`: the request made into one Matroska file (see *Conversions*). Asked again for the same input and request, the same conversion (or its file) answers; a failed one starts again. Transcoders that serve it say `conversions: true` in their capabilities |
+| POST | `/v1/conversions` | `JobRequest` | `ConversionStatus {id, state, progress, duration_ms, size?, error?, video?, audio?}`: the request made into one Matroska file, or MP4 with `container: "mp4"` (see *Conversions*). Asked again for the same input and request, the same conversion (or its file) answers; a failed one starts again. Transcoders that serve it say `conversions: true` in their capabilities, and `conversions_mp4: true` when they make MP4 |
 | GET | `/v1/conversions/{id}` | – | `ConversionStatus`: `queued`, `running` (with `progress`, 0 to 1), `done` (with `size`) or `failed` (with `error`) |
 | DELETE | `/v1/conversions/{id}` | – | `204` (stops ffmpeg, deletes the file) |
-| GET | `/v1/conversions/{id}/file` | – | `video/x-matroska`, once done; one range (`bytes=a-`, `bytes=a-b`) as asked, `416` past the end |
+| GET | `/v1/conversions/{id}/file` | – | `video/x-matroska` (or `video/mp4`), once done; one range (`bytes=a-`, `bytes=a-b`) as asked, `416` past the end |
 
 ## Conversions
 
@@ -109,6 +109,13 @@ A conversion whose FFmpeg ends without error but short of the media's end
 file the janitor deleted is made again when asked for. A remux whose segments would
 be edited (Dolby Vision converted, HDR10+ left out) has its video made
 anew instead, as a file can't be edited the way segments are.
+
+With `container: "mp4"` the file is MP4, for players that open no
+Matroska (QuickTime): its text subtitles made MP4's own (`mov_text`), in
+their order, its picture subtitles left out, HEVC tagged `hvc1` (QuickTime
+plays no `hev1`), and its index ahead of the media (`+faststart`), so it
+plays as soon as it opens. It is another conversion than the Matroska one
+of the same request (its id says so), named `<id>.mp4`.
 
 One conversion runs at a time, in a transcode slot like a job's process
 (a hardware session when one is free, else the software encoder), at low

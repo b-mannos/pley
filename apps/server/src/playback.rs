@@ -12,8 +12,9 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use pley_transcoder_api::{
-    AudioCodec, AudioMode, AudioRequest, DolbyVisionMode, DynamicRange, JobRequest, JobStatus, MediaInfo, MediaStream,
-    OutputRange, StreamKind, SubtitleBurnRequest, VideoCodec, VideoMode, VideoRequest, dynamic_range_label,
+    AudioCodec, AudioMode, AudioRequest, DolbyVisionMode, DynamicRange, FileContainer, JobRequest, JobStatus,
+    MediaInfo, MediaStream, OutputRange, StreamKind, SubtitleBurnRequest, VideoCodec, VideoMode, VideoRequest,
+    dynamic_range_label,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
@@ -166,6 +167,12 @@ impl Caps {
     }
     fn audio(&self, c: &str) -> bool {
         listed(&self.audio_codecs, c)
+    }
+
+    /// What a converted download for this player is: MP4 for one that opens
+    /// MP4 but no Matroska (QuickTime), else Matroska, which keeps more.
+    pub fn download_container(&self) -> FileContainer {
+        if !self.container("mkv") && self.container("mp4") { FileContainer::Mp4 } else { FileContainer::Matroska }
     }
 
     /// A version 2 report (`caps_version` 2 or more).

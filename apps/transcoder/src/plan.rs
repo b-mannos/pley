@@ -15,8 +15,8 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use pley_transcoder_api::{
-    AudioCodec, AudioMode, AudioPlan, DolbyVisionMode, DynamicRange, EncoderInfo, HwAccel, JobRequest, MediaInfo,
-    MediaStream, StreamKind, Tonemapper, VideoCodec, VideoMode, VideoPlan, VideoRequest, decode_key,
+    AudioCodec, AudioMode, AudioPlan, DolbyVisionMode, DynamicRange, EncoderInfo, FileContainer, HwAccel, JobRequest,
+    MediaInfo, MediaStream, StreamKind, Tonemapper, VideoCodec, VideoMode, VideoPlan, VideoRequest, decode_key,
     is_text_subtitle_codec,
 };
 
@@ -608,13 +608,20 @@ impl Plan {
         a.0
     }
 
-    /// The whole media as one Matroska file at `output` (a converted
-    /// download): the streams the segments would have, made in one go, and
-    /// every subtitle track of `media` in its order, as it is (MP4's text
-    /// made SRT), for the player to show itself.
+    /// The whole media as one file at `output` (a converted download): the
+    /// streams the segments would have, made in one go, and the subtitle
+    /// tracks of `media` in their order, for the player to show itself. In
+    /// Matroska every one as it is (MP4's text made SRT); in MP4 the text
+    /// ones made MP4's own, the pictures left out.
     /// Players find a track by its place among the subtitle tracks, the
     /// original's as the file's.
-    pub fn file_args(&self, ctx: &ArgsContext<'_>, media: &MediaInfo, output: &Path) -> Vec<OsString> {
+    pub fn file_args(
+        &self,
+        ctx: &ArgsContext<'_>,
+        media: &MediaInfo,
+        output: &Path,
+        container: FileContainer,
+    ) -> Vec<OsString> {
         let mut a = self.stream_args(ctx, 0, self.segment_count());
         // Their languages and names (stream_args leaves the input's metadata out).
         let name = |a: &mut Args, out: &str, s: &MediaStream| {
@@ -631,17 +638,35 @@ impl Plan {
         }
         let mut n = 0;
         for s in media.streams.iter().filter(|s| s.kind == StreamKind::Subtitle) {
-            let codec = match s.codec.as_str() {
-                c if MATROSKA_SUBTITLES.contains(&c) => "copy",
-                "mov_text" => "srt",
-                // Teletext and the like: Matroska has no place for them.
+            let codec = match (container, s.codec.as_str()) {
+                (FileContainer::Matroska, c) if MATROSKA_SUBTITLES.contains(&c) => "copy",
+                (FileContainer::Matroska, "mov_text") => "srt",
+                (FileContainer::Mp4, c) if MP4_TEXT_SUBTITLES.contains(&c) => "mov_text",
+                // Teletext and the like, and pictures in MP4: no place for them.
                 _ => continue,
             };
             a.push_all(["-map", &format!("0:{}", s.index), &format!("-c:s:{n}"), codec]);
             name(&mut a, &format!("s:{n}"), s);
             n += 1;
         }
-        a.push_all(["-f", "matroska"]);
+        match container {
+            FileContainer::Matroska => a.push_all(["-f", "matroska"]),
+            FileContainer::Mp4 => {
+                let hevc = self.video.as_ref().is_some_and(|v| {
+                    if v.copy {
+                        media.stream(v.stream_index).is_some_and(|s| s.codec == "hevc")
+                    } else {
+                        v.codec == VideoCodec::Hevc
+                    }
+                });
+                // QuickTime plays HEVC tagged hvc1 only (FFmpeg writes hev1).
+                if hevc {
+                    a.push_all(["-tag:v", "hvc1"]);
+                }
+                // The index first: it plays as soon as it opens, from anywhere.
+                a.push_all(["-movflags", "+faststart", "-f", "mp4"]);
+            }
+        }
         a.push_os(output.as_os_str().to_owned());
         a.0
     }
@@ -940,6 +965,9 @@ pub struct ArgsContext<'a> {
 /// Subtitle codecs a Matroska file holds as they are.
 const MATROSKA_SUBTITLES: [&str; 7] =
     ["subrip", "ass", "ssa", "webvtt", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"];
+
+/// The text subtitles an MP4 conversion makes its own (`mov_text`).
+const MP4_TEXT_SUBTITLES: [&str; 6] = ["subrip", "ass", "ssa", "webvtt", "mov_text", "text"];
 
 #[derive(Default)]
 struct Args(Vec<OsString>);
@@ -1436,7 +1464,7 @@ mod tests {
             shader_cache: None,
         };
         let args: Vec<String> = plan
-            .file_args(&ctx, &media, Path::new("/work/conversions/abc.mkv.part"))
+            .file_args(&ctx, &media, Path::new("/work/conversions/abc.mkv.part"), FileContainer::Matroska)
             .iter()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
@@ -1456,6 +1484,51 @@ mod tests {
         for absent in ["-segment", "-ss ", "-t ", "-readrate", "-output_ts_offset"] {
             assert!(!line.contains(absent), "{absent} in {line}");
         }
+    }
+
+    #[test]
+    fn a_conversion_to_mp4_makes_text_subtitles_its_own_and_tags_hevc_for_quicktime() {
+        let ff = ffmpeg_with(vec![x264()], vec![]);
+        let mut media = media(DynamicRange::Sdr, None);
+        media.streams.push(MediaStream {
+            index: 4,
+            kind: StreamKind::Subtitle,
+            codec: "ass".into(),
+            text_based: Some(true),
+            ..Default::default()
+        });
+        let ctx = ArgsContext {
+            input: Path::new("/media/movie.mkv"),
+            encoder: None,
+            relative_split_times: true,
+            preset: Some("fast"),
+            shader_cache: None,
+        };
+        let line = |req: &JobRequest| {
+            let plan = Plan::build(req, &media, &ff, Some(&[0])).unwrap();
+            plan.file_args(&ctx, &media, Path::new("/work/conversions/abc.mp4.part"), FileContainer::Mp4)
+                .iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+
+        // The HEVC copied: tagged hvc1, as QuickTime wants it.
+        let mut copy = request();
+        copy.video.as_mut().unwrap().mode = VideoMode::Copy;
+        let copied = line(&copy);
+        assert!(copied.contains("-c:v copy"), "{copied}");
+        assert!(copied.ends_with("-tag:v hvc1 -movflags +faststart -f mp4 /work/conversions/abc.mp4.part"), "{copied}");
+        // SubRip and ASS made MP4's own text, in their order; the PGS pictures have no place.
+        assert!(!copied.contains("0:2"), "{copied}");
+        assert!(copied.contains("-map 0:3 -c:s:0 mov_text"), "{copied}");
+        assert!(copied.contains("-map 0:4 -c:s:1 mov_text"), "{copied}");
+
+        // Made H.264: no tag to change.
+        let made = line(&request());
+        assert!(made.contains("-c:v libx264"), "{made}");
+        assert!(!made.contains("hvc1"), "{made}");
+        assert!(made.ends_with("-movflags +faststart -f mp4 /work/conversions/abc.mp4.part"), "{made}");
     }
 
     #[test]

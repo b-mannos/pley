@@ -20,8 +20,8 @@ use axum::{Json, Router};
 use parking_lot::Mutex;
 use pley_transcoder_api::{
     API_VERSION, AudioMode, AudioPlan, Capabilities, ConversionState, ConversionStatus, EncoderInfo, ErrorBody,
-    HwAccel, JobCreated, JobRequest, JobStatus, Limits, MediaInfo, MediaStream, PrefetchRequest, Prefetched,
-    ProbeRequest, SUBTITLES_COMPLETE_HEADER, StreamKind, SubtitleRequest, TranscoderInfo, TranscoderStatus,
+    FileContainer, HwAccel, JobCreated, JobRequest, JobStatus, Limits, MediaInfo, MediaStream, PrefetchRequest,
+    Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER, StreamKind, SubtitleRequest, TranscoderInfo, TranscoderStatus,
     TrickplayInfo, TrickplayRequest, VideoCodec, VideoMode, VideoPlan,
 };
 use serde_json::{Value, json};
@@ -244,6 +244,7 @@ async fn start_fake() -> (Fake, String) {
                         }],
                         subtitle_matroska: true,
                         conversions: true,
+                        conversions_mp4: true,
                         ..Default::default()
                     },
                     limits: Limits { max_jobs: 8, max_hw_jobs: 0 },
@@ -621,6 +622,32 @@ async fn a_download_the_player_cannot_play_is_converted_and_comes_with_ranges() 
         assert_eq!(app.get(&path, &other).await.status, StatusCode::NOT_FOUND, "{path}");
     }
     assert_eq!(app.get("/api/conversions/ffffffffffffffffffffffffffffffff", admin).await.status, StatusCode::NOT_FOUND);
+}
+
+/// A Mac's QuickTime: MP4 with H.264 or HEVC and AAC, AC-3 or E-AC-3; no Matroska.
+fn quicktime() -> Value {
+    json!({
+        "containers": ["mp4", "m4v", "mov"],
+        "video_codecs": ["h264", "hevc"],
+        "audio_codecs": ["aac", "ac3", "eac3", "alac", "mp3"],
+    })
+}
+
+#[tokio::test]
+async fn a_download_for_a_player_that_opens_no_matroska_is_made_mp4() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let feature = w.movies["Feature"];
+    let answer = app.post("/api/conversions", admin, json!({"item_id": feature, "caps": quicktime()})).await;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+    let asked = w.fake.conversions.lock().last().cloned().unwrap();
+    assert_eq!(asked.container, Some(FileContainer::Mp4));
+    assert_eq!(asked.video.as_ref().map(|v| v.mode), Some(VideoMode::Copy), "only the container changes");
+
+    // A phone opens Matroska, which keeps every track.
+    let answer = app.post("/api/conversions", admin, json!({"item_id": feature, "caps": phone()})).await;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+    assert_eq!(w.fake.conversions.lock().last().unwrap().container, None);
 }
 
 #[tokio::test]
