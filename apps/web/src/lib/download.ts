@@ -34,8 +34,13 @@ export function downloadName(item: ItemDetail, file: MediaFile): string {
   return `${safe || "Download"}.${extensionOf(file)}`;
 }
 
-/** The original file, as it is on the server. */
-export const fileUrl = (file: Pick<MediaFile, "id">) => `/api/files/${file.id}/stream`;
+/**
+ * The original file, as it is on the server; with the `item` it is of, for
+ * the desktop app, which asks the server for a file its player plays (a
+ * Mac's QuickTime opens no Matroska).
+ */
+export const fileUrl = (file: Pick<MediaFile, "id">, item?: Pick<ItemDetail, "id">) =>
+  `/api/files/${file.id}/stream${item ? `?item=${item.id}` : ""}`;
 
 /**
  * Downloads `href` as a file called `name`: the browser keeps it with its

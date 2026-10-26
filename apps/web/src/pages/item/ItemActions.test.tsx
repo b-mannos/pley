@@ -60,7 +60,7 @@ describe("MoreActions", () => {
     await user.click(screen.getByRole("menuitem", { name: /Download\s*2\.0 GB/ }));
 
     expect(clicked.map((a) => [a.getAttribute("href"), a.download])).toEqual([
-      ["/api/files/8/stream", "Alien (1979) - Director's Cut.mkv"],
+      [`/api/files/8/stream?item=${item.id}`, "Alien (1979) - Director's Cut.mkv"],
     ]);
     expect(screen.queryByRole("menu")).toBeNull();
   });

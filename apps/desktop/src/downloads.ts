@@ -8,8 +8,11 @@ export interface Download {
   name: string;
   size: number | null;
   received: number;
-  state: "queued" | "downloading" | "waiting" | "failed" | "done";
+  /** `preparing`: the server is making the file this computer's player plays (a Mac's QuickTime: MP4). */
+  state: "queued" | "preparing" | "downloading" | "waiting" | "failed" | "done";
   error: string | null;
+  /** How far the server has come making it, 0 to 1. */
+  preparing?: number | null;
 }
 
 /** `1.5 KB`, `150 MB`, `8.2 GB`: as the web app says sizes. */
@@ -30,7 +33,8 @@ export function serverName(origin: string, saved: SavedServer[]): string {
 }
 
 /** Whether `d` is still to come. */
-export const coming = (d: Download) => d.state === "queued" || d.state === "downloading" || d.state === "waiting";
+export const coming = (d: Download) =>
+  d.state === "queued" || d.state === "preparing" || d.state === "downloading" || d.state === "waiting";
 
 /** How far `d` has come, 0 to 1 (`null` before its size is known). */
 export const fraction = (d: Download) => (d.size ? Math.min(1, d.received / d.size) : null);
@@ -48,6 +52,10 @@ export function describe(d: Download, from: string): string {
     }
     case "queued":
       return `Waiting its turn · ${from}`;
+    case "preparing":
+      return d.preparing != null
+        ? `Preparing on ${from} · ${Math.floor(d.preparing * 100)}%`
+        : `Preparing on ${from}`;
     case "waiting":
       return `Waiting for ${from} to answer`;
     case "failed":

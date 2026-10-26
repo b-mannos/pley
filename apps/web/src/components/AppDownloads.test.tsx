@@ -55,6 +55,15 @@ describe("AppDownloads", () => {
     expect(screen.getByText("Alien (1979).mkv is downloaded already")).toBeInTheDocument();
   });
 
+  it("says the server is making a file for the app's player", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AppDownloads />);
+    tell({ ...ALIEN, id: 5, name: "Alien (1979).mp4", size: null, state: "preparing", preparing: 0.42 });
+
+    await user.click(screen.getByRole("button", { name: "Downloading Alien (1979).mp4" }));
+    expect(screen.getByText("Preparing on the server · 42%")).toBeInTheDocument();
+  });
+
   it("says why a download failed, and where a file the page made went", () => {
     renderWithProviders(<AppDownloads />);
     tell({ ...ALIEN, id: 4, name: "Heat (1995).mkv", state: "failed", error: "This file is no longer on the server." });

@@ -79,4 +79,8 @@ describe("saveFile", () => {
     expect(clicked[0]?.download).toBe("Alien (1979).mkv");
     expect(clicked[0]?.isConnected).toBe(false);
   });
+
+  it("names the title for the desktop app, which asks for a file its player plays", () => {
+    expect(fileUrl({ id: 7 }, { id: 42 })).toBe("/api/files/7/stream?item=42");
+  });
 });

@@ -12,14 +12,16 @@ export interface AppDownload {
   name: string;
   size: number | null;
   received: number;
-  state: "queued" | "downloading" | "waiting" | "failed" | "done";
+  /** `preparing`: the server is making the file for the app's player (`preparing` says how far, 0 to 1). */
+  state: "queued" | "preparing" | "downloading" | "waiting" | "failed" | "done";
   error: string | null;
+  preparing?: number | null;
 }
 
 /** The event the desktop app sends the page. */
 export const APP_DOWNLOAD_EVENT = "pley:download";
 
-const STATES = new Set<unknown>(["queued", "downloading", "waiting", "failed", "done"]);
+const STATES = new Set<unknown>(["queued", "preparing", "downloading", "waiting", "failed", "done"]);
 
 function isDownload(value: unknown): value is AppDownload {
   const d = value as Partial<AppDownload> | null;
@@ -79,7 +81,8 @@ export function useAppDownloadChanges(onChange: Change) {
 }
 
 /** Whether `d` is still to come. */
-export const coming = (d: AppDownload) => d.state === "queued" || d.state === "downloading" || d.state === "waiting";
+export const coming = (d: AppDownload) =>
+  d.state === "queued" || d.state === "preparing" || d.state === "downloading" || d.state === "waiting";
 
 /** How far `list` has come together, 0 to 1 (`null` before any size is known). */
 export function fractionOf(list: readonly AppDownload[]): number | null {

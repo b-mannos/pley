@@ -69,7 +69,7 @@ export function MoreActions({ item, file = item.files[0] }: { item: ItemDetail; 
         {(close) => (
           <>
             {download ? (
-              <MenuItem icon={<Download />} onClick={() => (close(), saveFile(fileUrl(download), downloadName(item, download)))}>
+              <MenuItem icon={<Download />} onClick={() => (close(), saveFile(fileUrl(download, item), downloadName(item, download)))}>
                 Download
                 <span className="ml-auto whitespace-nowrap pl-6 text-xs tabular-nums text-subtle">{formatBytes(download.size)}</span>
               </MenuItem>

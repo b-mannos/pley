@@ -37,6 +37,9 @@ function Ring({ fraction }: { fraction: number | null }) {
 }
 
 function progressLine(d: AppDownload): string {
+  if (d.state === "preparing") {
+    return d.preparing != null ? `Preparing on the server · ${Math.floor(d.preparing * 100)}%` : "Preparing on the server";
+  }
   if (d.state === "waiting") return "Waiting for the server to answer";
   if (d.state === "queued") return "Waiting its turn";
   return d.size ? `${formatBytes(d.received)} of ${formatBytes(d.size)}` : formatBytes(d.received);

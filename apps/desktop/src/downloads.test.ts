@@ -27,6 +27,8 @@ group("downloads", () => {
     expect(describe(download({ state: "downloading", received: 3_650_722_201 }), "Home")).toBe("41% · 3.4 GB of 8.2 GB");
     expect(describe(download({ state: "downloading", size: null, received: 1_048_576 }), "Home")).toBe("1.0 MB · Home");
     expect(describe(download({ state: "queued" }), "Home")).toBe("Waiting its turn · Home");
+    expect(describe(download({ state: "preparing", preparing: 0.42 }), "Home")).toBe("Preparing on Home · 42%");
+    expect(describe(download({ state: "preparing", preparing: null }), "Home")).toBe("Preparing on Home");
     expect(describe(download({ state: "waiting" }), "Home")).toBe("Waiting for Home to answer");
     expect(describe(download({ state: "failed", error: "This file is no longer on the server." }), "Home")).toBe(
       "This file is no longer on the server.",
