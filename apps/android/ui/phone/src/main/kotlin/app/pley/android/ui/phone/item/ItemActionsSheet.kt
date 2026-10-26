@@ -19,7 +19,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.describe
+import app.pley.android.common.sentenceOf
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
@@ -62,7 +62,7 @@ internal fun ItemActionsSheet(itemId: Long, continueWatching: Boolean = false) {
                 DelayedSpinner(stringResource(R.string.item_loading))
             }
             is ItemActionsUiState.Failed -> Text(
-                describe(s.error).replaceFirstChar { it.uppercase() },
+                sentenceOf(s.error),
                 style = MaterialTheme.typography.bodyMedium,
                 color = PleyColors.DangerText,
                 modifier = Modifier.padding(24.dp),

@@ -50,7 +50,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.describe
+import app.pley.android.common.sentenceOf
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyMotion
 import app.pley.android.designsystem.PleyShape
@@ -59,6 +59,7 @@ import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.image.ArtworkCandidates
+import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.designsystem.reducedMotion
 import app.pley.android.designsystem.tile.ArtworkTileModel
 import app.pley.android.designsystem.tile.TileKind
@@ -67,6 +68,7 @@ import app.pley.android.model.CreditRole
 import app.pley.android.model.ItemKind
 import app.pley.android.model.ItemSummary
 import app.pley.android.network.OfflineException
+import app.pley.android.screens.PleyKey
 import app.pley.android.screens.item.CrewLine
 import app.pley.android.screens.item.EpisodeLine
 import app.pley.android.screens.item.ItemEvent
@@ -74,8 +76,6 @@ import app.pley.android.screens.item.ItemPage
 import app.pley.android.screens.item.ItemUiState
 import app.pley.android.screens.item.ItemViewModel
 import app.pley.android.screens.item.extraSubtitle
-import app.pley.android.screens.PleyKey
-import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.kit.BackdropScrim
 import app.pley.android.ui.tv.kit.TvBackdrop
@@ -130,7 +130,7 @@ internal fun TvItemScreen(model: ItemViewModel) {
             )
             is ItemUiState.Failed -> TvMessage(
                 title = stringResource(R.string.tv_item_failed),
-                body = describe(s.error).replaceFirstChar { it.uppercase() },
+                body = sentenceOf(s.error),
                 action = stringResource(R.string.tv_item_retry),
                 onAction = model::retry,
             )

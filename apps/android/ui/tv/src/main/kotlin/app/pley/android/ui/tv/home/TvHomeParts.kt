@@ -44,8 +44,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import app.pley.android.common.describe
 import app.pley.android.common.perf.StartupSignals
+import app.pley.android.common.sentenceOf
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyTv
@@ -378,10 +378,7 @@ internal fun MarkHomeDrawn(model: TvHomeModel) {
 }
 
 /** [error]'s sentence, capitalised, with a full stop. */
-internal fun sentence(error: Throwable): String {
-    val text = describe(error).replaceFirstChar { it.uppercase() }
-    return if (text.endsWith('.') || text.endsWith('…')) text else "$text."
-}
+internal fun sentence(error: Throwable): String = sentenceOf(error)
 
 /** The text column over backdrops (design spec §1.3): x 96 to 560. */
 internal val TextColumn = 464.dp

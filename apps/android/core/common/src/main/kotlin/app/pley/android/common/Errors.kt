@@ -12,6 +12,15 @@ interface UserFacing
  */
 class NotBuiltYet(what: String) : UnsupportedOperationException("$what isn't built yet"), UserFacing
 
+/** Why [error] happened, as a sentence for people: "No answer in time." */
+fun sentenceOf(error: Throwable): String = asSentence(describe(error))
+
+/** [text] as a sentence: a capital first, a full stop last (the app's own texts come in lower case, without one). */
+fun asSentence(text: String): String {
+    val capital = text.trim().replaceFirstChar { it.uppercase() }
+    return if (capital.isEmpty() || capital.last() in ".…!?") capital else "$capital."
+}
+
 /** Why a request failed, in a few words for people. */
 fun describe(error: Throwable): String = when (error) {
     is java.net.ConnectException, is java.net.NoRouteToHostException -> "nothing answers there"

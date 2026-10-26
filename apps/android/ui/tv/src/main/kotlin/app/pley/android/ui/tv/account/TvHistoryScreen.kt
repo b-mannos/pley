@@ -39,7 +39,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.describe
+import app.pley.android.common.sentenceOf
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyTv
@@ -73,7 +73,7 @@ internal fun TvHistoryScreen() {
     val state by model.state.collectAsStateWithLifecycle()
     val navigator = LocalTvNavigator.current
     var problem by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(model) { model.errors.collect { problem = describe(it).replaceFirstChar { c -> c.uppercase() } } }
+    LaunchedEffect(model) { model.errors.collect { problem = sentenceOf(it) } }
     val memory = rememberFocusMemory()
     Column(Modifier.fillMaxSize().padding(top = TvSafeArea.Vertical).testTag(TV_HISTORY_PAGE)) {
         Row(Modifier.padding(start = PleyTv.Gutter, end = TvSafeArea.Horizontal), verticalAlignment = Alignment.Bottom) {
@@ -92,7 +92,7 @@ internal fun TvHistoryScreen() {
             }
             is HistoryUiState.Failed -> Message(
                 title = stringResource(R.string.tv_account_history_failed),
-                body = describe(s.error).replaceFirstChar { it.uppercase() },
+                body = sentenceOf(s.error),
                 action = stringResource(R.string.tv_account_retry),
                 onAction = model::retry,
             )

@@ -52,7 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.describe
+import app.pley.android.common.sentenceOf
 import app.pley.android.data.Loadable
 import app.pley.android.data.valueOrNull
 import app.pley.android.designsystem.PleyColors
@@ -111,7 +111,7 @@ internal fun CollectionScreen(key: PleyKey.Collection) {
         vm.events.collect { event ->
             when (event) {
                 CollectionEvent.NothingToPlay -> shell.toasts.show(nothing)
-                is CollectionEvent.Failed -> shell.toasts.show(describe(event.error), error = true)
+                is CollectionEvent.Failed -> shell.toasts.show(sentenceOf(event.error), error = true)
             }
         }
     }

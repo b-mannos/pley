@@ -26,7 +26,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import app.pley.android.common.describe
+import app.pley.android.common.sentenceOf
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
@@ -87,7 +87,7 @@ fun ErrorState(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val sentence = describe(error).replaceFirstChar { it.uppercase() }.let { if (it.endsWith('.')) it else "$it." }
+    val sentence = sentenceOf(error)
     EmptyState(
         title = title,
         body = sentence,

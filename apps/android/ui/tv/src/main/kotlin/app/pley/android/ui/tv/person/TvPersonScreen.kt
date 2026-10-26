@@ -25,7 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.describe
+import app.pley.android.common.sentenceOf
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyTv
@@ -71,7 +71,7 @@ internal fun TvPersonScreen(personId: Long) {
             )
             is PersonUiState.Failed -> TvMessage(
                 title = stringResource(R.string.tv_person_failed),
-                body = describe(s.error).replaceFirstChar { it.uppercase() },
+                body = sentenceOf(s.error),
                 action = stringResource(R.string.tv_item_retry),
                 onAction = model::retry,
             )

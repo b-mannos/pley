@@ -38,7 +38,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.describe
+import app.pley.android.common.sentenceOf
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyTv
@@ -167,7 +167,7 @@ internal fun TvSearchContent(
             )
             is SearchResultsState.Failed -> Notice(
                 stringResource(R.string.tv_search_failed),
-                describe(results.error).replaceFirstChar { it.uppercase() },
+                sentenceOf(results.error),
             )
             is SearchResultsState.Ready -> {
                 val names = groupNames()

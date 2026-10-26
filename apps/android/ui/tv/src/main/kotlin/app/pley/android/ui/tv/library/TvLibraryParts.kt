@@ -29,7 +29,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import app.pley.android.common.describe
+import app.pley.android.common.sentenceOf
 import app.pley.android.data.Loadable
 import app.pley.android.data.valueOrNull
 import app.pley.android.designsystem.PleyColors
@@ -40,11 +40,11 @@ import app.pley.android.designsystem.tile.ArtworkTileModel
 import app.pley.android.designsystem.tile.TileKind
 import app.pley.android.designsystem.tile.rememberSkeleton
 import app.pley.android.designsystem.tile.skeleton
+import app.pley.android.model.HubKeys
 import app.pley.android.model.LibraryKind
 import app.pley.android.model.SortOrder
 import app.pley.android.screens.LibraryTab
 import app.pley.android.screens.PleyKey
-import app.pley.android.model.HubKeys
 import app.pley.android.screens.library.LibraryUiState
 import app.pley.android.screens.library.LibraryViewModel
 import app.pley.android.screens.library.TileLook
@@ -101,7 +101,7 @@ internal fun TvMessage(
 
 /** An error's sentence, capitalised and ended. */
 internal fun sentence(error: Throwable): String =
-    describe(error).replaceFirstChar { it.uppercase() }.let { if (it.endsWith('.')) it else "$it." }
+    sentenceOf(error)
 
 /**
  * The Recommended tab (the web's RecommendedTab): the library's hubs as

@@ -21,7 +21,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.describe
+import app.pley.android.common.sentenceOf
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
@@ -66,7 +66,7 @@ internal fun TvItemActionsScreen(itemId: Long, continueWatching: Boolean = false
             ItemActionsUiState.Loading -> Unit
             is ItemActionsUiState.Failed -> TvMessage(
                 title = stringResource(R.string.tv_item_failed),
-                body = describe(s.error).replaceFirstChar { it.uppercase() },
+                body = sentenceOf(s.error),
                 action = stringResource(R.string.tv_item_back),
                 onAction = navigator::back,
             )

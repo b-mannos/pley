@@ -37,7 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.describe
+import app.pley.android.common.sentenceOf
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyTv
@@ -83,7 +83,7 @@ internal fun TvAlbumScreen(albumId: Long, trackId: Long?) {
             when (event) {
                 MusicEvent.Played -> navigator.open(PleyKey.NowPlaying)
                 MusicEvent.NothingToPlay -> problem = nothing
-                is MusicEvent.Failed -> problem = describe(event.error).replaceFirstChar { it.uppercase() }
+                is MusicEvent.Failed -> problem = sentenceOf(event.error)
             }
         }
     }
@@ -98,7 +98,7 @@ internal fun TvAlbumScreen(albumId: Long, trackId: Long?) {
             )
             is MusicPageState.Failed -> MusicMessage(
                 title = stringResource(R.string.tv_music_album_failed),
-                body = describe(s.error).replaceFirstChar { it.uppercase() },
+                body = sentenceOf(s.error),
                 action = stringResource(R.string.tv_music_retry),
                 onAction = model::retry,
             )

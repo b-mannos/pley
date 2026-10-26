@@ -1,5 +1,6 @@
 package app.pley.android.screens.onboarding
 
+import app.pley.android.common.asSentence
 import app.pley.android.screens.Navigator
 import app.pley.android.screens.PleyKey
 
@@ -21,7 +22,4 @@ fun Navigator.go(move: OnboardingMove) {
 }
 
 /** [text] as a sentence: a capital first, a full stop last (the modules write theirs in lower case, without one). */
-fun sentence(text: String): String {
-    val capital = text.trim().replaceFirstChar { it.uppercase() }
-    return if (capital.isEmpty() || capital.last() in ".…!?") capital else "$capital."
-}
+fun sentence(text: String): String = asSentence(text)

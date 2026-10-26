@@ -40,7 +40,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.describe
+import app.pley.android.common.sentenceOf
 import app.pley.android.data.Loadable
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
@@ -173,7 +173,7 @@ internal fun TvAddToPlaylistContent(
                     is Loadable.Failed -> if (playlists.stale == null) {
                         item(key = "failed") {
                             BasicText(
-                                describe(playlists.error).replaceFirstChar { it.uppercase() },
+                                sentenceOf(playlists.error),
                                 style = PleyType.Tv.Body.copy(color = PleyColors.DangerText),
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                             )

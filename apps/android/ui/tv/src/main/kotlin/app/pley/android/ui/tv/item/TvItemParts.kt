@@ -47,7 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
-import app.pley.android.common.describe
+import app.pley.android.common.sentenceOf
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyFocus
 import app.pley.android.designsystem.PleyMotion
@@ -184,7 +184,7 @@ internal class TvToastState {
     }
 
     fun report(error: Throwable) {
-        val sentence = describe(error).replaceFirstChar { it.uppercase() }.let { if (it.endsWith('.')) it else "$it." }
+        val sentence = sentenceOf(error)
         show(sentence, error = true)
     }
 
