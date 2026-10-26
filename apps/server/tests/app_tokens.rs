@@ -30,8 +30,10 @@ const PUBLIC: &[(&str, &str)] = &[
     // Apps exchange codes and refresh tokens, and sign out, with forms.
     ("POST", "/api/oauth/token"),
     ("POST", "/api/oauth/revoke"),
-    // TVs start signing in with a code (pley's own apps only).
+    // TVs start signing in with a code (pley's own apps only), and those
+    // that can't draw its QR code ask for it as a picture.
     ("POST", "/api/oauth/device"),
+    ("GET", "/api/oauth/device/qr"),
     // A session's media for players that can't send the token: the
     // session's own key stands in for it (tests/tv_apps.rs).
     ("GET", "/api/media/{key}/{file}"),
@@ -260,6 +262,7 @@ fn every_route_is_classified() {
     assert!(FIRST_PARTY.contains(&("PATCH", "/api/me")));
     // TVs: anyone starts with a code, which only pley's own page takes.
     assert!(PUBLIC.contains(&("POST", "/api/oauth/device")));
+    assert!(PUBLIC.contains(&("GET", "/api/oauth/device/qr")));
     assert!(COOKIE_ONLY.contains(&("POST", "/api/oauth/device/verify")));
 }
 
