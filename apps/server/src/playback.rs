@@ -816,7 +816,10 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         Some(v) if v2 => {
             let verdict = video_v2(v, caps, hdr_out);
             reasons.extend(verdict.reasons);
-            video_copy_ok = verdict.copy;
+            // A download's file carries what its stream would only hint at
+            // (a Dolby Vision profile the device doesn't decode, kept in
+            // Matroska): its video is copied only when it plays as it is.
+            video_copy_ok = if req.download { verdict.direct } else { verdict.copy };
             copy_dolby_vision = verdict.dolby_vision;
             copy_strip_hdr10plus = verdict.strip_hdr10plus;
             verdict.direct

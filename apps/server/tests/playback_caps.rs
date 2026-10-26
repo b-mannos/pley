@@ -425,8 +425,13 @@ fn a_download_is_made_for_the_players_screen() {
     tv["video"].as_array_mut().unwrap().retain(|d| d["codec"] != "hevc");
     let d = download(tv, &big, &info);
     assert_eq!(made(&d), (VideoMode::Transcode, Some(2160), Some(29_808)));
+    // Copied only when it plays as it is: the 4K stick decodes profile 8,
+    // not 7, whose base layer a stream would show but a file keeps.
+    let d = download(fire_tv_4k_max(), &small, &source("P8.1"));
+    assert_eq!(outcome(&d), "D");
     let d = download(fire_tv_4k_max(), &small, &source("P7"));
-    assert_eq!(made(&d), (VideoMode::Copy, None, None));
+    assert_eq!(made(&d).0, VideoMode::Transcode);
+    assert_eq!(outcome(&play(fire_tv_4k_max(), &source("P7"))), "R", "streamed, it is copied");
 }
 
 #[test]

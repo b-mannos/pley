@@ -422,6 +422,16 @@ pub struct DownloadInfo {
 }
 
 impl DownloadInfo {
+    /// `status` as `user` sees it: an app doesn't get FFmpeg's words, which
+    /// name the server's files (the log keeps them).
+    fn for_viewer(status: &ConversionStatus, user: &AuthUser) -> Self {
+        let mut info = Self::of(status);
+        if user.app.is_some() {
+            info.error = None;
+        }
+        info
+    }
+
     fn of(status: &ConversionStatus) -> Self {
         Self {
             id: Some(status.id.clone()),
@@ -502,9 +512,14 @@ pub async fn convert(
         start_ms: None,
         options: state.settings.get().transcode_options(),
     };
-    let status = state.transcoder.create_conversion(&job).await.map_err(|err| for_viewer(&user, err))?;
+    let status = state.transcoder.create_conversion(&job).await.map_err(|err| match AppError::from(err) {
+        // The file can't be read now (a share asleep, unmounted): a moment's
+        // trouble for a download, which asks again later.
+        AppError::NotFound(_) => AppError::Unavailable("this title's file can't be read right now".into()),
+        err => for_viewer(&user, err),
+    })?;
     state.sessions.note_conversion(&status.id, file.id);
-    Ok(Json(DownloadInfo::of(&status)))
+    Ok(Json(DownloadInfo::for_viewer(&status, &user)))
 }
 
 /// The file conversion `id` is made of, when this user may see it.
@@ -522,7 +537,7 @@ pub async fn conversion(
 ) -> ApiResult<Json<DownloadInfo>> {
     conversion_of(&state, &user, &id).await?;
     let status = state.transcoder.conversion(&id).await.map_err(|err| for_viewer(&user, err))?;
-    Ok(Json(DownloadInfo::of(&status)))
+    Ok(Json(DownloadInfo::for_viewer(&status, &user)))
 }
 
 /// `DELETE /api/conversions/{id}`: the download that wanted it went before
