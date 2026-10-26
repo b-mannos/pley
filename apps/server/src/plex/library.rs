@@ -634,9 +634,9 @@ async fn bitrates_for(db: &Db, rows: &[ItemRow], spec: &[(SortField, bool)]) -> 
         return Ok(HashMap::new());
     }
     let ids = serde_json::to_string(&rows.iter().map(|r| r.id).collect::<Vec<_>>()).unwrap_or_else(|_| "[]".into());
-    let found: Vec<(i64, Option<f64>)> = sqlx::query_as(&format!(
+    let found: Vec<(i64, Option<f64>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT i.id, CAST({BITRATE_SQL} AS REAL) FROM items i WHERE i.id IN (SELECT value FROM json_each(?))"
-    ))
+    )))
     .bind(ids)
     .fetch_all(&db.read)
     .await?;
@@ -1426,7 +1426,7 @@ pub async fn filter_choices(
             // Keyed by person id, so the filter is exact. People only appear
             // through titles the user may see.
             let role = people_role(field).map(people::Role::as_str).unwrap_or_default();
-            let credited: Vec<(i64, String)> = sqlx::query_as(&format!(
+            let credited: Vec<(i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                 "{} SELECT DISTINCT pe.id, pe.name FROM item_people ip
                  JOIN people pe ON pe.id = ip.person_id
                  JOIN items i ON i.id = ip.item_id
@@ -1436,7 +1436,7 @@ pub async fn filter_choices(
                  ORDER BY pe.name COLLATE NOCASE",
                 catalog::ME_CTE,
                 catalog::VISIBLE,
-            ))
+            )))
             .bind(user.id)
             .bind(lib.id)
             .bind(kind)
@@ -1462,10 +1462,10 @@ pub async fn filter_choices(
             return Ok(mc);
         }
         "label" => {
-            sqlx::query_scalar(&format!(
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 "{ME_CTE} SELECT DISTINCT l.label FROM {VISIBLE_ITEMS} JOIN item_labels l ON l.item_id = i.id
                  WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? ORDER BY l.label"
-            ))
+            )))
             .bind(user.id)
             .bind(lib.id)
             .bind(kind)
@@ -1474,11 +1474,11 @@ pub async fn filter_choices(
         }
         "contentRating" | "studio" => {
             let column = if filter == "studio" { "studio" } else { "content_rating" };
-            sqlx::query_scalar(&format!(
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 "{ME_CTE} SELECT DISTINCT i.{column} FROM {VISIBLE_ITEMS}
                  WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? AND i.{column} IS NOT NULL
                  ORDER BY i.{column} COLLATE NOCASE"
-            ))
+            )))
             .bind(user.id)
             .bind(lib.id)
             .bind(kind)
@@ -1528,10 +1528,10 @@ pub async fn first_character(
     let kind = params.get("type").and_then(kind_for_number).unwrap_or(lib.kind().top_level_kind());
     // Counted by exact first character in SQL, then merged here into what
     // Plex lists (SQLite's UPPER() only knows ASCII).
-    let firsts: Vec<(String, i64)> = sqlx::query_as(&format!(
+    let firsts: Vec<(String, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "{ME_CTE} SELECT SUBSTR(i.sort_title, 1, 1), COUNT(*) FROM {VISIBLE_ITEMS}
          WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? GROUP BY 1"
-    ))
+    )))
     .bind(user.id)
     .bind(lib.id)
     .bind(kind)
@@ -2548,7 +2548,7 @@ mod tests {
     }
 
     async fn exec(db: &Db, sql: &str) {
-        sqlx::query(sql).execute(&db.write).await.unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(sql)).execute(&db.write).await.unwrap();
     }
 
     /// Movies (library 1) and shows (library 2) with what filters and sorts

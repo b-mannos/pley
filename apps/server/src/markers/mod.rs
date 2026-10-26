@@ -315,7 +315,7 @@ impl MarkerService {
                     OR (a.fingerprinted = 0 AND ?))",
             vec!["?"; files.len()].join(", ")
         );
-        let mut query = sqlx::query_scalar(&sql);
+        let mut query = sqlx::query_scalar(sqlx::AssertSqlSafe(sql.as_str()));
         for id in &files {
             query = query.bind(id);
         }
@@ -660,9 +660,9 @@ impl MarkerService {
     }
 
     async fn episode_files(&self, filter: &str, id: i64, chromaprint: bool) -> sqlx::Result<Vec<EpisodeFile>> {
-        let rows: Vec<EpisodeFileRow> = sqlx::query_as(&format!(
+        let rows: Vec<EpisodeFileRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "{EPISODE_FILES} WHERE {filter} AND e.kind = 'episode' ORDER BY COALESCE(s.idx, 0), COALESCE(e.idx, 0), f.id"
-        ))
+        )))
         .bind(id)
         .fetch_all(&self.db.read)
         .await?;

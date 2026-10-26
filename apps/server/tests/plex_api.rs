@@ -112,7 +112,7 @@ async fn provider_guids_as_plex_reports_them() {
         (album, "musicbrainz_id", json!("b8048f24-c026-3398-b23a-b5e50716cbc7")),
         (artist, "musicbrainz_id", json!("a74b1b7f-71a5-4011-9441-d0b5e4122711")),
     ] {
-        sqlx::query(&format!("UPDATE items SET {column} = ? WHERE id = ?"))
+        sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE items SET {column} = ? WHERE id = ?")))
             .bind(value.as_i64().map(|n| n.to_string()).unwrap_or_else(|| value.as_str().unwrap().to_owned()))
             .bind(id)
             .execute(&app.state.db.write)

@@ -431,7 +431,7 @@ pub async fn update_me(
     for (column, value) in [("audio_language", body.audio_language), ("subtitle_language", body.subtitle_language)] {
         let Some(value) = value else { continue };
         check_language(column, value.as_deref())?;
-        sqlx::query(&format!("UPDATE users SET {column} = ? WHERE id = ?"))
+        sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE users SET {column} = ? WHERE id = ?")))
             .bind(value)
             .bind(user.id)
             .execute(&state.db.write)
@@ -640,7 +640,7 @@ const INVITE_COLUMNS: &str = "code, created_at, expires_at, uses_left, all_libra
 
 pub async fn list_invites(State(state): State<AppState>, _admin: AdminUser) -> ApiResult<Json<Vec<InviteDto>>> {
     let rows: Vec<InviteRow> =
-        sqlx::query_as(&format!("SELECT {INVITE_COLUMNS} FROM invites ORDER BY created_at DESC"))
+        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {INVITE_COLUMNS} FROM invites ORDER BY created_at DESC")))
             .fetch_all(&state.db.read)
             .await?;
     Ok(Json(rows.into_iter().map(InviteDto::from).collect()))
@@ -713,9 +713,9 @@ pub async fn delete_invite(
 }
 
 async fn valid_invite(state: &AppState, code: &str) -> ApiResult<InviteDto> {
-    let invite: Option<InviteRow> = sqlx::query_as(&format!(
+    let invite: Option<InviteRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {INVITE_COLUMNS} FROM invites WHERE code = ? AND uses_left > 0 AND (expires_at IS NULL OR expires_at > ?)"
-    ))
+    )))
     .bind(code)
     .bind(now())
     .fetch_optional(&state.db.read)

@@ -93,7 +93,7 @@ pub async fn apply(db: &Db, item_ids: &[i64]) -> sqlx::Result<()> {
     }
     let placeholders = vec!["?"; item_ids.len()].join(",");
     let sql = format!("SELECT item_id, field, value FROM item_overrides WHERE item_id IN ({placeholders})");
-    let mut query = sqlx::query_as::<_, (i64, String, Option<String>)>(&sql);
+    let mut query = sqlx::query_as::<_, (i64, String, Option<String>)>(sqlx::AssertSqlSafe(sql.as_str()));
     for id in item_ids {
         query = query.bind(id);
     }
@@ -116,13 +116,15 @@ pub async fn apply(db: &Db, item_ids: &[i64]) -> sqlx::Result<()> {
                 continue;
             }
             // `field` is one of FIELDS, so formatting it into SQL is safe.
-            changed |= sqlx::query(&format!("UPDATE items SET {field} = ? WHERE id = ? AND {field} IS NOT ?"))
-                .bind(value)
-                .bind(item)
-                .bind(value)
-                .execute(&mut *tx)
-                .await?
-                .rows_affected()
+            changed |= sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE items SET {field} = ? WHERE id = ? AND {field} IS NOT ?"
+            )))
+            .bind(value)
+            .bind(item)
+            .bind(value)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected()
                 > 0;
             match field.as_str() {
                 "title" if !has_sort => {

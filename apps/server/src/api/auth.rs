@@ -338,7 +338,7 @@ const SWITCH_TARGETS: &str = "SELECT t.id, t.home AND me.home AS both_home, t.di
 /// Profile `target` as seen from `from`'s; `None` when there is no such
 /// profile.
 pub(crate) async fn switch_target(state: &AppState, from: i64, target: i64) -> ApiResult<Option<SwitchTarget>> {
-    Ok(sqlx::query_as(&format!("{SWITCH_TARGETS} AND t.id = ?"))
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!("{SWITCH_TARGETS} AND t.id = ?")))
         .bind(from)
         .bind(target)
         .fetch_optional(&state.db.read)

@@ -197,11 +197,12 @@ async fn apply(state: &AppState, section: Option<i64>, ids: &[i64], edit: &Edit)
             }
             if locked {
                 // Keep what the field holds now.
-                let current: Option<String> =
-                    sqlx::query_scalar(&format!("SELECT CAST({field} AS TEXT) FROM items WHERE id = ?"))
-                        .bind(id)
-                        .fetch_one(&state.db.read)
-                        .await?;
+                let current: Option<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                    "SELECT CAST({field} AS TEXT) FROM items WHERE id = ?"
+                )))
+                .bind(id)
+                .fetch_one(&state.db.read)
+                .await?;
                 if let Some(current) = current {
                     changes.push((field.to_owned(), Some(current)));
                 }
@@ -328,7 +329,7 @@ pub async fn upload_collection_artwork(
         None => crate::api::editing::store_picture(&state, body).await.map_err(PlexError::from)?,
     };
     // `field` is `poster` or `backdrop`, both columns of collections.
-    sqlx::query(&format!("UPDATE collections SET {field} = ?, updated_at = ? WHERE id = ?"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE collections SET {field} = ?, updated_at = ? WHERE id = ?")))
         .bind(blob)
         .bind(crate::util::now())
         .bind(id)

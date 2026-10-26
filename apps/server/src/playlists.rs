@@ -123,7 +123,7 @@ pub async fn expand(db: &Db, user: &AuthUser, item_ids: &[i64]) -> sqlx::Result<
 }
 
 async fn owned(db: &Db, user: &AuthUser, id: i64) -> sqlx::Result<Option<PlaylistRow>> {
-    sqlx::query_as(&format!("SELECT {COLUMNS} FROM playlists WHERE id = ? AND user_id = ?"))
+    sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {COLUMNS} FROM playlists WHERE id = ? AND user_id = ?")))
         .bind(id)
         .bind(user.id)
         .fetch_optional(&db.read)
@@ -166,11 +166,12 @@ fn artwork_of(item: &ItemSummary) -> Option<String> {
 
 /// The user's playlists with visible counts and durations.
 pub async fn list(db: &Db, user: &AuthUser) -> sqlx::Result<Vec<PlaylistDto>> {
-    let rows: Vec<PlaylistRow> =
-        sqlx::query_as(&format!("SELECT {COLUMNS} FROM playlists WHERE user_id = ? ORDER BY title COLLATE NOCASE, id"))
-            .bind(user.id)
-            .fetch_all(&db.read)
-            .await?;
+    let rows: Vec<PlaylistRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {COLUMNS} FROM playlists WHERE user_id = ? ORDER BY title COLLATE NOCASE, id"
+    )))
+    .bind(user.id)
+    .fetch_all(&db.read)
+    .await?;
     let sql = format!(
         "{} SELECT pi.playlist_id, COUNT(*), COALESCE(SUM(i.duration_ms), 0) FROM playlist_items pi
            JOIN playlists pl ON pl.id = pi.playlist_id
@@ -181,7 +182,7 @@ pub async fn list(db: &Db, user: &AuthUser) -> sqlx::Result<Vec<PlaylistDto>> {
          GROUP BY pi.playlist_id",
         me_cte!()
     );
-    let totals: HashMap<i64, (i64, i64)> = sqlx::query_as::<_, (i64, i64, i64)>(&sql)
+    let totals: HashMap<i64, (i64, i64)> = sqlx::query_as::<_, (i64, i64, i64)>(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(user.id)
         .fetch_all(&db.read)
         .await?

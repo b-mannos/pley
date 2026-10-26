@@ -125,7 +125,7 @@ HTTP, so the two can have different licenses
 
 ## Requirements
 
-- Rust 1.85 or newer.
+- Rust 1.95 or newer.
 - Node.js 22 or newer to build the web app (22.22+ or 24.15+ to run its
   tests).
 - FFmpeg and ffprobe on `PATH` or configured; 6.1 or newer throttles

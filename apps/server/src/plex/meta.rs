@@ -160,7 +160,7 @@ pub async fn load_extras(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Extr
              FROM items WHERE id IN ({})",
             vec!["?"; chunk.len()].join(",")
         );
-        let mut query = sqlx::query_as::<_, ExtrasRow>(&sql);
+        let mut query = sqlx::query_as::<_, ExtrasRow>(sqlx::AssertSqlSafe(sql.as_str()));
         for id in chunk {
             query = query.bind(id);
         }
@@ -221,7 +221,7 @@ pub async fn load_locked(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Vec<
             "SELECT item_id, field FROM item_overrides WHERE item_id IN ({}) ORDER BY field",
             vec!["?"; chunk.len()].join(",")
         );
-        let mut query = sqlx::query_as::<_, (i64, String)>(&sql);
+        let mut query = sqlx::query_as::<_, (i64, String)>(sqlx::AssertSqlSafe(sql.as_str()));
         for id in chunk {
             query = query.bind(id);
         }
@@ -246,7 +246,7 @@ pub async fn load_collections(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64,
              WHERE ci.item_id IN ({}) ORDER BY c.sort_title COLLATE NOCASE",
             vec!["?"; chunk.len()].join(",")
         );
-        let mut query = sqlx::query_as::<_, (i64, i64, String)>(&sql);
+        let mut query = sqlx::query_as::<_, (i64, i64, String)>(sqlx::AssertSqlSafe(sql.as_str()));
         for id in chunk {
             query = query.bind(id);
         }
@@ -265,7 +265,7 @@ pub async fn load_markers(db: &Db, file_ids: &[i64]) -> sqlx::Result<HashMap<i64
             "SELECT file_id, kind, start_ms, end_ms, source FROM markers WHERE file_id IN ({}) ORDER BY start_ms",
             vec!["?"; chunk.len()].join(",")
         );
-        let mut query = sqlx::query_as::<_, Marker>(&sql);
+        let mut query = sqlx::query_as::<_, Marker>(sqlx::AssertSqlSafe(sql.as_str()));
         for id in chunk {
             query = query.bind(id);
         }
@@ -292,7 +292,7 @@ pub async fn load_files(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Vec<F
              FROM media_files WHERE item_id IN ({}) ORDER BY item_id, COALESCE(height, 0) DESC, id",
             vec!["?"; chunk.len()].join(",")
         );
-        let mut query = sqlx::query_as::<_, FileRow>(&sql);
+        let mut query = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(sql.as_str()));
         for id in chunk {
             query = query.bind(id);
         }

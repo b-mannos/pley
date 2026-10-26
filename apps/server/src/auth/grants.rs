@@ -696,7 +696,7 @@ pub async fn delete_except_clients(db: &Db, clients: &[&str]) -> Result<Vec<i64>
         sql.push(')');
     }
     sql.push_str(" RETURNING id");
-    let mut query = sqlx::query_scalar(&sql);
+    let mut query = sqlx::query_scalar(sqlx::AssertSqlSafe(sql.as_str()));
     for client in clients {
         query = query.bind(*client);
     }

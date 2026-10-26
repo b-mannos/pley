@@ -441,11 +441,11 @@ pub async fn is_visible(db: &Db, user_id: i64, item_id: i64) -> sqlx::Result<boo
                            LEFT JOIN items gp ON gp.id = i.grandparent_id WHERE i.id = ? AND {VISIBLE})",
         me_cte!()
     );
-    sqlx::query_scalar(&sql).bind(user_id).bind(item_id).fetch_one(&db.read).await
+    sqlx::query_scalar(sqlx::AssertSqlSafe(sql.as_str())).bind(user_id).bind(item_id).fetch_one(&db.read).await
 }
 
 pub async fn item(db: &Db, user_id: i64, item_id: i64) -> sqlx::Result<Option<ItemRow>> {
-    sqlx::query_as(&format!("{SUMMARY_SELECT} WHERE {VISIBLE} AND i.id = ?"))
+    sqlx::query_as(sqlx::AssertSqlSafe(format!("{SUMMARY_SELECT} WHERE {VISIBLE} AND i.id = ?")))
         .bind(user_id)
         .bind(item_id)
         .fetch_optional(&db.read)
@@ -472,7 +472,7 @@ pub async fn items_by_ids(db: &Db, user_id: i64, ids: &[i64]) -> sqlx::Result<Ve
     for chunk in ids.chunks(CHUNK) {
         let placeholders = vec!["?"; chunk.len()].join(",");
         let sql = format!("{SUMMARY_SELECT} WHERE {VISIBLE} AND i.id IN ({placeholders})");
-        let mut query = sqlx::query_as::<_, ItemRow>(&sql).bind(user_id);
+        let mut query = sqlx::query_as::<_, ItemRow>(sqlx::AssertSqlSafe(sql.as_str())).bind(user_id);
         for id in chunk {
             query = query.bind(id);
         }
@@ -484,10 +484,10 @@ pub async fn items_by_ids(db: &Db, user_id: i64, ids: &[i64]) -> sqlx::Result<Ve
 
 /// Seasons, episodes, albums or tracks under an item (not its extras).
 pub async fn children(db: &Db, user_id: i64, parent_id: i64) -> sqlx::Result<Vec<ItemRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "{SUMMARY_SELECT} WHERE {VISIBLE} AND i.parent_id = ? AND i.kind != 'extra'
          ORDER BY CASE WHEN i.kind = 'season' AND i.idx = 0 THEN 1 ELSE 0 END, i.disc, i.idx IS NULL, i.idx, i.sort_title"
-    ))
+    )))
     .bind(user_id)
     .bind(parent_id)
     .fetch_all(&db.read)
@@ -496,10 +496,10 @@ pub async fn children(db: &Db, user_id: i64, parent_id: i64) -> sqlx::Result<Vec
 
 /// Bonus material of a movie or show: trailers first, then by kind and title.
 pub async fn extras(db: &Db, user_id: i64, parent_id: i64) -> sqlx::Result<Vec<ItemRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "{SUMMARY_SELECT} WHERE {VISIBLE} AND i.parent_id = ? AND i.kind = 'extra'
          ORDER BY i.extra_type != 'trailer', i.extra_type, i.sort_title"
-    ))
+    )))
     .bind(user_id)
     .bind(parent_id)
     .fetch_all(&db.read)
@@ -651,8 +651,11 @@ pub async fn library_items(db: &Db, user_id: i64, q: &LibraryQuery<'_>) -> sqlx:
             query
         }};
     }
-    let rows: Vec<ItemRow> =
-        bind_filter!(sqlx::query_as::<_, ItemRow>(&sql)).bind(limit).bind(q.offset.max(0)).fetch_all(&db.read).await?;
+    let rows: Vec<ItemRow> = bind_filter!(sqlx::query_as::<_, ItemRow>(sqlx::AssertSqlSafe(sql.as_str())))
+        .bind(limit)
+        .bind(q.offset.max(0))
+        .fetch_all(&db.read)
+        .await?;
     // Counting is only needed when the page may not hold everything.
     let total = if q.offset == 0 && (rows.len() as i64) < limit {
         rows.len() as i64
@@ -664,7 +667,7 @@ pub async fn library_items(db: &Db, user_id: i64, q: &LibraryQuery<'_>) -> sqlx:
              WHERE {VISIBLE}{filter}",
             me_cte!()
         );
-        bind_filter!(sqlx::query_scalar::<_, i64>(&count)).fetch_one(&db.read).await?
+        bind_filter!(sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(count.as_str()))).fetch_one(&db.read).await?
     };
     Ok((rows, total))
 }
@@ -681,20 +684,20 @@ pub async fn library_filters(
     library_id: i64,
     kind: &str,
 ) -> sqlx::Result<(Vec<String>, Vec<i64>)> {
-    let genres: Vec<String> = sqlx::query_scalar(&format!(
+    let genres: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "{ME_CTE} SELECT DISTINCT g.genre FROM item_genres g JOIN items i ON i.id = g.item_id
              LEFT JOIN items p ON p.id = i.parent_id LEFT JOIN items gp ON gp.id = i.grandparent_id
          WHERE g.library_id = ? AND g.kind = ? AND {VISIBLE} ORDER BY g.genre COLLATE NOCASE"
-    ))
+    )))
     .bind(user_id)
     .bind(library_id)
     .bind(kind)
     .fetch_all(&db.read)
     .await?;
-    let years: Vec<i64> = sqlx::query_scalar(&format!(
+    let years: Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "{ME_CTE} SELECT DISTINCT i.year FROM {VISIBLE_ITEMS}
          WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? AND i.year IS NOT NULL ORDER BY i.year DESC"
-    ))
+    )))
     .bind(user_id)
     .bind(library_id)
     .bind(kind)
@@ -704,14 +707,19 @@ pub async fn library_filters(
 }
 
 pub async fn files_for_item(db: &Db, item_id: i64) -> sqlx::Result<Vec<FileRow>> {
-    sqlx::query_as(&format!("{FILE_SELECT} WHERE item_id = ? ORDER BY COALESCE(height, 0) DESC, id"))
-        .bind(item_id)
-        .fetch_all(&db.read)
-        .await
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "{FILE_SELECT} WHERE item_id = ? ORDER BY COALESCE(height, 0) DESC, id"
+    )))
+    .bind(item_id)
+    .fetch_all(&db.read)
+    .await
 }
 
 pub async fn file(db: &Db, file_id: i64) -> sqlx::Result<Option<FileRow>> {
-    sqlx::query_as(&format!("{FILE_SELECT} WHERE id = ?")).bind(file_id).fetch_optional(&db.read).await
+    sqlx::query_as(sqlx::AssertSqlSafe(format!("{FILE_SELECT} WHERE id = ?")))
+        .bind(file_id)
+        .fetch_optional(&db.read)
+        .await
 }
 
 #[derive(FromRow)]
@@ -809,7 +817,8 @@ pub async fn items_matching(db: &Db, user_id: i64, q: &ItemsQuery<'_>) -> sqlx::
         "{SUMMARY_SELECT} WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ?{} ORDER BY {} LIMIT ? OFFSET ?",
         q.filter, q.order_by
     );
-    let query = sqlx::query_as::<_, ItemRow>(&sql).bind(user_id).bind(q.library_id).bind(q.kind);
+    let query =
+        sqlx::query_as::<_, ItemRow>(sqlx::AssertSqlSafe(sql.as_str())).bind(user_id).bind(q.library_id).bind(q.kind);
     bind_sql_args!(query, q.args)
         .bind(q.limit.unwrap_or(i64::MAX).max(0))
         .bind(q.offset.max(0))
@@ -828,7 +837,8 @@ pub async fn count_matching(db: &Db, user_id: i64, q: &ItemsQuery<'_>) -> sqlx::
         "{ME_CTE} SELECT COUNT(*) FROM {VISIBLE_ITEMS}{state} WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ?{}",
         q.filter
     );
-    let query = sqlx::query_scalar::<_, i64>(&sql).bind(user_id).bind(q.library_id).bind(q.kind);
+    let query =
+        sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(sql.as_str())).bind(user_id).bind(q.library_id).bind(q.kind);
     bind_sql_args!(query, q.args).fetch_one(&db.read).await
 }
 
@@ -1017,10 +1027,10 @@ pub async fn set_watched(
     } else {
         "s.watched = 1 OR s.position_ms > 0"
     };
-    let changes: bool = sqlx::query_scalar(&format!(
+    let changes: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT EXISTS (SELECT 1 FROM items i LEFT JOIN user_item_state s ON s.item_id = i.id AND s.user_id = ?1
                         WHERE i.id IN ({leaves}) AND ({pending}))"
-    ))
+    )))
     .bind(user_id)
     .bind(0)
     .bind(item_id)
@@ -1030,31 +1040,33 @@ pub async fn set_watched(
     let mut back = false;
     if watched {
         back = show_again(db, user_id, kind, item_id).await?;
-        left_watchlist = sqlx::query(&format!("DELETE FROM watchlist WHERE user_id = ?1 AND item_id IN ({leaves})"))
-            .bind(user_id)
-            .bind(now)
-            .bind(item_id)
-            .execute(&db.write)
-            .await?
-            .rows_affected()
+        left_watchlist = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM watchlist WHERE user_id = ?1 AND item_id IN ({leaves})"
+        )))
+        .bind(user_id)
+        .bind(now)
+        .bind(item_id)
+        .execute(&db.write)
+        .await?
+        .rows_affected()
             > 0;
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO user_item_state (user_id, item_id, position_ms, watched, play_count, last_played_at, updated_at)
              SELECT ?1, id, 0, 1, 1, ?2, ?2 FROM items WHERE id IN ({leaves})
              ON CONFLICT(user_id, item_id) DO UPDATE SET
                 play_count = CASE WHEN user_item_state.watched = 0 THEN user_item_state.play_count + 1 ELSE user_item_state.play_count END,
                 watched = 1, position_ms = 0, last_played_at = excluded.last_played_at, updated_at = excluded.updated_at"
-        ))
+        )))
         .bind(user_id)
         .bind(now)
         .bind(item_id)
         .execute(&db.write)
         .await?;
     } else {
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE user_item_state SET watched = 0, position_ms = 0, updated_at = ?2
              WHERE user_id = ?1 AND item_id IN ({leaves})"
-        ))
+        )))
         .bind(user_id)
         .bind(now)
         .bind(item_id)
@@ -1080,7 +1092,7 @@ pub async fn in_progress(db: &Db, user_id: i64, library_id: Option<i64>, limit: 
                            WHERE h.user_id = (SELECT uid FROM me) AND h.item_id = COALESCE(i.grandparent_id, i.id))
          ORDER BY s.last_played_at DESC LIMIT ?"
     );
-    let mut q = sqlx::query_as::<_, ItemRow>(&sql).bind(user_id);
+    let mut q = sqlx::query_as::<_, ItemRow>(sqlx::AssertSqlSafe(sql.as_str())).bind(user_id);
     if let Some(lib) = library_id {
         q = q.bind(lib);
     }
@@ -1173,7 +1185,8 @@ async fn shows_episodes(db: &Db, user_id: i64, show_ids: &[i64]) -> sqlx::Result
          WHERE e.grandparent_id IN ({placeholders}) AND e.kind = 'episode'
          ORDER BY e.grandparent_id, se.idx = 0, se.idx, e.idx IS NULL, e.idx, e.sort_title"
     );
-    let mut query = sqlx::query_as::<_, (i64, i64, bool, i64, i64, Option<i64>)>(&sql).bind(user_id);
+    let mut query =
+        sqlx::query_as::<_, (i64, i64, bool, i64, i64, Option<i64>)>(sqlx::AssertSqlSafe(sql.as_str())).bind(user_id);
     for id in show_ids {
         query = query.bind(id);
     }
@@ -1194,7 +1207,7 @@ pub async fn next_up(db: &Db, user_id: i64, library_id: Option<i64>, limit: i64)
            AND e.grandparent_id IS NOT NULL {scope}
          ORDER BY s.last_played_at DESC"
     );
-    let mut q = sqlx::query_as::<_, (i64, i64)>(&sql).bind(user_id);
+    let mut q = sqlx::query_as::<_, (i64, i64)>(sqlx::AssertSqlSafe(sql.as_str())).bind(user_id);
     if let Some(lib) = library_id {
         q = q.bind(lib);
     }
@@ -1307,21 +1320,23 @@ pub async fn hide_from_continue_watching(db: &Db, events: &EventBus, user_id: i6
 /// progress report asks.
 async fn show_again(db: &Db, user_id: i64, kind: &str, item_id: i64) -> sqlx::Result<bool> {
     let titles = format!("SELECT COALESCE(grandparent_id, id) FROM items WHERE id IN ({})", leaves_clause(kind));
-    let hidden: bool = sqlx::query_scalar(&format!(
+    let hidden: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT EXISTS (SELECT 1 FROM continue_watching_hidden WHERE user_id = ?1 AND item_id IN ({titles}))"
-    ))
+    )))
     .bind(user_id)
     .bind(0)
     .bind(item_id)
     .fetch_one(&db.read)
     .await?;
     if hidden {
-        sqlx::query(&format!("DELETE FROM continue_watching_hidden WHERE user_id = ?1 AND item_id IN ({titles})"))
-            .bind(user_id)
-            .bind(0)
-            .bind(item_id)
-            .execute(&db.write)
-            .await?;
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM continue_watching_hidden WHERE user_id = ?1 AND item_id IN ({titles})"
+        )))
+        .bind(user_id)
+        .bind(0)
+        .bind(item_id)
+        .execute(&db.write)
+        .await?;
     }
     Ok(hidden)
 }
@@ -1352,10 +1367,10 @@ pub async fn remove_from_watchlist(db: &Db, user_id: i64, item_id: i64) -> sqlx:
 /// The user's My List, newest added first: what they may see of it (library
 /// access and age limit, as everywhere).
 pub async fn watchlist(db: &Db, user_id: i64, limit: Option<i64>) -> sqlx::Result<Vec<ItemRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "{SUMMARY_SELECT} JOIN watchlist w ON w.item_id = i.id AND w.user_id = (SELECT uid FROM me)
          WHERE {VISIBLE} ORDER BY w.added_at DESC, w.rowid DESC LIMIT ?"
-    ))
+    )))
     .bind(user_id)
     .bind(limit.unwrap_or(i64::MAX).max(0))
     .fetch_all(&db.read)
@@ -1427,9 +1442,9 @@ pub async fn recently_added(
         }
         kind => {
             let item_kind = if kind == "music" { "album" } else { "movie" };
-            sqlx::query_as(&format!(
+            sqlx::query_as(sqlx::AssertSqlSafe(format!(
                 "{SUMMARY_SELECT} WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? ORDER BY i.added_at DESC, i.id DESC LIMIT ?"
-            ))
+            )))
             .bind(user_id)
             .bind(library_id)
             .bind(item_kind)
@@ -1447,10 +1462,10 @@ pub async fn recently_released(
     kind: &str,
     limit: i64,
 ) -> sqlx::Result<Vec<ItemRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "{SUMMARY_SELECT} WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? AND i.release_date IS NOT NULL
          ORDER BY i.release_date DESC LIMIT ?"
-    ))
+    )))
     .bind(user_id)
     .bind(library_id)
     .bind(kind)
@@ -1460,9 +1475,9 @@ pub async fn recently_released(
 }
 
 pub async fn top_rated(db: &Db, user_id: i64, library_id: i64, kind: &str, limit: i64) -> sqlx::Result<Vec<ItemRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "{SUMMARY_SELECT} WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ? AND i.rating IS NOT NULL ORDER BY i.rating DESC, i.sort_title LIMIT ?"
-    ))
+    )))
     .bind(user_id)
     .bind(library_id)
     .bind(kind)

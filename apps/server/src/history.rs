@@ -115,7 +115,7 @@ pub async fn list(db: &Db, viewer_id: i64, filter: &Filter) -> sqlx::Result<(Vec
                 u.avatar_color {from} ORDER BY h.viewed_at DESC, h.id DESC LIMIT ? OFFSET ?",
         catalog::ME_CTE
     );
-    let rows: Vec<Row> = bind_filter!(sqlx::query_as::<_, Row>(&sql))
+    let rows: Vec<Row> = bind_filter!(sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(sql.as_str())))
         .bind(filter.limit.max(0))
         .bind(filter.offset.max(0))
         .fetch_all(&db.read)
@@ -131,7 +131,7 @@ pub async fn list(db: &Db, viewer_id: i64, filter: &Filter) -> sqlx::Result<(Vec
             catalog::ME_CTE,
             catalog::VISIBLE
         );
-        bind_filter!(sqlx::query_scalar::<_, i64>(&sql)).fetch_one(&db.read).await?
+        bind_filter!(sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(sql.as_str()))).fetch_one(&db.read).await?
     };
 
     let mut ids: Vec<i64> = rows.iter().map(|r| r.item_id).collect();

@@ -222,7 +222,7 @@ pub async fn reset_artwork(
     let kind = artwork_kind(&kind)?;
     overrides::set(&state.db, id, &[(kind.to_owned(), None)]).await?;
     // `kind` is one of three column names.
-    sqlx::query(&format!("UPDATE items SET {kind} = NULL, updated_at = ? WHERE id = ?"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE items SET {kind} = NULL, updated_at = ? WHERE id = ?")))
         .bind(now())
         .bind(id)
         .execute(&state.db.write)

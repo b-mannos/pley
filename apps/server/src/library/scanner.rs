@@ -412,7 +412,7 @@ impl Scanner {
         for chunk in removed.chunks(CHANGE_BATCH) {
             let placeholders = vec!["?"; chunk.len()].join(",");
             let sql = format!("DELETE FROM media_files WHERE id IN ({placeholders})");
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             for id in chunk {
                 q = q.bind(id);
             }
@@ -965,10 +965,10 @@ async fn cleanup_orphans(conn: &mut SqliteConnection, library_id: i64) -> sqlx::
     .execute(&mut *conn)
     .await?;
     for kinds in ["('season', 'album')", "('show', 'artist')"] {
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "DELETE FROM items WHERE library_id = ? AND kind IN {kinds}
              AND NOT EXISTS (SELECT 1 FROM items c WHERE c.parent_id = items.id AND c.kind != 'extra')"
-        ))
+        )))
         .bind(library_id)
         .execute(&mut *conn)
         .await?;

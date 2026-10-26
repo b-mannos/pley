@@ -20,7 +20,6 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use dashmap::DashMap;
-use rand_core::{OsRng, RngCore};
 use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey};
 use ring::hmac;
 use serde::Serialize;
@@ -173,7 +172,7 @@ impl TwoStep {
         // Saying so now beats failing once the app has the secret.
         self.key()?;
         let mut secret = [0u8; SECRET_BYTES];
-        OsRng.fill_bytes(&mut secret);
+        getrandom::fill(&mut secret).expect("the system's random numbers");
         self.pending.retain(|_, p| p.since.elapsed() < SETUP_TTL);
         self.pending.insert(user_id, Pending { secret, since: Instant::now(), wrong: 0 });
         let encoded = base32(&secret);
@@ -349,7 +348,7 @@ impl TwoStep {
     fn seal(&self, user_id: i64, secret: &[u8]) -> Result<String, AppError> {
         let key = self.key()?;
         let mut nonce = [0u8; aead::NONCE_LEN];
-        OsRng.fill_bytes(&mut nonce);
+        getrandom::fill(&mut nonce).expect("the system's random numbers");
         let mut sealed = secret.to_vec();
         key.seal_in_place_append_tag(Nonce::assume_unique_for_key(nonce), Aad::from(aad(user_id)), &mut sealed)
             .map_err(|_| AppError::Internal(anyhow::anyhow!("sealing an authenticator secret failed")))?;
@@ -387,7 +386,7 @@ fn load_key(path: &Path) -> Result<[u8; 32], String> {
             .ok_or_else(|| "it isn't a key pley made".to_owned()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             let mut key = [0u8; 32];
-            OsRng.fill_bytes(&mut key);
+            getrandom::fill(&mut key).expect("the system's random numbers");
             let mut options = std::fs::OpenOptions::new();
             options.write(true).create_new(true);
             #[cfg(unix)]
@@ -457,7 +456,7 @@ fn new_recovery_codes() -> Vec<String> {
     (0..RECOVERY_CODES)
         .map(|_| {
             let mut bytes = [0u8; RECOVERY_CHARS];
-            OsRng.fill_bytes(&mut bytes);
+            getrandom::fill(&mut bytes).expect("the system's random numbers");
             let mut code = String::with_capacity(RECOVERY_CHARS + RECOVERY_CHARS / 4);
             for (i, b) in bytes.iter().enumerate() {
                 if i > 0 && i % 4 == 0 {

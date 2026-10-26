@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
 use image::codecs::jpeg::JpegEncoder;
-use rand_core::{OsRng, RngCore};
 use serde::Serialize;
 
 use crate::db::Db;
@@ -116,10 +115,11 @@ pub fn avatar_url(user_id: i64, avatar: Option<&str>) -> Option<String> {
 }
 
 pub async fn user(db: &Db, id: i64) -> sqlx::Result<Option<UserDto>> {
-    let row: Option<UserRow> = sqlx::query_as(&format!("SELECT {USER_COLUMNS} FROM users WHERE id = ?"))
-        .bind(id)
-        .fetch_optional(&db.read)
-        .await?;
+    let row: Option<UserRow> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {USER_COLUMNS} FROM users WHERE id = ?")))
+            .bind(id)
+            .fetch_optional(&db.read)
+            .await?;
     let Some(row) = row else { return Ok(None) };
     let ids = sqlx::query_scalar("SELECT library_id FROM user_libraries WHERE user_id = ? ORDER BY library_id")
         .bind(id)
@@ -129,9 +129,9 @@ pub async fn user(db: &Db, id: i64) -> sqlx::Result<Option<UserDto>> {
 }
 
 pub async fn users(db: &Db) -> sqlx::Result<Vec<UserDto>> {
-    let rows: Vec<UserRow> = sqlx::query_as(&format!(
+    let rows: Vec<UserRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {USER_COLUMNS} FROM users ORDER BY managed, COALESCE(display_name, username) COLLATE NOCASE"
-    ))
+    )))
     .fetch_all(&db.read)
     .await?;
     let pairs: Vec<(i64, i64)> = sqlx::query_as("SELECT user_id, library_id FROM user_libraries ORDER BY library_id")
@@ -371,7 +371,7 @@ pub fn process_avatar(bytes: &[u8]) -> Result<Vec<u8>, AppError> {
 pub fn invite_code() -> String {
     const ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyz23456789";
     let mut bytes = [0u8; 12];
-    OsRng.fill_bytes(&mut bytes);
+    getrandom::fill(&mut bytes).expect("the system's random numbers");
     bytes.iter().map(|b| ALPHABET[*b as usize % ALPHABET.len()] as char).collect()
 }
 

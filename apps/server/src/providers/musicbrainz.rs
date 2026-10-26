@@ -460,10 +460,10 @@ impl MusicBrainz {
     /// artist's (`grandparent_id`) tracks, and whether they embed a cover.
     async fn file_ids(&self, parent: &'static str, id: i64) -> sqlx::Result<FileIds> {
         // `parent` is one of two column names.
-        let infos: Vec<String> = sqlx::query_scalar(&format!(
+        let infos: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT f.media_info FROM media_files f JOIN items t ON t.id = f.item_id
              WHERE t.{parent} = ? AND f.media_info IS NOT NULL ORDER BY t.disc, t.idx LIMIT 5"
-        ))
+        )))
         .bind(id)
         .fetch_all(&self.db.read)
         .await?;

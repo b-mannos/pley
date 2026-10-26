@@ -16,7 +16,7 @@ pub async fn for_items(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Vec<St
             "SELECT item_id, label FROM item_labels WHERE item_id IN ({}) ORDER BY label",
             vec!["?"; chunk.len()].join(",")
         );
-        let mut query = sqlx::query_as::<_, (i64, String)>(&sql);
+        let mut query = sqlx::query_as::<_, (i64, String)>(sqlx::AssertSqlSafe(sql.as_str()));
         for id in chunk {
             query = query.bind(id);
         }

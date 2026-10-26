@@ -428,7 +428,7 @@ impl Store {
         for chunk in forget.chunks(500) {
             let placeholders = vec!["?"; chunk.len()].join(",");
             let sql = format!("DELETE FROM remote_images WHERE url IN ({placeholders})");
-            let mut query = sqlx::query(&sql);
+            let mut query = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             for url in chunk {
                 query = query.bind(url);
             }
@@ -513,19 +513,22 @@ impl Store {
             [("items", "id", &["poster", "backdrop", "thumb"][..]), ("collections", "id", &["poster", "backdrop"][..])]
         {
             for column in columns {
-                let rows: Vec<(i64, String)> =
-                    sqlx::query_as(&format!("SELECT {key}, {column} FROM {table} WHERE {column} LIKE ? ESCAPE '^'"))
-                        .bind(&like)
-                        .fetch_all(&self.db.read)
-                        .await?;
+                let rows: Vec<(i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                    "SELECT {key}, {column} FROM {table} WHERE {column} LIKE ? ESCAPE '^'"
+                )))
+                .bind(&like)
+                .fetch_all(&self.db.read)
+                .await?;
                 for (id, old) in rows {
                     let new = self.import_once(&old, metadata_dir, &mut done, &mut moved).await;
-                    sqlx::query(&format!("UPDATE {table} SET {column} = ? WHERE {key} = ? AND {column} = ?"))
-                        .bind(new)
-                        .bind(id)
-                        .bind(&old)
-                        .execute(&self.db.write)
-                        .await?;
+                    sqlx::query(sqlx::AssertSqlSafe(format!(
+                        "UPDATE {table} SET {column} = ? WHERE {key} = ? AND {column} = ?"
+                    )))
+                    .bind(new)
+                    .bind(id)
+                    .bind(&old)
+                    .execute(&self.db.write)
+                    .await?;
                 }
             }
         }
@@ -1079,7 +1082,7 @@ mod tests {
     }
 
     async fn count(store: &Store, sql: &str) -> i64 {
-        sqlx::query_scalar(sql).fetch_one(&store.db.read).await.unwrap()
+        sqlx::query_scalar(sqlx::AssertSqlSafe(sql)).fetch_one(&store.db.read).await.unwrap()
     }
 
     #[tokio::test]

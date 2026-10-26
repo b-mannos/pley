@@ -15,13 +15,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use argon2::Argon2;
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::phc::PasswordHash;
+use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use axum::extract::{FromRequestParts, MatchedPath};
 use axum::http::header;
 use axum::http::request::Parts;
 use base64::Engine;
 use dashmap::DashMap;
-use rand_core::{OsRng, RngCore};
 use sha2::{Digest, Sha256};
 
 use self::grants::{ACCESS_PREFIX, APP_TOKEN_PREFIX, IssueError, Issued, NewGrant, RefreshError, RefreshInput};
@@ -106,10 +106,9 @@ async fn hashing<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -
 
 pub async fn hash_password(password: String) -> Result<String, AppError> {
     hashing(move || {
-        let salt = SaltString::generate(&mut OsRng);
         Argon2::default()
-            .hash_password(password.as_bytes(), &salt)
-            .map(|h| h.to_string())
+            .hash_password(password.as_bytes())
+            .map(|h: PasswordHash| h.to_string())
             .map_err(|e| AppError::Internal(anyhow::anyhow!("hashing password: {e}")))
     })
     .await?
@@ -121,7 +120,7 @@ pub async fn dummy_password_hash() -> String {
     static HASH: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
     HASH.get_or_init(|| async {
         let mut secret = [0u8; 16];
-        OsRng.fill_bytes(&mut secret);
+        getrandom::fill(&mut secret).expect("the system's random numbers");
         hash_password(hex::encode(secret)).await.unwrap_or_default()
     })
     .await
@@ -140,7 +139,7 @@ pub async fn verify_password(password: String, hash: String) -> Result<bool, App
 
 pub fn new_token() -> String {
     let mut bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut bytes);
+    getrandom::fill(&mut bytes).expect("the system's random numbers");
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
@@ -938,6 +937,14 @@ mod tests {
         assert!(verify_password("hunter22".into(), hash.clone()).await.unwrap());
         assert!(!verify_password("wrong".into(), hash).await.unwrap());
         assert!(!verify_password(String::new(), "!managed".into()).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn passwords_saved_by_earlier_versions_still_sign_in() {
+        // Made by argon2 0.5, which pley used until October 2026.
+        let hash = "$argon2id$v=19$m=19456,t=2,p=1$WWW5Ql9KdGRryRtZQHNBlQ$q02uDlN7nHCcWcmEqUPnSMB/ooHW5gEGESZbsu2y33w";
+        assert!(verify_password("correct horse".into(), hash.into()).await.unwrap());
+        assert!(!verify_password("correct horses".into(), hash.into()).await.unwrap());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

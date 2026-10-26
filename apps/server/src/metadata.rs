@@ -838,7 +838,7 @@ impl MetadataAgent {
         let title = details.title.clone().unwrap_or_else(|| item.title.clone());
         let genres: Vec<String> = details.genres.iter().map(|g| g.name.clone()).collect();
         let age = certification.as_deref().and_then(crate::ratings::rating_age);
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE items SET title = ?, sort_title = ?, original_title = ?, year = COALESCE(?, year), summary = ?, tagline = ?,
                 rating = ?, content_rating = CASE WHEN {RATING_LOCKED} THEN content_rating ELSE ? END,
                 rating_age = CASE WHEN {RATING_LOCKED} THEN rating_age ELSE ? END,
@@ -846,7 +846,7 @@ impl MetadataAgent {
                 tmdb_id = ?, imdb_id = COALESCE(?, imdb_id), poster = COALESCE(?, poster), backdrop = COALESCE(?, backdrop),
                 metadata_at = ?, updated_at = ?
              WHERE id = ?"
-        ))
+        )))
         .bind(&title)
         .bind(sort_title(&title))
         .bind(details.original_title.filter(|o| *o != title))
@@ -907,14 +907,14 @@ impl MetadataAgent {
         let title = details.name.clone().unwrap_or_else(|| item.title.clone());
         let genres: Vec<String> = details.genres.iter().map(|g| g.name.clone()).collect();
         let age = rating.as_deref().and_then(crate::ratings::rating_age);
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE items SET title = ?, sort_title = ?, original_title = ?, year = COALESCE(?, year), summary = ?, tagline = ?,
                 rating = ?, content_rating = CASE WHEN {RATING_LOCKED} THEN content_rating ELSE ? END,
                 rating_age = CASE WHEN {RATING_LOCKED} THEN rating_age ELSE ? END,
                 genres = ?, studio = ?, release_date = ?, tmdb_id = ?, imdb_id = COALESCE(?, imdb_id),
                 poster = COALESCE(?, poster), backdrop = COALESCE(?, backdrop), metadata_at = ?, updated_at = ?
              WHERE id = ?"
-        ))
+        )))
         .bind(&title)
         .bind(sort_title(&title))
         .bind(details.original_name.filter(|o| *o != title))

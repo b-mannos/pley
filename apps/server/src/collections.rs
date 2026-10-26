@@ -112,7 +112,7 @@ async fn visible_counts(db: &Db, user_id: i64, ids: &[i64]) -> sqlx::Result<Hash
          GROUP BY ci.collection_id",
         me_cte!()
     );
-    let mut query = sqlx::query_as::<_, (i64, i64)>(&sql).bind(user_id);
+    let mut query = sqlx::query_as::<_, (i64, i64)>(sqlx::AssertSqlSafe(sql.as_str())).bind(user_id);
     for id in ids {
         query = query.bind(id);
     }
@@ -126,9 +126,9 @@ fn listed(row: &CollectionRow, count: i64, user: &AuthUser) -> bool {
 
 /// Collections of a library (the caller checked library access).
 pub async fn list(db: &Db, user: &AuthUser, library_id: i64) -> sqlx::Result<Vec<CollectionDto>> {
-    let rows: Vec<CollectionRow> = sqlx::query_as(&format!(
+    let rows: Vec<CollectionRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {COLUMNS} FROM collections WHERE library_id = ? ORDER BY sort_title COLLATE NOCASE, id"
-    ))
+    )))
     .bind(library_id)
     .fetch_all(&db.read)
     .await?;
@@ -154,7 +154,10 @@ pub async fn list(db: &Db, user: &AuthUser, library_id: i64) -> sqlx::Result<Vec
 }
 
 async fn row(db: &Db, id: i64) -> sqlx::Result<Option<CollectionRow>> {
-    sqlx::query_as(&format!("SELECT {COLUMNS} FROM collections WHERE id = ?")).bind(id).fetch_optional(&db.read).await
+    sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {COLUMNS} FROM collections WHERE id = ?")))
+        .bind(id)
+        .fetch_optional(&db.read)
+        .await
 }
 
 /// Item ids of a collection in its display order.
@@ -166,10 +169,10 @@ async fn ordered_ids(db: &Db, id: i64, sort: &str) -> sqlx::Result<Vec<i64>> {
             "COALESCE(i.release_date, CAST(i.year AS TEXT)) IS NULL, COALESCE(i.release_date, CAST(i.year AS TEXT)), i.sort_title"
         }
     };
-    sqlx::query_scalar(&format!(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT ci.item_id FROM collection_items ci JOIN items i ON i.id = ci.item_id
          WHERE ci.collection_id = ? ORDER BY {order}"
-    ))
+    )))
     .bind(id)
     .fetch_all(&db.read)
     .await
@@ -205,10 +208,10 @@ pub struct CollectionRef {
 
 /// Collections an item belongs to (the caller checked the item is visible).
 pub async fn for_item(db: &Db, user: &AuthUser, item_id: i64) -> sqlx::Result<Vec<CollectionRef>> {
-    let rows: Vec<CollectionRow> = sqlx::query_as(&format!(
+    let rows: Vec<CollectionRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {COLUMNS} FROM collections WHERE id IN (SELECT collection_id FROM collection_items WHERE item_id = ?)
          ORDER BY sort_title COLLATE NOCASE"
-    ))
+    )))
     .bind(item_id)
     .fetch_all(&db.read)
     .await?;
@@ -317,7 +320,7 @@ pub async fn eligible(db: &Db, library_id: i64, item_ids: &[i64]) -> sqlx::Resul
     let sql = format!(
         "SELECT COUNT(*) FROM items WHERE library_id = ? AND kind IN ('movie', 'show') AND id IN ({placeholders})"
     );
-    let mut query = sqlx::query_scalar(&sql).bind(library_id);
+    let mut query = sqlx::query_scalar(sqlx::AssertSqlSafe(sql.as_str())).bind(library_id);
     for id in item_ids {
         query = query.bind(id);
     }

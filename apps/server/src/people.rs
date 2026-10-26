@@ -305,12 +305,12 @@ pub async fn replace(db: &Db, item_id: i64, credits: &[NewCredit]) -> sqlx::Resu
     for (position, credit) in credits.iter().enumerate() {
         let (column, id) = credit.person.column();
         // `column` is one of three fixed names.
-        let person: i64 = sqlx::query_scalar(&format!(
+        let person: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "INSERT INTO people ({column}, name, photo_url, updated_at) VALUES (?, ?, ?, ?)
              ON CONFLICT ({column}) DO UPDATE SET name = excluded.name,
                  photo_url = COALESCE(excluded.photo_url, photo_url), updated_at = excluded.updated_at
              RETURNING id"
-        ))
+        )))
         .bind(id)
         .bind(&credit.name)
         .bind(&credit.photo)
@@ -377,7 +377,7 @@ pub async fn for_items(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Vec<Cr
              WHERE ip.item_id IN ({}) ORDER BY ip.item_id, ip.position",
             vec!["?"; chunk.len()].join(",")
         );
-        let mut query = sqlx::query_as::<_, CreditRow>(&sql);
+        let mut query = sqlx::query_as::<_, CreditRow>(sqlx::AssertSqlSafe(sql.as_str()));
         for id in chunk {
             query = query.bind(id);
         }
@@ -522,7 +522,7 @@ pub async fn search(db: &Db, user_id: i64, input: &str, limit: i64) -> sqlx::Res
         .fetch_all(&db.read)
         .await
     } else {
-        sqlx::query_as::<_, (i64, String, Option<String>)>(&format!(
+        sqlx::query_as::<_, (i64, String, Option<String>)>(sqlx::AssertSqlSafe(format!(
             "{}, candidates AS (
                  SELECT pe.id, pe.name, pe.photo_url FROM people_fts f JOIN people pe ON pe.id = f.rowid
                  WHERE people_fts MATCH ?
@@ -536,7 +536,7 @@ pub async fn search(db: &Db, user_id: i64, input: &str, limit: i64) -> sqlx::Res
              SELECT id, name, photo_url FROM counted WHERE visible > 0 ORDER BY visible DESC, name LIMIT ?",
             catalog::ME_CTE,
             catalog::VISIBLE,
-        ))
+        )))
         .bind(user_id)
         .bind(&fts)
         .bind(limit)
@@ -565,7 +565,7 @@ pub async fn is_visible(db: &Db, user_id: i64, person_id: i64) -> sqlx::Result<b
         catalog::ME_CTE,
         catalog::VISIBLE,
     );
-    sqlx::query_scalar(&sql).bind(user_id).bind(person_id).fetch_one(&db.read).await
+    sqlx::query_scalar(sqlx::AssertSqlSafe(sql.as_str())).bind(user_id).bind(person_id).fetch_one(&db.read).await
 }
 
 /// Forget people no item credits any more (their photos go with the next

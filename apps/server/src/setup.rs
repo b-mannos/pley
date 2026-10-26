@@ -10,7 +10,6 @@ use std::net::{IpAddr, SocketAddr};
 use axum::extract::{ConnectInfo, FromRequestParts};
 use axum::http::request::Parts;
 use parking_lot::Mutex;
-use rand_core::{OsRng, RngCore};
 
 /// Letters and digits that can't be mistaken for one another.
 const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -24,7 +23,7 @@ impl SetupCode {
     /// A new code (`ABCD-EFGH`), replacing any earlier one.
     pub fn issue(&self) -> String {
         let mut bytes = [0u8; LENGTH];
-        OsRng.fill_bytes(&mut bytes);
+        getrandom::fill(&mut bytes).expect("the system's random numbers");
         let code: String = bytes.iter().map(|b| ALPHABET[usize::from(*b) % ALPHABET.len()] as char).collect();
         *self.0.lock() = Some(code.clone());
         format!("{}-{}", &code[..4], &code[4..])

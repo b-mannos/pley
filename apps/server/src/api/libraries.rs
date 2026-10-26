@@ -39,7 +39,12 @@ async fn to_dto(state: &AppState, lib: &LibraryRow, viewer: Option<&AuthUser>) -
             let sql = format!(
                 "{ME_CTE} SELECT COUNT(*) FROM {VISIBLE_ITEMS} WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ?"
             );
-            sqlx::query_scalar(&sql).bind(user.id).bind(lib.id).bind(kind).fetch_one(&state.db.read).await?
+            sqlx::query_scalar(sqlx::AssertSqlSafe(sql.as_str()))
+                .bind(user.id)
+                .bind(lib.id)
+                .bind(kind)
+                .fetch_one(&state.db.read)
+                .await?
         }
         _ => {
             sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE library_id = ? AND kind = ?")

@@ -34,7 +34,6 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
-use rand_core::{OsRng, RngCore};
 
 use super::AppSnapshot;
 use crate::auth::scopes::Scopes;
@@ -73,7 +72,7 @@ pub fn new_user_code() -> String {
     let mut code = String::with_capacity(CODE_LETTERS);
     let mut bytes = [0u8; 16];
     while code.len() < CODE_LETTERS {
-        OsRng.fill_bytes(&mut bytes);
+        getrandom::fill(&mut bytes).expect("the system's random numbers");
         code.extend(bytes.iter().filter_map(|&byte| letter(byte)).take(CODE_LETTERS - code.len()));
     }
     code

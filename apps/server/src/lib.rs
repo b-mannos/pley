@@ -73,7 +73,7 @@ pub fn request_shutdown() {
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(45);
 
 /// Whether the server started shutting down, for [`watch_shutdown`].
-static SHUTTING_DOWN: parking_lot::Mutex<bool> = parking_lot::const_mutex(false);
+static SHUTTING_DOWN: parking_lot::Mutex<bool> = parking_lot::Mutex::new(false);
 static SHUTTING_DOWN_CHANGED: parking_lot::Condvar = parking_lot::Condvar::new();
 
 fn set_shutting_down(shutting_down: bool) {
@@ -99,7 +99,7 @@ fn watch_shutdown() {
 
 /// Whether the server finished shutting down (its database is closed), see
 /// [`wait_until_stopped`].
-static STOPPED: parking_lot::Mutex<bool> = parking_lot::const_mutex(false);
+static STOPPED: parking_lot::Mutex<bool> = parking_lot::Mutex::new(false);
 static STOPPED_CHANGED: parking_lot::Condvar = parking_lot::Condvar::new();
 
 fn set_stopped(stopped: bool) {
