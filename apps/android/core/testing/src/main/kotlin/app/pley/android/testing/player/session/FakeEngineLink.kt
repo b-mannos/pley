@@ -12,7 +12,7 @@ import app.pley.android.player.session.FrameCounts
  * An engine without Media3, for the session's tests: it plays along
  * [clock] (a test scheduler's time) once [ready], and records what it was
  * told. Tests make things happen to it: [ready], [stall], [starve],
- * [end], [fail], [tracks].
+ * [outOfReach], [end], [fail], [tracks].
  */
 class FakeEngineLink(private val clock: () -> Long = { 0L }) : EngineLink {
     /** One prepare: what was loaded, from where. */
@@ -47,6 +47,8 @@ class FakeEngineLink(private val clock: () -> Long = { 0L }) : EngineLink {
         private set
     override var playWhenReady: Boolean = false
         private set
+    override var reconnecting: Boolean = false
+        private set
 
     /** Moving: ready, meant to play, not stalled. */
     private val moving: Boolean get() = status == EngineStatus.Ready && playWhenReady && !frozen
@@ -74,6 +76,7 @@ class FakeEngineLink(private val clock: () -> Long = { 0L }) : EngineLink {
         settle(startMs)
         frozen = false
         starving = false
+        reconnecting = false
         this.playWhenReady = playWhenReady
         status = EngineStatus.Buffering
         listener?.onStatus(EngineStatus.Buffering)
@@ -83,6 +86,7 @@ class FakeEngineLink(private val clock: () -> Long = { 0L }) : EngineLink {
     fun ready() {
         settle(positionMs)
         starving = false
+        reconnecting = false
         status = EngineStatus.Ready
         listener?.onStatus(EngineStatus.Ready)
         if (playWhenReady) listener?.onPlaying(true)
@@ -102,6 +106,12 @@ class FakeEngineLink(private val clock: () -> Long = { 0L }) : EngineLink {
         listener?.onStatus(EngineStatus.Buffering)
     }
 
+    /** The server goes out of reach: it waits for data, trying again, until [ready] or [fail]. */
+    fun outOfReach() {
+        starve()
+        reconnecting = true
+    }
+
     /** The end of the media. */
     fun end() {
         settle(if (durationMs > 0) durationMs else positionMs)
@@ -112,6 +122,7 @@ class FakeEngineLink(private val clock: () -> Long = { 0L }) : EngineLink {
     /** It stops with [error]. */
     fun fail(error: EngineError) {
         settle(positionMs)
+        reconnecting = false
         status = EngineStatus.Idle
         listener?.onError(error)
     }

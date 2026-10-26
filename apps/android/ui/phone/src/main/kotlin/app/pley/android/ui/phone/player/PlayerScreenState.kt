@@ -73,6 +73,9 @@ class PlayerScreenState(
         p == PlayerPhase.Preparing || p == PlayerPhase.Buffering || p == PlayerPhase.Switching
     }
 
+    /** The server is out of reach and playback keeps trying. */
+    val reconnecting: Boolean by derivedStateOf { ui.value.reconnecting }
+
     /** Meant to play: the play button shows Pause. */
     val playing: Boolean by derivedStateOf {
         val p = ui.value.phase

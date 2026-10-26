@@ -48,6 +48,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -57,6 +59,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import app.pley.android.common.asSentence
@@ -80,19 +83,47 @@ private val AboveControls = 112.dp
 
 /**
  * The spinner, after [PlayerScreenState.SPINNER_DELAY_MS] of waiting, so
- * short waits never flash one: a 48 dp ring in accent, centred.
+ * short waits never flash one: a 48 dp ring in accent, centred. While the
+ * server is out of reach ([reconnecting]), "Reconnecting…" 16 dp under it,
+ * backed like the fit mode's label.
  */
 @Composable
-internal fun BoxScope.Spinner(spinning: Boolean) {
+internal fun BoxScope.Spinner(spinning: Boolean, reconnecting: Boolean = false) {
     if (!spinning) return
     val label = stringResource(R.string.player_loading)
     CircularProgressIndicator(
-        modifier = Modifier.align(Alignment.Center).size(48.dp).semantics { contentDescription = label },
+        modifier = Modifier.align(Alignment.Center).size(SPINNER_SIZE).semantics { contentDescription = label },
         color = PleyColors.Accent,
         trackColor = PleyColors.Fg.copy(alpha = 0.2f),
         strokeWidth = 3.dp,
     )
+    if (reconnecting) {
+        Text(
+            stringResource(R.string.player_reconnecting),
+            style = MaterialTheme.typography.labelLarge,
+            color = PleyColors.Fg,
+            maxLines = 1,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .underSpinner(16.dp)
+                .background(Color.Black.copy(alpha = 0.6f), PleyShape.Control)
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .testTag(TAG_RECONNECTING)
+                .semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
 }
+
+private val SPINNER_SIZE = 48.dp
+
+/** Lays the label [gap] under the spinner, centred as the spinner is: the spinner stays where it is. */
+private fun Modifier.underSpinner(gap: Dp): Modifier = layout { measurable, constraints ->
+    val label = measurable.measure(constraints)
+    layout(label.width, label.height) { label.place(0, (SPINNER_SIZE / 2 + gap).roundToPx() + label.height / 2) }
+}
+
+/** The tag of "Reconnecting…", for tests. */
+internal const val TAG_RECONNECTING = "phone-player-reconnecting"
 
 /** Whether the spinner shows: waiting for longer than 400 ms. */
 @Composable

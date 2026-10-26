@@ -712,6 +712,8 @@ class SessionPlaybackController(
         val s = session ?: return
         if (closed) return
         val now = env.now()
+        val reconnecting = engineLink.reconnecting
+        if (reconnecting != ui.value.reconnecting) ui.update { it.copy(reconnecting = reconnecting) }
         val moving = mediaShown && engineLink.status == EngineStatus.Ready && engineLink.playWhenReady && !ended
         if (mediaShown && !ended) {
             val pos = engineLink.positionMs
@@ -728,8 +730,10 @@ class SessionPlaybackController(
             }
             credits.entered(marker)?.let { onCredits() }
         }
-        // A stall: meant to play, not moving (web: STALL_MS).
-        val stalling = wantPlay.value && !ended && ui.value.phase !is PlayerPhase.Error && engineLink.status != EngineStatus.Idle
+        // A stall: meant to play, not moving (web: STALL_MS). Not while the engine reconnects: a new
+        // session wouldn't reach the server either, and the engine goes on from where it stood.
+        val stalling = wantPlay.value && !ended && ui.value.phase !is PlayerPhase.Error && engineLink.status != EngineStatus.Idle &&
+            !reconnecting
         val pos = if (mediaShown) engineLink.positionMs else -1
         if (!stalling || pos != lastAdvancePos) {
             lastAdvanceAt = now

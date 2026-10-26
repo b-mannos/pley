@@ -21,6 +21,11 @@ data class EngineState(
     val struggling: Boolean = false,
     /** The audio output failed and the engine started it again at the same position. */
     val audioRestarts: Int = 0,
+    /**
+     * The server is out of reach: a load failed for it and nothing came in
+     * since. The engine keeps trying from where playback stood (MediaRetries).
+     */
+    val reconnecting: Boolean = false,
     val stats: PlaybackStats = PlaybackStats(),
 )
 

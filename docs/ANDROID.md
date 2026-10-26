@@ -60,6 +60,13 @@ one at home accepts at once or never (`HttpRoot.homeConnectTimeout`), so
 pressing play with the server off says "Can't reach your server" within
 seconds, with Try again.
 
+A playback that loses the server (the Wi-Fi dropping, the server
+restarting) keeps its place: it plays what it has, then waits with
+"Reconnecting…" under its ring while it tries again, up to 2 s apart, for
+90 s from the first failure (`MediaRetries`; the stall ladder holds off
+meanwhile), and goes on by itself once the server answers. Past that it
+says "Can't reach your server", with Try again.
+
 Downloads (`:core:downloads`) keep the original file of a movie or an
 episode (of several versions, the sharpest up to 1080p of those the
 device plays as they are, by the player's capabilities), with its

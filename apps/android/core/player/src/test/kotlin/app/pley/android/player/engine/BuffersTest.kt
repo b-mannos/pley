@@ -112,12 +112,11 @@ class BuffersTest {
     }
 
     @Test
-    fun otherErrorsAreRetriedWithBackoff() {
+    fun errorAnswersAreRetriedFiveTimesWithBackoff() {
         val retries = MediaRetries()
-        assertEquals(500L, retries.getRetryDelayMsFor(loadError(http(503), 1)))
-        assertEquals(1_000L, retries.getRetryDelayMsFor(loadError(IOException("reset"), 2)))
-        assertEquals(4_000L, retries.getRetryDelayMsFor(loadError(http(500), 4)))
-        assertEquals(8_000L, retries.getRetryDelayMsFor(loadError(http(500), 9)))
-        assertEquals(MediaRetries.RETRIES, retries.getMinimumLoadableRetryCount(C.DATA_TYPE_MEDIA))
+        val delays = (1..6).map { retries.getRetryDelayMsFor(loadError(http(500), it)) }
+        assertEquals(listOf(500L, 1_000L, 2_000L, 4_000L, 8_000L, C.TIME_UNSET), delays)
+        // The retries decide when a load gives up: Media3 doesn't stop it after a count of its own.
+        assertEquals(Int.MAX_VALUE, retries.getMinimumLoadableRetryCount(C.DATA_TYPE_MEDIA))
     }
 }

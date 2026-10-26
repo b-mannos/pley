@@ -239,6 +239,19 @@ class PhonePlayerScreenTest {
     }
 
     @Test
+    fun theSpinnerSaysReconnectingWhileTheServerIsOutOfReach() {
+        val fake = FakePlaybackController(playing { it.copy(phase = PlayerPhase.Buffering, reconnecting = true) })
+        show(fake)
+        // The spinner shows after 400 ms of waiting.
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        compose.onNodeWithText("Reconnecting…").assertIsDisplayed()
+        fake.update { it.copy(phase = PlayerPhase.Playing, reconnecting = false) }
+        compose.waitForIdle()
+        assertTrue(compose.onAllNodesWithTextCount("Reconnecting…") == 0)
+    }
+
+    @Test
     fun theBackArrowAndTheTitleLeave() {
         val fake = FakePlaybackController(playing())
         show(fake)

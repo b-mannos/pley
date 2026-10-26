@@ -129,7 +129,8 @@ class FakePlaybackController(initial: PlayerUiState = PlayerUiState()) : Playbac
          * stream at 8 Mbps with a fallback note, two audio tracks, subtitles
          * with one to burn in, the intro showing, chapters, previews, the
          * details open, Up Next counting down and a notice; the subtitles
-         * moved, a sleep timer running, and (only to fill it) a stop by the server.
+         * moved, a sleep timer running, and (only to fill them) the server
+         * out of reach and a stop by the server.
          */
         fun everything(): PlayerUiState = PlayerUiState(
             phase = PlayerPhase.Playing,
@@ -139,6 +140,7 @@ class FakePlaybackController(initial: PlayerUiState = PlayerUiState()) : Playbac
             positionMs = 3_000,
             durationMs = 20_000,
             bufferedMs = 12_000,
+            reconnecting = true,
             audio = listOf(TrackChoice(1, "English (AAC Stereo)", true), TrackChoice(2, "French (EAC3 5.1)", false)),
             subtitles = listOf(
                 TrackChoice(null, "Off", false),

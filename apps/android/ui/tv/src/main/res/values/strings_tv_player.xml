@@ -60,6 +60,7 @@
     <string name="tv_player_hz">%1$s Hz</string>
     <string name="tv_player_frame_rate_hint">Your TV didn\'t switch refresh rate. Turn on match content frame rate in its settings.</string>
     <string name="tv_player_buffering">Loading</string>
+    <string name="tv_player_reconnecting">Reconnecting…</string>
     <string name="tv_player_error_title">Can\'t play this item</string>
     <string name="tv_player_offline_title">Can\'t reach your server</string>
     <string name="tv_player_try_again">Try again</string>

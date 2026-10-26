@@ -92,6 +92,7 @@ class Media3EngineLink(override val engine: PlayerEngine) : EngineLink {
     override val durationMs: Long get() = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0
     override val status: EngineStatus get() = statusOf(player.playbackState)
     override val playWhenReady: Boolean get() = player.playWhenReady
+    override val reconnecting: Boolean get() = engine.state.value.reconnecting
 
     override fun setListener(listener: EngineLink.Listener?) {
         this.listener = listener

@@ -4,9 +4,11 @@ import android.app.Activity
 import android.content.Context
 import android.graphics.SurfaceTexture
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Surface
 import androidx.media3.common.Player
 import androidx.media3.test.utils.FakeClock
+import androidx.media3.test.utils.robolectric.RobolectricUtil
 import androidx.media3.test.utils.robolectric.ShadowMediaCodecConfig
 import androidx.media3.test.utils.robolectric.TestPlayerRunHelper
 import androidx.test.core.app.ApplicationProvider
@@ -27,6 +29,7 @@ import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
+import mockwebserver3.SocketEffect
 import okhttp3.Headers
 import okhttp3.OkHttpClient
 import okio.Buffer
@@ -44,6 +47,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import java.io.File
 import java.time.Duration
+import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
 class Media3EngineTest {
@@ -95,6 +99,7 @@ class Media3EngineTest {
         host: DisplayModeHost? = null,
         settings: EngineSettings = EngineSettings(),
         music: Boolean = false,
+        now: () -> Long = SystemClock::elapsedRealtime,
     ): Media3Engine = Media3Engine(
         context = context,
         profile = profile,
@@ -105,6 +110,7 @@ class Media3EngineTest {
         frameRateMemory = MemoryFrameRate(),
         focusPort = if (music) null else AndroidFocusPort(context),
         sdk = 34,
+        now = now,
         hostFor = { host ?: WindowModeHost(it) },
         playerClock = FakeClock(true),
     ).also { engines += it }
@@ -210,6 +216,35 @@ class Media3EngineTest {
     }
 
     @Test
+    fun aDroppedLinkIsWaitedForAndPlaybackGoesOn() {
+        codecs.addDecoders(ShadowMediaCodecConfig.CODEC_INFO_AVC, ShadowMediaCodecConfig.CODEC_INFO_AAC)
+        // More than the five tries an answer that is an error gets.
+        val drops = AtomicInteger(7)
+        val ranges = RangeDispatcher(clip, token = "Bearer secret")
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (drops.getAndDecrement() > 0) MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build() else ranges.dispatch(request)
+        }
+        server.start()
+        try {
+            val client = OkHttpClient.Builder()
+                .addInterceptor { chain -> chain.proceed(chain.request().newBuilder().header("Authorization", "Bearer secret").build()) }
+                .build()
+            // The retries' 90 s on the wall clock: the player's own clock races on while a request is really out.
+            val engine = engine(client = client, now = { System.nanoTime() / 1_000_000 })
+            engine.prepare(EngineSource(server.url("/api/files/1/stream").toString(), hls = false), startMs = 0, playWhenReady = false)
+            RobolectricUtil.runMainLooperUntil { engine.state.value.reconnecting }
+            // The failed loads aren't an error: the engine tries again until the server answers.
+            TestPlayerRunHelper.run(engine.player).ignoringNonFatalErrors().untilState(Player.STATE_READY)
+            RobolectricUtil.runMainLooperUntil { !engine.state.value.reconnecting }
+            assertEquals(8, server.requestCount)
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
     fun aMissingSessionFailsAtOnceRatherThanRetrying() {
         val server = MockWebServer()
         server.dispatcher = object : Dispatcher() {
@@ -282,7 +317,6 @@ class Media3EngineTest {
     /** Serves [body] with ranges, as the server's /stream does, to requests carrying [token] only. */
     private class RangeDispatcher(private val body: ByteArray, private val token: String) : Dispatcher() {
         override fun dispatch(request: RecordedRequest): MockResponse {
-            System.err.println("DEBUG request ${request.target} range=${request.headers["Range"]} auth=${request.headers["Authorization"]}")
             if (request.headers["Authorization"] != token) return MockResponse.Builder().code(401).build()
             val range = request.headers["Range"]?.removePrefix("bytes=")?.split('-')
             val start = range?.getOrNull(0)?.toLongOrNull() ?: 0L

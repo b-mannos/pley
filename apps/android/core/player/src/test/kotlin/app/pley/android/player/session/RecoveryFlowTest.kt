@@ -319,6 +319,29 @@ class RecoveryFlowTest {
     }
 
     @Test
+    fun `a server out of reach mid-playback is waited for where playback stood, saying so`() {
+        val c = h.play(PlayRequest(FixtureIds.SAMPLE_1080P))
+        h.engine.ready()
+        h.advance(2_000)
+        h.engine.outOfReach()
+        // A minute without the server: no new session (it wouldn't reach the server either), no error.
+        h.advance(60_000)
+        assertEquals(1, starts())
+        assertEquals(PlayerPhase.Buffering, c.state.value.phase)
+        assertTrue(c.state.value.reconnecting)
+        // It answers again: playback goes on where it stood.
+        h.engine.ready()
+        h.advance(1_000)
+        assertEquals(PlayerPhase.Playing, c.state.value.phase)
+        assertFalse(c.state.value.reconnecting)
+        assertEquals(1, starts())
+        // A stall after that is one again.
+        h.engine.starve()
+        h.advance(12_500)
+        assertEquals(2, starts())
+    }
+
+    @Test
     fun `a server out of reach when playing starts says so, and Try again plays once it answers`() {
         h.api.unreachable += "startPlayback"
         val c = h.play(PlayRequest(FixtureIds.SAMPLE_1080P))

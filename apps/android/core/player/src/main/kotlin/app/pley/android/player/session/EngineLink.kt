@@ -97,6 +97,9 @@ interface EngineLink {
     /** Meant to play (not paused), whether or not it is moving now. */
     val playWhenReady: Boolean
 
+    /** The server is out of reach and the engine keeps trying from where it stood. */
+    val reconnecting: Boolean get() = false
+
     fun setListener(listener: Listener?)
 
     /** Loads [source] at [startMs]; the track choices of the media before are forgotten. */

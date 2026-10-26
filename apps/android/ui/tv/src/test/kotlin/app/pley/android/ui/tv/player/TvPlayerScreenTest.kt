@@ -349,6 +349,19 @@ class TvPlayerScreenTest {
     }
 
     @Test
+    fun `the ring says Reconnecting while the server is out of reach`() {
+        val controller = playing { it.copy(phase = PlayerPhase.Buffering, reconnecting = true) }
+        show(controller)
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        compose.onNodeWithTag(TAG_BUFFERING).assertExists()
+        compose.onNodeWithText("Reconnecting…").assertExists()
+        controller.update { it.copy(phase = PlayerPhase.Playing, reconnecting = false) }
+        compose.waitForIdle()
+        compose.onNodeWithTag(TAG_RECONNECTING).assertDoesNotExist()
+    }
+
+    @Test
     fun `an error offers Try again, focused, and Back`() {
         val controller = playing { it.copy(phase = PlayerPhase.Error("The server stopped answering.", canRetry = true)) }
         show(controller)

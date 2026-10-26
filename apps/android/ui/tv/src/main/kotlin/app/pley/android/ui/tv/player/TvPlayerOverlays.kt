@@ -54,6 +54,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -62,6 +63,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Border
 import androidx.tv.material3.Button
@@ -342,10 +344,12 @@ private val BiasCentreRightThird = androidx.compose.ui.BiasAlignment(2f / 3f, 0f
  * Buffering (design spec §2.7): after 500 ms of waiting, a 40 dp ring, a
  * 2 dp fg stroke with a turning accent arc, centred. The one thing that
  * moves with the controls hidden besides the countdowns, and only while
- * playback waits.
+ * playback waits. While the server is out of reach ([reconnecting]),
+ * "Reconnecting…" 16 dp under it, on the seek badge's backing: the
+ * picture behind it can be anything.
  */
 @Composable
-internal fun BoxScope.TvBufferingRing(waiting: Boolean) {
+internal fun BoxScope.TvBufferingRing(waiting: Boolean, reconnecting: Boolean) {
     var show by remember { mutableStateOf(false) }
     LaunchedEffect(waiting) {
         show = false
@@ -361,7 +365,7 @@ internal fun BoxScope.TvBufferingRing(waiting: Boolean) {
     Box(
         Modifier
             .align(Alignment.Center)
-            .size(40.dp)
+            .size(RING_SIZE)
             .testTag(TAG_BUFFERING)
             .semantics { contentDescription = label }
             .drawBehind {
@@ -372,6 +376,28 @@ internal fun BoxScope.TvBufferingRing(waiting: Boolean) {
                 drawArc(PleyColors.Accent, angle - 90f, 90f, false, Offset(inset, inset), arcSize, style = Stroke(w, cap = StrokeCap.Round))
             },
     )
+    if (reconnecting) {
+        BasicText(
+            stringResource(R.string.tv_player_reconnecting),
+            Modifier
+                .align(Alignment.Center)
+                .underRing(16.dp)
+                .background(PleyColors.Bg.copy(alpha = 0.6f), PleyShape.Control)
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .testTag(TAG_RECONNECTING)
+                .semantics { liveRegion = LiveRegionMode.Polite },
+            style = PleyType.Tv.Label.copy(color = PleyColors.Fg),
+            maxLines = 1,
+        )
+    }
+}
+
+private val RING_SIZE = 40.dp
+
+/** Lays the label [gap] under the ring, centred on the screen as the ring is: the ring stays where it is. */
+private fun Modifier.underRing(gap: Dp): Modifier = layout { measurable, constraints ->
+    val label = measurable.measure(constraints)
+    layout(label.width, label.height) { label.place(0, (RING_SIZE / 2 + gap).roundToPx() + label.height / 2) }
 }
 
 /**
@@ -498,6 +524,7 @@ internal const val TAG_UP_NEXT = "pley.tv.player.upNext"
 internal const val TAG_PLAY_NOW = "pley.tv.player.playNow"
 internal const val TAG_BADGE = "pley.tv.player.badge"
 internal const val TAG_BUFFERING = "pley.tv.player.buffering"
+internal const val TAG_RECONNECTING = "pley.tv.player.reconnecting"
 internal const val TAG_SWITCHING = "pley.tv.player.switching"
 internal const val TAG_ERROR = "pley.tv.player.error"
 internal const val TAG_TOAST = "pley.tv.player.toast"

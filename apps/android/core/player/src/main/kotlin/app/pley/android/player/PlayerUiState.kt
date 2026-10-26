@@ -132,6 +132,8 @@ data class PlayerUiState(
     val positionMs: Long = 0,
     val durationMs: Long = 0,
     val bufferedMs: Long = 0,
+    /** The server is out of reach: playback waits where it stood and keeps trying ("Reconnecting…"). */
+    val reconnecting: Boolean = false,
     val audio: List<TrackChoice> = emptyList(),
     val subtitles: List<TrackChoice> = emptyList(),
     /** The quality chosen, as the menu's row says it: "Original", "8 Mbps 1080p", "8 Mbps 1080p (auto)". */

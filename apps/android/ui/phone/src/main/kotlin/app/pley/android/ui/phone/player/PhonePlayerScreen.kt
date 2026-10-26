@@ -137,7 +137,7 @@ fun PhonePlayerScreen(
         SkipButton(state)
         UpNextCard(state)
         UnlockButton(state)
-        Spinner(rememberSpinning(state))
+        Spinner(rememberSpinning(state), reconnecting = state.reconnecting)
         SleepNoticeOf(state)
         PlayerSheet(state, style, onStyle)
         (state.phase as? PlayerPhase.Error)?.let {

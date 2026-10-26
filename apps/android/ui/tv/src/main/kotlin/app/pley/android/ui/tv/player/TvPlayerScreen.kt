@@ -86,6 +86,7 @@ internal fun TvPlayerScreen(
     val phase by remember(state) { derivedStateOf { state.value.phase } }
     val error = phase as? PlayerPhase.Error
     val switching by remember(engineState) { derivedStateOf { engineState.value?.switchingDisplayMode == true } }
+    val reconnecting by remember(state) { derivedStateOf { state.value.reconnecting } }
     val switchingHz by remember(engineState) { derivedStateOf { engineState.value?.switchingToHz } }
     val card by remember(state) { derivedStateOf { state.value.upNextCard } }
     val skipLabel by remember(state) { derivedStateOf { state.value.skipLabel } }
@@ -389,7 +390,7 @@ internal fun TvPlayerScreen(
         TvSleepNotice(state, noticeShown, ui.controls, ui, onKeep = controller::keepWatching)
         TvUpNextCard(card, ui, onPlay = controller::playNext, onCancel = controller::cancelUpNext)
         if (!ui.controls) TvSeekBadge(seeker.badgeMs)
-        TvBufferingRing(waiting = (phase == PlayerPhase.Buffering || phase == PlayerPhase.Preparing) && !switching)
+        TvBufferingRing(waiting = (phase == PlayerPhase.Buffering || phase == PlayerPhase.Preparing) && !switching, reconnecting = reconnecting)
         if (switching || phase == PlayerPhase.Switching) TvSwitchingCover(switchingHz)
         TvPlayerPanels(ui, state, engineState, controller)
         if (error != null) {

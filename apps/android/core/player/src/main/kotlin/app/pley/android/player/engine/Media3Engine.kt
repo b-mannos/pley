@@ -21,6 +21,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.source.LoadEventInfo
+import androidx.media3.exoplayer.source.MediaLoadData
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import app.pley.android.caps.CapsDetails
 import app.pley.android.caps.CapsGraph
@@ -43,6 +45,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import java.io.IOException
 
 /** The playback settings the engine follows (Settings → Playback and Advanced). */
 data class EngineSettings(
@@ -92,6 +95,8 @@ class Media3EngineFactory(
  * - audio focus that pauses rather than ducks passthrough, pauses when
  *   headphones or HDMI go, and an audio output started again after it
  *   fails;
+ * - loads retried while the server is out of reach (MediaRetries), and
+ *   then [EngineState.reconnecting];
  * - stats, a struggling decoder, and tracks the device can't play, in
  *   [state].
  * Music engines have no video renderer, let Media3 handle focus and
@@ -128,7 +133,7 @@ class Media3Engine(
 
     private val loadControl = PleyLoadControl(BufferPlan.of(profile))
     private val trackSelector = DefaultTrackSelector(app)
-    private val loading = MediaLoading(app, mediaClient)
+    private val loading = MediaLoading(app, mediaClient, now)
 
     override val player: ExoPlayer = ExoPlayer.Builder(app)
         .setRenderersFactory(PleyRenderersFactory(app, rules, asyncQueueing = details?.forceAsyncQueueing ?: profile.fireTv, music = music))
@@ -162,6 +167,13 @@ class Media3Engine(
     private val hdmi: HdmiUnplugWatcher? = if (music) null else HdmiUnplugWatcher(app) { player.pause() }
     private val restarts = AudioRestarts(now)
     private val struggle = StruggleDetector()
+    private val reconnect = ReconnectWatcher()
+
+    /** While reconnecting, every half second: whether media came in. */
+    private val reconnectCheck = Runnable {
+        reconnect.buffered(player.bufferedPosition)
+        publishReconnecting()
+    }
     private val analytics = PlaybackAnalytics(now, ::isHardware) { stats -> mutableState.update { it.copy(stats = stats) } }
 
     private var window: Window? = null
@@ -196,6 +208,7 @@ class Media3Engine(
         player.addListener(Listener())
         player.addAnalyticsListener(analytics)
         player.addAnalyticsListener(AudioOutput())
+        player.addAnalyticsListener(Loads())
         applyTrackParameters()
         hdmi?.start()
     }
@@ -208,6 +221,8 @@ class Media3Engine(
         applyTrackParameters()
         player.setVideoChangeFrameRateStrategy(frameRateStrategy())
         struggle.reset()
+        reconnect.reset()
+        main.removeCallbacks(reconnectCheck)
         analytics.onPrepare(frameRate?.requestedModeId?.takeIf { it != 0 })
         mutableState.update { EngineState(stats = it.stats) }
         val asked = matchRequest(source)
@@ -243,6 +258,7 @@ class Media3Engine(
         detachWindow()
         scope.cancel()
         main.removeCallbacks(tick)
+        main.removeCallbacks(reconnectCheck)
         hdmi?.stop()
         focus?.release()
         player.release()
@@ -343,6 +359,14 @@ class Media3Engine(
 
     private fun isHardware(name: String): Boolean? = details?.input?.decoders?.firstOrNull { it.name == name }?.hardware
 
+    /** [EngineState.reconnecting] as the watcher has it, looked at again while it lasts. */
+    private fun publishReconnecting() {
+        val reconnecting = reconnect.reconnecting
+        main.removeCallbacks(reconnectCheck)
+        if (reconnecting) main.postDelayed(reconnectCheck, RECONNECT_CHECK_MS)
+        if (reconnecting != state.value.reconnecting) mutableState.update { it.copy(reconnecting = reconnecting) }
+    }
+
     private inner class Listener : Player.Listener {
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             if (!playWhenReady && ownPauses > 0) {
@@ -370,7 +394,10 @@ class Media3Engine(
         }
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-            if (reason == Player.DISCONTINUITY_REASON_SEEK) struggle.reset()
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                struggle.reset()
+                reconnect.sought()
+            }
         }
 
         override fun onRenderedFirstFrame() {
@@ -391,6 +418,8 @@ class Media3Engine(
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            reconnect.reset()
+            publishReconnecting()
             if (restarts.shouldRestart(error)) {
                 mutableState.update { it.copy(audioRestarts = it.audioRestarts + 1) }
                 // After an error the player keeps its position: preparing again resumes there.
@@ -406,9 +435,30 @@ class Media3Engine(
         }
     }
 
+    /** Whether loads reach the server: [EngineState.reconnecting]. */
+    private inner class Loads : AnalyticsListener {
+        override fun onLoadError(
+            eventTime: AnalyticsListener.EventTime,
+            loadEventInfo: LoadEventInfo,
+            mediaLoadData: MediaLoadData,
+            error: IOException,
+            wasCanceled: Boolean,
+        ) {
+            reconnect.failed(error, gaveUp = wasCanceled, bufferedMs = player.bufferedPosition)
+            publishReconnecting()
+        }
+
+        override fun onLoadCompleted(eventTime: AnalyticsListener.EventTime, loadEventInfo: LoadEventInfo, mediaLoadData: MediaLoadData) {
+            if (!reconnect.reconnecting) return
+            reconnect.completed()
+            publishReconnecting()
+        }
+    }
+
     companion object {
         const val SEEK_STEP_MS = 10_000L
         const val TICK_MS = 1_000L
+        const val RECONNECT_CHECK_MS = 500L
 
         /** Media3 marks setClock for tests; the app always passes Clock.DEFAULT, tests a clock that moves by itself. */
         @SuppressLint("VisibleForTests")
