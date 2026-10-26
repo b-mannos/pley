@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Fetches downloads in the foreground (type dataSync) while there are
@@ -56,7 +57,8 @@ class DownloadService : Service() {
                         .distinctUntilChanged()
                         .collectLatest { manager().notify(NOTIFICATION_ID, notification(it)) }
                 }
-                downloads.runQueue()
+                // Off the main thread: the index is written on every change.
+                withContext(Dispatchers.IO) { downloads.runQueue() }
                 shown.cancel()
                 ServiceCompat.stopForeground(this@DownloadService, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 stopSelf()

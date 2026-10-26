@@ -23,6 +23,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -77,6 +78,11 @@ internal class DownloadRunner(
     private val conversionPollMs: Long = CONVERSION_POLL_MS,
     /** The wait after a lost network or server, longer each time. */
     private val backoffMs: Long = BACKOFF_MS,
+    /**
+     * The server and profile signed in: only their downloads run, as the
+     * server's token is that profile's. `null`: every one (tests).
+     */
+    private val profile: () -> Pair<String, Long>? = { null },
 ) {
     @Volatile
     private var current: Pair<Key, Job>? = null
@@ -112,30 +118,33 @@ internal class DownloadRunner(
         var failures = 0
         while (true) {
             currentCoroutineContext().ensureActive()
-            val pending = store.all.value.filter { it.state == DownloadState.Queued || it.state == DownloadState.Waiting }
+            val signedIn = profile()
+            val pending = store.all.value.filter {
+                (it.state == DownloadState.Queued || it.state == DownloadState.Waiting) &&
+                    (signedIn == null || (it.server == signedIn.first && it.userId == signedIn.second))
+            }
             if (pending.isEmpty()) return false
             val now = clock()
             val next = pending.firstOrNull { it.notBefore <= now }
             if (next == null) {
-                // Every one left is being converted by the server: look again soon.
+                // Every one left is being made by the server, or waits after a loss: look again soon.
                 delay((pending.minOf { it.notBefore } - now).coerceIn(0, conversionPollMs))
                 continue
             }
             val mobile = mobileAllowed()
-            if (!gate.open(mobile)) {
+            if (!gate.open(mobile, next.server)) {
                 markWaiting()
-                if (!gate.await(mobile, waitMs)) return true
+                if (!gate.await(mobile, waitMs, next.server)) return true
                 continue
             }
-            val outcome = runOne(next)
-            when (outcome) {
-                Outcome.Done, Outcome.Removed, Outcome.Converting -> failures = 0
-                Outcome.Failed -> failures = 0
+            when (runOne(next)) {
+                Outcome.Done, Outcome.Removed, Outcome.Converting, Outcome.Failed -> failures = 0
                 Outcome.Lost -> {
-                    // The network went, or the server: wait a little longer each time.
+                    // The network went, or the server: that one waits a little longer
+                    // each time, while the others have their turn.
                     failures++
                     if (failures > MAX_LOST_IN_A_ROW) return true
-                    delay(backoffMs * failures)
+                    store.update(next.key, persist = false) { it.copy(notBefore = clock() + backoffMs * failures) }
                 }
             }
         }
@@ -145,7 +154,8 @@ internal class DownloadRunner(
 
     private suspend fun runOne(saved: Saved): Outcome {
         val key = saved.key
-        store.update(key) { it.copy(state = DownloadState.Downloading, error = null, unreachable = false) } ?: return Outcome.Removed
+        // It stays Queued while the server makes its file: Downloading is for bytes coming.
+        store.update(key, persist = false) { it.copy(error = null, unreachable = false) } ?: return Outcome.Removed
         val job = Job(currentCoroutineContext()[Job])
         current = key to job
         return try {
@@ -153,12 +163,17 @@ internal class DownloadRunner(
                 var s = store.get(key) ?: return@withContext Outcome.Removed
                 if (!s.extrasSaved) s = saveExtras(s)
                 if (s.convert && s.mediaUrl == null) s = converted(s) ?: return@withContext Outcome.Converting
+                s = keep(key) { it.copy(state = DownloadState.Downloading) }
                 fetchMedia(s)
                 store.update(key) { it.copy(state = DownloadState.Done, downloadedBytes = it.sizeBytes, error = null) }
                 Outcome.Done
             }
         } catch (e: CancellationException) {
-            currentCoroutineContext().ensureActive()
+            if (!currentCoroutineContext().isActive) {
+                // Every download stopped (Android's time for the service ran out): it waits its turn again.
+                store.update(key, persist = false) { if (it.state == DownloadState.Downloading) it.copy(state = DownloadState.Queued) else it }
+                throw e
+            }
             // Only this download was stopped: it was removed.
             Outcome.Removed
         } catch (e: DownloadFailure) {
@@ -168,10 +183,16 @@ internal class DownloadRunner(
             store.update(key) { it.copy(state = DownloadState.Failed, error = messageFor(e)) }
             Outcome.Failed
         } catch (_: ConversionGone) {
-            store.update(key) { it.copy(state = DownloadState.Queued, conversion = null, mediaUrl = null, converting = 0f) }
+            // The server forgot it (it restarted) or pruned the file: asked for again in a while.
+            // The same conversion goes on with what is down already.
+            store.update(key) {
+                it.copy(state = DownloadState.Queued, mediaUrl = null, converting = 0f, notBefore = clock() + conversionPollMs)
+            }
             Outcome.Converting
         } catch (_: IOException) {
-            store.update(key) { it.copy(state = DownloadState.Waiting, unreachable = true) }
+            // Waiting for the server, unless the network it may use went.
+            val away = gate.open(mobileAllowed(), saved.server)
+            store.update(key) { it.copy(state = DownloadState.Waiting, unreachable = away) }
             Outcome.Lost
         } finally {
             job.complete()
@@ -279,9 +300,9 @@ internal class DownloadRunner(
             }
         }
         return when (info.state) {
-            ConversionState.Direct -> keep(saved.key) { it.copy(convert = false, converting = null) }
+            ConversionState.Direct -> keep(saved.key) { it.copy(convert = false, converting = null, sizeBytes = info.size ?: it.sizeBytes) }
             ConversionState.Done -> keep(saved.key) {
-                it.copy(conversion = info.id, mediaUrl = info.url, converting = null, sizeBytes = info.size ?: 0)
+                it.copy(conversion = info.id, mediaUrl = info.url, converting = null, sizeBytes = info.size ?: it.sizeBytes)
             }
             ConversionState.Failed -> throw DownloadFailure(info.error?.let { "$CONVERSION_FAILED: $it" } ?: CONVERSION_FAILED)
             else -> {
@@ -318,10 +339,13 @@ internal class DownloadRunner(
         call(sources.media(saved.server), request) { response ->
             when {
                 response.code == 416 && saved.sizeBytes > 0 && have >= saved.sizeBytes -> return@call
-                response.code == 404 && saved.mediaUrl != null -> {
+                response.code == 416 -> {
+                    // Shorter than what is down: the file changed on the server. It starts again.
                     part.delete()
-                    throw ConversionGone()
+                    throw IOException("the file changed on the server")
                 }
+                // Kept: asked for again, the same conversion goes on from here.
+                response.code == 404 && saved.mediaUrl != null -> throw ConversionGone()
                 response.code == 206 -> Unit
                 response.isSuccessful -> {
                     // The whole file again: the server didn't take the range.
@@ -331,6 +355,11 @@ internal class DownloadRunner(
                 else -> throw ApiException.from(response)
             }
             val total = totalOf(response, have)
+            if (have > 0 && saved.sizeBytes > 0 && total > 0 && total != saved.sizeBytes) {
+                // Another size than the one begun: the file changed on the server. It starts again.
+                part.delete()
+                throw IOException("the file changed on the server")
+            }
             if (total > 0 && total != saved.sizeBytes) store.update(saved.key, persist = false) { it.copy(sizeBytes = total) }
             copy(response, part, have, saved.key)
         }
@@ -339,6 +368,8 @@ internal class DownloadRunner(
         withContext(io) {
             media.delete()
             if (!part.renameTo(media)) throw IOException("the file couldn't be put in place")
+            // What other conversions left begun.
+            store.dirOf(saved).listFiles { f -> f.name.endsWith(".part") }?.forEach { it.delete() }
         }
     }
 

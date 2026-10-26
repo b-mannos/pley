@@ -58,8 +58,18 @@ class PendingReportsTest {
     @Test
     fun aDownloadsSoundMustBeDecodedHere() {
         val caps = ClientCaps(containers = listOf("mkv"), videoCodecs = listOf("hevc"), audioCodecs = listOf("aac", "dts"), audioDecode = listOf("aac", "ac3"))
-        fun file(vararg codecs: String) = MediaFile(id = 1, path = "a.mkv", size = 1, streams = codecs.mapIndexed { i, c -> MediaStream(i + 1, StreamKind.Audio, c) })
-        assertTrue(AppDownloads.soundPlays(file("dts", "ac3"), caps))
+        fun file(vararg codecs: String, default: Int? = null, selected: Int? = null) = MediaFile(
+            id = 1,
+            path = "a.mkv",
+            size = 1,
+            streams = codecs.mapIndexed { i, c -> MediaStream(i + 1, StreamKind.Audio, c, default = i + 1 == default) },
+            selectedAudio = selected,
+        )
+        // The track the player starts on must be decoded, not any of them.
+        assertTrue(AppDownloads.soundPlays(file("ac3", "dts"), caps))
+        assertFalse("it starts on the first, DTS", AppDownloads.soundPlays(file("dts", "ac3"), caps))
+        assertTrue("on the file's default", AppDownloads.soundPlays(file("dts", "ac3", default = 2), caps))
+        assertFalse("on the profile's choice", AppDownloads.soundPlays(file("ac3", "dts", default = 1, selected = 2), caps))
         assertFalse("sent on to a receiver isn't decoded here", AppDownloads.soundPlays(file("dts", "truehd"), caps))
         assertTrue("no sound at all", AppDownloads.soundPlays(file(), caps))
     }

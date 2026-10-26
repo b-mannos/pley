@@ -82,7 +82,7 @@ class AppDownloads internal constructor(
         store.load()
     }
 
-    private val runner = DownloadRunner(store, sources, gate, ::mobileAllowed, io, clock)
+    private val runner = DownloadRunner(store, sources, gate, ::mobileAllowed, io, clock, profile = ::current)
     private val flushing = Mutex()
 
     /** Until when reports go straight to the queue: the server didn't answer a moment ago. */
@@ -142,7 +142,16 @@ class AppDownloads internal constructor(
     override fun retry(itemId: Long) {
         val key = keyOf(itemId) ?: return
         scope.launch(io) {
-            store.update(key) { it.copy(state = DownloadState.Queued, error = null) }
+            // A failed conversion is asked for anew: the server makes a failed one again.
+            store.update(key) {
+                it.copy(
+                    state = DownloadState.Queued,
+                    error = null,
+                    conversion = it.conversion.takeIf { _ -> it.mediaUrl != null },
+                    converting = null,
+                    notBefore = 0,
+                )
+            }
             start()
         }
     }
@@ -236,8 +245,10 @@ class AppDownloads internal constructor(
             flushReports(server, userId)
         } catch (e: CancellationException) {
             throw e
-        } catch (_: ApiException) {
-            // The server answered: there is nothing to send again.
+        } catch (e: ApiException) {
+            // The server answered: there is nothing to send again, unless what
+            // answered was trouble on the way (a proxy, a tunnel).
+            if (e.status >= 500) withContext(io) { reports.add(pending) }
         } catch (_: IOException) {
             offlineUntil = clock() + OFFLINE_MS
             withContext(io) { reports.add(pending) }
@@ -259,8 +270,12 @@ class AppDownloads internal constructor(
                     )
                 } catch (e: CancellationException) {
                     throw e
-                } catch (_: ApiException) {
-                    // Answered: it won't go another time either.
+                } catch (e: ApiException) {
+                    // Trouble on the way: kept for another time. Else answered: it won't go another time either.
+                    if (e.status >= 500) {
+                        offlineUntil = clock() + OFFLINE_MS
+                        return
+                    }
                 } catch (_: Exception) {
                     offlineUntil = clock() + OFFLINE_MS
                     return
@@ -376,8 +391,10 @@ class AppDownloads internal constructor(
          */
         fun soundPlays(file: MediaFile, caps: ClientCaps): Boolean {
             val tracks = file.streams.filter { it.kind == StreamKind.Audio }
-            val decoded = caps.audioDecode ?: caps.audioCodecs
-            return tracks.isEmpty() || tracks.any { it.codec.lowercase() in decoded }
+            if (tracks.isEmpty()) return true
+            // The track the player starts on, as it chooses it: the profile's, else the file's default, else the first.
+            val playing = tracks.firstOrNull { it.index == file.selectedAudio } ?: tracks.firstOrNull { it.default } ?: tracks.first()
+            return playing.codec.lowercase() in (caps.audioDecode ?: caps.audioCodecs)
         }
 
         /** The episode of [now]'s show downloaded whole after it, by season and number, among [mine]. */

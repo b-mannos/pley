@@ -3,6 +3,7 @@ package app.pley.android.downloads
 import app.pley.android.data.DownloadState
 import app.pley.android.model.ItemKind
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -105,7 +106,14 @@ internal class DownloadStore(private val root: File) {
 
     fun mediaOf(s: Saved): File = File(dirOf(s), "media.${extension(s)}")
 
-    fun partOf(s: Saved): File = File(dirOf(s), "media.${extension(s)}.part")
+    /**
+     * The file while it comes: the original's, or one per conversion (a
+     * conversion made anew, after its file changed, never continues another).
+     */
+    fun partOf(s: Saved): File {
+        val made = s.conversion?.takeIf { s.mediaUrl != null }?.let { ".$it" }.orEmpty()
+        return File(dirOf(s), "media.${extension(s)}$made.part")
+    }
 
     fun detailOf(s: Saved): File = File(dirOf(s), "detail.json")
 
@@ -144,12 +152,12 @@ internal class DownloadStore(private val root: File) {
         return result
     }
 
-    /** Removes the download of [key] and its folder. */
+    /** Removes the download of [key] and its folder (first: on a full device that is what frees room). */
     @Synchronized
     fun remove(key: Key) {
         val s = get(key) ?: return
-        update(key) { null }
         dirOf(s).deleteRecursively()
+        update(key) { null }
     }
 
     /** Removes every download, and every file under the root. */
@@ -166,13 +174,21 @@ internal class DownloadStore(private val root: File) {
     /** What is free where the downloads go. */
     fun freeBytes(): Long = root.apply { mkdirs() }.usableSpace
 
+    /**
+     * Writes the index. A device too full to take it keeps the one before:
+     * what changed lives on in memory, and the next save writes it all.
+     */
     private fun save() {
-        root.mkdirs()
         val temp = File(root, "$INDEX.tmp")
-        temp.writeText(StoreJson.encodeToString(ListSerializer(Saved.serializer()), state.value))
-        if (!temp.renameTo(index)) {
-            index.delete()
-            temp.renameTo(index)
+        try {
+            root.mkdirs()
+            temp.writeText(StoreJson.encodeToString(ListSerializer(Saved.serializer()), state.value))
+            if (!temp.renameTo(index)) {
+                index.delete()
+                temp.renameTo(index)
+            }
+        } catch (_: IOException) {
+            temp.delete()
         }
     }
 

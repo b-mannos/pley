@@ -186,6 +186,79 @@ class DownloadRunnerTest {
     }
 
     @Test
+    fun aConvertedFileCutShortGoesOnWhenTheServerForgotItsConversion() = runBlocking {
+        // The server restarted: it answers 404 for the file until asked for the conversion again.
+        api.answer("conversion", ConversionInfo(id = CONVERSION, state = ConversionState.Done, progress = 1.0, size = body.size.toLong(), url = FILE))
+        val begun = add(convert = true, extrasSaved = true)
+        store.update(begun.key) { it.copy(conversion = CONVERSION, mediaUrl = FILE, sizeBytes = body.size.toLong()) }
+        store.partOf(store.get(begun.key)!!).apply { parentFile!!.mkdirs() }.writeBytes(body.copyOfRange(0, 100_000))
+        server.enqueue(MockResponse.Builder().code(404).build())
+        server.enqueue(
+            MockResponse.Builder()
+                .code(206)
+                .setHeader("Content-Range", "bytes 100000-299999/300000")
+                .body(Buffer().write(body.copyOfRange(100_000, body.size)))
+                .build(),
+        )
+
+        runner().run()
+
+        assertEquals("bytes=100000-", server.takeRequest().headers["Range"])
+        assertEquals("what was down is kept", "bytes=100000-", server.takeRequest().headers["Range"])
+        val done = store.get(begun.key)!!
+        assertEquals(DownloadState.Done, done.state)
+        assertArrayEquals(body, store.mediaOf(done).readBytes())
+    }
+
+    @Test
+    fun aFileChangedOnTheServerSinceItBeganStartsAgain() = runBlocking {
+        val saved = add()
+        store.partOf(saved).apply { parentFile!!.mkdirs() }.writeBytes(ByteArray(100_000) { 1 })
+        // Replaced by a longer one: what is down belongs to the file before.
+        server.enqueue(
+            MockResponse.Builder()
+                .code(206)
+                .setHeader("Content-Range", "bytes 100000-399999/400000")
+                .body(Buffer().write(ByteArray(300_000)))
+                .build(),
+        )
+        server.enqueue(MockResponse.Builder().code(200).body(Buffer().write(body)).build())
+
+        runner().run()
+
+        assertEquals("bytes=100000-", server.takeRequest().headers["Range"])
+        assertEquals("from the start", null, server.takeRequest().headers["Range"])
+        assertArrayEquals(body, store.mediaOf(store.get(saved.key)!!).readBytes())
+    }
+
+    @Test
+    fun onlyTheSignedInProfilesDownloadsRunWithItsToken() = runBlocking {
+        server.enqueue(MockResponse.Builder().code(200).body(Buffer().write(body)).build())
+        val mine = add()
+        val theirs = add(itemId = 43, userId = 3)
+
+        assertFalse(runner(profile = "http://nas:7539" to 2L).run())
+
+        assertEquals(DownloadState.Done, store.get(mine.key)!!.state)
+        assertEquals("until that profile signs in", DownloadState.Queued, store.get(theirs.key)!!.state)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun aDownloadWhoseServerIsAwayLetsTheOthersGo() = runBlocking {
+        // The older one can't reach its server; the newer one comes meanwhile.
+        api.fail("item", java.io.IOException("away"))
+        server.enqueue(MockResponse.Builder().code(200).body(Buffer().write(body)).build())
+        val away = add()
+        val other = add(itemId = 43, fileId = 8, extrasSaved = true)
+
+        assertTrue("one still waits", runner().run(waitMs = 0))
+
+        assertEquals(DownloadState.Done, store.get(other.key)!!.state)
+        assertEquals(DownloadState.Waiting, store.get(away.key)!!.state)
+    }
+
+    @Test
     fun theIndexIsReadBackAndACutDownloadWaitsItsTurn() {
         val saved = add()
         store.update(saved.key) { it.copy(state = DownloadState.Downloading) }
@@ -198,12 +271,20 @@ class DownloadRunnerTest {
         assertEquals(1234L, back.downloadedBytes)
     }
 
-    private fun add(convert: Boolean = false, itemId: Long = 42, maxHeight: Int? = null): Saved {
+    private fun add(
+        convert: Boolean = false,
+        itemId: Long = 42,
+        maxHeight: Int? = null,
+        userId: Long = 2,
+        fileId: Long = 7,
+        extrasSaved: Boolean = false,
+    ): Saved {
         val saved = Saved(
             server = "http://nas:7539",
-            userId = 2,
+            userId = userId,
             itemId = itemId,
-            fileId = 7,
+            fileId = fileId,
+            extrasSaved = extrasSaved,
             kind = ItemKind.Movie,
             title = "Alien",
             container = "mkv",
@@ -217,7 +298,7 @@ class DownloadRunnerTest {
         return saved
     }
 
-    private fun runner(open: Boolean = true) = DownloadRunner(
+    private fun runner(open: Boolean = true, profile: Pair<String, Long>? = null) = DownloadRunner(
         store = store,
         sources = object : DownloadSources {
             override fun api(server: String, userId: Long): PleyApi = api
@@ -229,13 +310,14 @@ class DownloadRunnerTest {
             override val images = OkHttpClient()
         },
         gate = object : NetworkGate {
-            override fun open(mobile: Boolean) = open
+            override fun open(mobile: Boolean, server: String?) = open
 
-            override suspend fun await(mobile: Boolean, timeoutMs: Long) = open
+            override suspend fun await(mobile: Boolean, timeoutMs: Long, server: String?) = open
         },
         mobileAllowed = { false },
         conversionPollMs = 10,
         backoffMs = 1,
+        profile = { profile },
     )
 
     private companion object {

@@ -13,6 +13,7 @@ import app.pley.android.player.PlayRequest
 import app.pley.android.screens.ScreensGraph
 import app.pley.android.screens.screensGraph
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * A movie, or a show with its downloaded episodes (by season and number),
@@ -77,7 +79,8 @@ class DownloadsViewModel(private val graph: ScreensGraph) : ViewModel() {
         if (itemIds.isEmpty()) return
         viewModelScope.launch {
             try {
-                downloads.download(itemIds)
+                // Going back right after asking still downloads them.
+                withContext(NonCancellable) { downloads.download(itemIds) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

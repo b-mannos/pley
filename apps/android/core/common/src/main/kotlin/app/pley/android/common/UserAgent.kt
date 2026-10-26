@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
+import java.text.Normalizer
 
 /**
  * How the app's requests introduce themselves: `pleyAndroid/0.1.0
@@ -41,7 +42,8 @@ object UserAgent {
         } catch (_: Exception) {
             null
         }
-        return named?.takeIf { it.isNotBlank() } ?: Build.MODEL
+        // A name of letters a header can't carry (Cyrillic, CJK…) gives the model instead.
+        return named?.takeIf { cleaned(it).isNotEmpty() } ?: Build.MODEL
     }
 
     /**
@@ -49,7 +51,9 @@ object UserAgent {
      * and dashes made plain, the rest left out), without the brackets and
      * semicolons the user agent is made of.
      */
-    internal fun cleaned(name: String): String = name
+    internal fun cleaned(name: String): String = Normalizer.normalize(name, Normalizer.Form.NFD)
+        // "Télé" is "Tele": accents go, their letters stay.
+        .filterNot { Character.getType(it) == Character.NON_SPACING_MARK.toInt() }
         .map {
             when (it) {
                 '‘', '’', '‛', '′' -> '\''

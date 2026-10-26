@@ -61,6 +61,7 @@ class SharedRulesTest {
         assertEquals("pleyAndroid/0.1.0 (Android 14; Anna's TV - Living room)", ua("Anna’s TV — (Living room);"))
         assertEquals("pleyAndroid/0.1.0 (Android 14; Den TV)", ua("  Den\tTV 📺 "))
         assertEquals("pleyAndroid/0.1.0 (Android 14)", ua("📺"))
+        assertEquals("pleyAndroid/0.1.0 (Android 14; Tele du salon)", ua("Télé du salon"))
         assertEquals(40, UserAgent.cleaned("x".repeat(100)).length)
     }
 }

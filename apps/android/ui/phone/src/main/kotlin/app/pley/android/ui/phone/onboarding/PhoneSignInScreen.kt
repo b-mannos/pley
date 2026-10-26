@@ -203,11 +203,14 @@ internal fun PhoneSignInContent(
     var address by rememberSaveable { mutableStateOf("") }
     var submitted by remember { mutableStateOf(false) }
     // A typed address that answered joins the list, chosen: the field closes.
+    // One that didn't stays to be put right (typing clears its problem).
     LaunchedEffect(state.checkingAddress, state.addressProblem) {
-        if (submitted && !state.checkingAddress && state.addressProblem == null) {
+        if (submitted && !state.checkingAddress) {
             submitted = false
-            addressOpen = false
-            address = ""
+            if (state.addressProblem == null) {
+                addressOpen = false
+                address = ""
+            }
         }
     }
     val busy = signIn == BrowserSignIn.Opening || signIn == BrowserSignIn.Waiting || signIn == BrowserSignIn.Finishing ||
