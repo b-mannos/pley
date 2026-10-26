@@ -1,4 +1,4 @@
-//! Metadata edits through the Plex-compatible API (docs/PLEX.md), sent the
+//! Metadata edits through the Plex-compatible API (docs/COMPATIBILITY.md), sent the
 //! way python-plexapi (and so Kometa) sends them: fields and their locks,
 //! genres, labels, collections and posters.
 

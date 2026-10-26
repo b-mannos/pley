@@ -1,6 +1,6 @@
 # pley
 
-pley is a self-hosted media server in the spirit of Plex. It organizes your
+pley is a self-hosted media server. It organizes your
 movies, TV shows and music and plays them in any browser: directly when the
 browser can, transcoded on the fly when it can't, with hardware encoding and
 HDR10, HLG and Dolby Vision tone mapping. The server is written in Rust, the
@@ -12,7 +12,7 @@ web app in React and TypeScript.
 
 - Movies, TV shows and music, scanned incrementally and rescanned when files
   change. A drive that is offline isn't mistaken for deleted media.
-- File names are read the way Plex names them: `Movie (2019)`, release names,
+- File names are read the way media servers name them: `Movie (2019)`, release names,
   `{tmdb-123}` hints, editions (`{edition-Director's Cut}`), `S01E02`, `1x02`,
   date-based and anime episodes, and extras (`Trailers/` folders,
   `Movie (2019)-trailer.mkv`). Looser episode names work too: `04 - Title` or
@@ -69,9 +69,10 @@ web app in React and TypeScript.
 - Settings with a Test button for each API key and service, a live dashboard
   (playback, transcoder, scans) and daily database backups.
 
-**Plex-compatible API** on port 32400, for python-plexapi, Tautulli and
-Kometa: browsing with Plex's filters, editing, collections, playlists, play
-queues, sessions and notifications. See [docs/PLEX.md](docs/PLEX.md).
+**Compatibility API** on port 32400, for `python-plexapi`, Tautulli and
+Kometa: browsing with their filters, editing, collections, playlists, play
+queues, sessions and notifications. See
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 
 **Web app** for phones, tablets and desktops, which installs as an app from
 the browser.
@@ -120,7 +121,7 @@ HTTP, so the two can have different licenses
 | `packages/tv` | The TV app both share (TypeScript, Preact) |
 | `packages/transcoder-api` | Protocol types shared by server and transcoder |
 | `deploy/` | Docker, systemd and launchd setups ([guide](deploy/README.md)) |
-| `docs/` | [HTTP API](docs/API.md), [Plex API](docs/PLEX.md), [transcoder](docs/TRANSCODER.md), [storage](docs/STORAGE.md), [Samsung and LG TVs](docs/TV_PLATFORMS.md) |
+| `docs/` | [HTTP API](docs/API.md), [compatibility API](docs/COMPATIBILITY.md), [transcoder](docs/TRANSCODER.md), [storage](docs/STORAGE.md), [Samsung and LG TVs](docs/TV_PLATFORMS.md) |
 | `scripts/` | Release build, transcoder source package, license check, the web and desktop icons (`render-icons.mjs`) |
 
 ## Requirements
@@ -161,7 +162,7 @@ Options come from command-line flags, `PLEY_*` environment variables or
 | Flag | Default | |
 |---|---|---|
 | `--bind` | `0.0.0.0:7539` | Listen address (7539 spells PLEY on a keypad) |
-| `--plex-bind` | `0.0.0.0:32400` | Plex-compatible API; `off` turns it off |
+| `--plex-bind` | `0.0.0.0:32400` | Compatibility API; `off` turns it off |
 | `--data-dir` | `%LOCALAPPDATA%\pley`, `~/.local/share/pley` | Database, caches and artwork |
 | `--ffmpeg`, `--ffprobe` | from `PATH` | Passed to the transcoder |
 | `--transcoder-url` | | Use a transcoder running elsewhere instead of starting one |
@@ -243,9 +244,3 @@ Registry. `scripts/build.ps1` (or `build.sh`) builds an archive locally.
 ## Status
 
 Version 0.1.
-
-## Trademarks
-
-pley is an independent project, not affiliated with or endorsed by Plex Inc.
-"Plex" is a trademark of Plex Inc., used here only to describe API
-compatibility.

@@ -1,4 +1,4 @@
-//! Plex Media Server compatible API (docs/PLEX.md).
+//! Plex Media Server compatible API (docs/COMPATIBILITY.md).
 //!
 //! Served on its own listener (port 32400 by default) so tools written for
 //! Plex — python-plexapi, Tautulli, Overseerr, Kometa, direct-play clients —

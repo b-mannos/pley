@@ -43,7 +43,7 @@ it ([below](#behind-a-reverse-proxy)).
 | `compose.vaapi.yaml` | Add-on: Intel / AMD hardware transcoding |
 | `compose.nvidia.yaml` | Add-on: NVIDIA hardware transcoding |
 | `compose.proxy.yaml` | Add-on: a reverse proxy in Docker, no published port |
-| `compose.plex.yaml` | Add-on: the [Plex-compatible API](../../docs/PLEX.md) on port 32400 |
+| `compose.plex.yaml` | Add-on: the [compatibility API](../../docs/COMPATIBILITY.md) on port 32400 |
 | `config/` | pley's database, artwork and caches (default `PLEY_CONFIG_DIR`) |
 | `media/` | An example media folder (default `PLEY_MEDIA_DIR`) |
 | `Dockerfile` | The image: pley, pley-transcoder, FFmpeg 7, GPU drivers |
@@ -72,7 +72,7 @@ All in `.env` ([.env.example](.env.example) explains each one):
 | `PLEY_RENDER_GID` | | Intel / AMD: the GPU render node's group |
 | `PLEY_RENDER_DEVICE` | `/dev/dri/renderD128` | Intel / AMD: which GPU |
 | `PLEY_PROXY_NETWORK` | `proxy` | `compose.proxy.yaml`: the proxy's Docker network |
-| `PLEY_PLEX_LISTEN` | `127.0.0.1:32400` | `compose.plex.yaml`: where the Plex API is published |
+| `PLEY_PLEX_LISTEN` | `127.0.0.1:32400` | `compose.plex.yaml`: where the compatibility API is published |
 | `PLEY_IMAGE` | `pley:local` | The image; a release is `ghcr.io/hhaidar/pley:<version>` |
 | `PLEY_PULL_POLICY` | `build` | `build` from this checkout, or `missing` for a release |
 | `PLEY_LOG` | `info` | Log detail (`debug` to look into a problem) |
@@ -188,7 +188,7 @@ to work:
 
 - **One port, on this computer only.** pley is published on `127.0.0.1`, so
   the reverse proxy is the only way in from other computers, with its TLS and
-  access rules. The Plex-compatible API and network discovery are off, and
+  access rules. The compatibility API and network discovery are off, and
   the transcoder listens inside the container only, so nothing else can be
   reached.
 - **Not root, no privileges.** pley runs as your user, with every Linux
@@ -214,7 +214,7 @@ On pley's side ([SECURITY.md](../../SECURITY.md) has the details):
 - Turn on two-step sign-in for administrators (**Account → Two-step
   sign-in**).
 - Leave apps by other publishers off (**Settings → Server → Apps**) unless you
-  need one, and keep the Plex-compatible API off the internet.
+  need one, and keep the compatibility API off the internet.
 - Keep pley up to date (below): `setup.sh` also fetches newer base images,
   which bring Debian's security fixes for FFmpeg and the rest of the image.
 

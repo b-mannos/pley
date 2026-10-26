@@ -12,7 +12,7 @@ on `/media/Movies`, a TV Shows library on `/media/TV Shows`, a Music library on
 
 ## How to name files
 
-pley reads names the way Plex does. The year makes matches certain.
+pley reads names the way media servers commonly do. The year makes matches certain.
 
 ```
 media/

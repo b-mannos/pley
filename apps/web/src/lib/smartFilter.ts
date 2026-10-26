@@ -1,5 +1,5 @@
 // Smart collection filters: a library listing in Plex's syntax
-// (`genre=Comedy&unwatched=1&sort=year:desc`), see docs/PLEX.md.
+// (`genre=Comedy&unwatched=1&sort=year:desc`), see docs/COMPATIBILITY.md.
 
 import type { LibrarySort, SortOrder } from "@/api/types";
 

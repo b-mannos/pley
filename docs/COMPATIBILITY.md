@@ -1,18 +1,19 @@
-# Plex-compatible API
+# Compatibility API
 
-pley speaks enough of the Plex Media Server API for tools written against
-Plex to work with it: [python-plexapi](https://github.com/pushingkarmaorg/python-plexapi)
-scripts, and tools built the same way (Tautulli, Kometa, direct-play clients).
-It runs on its own port and uses the same libraries, users, watch state and
-playback sessions as pley's own API, so anything done through it shows up in
-the web UI and the other way round.
+Besides its own API, pley speaks a widely used media-server API, so tools
+written against it work with pley: scripts using
+[`python-plexapi`](https://github.com/pushingkarmaorg/python-plexapi), and
+tools built the same way (Tautulli, Kometa, direct-play clients). It runs on
+its own port and uses the same libraries, users, watch state and playback
+sessions as pley's own API, so anything done through it shows up in the web
+UI and the other way round.
 
-The official Plex apps are out of scope: they sign in through plex.tv and
-discover servers there, which pley does not do.
+Apps that sign in through their vendor's cloud service and find servers
+there are out of scope: pley has no such service.
 
 ## Enabling and port
 
-The API listens on `0.0.0.0:32400`, Plex's port, by default.
+The API listens on `0.0.0.0:32400`, its usual port, by default.
 
 | Where | Setting |
 |---|---|
@@ -20,13 +21,13 @@ The API listens on `0.0.0.0:32400`, Plex's port, by default.
 | Environment | `PLEY_PLEX_BIND` |
 | `pley.toml` | `plex_bind = "0.0.0.0:32400"` |
 
-If the port is taken (a real Plex server runs on the same machine), pley logs a
+If the port is taken (another media server uses it on the same machine), pley logs a
 warning and keeps running without this API. Pick another port with
 `--plex-bind`.
 
 ## Authentication
 
-Use a pley session token as the Plex token. Get one by signing in:
+Use a pley session token as the API's token. Get one by signing in:
 
 ```sh
 curl -s -X POST http://localhost:7539/api/auth/login \
@@ -35,19 +36,19 @@ curl -s -X POST http://localhost:7539/api/auth/login \
 # {"user":{…},"token":"<token>"}
 ```
 
-The token is accepted the Plex way, as the `X-Plex-Token` header or query
-parameter, and the pley way (`Authorization: Bearer`, `X-Pley-Token` or
+The token is accepted as the API sends it, the `X-Plex-Token` header or
+query parameter, and the pley way (`Authorization: Bearer`, `X-Pley-Token` or
 `?token=`). The web UI's `pley_token` cookie is refused here: browsers send
-it to this port too, and some Plex endpoints change things on a GET.
+it to this port too, and some of this API's endpoints change things on a GET.
 Tokens of apps signed in on pley's own page (`pley_at_…`) are refused as
 well, and so are the HLS session addresses of playback those apps started:
-Plex tools use a token from `POST /api/auth/login`. Every endpoint needs a
+tools of this API use a token from `POST /api/auth/login`. Every endpoint needs a
 token except `/identity`.
 
 ```python
 from plexapi.server import PlexServer
-plex = PlexServer('http://localhost:32400', '<token>')
-for movie in plex.library.section('Movies').search(unwatched=True):
+server = PlexServer('http://localhost:32400', '<token>')
+for movie in server.library.section('Movies').search(unwatched=True):
     print(movie.title, movie.media[0].videoResolution)
 ```
 
@@ -56,8 +57,8 @@ Administrators also see every user's sessions and can refresh libraries.
 
 ## Formats
 
-Responses are XML `MediaContainer`s like Plex's. With
-`Accept: application/json` they are JSON in Plex's layout
+Responses are XML `MediaContainer`s. With `Accept: application/json` they
+are JSON in the same layout
 (`{"MediaContainer": {"Metadata": […]}}`). Paging works through
 `X-Plex-Container-Start` and `X-Plex-Container-Size`, as headers or query
 parameters; containers report `size`, `totalSize` and `offset`.
@@ -71,13 +72,13 @@ parameters; containers report `size`, `totalSize` and `offset`.
   administrators choose in pley (Settings → Libraries); new ones come last.
 - **Types.** Movies and episodes are `Video` elements, shows, seasons, artists
   and albums are `Directory` elements, and tracks are `Track` elements, with
-  Plex's `type` values.
+  the API's `type` values.
 - **GUIDs.** Every item gets a `plex://<type>/<id>` guid. With
   `includeGuids=1`, and always in details, `Guid` children carry the ids
-  metadata found, as Plex reports them: `imdb://`, `tmdb://` (movies and
+  metadata found, in the API's usual form: `imdb://`, `tmdb://` (movies and
   shows), `tvdb://` (shows) and `mbid://` (artists and albums). The `guid`
   filter finds items by any of them.
-- **Editions.** Movies whose versions are tagged like Plex's
+- **Editions.** Movies whose versions are tagged with an edition
   (`{edition-Director's Cut}` in the file or folder name) carry the default
   version's `editionTitle`.
 - **Watch state.** `viewCount` is the play count of watched items and 0 once an
@@ -106,7 +107,7 @@ parameters; containers report `size`, `totalSize` and `offset`.
   `maxVideoBitrate`, `videoResolution`, `audioStreamID` and burned-in
   `subtitleStreamID`. The master playlist points at
   `session/<id>/base/index.m3u8`. Session URLs need no token: the 128-bit
-  session id is the credential, as with Plex.
+  session id is the credential.
 - **Preview thumbnails and chapters.** Parts of files with seek previews have
   `indexes="sd"`; the BIF index is cut from pley's previews. Details list the
   first version's `Chapter`s, with a `thumb` once the file has previews.
@@ -127,7 +128,7 @@ parameters; containers report `size`, `totalSize` and `offset`.
 |---|---|
 | Server | `/`, `/identity`, `/servers`, `/accounts`, `/myplex/account`, `/system`, `/prefs`, `/:/prefs`, `/media/providers`, `/:/websockets/notifications` |
 | Sections | `/library`, `/library/sections`, `/library/sections/{id}`, `…/all`, `…/albums`, `…/recentlyAdded`, `…/onDeck`, `…/search`, `…/firstCharacter`, `…/collections`, `…/{genre,year,decade,contentRating,studio,actor,director,writer,producer}`, `…/refresh`, `/library/sections/all/refresh` |
-| Items | `/library/metadata/{id}` (comma-separated ids allowed), `…/extras` (trailers and other bonus material as `clip`s with Plex's `extraType` and `subtype`), `…/children`, `…/allLeaves`, `…/grandchildren`, `…/related` ("More Like This" hub), `…/similar` (the same items), `…/thumb`, `…/art`, `…/refresh` |
+| Items | `/library/metadata/{id}` (comma-separated ids allowed), `…/extras` (trailers and other bonus material as `clip`s with the API's `extraType` and `subtype`), `…/children`, `…/allLeaves`, `…/grandchildren`, `…/related` ("More Like This" hub), `…/similar` (the same items), `…/thumb`, `…/art`, `…/refresh` |
 | Lists | `/library/all`, `/library/onDeck`, `/library/recentlyAdded`, `/hubs`, `/hubs/sections/{id}`, `/hubs/continueWatching/items`, `/hubs/home/recentlyAdded`, `/hubs/search`, `/search`, `PUT /actions/removeFromContinueWatching?ratingKey=` (the movie, or the episode's show, leaves the user's Continue Watching until it is played again, as `DELETE /api/continue-watching/{id}`) |
 | Collections | `/library/sections/{id}/collections` (also `…/all?type=18`), `/library/collections/{id}`, `…/children`, `…/{thumb,art,composite}[/{version}]` |
 | Playlists | `GET`/`POST /playlists` (`?type=&title=&uri=…/library/metadata/1,2`, or `smart=1&uri=…/library/sections/{id}/all?…` for a smart playlist of that listing; `?smart=0|1` filters the list), `GET`/`PUT` (`?title=`)/`DELETE /playlists/{id}`, `GET`/`PUT /playlists/{id}/items` (`?uri=`), `DELETE /playlists/{id}/items/{playlistItemID}`, `PUT …/{playlistItemID}/move?after=`, `/playlists/{id}/composite/{version}` |
@@ -139,7 +140,7 @@ parameters; containers report `size`, `totalSize` and `offset`.
 
 ## Editing
 
-Administrators edit metadata the way python-plexapi (and so Kometa) does:
+Administrators edit metadata the way `python-plexapi` (and so Kometa) does:
 
 - `PUT /library/sections/{id}/all?type=1&id=1,2&title.value=…&title.locked=1`,
   or `PUT /library/metadata/{id}?…`, for `title`, `titleSort`,
@@ -150,7 +151,7 @@ Administrators edit metadata the way python-plexapi (and so Kometa) does:
   `field.locked=0` gives the field back to the metadata agent, and a value
   sent with `field.locked=0` is written but not kept.
 - Tags: `genre[0].tag.tag=Horror` adds a genre, `genre[].tag.tag-=Horror,Drama`
-  removes (each name percent-encoded once more, as python-plexapi sends
+  removes (each name percent-encoded once more, as `python-plexapi` sends
   them). The same for `label`, which details list as `Label` and the
   `label` filter and `/library/sections/{id}/label` find, and for
   `collection`: the item joins or leaves the collection of that name in its
@@ -162,7 +163,7 @@ Administrators edit metadata the way python-plexapi (and so Kometa) does:
   addresses.
 - Collections: their title, sort title (kept as set, and listed as
   `titleSort`) and summary through their section (`type=18&id=…`, as
-  python-plexapi edits them), their poster and background through
+  `python-plexapi` edits them), their poster and background through
   `POST /library/collections/{id}/posters` (or `/arts`).
 - `POST /library/collections?type=1&title=…&sectionId=…&smart=0&uri=server://…/library/metadata/1,2`
   makes a collection of those items; with `smart=1` and
@@ -179,7 +180,7 @@ Administrators edit metadata the way python-plexapi (and so Kometa) does:
 episode, 8 artist, 9 album, 10 track), `sort` (`titleSort`, `addedAt`,
 `originallyAvailableAt`, `year`, `rating`, `audienceRating`, `lastViewedAt`,
 `viewCount`, `duration`, `index`, `id`, `updatedAt`; with `:desc`, several
-comma-separated), `limit` and Plex filters with their operators:
+comma-separated), `limit` and the API's filters with their operators:
 
 - strings (`title`, `studio`): contains, `!=` does not contain, `==` is, `!==`
   is not, `<=` begins with, `>=` ends with;
@@ -194,11 +195,11 @@ comma-separated), `limit` and Plex filters with their operators:
 
 Filters on ancestors work (`artist.id=5` on albums, `show.title=…` on
 episodes). With `includeMeta=1` the response describes these filters, sorts
-and fields in a `Meta` element; python-plexapi validates searches against it.
+and fields in a `Meta` element; `python-plexapi` validates searches against it.
 
 ## Tested
 
-With python-plexapi 4.18 the following work against the test media:
+With `python-plexapi` 4.18 the following work against the test media:
 
 - connecting, the library and its sections, `all()`, `get()`, `search()` with
   title, `unwatched`, year, sort and paging, `recentlyAdded()`,
@@ -227,9 +228,9 @@ With python-plexapi 4.18 the following work against the test media:
 
 ## Not supported
 
-- plex.tv: sign-in, server claiming, sharing, remote access and the official
-  Plex apps.
-- Collections' order and mode are set in pley, not through the Plex API.
+- The vendor's cloud service: its sign-in, server claiming, sharing and
+  remote access, and the apps that depend on it.
+- Collections' order and mode are set in pley, not through this API.
 - Editing episodes' and seasons' artwork from URLs other than TMDB images
   (upload the file instead), and per-item preferences (`/prefs`).
 - Filters on descendants (`episode.title` on shows) and on `resolution`, `hdr`,

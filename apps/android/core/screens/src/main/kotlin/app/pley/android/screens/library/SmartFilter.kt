@@ -5,7 +5,7 @@ import app.pley.android.model.SortOrder
 
 /**
  * Smart collection and playlist filters: a library listing in Plex's
- * syntax (`genre=Comedy&unwatched=1&sort=year:desc`, docs/PLEX.md), ported
+ * syntax (`genre=Comedy&unwatched=1&sort=year:desc`, docs/COMPATIBILITY.md), ported
  * from apps/web/src/lib/smartFilter.ts.
  */
 object SmartFilter {

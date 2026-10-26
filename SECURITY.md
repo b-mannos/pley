@@ -19,8 +19,8 @@ Only the latest release gets fixes.
 - **Set it up before exposing it.** A new server is set up with the one-time
   code pley prints in its log (the tray icon's "Open pley" fills it in).
 - **Keep what doesn't need to be public off the internet:** the
-  Plex-compatible API on port 32400 (turn it off with `plex_bind = "off"` if
-  no Plex app needs it), and any transcoder on another machine.
+  compatibility API on port 32400 (turn it off with `plex_bind = "off"` if
+  no tool needs it), and any transcoder on another machine.
 - **Mount media read-only**, run pley as an unprivileged user, and don't let
   untrusted people write to library folders. The Docker setup does the
   first two and more: a read-only image, no capabilities, the port on
@@ -73,7 +73,7 @@ rotated on every use, and one used twice ends the app's access. People are
 asked every time, pley's own apps included, on a page that shows the app's
 address first and can't be framed. Apps never get administrator rights:
 every route they may use is listed with the scope it needs, anything else
-is refused, and the Plex-compatible API refuses their tokens. Apps also
+is refused, and the compatibility API refuses their tokens. Apps also
 don't see library folders or file paths, the transcoder's error messages
 included. pley's own apps are built in and sign in without internet access.
 Descriptions of other publishers' apps are read only when an administrator

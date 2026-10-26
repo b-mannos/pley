@@ -1,4 +1,4 @@
-//! More of the Plex-compatible API (docs/PLEX.md): server endpoints, section
+//! More of the Plex-compatible API (docs/COMPATIBILITY.md): server endpoints, section
 //! listings and filter choices, the order of sections, hubs, watch-state
 //! reports and what only administrators may do. tests/plex.rs covers the
 //! basics.

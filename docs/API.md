@@ -20,7 +20,7 @@ unless stated otherwise. Timestamps are **unix seconds**; durations/positions ar
 * Missing/invalid token → `401`. Non-admin calling an admin endpoint → `403`.
 * Apps signed in on pley's own page (see [Apps](#apps-oauth-21)) send their
   access token (`pley_at_…`) in `Authorization: Bearer` only: never in the
-  cookie, `X-Pley-Token` or `?token=`. The Plex-compatible API refuses it.
+  cookie, `X-Pley-Token` or `?token=`. The compatibility API refuses it.
   Its refusals carry `WWW-Authenticate` (RFC 6750 §3):
   * `400` `bad_request` with `Bearer error="invalid_request"`: an app's token
     anywhere but the Authorization header;
@@ -891,13 +891,13 @@ ones in `library_ids`, and with `max_age` only movies and shows whose content
 rating allows that age (US, UK, DE, FR, AU, CA and numeric certifications are
 understood; seasons and episodes go by their show; unrated titles are hidden;
 music is exempt). Hidden libraries and items answer `404` everywhere: lists,
-hubs, search, artwork, streams and the Plex-compatible API.
+hubs, search, artwork, streams and the compatibility API.
 
 ## Libraries
 
 Libraries are listed in one order, the same for every user: the one
 administrators choose (new libraries go last). Lists of libraries, the home
-page's rows and the Plex-compatible API's sections all follow it; users who
+page's rows and the compatibility API's sections all follow it; users who
 may open only some libraries see those, in that order.
 
 | Method | Path | Body / Query | Response |
@@ -971,11 +971,11 @@ A seen episode stopped part of the way stays out of the in-progress rows
 shows out of the user's own Continue Watching: a movie, or for an episode
 (in progress or next up) its whole show (a show's or a season's id does the
 same). It stays out of every Continue Watching (Home's, the libraries' hubs,
-the Plex API's On Deck and `continueWatching` hubs) until the user plays
+the compatibility API's On Deck and `continueWatching` hubs) until the user plays
 that movie or any episode of that show again: a progress report, or a
 watched mark, newer than the hide. Then it comes back as it would have.
 Progress and watched marks stay as they are. Other kinds answer `400`. The
-Plex API's `PUT /actions/removeFromContinueWatching?ratingKey=` does the
+compatibility API's `PUT /actions/removeFromContinueWatching?ratingKey=` does the
 same. Either sends `user_state_changed` for the movie or show to the
 user's event streams, so their other devices fetch Home again.
 
@@ -990,7 +990,7 @@ user's event streams, so their other devices fetch Home again.
 Each user's own list. Titles the user can't see (library access, age
 limit) are left out of it, and come back when they can again. A movie
 leaves it once it is watched (played to the end, or marked watched here or
-through the Plex API); a show stays until it is removed. `ItemDetail` says
+through the compatibility API); a show stays until it is removed. `ItemDetail` says
 `in_watchlist`. Every change, a movie leaving by itself included, sends
 `watchlist_changed` to the user's event streams (only theirs), so their
 other devices fetch Home again.
@@ -1053,9 +1053,9 @@ interface Collection {
 | GET | `/api/items/{id}/collections` | – | `{ collections: { id, title }[] }` the movie or show is in ("Part of …") |
 
 Smart collections hold no items: `smart_filter` is a library listing in the
-Plex-compatible API's syntax (the query string of
+compatibility API's syntax (the query string of
 `/library/sections/{id}/all`, such as `genre=Comedy&unwatched=1&sort=year:desc`;
-see docs/PLEX.md), and the collection shows what it finds, in its order, as
+see docs/COMPATIBILITY.md), and the collection shows what it finds, in its order, as
 each user may see it. Their items can't be added, removed or reordered
 (`400`); the filter is changed instead.
 
@@ -1241,7 +1241,7 @@ for keyed URLs.
 ### Version 2
 
 `caps_version: 2` turns on these rules; a report without it (the web app,
-the Android app's web view, Plex clients) decides as above, whatever else it
+the Android app's web view, compatibility API clients) decides as above, whatever else it
 sends. Version 2 reports still send the version 1 fields: `containers`
 always counts, and `video_codecs` or `audio_codecs` stand in only when
 `video`, or both `audio_decode` and `audio_passthrough`, are left out.
@@ -1361,7 +1361,7 @@ index.m3u8
   `BANDWIDTH` is twice the copied video's average (discs peak about there),
   or the encoder's rate. TS segments are the same as `index.m3u8`'s.
 - Without `master_playlist` (and for every version 1 player, the web
-  player and Plex clients) the session starts at `index.m3u8` as before,
+  player and compatibility API clients) the session starts at `index.m3u8` as before,
   and remuxes name nothing.
 
 For those players, the Dolby Vision rules of version 2 become:
@@ -1497,7 +1497,7 @@ a play.
 interface HistoryEntry {
   id: Id;
   viewed_at: Timestamp;
-  device?: string;                  // "Chrome on Windows", a Plex client's name
+  device?: string;                  // "Chrome on Windows", a compatibility API client's name
   user: { id: Id; name: string; avatar_url?: string; avatar_color?: string };
   item: ItemSummary;
 }
@@ -1532,9 +1532,10 @@ once. Then:
 - the player stops, leaves, and says "Playback was stopped by the server's
   administrator" with the message, if any.
 
-The Plex API's `GET /status/sessions/terminate?sessionId=&reason=`
+The compatibility API's `GET /status/sessions/terminate?sessionId=&reason=`
 (Tautulli's) does the same for administrators, `reason` as the message. A
-Plex player's progress reports don't start its stopped session again.
+player's progress reports through the compatibility API don't start its
+stopped session again.
 
 ### Watch state on other devices
 
@@ -1543,9 +1544,9 @@ event streams (only theirs, the device that made the change included) when
 their watch state changes in a way their screens show:
 
 - something marked watched or unwatched (`POST /api/items/{id}/watched`,
-  `…/unwatched`, the Plex API's `/:/scrobble` and `/:/unscrobble`), unless
+  `…/unwatched`, the compatibility API's `/:/scrobble` and `/:/unscrobble`), unless
   nothing changed (marked watched again);
-- a progress report (pley's, or a Plex player's `/:/timeline` and
+- a progress report (pley's, or a compatibility API player's `/:/timeline` and
   `/:/progress`) that crosses 90 %, starts a resume point (15 s in) or
   clears one, or that pauses or stops the player somewhere new: where *Play*
   on another device starts. Not the reports that only keep the place every

@@ -1,4 +1,4 @@
-# Add-on: the Plex-compatible API (docs/PLEX.md) for python-plexapi,
+# Add-on: the Plex-compatible API (docs/COMPATIBILITY.md) for python-plexapi,
 # Tautulli and Kometa, published like the web port: on this computer only
 # unless PLEY_PLEX_LISTEN says otherwise. It takes the same accounts and
 # tokens as pley; keep it off the internet.

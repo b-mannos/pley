@@ -14,7 +14,7 @@ artwork, which pley never moves or changes.
                              pictures that are metadata
   media/ab/<fingerprint>/    files generated from one media file
     thumb.jpg                frame grab (movies and episodes without a still)
-    trickplay/               seek-bar previews (sprite sheets, Plex's index-sd.bif)
+    trickplay/               seek-bar previews (sprite sheets and index-sd.bif files)
     chapters/<n>.jpg         chapter pictures, cut from the previews
   avatars/                   profile pictures
   backups/pley-<date>.db     the last 3 daily database backups, and the copy

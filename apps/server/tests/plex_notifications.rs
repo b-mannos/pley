@@ -1,4 +1,4 @@
-//! `/:/websockets/notifications` over a real socket (docs/PLEX.md): playback
+//! `/:/websockets/notifications` over a real socket (docs/COMPATIBILITY.md): playback
 //! states with the session keys of `/status/sessions`, new items as Tautulli
 //! expects them, scans, and who hears about what.
 

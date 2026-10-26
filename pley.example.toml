@@ -7,7 +7,7 @@
 # Address to listen on. Use 127.0.0.1:7539 to stay local-only.
 # bind = "0.0.0.0:7539"
 
-# Plex-compatible API for Plex tools (docs/PLEX.md). "off" disables it; if the
+# Plex-compatible API for Plex tools (docs/COMPATIBILITY.md). "off" disables it; if the
 # port is taken (a real Plex server), pley logs a warning and runs without it.
 # plex_bind = "0.0.0.0:32400"
 

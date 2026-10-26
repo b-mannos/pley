@@ -49,7 +49,7 @@ JavaScript player (MSE).
   AVPlay is what Samsung points apps to for 4K, adaptive streams and
   track switching
   ([AVPlay guide](https://developer.samsung.com/smarttv/develop/guides/multimedia/media-playback/using-avplay.html)),
-  and what Plex's Samsung app uses.
+  and what other media apps on Samsung TVs use.
 - **LG.** A store app's `type` is `web`
   ([appinfo.json](https://webostv.developer.lge.com/develop/references/appinfo-json)).
   In October 2026 LG's Seller Lounge told a developer in writing that
@@ -110,17 +110,15 @@ and field reports where Samsung says nothing:
   `tizen.tvaudiocontrol.getOutputMode()` and can't change
   ([FAQ, Q12](https://developer.samsung.com/smarttv/develop/faq/multimedia.html)).
   **TrueHD** is in no app specification, and owners report TV apps can't
-  pass it over eARC
-  ([Plex forum](https://forums.plex.tv/t/still-no-dolby-atmos-on-samsung-tv/825774)),
-  though `webapis.systeminfo.isSupportedAudioCodec("TrueHD")` exists from
+  pass it over eARC, though `webapis.systeminfo.isSupportedAudioCodec("TrueHD")` exists from
   Tizen 6.0.
 - **Through `<video>` and MSE**, H.264 stops at 1080p; 4K and 8K need
   AVPlay ([FAQ](https://developer.samsung.com/smarttv/develop/faq/multimedia.html)).
 - **AVPlay sends no request headers** but a cookie and a User-Agent
   ([AVPlay API](https://developer.samsung.com/smarttv/develop/api-references/samsung-product-api-references/avplay-api.html)),
   so it can't send a bearer token: the apps play from keyed addresses
-  ([API.md, Keyed URLs](API.md#keyed-urls)), as Plex and Jellyfin clients
-  put their tokens in their URLs.
+  ([API.md, Keyed URLs](API.md#keyed-urls)), as other media servers'
+  clients put their tokens in their URLs.
 - **CORS is enforced** for packaged apps, whose requests come from
   `file://` ([Tizen CORS guide](https://github.com/Samsung/tizen-docs/blob/master/docs/application/web/guides/w3c/security/cors.md)):
   the server answers CORS for those origins ([API.md](API.md)).
