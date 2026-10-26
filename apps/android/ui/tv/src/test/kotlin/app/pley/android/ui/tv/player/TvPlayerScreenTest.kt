@@ -2,7 +2,10 @@ package app.pley.android.ui.tv.player
 
 import android.os.SystemClock
 import android.view.KeyEvent as AndroidKeyEvent
+import android.view.View
+import android.view.ViewGroup
 import androidx.activity.ComponentActivity
+import kotlin.math.roundToInt
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -161,6 +164,51 @@ class TvPlayerScreenTest {
         back()
         press(Key.DirectionDown)
         focusedOn(TAG_SUBTITLES)
+    }
+
+    /** Media3's SubtitleViews on screen: text first, then pictures. */
+    private fun subtitleViews(): List<View> {
+        val found = mutableListOf<View>()
+        fun walk(view: View) {
+            if (view.javaClass.name == "androidx.media3.ui.SubtitleView") found += view
+            if (view is ViewGroup) (0 until view.childCount).forEach { walk(view.getChildAt(it)) }
+        }
+        walk(compose.activity.window.decorView)
+        return found
+    }
+
+    @Test
+    fun `text subtitles stay inside the safe area, above the controls while they show, at the same size`() {
+        show(playing())
+        val density = compose.activity.resources.displayMetrics.density
+        fun px(dp: androidx.compose.ui.unit.Dp) = (dp.value * density).roundToInt()
+        val (text, pictures) = subtitleViews()
+        assertEquals(px(SUBTITLES_BOTTOM), text.paddingBottom)
+        assertEquals(px(app.pley.android.designsystem.TvSafeArea.Vertical), text.paddingTop)
+        assertEquals(px(app.pley.android.designsystem.TvSafeArea.Horizontal), text.paddingLeft)
+        assertEquals(px(app.pley.android.designsystem.TvSafeArea.Horizontal), text.paddingRight)
+        // Pictures (PGS) keep their frame's places over the whole screen.
+        assertEquals(0, pictures.paddingBottom)
+        press(Key.DirectionUp)
+        assertEquals(px(SUBTITLES_LIFTED), subtitleViews().first().paddingBottom)
+        assertTrue(SUBTITLES_LIFTED > app.pley.android.designsystem.PleyTv.CanvasHeight - TIMES_TOP)
+    }
+
+    @Test
+    fun `Playback details show over the video while nothing else does, asking for the details`() {
+        val controller = playing { it.copy(details = FakePlaybackController.everything().details) }
+        compose.setContent {
+            TvTheme {
+                TvPlayerScreen(controller, onExit = { exits++ }, showDetails = true, now = { 0L })
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag(TAG_DETAILS).assertExists()
+        compose.onNodeWithText("Transcoding · CPU").assertExists()
+        assertEquals(true, controller.calls("setDetailsOpen").last().args.single())
+        press(Key.DirectionUp)
+        compose.onNodeWithTag(TAG_DETAILS).assertDoesNotExist()
+        assertEquals(false, controller.calls("setDetailsOpen").last().args.single())
     }
 
     @Test

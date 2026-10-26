@@ -189,6 +189,8 @@ data class FileInfo(
     val title: String?,
     val rows: List<InfoRow>,
     val streams: List<StreamInfo>,
+    /** The file as the server describes it, for media info in full (the TV's). */
+    val file: app.pley.android.model.MediaFile? = null,
 )
 
 /** A fact about a file. */

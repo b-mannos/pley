@@ -13,6 +13,7 @@ import app.pley.android.model.format.formatBitrate
 import app.pley.android.model.format.resolutionLabel
 import app.pley.android.player.DetailRow
 import app.pley.android.player.PlaybackDetailsUi
+import app.pley.android.player.SubtitleDelivery
 import java.util.Locale
 
 /**
@@ -78,7 +79,8 @@ object PlaybackDetails {
      * The details of [info] playing [file] with audio [audioIndex]. [note]
      * says why it plays this way when the player knows better than the
      * server (a fallback); [live] is GET /api/playback/{session}'s
-     * transcode; [engine] the engine's own lines.
+     * transcode; [engine] the engine's own lines; [subtitle] the subtitles
+     * shown, if any.
      */
     fun build(
         texts: PlayerTexts,
@@ -89,6 +91,7 @@ object PlaybackDetails {
         positionMs: Long,
         live: TranscodeInfo?,
         engine: List<String>,
+        subtitle: MediaStream? = null,
     ): PlaybackDetailsUi {
         val transcode = if (info.method == PlaybackMethod.Direct) null else live
         val streams = file?.streams.orEmpty()
@@ -129,6 +132,20 @@ object PlaybackDetails {
             pipeline = transcode?.pipeline?.takeIf { transcode.video == StreamAction.Transcode }?.let { PIPELINE[it] ?: it },
             rows = rows,
             engine = engine,
+            playbackMethod = info.method,
+            file = file,
+            video = video,
+            audio = audio,
+            subtitle = subtitle,
+            subtitleDelivery = subtitle?.let { deliveryOf(info, it) },
+            transcode = transcode,
         )
+    }
+
+    /** How [subtitle] reaches the screen in [info]: burned in, the server's WebVTT, or read from the file by the player. */
+    fun deliveryOf(info: PlaybackInfo, subtitle: MediaStream): SubtitleDelivery = when {
+        info.burnSubtitles && info.subtitleIndex == subtitle.index -> SubtitleDelivery.BurnedIn
+        info.hls || subtitle.external -> SubtitleDelivery.Server
+        else -> SubtitleDelivery.File
     }
 }

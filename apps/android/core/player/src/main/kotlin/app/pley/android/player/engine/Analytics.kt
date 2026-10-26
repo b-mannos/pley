@@ -123,6 +123,8 @@ class PlaybackAnalytics(
                 frameRate = format.frameRate.takeIf { it > 0 },
                 dynamicRange = rangeOf(format),
                 colorInfo = format.colorInfo?.takeIf { it.isValid }?.let(ColorInfo::toLogString),
+                bitDepth = format.colorInfo?.lumaBitdepth?.takeIf { it > 0 },
+                videoBitrate = format.bitrate.takeIf { it > 0 },
             ),
         )
     }
@@ -132,8 +134,17 @@ class PlaybackAnalytics(
             stats.copy(
                 audioCodec = listOfNotNull(format.sampleMimeType, format.codecs).joinToString(" "),
                 audioChannels = format.channelCount.takeIf { it > 0 },
+                audioSampleRate = format.sampleRate.takeIf { it > 0 },
+                audioBitrate = format.bitrate.takeIf { it > 0 },
             ),
         )
+    }
+
+    /** The network's speed: kept when it moves less than 10 %, so the stats don't change with every load. */
+    override fun onBandwidthEstimate(eventTime: AnalyticsListener.EventTime, totalLoadTimeMs: Int, totalBytesLoaded: Long, bitrateEstimate: Long) {
+        val was = stats.bandwidth
+        if (bitrateEstimate <= 0) return
+        if (was == null || kotlin.math.abs(bitrateEstimate - was) > was / 10) update(stats.copy(bandwidth = bitrateEstimate))
     }
 
     override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, audioTrackConfig: AudioSink.AudioTrackConfig) {

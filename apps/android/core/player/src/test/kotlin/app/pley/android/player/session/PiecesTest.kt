@@ -18,6 +18,7 @@ import app.pley.android.model.StreamKind
 import app.pley.android.model.TranscodeInfo
 import app.pley.android.player.PlayQueue
 import app.pley.android.player.PlayRequest
+import app.pley.android.player.SubtitleDelivery
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -104,6 +105,30 @@ class PiecesTest {
         val fallback = PlaybackDetails.build(texts, info.copy(method = PlaybackMethod.Transcode, audioConverted = false), file, null, "The original didn't play smoothly on this device.", 0, null, emptyList())
         assertEquals("The original didn't play smoothly on this device.", fallback.why)
         assertEquals("HEVC 4K Dolby Vision P8.1 → …", fallback.rows.first().value)
+    }
+
+    @Test
+    fun `the details carry the file and the streams in play, and how subtitles reach the screen`() {
+        val video = MediaStream(0, StreamKind.Video, "hevc", width = 3840, height = 2160)
+        val audio = MediaStream(1, StreamKind.Audio, "eac3", channels = 6)
+        val french = MediaStream(2, StreamKind.Audio, "ac3", channels = 6, language = "fre")
+        val srt = MediaStream(3, StreamKind.Subtitle, "subrip", textBased = true)
+        val pgs = MediaStream(4, StreamKind.Subtitle, "hdmv_pgs_subtitle", textBased = false)
+        val beside = MediaStream(1000, StreamKind.Subtitle, "subrip", textBased = true, external = true)
+        val file = MediaFile(id = 1, path = "a.mkv", streams = listOf(video, audio, french, srt, pgs, beside))
+        val direct = PlaybackInfo("s", PlaybackMethod.Direct, "/x", false, 1)
+        val details = PlaybackDetails.build(texts, direct, file, 2, null, 0, null, emptyList(), subtitle = srt)
+        assertEquals(file, details.file)
+        assertEquals(video, details.video)
+        assertEquals(french, details.audio)
+        assertEquals(srt, details.subtitle)
+        assertEquals(PlaybackMethod.Direct, details.playbackMethod)
+        assertEquals(SubtitleDelivery.File, details.subtitleDelivery)
+        assertEquals(SubtitleDelivery.Server, PlaybackDetails.deliveryOf(direct, beside))
+        val hls = direct.copy(method = PlaybackMethod.Transcode, hls = true)
+        assertEquals(SubtitleDelivery.Server, PlaybackDetails.deliveryOf(hls, srt))
+        assertEquals(SubtitleDelivery.BurnedIn, PlaybackDetails.deliveryOf(hls.copy(burnSubtitles = true, subtitleIndex = 4), pgs))
+        assertNull(PlaybackDetails.build(texts, direct, file, null, null, 0, null, emptyList()).subtitleDelivery)
     }
 
     @Test

@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -42,7 +41,6 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyElevation
@@ -55,8 +53,8 @@ import app.pley.android.designsystem.reducedMotion
 import app.pley.android.player.PlaybackController
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.engine.EngineState
-import app.pley.android.player.engine.PlaybackStats
 import app.pley.android.ui.tv.R
+import app.pley.android.ui.tv.item.FactLine
 import app.pley.android.ui.tv.item.PanelHeading
 import app.pley.android.ui.tv.item.PanelRow
 import kotlinx.coroutines.launch
@@ -64,7 +62,7 @@ import java.util.Locale
 
 /**
  * The player's side panels (design spec §2.7): Subtitles, Audio, Quality,
- * Chapters and Info. 360 dp from the right edge, full height, surface2
+ * Chapters and Info. 360 dp (Info 440 dp) from the right edge, full height, surface2
  * with 16 dp left corners. It slides in on its own layer over 200 ms (in
  * place with reduced motion) and the scrim behind it fades by its colour
  * while drawing, so no layer covers the video. Focus starts on the current
@@ -87,7 +85,7 @@ internal fun BoxScope.TvPlayerPanels(
     Box(
         Modifier
             .align(Alignment.CenterEnd)
-            .width(PANEL_WIDTH)
+            .width(if (panel == PlayerPanel.Info) INFO_WIDTH else PANEL_WIDTH)
             .fillMaxHeight()
             .graphicsLayer { translationX = (1f - shown) * size.width }
             .clip(RoundedCornerShape(topStart = PleyShape.DialogRadius, bottomStart = PleyShape.DialogRadius))
@@ -208,16 +206,16 @@ private data class PanelData(
 }
 
 /**
- * Info, the stats for nerds: how the server sends it (method, why, the
- * streams) and what this TV does with it (decoders, the picture, the
- * display mode, audio passed through or decoded, dropped frames, the
- * buffer). Up and Down scroll it.
+ * Info, the stats for nerds ([TvReadout]): how the server sends it and
+ * why, the file, every stream in play in full, and what this TV does with
+ * them (decoders, the display's mode and HDR, frames, buffer, network).
+ * Read once a second; Up and Down scroll it.
  */
 @Composable
 private fun InfoPanel(state: State<PlayerUiState>, engine: State<EngineState?>, ui: TvPlayerUi) {
-    val details by remember(state) { derivedStateOf { state.value.details } }
-    val buffered by remember(state) { derivedStateOf { ((state.value.bufferedMs - state.value.positionMs).coerceAtLeast(0) / 1000).toInt() } }
-    val stats = engine.value?.stats
+    val input by rememberReadout(state, engine)
+    val resources = LocalResources.current
+    val sections = remember(input, resources) { TvReadout.sections(resources, input) }
     val scroll = rememberScrollState()
     val scope = rememberCoroutineScope()
     val step = with(LocalDensity.current) { 96.dp.toPx() }
@@ -244,65 +242,15 @@ private fun InfoPanel(state: State<PlayerUiState>, engine: State<EngineState?>, 
             .verticalScroll(scroll),
     ) {
         PanelTitle(stringResource(R.string.tv_player_info_title))
-        PanelHeading(stringResource(R.string.tv_player_info_how))
-        val d = details
-        if (d == null) {
-            PanelNote(stringResource(R.string.tv_player_info_waiting))
-        } else {
-            InfoLine(d.method + (d.pipeline?.let { " · $it" } ?: ""), d.why)
-            d.rows.forEach { InfoLine(it.label, it.value) }
-        }
-        PanelHeading(stringResource(R.string.tv_player_info_device))
-        if (stats != null) {
-            DeviceLines(stats, buffered)
-        } else {
-            d?.engine?.forEach { line ->
-                val parts = line.split(": ", limit = 2)
-                if (parts.size == 2) InfoLine(parts[0], parts[1]) else InfoLine("", line)
+        if (input.details == null) PanelNote(stringResource(R.string.tv_player_info_waiting))
+        sections.forEach { section ->
+            PanelHeading(section.title)
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                section.facts.forEach { FactLine(it, labelWidth = INFO_LABEL_WIDTH) }
             }
         }
         Spacer(Modifier.height(24.dp))
     }
-}
-
-/** The lines about this TV, from the engine's stats. */
-@Composable
-private fun DeviceLines(stats: PlaybackStats, bufferedS: Int) {
-    stats.videoDecoder?.let { name -> InfoLine(stringResource(R.string.tv_player_info_video_decoder), name + hardwareNote(stats.videoDecoderHardware)) }
-    val picture = listOfNotNull(
-        if (stats.width != null && stats.height != null) "${stats.width}×${stats.height}" else null,
-        stats.frameRate?.takeIf { it > 0 }?.let { String.format(Locale.ROOT, "%.3f fps", it).replace(".000 fps", " fps") },
-        stats.dynamicRange,
-        stats.videoCodec?.let { codecName(it.substringBefore(' ')) },
-    )
-    if (picture.isNotEmpty()) InfoLine(stringResource(R.string.tv_player_info_picture), picture.joinToString(" · "))
-    InfoLine(
-        stringResource(R.string.tv_player_info_display),
-        stringResource(if (stats.displayModeId != null) R.string.tv_player_info_display_switched else R.string.tv_player_info_display_kept),
-    )
-    stats.audioCodec?.let { codec ->
-        val audio = listOfNotNull(
-            codecName(codec),
-            stats.audioChannels?.let { "$it ch" },
-            stringResource(if (stats.passthrough) R.string.tv_player_info_passthrough else R.string.tv_player_info_decoded),
-        )
-        InfoLine(stringResource(R.string.tv_player_info_audio), audio.joinToString(" · "))
-    }
-    stats.audioDecoder?.takeIf { !stats.passthrough }?.let { InfoLine(stringResource(R.string.tv_player_info_audio_decoder), it) }
-    InfoLine(
-        stringResource(R.string.tv_player_info_dropped),
-        stringResource(R.string.tv_player_info_dropped_value, stats.droppedFrames, stats.renderedFrames + stats.droppedFrames),
-    )
-    InfoLine(stringResource(R.string.tv_player_info_rebuffers), stats.rebuffers.toString())
-    InfoLine(stringResource(R.string.tv_player_info_buffer), stringResource(R.string.tv_player_info_buffer_value, bufferedS))
-    stats.firstFrameMs?.let { InfoLine(stringResource(R.string.tv_player_info_first_frame), stringResource(R.string.tv_player_info_first_frame_value, it.toInt())) }
-}
-
-@Composable
-private fun hardwareNote(hardware: Boolean?): String = when (hardware) {
-    true -> " (" + stringResource(R.string.tv_player_info_hardware) + ")"
-    false -> " (" + stringResource(R.string.tv_player_info_software) + ")"
-    null -> ""
 }
 
 /** A MIME type as people know the codec: "video/hevc" is HEVC, "audio/eac3-joc" is E-AC-3 JOC (Atmos). */
@@ -327,14 +275,6 @@ internal fun codecName(mime: String): String = when (mime.lowercase(Locale.ROOT)
 }
 
 @Composable
-private fun InfoLine(label: String, value: String) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
-        if (label.isNotEmpty()) BasicText(label, style = PleyType.Tv.Caption.copy(color = PleyColors.Muted), maxLines = 1)
-        BasicText(value, style = PleyType.Tv.Body.copy(color = PleyColors.Fg), maxLines = 4, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
 private fun PanelTitle(text: String) {
     BasicText(text, style = PleyType.Tv.Title.copy(color = PleyColors.Fg), maxLines = 1, modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp))
 }
@@ -345,5 +285,9 @@ private fun PanelNote(text: String) {
 }
 
 private val PANEL_WIDTH = 360.dp
+
+/** Info is wider: its readout has a label column. */
+private val INFO_WIDTH = 440.dp
+private val INFO_LABEL_WIDTH = 112.dp
 
 internal const val TAG_PANEL = "pley.tv.player.panel"

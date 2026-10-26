@@ -273,14 +273,20 @@ internal class PlayRoutes(private val s: State) {
             val french = stream.language == "fre"
             return listOf(
                 Triple(1_000L, 4_000L, if (french) "Le serveur de test joue ceci." else "The fixture server plays this."),
-                Triple(6_000L, 9_000L, if (french) "Rien ici n'est un film." else "Nothing here is a film."),
-                Triple(11_000L, 14_000L, if (french) "Mire et tonalité seulement." else "Test pattern and tone only."),
+                Triple(6_000L, 9_000L, if (french) "Rien ici n'est un film :\njuste une mire qui gigote." else "Nothing here is a film:\njust a glossy, jumpy pattern."),
+                Triple(
+                    11_000L,
+                    14_000L,
+                    if (french) "Mire et tonalité seulement,\nquelques gags typographiques,\npuis le générique." else "Test pattern and tone only,\nplaying quietly, gently, joyfully,\nlong enough to judge the edges.",
+                ),
                 Triple(16_000L, 19_000L, if (french) "Le générique de fin." else "The end credits."),
             )
         }
         val duration = file.durationMs ?: 0
+        // One, two or three lines in turn, with descenders: what a film's subtitles look like at the bottom.
+        val more = listOf("", "\nquietly playing a gentle, jumpy pattern", "\nquietly playing a gentle, jumpy pattern\nlong enough to judge the edges")
         return (0 until (duration / 30_000).toInt().coerceIn(1, 400)).map { n ->
-            Triple(n * 30_000L + 1_000, n * 30_000L + 4_000, "Line ${n + 1} (${stream.language ?: "und"})")
+            Triple(n * 30_000L + 1_000, n * 30_000L + 4_000, "Line ${n + 1} (${stream.language ?: "und"})" + more[n % 3])
         }
     }
 

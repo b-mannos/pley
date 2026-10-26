@@ -1,6 +1,10 @@
 package app.pley.android.player
 
 import app.pley.android.model.Marker
+import app.pley.android.model.MediaFile
+import app.pley.android.model.MediaStream
+import app.pley.android.model.PlaybackMethod
+import app.pley.android.model.TranscodeInfo
 
 /** Where a playback stands. */
 sealed interface PlayerPhase {
@@ -67,7 +71,31 @@ data class PlaybackDetailsUi(
     val rows: List<DetailRow>,
     /** The engine's own lines: decoders, picture, dropped frames. */
     val engine: List<String>,
+    /** The way the server sends it; `null` in details made by hand. */
+    val playbackMethod: PlaybackMethod? = null,
+    /** The file playing as the server described it, for a full technical readout. */
+    val file: MediaFile? = null,
+    /** The streams in play: the file's video, the audio and the subtitles chosen. */
+    val video: MediaStream? = null,
+    val audio: MediaStream? = null,
+    val subtitle: MediaStream? = null,
+    /** How [subtitle] reaches the screen; `null` without subtitles. */
+    val subtitleDelivery: SubtitleDelivery? = null,
+    /** The transcode's live numbers (remux and transcode); `null` in direct play or before they come. */
+    val transcode: TranscodeInfo? = null,
 )
+
+/** How subtitles reach the screen. */
+enum class SubtitleDelivery {
+    /** Read from the file played as it is, drawn by the player. */
+    File,
+
+    /** The server's WebVTT (streams, and subtitle files beside the media), drawn by the player. */
+    Server,
+
+    /** Drawn into the picture by the server's transcode. */
+    BurnedIn,
+}
 
 /** What plays next, during its card. */
 data class UpNextUi(

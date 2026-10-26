@@ -1,10 +1,6 @@
 package app.pley.android.ui.tv.item
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,8 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -26,9 +20,6 @@ import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
 import app.pley.android.model.CreditRole
-import app.pley.android.model.StreamKind
-import app.pley.android.screens.item.FileInfo
-import app.pley.android.screens.item.InfoLabel
 import app.pley.android.screens.item.ItemPage
 import app.pley.android.ui.tv.R
 
@@ -36,8 +27,8 @@ import app.pley.android.ui.tv.R
  * Details at the end of the page (design spec §4.3): who made it and the
  * facts, one row per version in its long form ("4K · HEVC · Dolby Vision
  * P8.1 · TrueHD Atmos 7.1 · 62.0 GB", the one that plays ticked; Select
- * plays another), and the media info of each file. Every block takes
- * focus, so the remote reaches the end of the page.
+ * plays another), and the media info of each file. Only the version rows
+ * take focus; the text is read by scrolling on with Down.
  */
 @Composable
 internal fun TvDetails(page: ItemPage, onChooseVersion: (Long) -> Unit, modifier: Modifier = Modifier) {
@@ -75,24 +66,18 @@ internal fun TvDetails(page: ItemPage, onChooseVersion: (Long) -> Unit, modifier
         if (page.mediaInfo.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
             BasicText(stringResource(R.string.tv_item_media_info), style = PleyType.Tv.Title.copy(color = PleyColors.Fg), modifier = Modifier.padding(bottom = 8.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                page.mediaInfo.forEach { MediaCard(it) }
-            }
+            TvMediaInfo(page.mediaInfo)
         }
     }
 }
 
-/** A block that takes focus (a ring) so the remote can reach and scroll to it; it does nothing else. */
+/** A card of text. It never takes focus: Down past the page's last focusable scrolls to it (the page's readOn). */
 @Composable
 private fun FocusCard(content: @Composable () -> Unit) {
-    val interactions = remember { MutableInteractionSource() }
-    val focused by interactions.collectIsFocusedAsState()
     Column(
         Modifier
-            .focusRing(12.dp) { focused }
             .background(PleyColors.Surface2.copy(alpha = 0.6f), PleyShape.Card)
             .semantics(mergeDescendants = true) {}
-            .focusable(interactionSource = interactions)
             .padding(16.dp),
     ) { content() }
 }
@@ -104,44 +89,6 @@ private fun Fact(label: String, value: String) {
         BasicText(value, style = PleyType.Tv.Body.copy(color = PleyColors.Fg.copy(alpha = 0.85f)), maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
-
-@Composable
-private fun MediaCard(file: FileInfo) {
-    FocusCard {
-        file.title?.let { BasicText(it, style = PleyType.Tv.Label.copy(color = PleyColors.Fg), modifier = Modifier.padding(bottom = 6.dp)) }
-        file.rows.forEach { row -> Fact(infoLabel(row.label), row.value) }
-        file.streams.forEach { stream ->
-            val kind = when (stream.kind) {
-                StreamKind.Video -> stringResource(R.string.tv_item_info_video)
-                StreamKind.Audio -> stringResource(R.string.tv_item_info_audio)
-                else -> stringResource(R.string.tv_item_subtitles)
-            }
-            Spacer(Modifier.height(6.dp))
-            BasicText(
-                listOfNotNull(kind, stream.codec.takeIf { it.isNotEmpty() }, stream.language, stream.title).joinToString(" · "),
-                style = PleyType.Tv.Caption.copy(color = PleyColors.Fg),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (stream.details.isNotEmpty()) {
-                BasicText(stream.details, style = PleyType.Tv.Caption.copy(color = PleyColors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-    }
-}
-
-@Composable
-private fun infoLabel(label: InfoLabel): String = stringResource(
-    when (label) {
-        InfoLabel.File -> R.string.tv_item_info_file
-        InfoLabel.Container -> R.string.tv_item_info_container
-        InfoLabel.Size -> R.string.tv_item_info_size
-        InfoLabel.Duration -> R.string.tv_item_info_duration
-        InfoLabel.Bitrate -> R.string.tv_item_info_bitrate
-        InfoLabel.Video -> R.string.tv_item_info_video
-        InfoLabel.Audio -> R.string.tv_item_info_audio
-    },
-)
 
 /** Details end well inside the safe area: long lines are easier to read narrower. */
 private val DetailsEnd = 200.dp

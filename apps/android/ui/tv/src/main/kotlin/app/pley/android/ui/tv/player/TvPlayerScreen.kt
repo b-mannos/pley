@@ -6,7 +6,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -30,14 +29,16 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import app.pley.android.designsystem.PleyMotion
+import app.pley.android.designsystem.PleyTv
+import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.reducedMotion
 import app.pley.android.player.PlaybackController
 import app.pley.android.player.PlayerPhase
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.engine.EngineState
-import app.pley.android.player.engine.SubtitleStyle
-import app.pley.android.player.engine.Subtitles
 import app.pley.android.player.engine.VideoSurface
+import app.pley.android.player.subtitles.CaptionLook
+import app.pley.android.player.subtitles.ScreenCaptions
 import app.pley.android.ui.tv.R
 import kotlinx.coroutines.delay
 
@@ -58,15 +59,17 @@ import kotlinx.coroutines.delay
  * - **Media keys** work whatever shows.
  *
  * [onExit] leaves the player for where playing started; [now] is the wall
- * clock, for the clock and "Ends at".
+ * clock, for the clock and "Ends at". [captionLook] is Settings →
+ * Subtitles; [showDetails] (Settings → Playback details) keeps the compact
+ * readout over the video while nothing else shows.
  */
 @Composable
 internal fun TvPlayerScreen(
     controller: PlaybackController,
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
-    subtitleStyle: SubtitleStyle = SubtitleStyle(),
-    systemCaptions: Boolean = false,
+    captionLook: CaptionLook = CaptionLook(),
+    showDetails: Boolean = false,
     now: () -> Long = System::currentTimeMillis,
 ) {
     val state = controller.state.collectAsState()
@@ -307,8 +310,9 @@ internal fun TvPlayerScreen(
     LaunchedEffect(hint) {
         if (hint) ui.toast(resources.getString(R.string.tv_player_frame_rate_hint), TvPlayerUi.ERROR_TOAST_MS)
     }
-    // The Info panel's numbers are asked for while it is open.
-    val infoOpen = ui.panel == PlayerPanel.Info
+    // The playback's details are asked for while the Info panel is open or Playback details show.
+    val detailsShown = showDetails && !ui.controls && ui.panel == null && card == null && error == null
+    val infoOpen = ui.panel == PlayerPanel.Info || detailsShown
     val details = remember(controller) { DetailsWatch(controller) }
     LaunchedEffect(infoOpen) { details.open(infoOpen) }
     DisposableEffect(details) { onDispose { details.open(false) } }
@@ -329,7 +333,7 @@ internal fun TvPlayerScreen(
             .testTag(TAG_PLAYER),
     ) {
         VideoSurface(player, Modifier.fillMaxSize())
-        PlayerSubtitles(controller, player, subtitleStyle, systemCaptions, lifted = ui.controls)
+        PlayerSubtitles(controller, player, captionLook, lifted = ui.controls)
         // Holds focus while the controls are hidden: the keys arrive through it.
         Box(Modifier.fillMaxSize().videoFocus(ui, enabled = !ui.controls, label = videoLabel))
         Box(Modifier.fillMaxSize().controlScrims(controlsAlpha))
@@ -349,6 +353,7 @@ internal fun TvPlayerScreen(
                 onNext = ::next,
             )
         }
+        if (detailsShown) TvPlaybackDetails(state, engineState)
         TvSkipButton(state, skipShown, ui.controls, ui) { controller.skip() }
         TvUpNextCard(card, ui, onPlay = controller::playNext, onCancel = controller::cancelUpNext)
         if (!ui.controls) TvSeekBadge(seeker.badgeMs)
@@ -361,20 +366,27 @@ internal fun TvPlayerScreen(
 }
 
 /**
- * Subtitles over the video: the server's when it sends them, else the
- * file's own through the player; moved up above the controls while they
- * show. Collects the cues itself, so they change nothing else.
+ * Subtitles over the video: the server's and the file's own through the
+ * player. Text stays inside the TV's safe area, its last line
+ * [SUBTITLES_BOTTOM] above the bottom edge, and moves up above the
+ * controls while they show; it keeps its size either way. Pictures (PGS,
+ * VobSub) keep the places their frames give them on the whole screen.
+ * The cues are collected inside, so they recompose nothing else.
  */
 @Composable
-private fun PlayerSubtitles(controller: PlaybackController, player: Player?, style: SubtitleStyle, system: Boolean, lifted: Boolean) {
-    val cues by controller.cues.collectAsState()
-    Subtitles(
-        player,
-        style,
-        Modifier.fillMaxSize().padding(bottom = if (lifted) SUBTITLES_LIFT else 0.dp),
-        cues = cues.ifEmpty { null },
-        system = system,
+private fun PlayerSubtitles(controller: PlaybackController, player: Player?, look: CaptionLook, lifted: Boolean) {
+    val cues = controller.cues.collectAsState()
+    ScreenCaptions(
+        player = player,
+        serverCues = cues,
+        look = look,
+        pictures = false,
+        bottomPadding = if (lifted) SUBTITLES_LIFTED else SUBTITLES_BOTTOM,
+        sidePadding = TvSafeArea.Horizontal,
+        topPadding = TvSafeArea.Vertical,
+        modifier = Modifier.fillMaxSize(),
     )
+    ScreenCaptions(player = player, serverCues = cues, look = look, pictures = true, bottomPadding = 0.dp, modifier = Modifier.fillMaxSize())
 }
 
 /** Asks for the playback's details while the Info panel is open, and stops asking once it closes. */
@@ -408,7 +420,14 @@ private const val CHAPTER_SLACK_MS = 1_000L
 /** Previous restarts the chapter playing when it is this far in, else goes to the one before. */
 private const val RESTART_CHAPTER_MS = 3_000L
 
-/** Subtitles move up above the controls while they show. */
-private val SUBTITLES_LIFT = 150.dp
+/**
+ * Text subtitles' last line stays this far above the bottom edge: the
+ * safe area's 27 dp and a little more, so descenders and outlines clear
+ * an overscanned edge.
+ */
+internal val SUBTITLES_BOTTOM = TvSafeArea.Vertical + 13.dp
+
+/** While the controls show, above them: their times start at [TIMES_TOP] on the 540 dp canvas. */
+internal val SUBTITLES_LIFTED = PleyTv.CanvasHeight - TIMES_TOP + 12.dp
 
 internal const val TAG_PLAYER = "pley.tv.player"

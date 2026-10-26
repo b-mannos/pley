@@ -47,8 +47,18 @@ data class PlaybackStats(
     val dynamicRange: String? = null,
     /** The colour information as Media3 reads it (primaries, transfer, range). */
     val colorInfo: String? = null,
+    /** The video's bit depth as decoded (luma), when the format says. */
+    val bitDepth: Int? = null,
+    /** The video track's bitrate as the media declares it (an HLS variant's, a container's), bits per second. */
+    val videoBitrate: Int? = null,
     val audioCodec: String? = null,
     val audioChannels: Int? = null,
+    /** Hz. */
+    val audioSampleRate: Int? = null,
+    /** The audio track's declared bitrate, bits per second. */
+    val audioBitrate: Int? = null,
+    /** The network's speed as the player measures it, bits per second. */
+    val bandwidth: Long? = null,
     /** Media3's C.ENCODING_* of the audio output. */
     val audioEncoding: Int? = null,
     /** Encoded audio (AC3, E-AC3, TrueHD, DTS…) goes to the TV or receiver as it is. */

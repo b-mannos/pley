@@ -82,6 +82,12 @@ data class MediaStream(
     val dvLevel: Int? = null,
     /** Dolby Vision base-layer compatibility: 0 none, 1 HDR10, 2 SDR, 4 HLG. */
     val dvBlCompat: Int? = null,
+    /**
+     * HDR10+ metadata in a Dolby Vision stream's first frames: `true` is a
+     * Dolby Vision + HDR10+ stream; `null` when not looked for (other
+     * streams, or an older server).
+     */
+    val hdr10plus: Boolean? = null,
     /** "smpte2084", "arib-std-b67", "bt709"… */
     val colorTransfer: String? = null,
     val colorPrimaries: String? = null,

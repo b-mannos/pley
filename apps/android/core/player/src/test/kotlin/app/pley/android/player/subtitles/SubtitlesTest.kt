@@ -37,6 +37,22 @@ class SubtitlesTest {
     private fun texts(cues: List<Cue>) = cues.map { it.text.toString() }
 
     @Test
+    fun `cues without a line sit on the area's last line, so the screen pads the area`() {
+        // SubtitleView draws a cue on line -1 flush with its area's bottom, not 8 % above it:
+        // a player that doesn't pad the view puts the server's subtitles on the screen's edge.
+        val cue = Media3VttParser.parse(vtt).first().cues.single()
+        assertEquals(Cue.LINE_TYPE_NUMBER, cue.lineType)
+        assertEquals(-1f, cue.line)
+    }
+
+    @Test
+    fun `the settings' size and background, and pley's style once either was chosen`() {
+        assertEquals(CaptionLook(0.048f, box = false, custom = false), CaptionLook.of(app.pley.android.data.Settings()))
+        val big = app.pley.android.data.Settings(subtitleSize = 0.075f, subtitleBackground = app.pley.android.data.SubtitleBackground.DarkBox)
+        assertEquals(CaptionLook(0.076f, box = true, custom = true), CaptionLook.of(big))
+    }
+
+    @Test
     fun `Media3's parser reads times, text, styling and lines`() {
         val index = SubtitleIndex(Media3VttParser.parse(vtt))
         assertEquals(69_000L, index.endMs)

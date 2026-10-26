@@ -721,6 +721,7 @@ class SessionPlaybackController(
             positionMs = livePosition(),
             live = live,
             engine = link?.stats().orEmpty(),
+            subtitle = subtitle,
         )
         ui.update { it.copy(details = details) }
     }

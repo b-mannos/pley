@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
-import android.view.accessibility.CaptioningManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
@@ -15,13 +14,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import app.pley.android.common.perf.PerfMonitor
-import app.pley.android.data.Settings as PleySettings
-import app.pley.android.data.SubtitleBackground
 import app.pley.android.player.PlaybackController
 import app.pley.android.player.PlayerEngine
 import app.pley.android.player.PlayerPhase
-import app.pley.android.player.engine.SubtitleStyle
 import app.pley.android.player.engine.VideoMediaSession
+import app.pley.android.player.subtitles.CaptionLook
 import app.pley.android.player.session.SavedPlaybackState
 import app.pley.android.screens.PleyGraphOwner
 import app.pley.android.screens.ScreensGraph
@@ -63,7 +60,10 @@ class TvPlayerActivity : ComponentActivity() {
 
     private var session: VideoMediaSession? = null
     private var attached: PlayerEngine? = null
-    private var subtitleStyle by mutableStateOf(SubtitleStyle())
+    private var captionLook by mutableStateOf(CaptionLook())
+
+    /** Settings → Playback details: the readout shows over the video. */
+    private var showDetails by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,7 +76,6 @@ class TvPlayerActivity : ComponentActivity() {
             finish()
             return
         }
-        val captions = getSystemService(CaptioningManager::class.java)
         setContent {
             TvTheme(tier = graph.device.tier) {
                 val playing = controller
@@ -85,8 +84,8 @@ class TvPlayerActivity : ComponentActivity() {
                         TvPlayerScreen(
                             controller = playing,
                             onExit = ::finish,
-                            subtitleStyle = subtitleStyle,
-                            systemCaptions = captions?.isEnabled == true,
+                            captionLook = captionLook,
+                            showDetails = showDetails,
                         )
                     }
                 }
@@ -175,11 +174,14 @@ class TvPlayerActivity : ComponentActivity() {
         }
     }
 
-    /** Subtitles as Settings → Subtitles says (size and background). */
+    /** Subtitles as Settings → Subtitles says (size and background), and whether Playback details show. */
     private fun followSettings() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                graph.data.settings.settings.map { styleOf(it) }.distinctUntilChanged().collect { subtitleStyle = it }
+                graph.data.settings.settings.map { CaptionLook.of(it) to it.showPlaybackDetails }.distinctUntilChanged().collect { (look, details) ->
+                    captionLook = look
+                    showDetails = details
+                }
             }
         }
     }
@@ -194,13 +196,5 @@ class TvPlayerActivity : ComponentActivity() {
 
         fun intent(context: Context, playback: String): Intent =
             Intent(context, TvPlayerActivity::class.java).putExtra(EXTRA_PLAYBACK, playback)
-
-        /** The settings' subtitle size (one of Settings.SUBTITLE_SIZES) and background, as the player draws them. */
-        internal fun styleOf(settings: PleySettings): SubtitleStyle {
-            val sizes = PleySettings.SUBTITLE_SIZES
-            val nearest = sizes.indices.minByOrNull { kotlin.math.abs(sizes[it] - settings.subtitleSize) } ?: 1
-            val size = SubtitleStyle.Size.entries.getOrElse(nearest) { SubtitleStyle.Size.Normal }
-            return SubtitleStyle(size = size, box = settings.subtitleBackground == SubtitleBackground.DarkBox)
-        }
     }
 }

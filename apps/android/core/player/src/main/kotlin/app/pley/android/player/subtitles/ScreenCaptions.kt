@@ -17,6 +17,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.Player
 import androidx.media3.common.text.Cue
@@ -24,6 +25,9 @@ import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
+import app.pley.android.data.Settings
+import app.pley.android.data.SubtitleBackground
+import kotlin.math.abs
 
 /**
  * How pley draws text subtitles (apps/web/src/player/subtitles.ts): white,
@@ -57,6 +61,16 @@ data class CaptionLook(
 
         /** 66 % black. */
         const val BOX_COLOR = 0xA8000000.toInt()
+
+        /** How subtitles look with [settings] (Settings → Subtitles): the size nearest theirs, and pley's own style once either was chosen. */
+        fun of(settings: Settings): CaptionLook {
+            val defaults = Settings()
+            return CaptionLook(
+                textFraction = Settings.SUBTITLE_SIZES.minBy { abs(it - settings.subtitleSize) },
+                box = settings.subtitleBackground == SubtitleBackground.DarkBox,
+                custom = settings.subtitleSize != defaults.subtitleSize || settings.subtitleBackground != defaults.subtitleBackground,
+            )
+        }
     }
 }
 
@@ -69,7 +83,9 @@ data class CaptionLook(
  * pictures inside the visible part of the video and text over all of it.
  *
  * [bottomPadding] keeps them clear of the bottom edge, and lifts them above
- * the player's controls while those show; the text keeps its size. Cue
+ * the player's controls while those show; [sidePadding] and [topPadding]
+ * keep long lines and cues placed at the top inside a TV's safe area. The
+ * text keeps its size: a share of the whole height, padding or not. Cue
  * changes redraw the view without recomposing anything.
  */
 @OptIn(UnstableApi::class)
@@ -81,9 +97,14 @@ fun ScreenCaptions(
     pictures: Boolean,
     bottomPadding: Dp,
     modifier: Modifier = Modifier,
+    sidePadding: Dp = 0.dp,
+    topPadding: Dp = 0.dp,
 ) {
     val context = LocalContext.current
-    val padding = with(LocalDensity.current) { bottomPadding.roundToPx() }
+    val density = LocalDensity.current
+    val padding = with(density) { bottomPadding.roundToPx() }
+    val side = with(density) { sidePadding.roundToPx() }
+    val top = with(density) { topPadding.roundToPx() }
     val system = remember(context) { mutableStateOf(systemCaptionsOn(context)) }
     // The system's style or size changed: the view reads them again.
     val changes = remember { mutableIntStateOf(0) }
@@ -129,7 +150,8 @@ fun ScreenCaptions(
             changes.intValue
             // The view lays its cues out inside its padding: sizes are scaled back up to the whole height's.
             val h = height.intValue
-            val scale = if (h > padding && padding > 0) h.toFloat() / (h - padding) else 1f
+            val inside = h - padding - top
+            val scale = if (inside in 1 until h) h.toFloat() / inside else 1f
             val manager = view.context.getSystemService(CaptioningManager::class.java)
             if (system.value && !look.custom && manager != null) {
                 view.setUserDefaultStyle()
@@ -140,7 +162,7 @@ fun ScreenCaptions(
             }
             view.setApplyEmbeddedFontSizes(false)
             // Media3 leaves cues on the last line at the very bottom: the view's own padding lifts all of them.
-            if (view.paddingBottom != padding) view.setPadding(0, 0, 0, padding)
+            if (view.paddingBottom != padding || view.paddingTop != top || view.paddingLeft != side) view.setPadding(side, top, side, padding)
             val showing = serverCues.value + engineCues.value
             view.setCues(showing.filter { (it.bitmap != null) == pictures })
         },

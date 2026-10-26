@@ -278,6 +278,7 @@ private fun mediaInfo(files: List<MediaFile>): List<FileInfo> = files.mapIndexed
             .filter { it.kind != StreamKind.Unknown }
             .sortedWith(compareBy({ it.kind.ordinal }, { it.index }))
             .map { s -> StreamInfo(s.kind, codecLabel(s.codec), languageName(s.language), s.title?.takeIf { it.isNotBlank() }, streamDetails(s)) },
+        file = f,
     )
 }
 
