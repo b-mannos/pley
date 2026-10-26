@@ -139,6 +139,10 @@ internal fun PhoneSignInScreen(preselect: String?) {
         onSelect = servers::select,
         onForget = servers::forget,
         onConnect = { servers.connect(it, open = false) },
+        onConnectAndContinue = { address ->
+            viaCode = false
+            servers.connect(address, open = true)
+        },
         onAddressEdited = servers::addressEdited,
         onSearchAgain = servers::search,
         onDemo = servers::useDemo,
@@ -191,6 +195,8 @@ internal fun PhoneSignInContent(
     onUseCode: () -> Unit,
     onRetry: () -> Unit,
     onOpenInBrowser: (String) -> Unit,
+    /** Continue with the address typed, once it answers: the button under the field says Continue, so it goes there. */
+    onConnectAndContinue: (String) -> Unit = onConnect,
 ) {
     var forgetting by remember { mutableStateOf<ServerRow?>(null) }
     var addressOpen by rememberSaveable { mutableStateOf(false) }
@@ -287,11 +293,23 @@ internal fun PhoneSignInContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 SignInStatus(signIn, state, onRetry, onOpenInBrowser)
+                // An address typed and not connected yet is what Continue means: the
+                // field's own Connect may be scrolled away under the keyboard.
+                val typed = addressOpen && address.isNotBlank()
                 PrimaryButton(
                     text = stringResource(if (withoutBrowser) R.string.onboarding_code_primary else R.string.onboarding_continue),
-                    onClick = if (withoutBrowser) onUseCode else onContinue,
+                    onClick = when {
+                        typed -> {
+                            {
+                                submitted = true
+                                onConnectAndContinue(address)
+                            }
+                        }
+                        withoutBrowser -> onUseCode
+                        else -> onContinue
+                    },
                     icon = if (withoutBrowser) null else GlobeIcon,
-                    enabled = state.selected != null && !busy,
+                    enabled = (state.selected != null || typed) && !busy && !state.checkingAddress,
                     modifier = Modifier.fillMaxWidth().testTag(CONTINUE_TAG),
                 )
             }
