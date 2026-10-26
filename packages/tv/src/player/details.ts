@@ -16,6 +16,9 @@ export const T = {
   slowServer: "The server can't convert this video as fast as it plays. A lower quality will play smoothly.",
   noFile: "This item has no file to play.",
   burnedIn: "Drawn onto the video",
+  reconnecting: "Reconnecting…",
+  offlineTitle: "Can't reach your server",
+  offlineBody: "Check that the server is on and that this device is on its network.",
 } as const;
 
 export function methodText(info: PlaybackInfo): string {

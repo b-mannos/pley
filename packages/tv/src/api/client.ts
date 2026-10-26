@@ -275,8 +275,13 @@ export class Api {
     return this.send("/api/playback", { method: "POST", body: req, cancel, timeoutMs: 60_000 }).then((r) => r.body as PlaybackInfo);
   }
 
-  sessionStatus(session: string, cancel?: Cancel): Promise<SessionStatus> {
-    return this.get(`/api/playback/${encodeURIComponent(session)}`, { cancel });
+  sessionStatus(session: string, cancel?: Cancel, timeoutMs?: number): Promise<SessionStatus> {
+    return this.get(`/api/playback/${encodeURIComponent(session)}`, { cancel, timeoutMs });
+  }
+
+  /** Whether the server answers at all (a player reconnecting without a session to ask about). */
+  reachable(timeoutMs: number): Promise<unknown> {
+    return this.get("/api/server", { timeoutMs });
   }
 
   stopSession(session: string): Promise<unknown> {

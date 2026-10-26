@@ -811,6 +811,8 @@ html.avplay .engine-host { background: transparent; }
 
 .seek-badge { position: absolute; top: 238px; width: 64px; height: 64px; border-radius: 6px; background: rgba(11, 13, 16, 0.6); color: var(--fg); display: flex; align-items: center; justify-content: center; z-index: 5; }
 .player-ring { position: absolute; left: 460px; top: 250px; width: 40px; height: 40px; z-index: 5; }
+/* 16 under the ring, centred on it, on the page colour at 60 %. */
+.player-reconnecting { position: absolute; left: 480px; top: 306px; transform: translateX(-50%); padding: 6px 12px; border-radius: 6px; background: rgba(11, 13, 16, 0.6); white-space: nowrap; z-index: 5; }
 .player-ring > div {
   width: 36px;
   height: 36px;

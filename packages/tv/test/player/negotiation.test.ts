@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Api } from "../../src/api/client";
 import type { ClientCaps, ItemDetail, MediaFile, MediaStream, PlaybackInfo, PlaybackRequest, ServerEvent } from "../../src/api/types";
 import type { KeyValue } from "../../src/auth/tokens";
@@ -7,6 +7,7 @@ import type { EngineListener, EngineSource, EngineStatus, PlayerEngine } from ".
 import { dvContainerMode, dvRetryMode, playbackRequest, type Choices } from "../../src/player/plan";
 import { ORIGINAL } from "../../src/player/quality";
 import { Reporter } from "../../src/player/reporter";
+import { NetworkError } from "../../src/net/transport";
 import { OffsetStore } from "../../src/subs/sync";
 
 // ---- fixtures
@@ -219,18 +220,23 @@ function world(detail: ItemDetail, answer: (req: PlaybackRequest) => PlaybackInf
   const calls: string[] = [];
   const requests: PlaybackRequest[] = [];
   const listeners: ((e: ServerEvent) => void)[] = [];
+  /** `down`: nothing answers (the Wi-Fi dropped, the server restarts). */
+  const net = { down: false };
+  const answered = <T>(value: () => T): Promise<T> => (net.down ? Promise.reject(new NetworkError("Can't reach the server")) : Promise.resolve(value()));
   const api = {
     server: "http://nas:7539",
     url: (p: string) => (/^https?:/.test(p) ? p : `http://nas:7539${p}`),
     item: async () => detail,
-    play: async (req: PlaybackRequest) => {
-      requests.push(req);
-      calls.push(`start ${req.mode}`);
-      return answer(req);
-    },
+    play: (req: PlaybackRequest) =>
+      answered(() => {
+        requests.push(req);
+        calls.push(`start ${req.mode}`);
+        return answer(req);
+      }),
     progress: async (_id: number, pos: number, _d: number | null, state: string) => void calls.push(`progress ${state} ${Math.round(pos)}`),
     stopSession: async (id: string) => void calls.push(`delete ${id}`),
-    sessionStatus: async () => ({ session_id: "s1", method: "direct", transcode: null }),
+    sessionStatus: () => answered(() => ({ session_id: "s1", method: "direct", transcode: null })),
+    reachable: () => answered(() => ({})),
     setStreams: async () => undefined,
     trickplay: async () => {
       throw new Error("not ready");
@@ -254,7 +260,7 @@ function world(detail: ItemDetail, answer: (req: PlaybackRequest) => PlaybackInf
       return () => undefined;
     },
   };
-  return { env, engine, calls, requests, send: (e: ServerEvent) => listeners.forEach((l) => l(e)) };
+  return { env, engine, calls, requests, net, send: (e: ServerEvent) => listeners.forEach((l) => l(e)) };
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 20));
@@ -329,6 +335,88 @@ describe("a playback session", () => {
     await new Promise((r) => setTimeout(r, 2_200));
     expect(w.requests.map((r) => r.mode)).toEqual(["auto", "transcode"]);
     expect(w.engine.prepared[1]).toMatchObject({ hls: true, url: "http://nas:7539/api/media/pley_mk_KEY2/master.m3u8" });
+    c.close();
+  });
+});
+
+describe("the server out of reach", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A playback that has shown its picture, on a clock the test moves. */
+  async function playing() {
+    vi.useFakeTimers();
+    const w = world(item(file()), () => info());
+    w.env.now = () => Date.now();
+    const c = new PlaybackController({ itemId: 70 }, w.env, 0);
+    c.start();
+    await vi.advanceTimersByTimeAsync(50);
+    w.engine.state = "ready";
+    w.engine.listener?.status("ready");
+    return { w, c };
+  }
+
+  it("keeps the place and waits for the server, then starts again where it was", async () => {
+    const { w, c } = await playing();
+    w.net.down = true;
+    w.engine.state = "buffering";
+    w.engine.listener?.error({ kind: "network", detail: "connection failed" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(c.state.value.reconnecting).toBe(true);
+    expect(c.state.value.phase.kind).toBe("buffering");
+    // Away 30 s: no session spent, no conversion, no error.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(w.requests.length).toBe(1);
+    expect(c.state.value.phase.kind).toBe("buffering");
+    w.net.down = false;
+    await vi.advanceTimersByTimeAsync(2_100);
+    expect(c.state.value.reconnecting).toBe(false);
+    expect(w.requests.map((r) => [r.mode, r.start_ms])).toEqual([
+      ["auto", 600_000],
+      ["auto", 600_000],
+    ]);
+    c.close();
+  });
+
+  it("says so after 90 s, and Try again starts over", async () => {
+    const { w, c } = await playing();
+    w.net.down = true;
+    w.engine.listener?.error({ kind: "network", detail: "connection failed" });
+    await vi.advanceTimersByTimeAsync(89_000);
+    expect(c.state.value.phase.kind).toBe("buffering");
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(c.state.value.phase).toMatchObject({ kind: "error", title: "Can't reach your server", canRetry: true });
+    expect(c.state.value.reconnecting).toBe(false);
+    w.net.down = false;
+    c.retry();
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(w.requests.length).toBe(2);
+    expect(c.state.value.phase.kind).not.toBe("error");
+    c.close();
+  });
+
+  it("says so at once when the server is off as play is pressed", async () => {
+    vi.useFakeTimers();
+    const w = world(item(file()), () => info());
+    w.net.down = true;
+    const c = new PlaybackController({ itemId: 70 }, w.env, 0);
+    c.start();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(c.state.value.phase).toMatchObject({ kind: "error", title: "Can't reach your server", canRetry: true });
+    c.close();
+  });
+
+  it("waits for the server, rather than converting the video, when a stall finds it gone", async () => {
+    const { w, c } = await playing();
+    w.net.down = true;
+    w.engine.state = "buffering";
+    // The TV's own player says nothing: 12 s without moving.
+    await vi.advanceTimersByTimeAsync(13_000);
+    expect(c.state.value.reconnecting).toBe(true);
+    w.net.down = false;
+    await vi.advanceTimersByTimeAsync(2_100);
+    expect(w.requests.map((r) => r.mode)).toEqual(["auto", "auto"]);
     c.close();
   });
 });

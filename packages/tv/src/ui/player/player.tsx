@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/ho
 import { formatClock, formatTimeOfDay } from "../../format/format";
 import { initMusic } from "../../player/music";
 import { PlaybackController, type PlayerEnv, type SavedPlayback } from "../../player/controller";
+import { T } from "../../player/details";
 import type { PlayRequest } from "../../player/plan";
 import { thumbnailAt, sheetPath } from "../../player/nextup";
 import { badgeText, MEDIA_STEP_MS, Seeker, STEP_MS } from "../../player/seeker";
@@ -507,11 +508,16 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
           <div />
         </div>
       )}
+      {ring && !error && s.reconnecting && (
+        <div class="player-reconnecting t-label c-fg" role="status" aria-live="polite">
+          {T.reconnecting}
+        </div>
+      )}
       {panel && <PlayerPanels panel={panel} state={s} controller={c} positionMs={position} onClose={closePanel} stats={engineStats} engineName={c.engine?.name ?? ""} />}
       {error && (
         <div class="player-error">
           <div class="t-page c-fg" style="text-align:center">
-            {s.stoppedByServer ? "Playback stopped" : "Can't play this item"}
+            {s.stoppedByServer ? "Playback stopped" : error.title ?? "Can't play this item"}
           </div>
           <div class="t-body c-muted lines-4" style="margin-top:12px;text-align:center;white-space:pre-line">
             {error.message}
