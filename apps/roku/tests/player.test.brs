@@ -11,12 +11,41 @@ sub test_player_progress_bodies()
 end sub
 
 sub test_player_tells_media_errors_from_stream_errors()
-    tkEqual(playerErrorKind(-1, { category: "http", errcode: 401, dbgmsg: "" }), "stream")
-    tkEqual(playerErrorKind(-5, { category: "mediaerror" }), "media")
-    tkEqual(playerErrorKind(-5, invalid), "media")
-    tkEqual(playerErrorKind(-6, invalid), "media")
-    tkEqual(playerErrorKind(-1, invalid), "stream")
-    tkEqual(playerErrorKind(-3, {}), "stream")
+    tkEqual(playerErrorKind(-1, { category: "http", errcode: 401, dbgmsg: "" }, true), "stream")
+    tkEqual(playerErrorKind(-5, { category: "mediaerror" }, true), "media")
+    tkEqual(playerErrorKind(-5, invalid, true), "media")
+    tkEqual(playerErrorKind(-6, invalid, true), "media")
+    tkEqual(playerErrorKind(-1, invalid, true), "stream")
+    tkEqual(playerErrorKind(-3, {}, true), "stream")
+end sub
+
+sub test_player_converts_what_fails_before_it_plays()
+    tkEqual(playerErrorKind(-1, invalid, false), "media", "the first picture never came")
+    tkEqual(playerErrorKind(-3, { category: "network" }, false), "media")
+    tkEqual(playerErrorKind(-1, { category: "http", errcode: 404 }, false), "stream", "HTTP stays the session's")
+end sub
+
+sub test_player_asks_for_picture_subtitles_to_be_drawn()
+    file = {
+        id: 7,
+        selected_subtitle: 4,
+        streams: [
+            { index: 0, kind: "video", codec: "h264" },
+            { index: 3, kind: "subtitle", codec: "subrip", text_based: true },
+            { index: 4, kind: "subtitle", codec: "hdmv_pgs_subtitle", text_based: false },
+            { index: 5, kind: "subtitle", codec: "dvd_subtitle" }
+        ]
+    }
+    tkEqual(playerBurnIndex(file), 4)
+    file.selected_subtitle = 3
+    tkEqual(playerBurnIndex(file), -1, "text: the Video node shows it")
+    file.selected_subtitle = 5
+    tkEqual(playerBurnIndex(file), -1, "not said to be a picture")
+    file.selected_subtitle = invalid
+    tkEqual(playerBurnIndex(file), -1, "none picked")
+    file.selected_subtitle = 9
+    tkEqual(playerBurnIndex(file), -1, "no such stream")
+    tkEqual(playerBurnIndex(invalid), -1)
 end sub
 
 sub test_player_reads_the_sessions_status()

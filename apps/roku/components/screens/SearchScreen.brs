@@ -35,7 +35,7 @@ sub search()
     m.query = query
     if query = ""
         m.path = ""
-        m.grid.visible = false
+        hideGrid()
         showMessage("Type to search your libraries.")
         return
     end if
@@ -52,13 +52,19 @@ sub onResults(event as object)
         return
     end if
     if answer.data.shown = 0
-        m.grid.visible = false
+        hideGrid()
         showMessage("Nothing found for “" + m.query + "”.")
         return
     end if
     m.message.visible = false
     m.grid.content = request.content
     m.grid.visible = true
+end sub
+
+' The keyboard takes the focus before the results it was on go.
+sub hideGrid()
+    if m.grid.isInFocusChain() then m.keyboard.setFocus(true)
+    m.grid.visible = false
 end sub
 
 sub showMessage(text as string)

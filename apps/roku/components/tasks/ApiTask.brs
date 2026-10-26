@@ -15,9 +15,11 @@ sub apiRun()
     m.clock = CreateObject("roTimespan")
     m.serversSection = CreateObject("roRegistrySection", "servers")
     m.tokensSection = CreateObject("roRegistrySection", "tokens")
-    ' Transfers under way by identity, and requests waiting for a refresh.
+    ' Transfers under way by identity, requests waiting for a refresh, and
+    ' transfers sent again later ({ at, job }).
     m.transfers = {}
     m.waiting = []
+    m.later = []
     ' Servers (issuers) with a refresh under way.
     m.refreshing = {}
     ' The access token the last refresh gave, and when: { token, at }.
@@ -64,9 +66,10 @@ function apiNow() as integer
     return CreateObject("roDateTime").AsSeconds()
 end function
 
-' Timers need a tick while transfers or a sign-in are under way.
+' Timers need a tick while transfers, a sign-in or a later transfer are
+' under way.
 function apiWaitMs() as integer
-    if m.transfers.Count() > 0 or m.signIn <> invalid then return 250
+    if m.transfers.Count() > 0 or m.signIn <> invalid or m.later.Count() > 0 then return 250
     return 0
 end function
 
@@ -119,7 +122,7 @@ end sub
 
 ' A transfer to send; purpose says what its answer is for.
 function apiJob(purpose as string, method as string, url as string) as object
-    return { purpose: purpose, method: method, url: url, body: "", contentType: "", auth: false, sent: "", retried: false, request: invalid, server: m.server, timeoutMs: 30000 }
+    return { purpose: purpose, method: method, url: url, body: "", contentType: "", auth: false, sent: "", retried: false, request: invalid, server: m.server, timeoutMs: 30000, play: false }
 end function
 
 function apiForm(job as object, params as object) as object
@@ -129,9 +132,11 @@ function apiForm(job as object, params as object) as object
 end function
 
 ' A request of the screens: { method, path, query, json, auth, timeoutMs,
-' build }, to the current server, with the token unless auth is false.
-' build ("rows", "tiles", "seasons", "episodes") makes the answer's list
-' into ContentNodes here, off the render thread (apiBuild).
+' build, known }, to the current server, with the token unless auth is
+' false. build ("rows", "tiles", "seasons", "episodes") makes the
+' answer's list into ContentNodes here, off the render thread (apiBuild);
+' for "rows", known holds the signatures of the rows Home shows, which
+' aren't built again.
 sub apiCall(request as object, spec as object)
     if m.server = ""
         apiAnswer(request, apiFail("no_server", "Choose a server first."))
@@ -142,6 +147,8 @@ sub apiCall(request as object, spec as object)
     job = apiJob("call", method, m.server + urlWithQuery(httpString(spec.path), spec.query))
     job.request = request
     job.build = httpString(spec.build)
+    job.known = spec.known
+    job.play = httpTrue(spec.play)
     job.auth = true
     if GetInterface(spec.auth, "ifBoolean") <> invalid then job.auth = spec.auth
     if spec.json <> invalid
@@ -157,6 +164,9 @@ sub apiSend(job as object)
     if job.auth
         decision = authBeforeRequest(m.tokens, apiNow(), m.refreshing.DoesExist(m.server))
         if decision = "signed_out"
+            ' The token ran out with nothing to refresh it: the scene shows
+            ' sign-in.
+            if m.tokens <> invalid then apiEnd("ended")
             apiAnswer(job.request, apiSignedOut())
             return
         end if
@@ -216,11 +226,18 @@ sub apiAnswered(job as object, status as integer, body as string, headers as dyn
         apiDeviceAnswered(job, status, body)
     else if purpose = "poll"
         apiPollAnswered(job, status, body)
+    else if purpose = "revoke"
+        ' The app signed out whatever the answer; a busy server is asked
+        ' once more.
+        if authRevokeAgain(status, job.retried)
+            job.retried = true
+            m.later.Push({ at: m.clock.TotalMilliseconds() + 3000, job: job })
+        end if
     end if
-    ' "revoke": the app signed out whatever the server answered.
 end sub
 
-' Transfers that hang are cancelled; the device code is polled on time.
+' Transfers that hang are cancelled, later ones go when due, and the
+' device code is polled on time.
 sub apiTick()
     now = m.clock.TotalMilliseconds()
     for each key in m.transfers.Keys()
@@ -231,6 +248,21 @@ sub apiTick()
             apiAnswered(job, -28, "", invalid)
         end if
     end for
+    if m.later.Count() > 0
+        due = []
+        waiting = []
+        for each entry in m.later
+            if now >= entry.at
+                due.Push(entry.job)
+            else
+                waiting.Push(entry)
+            end if
+        end for
+        m.later = waiting
+        for each job in due
+            apiSend(job)
+        end for
+    end if
     apiPollWhenDue(now)
 end sub
 
@@ -256,8 +288,30 @@ sub apiCallAnswered(job as object, status as integer, body as string, headers as
         end if
     end if
     answer = httpAnswer(status, body)
+    if answer.ok and job.play and apiAbandoned(job.request)
+        ' The player left before its session came: the server would go on
+        ' preparing it.
+        apiCloseSession(answer.data)
+        return
+    end if
     if answer.ok and job.build <> "" then apiBuild(job, answer)
     apiAnswer(job.request, answer)
+end sub
+
+function apiAbandoned(request as dynamic) as boolean
+    if request = invalid then return false
+    return request.abandoned = true
+end function
+
+' DELETE /api/playback/{session} of a PlaybackInfo; nothing waits for it.
+sub apiCloseSession(info as dynamic)
+    data = httpObject(info)
+    if data = invalid then return
+    sessionId = httpString(data.session_id)
+    if sessionId = "" then return
+    job = apiJob("close", "DELETE", m.server + "/api/playback/" + urlEncode(sessionId))
+    job.auth = true
+    apiSend(job)
 end sub
 
 ' The list of an answer as ContentNodes, in the request's content; the
@@ -268,13 +322,10 @@ sub apiBuild(job as object, answer as object)
     if data = invalid then data = {}
     server = job.server
     if job.build = "rows"
-        rows = contentHomeRows(data.hubs, invalid, server)
-        summary = []
-        for each row in rows
-            summary.Push({ title: row.title, wide: row.wide, size: row.tiles.Count() })
-        end for
-        job.request.content = nodesRows(rows)
-        answer.data = { rows: summary }
+        ' Rows Home shows as they are aren't made again.
+        changes = contentRowChanges(data.hubs, invalid, server, job.known)
+        job.request.content = nodesRows(changes.changed)
+        answer.data = { rows: changes.summary }
     else if job.build = "tiles"
         items = httpArray(data.items)
         tiles = contentTiles(items, server)
@@ -304,6 +355,9 @@ sub apiRefresh()
     m.refreshing[tokens.issuer] = true
     job = apiForm(apiJob("refresh", "POST", tokens.tokenEndpoint), { grant_type: "refresh_token", refresh_token: tokens.refresh, client_id: httpClientId() })
     job.tokens = tokens
+    ' An answer given up on can be a refresh token the server has spent:
+    ' a refresh is waited for much longer than other requests.
+    job.timeoutMs = 120000
     apiSend(job)
 end sub
 
@@ -312,6 +366,9 @@ sub apiRefreshAnswered(job as object, status as integer, body as string)
     m.refreshing.Delete(old.issuer)
     ' Still the tokens in use: the same server, not signed in again since.
     current = m.tokens <> invalid and m.tokens.issuer = old.issuer and m.tokens.refresh = old.refresh
+    ' Still the tokens kept for that server: not signed out, the server not
+    ' forgotten, no code sign-in since.
+    kept = authRefreshKept(tokensLoad(m.tokensSection, old.issuer), old)
     outcome = authRefreshOutcome(status, body)
     fresh = invalid
     reason = "ended"
@@ -331,9 +388,13 @@ sub apiRefreshAnswered(job as object, status as integer, body as string)
     else if fresh = invalid
         if current
             apiEnd(reason)
-        else
+        else if kept
             tokensWipe(m.tokensSection, old.issuer)
         end if
+    else if not kept
+        ' Ended here while the refresh was under way: so are its tokens, and
+        ' what replaced them stays.
+        apiRevoke(fresh)
     else
         ' Saved before it is used: the old refresh token is spent.
         tokensSave(m.tokensSection, fresh)
@@ -473,6 +534,8 @@ sub apiCheckServer(request as object, spec as object)
         return
     end if
     job = apiJob("check", "GET", candidates[0] + "/api/server")
+    ' Each address it could be gets a few seconds, not a request's 30.
+    job.timeoutMs = 8000
     job.request = request
     job.candidates = candidates
     job.index = 0
@@ -681,7 +744,8 @@ end sub
 ' --- Playback ---
 
 ' POST /api/playback with what this Roku plays, asked of it now. mode is
-' "auto", or "transcode" once the original didn't play here.
+' "auto", or "transcode" once the original didn't play here;
+' subtitleIndex, picture subtitles for the server to draw.
 sub apiPlay(request as object, spec as object)
     mode = httpString(spec.mode)
     if mode = "" then mode = "auto"
@@ -693,6 +757,7 @@ sub apiPlay(request as object, spec as object)
         caps: capsBuild(CreateObject("roDeviceInfo"))
     }
     if httpNumber(spec.fileId, 0) > 0 then body.file_id = spec.fileId
+    if httpNumber(spec.subtitleIndex, -1) >= 0 then body.subtitle_index = Int(spec.subtitleIndex)
     ' Starting a transcode takes the server a few seconds.
-    apiCall(request, { method: "POST", path: "/api/playback", json: body, timeoutMs: 60000 })
+    apiCall(request, { method: "POST", path: "/api/playback", json: body, timeoutMs: 60000, play: true })
 end sub

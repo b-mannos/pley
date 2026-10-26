@@ -17,7 +17,7 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Player.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Content.brs" />
     <children>
-        <Poster id="backdrop" width="1920" height="1080" loadWidth="1280" loadHeight="720" loadDisplayMode="scaleToZoom" opacity="0.15" />
+        <Poster id="backdrop" width="1920" height="1080" loadWidth="640" loadHeight="360" loadDisplayMode="scaleToZoom" opacity="0.15" />
         <Label id="title" translation="[96, 64]" width="540" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
         <Label id="meta" translation="[96, 196]" width="540" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
         <ButtonGroup id="play" iconUri="" focusedIconUri="" translation="[96, 250]" minWidth="520" maxWidth="540" visible="false" />

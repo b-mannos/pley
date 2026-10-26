@@ -127,6 +127,20 @@ sub test_auth_shows_user_codes_in_two_halves()
     tkEqual(authShownCode("ABC"), "ABC")
 end sub
 
+sub test_auth_keeps_a_refresh_only_while_its_sign_in_lasts()
+    old = { issuer: "http://nas:7539", access: "a1", refresh: "r1" }
+    tkTrue(authRefreshKept({ issuer: "http://nas:7539", access: "a1", refresh: "r1" }, old))
+    tkFalse(authRefreshKept(invalid, old), "signed out or the server forgotten meanwhile")
+    tkFalse(authRefreshKept({ issuer: "http://nas:7539", access: "a9", refresh: "r9" }, old), "signed in again with a code meanwhile")
+end sub
+
+sub test_auth_revokes_again_once_when_the_server_is_busy()
+    tkTrue(authRevokeAgain(503, false))
+    tkFalse(authRevokeAgain(503, true), "once")
+    tkFalse(authRevokeAgain(200, false))
+    tkFalse(authRevokeAgain(-28, false))
+end sub
+
 sub test_auth_asks_the_server_for_the_codes_qr_code()
     tkEqual(authQrAddress("http://192.168.1.20:7539", "BCDF-GHJK"), "http://192.168.1.20:7539/api/oauth/device/qr?code=BCDFGHJK")
     tkEqual(authQrAddress("https://pley.example.com", "bcdf ghjk"), "https://pley.example.com/api/oauth/device/qr?code=BCDFGHJK")

@@ -91,8 +91,8 @@ sub render()
     m.list.content = nodesContent(items)
     m.list.jumpToItem = focusIndex
     m.hint.visible = anySaved
-    ' The first servers to show take the focus, once.
-    if m.rows.Count() > 0 and not m.listFocused and m.top.active
+    ' The first servers to show take the focus, once, unless a dialog has it.
+    if m.rows.Count() > 0 and not m.listFocused and m.top.isInFocusChain()
         m.listFocused = true
         m.list.setFocus(true)
     end if
@@ -190,7 +190,7 @@ sub onForgotten(event as object)
     answer = event.getData()
     if answer.ok then m.saved = answer.data.servers
     render()
-    if m.rows.Count() = 0 then m.actions.setFocus(true)
+    if m.rows.Count() = 0 and m.top.isInFocusChain() then m.actions.setFocus(true)
 end sub
 
 function onKeyEvent(key as string, press as boolean) as boolean

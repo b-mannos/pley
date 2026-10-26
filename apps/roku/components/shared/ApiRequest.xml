@@ -9,5 +9,8 @@
         <!-- { ok, status, data, error, message } -->
         <field id="result" type="assocarray" alwaysNotify="true" />
         <field id="update" type="assocarray" alwaysNotify="true" />
+        <!-- Set by the player that asked, once it no longer wants the answer:
+             a playback session that comes after is closed at once. -->
+        <field id="abandoned" type="boolean" />
     </interface>
 </component>

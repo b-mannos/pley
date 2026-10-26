@@ -21,14 +21,14 @@
         <Label id="intro" translation="[96, 306]" width="1500" color="0xEB6B70FF" visible="false" font="font:SmallerSystemFont" />
         <Group id="steps">
             <Label translation="[96, 380]" text="On your phone or computer, go to" color="0xEBEBEBFF" font="font:MediumSystemFont" />
-            <Label id="url" translation="[96, 432]" width="1248" color="0x7DD3FCFF" font="font:ExtraLargeBoldSystemFont" />
+            <Label id="url" translation="[96, 432]" width="1248" maxLines="2" color="0x7DD3FCFF" font="font:ExtraLargeBoldSystemFont" />
             <Label translation="[96, 530]" text="and enter this code" color="0xEBEBEBFF" font="font:MediumSystemFont" />
             <Rectangle id="codeBox" translation="[96, 586]" width="760" height="150" color="0x262B35FF" />
             <Label id="code" translation="[96, 586]" width="760" height="150" horizAlign="center" vertAlign="center" text="…" color="0xEBEBEBFF" font="font:LargestSystemFont" />
             <Label translation="[96, 760]" width="1248" text="Your phone must be on this TV's network, or able to reach the server's address." color="0x8B95A5FF" font="font:SmallestSystemFont" />
             <!-- Shown once it has loaded: older servers don't draw one. -->
             <Group id="qrBox" translation="[1384, 380]" visible="false">
-                <Label width="440" text="Or scan this" color="0xEBEBEBFF" font="font:MediumSystemFont" />
+                <Label width="440" horizAlign="center" text="Or scan this" color="0xEBEBEBFF" font="font:MediumSystemFont" />
                 <Poster id="qr" translation="[0, 52]" width="440" height="440" loadDisplayMode="scaleToFit" />
             </Group>
         </Group>

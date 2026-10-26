@@ -142,6 +142,22 @@ function authRefreshOutcome(status as integer, text as dynamic) as string
     return "failed"
 end function
 
+' Whether the tokens a refresh of old gave are kept: only while the
+' registry (stored, its tokens for old's server) still holds old's refresh
+' token. Signing out, forgetting the server or signing in again with a code
+' while the refresh was under way replaced or removed it: its tokens are
+' ended instead, and whatever is stored stays.
+function authRefreshKept(stored as dynamic, old as object) as boolean
+    if stored = invalid then return false
+    return stored.refresh <> "" and stored.refresh = old.refresh
+end function
+
+' Whether a revocation is sent again (once, a few seconds later): the
+' server was busy (503), so the token may still work.
+function authRevokeAgain(status as integer, retried as boolean) as boolean
+    return status = 503 and not retried
+end function
+
 ' The answer of the device authorization endpoint (RFC 8628 §3.2):
 ' { ok, deviceCode, userCode, verificationUri, verificationUriComplete,
 ' expiresAt, interval } (interval in seconds), or { ok: false, message }.

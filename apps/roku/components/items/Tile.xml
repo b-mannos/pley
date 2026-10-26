@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- A title in a RowList row or a MarkupGrid: its poster (or a 16:9 picture
-     for Continue Watching), how far along it is, and two lines under it. -->
+     for Continue Watching), how far along it is or a mark once watched, and
+     two lines under it. -->
 <component name="Tile" extends="Group">
     <interface>
         <field id="itemContent" type="node" onChange="onContent" />
@@ -19,6 +20,7 @@
         <Poster id="poster" loadDisplayMode="scaleToZoom" />
         <Rectangle id="track" color="0x16191ECC" visible="false" />
         <Rectangle id="fill" color="0x38BDF8FF" visible="false" />
+        <Poster id="watched" uri="pkg:/images/watched.png" width="40" height="40" visible="false" />
         <Label id="title" color="0xEBEBEBFF" font="font:SmallestBoldSystemFont" />
         <Label id="subtitle" color="0xA1A9B6FF" font="font:TinySystemFont" />
     </children>

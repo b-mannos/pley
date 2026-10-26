@@ -13,6 +13,10 @@ sub init()
     m.started = false
     m.request = invalid
     m.done = false
+    ' The code shown came in place of one that expired, and how many came
+    ' so since a button was pressed.
+    m.renewed = false
+    m.renewals = 0
     m.qr.observeField("loadStatus", "onQrStatus")
     m.actions.observeField("buttonSelected", "onAction")
     m.leave.observeField("fire", "onLeave")
@@ -41,8 +45,15 @@ sub onActive()
     m.actions.setFocus(true)
 end sub
 
-' Asks for a code, and goes on asking whether it was approved.
-sub ask()
+' Asks for a code, and goes on asking whether it was approved. renewed:
+' in place of one that expired.
+sub ask(renewed = false as boolean)
+    m.renewed = renewed
+    if renewed
+        m.renewals = m.renewals + 1
+    else
+        m.renewals = 0
+    end if
     stopAsking()
     m.code.text = "…"
     m.code.opacity = 1.0
@@ -73,7 +84,21 @@ sub onCode(event as object)
     end if
     m.code.text = answer.data.userCode
     m.url.text = answer.data.verificationUri
+    fitAddress()
     showQr(answer.data.qr)
+end sub
+
+' The address in the largest size that fits its column on one line; one
+' too long even in the smallest wraps.
+sub fitAddress()
+    m.url.wrap = false
+    m.url.width = 0
+    for each font in ["font:ExtraLargeBoldSystemFont", "font:LargeBoldSystemFont", "font:MediumBoldSystemFont", "font:SmallBoldSystemFont"]
+        m.url.font = font
+        if m.url.boundingRect().width <= 1248 then exit for
+    end for
+    m.url.width = 1248
+    m.url.wrap = true
 end sub
 
 ' The server's QR code of the address with the code in it, shown once it
@@ -90,27 +115,60 @@ sub hideQr()
     m.qr.uri = ""
 end sub
 
+' Drawn at a whole multiple of its size (the server draws 8 pixels a
+' module), so its modules stay sharp, centred in its column.
 sub onQrStatus()
-    m.qrBox.visible = m.qr.loadStatus = "ready" and m.qr.uri <> ""
+    ready = m.qr.loadStatus = "ready" and m.qr.uri <> ""
+    if ready and m.qr.bitmapWidth > 0
+        side = Int(m.qr.bitmapWidth)
+        size = side * Int(qrSpace() / side)
+        if size <= 0 then size = qrSpace()
+        m.qr.width = size
+        m.qr.height = size
+        m.qr.translation = [Int((qrSpace() - size) / 2), 52]
+    end if
+    m.qrBox.visible = ready
 end sub
+
+' The width of the QR code's column.
+function qrSpace() as integer
+    return 440
+end function
 
 sub onUpdate(event as object)
     update = event.getData()
     status = update.status
     if status = "waiting"
-        setStatus("Waiting for approval…", false)
+        if m.renewed
+            setStatus("That code expired, so here is a new one. Waiting for approval…", false)
+        else
+            setStatus("Waiting for approval…", false)
+        end if
     else if status = "retrying"
         setStatus("Can't reach the server. Trying again in " + urlValue(update.seconds) + " s.", true)
     else if status = "denied"
         expired("Request declined.", true)
     else if status = "expired"
-        expired("Code expired: press OK for a new one.", false)
+        ' A new one at once: the TV may be left on this screen a while. After
+        ' an hour of them, OK gets the next, so a Roku left on overnight
+        ' doesn't ask the server for codes all night.
+        if m.renewals < renewalsMax()
+            ask(true)
+        else
+            expired("Code expired: press OK for a new one.", false)
+        end if
     else if status = "signed_in"
         signedIn()
     else
         expired(httpString(update.message), true)
     end if
 end sub
+
+' Codes given in a row with no button pressed: with the server's 10
+' minutes a code, an hour's worth.
+function renewalsMax() as integer
+    return 5
+end function
 
 ' The code can't be used any more: a new one is a button away.
 sub expired(text as string, problem as boolean)
@@ -158,7 +216,7 @@ end sub
 sub setButtons(labels as object)
     m.actions.buttons = labels
     m.actions.visible = labels.Count() > 0
-    if labels.Count() > 0 and m.top.active
+    if labels.Count() > 0 and m.top.isInFocusChain()
         m.actions.focusButton = 0
         m.actions.setFocus(true)
     end if

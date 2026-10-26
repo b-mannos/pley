@@ -115,11 +115,21 @@ const episodes = seasons.flatMap((season) => Array.from({ length: 9 }, (_, i) =>
 })));
 const items = new Map([...movies, show, ...seasons, ...episodes].map((item) => [item.id, item]));
 
+// Every file has text and picture subtitles; the choices pick the picture
+// ones for episode 103 (the one the walk plays), which the app asks the
+// server to draw.
+const PICTURE_SUBTITLES = 4;
 function detail(item) {
   const file = {
     id: 7000 + item.id, path: `${item.title}.mkv`, size: 1000000, container: item.kind === "movie" ? "mkv" : "mp4",
     duration_ms: item.duration_ms ?? null, bitrate: 8000000, width: 1920, height: 1080, video_codec: "h264", audio_codec: "aac",
-    streams: [], edition: null, selected_audio: 1, selected_subtitle: 3, chapters: [],
+    streams: [
+      { index: 0, kind: "video", codec: "h264" },
+      { index: 1, kind: "audio", codec: "aac", language: "eng" },
+      { index: 3, kind: "subtitle", codec: "subrip", language: "eng", text_based: true },
+      { index: PICTURE_SUBTITLES, kind: "subtitle", codec: "hdmv_pgs_subtitle", language: "eng", forced: false, text_based: false },
+    ],
+    edition: null, selected_audio: 1, selected_subtitle: item.id === 103 ? PICTURE_SUBTITLES : 3, chapters: [],
   };
   const playable = item.kind === "movie" || item.kind === "episode";
   return {
@@ -135,7 +145,8 @@ function detail(item) {
 // hour). refuse: paths whose first request answers 401 invalid_token, as
 // for a token the server dropped.
 // The returned `down` makes the server stop answering, as when it's off;
-// `qr` false makes it answer 404 for QR codes, as an older one does.
+// `qr` false makes it answer 404 for QR codes, as an older one does;
+// `playbackDelayMs` holds back the answers to POST /api/playback.
 export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
   const problems = [];
   const requests = [];
@@ -307,11 +318,19 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       if (ask.caps?.caps_version !== 2) problems.push("a playback request without caps_version 2");
       if (!ask.caps?.hls?.master_playlist) problems.push("a playback request without hls.master_playlist");
       const item = items.get(ask.item_id);
-      sessions += 1;
       const fileId = 7000 + ask.item_id;
+      if (ask.file_id != null && ask.file_id !== fileId) problems.push(`playback of file ${ask.file_id} for item ${ask.item_id}`);
+      const burn = ask.subtitle_index ?? null;
+      if (burn !== null && burn !== PICTURE_SUBTITLES) problems.push(`subtitles ${burn} to draw, which aren't pictures`);
+      fixture.playbacks.push({ item: ask.item_id, subtitle_index: burn });
+      sessions += 1;
+      const session = `s${sessions}`;
+      if (fixture.playbackDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, fixture.playbackDelayMs));
+      // Drawn subtitles make a conversion.
       return json(200, {
-        session_id: `s${sessions}`, method: "direct", url: `/api/files/${fileId}/stream`, hls: false, file_id: fileId,
-        duration_ms: item?.duration_ms ?? 0, audio_index: 1, subtitle_index: null, burn_subtitles: false, audio_converted: false,
+        session_id: session, method: burn === null ? "direct" : "transcode",
+        url: burn === null ? `/api/files/${fileId}/stream` : `/api/playback/${session}/master.m3u8`, hls: burn !== null, file_id: fileId,
+        duration_ms: item?.duration_ms ?? 0, audio_index: 1, subtitle_index: burn, burn_subtitles: burn !== null, audio_converted: false,
         subtitles: [{ index: 3, codec: "subrip", language: "eng", title: "English", default: false, forced: false, external: false, text_based: true, url: `/api/files/${fileId}/subtitles/3.vtt` }],
         reasons: [], reason: null, auto_quality: null,
       });
@@ -335,7 +354,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     return json(404, { code: "not_found", message: `nothing at ${path}` });
   });
 
-  const fixture = { issuer: "", down: false, qr: true, refreshes: 0, problems, requests, progress, closed, close: () => server.close() };
+  const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], problems, requests, progress, closed, close: () => server.close() };
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       issuer = `http://127.0.0.1:${server.address().port}`;

@@ -22,17 +22,38 @@ function playerProgress(positionMs as dynamic, durationMs as dynamic, state as s
     return body
 end function
 
-' What a Video node error is: "media" (this file doesn't play on this Roku)
-' or "stream" (HTTP or network: the session's status says what happened).
-' errorInfo is the node's errorInfo ({ category, errcode, ... }).
-function playerErrorKind(errorCode as integer, errorInfo as dynamic) as string
+' What a Video node error is: "media" (this file doesn't play on this Roku:
+' it is converted instead) or "stream" (HTTP or network: the session's
+' status says what happened). errorInfo is the node's errorInfo
+' ({ category, errcode, ... }). Before the video first played, anything
+' but HTTP is the file's; after, only what says so.
+function playerErrorKind(errorCode as integer, errorInfo as dynamic, started as boolean) as string
     category = ""
     info = httpObject(errorInfo)
     if info <> invalid then category = LCase(httpString(info.category))
     if category = "http" then return "stream"
+    if not started then return "media"
     if category = "mediaerror" or category = "drm" then return "media"
     if errorCode = -5 or errorCode = -6 then return "media"
     return "stream"
+end function
+
+' The subtitles to ask the server to draw onto the video (subtitle_index):
+' those the person's choices pick for file (its selected_subtitle) when
+' they are pictures (PGS, VobSub, DVB), as the web player asks; -1 for none
+' or for text ones, which the Video node shows itself.
+function playerBurnIndex(file as dynamic) as integer
+    data = httpObject(file)
+    if data = invalid then return -1
+    selected = Int(httpNumber(data.selected_subtitle, -1))
+    if selected < 0 then return -1
+    for each stream in httpArray(data.streams)
+        if GetInterface(stream, "ifAssociativeArray") <> invalid and httpString(stream.kind) = "subtitle" and httpNumber(stream.index, -2) = selected
+            if GetInterface(stream.text_based, "ifBoolean") <> invalid and not stream.text_based then return selected
+            return -1
+        end if
+    end for
+    return -1
 end function
 
 ' What the answer to GET /api/playback/{session} says of a broken stream:

@@ -81,11 +81,12 @@ function shoot(name) {
 }
 
 // Whether the sign-in screen shows a QR code: its quiet zone is white where
-// the screen is dark (LinkScreen.xml puts the picture at 1384, 432).
+// the screen is dark (LinkScreen.xml centres the picture in a column from
+// 1384 to 1824, from 432 down).
 function qrDrawn() {
   if (!frame) return false;
-  const x = Math.round((1384 + 16) * (frame.width / 1920));
-  const y = Math.round((432 + 16) * (frame.height / 1080));
+  const x = Math.round((1384 + 220) * (frame.width / 1920));
+  const y = Math.round((432 + 12) * (frame.height / 1080));
   const at = (y * frame.width + x) * 4;
   return frame.data[at] > 200 && frame.data[at + 1] > 200 && frame.data[at + 2] > 200;
 }
@@ -211,6 +212,7 @@ async function signOut() {
 }
 
 const qr = { shown: false, hidden: false };
+const home = { kept: false };
 
 async function walk() {
   // A cold start of brs-node can take a while.
@@ -224,6 +226,15 @@ async function walk() {
   await press("select"); // the first of Continue Watching: an episode
   await waitFor(/^GET \/api\/items\/103$/, since, "its details");
   shoot("details");
+  // Back while the player starts: the session that comes after is closed.
+  since = mark();
+  fixture.playbackDelayMs = 2500;
+  await press("select"); // Resume
+  await waitFor(/^POST \/api\/playback$/, since, "a playback session", { settles: false });
+  await press("back");
+  fixture.playbackDelayMs = 0;
+  await waitFor(/^DELETE \/api\/playback\/s1$/, since, "closing the session answered after Back");
+  // Played this time, then left.
   since = mark();
   await press("select"); // Resume
   await waitFor(/^POST \/api\/playback$/, since, "a playback session");
@@ -231,7 +242,9 @@ async function walk() {
   since = mark();
   await press("back"); // stopped, then the session closed
   await waitFor(/^DELETE \/api\/playback\//, since, "closing the session");
-  await press("back"); // Home
+  since = mark();
+  await press("back"); // Home, which asks for its rows again after playing
+  await waitFor(/^GET \/api\/hubs\/home$/, since, "Home's rows after playing");
   await openFromMenu(1, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies");
   shoot("library");
   // Down until the next page is asked for: two rows before the first one ends.
@@ -254,9 +267,11 @@ async function walk() {
     await press("lit_o");
   });
   shoot("search");
+  // Back from Search nothing played: Home stays as it is.
   since = mark();
   await press("back");
-  await waitFor(/^GET \/api\/hubs\/home$/, since, "Home again");
+  await settle();
+  home.kept = !seen(/^GET \/api\/hubs\/home$/, since);
   await openFromMenu(4, /^GET \/api\/auth\/me$/, "Settings");
   shoot("settings");
   // The server goes away: a library can't load, and says so.
@@ -352,9 +367,12 @@ const checks = [
   ["refreshed its token", fixture.refreshes > 0],
   ["loaded Home", asked(/^GET \/api\/hubs\/home$/)],
   ["asked to play with its capabilities", asked(/^POST \/api\/playback$/)],
-  ["closed the session it played", fixture.closed.length > 0],
+  ["asked for the picture subtitles to be drawn", fixture.playbacks.some((p) => p.item === 103 && p.subtitle_index === 4)],
+  ["closed a session that came after Back", fixture.closed.includes("s1")],
+  ["closed the session it played", fixture.closed.length > 1],
   ["reported where it stopped", fixture.progress.some((p) => p.state === "stopped" && p.session_id)],
   ["loaded a library's next page", asked(/^GET \/api\/libraries\/1\/items\?.*offset=70/)],
+  ["came back to Home without asking for it again", home.kept],
   ["loaded a season's episodes", asked(/^GET \/api\/items\/100\/children$/)],
   ["searched", asked(/^GET \/api\/search\?/)],
   ["asked again with a new token after a 401", new Set(fixture.requests.filter((r) => r.path === "/api/items/103").map((r) => r.auth)).size > 1],

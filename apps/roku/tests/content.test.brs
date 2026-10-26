@@ -93,7 +93,8 @@ sub test_content_details_offer_resume_and_start()
     tkEqual(detail.genres, "Drama, Science Fiction, Mystery")
     tkEqual(detail.buttons, ["Resume from 10:00", "Play from start"])
     tkEqual(detail.actions, ["resume", "start"])
-    tkEqual(detail.backdrop, "http://nas:7539/api/items/12/images/backdrop?v=1729600000&w=1280")
+    tkEqual(detail.backdrop, "http://nas:7539/api/items/12/images/backdrop?v=1729600000&w=640", "faint behind text: small")
+    tkEqual(detail.poster, "http://nas:7539/api/items/12/images/poster?v=1729600000&w=420")
 
     fresh = contentTestDetail()
     fresh.user_state.position_ms = 0
@@ -137,9 +138,47 @@ sub test_content_stream_carries_text_subtitles()
     tkEqual(stream.playStart, 600)
     tkEqual(stream.subtitleTracks, [
         { Language: "eng", TrackName: "http://nas:7539/api/files/7/subtitles/3.vtt", Description: "English" },
-        { Language: "und", TrackName: "http://nas:7539/api/files/7/subtitles/4.vtt", Description: "und (forced)" }
+        { Language: "und", TrackName: "http://nas:7539/api/files/7/subtitles/4.vtt", Description: "Forced" }
     ])
     tkEqual(stream.subtitle, "http://nas:7539/api/files/7/subtitles/3.vtt", "the file's selected_subtitle")
+end sub
+
+sub test_content_names_subtitles()
+    tkEqual(contentSubtitleName({ title: "SDH" }, "eng"), "SDH")
+    tkEqual(contentSubtitleName({ title: invalid }, "fre"), "fre")
+    tkEqual(contentSubtitleName({ title: invalid, forced: true }, "fre"), "fre (Forced)")
+    tkEqual(contentSubtitleName({ title: "" }, "und"), "Unknown")
+    tkEqual(contentSubtitleName({ forced: true }, "und"), "Forced")
+end sub
+
+sub test_content_rebuilds_only_the_home_rows_that_changed()
+    hubs = [
+        { key: "continue_watching", title: "Continue Watching", library_id: invalid, items: [contentTestEpisode(), contentTestMovie()] },
+        { key: "recently_added:1", title: "Recently Added in Movies", library_id: 1, items: [contentTestMovie()] }
+    ]
+    server = contentTestServer()
+    first = contentRowChanges(hubs, invalid, server, invalid)
+    tkEqual(first.changed.Count(), 2, "nothing shown yet: every row")
+    tkEqual(first.changed, contentHomeRows(hubs, invalid, server), "the same rows as built in one go")
+    tkEqual(first.summary[0].key, "continue_watching")
+    tkTrue(first.summary[0].wide)
+    tkTrue(first.summary[1].built)
+    known = {}
+    for each row in first.summary
+        known[row.key] = row.sig
+    end for
+    tkEqual(contentRowChanges(hubs, invalid, server, known).changed.Count(), 0, "the same answer: nothing to build")
+
+    hubs[0].items[1].user_state.position_ms = 1200000
+    hubs.Push({ key: "my_list", title: "My List", library_id: invalid, items: [contentTestMovie()] })
+    hubs.Push({ key: "music", title: "Music", library_id: invalid, items: [{ id: 5, kind: "album", title: "Blue" }] })
+    again = contentRowChanges(hubs, invalid, server, known)
+    tkEqual(again.summary.Count(), 3, "a hub with nothing this version shows is left out")
+    tkEqual(again.changed.Count(), 2, "a title further along, and a new row")
+    tkTrue(again.summary[0].built)
+    tkFalse(again.summary[1].built)
+    tkTrue(again.summary[1].sig = known["recently_added:1"])
+    tkEqual(again.changed[1].key, "my_list")
 end sub
 
 sub test_content_up_next_card()

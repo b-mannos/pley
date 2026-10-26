@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Skip Intro / Skip Credits over the video. It is a child of the Video
-     node and has the focus while shown: OK presses it, Back puts it away,
-     and every other key goes on up to the Video node's own trick play. -->
+<!-- Skip Intro / Skip Credits over the video, with the focus while shown:
+     OK presses it; play, fast forward and rewind go to the player, which
+     acts on the video; Back and the rest go on as without the button. -->
 <component name="SkipButton" extends="Group">
     <interface>
         <field id="text" type="string" onChange="onText" />
         <field id="pressed" type="boolean" alwaysNotify="true" />
-        <field id="dismissed" type="boolean" alwaysNotify="true" />
+        <!-- "play", "fastforward", "rewind" or "replay", as pressed -->
+        <field id="playKey" type="string" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/items/SkipButton.brs" />
     <children>

@@ -99,6 +99,14 @@ function uiFailed(answer as object) as boolean
     return answer.error = "signed_out"
 end function
 
+' Roku's launch beacon, once: the first screen can be used.
+sub uiLaunched()
+    scene = m.top.getScene()
+    if scene.launched then return
+    scene.launched = true
+    scene.signalBeacon("AppLaunchComplete")
+end sub
+
 ' A message with an OK button.
 sub uiMessage(title as string, lines as object)
     dialog = CreateObject("roSGNode", "StandardMessageDialog")

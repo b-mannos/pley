@@ -25,8 +25,15 @@ function contentEpisodeWidth() as integer
     return 300
 end function
 
+' Backdrops are drawn faint (15 % and 40 %) behind text: a third of the
+' screen's width is plenty.
 function contentBackdropWidth() as integer
-    return 1280
+    return 640
+end function
+
+' The poster beside a title's details.
+function contentDetailPosterWidth() as integer
+    return 420
 end function
 
 ' One tile of a row or a grid. wide: a 16:9 picture (Continue Watching,
@@ -138,6 +145,39 @@ function contentHomeRows(hubs as dynamic, libraries as dynamic, server as string
         end if
     end for
     return rows
+end function
+
+' A short fingerprint of a hub as the server sent it.
+function contentSignature(value as object) as string
+    bytes = CreateObject("roByteArray")
+    bytes.FromAsciiString(FormatJson(value))
+    return bytes.GetCRC32().ToStr() + ":" + bytes.Count().ToStr()
+end function
+
+' Home's rows from GET /api/hubs/home (as contentHomeRows), made again only
+' where they changed: known holds the fingerprint of each row Home shows
+' ({ key: signature }), taken from the server's JSON, so a hub sent as
+' before isn't even read. { summary: [{ key, wide, sig, built }] for every
+' row in order, changed: the rows to build, in order }.
+function contentRowChanges(hubs as dynamic, libraries as dynamic, server as string, known as dynamic) as object
+    shown = httpObject(known)
+    summary = []
+    changed = []
+    for each hub in httpArray(hubs)
+        if GetInterface(hub, "ifAssociativeArray") <> invalid
+            key = httpString(hub.key)
+            sig = contentSignature(hub)
+            if shown <> invalid and shown.DoesExist(key) and shown[key] = sig
+                summary.Push({ key: key, wide: key = "continue_watching", sig: sig, built: false })
+            else
+                for each row in contentHomeRows([hub], libraries, server)
+                    summary.Push({ key: row.key, wide: row.wide, sig: sig, built: true })
+                    changed.Push(row)
+                end for
+            end if
+        end if
+    end for
+    return { summary: summary, changed: changed }
 end function
 
 ' Tiles of the titles in a listing (a library page, search) this version
@@ -253,7 +293,7 @@ function contentDetail(detail as object, server as string) as object
         genres: genres.Join(", "),
         summary: httpClean(detail.summary, 1200, true),
         backdrop: backdrop,
-        poster: urlImage(server, detail.poster_url, contentPosterWidth()),
+        poster: contentTileImage(detail, server, false, contentDetailPosterWidth()),
         positionMs: position,
         durationMs: duration,
         buttons: buttons,
@@ -303,10 +343,7 @@ function contentStream(info as object, detail as object, server as string, start
             if Left(trackUrl, 1) = "/" then trackUrl = server + trackUrl
             language = httpString(track.language)
             if language = "" then language = "und"
-            description = httpSentence(track.title)
-            if description = "" then description = language
-            if httpTrue(track.forced) then description = description + " (forced)"
-            tracks.Push({ Language: language, TrackName: trackUrl, Description: description })
+            tracks.Push({ Language: language, TrackName: trackUrl, Description: contentSubtitleName(track, language) })
             if httpNumber(track.index, -2) = selected then subtitle = trackUrl
         end if
     end for
@@ -318,6 +355,20 @@ function contentStream(info as object, detail as object, server as string, start
         subtitleTracks: tracks,
         subtitle: subtitle
     }
+end function
+
+' What Roku's subtitle menu calls a track: its title, else its language;
+' "Unknown" for neither, "Forced" for forced ones of no language.
+function contentSubtitleName(track as object, language as string) as string
+    name = httpSentence(track.title)
+    if name = "" and language <> "und" then name = language
+    forced = httpTrue(track.forced)
+    if name = ""
+        if forced then return "Forced"
+        return "Unknown"
+    end if
+    if forced then return name + " (Forced)"
+    return name
 end function
 
 ' "Show · S1 E2 · Pilot" for an episode, the title for a movie.

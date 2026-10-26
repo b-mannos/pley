@@ -4,6 +4,7 @@ sub init()
     m.poster = m.top.findNode("poster")
     m.track = m.top.findNode("track")
     m.fill = m.top.findNode("fill")
+    m.watched = m.top.findNode("watched")
     m.title = m.top.findNode("title")
     m.subtitle = m.top.findNode("subtitle")
     m.wide = false
@@ -19,6 +20,7 @@ sub onContent()
     if item.hasField("wide") then m.wide = item.wide
     m.progress = 0.0
     if item.hasField("progress") then m.progress = item.progress
+    m.watched.visible = item.hasField("watched") and item.watched = true
     m.title.text = item.title
     m.subtitle.text = item.subtitle
     m.fallback.text = item.title
@@ -54,6 +56,7 @@ sub onLayout()
     m.fill.height = 10
     m.track.visible = m.progress > 0
     m.fill.visible = m.progress > 0
+    m.watched.translation = [w - 52, 12]
     m.title.translation = [0, imageHeight + 12]
     m.title.width = w
     m.subtitle.translation = [0, imageHeight + 44]

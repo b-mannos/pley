@@ -4,6 +4,8 @@ sub init()
     m.top.palette = uiPalette()
     m.screens = m.top.findNode("screens")
     m.stack = []
+    ' The sign-in screen shown at launch, until another replaces it.
+    m.launchDialog = invalid
 
     session = CreateObject("roSGNode", "Session")
     m.global.addFields({ session: session })
@@ -23,11 +25,26 @@ sub onApiReady()
     if m.api.ready then uiRequest({ op: "boot" }, "onBoot")
 end sub
 
+' Roku's launch beacons: AppLaunchComplete once the first screen can be
+' used (Servers and sign-in at once, Home once its rows show), and around a
+' sign-in shown at launch AppDialogInitiate and AppDialogComplete, whose
+' time Roku leaves out of the launch's.
 sub onBoot(event as object)
     answer = event.getData()
     screen = "servers"
     if answer.ok then screen = answer.data.screen
+    if screen = "link" then m.top.signalBeacon("AppDialogInitiate")
     show({ to: screen, reset: true })
+    if screen = "link" then m.launchDialog = m.stack.Peek()
+    if screen <> "home" then uiLaunched()
+end sub
+
+' The sign-in shown at launch is over once another screen replaces it.
+sub launchDialogDone()
+    if m.launchDialog = invalid then return
+    if m.stack.Count() > 0 and m.stack.Peek().isSameNode(m.launchDialog) then return
+    m.launchDialog = invalid
+    m.top.signalBeacon("AppDialogComplete")
 end sub
 
 ' Pictures load through the scene's HTTP agent (nodes without their own
@@ -85,6 +102,7 @@ sub show(nav as object)
     m.stack.Push(screen)
     m.screens.appendChild(screen)
     screen.active = true
+    launchDialogDone()
 end sub
 
 sub pop()
@@ -93,6 +111,7 @@ sub pop()
     top = m.stack.Peek()
     top.visible = true
     top.active = true
+    launchDialogDone()
 end sub
 
 sub closeScreen(screen as object)

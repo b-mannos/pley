@@ -2,6 +2,12 @@
 <!-- The app's one scene: it starts the API task and keeps the stack of
      screens; Back on the first screen leaves the app. -->
 <component name="MainScene" extends="Scene">
+    <interface>
+        <!-- Roku's AppLaunchComplete went (uiLaunched). -->
+        <field id="launched" type="boolean" />
+        <!-- Playbacks so far: Home asks for its rows again after one. -->
+        <field id="played" type="integer" />
+    </interface>
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />

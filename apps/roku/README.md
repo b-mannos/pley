@@ -44,12 +44,25 @@ Rules the code keeps:
   a new agent each time the token changes.
 - Refreshes run one at a time for each server, and the new pair is written
   to the registry before it is used: a refresh token works once, and two
-  refreshes with the same one end the sign-in. A token refused moments after
-  a refresh gave it ends the sign-in too, as in the Android app.
+  refreshes with the same one end the sign-in. A refresh is waited for two
+  minutes, not given up on after the usual 30 s, and the pair it brings is
+  kept only while the registry still holds the one it replaces: signed out,
+  the server forgotten or signed in again meanwhile, it is revoked instead.
+  A token refused moments after a refresh gave it ends the sign-in too, as
+  in the Android app; so does one that runs out with nothing to refresh it.
+  A revocation the server is too busy for (503) is sent again once.
 - A stream that breaks is checked with the server: stopped by an
   administrator (410), the player leaves and says why; otherwise it starts
-  again where it was with the current token. A file the Roku turns out not
-  to play is played again converted.
+  again where it was with the current token. A file that fails before its
+  first picture (anything but HTTP), or with a media error later, is played
+  again converted, once. A session that answers after the player was left
+  is closed at once.
+- Subtitles: text ones go to the Video node as WebVTT; picture ones (PGS,
+  VobSub, DVB) the person's choices pick are sent as `subtitle_index`, which
+  the server draws onto the video, as the web player asks. Roku shows a
+  subtitle track only with captions on, a setting of the whole Roku: when
+  pley picks one, it turns captions on for that playback and back as they
+  were after, unless the person changed them meanwhile.
 - Every request says `pleyRoku/<version> (Roku OS <version>; <model>)`, the
   model being `roDeviceInfo`'s display name: the server's `/link` page shows
   that part to whoever types the code.
@@ -62,9 +75,22 @@ Rules the code keeps:
 - Skip Intro and Skip Credits show while the video plays, from a marker's
   start until a second before its end, for the markers of the file playing;
   an episode's credits bring up Up Next instead. The button is a child of
-  the Video node and has the focus while shown: OK skips, Back puts it away,
-  and every other key goes on up to the Video node, so its own trick play
-  works as without it.
+  the Video node and has the focus while shown: OK skips; play pauses or
+  goes on, fast forward and rewind move 10 s; Back leaves the player as
+  ever. While Up Next counts down, Back cancels it, and play, fast forward
+  and rewind cancel it and do the same.
+- Home asks for its rows again only after something played (or when Home
+  is picked in its menu). The task makes again only the rows whose JSON
+  changed; the others stay as they are, scrolled where they were, the focus
+  stays on the same row and title, and the menu changes only with the
+  libraries.
+- A screen shown again takes the focus at once, before any answer, so the
+  remote works whatever comes back; an answer moves the focus only while its
+  screen has it, so a dialog over it keeps it.
+- Roku's launch beacons: `AppLaunchComplete` once the first screen can be
+  used (Home with its rows, or Servers or sign-in when the app opens on
+  them), and `AppDialogInitiate` / `AppDialogComplete` around a sign-in
+  shown at launch.
 
 ## Checking it on a computer
 
@@ -83,19 +109,23 @@ from `brs-engine` to `brs-node`): each `sub test_…()` is a test.
 `npm run smoke` starts a fake pley server on 127.0.0.1
 (`scripts/fixture-server.mjs`, answers written from docs/API.md) and walks
 the app with the remote: sign-in with a code and its QR code, Home, a
-title's details after a refused token, the player, a library's second page,
-a show, Search, Settings, the server gone and Retry, then signing out and in
-again on a server without QR codes; then it starts the app again, signed in,
-in a second process (brs-node runs one app per process). It fails on any
-BrightScript error, on a request without the User-Agent, a token in an
-address or sent for a QR code, a refresh token used twice or two refreshes
-at once, and saves each screen in `out/smoke/`. brs-node is a simulator: it
-draws with its own fonts, plays no video (so Skip Intro and Up Next have
-only their unit tests), drops a remote key now and then, and can't stand in
-for a Roku's speed.
+title's details after a refused token, Back while the player starts (the
+session that comes after is closed), the player with picture subtitles to
+draw, Home asking again after it, a library's second page, a show, Search,
+Home not asking again after it, Settings, the server gone and Retry, then
+signing out and in again on a server without QR codes; then it starts the
+app again, signed in, in a second process (brs-node runs one app per
+process). It fails on any BrightScript error, on a request without the
+User-Agent, a token in an address or sent for a QR code, a refresh token
+used twice or two refreshes at once, and saves each screen in `out/smoke/`.
+brs-node is a simulator: it draws with its own fonts, plays no video (so
+Skip Intro and Up Next have only their unit tests), fetches every address
+with a Node process of its own, one at a time, numbers transfers at random
+below 80 (the API task keeps those under way apart), drops a remote key now
+and then, and can't stand in for a Roku's speed.
 
-`npm run images` draws the icons and splash screens again
-(`scripts/make_images.py`, Python's standard library only).
+`npm run images` draws the icons, the dark splash screens and the watched
+mark again (`scripts/make_images.py`, Python's standard library only).
 
 ## Installing on a Roku
 
