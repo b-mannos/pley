@@ -6,13 +6,13 @@ import app.pley.android.model.PleyJson
  * Devices probed for real over adb, read-only (getprop, dumpsys
  * media.player, dumpsys display, dumpsys media.audio_policy, settings get):
  * their decoders, screen modes and HDR types as the system lists them. The
- * dumps became fixtures through scratchpad tooling that emulates
- * areSizeAndRateSupported from each decoder's advertised limits.
+ * fixtures emulate areSizeAndRateSupported from each decoder's advertised
+ * limits.
  */
 object RealDevices {
     /**
-     * Google TV Streamer, Android 14, on a Samsung C49RG9x monitor: HDR10
-     * only, stereo PCM over HDMI, match content frame rate set to never.
+     * Google TV Streamer, Android 14, on an HDR10 monitor: HDR10 only,
+     * stereo PCM over HDMI, match content frame rate set to never.
      */
     val googleTvStreamer: ProbeInput by lazy { load("google_tv_streamer.json") }
 

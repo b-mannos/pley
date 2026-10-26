@@ -1355,7 +1355,7 @@ mod tests {
         assert_eq!(whole_file_timeout(&small), Duration::from_secs(20 * 60));
         assert_eq!(whole_file_timeout(&dir.path().join("missing.mkv")), Duration::from_secs(20 * 60));
         assert_eq!(pass_timeout(5_000_000_000), Duration::from_secs(20 * 60));
-        assert_eq!(pass_timeout(77_098_924_052), Duration::from_secs(7_709), "Blade Runner 2049's remux: over 2 hours");
+        assert_eq!(pass_timeout(77_098_924_052), Duration::from_secs(7_709), "a 77 GB 4K remux: over 2 hours");
     }
 
     #[test]

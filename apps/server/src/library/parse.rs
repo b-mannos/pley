@@ -629,7 +629,7 @@ mod tests {
     #[test]
     fn the_shows_name_then_a_number() {
         // Anime named without ` - `, tags in parentheses.
-        let e = episode("Monster (2004)/(G_P) Monster 01v2(x264)(53CFA614).mkv");
+        let e = episode("Monster (2004)/(Group) Monster 01v2(x264)(53CFA614).mkv");
         assert_eq!((e.show.as_str(), e.season, e.episode, e.title), ("Monster", 1, Some(1), None));
         let e = episode("Monster (2004)/Monster 05 - The Night of the Execution.mkv");
         assert_eq!((e.episode, e.title.as_deref()), (Some(5), Some("The Night of the Execution")));

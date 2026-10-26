@@ -535,7 +535,7 @@ fn what_hdr_becomes_is_said() {
 
 #[test]
 fn hdr_transcodes_are_bound_by_the_hevc_main_10_decoders() {
-    // Blade Runner 2049 at "4K · 30 Mbps" on the Streamer: Dolby Vision 8.1
+    // A 4K film at "4K · 30 Mbps" on the Streamer: Dolby Vision 8.1
     // over the cap, made HEVC Main 10 HDR10 in 4K.
     let mut info = source("P8.1");
     (info.streams[0].width, info.streams[0].height, info.streams[0].level) = (Some(3840), Some(2160), Some(153));

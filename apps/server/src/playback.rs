@@ -2086,7 +2086,7 @@ mod tests {
         let mut req = request();
         req.caps = chrome();
 
-        // Blade Runner 2049's remux: Dolby Vision 8.1 with TrueHD Atmos, as
+        // A 4K remux: Dolby Vision 8.1 with TrueHD Atmos, as
         // Plex plays it in a browser: the video copied, the audio converted.
         let mut p81 = dolby_vision(8, 1);
         p81.streams[1].codec = "truehd".into();
