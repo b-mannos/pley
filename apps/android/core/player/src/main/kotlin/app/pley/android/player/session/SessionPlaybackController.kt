@@ -1276,8 +1276,17 @@ class SessionPlaybackController(
     }
 
     private fun failWith(error: Exception) {
+        val downloaded = file?.let { localFile(it.id) } != null
+        if (error is OfflineException && downloaded && recovery.fallbackReason == FallbackReason.NotSmooth) {
+            // A download that dropped frames went to the server for a smoother copy, which is out
+            // of reach: it plays on as it is (it doesn't switch twice).
+            recovery.playOriginal()
+            ui.update { it.copy(canPlayOriginal = false, note = null) }
+            restart(lastPositionMs)
+            return
+        }
         // A download that didn't play here as it is went to the server, which is out of reach.
-        val leftDownload = recovery.fallbackMode != null && file?.let { localFile(it.id) } != null
+        val leftDownload = recovery.fallbackMode != null && downloaded
         if (error is OfflineException && !leftDownload) {
             return fail(if (error.blocked) describe(error) else texts.unreachable(describe(error)), canRetry = true, offline = true)
         }

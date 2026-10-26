@@ -89,6 +89,29 @@ class RecoveryFlowTest {
     }
 
     @Test
+    fun `a download that drops frames plays on as it is with the server away`() {
+        val movie = runBlocking { h.api.item(FixtureIds.SAMPLE_1080P) }
+        h.local = object : LocalMedia {
+            override fun file(fileId: Long) = LocalFile("file:///downloads/movie.mkv").takeIf { fileId == movie.files.first().id }
+        }
+        val c = h.play(PlayRequest(FixtureIds.SAMPLE_1080P))
+        assertEquals("file:///downloads/movie.mkv", h.engine.source?.url)
+        h.engine.durationMs = 600_000
+        h.engine.ready()
+        h.api.unreachable += "startPlayback"
+        h.engine.frames = FrameCounts(rendered = 0, dropped = 0, maxConsecutiveDropped = 0)
+        h.advance(2_000)
+        // 240 frames in 10 s, 12 of them dropped: a smoother copy is asked of the server, out of reach.
+        h.engine.frames = FrameCounts(rendered = 228, dropped = 12, maxConsecutiveDropped = 2)
+        h.advance(10_000)
+        h.settle()
+
+        assertFalse(c.state.value.phase is PlayerPhase.Error)
+        assertEquals("the download again", "file:///downloads/movie.mkv", h.engine.source?.url)
+        assertFalse(c.state.value.canPlayOriginal)
+    }
+
+    @Test
     fun `a download of another file with the same number streams instead`() {
         // A server whose database was made anew numbers its files again: the
         // download kept under this number was of another title.
