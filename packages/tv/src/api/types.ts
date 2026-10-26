@@ -321,7 +321,7 @@ export interface ClientCaps {
 export interface VideoDecoderCaps {
   codec: string;
   hardware: boolean;
-  profiles: string[];
+  profiles?: string[];
   max_width?: number;
   max_height?: number;
   max_fps?: number;

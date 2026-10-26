@@ -29,6 +29,10 @@ export class Input {
   private menuDown = false;
   /** While a text field types, keys go to it. */
   typing: HTMLElement | null = null;
+  /** When a key was last pressed (Date.now()): pages that have been touched keep the focus people gave them. */
+  lastKeyAt = 0;
+  /** A direction nothing on the page took (Left with nothing further left goes to the rail). */
+  onMoveFailed: ((dir: "left" | "right" | "up" | "down") => void) | null = null;
 
   constructor(focus: FocusManager, mapKey: (e: KeyboardEvent) => Key | null = standardKey, gate = new KeyRepeatGate()) {
     this.focus = focus;
@@ -70,6 +74,7 @@ export class Input {
 
   /** One key event, already mapped (tests call this). */
   dispatch(key: Key, type: "down" | "up", repeat: boolean): void {
+    if (type === "down") this.lastKeyAt = Date.now();
     if (isDirection(key) && !this.gate.admit(type, repeat)) return;
     const event = { repeat, type };
     // The focused element's own keys first (a field, the jump control, the sync row).
@@ -90,7 +95,7 @@ export class Input {
       }
       return;
     }
-    if (type === "down" && isDirection(key)) this.focus.move(key);
+    if (type === "down" && isDirection(key) && !this.focus.move(key)) this.onMoveFailed?.(key);
   }
 
   private ok(type: "down" | "up", repeat: boolean): void {

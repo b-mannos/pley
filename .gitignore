@@ -20,3 +20,5 @@ Thumbs.db
 /.local
 /.claude/
 __pycache__/
+/apps/tizen/out
+/apps/webos/out

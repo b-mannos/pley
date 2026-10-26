@@ -5,7 +5,8 @@
   "description": "What pley's Samsung (Tizen) and LG (webOS) TV apps share: the screens, sign-in, capabilities, playback sessions and subtitles. Each app adds its platform's player and probes.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
+    ".": "./src/index.tsx",
+    "./build": "./build/build-app.mjs",
     "./*": "./src/*"
   },
   "scripts": {
@@ -23,6 +24,7 @@
   "devDependencies": {
     "jsdom": "^30.1.3",
     "typescript": "~5.9",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "esbuild": "^0.28.2"
   }
 }

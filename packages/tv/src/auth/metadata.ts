@@ -10,6 +10,14 @@ export class AuthError extends Error {
 }
 
 /** What older servers answer: no app sign-in at all. */
+/** The server didn't answer at all: worth trying again by itself. */
+export class UnreachableError extends AuthError {
+  constructor(message = "the server can't be reached: check its address and that it's on") {
+    super(message);
+    this.name = "UnreachableError";
+  }
+}
+
 export const TOO_OLD = "this server is too old for this app";
 
 /** RFC 8628's grant: a TV collects its tokens with the code it was given. */
@@ -51,7 +59,7 @@ export async function fetchMetadata(http: Transport, server: string): Promise<Se
   try {
     res = await http({ method: "GET", url: home + METADATA_PATH, headers: { Accept: "application/json" }, timeoutMs: 8000 });
   } catch (e) {
-    if (e instanceof NetworkError) throw new AuthError("the server can't be reached: check its address and that it's on");
+    if (e instanceof NetworkError) throw new UnreachableError();
     throw e;
   }
   if (res.status === 404) throw new AuthError(TOO_OLD);

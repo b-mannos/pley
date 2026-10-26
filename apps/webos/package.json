@@ -9,7 +9,8 @@
     "package": "node scripts/build.mjs && node scripts/package.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "check": "tsc -p tsconfig.json && vitest run"
+    "check": "tsc -p tsconfig.json && vitest run",
+    "serve": "node scripts/build.mjs --dev && node scripts/serve.mjs"
   },
   "dependencies": {
     "pley-tv": "*"

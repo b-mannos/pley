@@ -1,6 +1,6 @@
 import { NetworkError, type Transport } from "../net/transport";
 import { origin, unencrypted, UNENCRYPTED } from "./addresses";
-import { AuthError, DEVICE_CODE_GRANT, fetchMetadata, NO_CODES, signsInWithCodes, type ServerMetadata } from "./metadata";
+import { AuthError, DEVICE_CODE_GRANT, fetchMetadata, NO_CODES, signsInWithCodes, UnreachableError, type ServerMetadata } from "./metadata";
 import { parseTokenResponse, postForm, stored, TokenError, type StoredTokens } from "./tokens";
 
 /** Everything pley's own TV apps may ask for (docs/API.md, "Scopes"). */
@@ -93,7 +93,7 @@ export class DeviceSignIn {
         throw new AuthError("this server doesn't know pley's TV apps yet: update it");
       }
       if (e instanceof TokenError && e.status === 429) throw new AuthError("too many TVs are signing in here right now: try again in a minute");
-      if (e instanceof NetworkError) throw new AuthError("the server can't be reached: check its address and that it's on");
+      if (e instanceof NetworkError) throw new UnreachableError();
       throw e;
     }
     return parseDeviceCode(answer, home, metadata, scope, this.clock());

@@ -154,7 +154,7 @@ export class Api {
 
   libraryItems(
     id: Id,
-    query: { sort?: LibrarySort; order?: "asc" | "desc"; watched?: boolean; genre?: string; offset?: number; limit?: number },
+    query: { sort?: LibrarySort; order?: "asc" | "desc"; watched?: boolean; genre?: string; year?: number; offset?: number; limit?: number },
     cancel?: Cancel,
   ): Promise<{ total: number; items: ItemSummary[] }> {
     return this.get(`/api/libraries/${id}/items`, { query, cancel });
@@ -201,7 +201,7 @@ export class Api {
   }
 
   search(q: string, cancel?: Cancel): Promise<{ items: ItemSummary[]; people?: PersonSummary[] }> {
-    return this.get("/api/search", { query: { q, limit: 40 }, cancel });
+    return this.get("/api/search", { query: { q, limit: 60 }, cancel });
   }
 
   playlists(cancel?: Cancel): Promise<{ playlists: Playlist[] }> {

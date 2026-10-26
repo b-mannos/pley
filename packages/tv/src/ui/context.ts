@@ -19,6 +19,8 @@ export interface Ui {
   tier: "low" | "mid" | "high";
   reducedMotion: boolean;
   toast(text: string, error?: boolean): void;
+  /** Focus to the rail's current entry, opening it; false on pages without the rail. */
+  toRail(): boolean;
   /**
    * An element that may take focus as its page opens: the page's
    * remembered element at once, else the `initial` one when nothing in the

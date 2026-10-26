@@ -1,5 +1,5 @@
 import type { ComponentChildren } from "preact";
-import { useRef, useState } from "preact/hooks";
+import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useUi } from "../context";
 import type { Dir } from "../focus";
 import { G } from "./focusable";
@@ -49,13 +49,15 @@ export interface RowProps<T> {
   title?: string;
   kind: TileKind;
   items: T[];
-  /** One tile, absolutely placed with `style`. */
-  tile: (item: T, index: number, place: { style: string; onFocus: (el: HTMLElement) => void; priority: number }) => ComponentChildren;
+  /** One tile; the row places it. */
+  tile: (item: T, index: number, place: { onFocus: (el: HTMLElement) => void; priority: number }) => ComponentChildren;
+  /** A stable key per tile (an item's id), so tiles keep their pictures when others come and go. */
+  keyOf?: (item: T, index: number) => string | number;
   /** A "See all" tile after the items. */
-  seeAll?: (place: { style: string; onFocus: (el: HTMLElement) => void }) => ComponentChildren;
+  seeAll?: (place: { onFocus: (el: HTMLElement) => void }) => ComponentChildren;
   /** Left from the first tile: the rail. */
   onLeftEdge?: () => boolean;
-  /** Where focus enters the row when it has none to come back to. */
+  /** The tile focus enters at when the row has none to come back to (the one focused before Back). */
   enterAt?: number;
   onFocusIndex?: (index: number) => void;
   class?: string;
@@ -67,30 +69,51 @@ export interface RowProps<T> {
  * slides under the focused tile, kept at x 96. One focus group that
  * returns to its own last tile; Left from the first tile goes to the
  * rail, Right at the end stops. Only the tiles near the screen are drawn.
+ * When the focused tile leaves (its actions removed it), focus goes to
+ * the tile now at its place, or the last.
  */
 export function Row<T>(p: RowProps<T>) {
   const ui = useUi();
   const spec = TILES[p.kind];
   const count = p.items.length + (p.seeAll ? 1 : 0);
-  const [focused, setFocused] = useState(p.enterAt ?? 0);
-  const offset = rowOffset(p.kind, count, Math.min(focused, Math.max(0, count - 1)));
+  const [focused, setFocused] = useState(Math.min(p.enterAt ?? 0, Math.max(0, count - 1)));
+  const at = Math.min(focused, Math.max(0, count - 1));
+  const offset = rowOffset(p.kind, count, at);
   const [first, last] = windowOf(p.kind, count, offset);
   const groupEl = useRef<HTMLElement | null>(null);
+  const focusedEl = useRef<HTMLElement | null>(null);
   const place = (i: number) => {
-    const style = `position:absolute;left:${GUTTER + i * (spec.w + spec.gap)}px;top:0`;
-    const onFocus = () => {
+    const onFocus = (el: HTMLElement) => {
+      focusedEl.current = el;
       setFocused(i);
       p.onFocusIndex?.(i);
     };
-    return { style, onFocus, priority: Math.abs(i - focused) };
+    return { onFocus, priority: Math.abs(i - at) };
   };
   const onEdge = (dir: Dir) => {
     if (dir === "left") return p.onLeftEdge ? p.onLeftEdge() : false;
     return dir === "right";
   };
+  const slot = (key: string | number, i: number, child: ComponentChildren) => (
+    <div key={key} class="row-slot" data-index={i} style={`left:${GUTTER + i * (spec.w + spec.gap)}px`}>
+      {child}
+    </div>
+  );
   const tiles: ComponentChildren[] = [];
-  for (let i = first; i < Math.min(last, p.items.length); i++) tiles.push(p.tile(p.items[i]!, i, place(i)));
-  if (p.seeAll && last >= count && first <= p.items.length) tiles.push(p.seeAll(place(p.items.length)));
+  for (let i = first; i < Math.min(last, p.items.length); i++) {
+    const item = p.items[i]!;
+    tiles.push(slot(p.keyOf ? p.keyOf(item, i) : i, i, p.tile(item, i, place(i))));
+  }
+  if (p.seeAll && last >= count && first <= p.items.length) tiles.push(slot("see-all", p.items.length, p.seeAll(place(p.items.length))));
+  // The focused tile went away: the one now in its place takes focus.
+  useLayoutEffect(() => {
+    const was = focusedEl.current;
+    if (!was || was.isConnected || ui.focus.current !== was) return;
+    const group = groupEl.current;
+    if (!group || !count) return;
+    const target = group.querySelector<HTMLElement>(`[data-index="${at}"] [data-f]`) ?? lastTile(group);
+    if (target) ui.focus.focus(target);
+  });
   const height = spec.h + TILES_TO_CAPTION + CAPTION;
   return (
     <div class={`row ${p.class ?? ""}`} style={p.style}>
@@ -102,10 +125,11 @@ export function Row<T>(p: RowProps<T>) {
         style={`position:relative;height:${height}px;margin-top:${p.title !== undefined ? HEADER_TO_TILES : 0}px`}
         onEdge={onEdge}
         onEnter={(_dir, from) => {
-          // A row never visited: its first tile, or the one asked for; else the default (nearest).
-          if (!groupEl.current || ui.focus.rememberedIn(groupEl.current)) return null;
-          if (p.enterAt !== undefined) return groupEl.current.querySelector<HTMLElement>(`[data-index="${p.enterAt}"] [data-f], [data-index="${p.enterAt}"][data-f]`);
-          return from ? null : groupEl.current.querySelector<HTMLElement>("[data-f]");
+          const group = groupEl.current;
+          if (!group || ui.focus.rememberedIn(group)) return null;
+          // A row not visited on this page yet: the tile asked for, else the nearest (from above or below), else the first.
+          if (p.enterAt !== undefined) return group.querySelector<HTMLElement>(`[data-index="${Math.min(p.enterAt, count - 1)}"] [data-f]`);
+          return from ? null : group.querySelector<HTMLElement>("[data-f]");
         }}
         elRef={(el) => (groupEl.current = el)}
       >
@@ -115,6 +139,11 @@ export function Row<T>(p: RowProps<T>) {
       </G>
     </div>
   );
+}
+
+function lastTile(group: HTMLElement): HTMLElement | null {
+  const all = group.querySelectorAll<HTMLElement>("[data-f]");
+  return all.length ? all[all.length - 1]! : null;
 }
 
 export interface Section {

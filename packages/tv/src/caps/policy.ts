@@ -108,13 +108,14 @@ export function takes(e: VideoDecoderCaps, video: MediaStream, depth: number): b
     if (!asIs && !turned) return false;
   }
   if (video.frame_rate != null && e.max_fps != null && video.frame_rate > e.max_fps + RATE_SLACK) return false;
-  if (depth > (e.max_bit_depth ?? 8)) return false;
+  if (e.max_bit_depth != null && depth > e.max_bit_depth) return false;
   if (video.level != null && video.level > 0 && e.max_level != null && video.level > e.max_level) return false;
   const profile = video.profile;
-  if (profile && e.profiles.length && !e.profiles.some((p) => p.toLowerCase() === profile.toLowerCase())) {
+  const listed = e.profiles ?? [];
+  if (profile && listed.length && !listed.some((p) => p.toLowerCase() === profile.toLowerCase())) {
     if (KNOWN_PROFILES.indexOf(profile.toLowerCase()) >= 0) return false;
   }
-  if (e.profiles.length && video.codec === "hevc" && depth >= 10 && !e.profiles.some((p) => /^(main 10|rext)$/i.test(p))) return false;
+  if (listed.length && video.codec === "hevc" && depth >= 10 && !listed.some((p) => /^(main 10|rext)$/i.test(p))) return false;
   return true;
 }
 

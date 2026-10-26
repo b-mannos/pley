@@ -28,6 +28,8 @@ export type Key =
   | "yellow"
   | "blue"
   | "backspace"
+  /** "." on a keyboard or a numpad: the address pad types it. */
+  | "period"
   | `digit${number}`;
 
 export function isDirection(k: Key | null): k is "left" | "right" | "up" | "down" {
@@ -48,7 +50,11 @@ export function standardKey(e: KeyboardEvent): Key | null {
     case 13:
       return "ok";
     case 8:
+    case 46:
       return "backspace";
+    case 110:
+    case 190:
+      return "period";
     case 27:
       return "back";
     case 93:
@@ -82,6 +88,9 @@ export function standardKey(e: KeyboardEvent): Key | null {
     default:
       if (e.keyCode >= 48 && e.keyCode <= 57) return `digit${e.keyCode - 48}`;
       if (e.keyCode >= 96 && e.keyCode <= 105) return `digit${e.keyCode - 96}`;
+      // Keyboards that leave keyCode out name the key instead.
+      if (e.key === "." || e.key === "Decimal") return "period";
+      if (e.key && e.key.length === 1 && e.key >= "0" && e.key <= "9") return `digit${Number(e.key)}`;
       return null;
   }
 }

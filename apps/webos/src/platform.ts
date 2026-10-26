@@ -1,0 +1,88 @@
+import type { DeviceFacts, Platform, Probe } from "pley-tv/platform";
+import { localStore } from "pley-tv/auth/tokens";
+import { standardKey, type Key } from "pley-tv/ui/keys";
+import { browserFacts, readFacts, type WebosFacts } from "./facts";
+import { tierOf, webosCaps } from "./caps";
+import { WebosEngine } from "./engine";
+import { hasLuna, luna } from "./luna";
+
+/** pley for LG TV's built-in OAuth client (apps/server/src/oauth/builtin/webos.json). */
+export const CLIENT_ID = "https://hhaidar.github.io/pley/oauth/webos.json";
+
+/** LG's remote: Back is 461; the rest are the standard codes. */
+export function webosKey(e: KeyboardEvent): Key | null {
+  switch (e.keyCode) {
+    case 461:
+      return "back";
+    case 1536:
+    case 1537:
+      // The Magic Remote's pointer showing or hiding.
+      return null;
+    default:
+      return standardKey(e);
+  }
+}
+
+/**
+ * pley for LG TVs: LG's pipeline behind a <video> element, LG's services
+ * for what the TV is, the remote's keys. In a desktop browser (no Luna)
+ * the same app runs for development, with the browser's own player.
+ */
+export function webosPlatform(): Platform {
+  const onTv = hasLuna();
+  let facts: WebosFacts = onTv ? { ...browserFacts(), model: "LG TV" } : browserFacts();
+  const factsReady = onTv ? readFacts().then((f) => (facts = f)) : Promise.resolve(facts);
+  return {
+    name: "webos",
+    clientId: CLIENT_ID,
+    version: __PLEY_VERSION__,
+    appName: "pley for LG TV",
+    storage: localStore,
+    mapKey: webosKey,
+    createEngine: (host) => new WebosEngine(host),
+    async probe(overrides): Promise<Probe> {
+      await factsReady;
+      const r = webosCaps(facts, overrides);
+      return { caps: r.caps, lines: r.lines, dvContainers: r.dvContainers };
+    },
+    device(): DeviceFacts {
+      return {
+        maker: "LG",
+        model: facts.model,
+        os: `webOS ${facts.webos}`,
+        firmware: facts.firmware,
+        year: null,
+        chromium: facts.chromium,
+      };
+    },
+    tier: () => tierOf(facts),
+    async localAddress(): Promise<string | null> {
+      if (!onTv) return null;
+      const status = await luna("luna://com.webos.service.connectionmanager/getStatus", {});
+      const wired = status.wired as { state?: string; ipAddress?: string } | undefined;
+      const wifi = status.wifi as { state?: string; ipAddress?: string } | undefined;
+      if (wired?.state === "connected" && wired.ipAddress) return wired.ipAddress;
+      if (wifi?.state === "connected" && wifi.ipAddress) return wifi.ipAddress;
+      return null;
+    },
+    keepAwake() {
+      // LG keeps the screen on while its pipeline plays; nothing to ask.
+    },
+    exit() {
+      const sys = window.webOSSystem ?? window.PalmSystem;
+      if (sys?.platformBack) sys.platformBack();
+      else window.close();
+    },
+    onVisibility(listener) {
+      document.addEventListener("visibilitychange", () => listener(!document.hidden));
+    },
+    clock24() {
+      try {
+        const sample = new Date(2000, 0, 1, 15).toLocaleTimeString();
+        return !/PM|AM/i.test(sample);
+      } catch {
+        return false;
+      }
+    },
+  };
+}
