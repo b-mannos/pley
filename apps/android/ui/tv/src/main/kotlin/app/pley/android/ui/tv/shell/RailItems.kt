@@ -8,7 +8,7 @@ import app.pley.android.model.LibraryKind
 import app.pley.android.screens.PleyKey
 
 /** The kinds of place the rail goes to. */
-enum class RailSlot { Search, Home, Library, Libraries, Playlists, Collections, Settings }
+enum class RailSlot { Search, Home, Library, Libraries, Playlists, Collections, NowPlaying, Settings }
 
 /** One rail entry: where it goes, and for a library its name and kind. */
 @Immutable
@@ -34,6 +34,7 @@ data class RailItem(
             RailSlot.Libraries -> PleyIcons.Layers
             RailSlot.Playlists -> PleyIcons.ListMusic
             RailSlot.Collections -> PleyIcons.Layers
+            RailSlot.NowPlaying -> PleyIcons.AudioLines
             RailSlot.Settings -> PleyIcons.Settings
         }
 }
@@ -44,9 +45,22 @@ data class RailItem(
  * Collections. Between the avatar and Settings there is room for seven
  * entries, so with more libraries a "Libraries" entry, which lists them
  * all, takes Collections' place (collections stay on each library's
- * Collections tab).
+ * Collections tab). While music has a queue ([nowPlaying]), Now Playing
+ * comes last: in Collections' place when the rail is full, else in the
+ * last library's (which "Libraries" lists).
  */
-fun railItems(libraries: List<Library>): List<RailItem> = buildList {
+fun railItems(libraries: List<Library>, nowPlaying: Boolean = false): List<RailItem> {
+    val items = mainItems(libraries)
+    if (!nowPlaying) return items
+    val room = when {
+        items.size < MAX_ITEMS -> items
+        items.any { it.slot == RailSlot.Collections } -> items.filter { it.slot != RailSlot.Collections }
+        else -> items - items.last { it.slot == RailSlot.Library }
+    }
+    return room + NowPlayingItem
+}
+
+private fun mainItems(libraries: List<Library>): List<RailItem> = buildList {
     add(RailItem("search", RailSlot.Search, PleyKey.Search()))
     add(RailItem("home", RailSlot.Home, PleyKey.Home))
     libraries.take(MAX_LIBRARIES).forEach { library ->
@@ -60,6 +74,9 @@ fun railItems(libraries: List<Library>): List<RailItem> = buildList {
         if (first != null) add(RailItem("collections", RailSlot.Collections, PleyKey.Collections(first.id)))
     }
 }
+
+/** Music's Now Playing, while there is music. */
+val NowPlayingItem = RailItem("now-playing", RailSlot.NowPlaying, PleyKey.NowPlaying)
 
 /** Settings, pinned at the rail's foot. */
 val SettingsItem = RailItem("settings", RailSlot.Settings, PleyKey.Settings)
@@ -85,3 +102,6 @@ fun railCurrent(root: PleyKey, items: List<RailItem>): String? = when (root) {
 
 /** At most this many libraries in the rail (design spec §2.1). */
 const val MAX_LIBRARIES = 3
+
+/** Entries between the avatar and Settings, at most: their 56 dp pitch fills the rail. */
+const val MAX_ITEMS = 7

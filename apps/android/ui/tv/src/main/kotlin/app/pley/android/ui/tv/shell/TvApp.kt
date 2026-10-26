@@ -126,7 +126,12 @@ private fun TvShell(
     val backStack = rememberNavBackStack(start)
     val libraries by source.libraries.collectAsStateWithLifecycle(emptyList())
     val profile by source.profile.collectAsStateWithLifecycle(null)
-    val items = remember(libraries) { railItems(libraries) }
+    // Read after the first frame, as the phone's mini player is: music never holds up the start.
+    val music by produceState(false, source) {
+        withFrameNanos { }
+        source.music.collect { value = it }
+    }
+    val items = remember(libraries, music) { railItems(libraries, nowPlaying = music) }
     val content = remember { FocusRequester() }
     val rail = remember { RailState(content) }
     val navigator = remember(backStack) { TvNavigator(backStack, rail, onExit) }

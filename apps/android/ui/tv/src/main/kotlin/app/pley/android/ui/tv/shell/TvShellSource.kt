@@ -52,6 +52,9 @@ interface TvShellSource {
     /** pley's own "Reduce motion" switch (the system's setting counts as well). */
     val reduceMotion: Flow<Boolean> get() = flowOf(false)
 
+    /** Music has a queue, playing or paused: the rail leads to Now Playing. */
+    val music: Flow<Boolean> get() = flowOf(false)
+
     companion object {
         /**
          * The app's: the startup read's server and tokens ([startup]),
@@ -135,6 +138,8 @@ private class GraphShellSource(
     override val signedOut: Flow<String> = offMain { graph.auth.events }.filterIsInstance<AuthEvent.SignedOut>().map { it.issuer }
 
     override val reduceMotion: Flow<Boolean> = offMain { graph.data.settings.settings }.map { it.reduceMotion }.distinctUntilChanged()
+
+    override val music: Flow<Boolean> = offMain { graph.player.music.nowPlaying }.map { it != null }.distinctUntilChanged()
 
     /** [upstream], made and collected on Default: the graph is never made on the main thread for it. */
     private fun <T> offMain(upstream: () -> Flow<T>): Flow<T> = flow { emitAll(upstream()) }.flowOn(Dispatchers.Default)

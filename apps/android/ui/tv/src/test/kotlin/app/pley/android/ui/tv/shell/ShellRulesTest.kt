@@ -51,6 +51,27 @@ class ShellRulesTest {
     }
 
     @Test
+    fun whileMusicPlaysNowPlayingComesLastWithinTheRailsSevenEntries() {
+        assertEquals(
+            "in Collections' place",
+            listOf("search", "home", "library:1", "library:2", "library:3", "playlists", "now-playing"),
+            railItems(libraries(3), nowPlaying = true).map { it.id },
+        )
+        assertEquals(
+            "in the last library's, which Libraries lists",
+            listOf("search", "home", "library:1", "library:2", "libraries", "playlists", "now-playing"),
+            railItems(libraries(5), nowPlaying = true).map { it.id },
+        )
+        assertEquals(
+            "added where there is room",
+            listOf("search", "home", "library:1", "library:2", "playlists", "collections", "now-playing"),
+            railItems(libraries(2), nowPlaying = true).map { it.id },
+        )
+        val items = railItems(libraries(3), nowPlaying = true)
+        assertEquals("now-playing", railCurrent(PleyKey.NowPlaying, items))
+    }
+
+    @Test
     fun aRailWithoutLibrariesHasNoCollections() {
         assertEquals(listOf("search", "home", "playlists"), railItems(emptyList()).map { it.id })
     }
