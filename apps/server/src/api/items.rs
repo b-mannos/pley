@@ -199,10 +199,32 @@ pub struct Progress {
     state: String,
     #[serde(default)]
     session_id: Option<String>,
+    /// How long ago a report sent late was made (a download played while
+    /// the server was out of reach): it counts unless something newer
+    /// happened to the item since.
+    #[serde(default)]
+    age_ms: Option<i64>,
 }
 
 fn playing() -> String {
     "playing".into()
+}
+
+/// The oldest a late report counts as: older ones count as this old.
+const MAX_REPORT_AGE_MS: i64 = 90 * 24 * 60 * 60 * 1000;
+
+/// Whether the user's state of `item_id` changed after a report made
+/// `age_ms` ago (played elsewhere since, marked watched, …): the newer wins.
+async fn changed_since(state: &AppState, user_id: i64, item_id: i64, age_ms: i64) -> sqlx::Result<bool> {
+    let at = (crate::util::now_ms() - age_ms.min(MAX_REPORT_AGE_MS)) / 1000;
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM user_item_state WHERE user_id = ? AND item_id = ? AND updated_at > ?)",
+    )
+    .bind(user_id)
+    .bind(item_id)
+    .bind(at)
+    .fetch_one(&state.db.read)
+    .await
 }
 
 pub async fn progress(
@@ -218,6 +240,11 @@ pub async fn progress(
     }
     if !matches!(body.state.as_str(), "playing" | "paused" | "stopped" | "buffering") {
         return Err(AppError::bad_request("state must be playing, paused or stopped"));
+    }
+    if let Some(age_ms) = body.age_ms.filter(|age| *age > 0) {
+        if changed_since(&state, user.id, id, age_ms).await? {
+            return Ok(StatusCode::NO_CONTENT);
+        }
     }
     let duration = body.duration_ms.filter(|d| *d > 0).or(row.duration_ms).unwrap_or(0);
     let device = crate::accounts::device_name(headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()));

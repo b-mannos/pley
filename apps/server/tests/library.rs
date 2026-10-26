@@ -1035,3 +1035,49 @@ async fn libraries_sort_by_bitrate_and_say_what_the_files_are_like() {
     let titles: Vec<&str> = plex["Metadata"].as_array().unwrap().iter().map(|m| m["title"].as_str().unwrap()).collect();
     assert_eq!(titles, ["Brazil", "Alien", "Casablanca"]);
 }
+
+#[tokio::test]
+async fn late_progress_counts_unless_something_newer_happened() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    for name in ["Alien (1979)", "Heat (1995)", "Ronin (1998)"] {
+        app.media_file(&format!("movies/{name}.mkv"), 1024);
+    }
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let ids = app.ids(movies, &admin).await;
+    let report = |id: i64, body: Value| {
+        let app = &app;
+        let admin = admin.clone();
+        async move {
+            let reply = app.post(&format!("/api/items/{id}/progress"), &admin, body).await;
+            assert_eq!(reply.status, StatusCode::NO_CONTENT);
+        }
+    };
+    let state = |id: i64| {
+        let app = &app;
+        let admin = admin.clone();
+        async move { app.get(&format!("/api/items/{id}"), &admin).await.body["user_state"].clone() }
+    };
+    let hour = 3_600_000;
+
+    // Played on a train an hour ago and sent now: nothing happened since, so it counts.
+    report(ids["Alien"], json!({"position_ms": 600_000, "duration_ms": 6_000_000, "state": "stopped", "age_ms": hour}))
+        .await;
+    assert_eq!(state(ids["Alien"]).await["position_ms"], json!(600_000));
+
+    // Played elsewhere since: the report from before changes nothing.
+    report(ids["Heat"], json!({"position_ms": 1_200_000, "duration_ms": 6_000_000, "state": "stopped"})).await;
+    report(ids["Heat"], json!({"position_ms": 300_000, "duration_ms": 6_000_000, "state": "stopped", "age_ms": hour}))
+        .await;
+    assert_eq!(state(ids["Heat"]).await["position_ms"], json!(1_200_000));
+
+    // Finished offline: watched, as a report sent at once would make it.
+    report(
+        ids["Ronin"],
+        json!({"position_ms": 5_900_000, "duration_ms": 6_000_000, "state": "stopped", "age_ms": hour}),
+    )
+    .await;
+    let ronin = state(ids["Ronin"]).await;
+    assert_eq!(ronin["watched"], json!(true));
+    assert_eq!(ronin["play_count"], json!(1));
+}

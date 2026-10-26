@@ -894,7 +894,7 @@ may open only some libraries see those, in that order.
 | GET | `/api/items/{id}/on-deck` | – | `{ item: ItemSummary \| null }` – for show/season: the episode to play when pressing *Play* (in progress, else next unwatched, else first) |
 | GET | `/api/items/{id}/related` | `limit` (default 20, max 60) | `{ items: ItemSummary[] }` – "More Like This" for movies and shows: the same library's titles sharing collections, directors, creators and top-billed cast, genres and a period, best first (empty for other kinds) |
 | GET | `/api/items/{id}/next` | – | `{ item: ItemSummary \| null }` – episode/track following this one (for autoplay) |
-| POST | `/api/items/{id}/progress` | `{ position_ms, duration_ms?, state: "playing"\|"paused"\|"stopped", session_id? }` | `204`. ≥ 90 % marks the item watched and clears the resume point. |
+| POST | `/api/items/{id}/progress` | `{ position_ms, duration_ms?, state: "playing"\|"paused"\|"stopped", session_id?, age_ms? }` | `204`. ≥ 90 % marks the item watched and clears the resume point. `age_ms`: how long ago a report sent late was made (a download played while the server was out of reach, up to 90 days); it changes nothing when the item's state changed since (played elsewhere, marked watched) |
 | POST | `/api/items/{id}/watched` | – | `204` (containers: all leaves) |
 | PATCH | `/api/items/{id}` *(admin)* | `{ title?, sort_title?, original_title?, year?, summary?, tagline?, studio?, content_rating?, release_date?, genres? }` | `ItemDetail`. A value edits and locks the field (refreshes and scans keep it); `null` unlocks it. `locked_fields` in `ItemDetail` lists locked fields. |
 | GET | `/api/items/{id}/matches?title=&year=` *(admin)* | – | TMDB candidates `{ tmdb_id, title, original_title, year, overview, poster_url }[]` for movies and shows (needs a TMDB key) |
@@ -1154,7 +1154,9 @@ use the same endpoint and get either a direct URL or an audio-only HLS stream.
 
 The player should send `POST /api/items/{id}/progress` every ~10 s while
 playing (with `session_id`), on pause, and with `state: "stopped"` when closing,
-then `DELETE /api/playback/{session_id}`.
+then `DELETE /api/playback/{session_id}`. A downloaded file played as it is
+reports without a session; reports made while the server was out of reach are
+sent once it is back, each with its `age_ms`.
 
 ### Version 2
 
