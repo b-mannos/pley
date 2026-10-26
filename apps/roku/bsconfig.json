@@ -1,0 +1,14 @@
+{
+    "rootDir": ".",
+    "files": [
+        "manifest",
+        "source/**/*",
+        "components/**/*",
+        "images/**/*",
+        "licenses/**/*"
+    ],
+    "stagingDir": "out/staging",
+    "outFile": "out/pley-roku.zip",
+    "minFirmwareVersion": "12.0.0",
+    "diagnosticLevel": "hint"
+}

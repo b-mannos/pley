@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings: the server and the profile this TV uses; switch server or
+     sign out. -->
+<component name="SettingsScreen" extends="Group">
+    <interface>
+        <field id="route" type="string" />
+        <field id="params" type="assocarray" />
+        <field id="navigate" type="assocarray" alwaysNotify="true" />
+        <field id="active" type="boolean" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/screens/SettingsScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
+    <children>
+        <Label translation="[96, 56]" text="Settings" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
+        <Label translation="[96, 180]" text="Server" color="0x8B95A5FF" font="font:SmallestSystemFont" />
+        <Label id="server" translation="[96, 218]" width="1600" color="0xEBEBEBFF" font="font:MediumSystemFont" />
+        <Label translation="[96, 300]" text="Signed in as" color="0x8B95A5FF" font="font:SmallestSystemFont" />
+        <Label id="profile" translation="[96, 338]" width="1600" color="0xEBEBEBFF" text="…" font="font:MediumSystemFont" />
+        <Label translation="[96, 420]" text="This Roku" color="0x8B95A5FF" font="font:SmallestSystemFont" />
+        <Label id="device" translation="[96, 458]" width="1600" color="0xEBEBEBFF" font="font:MediumSystemFont" />
+        <Label translation="[96, 540]" text="pley for Roku" color="0x8B95A5FF" font="font:SmallestSystemFont" />
+        <Label id="version" translation="[96, 578]" width="1600" color="0xEBEBEBFF" font="font:MediumSystemFont" />
+        <ButtonGroup id="buttons" iconUri="" focusedIconUri="" translation="[96, 700]" minWidth="480" />
+    </children>
+</component>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The one place that talks to the server (ApiTask.brs). Screens hand it
+     ApiRequest nodes through `request` (components/shared/Ui.brs). -->
+<component name="ApiTask" extends="Task">
+    <interface>
+        <field id="request" type="node" alwaysNotify="true" />
+        <!-- Set once the task listens: a request set before is never seen. -->
+        <field id="ready" type="boolean" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/tasks/ApiTask.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Auth.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/TokenStore.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Servers.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Caps.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Format.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Player.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Content.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Nodes.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Transfer.brs" />
+</component>

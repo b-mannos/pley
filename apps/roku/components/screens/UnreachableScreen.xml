@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The server doesn't answer: Retry (the screen that needed it) or Switch
+     server. Shown in place of that screen. -->
+<component name="UnreachableScreen" extends="Group">
+    <interface>
+        <field id="route" type="string" />
+        <field id="params" type="assocarray" />
+        <field id="navigate" type="assocarray" alwaysNotify="true" />
+        <field id="active" type="boolean" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/screens/UnreachableScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
+    <children>
+        <Label translation="[96, 72]" text="pley" color="0x38BDF8FF" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="title" translation="[96, 300]" width="1728" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="text" translation="[96, 400]" width="1400" wrap="true" maxLines="4" lineSpacing="6" color="0xA1A9B6FF" font="font:MediumSystemFont" />
+        <ButtonGroup id="buttons" iconUri="" focusedIconUri="" translation="[96, 620]" layoutDirection="horiz" minWidth="380" />
+    </children>
+</component>

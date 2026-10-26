@@ -1,0 +1,13 @@
+{
+    "rules": {
+        "type-annotations": "all",
+        "no-print": "error",
+        "no-stop": "error",
+        "no-todo": "warn",
+        "unreachable-code": "warn",
+        "color-format": "quoted-numeric-hex",
+        "color-case": "upper",
+        "color-alpha": "always",
+        "color-cert": "always"
+    }
+}

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One request to the API task (components/tasks/ApiTask.brs): spec in,
+     result out, and updates while a TV code sign-in goes on. -->
+<component name="ApiRequest" extends="Node">
+    <interface>
+        <field id="spec" type="assocarray" />
+        <!-- With spec.build: the list as ContentNodes, made in the task. -->
+        <field id="content" type="node" />
+        <!-- { ok, status, data, error, message } -->
+        <field id="result" type="assocarray" alwaysNotify="true" />
+        <field id="update" type="assocarray" alwaysNotify="true" />
+    </interface>
+</component>

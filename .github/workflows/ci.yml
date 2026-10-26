@@ -241,6 +241,37 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  roku:
+    name: Roku app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/roku
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: apps/roku/package-lock.json
+      - run: npm ci --no-fund --no-audit
+      # Compiled by BrighterScript, linted by bslint, its logic tested in
+      # brs-node. The walk through the whole app (npm run smoke) runs by hand:
+      # brs-node's SceneGraph is in beta and drops a key now and then.
+      - name: Compile, lint and test
+        run: npm run check
+      - name: Package
+        run: npm run package
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pley-roku
+          path: apps/roku/out/pley-roku.zip
+          if-no-files-found: error
+          retention-days: 14
+
   licenses:
     name: License boundary
     runs-on: ubuntu-latest

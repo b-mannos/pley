@@ -1,0 +1,156 @@
+' Items as docs/API.md's types describe them.
+
+function contentTestServer() as string
+    return "http://nas:7539"
+end function
+
+function contentTestMovie() as object
+    return ParseJson("{""id"":12,""library_id"":1,""kind"":""movie"",""title"":""Arrival"",""sort_title"":""Arrival"",""year"":2016,""duration_ms"":6960000,""added_at"":1700000000,""poster_url"":""/api/items/12/images/poster?v=1729600000"",""backdrop_url"":""/api/items/12/images/backdrop?v=1729600000"",""user_state"":{""position_ms"":600000,""watched"":false,""play_count"":0}}")
+end function
+
+function contentTestEpisode() as object
+    return ParseJson("{""id"":101,""library_id"":2,""kind"":""episode"",""title"":""Good News About Hell"",""sort_title"":""Good News About Hell"",""index"":1,""parent_id"":100,""parent_title"":""Season 1"",""parent_index"":1,""grandparent_id"":99,""grandparent_title"":""Severance"",""duration_ms"":3300000,""added_at"":1700000000,""thumb_url"":""/api/items/101/images/thumb?v=2"",""summary"":""Mark leads a team."",""user_state"":{""position_ms"":0,""watched"":true,""play_count"":1}}")
+end function
+
+function contentTestDetail() as object
+    detail = contentTestMovie()
+    detail.original_title = invalid
+    detail.tagline = "Why are they here?"
+    detail.genres = ["Drama", "Science Fiction", "Mystery", "Thriller"]
+    detail.content_rating = "PG-13"
+    detail.summary = "A linguist works with the military."
+    detail.files = ParseJson("[{""id"":7,""path"":""Arrival (2016).mkv"",""size"":1,""container"":""mkv"",""duration_ms"":6960000,""bitrate"":null,""width"":3840,""height"":2160,""video_codec"":""hevc"",""audio_codec"":""eac3"",""streams"":[],""edition"":null,""selected_audio"":1,""selected_subtitle"":3,""chapters"":[]}]")
+    detail.markers = []
+    return detail
+end function
+
+sub test_content_movie_tiles_show_poster_year_and_progress()
+    tile = contentTile(contentTestMovie(), contentTestServer(), false)
+    tkEqual(tile.title, "Arrival")
+    tkEqual(tile.subtitle, "2016")
+    tkEqual(tile.image, "http://nas:7539/api/items/12/images/poster?v=1729600000&w=220")
+    tkEqual(tile.itemId, 12)
+    tkEqual(tile.kind, "movie")
+    tkFalse(tile.watched)
+    tkTrue(tile.progress > 0.086 and tile.progress < 0.087, "600000 of 6960000")
+    tkEqual(tile.positionMs, 600000)
+end sub
+
+sub test_content_episode_tiles_name_the_show()
+    tile = contentTile(contentTestEpisode(), contentTestServer(), true)
+    tkEqual(tile.title, "Severance")
+    tkEqual(tile.subtitle, "S1 E1 · Good News About Hell")
+    tkEqual(tile.image, "http://nas:7539/api/items/101/images/thumb?v=2&w=400")
+    tkTrue(tile.watched)
+    tkEqual(tile.progress, 0, "watched shows no progress")
+    tkEqual(tile.grandparentId, 99)
+    poster = contentTile(contentTestEpisode(), contentTestServer(), false)
+    tkEqual(poster.image, "http://nas:7539/api/items/101/images/poster?w=220", "the server falls back to the show's")
+end sub
+
+sub test_content_home_rows_leave_out_music()
+    libraries = ParseJson("[{""id"":1,""name"":""Movies"",""kind"":""movies"",""paths"":[],""item_count"":245},{""id"":2,""name"":""TV Shows"",""kind"":""shows"",""paths"":[],""item_count"":31},{""id"":3,""name"":""Music"",""kind"":""music"",""paths"":[],""item_count"":120}]")
+    hubs = [
+        { key: "continue_watching", title: "Continue Watching", library_id: invalid, items: [contentTestEpisode(), contentTestMovie()] },
+        { key: "my_list", title: "My List", library_id: invalid, items: [] },
+        { key: "recently_added:1", title: "Recently Added in Movies", library_id: 1, items: [contentTestMovie()] },
+        { key: "recently_added:3", title: "Recently Added in Music", library_id: 3, items: [{ id: 5, kind: "album", title: "Blue" }] },
+        { key: "odd", title: "Odd", library_id: invalid, items: [{ id: 6, kind: "track", title: "Song" }] }
+    ]
+    rows = contentHomeRows(hubs, libraries, contentTestServer())
+    tkEqual(rows.Count(), 2)
+    tkEqual(rows[0].title, "Continue Watching")
+    tkTrue(rows[0].wide)
+    tkEqual(rows[0].tiles.Count(), 2)
+    tkEqual(rows[0].tiles[1].image, "http://nas:7539/api/items/12/images/backdrop?v=1729600000&w=400", "a movie's backdrop in a wide tile")
+    tkEqual(rows[1].title, "Recently Added in Movies")
+    tkFalse(rows[1].wide)
+    tkEqual(contentLibraries(libraries), [{ id: 1, name: "Movies", kind: "movies", itemCount: 245 }, { id: 2, name: "TV Shows", kind: "shows", itemCount: 31 }])
+end sub
+
+sub test_content_seasons_and_episodes()
+    seasons = contentSeasons([
+        { id: 98, kind: "season", title: "", index: 0, leaf_count: 2 },
+        { id: 100, kind: "season", title: "Season 1", index: 1, leaf_count: 9, viewed_leaf_count: 3 },
+        { id: 1, kind: "episode", title: "stray" }
+    ])
+    tkEqual(seasons, [{ itemId: 98, title: "Specials", index: 0, episodes: 2, watchedEpisodes: 0 }, { itemId: 100, title: "Season 1", index: 1, episodes: 9, watchedEpisodes: 3 }])
+
+    started = contentTestEpisode()
+    started.user_state = { position_ms: 900000, watched: false, play_count: 0 }
+    episodes = contentEpisodes([contentTestEpisode(), started], contentTestServer())
+    tkEqual(episodes[0].title, "1. Good News About Hell")
+    tkEqual(episodes[0].image, "http://nas:7539/api/items/101/images/thumb?v=2&w=300", "sized to the list's stills")
+    tkEqual(episodes[0].subtitle, "55 min · Watched")
+    tkEqual(episodes[0].summary, "Mark leads a team.")
+    tkEqual(episodes[1].subtitle, "40 min left")
+end sub
+
+sub test_content_details_offer_resume_and_start()
+    detail = contentDetail(contentTestDetail(), contentTestServer())
+    tkEqual(detail.heading, "Arrival")
+    tkEqual(detail.line, "2016 · 1 h 56 min · PG-13")
+    tkEqual(detail.genres, "Drama, Science Fiction, Mystery")
+    tkEqual(detail.buttons, ["Resume from 10:00", "Play from start"])
+    tkEqual(detail.actions, ["resume", "start"])
+    tkEqual(detail.backdrop, "http://nas:7539/api/items/12/images/backdrop?v=1729600000&w=1280")
+
+    fresh = contentTestDetail()
+    fresh.user_state.position_ms = 0
+    tkEqual(contentDetail(fresh, contentTestServer()).buttons, ["Play"])
+
+    long = contentTestDetail()
+    long.summary = String(60, "A long summary. ")
+    tkEqual(Len(contentDetail(long, contentTestServer()).summary), 959, "the whole summary, trimmed")
+
+    empty = contentTestDetail()
+    empty.files = []
+    tkEqual(contentDetail(empty, contentTestServer()).note, "This item has no file to play.")
+    tkEqual(contentDetail(empty, contentTestServer()).buttons, [])
+end sub
+
+sub test_content_episode_details_name_show_and_episode()
+    episode = contentTestEpisode()
+    episode.files = [{ id: 8, container: "mp4" }]
+    detail = contentDetail(episode, contentTestServer())
+    tkEqual(detail.heading, "Severance")
+    tkEqual(detail.line, "S1 E1 · Good News About Hell · 55 min")
+    tkEqual(contentPlayerTitle(episode), "Severance · S1 E1 · Good News About Hell")
+    tkEqual(contentPlayerTitle(contentTestMovie()), "Arrival")
+end sub
+
+sub test_content_stream_formats()
+    detail = contentTestDetail()
+    tkEqual(contentStreamFormat({ hls: true, file_id: 7 }, detail), "hls")
+    tkEqual(contentStreamFormat({ hls: false, file_id: 7 }, detail), "mkv")
+    detail.files[0].container = "mov"
+    tkEqual(contentStreamFormat({ hls: false, file_id: 7 }, detail), "mp4")
+    tkEqual(contentStreamFormat({ hls: false, file_id: 99 }, detail), "mp4", "the first file when the id is unknown")
+end sub
+
+sub test_content_stream_carries_text_subtitles()
+    info = ParseJson("{""session_id"":""s1"",""method"":""remux"",""url"":""/api/playback/s1/master.m3u8"",""hls"":true,""file_id"":7,""duration_ms"":6960000,""audio_index"":1,""subtitle_index"":null,""burn_subtitles"":false,""audio_converted"":false,""subtitles"":[{""index"":3,""codec"":""subrip"",""language"":""eng"",""title"":""English"",""default"":false,""forced"":false,""external"":false,""text_based"":true,""url"":""/api/files/7/subtitles/3.vtt""},{""index"":4,""codec"":""subrip"",""language"":null,""title"":null,""default"":false,""forced"":true,""external"":false,""text_based"":true,""url"":""/api/files/7/subtitles/4.vtt""},{""index"":5,""codec"":""hdmv_pgs_subtitle"",""language"":""fre"",""title"":null,""default"":false,""forced"":false,""external"":false,""text_based"":false,""url"":null}],""reasons"":[],""reason"":null,""auto_quality"":null}")
+    stream = contentStream(info, contentTestDetail(), contentTestServer(), 600000)
+    tkEqual(stream.url, "http://nas:7539/api/playback/s1/master.m3u8")
+    tkEqual(stream.streamFormat, "hls")
+    tkEqual(stream.title, "Arrival")
+    tkEqual(stream.playStart, 600)
+    tkEqual(stream.subtitleTracks, [
+        { Language: "eng", TrackName: "http://nas:7539/api/files/7/subtitles/3.vtt", Description: "English" },
+        { Language: "und", TrackName: "http://nas:7539/api/files/7/subtitles/4.vtt", Description: "und (forced)" }
+    ])
+    tkEqual(stream.subtitle, "http://nas:7539/api/files/7/subtitles/3.vtt", "the file's selected_subtitle")
+end sub
+
+sub test_content_up_next_card()
+    nextEpisode = contentTestEpisode()
+    nextEpisode.index = 2
+    nextEpisode.title = "Half Loop"
+    nextEpisode.user_state = { position_ms: 0, watched: false, play_count: 0 }
+    card = contentUpNext(nextEpisode, contentTestServer())
+    tkEqual(card.title, "Severance")
+    tkEqual(card.line, "S1 E2 · Half Loop")
+    tkEqual(card.startMs, 0)
+    nextEpisode.user_state.position_ms = 120000
+    tkEqual(contentUpNext(nextEpisode, contentTestServer()).startMs, 120000, "its own place")
+end sub

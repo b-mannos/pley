@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A server in the server list: its name, its address and where it came
+     from (saved, on this network) or a warning. -->
+<component name="ServerRow" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="onContent" />
+        <field id="itemHasFocus" type="boolean" onChange="onFocus" />
+        <field id="listHasFocus" type="boolean" value="true" onChange="onFocus" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/items/ServerRow.brs" />
+    <children>
+        <Rectangle id="background" width="1000" height="104" color="0x262B35FF" />
+        <Label id="name" translation="[32, 14]" width="620" color="0xEBEBEBFF" font="font:MediumBoldSystemFont" />
+        <Label id="address" translation="[32, 60]" width="620" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+        <Label id="tag" translation="[640, 36]" width="328" horizAlign="right" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+    </children>
+</component>

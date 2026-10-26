@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Looks for pley servers on the local network for about two seconds
+     (DiscoveryTask.brs). -->
+<component name="DiscoveryTask" extends="Task">
+    <interface>
+        <!-- [{ url, name, id, version }], by name, as they answer -->
+        <field id="found" type="array" alwaysNotify="true" />
+        <field id="done" type="boolean" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/tasks/DiscoveryTask.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Servers.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Discovery.brs" />
+</component>

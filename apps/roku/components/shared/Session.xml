@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What every screen knows of the server and the sign-in, as m.global.session.
+     Only the API task writes it; the screens observe it. -->
+<component name="Session" extends="Node">
+    <interface>
+        <field id="server" type="string" />
+        <field id="serverName" type="string" />
+        <field id="signedIn" type="boolean" alwaysNotify="true" />
+        <!-- "ended" (by the server), "wider_scope", "signed_out" (by the person) -->
+        <field id="signOutReason" type="string" />
+        <!-- The current access token, for the HTTP agents of pictures and video. -->
+        <field id="accessToken" type="string" />
+        <field id="userAgent" type="string" />
+        <field id="appVersion" type="string" />
+        <field id="device" type="string" />
+    </interface>
+</component>

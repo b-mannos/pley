@@ -1,0 +1,379 @@
+// Runs the whole app, SceneGraph and Tasks included, in brs-node against
+// a fake pley server on 127.0.0.1 (scripts/fixture-server.mjs), and walks
+// it with the remote: sign in with the TV code and its QR code, Home, a
+// title's details, the player, a library's grid and its next page, a show,
+// Search, Settings, the server gone and Retry, then signing out and in
+// again on a server too old for QR codes. Then it starts the app again,
+// signed in, and times how soon Home is asked for. Fails on a BrightScript
+// error or on anything the fake server found wrong; saves what the screen
+// showed at each step in out/smoke/. brs-node is a simulator: layouts and
+// the player differ from a Roku, and so does its speed.
+//
+//   node scripts/smoke.mjs
+
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { startFixture } from "./fixture-server.mjs";
+
+const require = createRequire(import.meta.url);
+const brs = require("brs-node");
+const { createCanvas } = createRequire(require.resolve("brs-node"))("canvas");
+
+const script = fileURLToPath(import.meta.url);
+const root = join(dirname(script), "..");
+const shots = join(root, "out", "smoke");
+mkdirSync(shots, { recursive: true });
+
+const messages = [];
+let frame = null;
+let registry = null;
+let mainAt = 0;
+brs.subscribeHost("smoke", (event, data) => {
+  if (event === "message" && typeof data === "string") {
+    messages.push(data);
+    if (data.startsWith("start,") && mainAt === 0) mainAt = Date.now();
+  } else if (event === "frame") frame = data;
+  else if (event === "registry") registry = data.current;
+});
+
+// The remote: key codes as brs-node's CLI sends them, in its shared buffer.
+const KEYS = { back: 0, up: 2, down: 3, left: 4, right: 5, select: 6, options: 10 };
+const shared = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * (brs.DataBufferIndex + brs.DataBufferSize));
+const control = new Int32Array(shared).fill(-1);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Waits for a free slot: the engine empties them as it reads the keys, which
+// can wait while it loads pictures (one at a time, on its render thread).
+async function send(code, mod) {
+  const until = Date.now() + 30000;
+  while (Date.now() < until) {
+    for (let slot = 0; slot < brs.KeyArraySpots; slot++) {
+      const at = slot * brs.KeyBufferSize;
+      if (Atomics.load(control, brs.DataType.KEY + at) < 0) {
+        Atomics.store(control, brs.DataType.RID + at, brs.RemoteType.SIM);
+        Atomics.store(control, brs.DataType.MOD + at, mod);
+        Atomics.store(control, brs.DataType.KEY + at, code + mod);
+        return;
+      }
+    }
+    await sleep(20);
+  }
+  throw new Error(`the app read no key for 30 s`);
+}
+async function press(key, times = 1) {
+  for (let i = 0; i < times; i++) {
+    const code = key.startsWith("lit_") ? key.codePointAt(4) : KEYS[key];
+    await send(code, 0);
+    await sleep(80);
+    await send(code, 100);
+    await sleep(600);
+  }
+}
+let step = 0;
+function shoot(name) {
+  step += 1;
+  if (!frame) return;
+  const canvas = createCanvas(frame.width, frame.height);
+  canvas.getContext("2d").putImageData(frame, 0, 0);
+  writeFileSync(join(shots, `${String(step).padStart(2, "0")}-${name}.png`), canvas.toBuffer("image/png"));
+}
+
+// Whether the sign-in screen shows a QR code: its quiet zone is white where
+// the screen is dark (LinkScreen.xml puts the picture at 1384, 432).
+function qrDrawn() {
+  if (!frame) return false;
+  const x = Math.round((1384 + 16) * (frame.width / 1920));
+  const y = Math.round((432 + 16) * (frame.height / 1080));
+  const at = (y * frame.width + x) * 4;
+  return frame.data[at] > 200 && frame.data[at + 1] > 200 && frame.data[at + 2] > 200;
+}
+async function drawnWithin(ms, test) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (test()) return true;
+    await sleep(100);
+  }
+  return test();
+}
+
+function launch(saved) {
+  return brs.createPayloadFromFiles([], { developerId: "smoke", displayMode: "1080p", registry: saved }, undefined, root).then((payload) => {
+    payload.extensions = [brs.SupportedExtension.SceneGraph];
+    payload.device.extensions = new Map([[brs.SupportedExtension.SceneGraph, "brs-sg.node.js"]]);
+    return brs.executeApp(payload, { sharedBuffer: shared });
+  });
+}
+
+// The second start runs in a process of its own: brs-node runs one app per
+// process. It runs until the first process has seen Home's pictures asked
+// for (it says so on stdin), and prints its BrightScript errors for the
+// first to check.
+const restarting = process.argv.indexOf("--restart");
+if (restarting > 0) {
+  const [file, number] = process.argv.slice(restarting + 1);
+  const running = launch(new Map(JSON.parse(readFileSync(file, "utf8"))));
+  await new Promise((resolve) => {
+    process.stdin.once("data", resolve);
+    process.stdin.once("end", resolve);
+    setTimeout(resolve, 90000);
+  });
+  step = Number(number) - 1;
+  shoot("restarted");
+  brs.terminateApp("smoke done", 3000);
+  await running;
+  console.log(`main,${mainAt}`);
+  for (const m of messages.filter((m) => m.startsWith("error,"))) console.log(m);
+  process.exit(0);
+}
+
+// Refreshed access tokens need a refresh two seconds after they're given
+// (the app refreshes 5 minutes ahead), so the walk refreshes often. The
+// first request for a title's details is refused (401 invalid_token): the
+// app refreshes and asks again.
+const fixture = await startFixture({ accessSeconds: 302, refuse: ["/api/items/103"] });
+
+// Saved and chosen: the app opens at sign-in (no search of the network).
+const server = fixture.issuer;
+const running = launch(new Map([
+  ["smoke.servers.list", JSON.stringify([{ url: server, name: "Fixture", id: "fixture", last_used: 1 }])],
+  ["smoke.servers.current", server],
+]));
+
+const mark = () => fixture.requests.length;
+const seen = (pattern, since) => fixture.requests.slice(since).some((r) => pattern.test(`${r.method} ${r.path}`));
+
+// Until the app has asked for nothing for a second (15 s at most): brs-node
+// loads a screen's pictures one by one, and keys wait meanwhile.
+async function settle() {
+  const until = Date.now() + 15000;
+  let count = mark();
+  let quietSince = Date.now();
+  while (Date.now() < until && Date.now() - quietSince < 1000) {
+    await sleep(100);
+    if (mark() !== count) {
+      count = mark();
+      quietSince = Date.now();
+    }
+  }
+}
+
+// Each step waits for the request it leads to (refreshes make answers
+// come at their own pace), then for the screen to settle, unless it asks
+// for something every second (the sign-in screen).
+async function waitFor(pattern, since, what, { ms = 30000, settles = true } = {}) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (seen(pattern, since)) {
+      if (settles) await settle();
+      return;
+    }
+    await sleep(100);
+  }
+  throw new Error(`no request for ${what}`);
+}
+
+// brs-node drops a key now and then: menu entries are reached from the
+// top of the menu and checked by the request they lead to.
+async function openFromMenu(index, pattern, what, then = async () => {}) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await press("left", 3);
+    await press("up", 6);
+    await press("down", index);
+    const since = mark();
+    await press("select");
+    await then();
+    try {
+      await waitFor(pattern, since, what);
+      return;
+    } catch {
+      await press("back");
+    }
+  }
+  throw new Error(`couldn't open ${what} from the menu`);
+}
+
+// From Settings: Sign out, and Sign out again in the dialog.
+async function signOut() {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const since = mark();
+    await press("down", 2);
+    await press("select");
+    await sleep(800);
+    await press("select");
+    const until = Date.now() + 6000;
+    while (Date.now() < until && !seen(/^POST \/api\/oauth\/revoke$/, since)) await sleep(100);
+    if (seen(/^POST \/api\/oauth\/revoke$/, since)) return;
+    await press("back"); // a dialog left open
+  }
+  throw new Error("couldn't sign out");
+}
+
+const qr = { shown: false, hidden: false };
+
+async function walk() {
+  // A cold start of brs-node can take a while.
+  await waitFor(/^POST \/api\/oauth\/device$/, 0, "a TV code", { ms: 60000, settles: false });
+  await waitFor(/^GET \/api\/oauth\/device\/qr\?code=BCDFGHJK$/, 0, "the code's QR code", { settles: false });
+  qr.shown = await drawnWithin(2500, qrDrawn);
+  shoot("sign-in");
+  await waitFor(/^GET \/api\/hubs\/home$/, 0, "Home");
+  shoot("home");
+  let since = mark();
+  await press("select"); // the first of Continue Watching: an episode
+  await waitFor(/^GET \/api\/items\/103$/, since, "its details");
+  shoot("details");
+  since = mark();
+  await press("select"); // Resume
+  await waitFor(/^POST \/api\/playback$/, since, "a playback session");
+  shoot("player");
+  since = mark();
+  await press("back"); // stopped, then the session closed
+  await waitFor(/^DELETE \/api\/playback\//, since, "closing the session");
+  await press("back"); // Home
+  await openFromMenu(1, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies");
+  shoot("library");
+  // Down until the next page is asked for: two rows before the first one ends.
+  since = mark();
+  for (let i = 0; i < 20 && !seen(/^GET \/api\/libraries\/1\/items\?.*offset=70/, since); i++) await press("down");
+  await waitFor(/^GET \/api\/libraries\/1\/items\?.*offset=70/, since, "the next page");
+  shoot("library-scrolled");
+  await press("back");
+  await openFromMenu(2, /^GET \/api\/libraries\/2\/items/, "TV Shows");
+  since = mark();
+  await press("select"); // Severance
+  await waitFor(/^GET \/api\/items\/100\/children$/, since, "a season's episodes");
+  shoot("show");
+  await press("right"); // the episodes
+  shoot("show-episodes");
+  await press("back", 2);
+  await openFromMenu(3, /^GET \/api\/search\?.*q=mo/, "Search", async () => {
+    await sleep(800);
+    await press("lit_m");
+    await press("lit_o");
+  });
+  shoot("search");
+  since = mark();
+  await press("back");
+  await waitFor(/^GET \/api\/hubs\/home$/, since, "Home again");
+  await openFromMenu(4, /^GET \/api\/auth\/me$/, "Settings");
+  shoot("settings");
+  // The server goes away: a library can't load, and says so.
+  await press("back");
+  await sleep(1500);
+  fixture.down = true;
+  await press("left", 3);
+  await press("up", 6);
+  await press("down");
+  await press("select");
+  await sleep(3000);
+  shoot("unreachable");
+  fixture.down = false;
+  since = mark();
+  await press("select"); // Retry
+  await waitFor(/^GET \/api\/libraries\/1\/items\?.*offset=0/, since, "the library after Retry");
+  shoot("retried");
+  // Signed out, and in again with a server that has no QR codes yet: the
+  // code shows on its own.
+  await press("back");
+  await openFromMenu(4, /^GET \/api\/auth\/me$/, "Settings");
+  fixture.qr = false;
+  since = mark();
+  await signOut();
+  await waitFor(/^POST \/api\/oauth\/device$/, since, "a new TV code", { settles: false });
+  await waitFor(/^GET \/api\/oauth\/device\/qr\?code=LMNPQRST$/, since, "the new code's QR code", { settles: false });
+  // The code stays up until the third poll, two seconds on.
+  qr.hidden = !(await drawnWithin(1500, qrDrawn)) && seen(/^POST \/api\/oauth\/device$/, since) && !seen(/^GET \/api\/hubs\/home$/, since);
+  shoot("sign-in-again");
+  await waitFor(/^GET \/api\/hubs\/home$/, since, "Home after signing in again");
+}
+
+// Started again, signed in, from what the first run saved: how long until
+// Home's rows are asked for, and the first picture.
+async function restart() {
+  const file = join(shots, "registry.json");
+  writeFileSync(file, JSON.stringify([...registry]));
+  const since = mark();
+  const start = Date.now();
+  const child = spawn(process.execPath, [script, "--restart", file, String(step + 1)], { stdio: ["pipe", "pipe", "inherit"] });
+  let output = "";
+  child.stdout.on("data", (chunk) => (output += chunk));
+  const exited = new Promise((resolve) => child.on("exit", resolve));
+  try {
+    await waitFor(/images\//, since, "a picture after a restart", { ms: 60000 });
+  } finally {
+    child.stdin.end("done\n");
+  }
+  const code = await exited;
+  let main = start;
+  for (const line of output.split("\n")) {
+    if (line.startsWith("error,")) messages.push(line);
+    if (line.startsWith("main,")) main = Number(line.slice(5));
+  }
+  if (code !== 0) throw new Error(`the second start's process ended with ${code}`);
+  const first = (pattern) => fixture.requests.slice(since).find((r) => pattern.test(`${r.method} ${r.path}`));
+  if (first(/^POST \/api\/oauth\/device$/)) throw new Error("signed out by a restart");
+  // From the app's Main, once brs-node itself has loaded.
+  return { rows: first(/^GET \/api\/hubs\/home$/).at - main, picture: first(/images\//).at - main };
+}
+
+const failures = [];
+let walked = null;
+let started = null;
+try {
+  await walk();
+} catch (error) {
+  walked = error;
+  shoot("failed");
+}
+brs.terminateApp("smoke done", 3000);
+const result = await running;
+if (result?.exitReason !== "smoke done") failures.push(`the app ended by itself: ${result?.exitReason}`);
+if (!walked && registry) {
+  try {
+    started = await restart();
+  } catch (error) {
+    walked = error;
+  }
+}
+fixture.close();
+
+if (walked) failures.push(`the walk failed: ${walked.message}`);
+const errors = messages.filter((m) => m.startsWith("error,"));
+for (const error of errors) failures.push(`BrightScript: ${error.slice(6).trim()}`);
+for (const problem of fixture.problems) failures.push(`server: ${problem}`);
+
+const asked = (pattern) => fixture.requests.some((r) => pattern.test(`${r.method} ${r.path}`));
+const checks = [
+  ["asked for a TV code", asked(/^POST \/api\/oauth\/device$/)],
+  ["showed the code's QR code", qr.shown],
+  ["polled with the device code", asked(/^POST \/api\/oauth\/token$/)],
+  ["refreshed its token", fixture.refreshes > 0],
+  ["loaded Home", asked(/^GET \/api\/hubs\/home$/)],
+  ["asked to play with its capabilities", asked(/^POST \/api\/playback$/)],
+  ["closed the session it played", fixture.closed.length > 0],
+  ["reported where it stopped", fixture.progress.some((p) => p.state === "stopped" && p.session_id)],
+  ["loaded a library's next page", asked(/^GET \/api\/libraries\/1\/items\?.*offset=70/)],
+  ["loaded a season's episodes", asked(/^GET \/api\/items\/100\/children$/)],
+  ["searched", asked(/^GET \/api\/search\?/)],
+  ["asked again with a new token after a 401", new Set(fixture.requests.filter((r) => r.path === "/api/items/103").map((r) => r.auth)).size > 1],
+  ["sent the token in the header only", fixture.requests.every((r) => !/[?&]token=/.test(r.path))],
+  ["signed out", asked(/^POST \/api\/oauth\/revoke$/)],
+  ["left out a QR code the server doesn't draw", qr.hidden],
+  ["started again signed in", started !== null],
+];
+for (const [what, ok] of checks) if (!ok) failures.push(`never ${what}`);
+
+console.log(`${fixture.requests.length} requests to the fake server, ${checks.filter(([, ok]) => ok).length}/${checks.length} checks passed; screens in out/smoke/`);
+if (started) console.log(`signed-in start in brs-node, from Main: Home's rows asked for after ${started.rows} ms, the first picture after ${started.picture} ms`);
+if (failures.length > 0) {
+  for (const failure of failures) console.log(`FAIL ${failure}`);
+  if (process.argv.includes("--verbose")) {
+    for (const r of fixture.requests) console.log(`  ${r.method} ${r.path} ${r.auth}`);
+    for (const m of messages) console.log(`  engine: ${m.trim()}`);
+  }
+  process.exit(1);
+}
+console.log("smoke: passed");
+process.exit(0);

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Signing in with a code (docs/API.md, "TVs"): the TV shows a code and
+     the address of the server's /link page, approved on a phone, and beside
+     them that address with the code as a QR code, which the server draws. -->
+<component name="LinkScreen" extends="Group">
+    <interface>
+        <field id="route" type="string" />
+        <field id="params" type="assocarray" />
+        <field id="navigate" type="assocarray" alwaysNotify="true" />
+        <field id="active" type="boolean" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/screens/LinkScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
+    <children>
+        <Label id="wordmark" translation="[96, 72]" text="pley" color="0x38BDF8FF" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="title" translation="[96, 180]" width="1500" text="Sign in to pley" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="server" translation="[96, 262]" width="1500" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
+        <Label id="intro" translation="[96, 306]" width="1500" color="0xEB6B70FF" visible="false" font="font:SmallerSystemFont" />
+        <Group id="steps">
+            <Label translation="[96, 380]" text="On your phone or computer, go to" color="0xEBEBEBFF" font="font:MediumSystemFont" />
+            <Label id="url" translation="[96, 432]" width="1248" color="0x7DD3FCFF" font="font:ExtraLargeBoldSystemFont" />
+            <Label translation="[96, 530]" text="and enter this code" color="0xEBEBEBFF" font="font:MediumSystemFont" />
+            <Rectangle id="codeBox" translation="[96, 586]" width="760" height="150" color="0x262B35FF" />
+            <Label id="code" translation="[96, 586]" width="760" height="150" horizAlign="center" vertAlign="center" text="…" color="0xEBEBEBFF" font="font:LargestSystemFont" />
+            <Label translation="[96, 760]" width="1248" text="Your phone must be on this TV's network, or able to reach the server's address." color="0x8B95A5FF" font="font:SmallestSystemFont" />
+            <!-- Shown once it has loaded: older servers don't draw one. -->
+            <Group id="qrBox" translation="[1384, 380]" visible="false">
+                <Label width="440" text="Or scan this" color="0xEBEBEBFF" font="font:MediumSystemFont" />
+                <Poster id="qr" translation="[0, 52]" width="440" height="440" loadDisplayMode="scaleToFit" />
+            </Group>
+        </Group>
+        <Label id="status" translation="[96, 830]" width="1248" color="0xA1A9B6FF" font="font:MediumSystemFont" />
+        <ButtonGroup id="actions" iconUri="" focusedIconUri="" translation="[96, 900]" layoutDirection="horiz" minWidth="380" />
+        <Timer id="leave" duration="1.2" />
+    </children>
+</component>

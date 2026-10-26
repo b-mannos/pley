@@ -86,7 +86,9 @@ installing it is in [docs/ANDROID.md](docs/ANDROID.md). And pley for Kodi,
 an add-on for Kodi 20 and newer (LibreELEC and CoreELEC boxes, Android TV
 boxes, computers) that plays with Kodi's own player, with Skip Intro and
 Up Next, and signs in with a code too
-([apps/kodi/README.md](apps/kodi/README.md)).
+([apps/kodi/README.md](apps/kodi/README.md)); and pley for Roku, a native
+app that signs in the same way, sideloaded for now
+([apps/roku/README.md](apps/roku/README.md)).
 
 **Offline**: on the home network everything works without the internet.
 Item pages download a file's original, which the Android app (phones and
@@ -118,6 +120,7 @@ HTTP, so the two can have different licenses
 | `apps/desktop` | pley for Windows, macOS and Linux (Tauri) |
 | `apps/android` | pley for Android phones, tablets and TVs (Kotlin, Compose, Media3) |
 | `apps/kodi` | pley for Kodi, an add-on (Python, GPL-2.0-or-later) |
+| `apps/roku` | pley for Roku (BrightScript, SceneGraph) |
 | `packages/transcoder-api` | Protocol types shared by server and transcoder |
 | `deploy/` | Docker, systemd and launchd setups ([guide](deploy/README.md)) |
 | `docs/` | [HTTP API](docs/API.md), [Plex API](docs/PLEX.md), [transcoder](docs/TRANSCODER.md), [storage](docs/STORAGE.md) |

@@ -1,0 +1,698 @@
+' The one place that talks to the server: the screens' requests, the TV
+' code sign-in and the token refreshes. Transfers run side by side on one
+' message port; refreshes run one at a time for each server, since a
+' refresh token works once and two refreshes with the same one end the
+' sign-in. A new pair is written to the registry before it is used.
+
+sub init()
+    m.top.functionName = "apiRun"
+end sub
+
+sub apiRun()
+    m.port = CreateObject("roMessagePort")
+    m.top.observeField("request", m.port)
+    m.session = m.global.session
+    m.clock = CreateObject("roTimespan")
+    m.serversSection = CreateObject("roRegistrySection", "servers")
+    m.tokensSection = CreateObject("roRegistrySection", "tokens")
+    ' Transfers under way by identity, and requests waiting for a refresh.
+    m.transfers = {}
+    m.waiting = []
+    ' Servers (issuers) with a refresh under way.
+    m.refreshing = {}
+    ' The access token the last refresh gave, and when: { token, at }.
+    m.lastIssued = invalid
+    m.server = ""
+    m.tokens = invalid
+    m.signIn = invalid
+    m.signIns = 0
+    apiDeviceFacts()
+    m.top.ready = true
+    while true
+        msg = wait(apiWaitMs(), m.port)
+        kind = type(msg)
+        if kind = "roSGNodeEvent"
+            if msg.getField() = "request" then apiAccept(msg.getData())
+        else if kind = "roUrlEvent"
+            apiFinished(msg)
+        end if
+        apiTick()
+    end while
+end sub
+
+' The User-Agent, the player's id and what Settings shows of this Roku.
+sub apiDeviceFacts()
+    device = CreateObject("roDeviceInfo")
+    version = CreateObject("roAppInfo").GetVersion()
+    os = device.GetOSVersion()
+    model = httpSentence(device.GetModelDisplayName())
+    m.userAgent = httpUserAgent(version, os, model)
+    ' The player's client_id, so the server sees one player across restarts.
+    section = CreateObject("roRegistrySection", "device")
+    m.playerId = section.Read("player")
+    if m.playerId = ""
+        m.playerId = device.GetRandomUUID()
+        section.Write("player", m.playerId)
+        section.Flush()
+    end if
+    m.session.userAgent = m.userAgent
+    m.session.appVersion = version
+    m.session.device = model + " · Roku OS " + httpOsVersion(os)
+end sub
+
+function apiNow() as integer
+    return CreateObject("roDateTime").AsSeconds()
+end function
+
+' Timers need a tick while transfers or a sign-in are under way.
+function apiWaitMs() as integer
+    if m.transfers.Count() > 0 or m.signIn <> invalid then return 250
+    return 0
+end function
+
+function apiOk(data as dynamic) as object
+    return { ok: true, status: 200, data: data, error: "", message: "" }
+end function
+
+function apiFail(code as string, message as string) as object
+    return { ok: false, status: 0, data: invalid, error: code, message: message }
+end function
+
+function apiSignedOut() as object
+    return { ok: false, status: 401, data: invalid, error: "signed_out", message: "You were signed out: sign in again." }
+end function
+
+sub apiAnswer(request as dynamic, answer as object)
+    if request <> invalid then request.result = answer
+end sub
+
+sub apiAccept(request as dynamic)
+    if request = invalid then return
+    spec = request.spec
+    if spec = invalid then spec = {}
+    op = httpString(spec.op)
+    if op = "boot"
+        apiBoot(request)
+    else if op = "listServers"
+        apiAnswer(request, apiOk({ servers: apiSavedServers() }))
+    else if op = "useServer"
+        apiUseServer(request, spec)
+    else if op = "forgetServer"
+        apiForgetServer(request, spec)
+    else if op = "checkServer"
+        apiCheckServer(request, spec)
+    else if op = "signIn"
+        apiSignInStart(request)
+    else if op = "signInStop"
+        m.signIn = invalid
+        apiAnswer(request, apiOk(invalid))
+    else if op = "signOut"
+        apiSignOut(request)
+    else if op = "play"
+        apiPlay(request, spec)
+    else
+        apiCall(request, spec)
+    end if
+end sub
+
+' --- Transfers ---
+
+' A transfer to send; purpose says what its answer is for.
+function apiJob(purpose as string, method as string, url as string) as object
+    return { purpose: purpose, method: method, url: url, body: "", contentType: "", auth: false, sent: "", retried: false, request: invalid, server: m.server, timeoutMs: 30000 }
+end function
+
+function apiForm(job as object, params as object) as object
+    job.body = urlQuery(params)
+    job.contentType = "application/x-www-form-urlencoded"
+    return job
+end function
+
+' A request of the screens: { method, path, query, json, auth, timeoutMs,
+' build }, to the current server, with the token unless auth is false.
+' build ("rows", "tiles", "seasons", "episodes") makes the answer's list
+' into ContentNodes here, off the render thread (apiBuild).
+sub apiCall(request as object, spec as object)
+    if m.server = ""
+        apiAnswer(request, apiFail("no_server", "Choose a server first."))
+        return
+    end if
+    method = UCase(httpString(spec.method))
+    if method = "" then method = "GET"
+    job = apiJob("call", method, m.server + urlWithQuery(httpString(spec.path), spec.query))
+    job.request = request
+    job.build = httpString(spec.build)
+    job.auth = true
+    if GetInterface(spec.auth, "ifBoolean") <> invalid then job.auth = spec.auth
+    if spec.json <> invalid
+        job.body = FormatJson(spec.json)
+        job.contentType = "application/json"
+    end if
+    timeout = httpNumber(spec.timeoutMs, 0)
+    if timeout > 0 then job.timeoutMs = timeout
+    apiSend(job)
+end sub
+
+sub apiSend(job as object)
+    if job.auth
+        decision = authBeforeRequest(m.tokens, apiNow(), m.refreshing.DoesExist(m.server))
+        if decision = "signed_out"
+            apiAnswer(job.request, apiSignedOut())
+            return
+        end if
+        if decision <> "send"
+            m.waiting.Push(job)
+            if decision = "refresh" then apiRefresh()
+            return
+        end if
+        job.sent = m.tokens.access
+    end if
+    transfer = transferNew(m.transfers)
+    transfer.SetMessagePort(m.port)
+    transfer.SetUrl(job.url)
+    transfer.RetainBodyOnError(true)
+    transfer.EnableEncodings(true)
+    if LCase(Left(job.url, 8)) = "https://" then transfer.SetCertificatesFile("common:/certs/ca-bundle.crt")
+    transfer.AddHeader("User-Agent", m.userAgent)
+    transfer.AddHeader("Accept", "application/json")
+    ' The token goes in this header only, never in an address.
+    if job.auth then transfer.AddHeader("Authorization", "Bearer " + job.sent)
+    if job.contentType <> "" then transfer.AddHeader("Content-Type", job.contentType)
+    transfer.SetRequest(job.method)
+    if job.method = "GET"
+        started = transfer.AsyncGetToString()
+    else
+        started = transfer.AsyncPostFromString(job.body)
+    end if
+    if not started
+        apiAnswered(job, -1, "", invalid)
+        return
+    end if
+    job.transfer = transfer
+    job.startedAt = m.clock.TotalMilliseconds()
+    m.transfers[transfer.GetIdentity().ToStr()] = job
+end sub
+
+sub apiFinished(msg as object)
+    if msg.GetInt() <> 1 then return
+    key = msg.GetSourceIdentity().ToStr()
+    job = m.transfers[key]
+    if job = invalid then return
+    m.transfers.Delete(key)
+    apiAnswered(job, msg.GetResponseCode(), msg.GetString(), msg.GetResponseHeaders())
+end sub
+
+sub apiAnswered(job as object, status as integer, body as string, headers as dynamic)
+    purpose = job.purpose
+    if purpose = "call"
+        apiCallAnswered(job, status, body, headers)
+    else if purpose = "refresh"
+        apiRefreshAnswered(job, status, body)
+    else if purpose = "check"
+        apiCheckAnswered(job, status, body)
+    else if purpose = "metadata"
+        apiMetadataAnswered(job, status, body)
+    else if purpose = "device"
+        apiDeviceAnswered(job, status, body)
+    else if purpose = "poll"
+        apiPollAnswered(job, status, body)
+    end if
+    ' "revoke": the app signed out whatever the server answered.
+end sub
+
+' Transfers that hang are cancelled; the device code is polled on time.
+sub apiTick()
+    now = m.clock.TotalMilliseconds()
+    for each key in m.transfers.Keys()
+        job = m.transfers[key]
+        if now - job.startedAt > job.timeoutMs
+            job.transfer.AsyncCancel()
+            m.transfers.Delete(key)
+            apiAnswered(job, -28, "", invalid)
+        end if
+    end for
+    apiPollWhenDue(now)
+end sub
+
+sub apiCallAnswered(job as object, status as integer, body as string, headers as dynamic)
+    if status = 401 and job.auth and job.server = m.server
+        challenge = invalid
+        if GetInterface(headers, "ifAssociativeArray") <> invalid then challenge = headers["www-authenticate"]
+        decision = authAfterRefusal(job.sent, httpInvalidToken(challenge), job.retried, m.tokens, m.lastIssued, apiNow(), m.refreshing.DoesExist(m.server))
+        if decision = "ended"
+            apiEnd("ended")
+            apiAnswer(job.request, apiSignedOut())
+            return
+        end if
+        if decision <> "answer"
+            job.retried = true
+            if decision = "resend"
+                apiSend(job)
+            else
+                m.waiting.Push(job)
+                if decision = "refresh" then apiRefresh()
+            end if
+            return
+        end if
+    end if
+    answer = httpAnswer(status, body)
+    if answer.ok and job.build <> "" then apiBuild(job, answer)
+    apiAnswer(job.request, answer)
+end sub
+
+' The list of an answer as ContentNodes, in the request's content; the
+' answer keeps a summary instead of the JSON, so little crosses over to
+' the render thread.
+sub apiBuild(job as object, answer as object)
+    data = httpObject(answer.data)
+    if data = invalid then data = {}
+    server = job.server
+    if job.build = "rows"
+        rows = contentHomeRows(data.hubs, invalid, server)
+        summary = []
+        for each row in rows
+            summary.Push({ title: row.title, wide: row.wide, size: row.tiles.Count() })
+        end for
+        job.request.content = nodesRows(rows)
+        answer.data = { rows: summary }
+    else if job.build = "tiles"
+        items = httpArray(data.items)
+        tiles = contentTiles(items, server)
+        job.request.content = nodesContent(tiles)
+        ' listed: the page's items (the next page's offset), shown or not.
+        answer.data = { total: httpNumber(data.total, -1), listed: items.Count(), shown: tiles.Count() }
+    else if job.build = "seasons"
+        seasons = contentSeasons(data.items)
+        job.request.content = nodesContent(seasons)
+        answer.data = { size: seasons.Count() }
+    else if job.build = "episodes"
+        episodes = contentEpisodes(data.items, server)
+        job.request.content = nodesContent(episodes)
+        answer.data = { size: episodes.Count() }
+    end if
+end sub
+
+' --- Tokens ---
+
+sub apiRefresh()
+    tokens = m.tokens
+    if tokens = invalid or m.refreshing.DoesExist(tokens.issuer) then return
+    if tokens.refresh = ""
+        apiEnd("ended")
+        return
+    end if
+    m.refreshing[tokens.issuer] = true
+    job = apiForm(apiJob("refresh", "POST", tokens.tokenEndpoint), { grant_type: "refresh_token", refresh_token: tokens.refresh, client_id: httpClientId() })
+    job.tokens = tokens
+    apiSend(job)
+end sub
+
+sub apiRefreshAnswered(job as object, status as integer, body as string)
+    old = job.tokens
+    m.refreshing.Delete(old.issuer)
+    ' Still the tokens in use: the same server, not signed in again since.
+    current = m.tokens <> invalid and m.tokens.issuer = old.issuer and m.tokens.refresh = old.refresh
+    outcome = authRefreshOutcome(status, body)
+    fresh = invalid
+    reason = "ended"
+    if outcome = "ok"
+        answer = authParseTokens(body, old.scope, apiNow())
+        ' Unreadable, the old refresh token spent: the sign-in is over.
+        if answer.ok then fresh = tokensFrom(answer, old.issuer, old.tokenEndpoint, old.revocationEndpoint)
+        if fresh <> invalid and authExtraScopes(fresh.scope, old.scope).Count() > 0
+            apiRevoke(fresh)
+            fresh = invalid
+            reason = "wider_scope"
+        end if
+    end if
+    if outcome = "failed"
+        ' The network or the server: the tokens stay, the waiting requests fail.
+        if current then apiFailWaiting(httpAnswer(status, body))
+    else if fresh = invalid
+        if current
+            apiEnd(reason)
+        else
+            tokensWipe(m.tokensSection, old.issuer)
+        end if
+    else
+        ' Saved before it is used: the old refresh token is spent.
+        tokensSave(m.tokensSection, fresh)
+        if current
+            m.tokens = fresh
+            m.lastIssued = { token: fresh.access, at: apiNow() }
+            m.session.accessToken = fresh.access
+        end if
+    end if
+    ' What waits goes again, with the new token; when these tokens were
+    ' replaced meanwhile (signed in again), with the ones in use.
+    jobs = m.waiting
+    m.waiting = []
+    for each waiting in jobs
+        apiSend(waiting)
+    end for
+end sub
+
+' The sign-in is over (ended by the server, or more than was asked): the
+' tokens go, and the screens show sign-in.
+sub apiEnd(reason as string)
+    if m.tokens <> invalid then tokensWipe(m.tokensSection, m.tokens.issuer)
+    m.tokens = invalid
+    m.lastIssued = invalid
+    apiFailWaiting(apiSignedOut())
+    m.session.accessToken = ""
+    m.session.signOutReason = reason
+    m.session.signedIn = false
+end sub
+
+sub apiFailWaiting(answer as object)
+    jobs = m.waiting
+    m.waiting = []
+    for each job in jobs
+        apiAnswer(job.request, answer)
+    end for
+end sub
+
+' Ends the grant of tokens on its server (RFC 7009); nothing waits for it.
+sub apiRevoke(tokens as object)
+    token = tokens.refresh
+    if token = "" then token = tokens.access
+    apiSend(apiForm(apiJob("revoke", "POST", tokens.revocationEndpoint), { token: token, client_id: httpClientId() }))
+end sub
+
+sub apiSignOut(request as object)
+    tokens = m.tokens
+    if tokens <> invalid
+        apiRevoke(tokens)
+        tokensWipe(m.tokensSection, tokens.issuer)
+    end if
+    m.tokens = invalid
+    m.lastIssued = invalid
+    apiFailWaiting(apiSignedOut())
+    m.session.accessToken = ""
+    m.session.signOutReason = "signed_out"
+    m.session.signedIn = false
+    apiAnswer(request, apiOk(invalid))
+end sub
+
+' --- Servers ---
+
+function apiSavedServers() as object
+    return serversParse(m.serversSection.Read("list"))
+end function
+
+sub apiBoot(request as object)
+    servers = apiSavedServers()
+    current = urlOrigin(m.serversSection.Read("current"))
+    if current <> invalid
+        name = urlDisplayAddress(current)
+        for each server in servers
+            if server.url = current then name = server.name
+        end for
+        apiSelect(current, name)
+    end if
+    apiAnswer(request, apiOk({ screen: serversStartScreen(m.server, m.tokens <> invalid), servers: servers }))
+end sub
+
+' Makes url the server the screens talk to, signed in when it has tokens.
+sub apiSelect(url as string, name as string)
+    if url <> m.server then apiFailWaiting(apiFail("server_changed", "The server changed."))
+    m.signIn = invalid
+    m.server = url
+    m.tokens = invalid
+    if url <> "" then m.tokens = tokensLoad(m.tokensSection, url)
+    m.lastIssued = invalid
+    m.session.server = url
+    m.session.serverName = name
+    m.session.signOutReason = ""
+    if m.tokens <> invalid
+        m.session.accessToken = m.tokens.access
+    else
+        m.session.accessToken = ""
+    end if
+    m.session.signedIn = m.tokens <> invalid
+end sub
+
+sub apiUseServer(request as object, spec as object)
+    url = urlOrigin(httpString(spec.url))
+    if url = invalid
+        apiAnswer(request, apiFail("address", "That isn't a server's address."))
+        return
+    end if
+    name = httpSentence(spec.name)
+    if name = "" then name = urlDisplayAddress(url)
+    servers = serversWith(apiSavedServers(), { url: url, name: name, id: httpString(spec.id), lastUsed: apiNow() })
+    m.serversSection.Write("list", serversSerialize(servers))
+    m.serversSection.Write("current", url)
+    m.serversSection.Flush()
+    apiSelect(url, name)
+    apiAnswer(request, apiOk({ signedIn: m.tokens <> invalid }))
+end sub
+
+sub apiForgetServer(request as object, spec as object)
+    url = httpString(spec.url)
+    tokens = tokensLoad(m.tokensSection, url)
+    if tokens <> invalid
+        apiRevoke(tokens)
+        tokensWipe(m.tokensSection, url)
+    end if
+    servers = serversWithout(apiSavedServers(), url)
+    m.serversSection.Write("list", serversSerialize(servers))
+    if m.serversSection.Read("current") = url then m.serversSection.Delete("current")
+    m.serversSection.Flush()
+    if m.server = url then apiSelect("", "")
+    apiAnswer(request, apiOk({ servers: servers }))
+end sub
+
+' Whether what someone typed is a pley server: GET /api/server at each
+' address it could be, in turn.
+sub apiCheckServer(request as object, spec as object)
+    address = httpString(spec.address).Trim()
+    candidates = urlCandidates(address)
+    if candidates.Count() = 0
+        apiAnswer(request, apiFail("address", "Enter an address such as nas, 192.168.1.20 or pley.example.com."))
+        return
+    end if
+    job = apiJob("check", "GET", candidates[0] + "/api/server")
+    job.request = request
+    job.candidates = candidates
+    job.index = 0
+    job.address = address
+    job.answered = false
+    apiSend(job)
+end sub
+
+sub apiCheckAnswered(job as object, status as integer, body as string)
+    server = job.candidates[job.index]
+    data = httpObject(httpJson(body))
+    if status = 200 and data <> invalid and httpString(data.version) <> ""
+        if httpTrue(data.setup_required)
+            apiAnswer(job.request, apiFail("setup", "This server isn't set up yet: open " + urlDisplayAddress(server) + " in a browser first."))
+        else if urlUnencrypted(server)
+            apiAnswer(job.request, apiFail("unencrypted", job.address + " isn't on your network and isn't encrypted: open it by its https address."))
+        else
+            name = httpSentence(data.name)
+            if name = "" then name = urlDisplayAddress(server)
+            apiAnswer(job.request, apiOk({ url: server, name: name, version: data.version }))
+        end if
+        return
+    end if
+    if status > 0 then job.answered = true
+    job.index = job.index + 1
+    if job.index < job.candidates.Count()
+        job.url = job.candidates[job.index] + "/api/server"
+        apiSend(job)
+    else if job.answered
+        apiAnswer(job.request, apiFail("not_pley", "Something answers at " + job.address + ", but it isn't pley."))
+    else
+        apiAnswer(job.request, apiFail("unreachable", "Couldn't reach " + job.address + ". Check the address, and that the server is on."))
+    end if
+end sub
+
+' --- Signing in with a TV code (RFC 8628) ---
+
+' The request's result is the code to show (or why there is none); its
+' updates say how the sign-in goes: waiting, retrying, denied, expired,
+' invalid, failed, signed_in.
+sub apiSignInStart(request as object)
+    m.signIn = invalid
+    if m.server = ""
+        apiAnswer(request, apiFail("no_server", "Choose a server first."))
+        return
+    end if
+    if urlUnencrypted(m.server)
+        apiAnswer(request, apiFail("unencrypted", "This server isn't on your network and isn't encrypted: open it by its https address to sign in."))
+        return
+    end if
+    m.signIns = m.signIns + 1
+    m.signIn = { id: m.signIns, request: request, server: m.server, meta: invalid, code: invalid, intervalMs: 5000, failures: 0, nextAt: 0, polling: false, troubled: false }
+    job = apiJob("metadata", "GET", m.server + "/.well-known/oauth-authorization-server")
+    job.signIn = m.signIn.id
+    apiSend(job)
+end sub
+
+' The sign-in a job belongs to, when it is still the one under way.
+function apiSignInOf(job as object) as dynamic
+    if m.signIn = invalid or m.signIn.id <> job.signIn then return invalid
+    return m.signIn
+end function
+
+sub apiSignInFailed(signIn as object, message as string)
+    m.signIn = invalid
+    apiAnswer(signIn.request, apiFail("sign_in", message))
+end sub
+
+' The server didn't answer the sign-in: "network", as for any request.
+function apiSignInUnreachable(signIn as object, status as integer, body as string) as boolean
+    answer = httpAnswer(status, body)
+    if answer.error <> "network" then return false
+    m.signIn = invalid
+    apiAnswer(signIn.request, answer)
+    return true
+end function
+
+sub apiSignInUpdate(signIn as object, update as object)
+    signIn.request.update = update
+end sub
+
+sub apiMetadataAnswered(job as object, status as integer, body as string)
+    signIn = apiSignInOf(job)
+    if signIn = invalid or apiSignInUnreachable(signIn, status, body) then return
+    if status = 404
+        apiSignInFailed(signIn, authTooOld())
+        return
+    end if
+    meta = authParseMetadata(body, signIn.server)
+    if not meta.ok
+        apiSignInFailed(signIn, meta.message)
+        return
+    end if
+    signIn.meta = meta
+    device = apiForm(apiJob("device", "POST", meta.deviceEndpoint), { client_id: httpClientId(), scope: httpScope() })
+    device.signIn = signIn.id
+    apiSend(device)
+end sub
+
+sub apiDeviceAnswered(job as object, status as integer, body as string)
+    signIn = apiSignInOf(job)
+    if signIn = invalid or apiSignInUnreachable(signIn, status, body) then return
+    if status < 200 or status >= 300
+        apiSignInFailed(signIn, authDeviceRefusal(status, body))
+        return
+    end if
+    code = authParseDeviceCode(body, apiNow())
+    if not code.ok
+        apiSignInFailed(signIn, code.message)
+        return
+    end if
+    signIn.code = code
+    signIn.intervalMs = code.interval * 1000
+    signIn.nextAt = m.clock.TotalMilliseconds() + signIn.intervalMs
+    apiAnswer(signIn.request, apiOk({
+        userCode: code.userCode,
+        verificationUri: code.verificationUri,
+        verificationUriComplete: code.verificationUriComplete,
+        qr: authQrAddress(signIn.server, code.userCode),
+        expiresAt: code.expiresAt
+    }))
+    apiSignInUpdate(signIn, { status: "waiting" })
+end sub
+
+' Asks the token endpoint about the code every interval, never sooner.
+sub apiPollWhenDue(now as integer)
+    signIn = m.signIn
+    if signIn = invalid or signIn.code = invalid or signIn.polling or now < signIn.nextAt then return
+    if apiNow() >= signIn.code.expiresAt
+        m.signIn = invalid
+        apiSignInUpdate(signIn, { status: "expired" })
+        return
+    end if
+    signIn.polling = true
+    poll = apiForm(apiJob("poll", "POST", signIn.meta.tokenEndpoint), { grant_type: authDeviceGrant(), device_code: signIn.code.deviceCode, client_id: httpClientId() })
+    poll.signIn = signIn.id
+    poll.revocationEndpoint = signIn.meta.revocationEndpoint
+    apiSend(poll)
+end sub
+
+sub apiPollAnswered(job as object, status as integer, body as string)
+    signIn = apiSignInOf(job)
+    if signIn = invalid
+        ' Approved after the TV stopped waiting: those tokens are ended.
+        if status >= 200 and status < 300
+            answer = authParseTokens(body, httpScope(), apiNow())
+            if answer.ok then apiRevoke({ access: answer.access, refresh: answer.refresh, revocationEndpoint: job.revocationEndpoint })
+        end if
+        return
+    end if
+    signIn.polling = false
+    answer = authPollAnswer(status, body)
+    now = m.clock.TotalMilliseconds()
+    if answer.kind = "pending" or answer.kind = "slow_down"
+        ' slow_down: 5 seconds more, for good (RFC 8628 §3.5).
+        if answer.kind = "slow_down" then signIn.intervalMs = signIn.intervalMs + 5000
+        signIn.failures = 0
+        signIn.nextAt = now + signIn.intervalMs
+        if signIn.troubled
+            signIn.troubled = false
+            apiSignInUpdate(signIn, { status: "waiting" })
+        end if
+    else if answer.kind = "network"
+        signIn.failures = signIn.failures + 1
+        delayMs = authPollWait(signIn.intervalMs, signIn.failures)
+        signIn.nextAt = now + delayMs
+        signIn.troubled = true
+        apiSignInUpdate(signIn, { status: "retrying", seconds: Int(delayMs / 1000) })
+    else if answer.kind = "tokens"
+        m.signIn = invalid
+        apiSignedIn(signIn, body)
+    else
+        m.signIn = invalid
+        apiSignInUpdate(signIn, { status: answer.kind, message: answer.message })
+    end if
+end sub
+
+' Keeps the tokens of an approved code; the sign-in they replace on that
+' server is ended.
+sub apiSignedIn(signIn as object, body as string)
+    answer = authParseTokens(body, httpScope(), apiNow())
+    if not answer.ok
+        apiSignInUpdate(signIn, { status: "failed", message: answer.message })
+        return
+    end if
+    meta = signIn.meta
+    fresh = tokensFrom(answer, meta.issuer, meta.tokenEndpoint, meta.revocationEndpoint)
+    if authExtraScopes(fresh.scope, httpScope()).Count() > 0
+        apiRevoke(fresh)
+        apiSignInUpdate(signIn, { status: "failed", message: "The server allowed more than pley for Roku asks for, so it was signed out again." })
+        return
+    end if
+    previous = tokensLoad(m.tokensSection, fresh.issuer)
+    tokensSave(m.tokensSection, fresh)
+    if previous <> invalid and previous.refresh <> fresh.refresh then apiRevoke(previous)
+    if fresh.issuer = m.server
+        m.tokens = fresh
+        m.lastIssued = invalid
+        m.session.signOutReason = ""
+        m.session.accessToken = fresh.access
+        m.session.signedIn = true
+    end if
+    apiSignInUpdate(signIn, { status: "signed_in" })
+end sub
+
+' --- Playback ---
+
+' POST /api/playback with what this Roku plays, asked of it now. mode is
+' "auto", or "transcode" once the original didn't play here.
+sub apiPlay(request as object, spec as object)
+    mode = httpString(spec.mode)
+    if mode = "" then mode = "auto"
+    body = {
+        item_id: spec.itemId,
+        start_ms: Int(httpNumber(spec.startMs, 0)),
+        mode: mode,
+        client_id: m.playerId,
+        caps: capsBuild(CreateObject("roDeviceInfo"))
+    }
+    if httpNumber(spec.fileId, 0) > 0 then body.file_id = spec.fileId
+    ' Starting a transcode takes the server a few seconds.
+    apiCall(request, { method: "POST", path: "/api/playback", json: body, timeoutMs: 60000 })
+end sub

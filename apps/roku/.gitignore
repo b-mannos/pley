@@ -1,0 +1,4 @@
+node_modules/
+out/
+# Left by brs-node's synchronous HTTP during npm run smoke.
+.node-xhr-*

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A title in a RowList row or a MarkupGrid: its poster (or a 16:9 picture
+     for Continue Watching), how far along it is, and two lines under it. -->
+<component name="Tile" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="onContent" />
+        <field id="width" type="float" onChange="onLayout" />
+        <field id="height" type="float" onChange="onLayout" />
+        <field id="itemHasFocus" type="boolean" onChange="onFocus" />
+        <!-- RowList sets the first two, MarkupGrid the third. -->
+        <field id="rowHasFocus" type="boolean" value="true" onChange="onFocus" />
+        <field id="rowListHasFocus" type="boolean" value="true" onChange="onFocus" />
+        <field id="gridHasFocus" type="boolean" value="true" onChange="onFocus" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/items/Tile.brs" />
+    <children>
+        <Rectangle id="frame" color="0x262B35FF" />
+        <Label id="fallback" color="0xA1A9B6FF" horizAlign="center" vertAlign="center" wrap="true" maxLines="4" font="font:SmallestBoldSystemFont" />
+        <Poster id="poster" loadDisplayMode="scaleToZoom" />
+        <Rectangle id="track" color="0x16191ECC" visible="false" />
+        <Rectangle id="fill" color="0x38BDF8FF" visible="false" />
+        <Label id="title" color="0xEBEBEBFF" font="font:SmallestBoldSystemFont" />
+        <Label id="subtitle" color="0xA1A9B6FF" font="font:TinySystemFont" />
+    </children>
+</component>

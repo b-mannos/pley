@@ -100,6 +100,18 @@ jobs:
         run: |
           python3 src/apps/kodi/package.py
           mv src/dist/plugin.video.pley-*.zip dist/
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: src/.nvmrc
+      # pley for Roku, as a Roku in developer mode installs it, named for the
+      # version in its manifest.
+      - name: Roku app
+        working-directory: src/apps/roku
+        run: |
+          npm ci --no-fund --no-audit
+          npm run package
+          version=$(awk -F= '/^major_version=/{a=$2} /^minor_version=/{b=$2} /^build_version=/{c=$2} END{print a "." b "." c}' manifest)
+          cp out/pley-roku.zip "$GITHUB_WORKSPACE/dist/pley-roku-$version.zip"
       - name: Checksums
         working-directory: dist
         run: sha256sum -- * > SHA256SUMS

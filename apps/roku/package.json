@@ -1,0 +1,21 @@
+{
+  "name": "pley-roku",
+  "private": true,
+  "version": "0.1.0",
+  "description": "pley for Roku: a native SceneGraph app",
+  "scripts": {
+    "compile": "bsc --create-package false --copy-to-staging false",
+    "lint": "bslint --project bsconfig.lint.json",
+    "test": "node scripts/test.mjs",
+    "check": "npm run compile && npm run lint && npm test",
+    "smoke": "node scripts/smoke.mjs",
+    "package": "bsc --create-package --out-file out/pley-roku.zip",
+    "images": "python scripts/make_images.py",
+    "bench": "node scripts/bench.mjs"
+  },
+  "devDependencies": {
+    "@rokucommunity/bslint": "0.8.46",
+    "brighterscript": "0.73.5",
+    "brs-node": "2.6.0"
+  }
+}
