@@ -87,6 +87,22 @@ class RecoveryFlowTest {
     }
 
     @Test
+    fun `a download of another file with the same number streams instead`() {
+        // A server whose database was made anew numbers its files again: the
+        // download kept under this number was of another title.
+        val movie = runBlocking { h.api.item(FixtureIds.SAMPLE_1080P) }
+        val other = movie.copy(title = "Another", files = movie.files.map { it.copy(path = "Another (1999).mkv") })
+        h.local = object : LocalMedia {
+            override fun file(fileId: Long) = LocalFile("file:///downloads/another.mkv").takeIf { fileId == movie.files.first().id }
+
+            override suspend fun detail(itemId: Long) = other.takeIf { itemId == movie.id }
+        }
+        h.play(PlayRequest(FixtureIds.SAMPLE_1080P))
+        assertEquals("streamed", 1, h.playbackRequests().size)
+        assertFalse(h.engine.source!!.url.startsWith("file:"))
+    }
+
+    @Test
     fun `a video the device can't decode is transcoded at once`() {
         h.play(PlayRequest(FixtureIds.SAMPLE_1080P))
         h.engine.ready()

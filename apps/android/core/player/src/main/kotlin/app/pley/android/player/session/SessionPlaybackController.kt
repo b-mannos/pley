@@ -120,6 +120,9 @@ class SessionPlaybackController(
     private var item: ItemDetail? = null
     private var caps: CapsSnapshot? = null
     private var file: MediaFile? = null
+
+    /** The item's files downloaded here, of the same file ([downloadedFiles]). */
+    private var downloads: Set<Long> = emptySet()
     private var audio: MediaStream? = null
     private var subtitle: MediaStream? = null
     private var quality: QualityPreset = Qualities.ORIGINAL
@@ -227,7 +230,8 @@ class SessionPlaybackController(
     private suspend fun load(detail: ItemDetail, req: PlayRequest) {
         item = detail
         current = req
-        val downloaded = req.fileId ?: detail.files.firstOrNull { env.local.file(it.id) != null }?.id
+        downloads = downloadedFiles(detail)
+        val downloaded = req.fileId ?: detail.files.firstOrNull { it.id in downloads }?.id
         val chosen = PlaybackPlan.file(detail, downloaded, caps, env.policy)
         file = chosen
         audio = PlaybackPlan.initialAudio(chosen, req.audioIndex)
@@ -310,7 +314,7 @@ class SessionPlaybackController(
         lastAdvancePos = -1
         ui.update { it.copy(phase = PlayerPhase.Preparing, positionMs = atMs, skipLabel = null) }
 
-        val local = env.local.file(chosen.id)?.takeIf { recovery.fallbackMode == null && !streamingPicked }
+        val local = localFile(chosen.id)?.takeIf { recovery.fallbackMode == null && !streamingPicked }
         if (local != null) return beginLocal(detail, chosen, local, atMs)
 
         val mode = recovery.fallbackMode ?: guardMode?.takeIf { quality.original } ?: quality.mode
@@ -440,6 +444,24 @@ class SessionPlaybackController(
             saved ?: env.local.detail(itemId) ?: throw e
         }
     }
+
+    /**
+     * The files of [detail] whose download here is of that very file, by
+     * its name and size as the details saved with it have them: a server
+     * whose database was made anew numbers its files again, and another
+     * title's download must not play for this one (it streams instead).
+     */
+    private suspend fun downloadedFiles(detail: ItemDetail): Set<Long> {
+        val here = detail.files.filter { env.local.file(it.id) != null }
+        if (here.isEmpty()) return emptySet()
+        val saved = env.local.detail(detail.id)?.files.orEmpty().associateBy { it.id }
+        return here.filter { f ->
+            saved[f.id]?.let { s -> s.path == f.path && (s.size <= 0 || f.size <= 0 || s.size == f.size) } ?: true
+        }.mapTo(HashSet()) { it.id }
+    }
+
+    /** The download of file [id] of the item playing, when it is of that file. */
+    private fun localFile(id: Long): LocalFile? = if (id in downloads) env.local.file(id) else null
 
     /** Reports `stopped` at [positionMs] and deletes the session playing; false when none plays. */
     private fun endSession(positionMs: Long): Boolean {
@@ -1059,7 +1081,7 @@ class SessionPlaybackController(
     private fun lookUpNext(then: (ItemSummary?) -> Unit) {
         val detail = item ?: return then(null)
         // Asked at the end too, when the session has ended already: by the file.
-        val fromDownload = !streamingPicked && file?.let { env.local.file(it.id) } != null
+        val fromDownload = !streamingPicked && file?.let { localFile(it.id) } != null
         nextLookup?.cancel()
         nextLookup = scope.launch {
             val found = try {
@@ -1243,7 +1265,7 @@ class SessionPlaybackController(
 
     private fun failWith(error: Exception) {
         // A download that didn't play here as it is went to the server, which is out of reach.
-        val leftDownload = recovery.fallbackMode != null && file?.let { env.local.file(it.id) } != null
+        val leftDownload = recovery.fallbackMode != null && file?.let { localFile(it.id) } != null
         val message = if (leftDownload && error is OfflineException) texts.downloadNeedsServer else describe(error)
         val canRetry = !(error is ApiException && (error.status == 403 || error.status == 404 || error.signedOut))
         fail(message, canRetry)
