@@ -220,6 +220,50 @@ async fn sidecar_languages(app: &TestApp, token: &str, item: i64) -> Vec<String>
         .collect()
 }
 
+#[tokio::test]
+async fn a_new_title_never_gets_the_id_of_one_deleted() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let files = [("Alien", "movies/Alien (1979).mkv"), ("Brazil", "movies/Brazil (1985).mkv")];
+    for (_, path) in files {
+        app.media_file(path, 1024);
+    }
+    let lib = app.library(&admin, "Movies", "movies", "movies").await;
+    let file_of = |id: i64| {
+        let app = &app;
+        let admin = admin.clone();
+        async move { app.get(&format!("/api/items/{id}"), &admin).await.body["files"][0]["id"].as_i64().unwrap() }
+    };
+    let ids = app.ids(lib, &admin).await;
+    let newest = ids.values().copied().max().unwrap();
+    let newest_file = file_of(newest).await;
+    let (_, path) = files.iter().find(|(title, _)| ids[*title] == newest).unwrap();
+
+    // The newest goes, and another comes: a phone's download of the one
+    // that went must never become the new one's.
+    std::fs::remove_file(app.media.path().join(path)).unwrap();
+    rescan(&app, &admin, lib).await;
+    app.media_file("movies/Casablanca (1942).mkv", 1024);
+    rescan(&app, &admin, lib).await;
+    let casablanca = app.ids(lib, &admin).await["Casablanca"];
+    assert!(casablanca > newest, "{casablanca} after {newest}");
+    assert!(file_of(casablanca).await > newest_file);
+
+    // Profiles too.
+    let created = |name: &'static str| {
+        let app = &app;
+        let admin = admin.clone();
+        async move {
+            let reply = app.post("/api/users", &admin, json!({"username": name, "password": "a-long-password"})).await;
+            assert_eq!(reply.status, StatusCode::CREATED, "{}", reply.body);
+            reply.body["id"].as_i64().unwrap()
+        }
+    };
+    let first = created("first").await;
+    assert_eq!(app.delete(&format!("/api/users/{first}"), &admin).await.status, StatusCode::NO_CONTENT);
+    assert!(created("second").await > first);
+}
+
 async fn rescan(app: &TestApp, token: &str, library: i64) {
     let reply = app.post(&format!("/api/libraries/{library}/scan"), token, json!({})).await;
     assert_eq!(reply.status, StatusCode::ACCEPTED);

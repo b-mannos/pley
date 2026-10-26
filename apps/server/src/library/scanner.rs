@@ -846,9 +846,9 @@ async fn upsert_item(conn: &mut SqliteConnection, library_id: i64, item: &NewIte
     // Titles and years come from the files until a metadata agent matched the
     // item; music tags keep them (MusicBrainz only fills in what they lack).
     sqlx::query_scalar(
-        "INSERT INTO items (library_id, parent_id, grandparent_id, kind, key, title, sort_title, original_title, year, idx, disc,
-                            duration_ms, path, release_date, genres, tmdb_id, imdb_id, added_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO items (id, library_id, parent_id, grandparent_id, kind, key, title, sort_title, original_title, year, idx,
+                            disc, duration_ms, path, release_date, genres, tmdb_id, imdb_id, added_at, updated_at)
+         VALUES ((SELECT last + 1 FROM item_ids), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(library_id, key) DO UPDATE SET
             parent_id = excluded.parent_id,
             grandparent_id = excluded.grandparent_id,
@@ -906,9 +906,9 @@ async fn upsert_file(
         .or_else(|| file.path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()));
     let now = now();
     sqlx::query(
-        "INSERT INTO media_files (item_id, library_id, path, size, mtime, container, duration_ms, bitrate, width, height,
-                                  video_codec, audio_codec, media_info, external_subs, probed, added_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO media_files (id, item_id, library_id, path, size, mtime, container, duration_ms, bitrate, width,
+                                  height, video_codec, audio_codec, media_info, external_subs, probed, added_at, updated_at)
+         VALUES ((SELECT last + 1 FROM file_ids), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(path) DO UPDATE SET
             item_id = excluded.item_id, library_id = excluded.library_id, size = excluded.size, mtime = excluded.mtime,
             container = excluded.container, duration_ms = excluded.duration_ms, bitrate = excluded.bitrate,

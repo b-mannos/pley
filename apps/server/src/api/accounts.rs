@@ -105,9 +105,9 @@ pub async fn create_user(
         return Err(AppError::conflict(format!("user '{username}' already exists")));
     }
     let id: i64 = sqlx::query_scalar(
-        "INSERT INTO users (username, password_hash, display_name, is_admin, managed, home, all_libraries, max_age,
+        "INSERT INTO users (id, username, password_hash, display_name, is_admin, managed, home, all_libraries, max_age,
                             pin_hash, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+         VALUES ((SELECT last + 1 FROM user_ids), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(&username)
     .bind(password_hash)
@@ -283,8 +283,7 @@ pub async fn delete_user(
         let _ = tokio::fs::remove_file(accounts::avatars_dir(&state.config.data_dir).join(file)).await;
     }
     state.auth.forget_user(id);
-    // An app it was signing in gets nothing, even from an account made
-    // later with the same number.
+    // An app it was signing in gets nothing.
     state.oauth.forget_user(id);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -777,8 +776,8 @@ pub async fn accept_invite(
     }
     // Invited people are friends of the server, not members of the home.
     let id: i64 = sqlx::query_scalar(
-        "INSERT INTO users (username, password_hash, display_name, home, all_libraries, max_age, created_at)
-         VALUES (?, ?, ?, 0, ?, ?, ?) RETURNING id",
+        "INSERT INTO users (id, username, password_hash, display_name, home, all_libraries, max_age, created_at)
+         VALUES ((SELECT last + 1 FROM user_ids), ?, ?, ?, 0, ?, ?, ?) RETURNING id",
     )
     .bind(&username)
     .bind(hash)

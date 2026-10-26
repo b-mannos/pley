@@ -64,7 +64,7 @@ message }`, where `message` is what the one who stopped it wrote, or `null`
 ## Types
 
 ```ts
-type Id = number;
+type Id = number;        // a library's, item's, file's or user's is never given to another, also once deleted
 type Timestamp = number; // unix seconds
 
 interface User {

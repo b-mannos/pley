@@ -269,13 +269,16 @@ pub async fn reset_password(config: Config, username: &str, password: &str, admi
             println!("password updated for '{username}'{off}{apps}");
         }
         None => {
-            sqlx::query("INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?)")
-                .bind(username)
-                .bind(&hash)
-                .bind(admin)
-                .bind(util::now())
-                .execute(&db.write)
-                .await?;
+            sqlx::query(
+                "INSERT INTO users (id, username, password_hash, is_admin, created_at)
+                 VALUES ((SELECT last + 1 FROM user_ids), ?, ?, ?, ?)",
+            )
+            .bind(username)
+            .bind(&hash)
+            .bind(admin)
+            .bind(util::now())
+            .execute(&db.write)
+            .await?;
             println!("created user '{username}'{}", if admin { " (admin)" } else { "" });
         }
     }

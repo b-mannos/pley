@@ -651,12 +651,12 @@ async fn a_tv_allowed_but_not_signed_in_yet_ends_with_the_accounts_sign_ins() {
     assert_eq!(set.status, StatusCode::OK, "{}", set.text());
     told_no(&app, &device_code).await;
 
-    // His account is deleted, and the next one made gets his number.
+    // His account is deleted, and another made: it never gets his number.
     let bob = app.login("bob", "test-pass-3").await;
     let (device_code, _) = allowed_tv(&app, &bob).await;
     assert_eq!(app.delete(&format!("/api/users/{bob_id}"), &admin).await.status, StatusCode::NO_CONTENT);
     let (_, carol_id) = app.user(&admin, "carol", json!({})).await;
-    assert_eq!(carol_id, bob_id, "SQLite numbers a new account after the highest one left");
+    assert!(carol_id > bob_id, "a new account counts on from the numbers ever given");
     told_no(&app, &device_code).await;
 }
 

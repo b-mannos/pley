@@ -101,8 +101,8 @@ pub async fn setup(
     let hash = hash_password(body.password).await?;
     // Insert only when there are no users yet (atomic with the write pool).
     let created: Option<i64> = sqlx::query_scalar(
-        "INSERT INTO users (username, password_hash, is_admin, created_at)
-         SELECT ?, ?, 1, ? WHERE NOT EXISTS (SELECT 1 FROM users)
+        "INSERT INTO users (id, username, password_hash, is_admin, created_at)
+         SELECT (SELECT last + 1 FROM user_ids), ?, ?, 1, ? WHERE NOT EXISTS (SELECT 1 FROM users)
          RETURNING id",
     )
     .bind(body.username.trim())
