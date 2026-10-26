@@ -2,7 +2,9 @@ package app.pley.android.player.engine
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.graphics.SurfaceTexture
+import android.media.AudioManager
 import android.os.Looper
 import android.os.SystemClock
 import android.view.Surface
@@ -293,6 +295,37 @@ class Media3EngineTest {
 
         engine.detachWindow()
         assertEquals("the mode goes back to the system's choice", listOf(46, 0), host.requested)
+    }
+
+    @Test
+    fun aTvPlaysOnThroughTheHdmiDropOfItsOwnModeChange() {
+        codecs.addDecoders(ShadowMediaCodecConfig.CODEC_INFO_AVC, ShadowMediaCodecConfig.CODEC_INFO_AAC)
+        val host = FakeHost(ModeChoiceTest.STREAMER.copy(matchContent = MatchContent.Always))
+        val engine = engine(profile = tv, caps = snapshot(DecoderPolicy(tv = true, allowSoftware = true)), host = host)
+        val film = MediaStream(index = 0, kind = StreamKind.Video, codec = "h264", frameRate = 23.976, dynamicRange = DynamicRange.Sdr)
+        engine.prepare(EngineSource(file(), hls = false, video = film, durationMs = 2 * 60 * 60 * 1000L), startMs = 0, playWhenReady = true)
+        engine.attachWindow(Robolectric.buildActivity(Activity::class.java).setup().get().window)
+        val looper = shadowOf(Looper.getMainLooper())
+
+        // As a Fire TV does while the mode changes: its HDMI audio goes, and Android says the output became noisy.
+        context.sendBroadcast(Intent(AudioManager.ACTION_HDMI_AUDIO_PLUG).putExtra(AudioManager.EXTRA_AUDIO_PLUG_STATE, 0))
+        context.sendBroadcast(Intent(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
+        looper.idle()
+        assertFalse(engine.player.playWhenReady)
+
+        looper.idleFor(Duration.ofMillis(FrameRateController.SETTLE_MS))
+        assertTrue("the resume plays once the mode settles", engine.player.playWhenReady)
+
+        // The drop's late news doesn't pause it either...
+        context.sendBroadcast(Intent(AudioManager.ACTION_HDMI_AUDIO_PLUG).putExtra(AudioManager.EXTRA_AUDIO_PLUG_STATE, 0))
+        looper.idle()
+        assertTrue(engine.player.playWhenReady)
+
+        // ...but the HDMI output going later still does.
+        looper.idleFor(Duration.ofMillis(Media3Engine.SWITCH_QUIET_MS))
+        context.sendBroadcast(Intent(AudioManager.ACTION_HDMI_AUDIO_PLUG).putExtra(AudioManager.EXTRA_AUDIO_PLUG_STATE, 0))
+        looper.idle()
+        assertFalse(engine.player.playWhenReady)
     }
 
     @Test

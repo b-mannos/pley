@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.view.Window
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -164,7 +165,14 @@ class Media3Engine(
         )
     }
 
-    private val hdmi: HdmiUnplugWatcher? = if (music) null else HdmiUnplugWatcher(app) { player.pause() }
+    private val hdmi: HdmiUnplugWatcher? = if (music) null else HdmiUnplugWatcher(app) {
+        if (switchQuiet()) {
+            Log.i(TAG, "HDMI output went with the display mode change: plays on")
+        } else {
+            Log.i(TAG, "HDMI output went: pause")
+            player.pause()
+        }
+    }
     private val restarts = AudioRestarts(now)
     private val struggle = StruggleDetector()
     private val reconnect = ReconnectWatcher()
@@ -184,6 +192,20 @@ class Media3Engine(
     private var wantPlay = false
     private var ownPauses = 0
     private var released = false
+
+    /** The player's playWhenReady as last reported: Media3 also reports a new reason alone, paused already. */
+    private var reportedPlayWhenReady = false
+
+    /**
+     * Until when an HDMI output that goes, and Media3's "becoming noisy"
+     * with it, are the display mode change's doing, not the person's: a
+     * Fire TV drops the HDMI audio for about a second as the mode changes,
+     * and says so up to a second later. Taken for the person's pause, it
+     * kept a resume paused once the mode had settled.
+     */
+    private var switchQuietUntil = 0L
+
+    private fun switchQuiet(): Boolean = matchPending || now() < switchQuietUntil
 
     /**
      * A file played as it is that starts part way (a resume) starts at the
@@ -228,6 +250,7 @@ class Media3Engine(
         val asked = matchRequest(source)
         request = asked
         matchPending = asked != null
+        Log.i(TAG, "prepare at $startMs ms: play $playWhenReady, display match ${if (asked != null) "asked" else "none"}, window ${window != null}")
         snapToKeyFrame = startMs > 0 && !music && !source.hls
         player.setSeekParameters(SeekParameters.EXACT)
         player.setMediaSource(loading.mediaSource(source), startMs.coerceAtLeast(0))
@@ -239,11 +262,13 @@ class Media3Engine(
     override fun attachWindow(window: Window) {
         if (released || this.window === window) return
         this.window = window
+        Log.i(TAG, "window attached, display match pending $matchPending")
         if (profile.isTv && !music) frameRate = FrameRateController(hostFor(window), frameRateMemory, sdk)
         if (matchPending) startMatch()
     }
 
     override fun detachWindow() {
+        if (window != null) Log.i(TAG, "window detached, display match pending $matchPending")
         matchJob?.cancel()
         matchJob = null
         frameRate?.clear()
@@ -297,6 +322,8 @@ class Media3Engine(
         matchJob?.cancel()
         matchJob = scope.launch {
             val outcome = controller.match(asked) { hz -> mutableState.update { it.copy(switchingDisplayMode = true, switchingToHz = hz) } }
+            Log.i(TAG, "display match: ${outcome.decision}, switched ${outcome.switched}, timed out ${outcome.timedOut}; play $wantPlay")
+            if (outcome.switched || outcome.timedOut) switchQuietUntil = now() + SWITCH_QUIET_MS
             matchPending = false
             mutableState.update {
                 it.copy(switchingDisplayMode = false, switchingToHz = null, frameRateHint = it.frameRateHint || outcome.showHint)
@@ -369,8 +396,19 @@ class Media3Engine(
 
     private inner class Listener : Player.Listener {
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            Log.i(TAG, "play when ready $playWhenReady (reason $reason, own pauses $ownPauses, display match pending $matchPending)")
+            val changed = playWhenReady != reportedPlayWhenReady
+            reportedPlayWhenReady = playWhenReady
+            // A new reason alone (paused already, now "becoming noisy") is no new pause.
+            if (!changed) return
             if (!playWhenReady && ownPauses > 0) {
                 ownPauses--
+                return
+            }
+            if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY && switchQuiet()) {
+                Log.i(TAG, "becoming noisy with the display mode change: plays on")
+                // While the mode changes the player is held anyway; it plays as the mode settles.
+                if (!matchPending) player.play()
                 return
             }
             if (playWhenReady) {
@@ -380,7 +418,10 @@ class Media3Engine(
                         wantPlay = true
                         pauseOurselves()
                     }
-                    focus != null && !focus.beforePlay() -> pauseOurselves()
+                    focus != null && !focus.beforePlay() -> {
+                        Log.i(TAG, "audio focus refused: pause")
+                        pauseOurselves()
+                    }
                 }
             } else {
                 wantPlay = false
@@ -389,6 +430,7 @@ class Media3Engine(
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            Log.i(TAG, if (isPlaying) "playing" else "not playing")
             main.removeCallbacks(tick)
             if (isPlaying) main.postDelayed(tick, TICK_MS)
         }
@@ -459,6 +501,12 @@ class Media3Engine(
         const val SEEK_STEP_MS = 10_000L
         const val TICK_MS = 1_000L
         const val RECONNECT_CHECK_MS = 500L
+
+        /** A few lines a playback (prepare, display match, play and pause with their reasons), for devices' bugs. */
+        private const val TAG = "pley.engine"
+
+        /** After a display mode change, how long an HDMI output going is still taken for its doing. */
+        const val SWITCH_QUIET_MS = 4_000L
 
         /** Media3 marks setClock for tests; the app always passes Clock.DEFAULT, tests a clock that moves by itself. */
         @SuppressLint("VisibleForTests")

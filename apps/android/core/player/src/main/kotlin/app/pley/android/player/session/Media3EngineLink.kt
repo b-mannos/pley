@@ -37,6 +37,7 @@ class Media3EngineLink(override val engine: PlayerEngine) : EngineLink {
     private var wantedText: Wanted? = Wanted(null, null)
     private var videoDecoder: String? = null
     private var audioDecoder: String? = null
+    private var reportedPlayWhenReady = engine.player.playWhenReady
 
     private val events = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -44,6 +45,9 @@ class Media3EngineLink(override val engine: PlayerEngine) : EngineLink {
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            // Media3 also reports a new reason alone (paused already, now "becoming noisy"): nothing for the session.
+            if (playWhenReady == reportedPlayWhenReady) return
+            reportedPlayWhenReady = playWhenReady
             listener?.onPlayWhenReady(playWhenReady)
         }
 
