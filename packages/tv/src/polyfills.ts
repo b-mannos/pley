@@ -69,4 +69,13 @@ if (!pp.finally) {
   };
 }
 
+// Preact schedules its renders with it (Chromium 71).
+const g = window as unknown as Record<string, unknown>;
+if (!g.queueMicrotask) {
+  const done = Promise.resolve();
+  g.queueMicrotask = (fn: () => void) => {
+    done.then(fn).catch((e) => setTimeout(() => { throw e; }));
+  };
+}
+
 export {};

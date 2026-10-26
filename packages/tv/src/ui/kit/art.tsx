@@ -1,4 +1,4 @@
-import type { JSX } from "preact";
+import type { CSSProperties } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { ItemSummary } from "../../api/types";
 import { useUi } from "../context";
@@ -45,7 +45,7 @@ export function Art(props: {
   title: string;
   showTitle?: boolean;
   class?: string;
-  style?: JSX.CSSProperties;
+  style?: CSSProperties;
   /** The widest picture asked for, in px (backdrops: 1280). */
   cap?: number;
   priority?: number;

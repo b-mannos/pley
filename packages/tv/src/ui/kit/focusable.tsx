@@ -1,11 +1,11 @@
-import type { ComponentChildren, JSX } from "preact";
+import type { ComponentChildren, CSSProperties } from "preact";
 import { useLayoutEffect, useRef } from "preact/hooks";
 import { setGroup, setHandlers, type Dir, type FocusHandlers, type GroupOptions } from "../focus";
 import { useUi } from "../context";
 
 interface FProps extends FocusHandlers {
   class?: string;
-  style?: JSX.CSSProperties | string;
+  style?: CSSProperties | string;
   /** The page's memory key ("play", "grid/42"): Back lands on it again. */
   fid?: string;
   /** Takes focus when the page opens, unless the page remembers another element. */
@@ -57,7 +57,7 @@ export function F(props: FProps) {
 interface GProps extends Omit<GroupOptions, "kind"> {
   kind: GroupOptions["kind"];
   class?: string;
-  style?: JSX.CSSProperties | string;
+  style?: CSSProperties | string;
   children?: ComponentChildren;
   elRef?: (el: HTMLDivElement | null) => void;
 }

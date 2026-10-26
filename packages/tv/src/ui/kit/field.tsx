@@ -79,7 +79,8 @@ export function TextField(p: {
       {p.icon && <Icon name={p.icon} size={20} color={typing ? "var(--fg)" : "var(--muted)"} />}
       <input
         ref={input}
-        type={p.type ?? "text"}
+        // Preact types an input's attributes by its type, one type at a time.
+        type={(p.type ?? "text") as "text"}
         value={p.value}
         style={p.icon ? "margin-left:12px" : undefined}
         placeholder={p.placeholder}

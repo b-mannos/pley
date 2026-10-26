@@ -1,7 +1,6 @@
 {
   "extends": "../../packages/tv/tsconfig.json",
   "compilerOptions": {
-    "baseUrl": ".",
     "paths": {
       "pley-tv": ["../../packages/tv/src/index.tsx"],
       "pley-tv/*": ["../../packages/tv/src/*"]
