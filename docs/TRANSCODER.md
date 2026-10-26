@@ -5,7 +5,7 @@ FFmpeg**:
 
 - probing media files
 - HLS transcoding and remuxing
-- HDR10, HLG and Dolby Vision tone mapping
+- HDR10, HLG and Dolby Vision tone mapping, or HDR kept in HEVC Main 10
 - subtitle burn-in and extraction
 - thumbnails and embedded cover art
 - keyframe indexing
@@ -222,6 +222,35 @@ following status codes:
   no colour properties (they only come from the RPU), so they are tagged
   BT.2020 PQ for zimg and OpenCL. The video plays, with off colours. The
   same tagging fills in whatever an HDR stream leaves untagged.
+- **HDR kept** (`video.codec = hevc` with `video.dynamic_range` `hdr10` or
+  `hlg`): HDR video is encoded in HEVC Main 10 instead of being tone-mapped.
+  Encoder detection test-encodes every working HEVC encoder in 10 bits too
+  (`-profile:v main10`, P010; x265 with `yuv420p10le` and `-dolbyvision 0`)
+  and marks it `main10`; `capabilities.hdr_transcode` says one passed.
+  - Video already in the asked range (HDR10, HDR10+, Dolby Vision 7 and 8.1
+    as their HDR10 base layer, HLG and 8.4 for `hlg`) isn't tone-mapped:
+    decoded, scaled to P010 (`scale_cuda` without leaving the GPU when the
+    CUDA zero-copy pipeline handles the codec, else on the CPU) and encoded.
+  - Other HDR (HLG or Dolby Vision 8.4 to HDR10, PQ to HLG, Dolby Vision
+    profile 5 to either) goes through libplacebo with a BT.2020 target in
+    10 bits (`format=p010`, `color_trc=smpte2084` or `arib-std-b67`), on the
+    Vulkan pipeline when the GPU decodes the codec into Vulkan memory.
+  - The decoded frames' HDR10 metadata (mastering display, content light
+    levels) goes through scaling and libplacebo to the encoder, which writes
+    it as SEI messages with every frame (NVENC, and x265 with
+    `repeat-headers=1`): every segment starts with it. PQ or HLG, BT.2020
+    primaries and matrix are also set on the encoder (`-color_trc`…), so the
+    stream says them whatever the frames were tagged with. Dolby Vision RPUs
+    are never written (NVENC doesn't, x265 is told not to): Dolby Vision
+    comes out as its base layer, or converted when it has none. HDR10+
+    dynamic metadata is not kept.
+  - Where HDR can't be kept the job tone-maps to SDR as above, with a
+    warning: H.264 asked for, subtitles drawn onto the video, no `main10`
+    encoder, or a conversion without libplacebo. When hardware sessions run
+    out, the software fallback for an HDR job is a `main10` x265.
+  - The master playlist names the output `hvc1.2.4.LLL.B0` with
+    `VIDEO-RANGE=PQ` or `HLG`; the plan's `dynamic_range_out` says `hdr10`,
+    `hlg` or `sdr` for transcodes.
 - **Frame grabs** (`/v1/thumbnail` with `hdr`) tone-map Dolby Vision profile 5
   through libplacebo and other HDR through zimg. If tone mapping fails (a
   Vulkan device that went away, say), the frame is grabbed as it is rather

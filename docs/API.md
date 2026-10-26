@@ -1037,7 +1037,7 @@ queue.
 {
   item_id: Id;
   file_id?: Id;                   // default: first file of the item
-  audio_index?: number | null;    // ffprobe stream index, default: the file's default audio stream
+  audio_index?: number | null;    // ffprobe stream index, default: the track the user's choices pick (the file's `selected_audio`), else the file's default audio stream
   subtitle_index?: number | null; // only needed for image-based subs (forces burn-in transcode)
   max_bitrate?: number | null;    // kbps, null/absent = original quality
   max_height?: number | null;     // e.g. 1080, 720, 480
@@ -1125,7 +1125,10 @@ always counts, and `video_codecs` or `audio_codecs` stand in only when
   request are only the quality the person picked.
 - **Dynamic range.** HDR10 needs `hdr10` in `hdr_types`; HDR10+ needs
   `hdr10plus` or `hdr10`; HLG needs `hlg`. Without them the video is
-  tone-mapped to SDR, as for an SDR screen.
+  converted: to the HDR format the screen shows when the player takes it
+  (see [HDR transcodes](#hdr-transcodes)), else tone-mapped to SDR, as for
+  an SDR screen. The reason says which ("HLG is converted to HDR10 for this
+  screen.").
 - **Dolby Vision** plays as it is when `hdr_types` has `dolby_vision` and
   `dolby_vision_profiles` lists the profile at or above its level.
   Otherwise:
@@ -1134,10 +1137,11 @@ always counts, and `video_codecs` or `audio_codecs` stand in only when
   - 7 is **repackaged** when the screen shows HDR10: the video is copied
     into HLS and plays as its HDR10 base layer (Media3 has no profile 7
     fallback), or is converted to 8.1 for a Dolby Vision player that reads
-    master playlists (below). Tone-mapped otherwise;
-  - 5, which has no base layer, is tone-mapped, never repackaged without a
-    master playlist: MPEG-TS segments lose the Dolby Vision signalling,
-    which leaves its colours wrong.
+    master playlists (below). Converted otherwise;
+  - 5, which has no base layer, is converted (to HDR10 or HLG where the
+    screen shows it, else to SDR), never repackaged without a master
+    playlist: MPEG-TS segments lose the Dolby Vision signalling, which
+    leaves its colours wrong.
 
   Players that read master playlists keep Dolby Vision in remuxes, and
   Dolby Vision + HDR10+ streams change: see
@@ -1151,15 +1155,50 @@ always counts, and `video_codecs` or `audio_codecs` stand in only when
   Subtitle files next to the media are always drawn.
 - **Converting.** Video is converted to H.264, no bigger than the player's
   largest H.264 entry (a 4K file is made in 1080p for a 1080p stick, also
-  when a higher quality is picked). Audio in AAC, MP3, AC-3 or E-AC-3 that
-  the player takes is copied; anything else is converted to:
+  when a higher quality is picked); HDR video the player can show stays
+  HDR, in HEVC Main 10 ([HDR transcodes](#hdr-transcodes)). Audio in AAC,
+  MP3, AC-3 or E-AC-3 that the player takes is copied; anything else is
+  converted to:
   - E-AC-3 5.1 at 640 kbit/s when `audio_channels` is 6 or more, the source
     has more than two channels, and `eac3` is decoded or passed through;
   - else AC-3 5.1 at 640 kbit/s when `ac3` is;
   - else AAC with as many channels as the output takes, up to 5.1 (stereo
     for stereo outputs; a stereo source stays stereo).
 
-Not yet: HDR (HEVC Main 10) transcodes for HDR screens.
+### HDR transcodes
+
+HDR video that a version 2 player has converted (a lower quality picked,
+a stream its decoders don't take, Dolby Vision profile 5 or HLG its
+screen doesn't show) stays HDR when:
+
+- an entry of `video` is HEVC, `hardware`, lists `Main 10` (or no profiles)
+  with a `max_bit_depth` of 10 or more (or none), and takes the video's
+  frame rate;
+- the screen shows HDR10 (`hdr10` or `hdr10plus` in `hdr_types`) or HLG
+  (`hlg`);
+- the server's transcoder can (`hdr_transcode` in its capabilities: a
+  10-bit HEVC encoder works);
+- no picture subtitles are drawn onto the video.
+
+The video is then HEVC Main 10, no bigger than the largest such decoder
+takes:
+
+| Source | Screen shows HDR10 | Screen shows HLG only | Screen shows both |
+|---|---|---|---|
+| HDR10, HDR10+ | HDR10, as it is | HLG (libplacebo) | HDR10 |
+| Dolby Vision 7, 8.1 | HDR10: the base layer | HLG (libplacebo) | HDR10 |
+| Dolby Vision 5 | HDR10 (libplacebo applies the RPU) | HLG (libplacebo) | HDR10 |
+| HLG, Dolby Vision 8.4 | HDR10 (libplacebo) | HLG, as it is | HLG |
+
+The HDR10 static metadata of the source (mastering display, MaxCLL and
+MaxFALL) is kept; Dolby Vision's RPUs and HDR10+ are not (converted video
+never carries Dolby Vision). Video converted from HLG or Dolby Vision
+profile 5 has no static metadata unless the source had some. Everything
+else (no such decoder, an SDR screen, an older transcoder, picture
+subtitles, a transcoder without libplacebo for a conversion) is tone-mapped
+to H.264 SDR as before; version 1 players always are. The master
+playlist names it `hvc1.2.4.LLL.B0` with `VIDEO-RANGE=PQ` or `HLG`, and the
+player's details say `video_out: "HEVC 3840×2160 HDR10"`.
 
 ### Dolby Vision remuxes
 
@@ -1322,7 +1361,7 @@ interface TranscodeInfo {
   video: "copy" | "transcode" | "none";
   audio: "copy" | "transcode" | "none";
   video_in: string | null;      // e.g. "HEVC 3840×2160 Dolby Vision P8.1"
-  video_out: string | null;     // e.g. "H.264 1920×1080"
+  video_out: string | null;     // e.g. "H.264 1920×1080"; "HEVC 3840×2160 HDR10" when HDR is kept
   audio_in: string | null;      // e.g. "EAC3 5.1"
   audio_out: string | null;     // e.g. "AAC 2.0"
   encoder: string | null;       // e.g. "h264_nvenc", "libx264"
