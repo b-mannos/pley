@@ -172,13 +172,41 @@ class Media3EngineTest {
             val engine = engine(client = client)
             engine.prepare(EngineSource(server.url("/api/files/1/stream").toString(), hls = false), startMs = 5_000, playWhenReady = false)
             TestPlayerRunHelper.run(engine.player).untilState(Player.STATE_READY)
-            assertEquals(5_000L, engine.player.currentPosition)
+            // A resume starts at the key frame before its place (the clip's are 2 s apart).
+            assertEquals(4_000L, engine.player.currentPosition)
             // The header, then from the 5 s point on.
             assertEquals(null, server.takeRequest().headers["Range"])
             assertTrue(server.takeRequest().headers["Range"]!!.startsWith("bytes="))
         } finally {
             server.close()
         }
+    }
+
+    /**
+     * A resume starts at the key frame before its place, so no frame is
+     * decoded only to be dropped; once a frame shows, seeks are exact. The
+     * clip's key frames are 2 s apart.
+     */
+    @Test
+    fun aResumeStartsAtAKeyFrameAndSeeksStayExact() {
+        codecs.addDecoders(ShadowMediaCodecConfig.CODEC_INFO_AVC, ShadowMediaCodecConfig.CODEC_INFO_AAC)
+        val engine = engine()
+        engine.player.setVideoSurface(Surface(SurfaceTexture(1)))
+        engine.prepare(EngineSource(file(), hls = false, mimeType = "video/mp4"), startMs = 5_000, playWhenReady = true)
+        TestPlayerRunHelper.run(engine.player).untilState(Player.STATE_READY)
+        assertEquals(4_000L, engine.player.currentPosition)
+
+        TestPlayerRunHelper.run(engine.player).untilPositionAtLeast(4_500)
+        engine.player.pause()
+        engine.player.seekTo(7_000)
+        TestPlayerRunHelper.run(engine.player).untilState(Player.STATE_READY)
+        assertEquals(7_000L, engine.player.currentPosition)
+
+        // From the start: nothing to move.
+        val fresh = engine()
+        fresh.prepare(EngineSource(file(), hls = false, mimeType = "video/mp4"), startMs = 0, playWhenReady = false)
+        TestPlayerRunHelper.run(fresh.player).untilState(Player.STATE_READY)
+        assertEquals(0L, fresh.player.currentPosition)
     }
 
     @Test

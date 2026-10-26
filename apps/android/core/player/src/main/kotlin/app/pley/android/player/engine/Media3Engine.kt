@@ -18,6 +18,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.util.Clock
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
@@ -172,6 +173,18 @@ class Media3Engine(
     private var ownPauses = 0
     private var released = false
 
+    /**
+     * A file played as it is that starts part way (a resume) starts at the
+     * key frame before its place (Media3's PREVIOUS_SYNC, once the file's
+     * index is read), so no frame is decoded only to be thrown away; seeks
+     * are exact again once its first frame shows. On the Google TV Streamer
+     * a 1080p HEVC resume went from 3.75 s to 2.3 s from the press to the
+     * first frame, a 4K one from 4.4 s to 3.6 s. Not for HLS: the server's
+     * segments start where the playback does, and moving into the one
+     * being fetched made a 4K remux start later.
+     */
+    private var snapToKeyFrame = false
+
     private val tick = object : Runnable {
         override fun run() {
             sample()
@@ -200,6 +213,8 @@ class Media3Engine(
         val asked = matchRequest(source)
         request = asked
         matchPending = asked != null
+        snapToKeyFrame = startMs > 0 && !music && !source.hls
+        player.setSeekParameters(SeekParameters.EXACT)
         player.setMediaSource(loading.mediaSource(source), startMs.coerceAtLeast(0))
         setPlayWhenReady(playWhenReady && !matchPending)
         player.prepare()
@@ -358,8 +373,17 @@ class Media3Engine(
             if (reason == Player.DISCONTINUITY_REASON_SEEK) struggle.reset()
         }
 
+        override fun onRenderedFirstFrame() {
+            player.setSeekParameters(SeekParameters.EXACT)
+        }
+
         override fun onTracksChanged(tracks: Tracks) {
             if (tracks.isEmpty) return
+            if (snapToKeyFrame) {
+                snapToKeyFrame = false
+                player.setSeekParameters(SeekParameters.PREVIOUS_SYNC)
+                player.seekTo(player.currentPosition)
+            }
             // Music plays no video: an album's cover track isn't missing anything.
             val groups = TrackMapper.groupsOf(tracks).filter { !music || it.type != C.TRACK_TYPE_VIDEO }
             val help = UnsupportedTrackWatcher.check(groups)
