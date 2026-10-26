@@ -22,6 +22,8 @@ import app.pley.android.model.MediaFile
 import app.pley.android.model.PleyJson
 import app.pley.android.model.ProgressReport
 import app.pley.android.model.ProgressState
+import app.pley.android.model.StreamKind
+import app.pley.android.model.caps.ClientCaps
 import app.pley.android.network.ApiException
 import app.pley.android.network.NetworkGraph
 import java.io.File
@@ -347,6 +349,17 @@ class AppDownloads internal constructor(
     )
 
     companion object {
+        /**
+         * Whether [file] has a sound track this device decodes ([caps]'
+         * decoders, not what it sends on to a receiver: a download plays
+         * anywhere), or no sound at all.
+         */
+        fun soundPlays(file: MediaFile, caps: ClientCaps): Boolean {
+            val tracks = file.streams.filter { it.kind == StreamKind.Audio }
+            val decoded = caps.audioDecode ?: caps.audioCodecs
+            return tracks.isEmpty() || tracks.any { it.codec.lowercase() in decoded }
+        }
+
         /** The episode of [now]'s show downloaded whole after it, by season and number, among [mine]. */
         internal fun nextEpisode(mine: List<Saved>, now: Saved): Saved? {
             if (now.kind != ItemKind.Episode || now.showId == null) return null

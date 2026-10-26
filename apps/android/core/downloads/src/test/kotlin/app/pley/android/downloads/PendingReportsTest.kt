@@ -1,8 +1,13 @@
 package app.pley.android.downloads
 
 import app.pley.android.model.MediaFile
+import app.pley.android.model.MediaStream
 import app.pley.android.model.ProgressState
+import app.pley.android.model.StreamKind
+import app.pley.android.model.caps.ClientCaps
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -48,6 +53,15 @@ class PendingReportsTest {
         assertEquals("4K only: the smaller", 4L, AppDownloads.pickFile(listOf(uhd, uhd.copy(id = 4, size = 30_000_000_000)))?.id)
         assertEquals("one that plays here as it is", 1L, AppDownloads.pickFile(listOf(uhd, hd, sd)) { it.id == 1L }?.id)
         assertEquals("none does: as if all did", 2L, AppDownloads.pickFile(listOf(uhd, hd, sd)) { false }?.id)
+    }
+
+    @Test
+    fun aDownloadsSoundMustBeDecodedHere() {
+        val caps = ClientCaps(containers = listOf("mkv"), videoCodecs = listOf("hevc"), audioCodecs = listOf("aac", "dts"), audioDecode = listOf("aac", "ac3"))
+        fun file(vararg codecs: String) = MediaFile(id = 1, path = "a.mkv", size = 1, streams = codecs.mapIndexed { i, c -> MediaStream(i + 1, StreamKind.Audio, c) })
+        assertTrue(AppDownloads.soundPlays(file("dts", "ac3"), caps))
+        assertFalse("sent on to a receiver isn't decoded here", AppDownloads.soundPlays(file("dts", "truehd"), caps))
+        assertTrue("no sound at all", AppDownloads.soundPlays(file(), caps))
     }
 
     private fun report(itemId: Long, position: Long, at: Long) = PendingReport(

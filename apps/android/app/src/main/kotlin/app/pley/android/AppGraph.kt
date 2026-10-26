@@ -53,7 +53,8 @@ class AppGraph(private val app: Application) : ScreensGraph {
             } catch (_: Exception) {
                 null
             }
-            snapshot == null || caps.policy.decide(item, file.id, snapshot) == CapsDecision.Direct
+            snapshot == null ||
+                (caps.policy.decide(item, file.id, snapshot) == CapsDecision.Direct && AppDownloads.soundPlays(file, snapshot.report))
         }
     }
     override val downloads: Downloads get() = if (device.isTv) Downloads.None else appDownloads
