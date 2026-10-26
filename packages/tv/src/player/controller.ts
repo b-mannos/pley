@@ -1,0 +1,1290 @@
+import { batch, signal, type Signal } from "@preact/signals";
+import { ApiError, errorMessage, SessionStoppedError, type Api } from "../api/client";
+import type {
+  ClientCaps,
+  ItemDetail,
+  ItemSummary,
+  Marker,
+  MediaFile,
+  MediaStream,
+  PlaybackInfo,
+  PlaybackMode,
+  ServerEvent,
+  TranscodeInfo,
+  Trickplay,
+} from "../api/types";
+import { SignedOutError } from "../auth/tokens";
+import { episodeLabel, streamLabel } from "../format/format";
+import { decide } from "../caps/policy";
+import { NetworkError } from "../net/transport";
+import { NOTHING_SHOWN, SubtitlePresenter, type ShownSubtitles } from "../subs/presenter";
+import { clampOffset, type OffsetStore } from "../subs/sync";
+import { buildDetails, fallbackText, methodText, stoppedText, T, type PlaybackDetails } from "./details";
+import type { EngineSource, EngineStatus, PlayerEngine } from "./engine";
+import { activeMarker, CreditsGate, markersOf, skipLabel, skipTarget } from "./markers";
+import { hasNext, labelOf, nextAfter, startOf, TRICKPLAY_GIVE_UP_MS, TRICKPLAY_RETRY_MS } from "./nextup";
+import {
+  audioPlaysHere,
+  audioStreams,
+  chooseFile,
+  dvRetryMode,
+  initialAudio,
+  initialSubtitle,
+  isPicture,
+  mimeTypeOf,
+  needsIndexes,
+  picturePath,
+  playbackRequest,
+  startMs as startOfPlay,
+  subtitleStreams,
+  willStream,
+  type Choices,
+  type PlayRequest,
+} from "./plan";
+import { chooseQuality, fileHint, modeOf, ORIGINAL, presetById, qualitiesFor, type QualityPreset } from "./quality";
+import { failureText, Recovery, StruggleMeter, type EngineError, type RecoveryAction } from "./recovery";
+import type { Reporter } from "./reporter";
+import { SLEEP_OFF, SleepTimer, type SleepChoice, type SleepState } from "./sleep";
+
+export type Phase =
+  | { kind: "preparing" }
+  | { kind: "buffering" }
+  | { kind: "playing" }
+  | { kind: "paused" }
+  /** The end, with nothing next: the player leaves. */
+  | { kind: "ended" }
+  | { kind: "error"; message: string; canRetry: boolean };
+
+/** An audio or subtitle track as the menus show it. */
+export interface TrackChoice {
+  /** The server's stream index; `null` for "Off". */
+  index: number | null;
+  label: string;
+  selected: boolean;
+  /** Pictures a stream draws onto the video ("burn-in"). */
+  burnIn: boolean;
+}
+
+export interface QualityChoice {
+  id: string;
+  label: string;
+  hint: string | null;
+  selected: boolean;
+}
+
+export interface ChapterMark {
+  title: string | null;
+  startMs: number;
+  endMs: number;
+  imageUrl: string | null;
+}
+
+export interface UpNextCard {
+  itemId: number;
+  title: string;
+  heading: string;
+  imageUrl: string | null;
+  /** Seconds before it plays by itself; `null` when it won't. */
+  secondsLeft: number | null;
+}
+
+/** What the player screen shows, but the clock and the subtitles, which change often and have their own signals. */
+export interface PlayerState {
+  phase: Phase;
+  itemId: number;
+  /** A movie's "Title (Year)", an episode's show. */
+  title: string;
+  /** An episode's "S1 · E2 — Title". */
+  subtitle: string | null;
+  audio: TrackChoice[];
+  subtitles: TrackChoice[];
+  quality: string;
+  qualities: QualityChoice[];
+  method: string | null;
+  note: string | null;
+  canPlayOriginal: boolean;
+  suggestLowerQuality: boolean;
+  skipLabel: string | null;
+  markers: Marker[];
+  chapters: ChapterMark[];
+  trickplay: { fileId: number; info: Trickplay } | null;
+  upNext: UpNextCard | null;
+  details: PlaybackDetails | null;
+  notice: string | null;
+  subtitleOffsetMs: number;
+  subtitleSync: boolean;
+  sleep: SleepState;
+  stoppedByServer: boolean;
+  /** Time to the first frame of the session playing, in ms; `null` before it shows. */
+  firstFrameMs: number | null;
+}
+
+export interface PlayerClock {
+  positionMs: number;
+  durationMs: number;
+  bufferedMs: number;
+}
+
+const INITIAL: PlayerState = {
+  phase: { kind: "preparing" },
+  itemId: 0,
+  title: "",
+  subtitle: null,
+  audio: [],
+  subtitles: [],
+  quality: "Original",
+  qualities: [],
+  method: null,
+  note: null,
+  canPlayOriginal: false,
+  suggestLowerQuality: false,
+  skipLabel: null,
+  markers: [],
+  chapters: [],
+  trickplay: null,
+  upNext: null,
+  details: null,
+  notice: null,
+  subtitleOffsetMs: 0,
+  subtitleSync: false,
+  sleep: SLEEP_OFF,
+  stoppedByServer: false,
+  firstFrameMs: null,
+};
+
+/** What a player needs from the app around it. */
+export interface PlayerEnv {
+  api: Api;
+  reporter: Reporter;
+  engine: () => PlayerEngine;
+  /** The TV's capabilities report; `null` when the probe failed. */
+  caps: () => Promise<ClientCaps | null>;
+  /** The TV's player can't send headers: its URLs carry a key (docs/API.md, "Keyed URLs"). */
+  keyedUrls: boolean;
+  clientId: string;
+  offsets: OffsetStore;
+  quality: { remembered(): string | null; remember(id: string): void };
+  autoplayNext: () => boolean;
+  /** Subscribes to the server's events; returns the unsubscribe. */
+  events: (listener: (e: ServerEvent) => void) => () => void;
+  /** Item details the app has already (tap time), to start without waiting. */
+  cachedItem?: (id: number) => ItemDetail | null;
+  now?: () => number;
+}
+
+/** Where a closed or hidden player was, to start again from there. */
+export interface SavedPlayback {
+  request: PlayRequest;
+  quality: string;
+  playing: boolean;
+}
+
+export const TICK_MS = 500;
+export const PROGRESS_MS = 10_000;
+/** While paused: the server forgets players it hasn't heard from for 90 s. */
+export const PAUSED_HEARTBEAT_MS = 30_000;
+export const SEEK_REPORT_MS = 1_000;
+export const STALL_MS = 12_000;
+export const SHORT_END_MS = 60_000;
+export const SHORT_PLAY_MS = 5_000;
+export const STARVING_MS = 1_000;
+export const STRUGGLE_SAMPLE_MS = 2_000;
+export const DETAILS_MS = 2_000;
+export const COUNTDOWN_SECONDS = 10;
+/** The longest a new session waits for the one before to be ended. */
+export const END_WAIT_MS = 2_000;
+/** Seeks stop this short of the end, so the end isn't reached by a seek. */
+export const SEEK_END_MARGIN_MS = 250;
+export const UP_NEXT_IMAGE_WIDTH = 480;
+
+/**
+ * The playback of one video, then of what plays after it, on one engine
+ * (the Android app's SessionPlaybackController):
+ *
+ * - **Start.** The item's details and the TV's capabilities come together,
+ *   then POST /api/playback, the Dolby Vision guards, and the engine loads
+ *   the answer, at once at the resume point.
+ * - **Reports.** Progress every 10 s while playing and every 30 s paused,
+ *   on pause, and 1 s after the last seek; `stopped` then DELETE at the
+ *   end, on closing and before any new session.
+ * - **Recovery.** The ladder for errors, 12 s stalls and dropped frames.
+ * - **Tracks.** Audio switched by the engine in direct play, a new session
+ *   for streams; subtitles always drawn by the TV (the server's WebVTT, or
+ *   its .mks of a picture track), burned in only when the server can't
+ *   make the .mks. Choices are saved with PUT /api/items/{id}/streams.
+ * - **Markers, Up Next, the sleep timer**, and a session the server
+ *   stopped: it says so and plays no more.
+ */
+export class PlaybackController {
+  readonly state: Signal<PlayerState> = signal(INITIAL);
+  readonly clock: Signal<PlayerClock> = signal({ positionMs: 0, durationMs: 0, bufferedMs: 0 });
+  readonly subs: Signal<ShownSubtitles> = signal(NOTHING_SHOWN);
+
+  private readonly env: PlayerEnv;
+  private readonly now: () => number;
+  private engineRef: PlayerEngine | null = null;
+
+  private current: PlayRequest;
+  private item: ItemDetail | null = null;
+  private caps: ClientCaps | null = null;
+  private file: MediaFile | null = null;
+  private audio: MediaStream | null = null;
+  private subtitle: MediaStream | null = null;
+  private quality: QualityPreset = ORIGINAL;
+  private markers: Marker[] = [];
+  /** The mode a Dolby Vision guard asked for, for this item's later sessions too. */
+  private guardMode: PlaybackMode | null = null;
+
+  private info: PlaybackInfo | null = null;
+  private sessionEnded = true;
+  /** Bumped by every new start: what an older one finds when it resumes is no longer its own. */
+  private generation = 0;
+
+  private lastPositionMs = 0;
+  private startedAtMs = 0;
+  private mediaShown = false;
+  private wantPlay = true;
+  private ended = false;
+  private closed = false;
+  /** The server stopped the playback: nothing plays again. */
+  private stopped = false;
+  /** The server has no .mks of picture subtitles: they are burned in. */
+  private picturesUnavailable = false;
+  private offset = 0;
+
+  private readonly recovery = new Recovery();
+  private readonly struggle = new StruggleMeter();
+  private readonly credits = new CreditsGate();
+  private readonly presenter: SubtitlePresenter;
+  private readonly sleep: SleepTimer;
+
+  private lastAdvanceAt = 0;
+  private lastAdvancePos = -1;
+  private lastStruggleSample = 0;
+  private sessionStartedAt = 0;
+  private live: TranscodeInfo | null = null;
+
+  private tickTimer: ReturnType<typeof setInterval> | null = null;
+  private progressTimer: ReturnType<typeof setTimeout> | null = null;
+  private seekReportTimer: ReturnType<typeof setTimeout> | null = null;
+  private countdownTimer: ReturnType<typeof setTimeout> | null = null;
+  private detailsTimer: ReturnType<typeof setTimeout> | null = null;
+  private trickplayTimer: ReturnType<typeof setTimeout> | null = null;
+  private unsubscribe: (() => void) | null = null;
+
+  private next: ItemSummary | null = null;
+  private nextDetail: ItemDetail | null = null;
+  private nextLookup = 0;
+  /** When the screen asked to play: the first frame is timed from it. */
+  private pressedAt: number;
+
+  constructor(request: PlayRequest, env: PlayerEnv, pressedAt?: number) {
+    this.current = request;
+    this.env = env;
+    this.now = env.now ?? (() => (typeof performance !== "undefined" ? performance.now() : Date.now()));
+    this.pressedAt = pressedAt ?? this.now();
+    this.presenter = new SubtitlePresenter(env.api, {
+      position: () => this.livePosition(),
+      offsetMs: () => this.offset,
+      onShown: (shown) => (this.subs.value = shown),
+      onFailed: () => this.notice(T.subtitlesFailed),
+      onPicturesUnavailable: () => this.picturesFailed(),
+    });
+    this.sleep = new SleepTimer({
+      itemLeftMs: () => this.itemLeftMs(),
+      itemKey: () => this.item?.id ?? null,
+      onFire: () => this.onSleep(),
+      onChange: (s) => this.update({ sleep: s }),
+    });
+  }
+
+  get engine(): PlayerEngine | null {
+    return this.engineRef;
+  }
+
+  // ---------------------------------------------------------------- start
+
+  start(): void {
+    this.tickTimer = setInterval(() => this.tick(), TICK_MS);
+    this.unsubscribe = this.env.events((e) => {
+      if (e.type === "session_stopped" && this.info && e.session_id === this.info.session_id) this.stopByServer(e.message, e.by_admin);
+    });
+    void this.prepareFirst();
+  }
+
+  private async prepareFirst(): Promise<void> {
+    const generation = ++this.generation;
+    try {
+      const cached = this.env.cachedItem?.(this.current.itemId) ?? null;
+      const [detail, caps] = await Promise.all([
+        cached ? Promise.resolve(cached) : this.env.api.item(this.current.itemId),
+        this.env.caps().catch(() => null),
+      ]);
+      if (generation !== this.generation || this.closed) return;
+      if (!this.engineRef) {
+        this.engineRef = this.env.engine();
+        this.engineRef.setListener({
+          status: (s) => this.onStatus(s),
+          firstFrame: () => this.onFirstFrame(),
+          error: (e) => this.onError(e),
+          tracks: () => undefined,
+        });
+      }
+      this.caps = caps;
+      this.load(detail, this.current);
+      await this.begin(startOfPlay(detail, this.current), generation);
+    } catch (e) {
+      if (generation === this.generation) this.failWith(e);
+    }
+  }
+
+  /** Takes `detail` as the item playing, with `req`'s choices. */
+  private load(detail: ItemDetail, req: PlayRequest): void {
+    this.item = detail;
+    this.current = req;
+    const chosen = chooseFile(detail, req.fileId, this.caps);
+    this.file = chosen;
+    this.audio = initialAudio(chosen, req.audioIndex);
+    this.subtitle = initialSubtitle(chosen, req.subtitleIndex);
+    this.quality = chooseQuality(this.env.quality.remembered(), qualitiesFor(chosen));
+    this.offset = chosen ? this.env.offsets.get(this.env.api.server, chosen.id) : 0;
+    this.markers = chosen ? markersOf(detail, chosen.id) : [];
+    const episode = detail.kind === "episode";
+    this.update({
+      itemId: detail.id,
+      title: episode ? detail.grandparent_title || detail.title : detail.year != null ? `${detail.title} (${detail.year})` : detail.title,
+      subtitle: episode ? [episodeLabel(detail.parent_index, detail.index), detail.title].filter(Boolean).join(" — ") : null,
+      markers: this.markers,
+      chapters: (chosen?.chapters ?? []).map((c) => ({
+        title: c.title,
+        startMs: c.start_ms,
+        endMs: c.end_ms,
+        imageUrl: c.thumb_url ? this.env.api.url(c.thumb_url) : null,
+      })),
+      trickplay: null,
+      subtitleOffsetMs: this.offset,
+    });
+    this.setClock({ durationMs: chosen?.duration_ms ?? detail.duration_ms ?? 0 });
+    this.publishChoices();
+    this.loadTrickplay(chosen);
+  }
+
+  // ---------------------------------------------------------------- sessions
+
+  /** Starts a server session at `atMs`, ending the one before; an earlier start still running loses. */
+  private restart(atMs: number): void {
+    if (this.stopped || this.closed) return;
+    const generation = ++this.generation;
+    this.begin(atMs, generation).catch((e) => {
+      if (generation === this.generation) this.failWith(e);
+    });
+  }
+
+  private async begin(atMs: number, generation: number): Promise<void> {
+    const detail = this.item;
+    if (!detail) return;
+    const chosen = this.file;
+    if (!chosen) {
+      this.fail(T.noFile, false);
+      return;
+    }
+    // The session before ends first ("stopped", then DELETE), unless the server is slow to say so.
+    if (this.endSession(atMs)) await this.env.reporter.flush(END_WAIT_MS);
+    if (generation !== this.generation || this.closed) return;
+    this.lastPositionMs = atMs;
+    this.startedAtMs = atMs;
+    this.mediaShown = false;
+    this.ended = false;
+    this.struggle.reset();
+    this.recovery.onJump();
+    this.lastAdvanceAt = this.now();
+    this.lastAdvancePos = -1;
+    this.sessionStartedAt = this.now();
+    this.update({ phase: { kind: "preparing" }, skipLabel: null, firstFrameMs: null });
+    this.setClock({ positionMs: atMs });
+
+    const mode = this.recovery.fallbackMode ?? (this.quality.id === ORIGINAL.id ? this.guardMode : null) ?? modeOf(this.quality);
+    const decision = this.caps ? decide(chosen, this.caps) : null;
+    let choices: Choices = {
+      file: chosen,
+      startMs: atMs,
+      audio: this.audio,
+      subtitle: this.subtitle,
+      quality: this.quality,
+      mode,
+      streaming: willStream(mode, decision, chosen, this.audio, this.caps),
+      sideload: this.sideload,
+    };
+    let sent = playbackRequest(detail.id, choices, this.env.clientId, this.caps, this.env.keyedUrls);
+    let info = await this.env.api.play(sent);
+    if (generation !== this.generation || this.closed) {
+      // Closed or replaced while the server made it: it never played.
+      this.discard(info);
+      return;
+    }
+    const guarded = dvRetryMode(info, chosen, this.caps);
+    if (guarded) {
+      this.discard(info);
+      this.guardMode = guarded;
+      choices = { ...choices, mode: guarded, streaming: true };
+      sent = playbackRequest(detail.id, choices, this.env.clientId, this.caps, this.env.keyedUrls);
+      info = await this.env.api.play(sent);
+    }
+    if (needsIndexes(info, sent, choices)) {
+      this.discard(info);
+      choices = { ...choices, streaming: true };
+      sent = playbackRequest(detail.id, choices, this.env.clientId, this.caps, this.env.keyedUrls);
+      info = await this.env.api.play(sent);
+    }
+    if (generation !== this.generation || this.closed) {
+      this.discard(info);
+      return;
+    }
+    if (this.env.keyedUrls && !isKeyed(info.url)) {
+      this.discard(info);
+      this.fail("This server is too old to play on this TV: update it.", false);
+      return;
+    }
+    this.info = info;
+    this.sessionEnded = false;
+    this.live = null;
+    this.update({
+      method: methodText(info),
+      note: this.recovery.fallbackReason ? fallbackText(this.recovery.fallbackReason) : null,
+      canPlayOriginal: this.recovery.struggleSwitched && this.recovery.fallbackMode !== null,
+    });
+    if (info.duration_ms > 0) this.setClock({ durationMs: info.duration_ms });
+    this.publishChoices();
+    this.armProgress();
+    this.refreshDetails(false);
+    const engine = this.engineRef;
+    if (!engine) return;
+    const video = videoStreamOf(chosen);
+    const source: EngineSource = {
+      url: this.env.api.url(info.url),
+      hls: info.hls,
+      mime: info.hls ? null : mimeTypeOf(chosen.container),
+      startMs: atMs,
+      durationHintMs: info.duration_ms > 0 ? info.duration_ms : chosen.duration_ms ?? detail.duration_ms ?? null,
+      video: video
+        ? {
+            codec: info.method === "transcode" ? "unknown" : video.codec,
+            width: video.width ?? null,
+            height: video.height ?? null,
+            frameRate: video.frame_rate ?? null,
+            // A conversion's dynamic range is the server's to choose.
+            range: info.method === "transcode" ? "sdr" : video.dynamic_range ?? "sdr",
+            dvProfile: info.method === "transcode" ? null : video.dv_profile ?? null,
+            bitDepth: video.bit_depth ?? 8,
+          }
+        : null,
+      audioCodec: info.audio_converted ? null : this.audio?.codec ?? null,
+    };
+    engine.prepare(source, this.wantPlay);
+    this.applyTracks();
+  }
+
+  /** Reports `stopped` at `positionMs` and deletes the session playing; false when none plays. */
+  private endSession(positionMs: number): boolean {
+    const info = this.info;
+    if (!info || this.sessionEnded) return false;
+    this.sessionEnded = true;
+    this.clearProgress();
+    const itemId = this.item?.id ?? this.current.itemId;
+    const api = this.env.api;
+    this.env.reporter.send(() => api.progress(itemId, positionMs, info.duration_ms, "stopped", info.session_id));
+    this.env.reporter.send(() => api.stopSession(info.session_id));
+    return true;
+  }
+
+  /** Deletes a session that never played: no `stopped`, which would move the resume point. */
+  private discard(info: PlaybackInfo): void {
+    const api = this.env.api;
+    this.env.reporter.send(() => api.stopSession(info.session_id));
+  }
+
+  /** Subtitles go where they're drawn: the server's WebVTT for text, its .mks for pictures, nothing when burned in. */
+  private applyTracks(): void {
+    const info = this.info;
+    const engine = this.engineRef;
+    if (!info || !engine) return;
+    if (!info.hls && this.audio) {
+      engine.selectAudio(audioStreams(this.file).indexOf(this.audio), this.audio.language);
+    }
+    const sub = this.subtitle;
+    if (!sub) {
+      this.presenter.hide();
+      return;
+    }
+    if (!isPicture(sub)) {
+      const path = info.subtitles.filter((t) => t.index === sub.index)[0]?.url ?? `/api/files/${info.file_id}/subtitles/${sub.index}.vtt`;
+      this.presenter.showText(path);
+    } else if (!info.burn_subtitles && this.sideload) {
+      this.presenter.showPictures(picturePath(info.file_id, sub.index));
+    } else {
+      this.presenter.hide();
+    }
+  }
+
+  /** Picture subtitles are drawn here unless the server can't make them. */
+  private get sideload(): boolean {
+    return !this.picturesUnavailable && !!this.caps?.picture_subtitles_sideload;
+  }
+
+  /** The server can't make the .mks (an older server or transcoder): picture subtitles are burned in from now on. */
+  private picturesFailed(): void {
+    if (this.closed || this.stopped) return;
+    this.picturesUnavailable = true;
+    this.publishChoices();
+    if (isPicture(this.subtitle) && this.info && !this.info.burn_subtitles) this.restart(this.livePosition());
+  }
+
+  // ---------------------------------------------------------------- engine events
+
+  private onStatus(status: EngineStatus): void {
+    if (!this.info || this.closed) return;
+    switch (status) {
+      case "buffering":
+        if (!this.ended) this.phase({ kind: "buffering" });
+        break;
+      case "ready":
+        this.mediaShown = true;
+        this.phase(this.engineRef?.playing() ? { kind: "playing" } : { kind: "paused" });
+        break;
+      case "ended":
+        if (this.endedShort()) this.onEndedShort();
+        else this.onEnded();
+        break;
+      default:
+        break;
+    }
+  }
+
+  private onFirstFrame(): void {
+    if (this.closed || !this.info) return;
+    this.mediaShown = true;
+    if (this.state.value.firstFrameMs === null) {
+      // From the press for the first session; from the session's start after that.
+      const from = this.pressedAt || this.sessionStartedAt;
+      this.pressedAt = 0;
+      this.update({ firstFrameMs: Math.round(this.now() - from) });
+    }
+    this.presenter.refresh();
+  }
+
+  private onError(error: EngineError): void {
+    const info = this.info;
+    if (!info || this.closed || this.stopped) return;
+    if (error.kind === "stopped") {
+      this.stopByServer(error.message, true);
+      return;
+    }
+    // A native player can't say why a request failed: the session's own answer tells a stop from the rest.
+    if (error.kind === "http" || error.kind === "network" || error.kind === "playlist") {
+      const sessionId = info.session_id;
+      this.env.api.sessionStatus(sessionId).then(
+        () => this.recover(error, info),
+        (e: unknown) => {
+          if (this.info?.session_id !== sessionId) return;
+          if (e instanceof SessionStoppedError) this.stopByServer(e.note, true);
+          else if (e instanceof ApiError && e.status === 404) this.recover({ kind: "http", status: 404, detail: e.message }, info);
+          else this.recover(error, info);
+        },
+      );
+      return;
+    }
+    this.recover(error, info);
+  }
+
+  private recover(error: EngineError, info: PlaybackInfo): void {
+    if (this.info !== info || this.closed || this.stopped) return;
+    this.act(this.recovery.decide(error, info.method, videoStreamOf(this.file)?.codec ?? null), false);
+  }
+
+  private act(action: RecoveryAction, starving: boolean): void {
+    switch (action.kind) {
+      case "new_session":
+        if (action.reason === "not_smooth" && this.recovery.struggleSwitched) this.update({ canPlayOriginal: true });
+        this.restart(this.livePosition());
+        break;
+      case "check_server": {
+        const info = this.info;
+        if (!info) return;
+        this.env.api.sessionStatus(info.session_id).then(
+          (status) => {
+            if (this.info === info) this.act(this.recovery.afterServerCheck(status.transcode?.speed ?? null, starving), starving);
+          },
+          () => {
+            if (this.info === info) this.act(this.recovery.afterServerCheck(null, starving), starving);
+          },
+        );
+        break;
+      }
+      case "suggest_lower_quality":
+        this.update({ suggestLowerQuality: true, note: T.slowServer });
+        break;
+      case "fail":
+        this.fail(failureText(action.failure, action.detail), action.failure !== "unplayable");
+        break;
+    }
+  }
+
+  /** The media ended moments after where it started, a minute or more before its end: not the end. */
+  private endedShort(): boolean {
+    if (this.ended || !this.engineRef) return false;
+    const expected = (this.info?.duration_ms || 0) > 0 ? this.info!.duration_ms : this.file?.duration_ms ?? 0;
+    if (!expected) return false;
+    const reached = this.engineRef.positionMs();
+    return reached + SHORT_END_MS < expected && reached < this.startedAtMs + SHORT_PLAY_MS;
+  }
+
+  private onEndedShort(): void {
+    const info = this.info;
+    if (!info) return;
+    this.mediaShown = false;
+    this.lastPositionMs = this.startedAtMs;
+    this.setClock({ positionMs: this.startedAtMs });
+    this.update({ skipLabel: null });
+    this.act(this.recovery.onEndedShort(info.method), false);
+  }
+
+  private onEnded(): void {
+    if (this.ended) return;
+    this.ended = true;
+    const sleeping = this.sleep.itemEnded(this.item?.id ?? null);
+    const engineDuration = this.engineRef?.durationMs() ?? 0;
+    const duration = (this.info?.duration_ms || 0) > 0 ? this.info!.duration_ms : engineDuration > 0 ? engineDuration : this.lastPositionMs;
+    this.lastPositionMs = duration;
+    this.endSession(duration);
+    this.setClock({ positionMs: duration });
+    this.update({ skipLabel: null });
+    const detail = this.item;
+    if (!detail || !hasNext(detail.kind, this.current.queue)) {
+      this.phase({ kind: "ended" });
+      return;
+    }
+    this.phase({ kind: "paused" });
+    const known = this.next;
+    if (known) {
+      this.showUpNext(known, !sleeping && this.countdownTimer === null);
+      return;
+    }
+    this.lookUpNext((found) => {
+      if (!found) this.phase({ kind: "ended" });
+      else this.showUpNext(found, !sleeping);
+    });
+  }
+
+  // ---------------------------------------------------------------- the clock
+
+  private tick(): void {
+    const engine = this.engineRef;
+    const info = this.info;
+    if (!engine || !info || this.closed || this.sessionEnded) return;
+    const now = this.now();
+    const status = engine.status();
+    const moving = this.mediaShown && status === "ready" && engine.playing() && !this.ended;
+    if (this.mediaShown && !this.ended) {
+      const pos = engine.positionMs();
+      this.lastPositionMs = pos;
+      if (moving) this.recovery.onPosition(pos);
+      const marker = this.state.value.phase.kind === "error" ? null : activeMarker(this.markers, pos);
+      const engineDuration = engine.durationMs();
+      this.setClock({
+        positionMs: pos,
+        bufferedMs: engine.bufferedMs(),
+        durationMs: info.duration_ms > 0 ? info.duration_ms : engineDuration > 0 ? engineDuration : this.clock.value.durationMs,
+      });
+      const label = marker ? skipLabel(marker) : null;
+      if (label !== this.state.value.skipLabel) this.update({ skipLabel: label });
+      if (marker && this.credits.enter(marker)) this.onCredits();
+    }
+    // A stall: meant to play, not moving.
+    const stalling = this.wantPlay && !this.ended && this.state.value.phase.kind !== "error" && status !== "idle";
+    const pos = this.mediaShown ? engine.positionMs() : -1;
+    if (!stalling || pos !== this.lastAdvancePos) {
+      this.lastAdvanceAt = now;
+      this.lastAdvancePos = pos;
+    } else if (now - this.lastAdvanceAt >= STALL_MS) {
+      this.lastAdvanceAt = now;
+      const starving = status === "buffering" && engine.bufferedMs() - engine.positionMs() < STARVING_MS;
+      this.act(this.recovery.onStall(info.method, starving), starving);
+      return;
+    }
+    // Dropped frames, sampled every 2 s of playback.
+    if (moving && now - this.lastStruggleSample >= STRUGGLE_SAMPLE_MS) {
+      this.lastStruggleSample = now;
+      const counts = engine.frameCounts();
+      if (counts && this.struggle.sample(now, counts.dropped, counts.total)) {
+        this.struggle.reset();
+        const action = this.recovery.onStruggling(info.method);
+        if (action) this.act(action, false);
+      }
+    }
+  }
+
+  /** Progress every 10 s while playing and every 30 s paused, so the server keeps the session and its transcode. */
+  private armProgress(): void {
+    this.clearProgress();
+    if (!this.info || this.sessionEnded) return;
+    this.progressTimer = setTimeout(
+      () => {
+        this.progressTimer = null;
+        if (!this.ended && this.state.value.phase.kind !== "error") this.report(this.wantPlay ? "playing" : "paused");
+        this.armProgress();
+      },
+      this.wantPlay ? PROGRESS_MS : PAUSED_HEARTBEAT_MS,
+    );
+  }
+
+  private clearProgress(): void {
+    if (this.progressTimer !== null) clearTimeout(this.progressTimer);
+    this.progressTimer = null;
+  }
+
+  private report(state: "playing" | "paused"): void {
+    const info = this.info;
+    if (!info || this.sessionEnded) return;
+    const itemId = this.item?.id ?? this.current.itemId;
+    const position = this.livePosition();
+    const api = this.env.api;
+    this.env.reporter.send(() => api.progress(itemId, position, info.duration_ms, state, info.session_id));
+  }
+
+  private livePosition(): number {
+    const engine = this.engineRef;
+    return this.mediaShown && engine && this.info && !this.sessionEnded && !this.ended ? engine.positionMs() : this.lastPositionMs;
+  }
+
+  /** How long the item playing has left, for the sleep timer; `null` while unknown. */
+  private itemLeftMs(): number | null {
+    if (!this.info || !this.mediaShown || this.ended) return null;
+    const duration = this.clock.value.durationMs;
+    return duration > 0 ? duration - this.livePosition() : null;
+  }
+
+  /** The sleep timer ended: it pauses, and what plays next doesn't start by itself. */
+  private onSleep(): void {
+    this.stopCountdown();
+    const card = this.state.value.upNext;
+    if (card) this.update({ upNext: { ...card, secondsLeft: null } });
+    this.engineRef?.pause();
+    this.setWantPlay(false);
+  }
+
+  /**
+   * The server ended the session: the engine stops, nothing more is asked
+   * of the server (only `stopped`, for the resume point), and the screen
+   * says why, without Try again, then leaves.
+   */
+  private stopByServer(message: string | null, byAdmin: boolean): void {
+    if (this.closed || this.stopped) return;
+    this.stopped = true;
+    this.generation++;
+    const position = this.livePosition();
+    this.lastPositionMs = position;
+    const info = this.info;
+    if (info && !this.sessionEnded) {
+      this.sessionEnded = true;
+      this.clearProgress();
+      const itemId = this.item?.id ?? this.current.itemId;
+      const api = this.env.api;
+      this.env.reporter.send(() => api.progress(itemId, position, info.duration_ms, "stopped", info.session_id));
+    }
+    if (this.seekReportTimer !== null) clearTimeout(this.seekReportTimer);
+    this.nextLookup++;
+    this.hideUpNext();
+    this.presenter.hide();
+    this.sleep.cancel();
+    this.engineRef?.stop();
+    this.update({ phase: { kind: "error", message: stoppedText(message, byAdmin), canRetry: false }, skipLabel: null, stoppedByServer: true });
+  }
+
+  // ---------------------------------------------------------------- commands
+
+  play(): void {
+    if (this.closed || this.stopped) return;
+    if (this.ended) {
+      this.restart(0);
+      return;
+    }
+    this.setWantPlay(true);
+    this.engineRef?.play();
+  }
+
+  pause(): void {
+    if (this.closed) return;
+    this.engineRef?.pause();
+    this.setWantPlay(false);
+  }
+
+  /** Play or pause, from what the player means to do now. */
+  get wantsToPlay(): boolean {
+    return this.wantPlay;
+  }
+
+  private setWantPlay(play: boolean): void {
+    const was = this.wantPlay;
+    this.wantPlay = play;
+    if (play) this.sleep.resumed();
+    if (!this.info || was === play) return;
+    if (!play) {
+      this.struggle.reset();
+      if (!this.ended) this.report("paused");
+      if (this.engineRef?.status() === "ready") this.phase({ kind: "paused" });
+    } else if (this.engineRef?.status() === "ready") {
+      this.phase({ kind: "playing" });
+    }
+    this.armProgress();
+  }
+
+  seekTo(positionMs: number): void {
+    const engine = this.engineRef;
+    if (!engine || this.closed || this.stopped) return;
+    const duration = this.clock.value.durationMs;
+    const target = duration > 0 ? Math.max(0, Math.min(positionMs, Math.max(0, duration - SEEK_END_MARGIN_MS))) : Math.max(0, positionMs);
+    this.hideUpNext();
+    if (this.ended || !this.info || this.sessionEnded) {
+      this.lastPositionMs = target;
+      this.setClock({ positionMs: target });
+      this.restart(target);
+      return;
+    }
+    engine.seekTo(target);
+    this.lastPositionMs = target;
+    this.startedAtMs = target;
+    this.recovery.onJump();
+    this.struggle.reset();
+    this.lastAdvanceAt = this.now();
+    this.setClock({ positionMs: target });
+    this.presenter.refresh();
+    if (this.seekReportTimer !== null) clearTimeout(this.seekReportTimer);
+    this.seekReportTimer = setTimeout(() => {
+      this.seekReportTimer = null;
+      this.report(this.wantPlay ? "playing" : "paused");
+    }, SEEK_REPORT_MS);
+  }
+
+  selectAudio(index: number): void {
+    const chosen = audioStreams(this.file).filter((s) => s.index === index)[0];
+    if (!chosen || chosen.index === this.audio?.index) return;
+    this.audio = chosen;
+    this.saveStreams();
+    this.publishChoices();
+    const info = this.info;
+    if (!info) return;
+    const engine = this.engineRef;
+    if (!info.hls && engine && audioPlaysHere(chosen, this.caps) && engine.selectAudio(audioStreams(this.file).indexOf(chosen), chosen.language)) return;
+    this.restart(this.livePosition());
+  }
+
+  selectSubtitle(index: number | null): void {
+    const chosen = index === null ? null : subtitleStreams(this.file).filter((s) => s.index === index)[0];
+    if (chosen === undefined) return;
+    if ((chosen?.index ?? null) === (this.subtitle?.index ?? null)) return;
+    this.subtitle = chosen;
+    this.saveStreams();
+    this.publishChoices();
+    const info = this.info;
+    if (!info) return;
+    // Pictures the TV can't draw are burned in: that is another session.
+    const burn = isPicture(chosen) && !this.sideload;
+    if (burn !== info.burn_subtitles || (burn && info.subtitle_index !== chosen?.index)) this.restart(this.livePosition());
+    else this.applyTracks();
+  }
+
+  setSubtitleOffset(ms: number): void {
+    if (this.closed) return;
+    const moved = clampOffset(ms);
+    if (moved === this.offset) return;
+    this.offset = moved;
+    this.update({ subtitleOffsetMs: moved });
+    if (this.file) this.env.offsets.set(this.env.api.server, this.file.id, moved);
+    this.presenter.refresh();
+  }
+
+  setSleep(choice: SleepChoice): void {
+    if (this.closed || this.stopped) return;
+    this.sleep.set(choice);
+  }
+
+  keepWatching(): void {
+    if (this.closed || this.stopped) return;
+    this.sleep.extend();
+    // What plays next was held for the timer: its countdown goes on.
+    const known = this.next;
+    if (known && this.state.value.upNext && this.countdownTimer === null && !this.ended) this.showUpNext(known, true);
+  }
+
+  selectQuality(id: string): void {
+    const chosen = qualitiesFor(this.file).filter((p) => p.id === presetById(id)?.id)[0];
+    if (!chosen || chosen.id === this.quality.id) return;
+    this.quality = chosen;
+    this.recovery.qualityChanged();
+    this.update({ suggestLowerQuality: false, note: null, canPlayOriginal: false });
+    this.env.quality.remember(chosen.id);
+    this.publishChoices();
+    if (this.item) this.restart(this.livePosition());
+  }
+
+  skip(): void {
+    const marker = activeMarker(this.markers, this.livePosition());
+    if (!marker) return;
+    const duration = this.clock.value.durationMs;
+    this.seekTo(duration > 0 ? Math.min(skipTarget(marker), duration) : skipTarget(marker));
+  }
+
+  playNext(): void {
+    if (this.closed || this.stopped) return;
+    const known = this.next;
+    if (known) {
+      this.switchTo(known);
+      return;
+    }
+    this.lookUpNext((found) => {
+      if (!found) this.notice(this.current.queue ? T.lastInQueue : T.lastEpisode);
+      else this.switchTo(found);
+    });
+  }
+
+  cancelUpNext(): void {
+    this.hideUpNext();
+    if (this.ended) this.phase({ kind: "ended" });
+  }
+
+  playOriginal(): void {
+    if (this.recovery.fallbackMode === null) return;
+    this.recovery.playOriginal();
+    this.update({ canPlayOriginal: false, note: null });
+    this.restart(this.livePosition());
+  }
+
+  setDetailsOpen(open: boolean): void {
+    if (this.detailsTimer !== null) clearTimeout(this.detailsTimer);
+    this.detailsTimer = null;
+    if (!open) {
+      this.update({ details: null });
+      return;
+    }
+    const loop = () => {
+      const info = this.info;
+      const done = () => {
+        this.refreshDetails(true);
+        this.detailsTimer = setTimeout(loop, DETAILS_MS);
+      };
+      if (info && info.hls) {
+        this.env.api.sessionStatus(info.session_id).then(
+          (s) => {
+            if (this.detailsTimer === null && this.state.value.details === null && !open) return;
+            this.live = s.transcode;
+            done();
+          },
+          () => done(),
+        );
+      } else {
+        done();
+      }
+    };
+    this.detailsTimer = setTimeout(loop, 0);
+  }
+
+  private refreshDetails(force: boolean): void {
+    if (!force && this.state.value.details === null) return;
+    const info = this.info;
+    if (!info) return;
+    this.update({
+      details: buildDetails({
+        info,
+        file: this.file,
+        audioIndex: this.audio?.index ?? null,
+        note: this.recovery.fallbackReason ? fallbackText(this.recovery.fallbackReason) : null,
+        positionMs: this.livePosition(),
+        live: this.live,
+        subtitle: this.subtitle,
+        sideload: this.sideload,
+      }),
+    });
+  }
+
+  dismissNotice(): void {
+    this.update({ notice: null });
+  }
+
+  retry(): void {
+    if (this.closed || this.stopped) return;
+    this.recovery.retry();
+    this.update({ phase: { kind: "preparing" } });
+    if (!this.item) void this.prepareFirst();
+    else this.restart(this.lastPositionMs);
+  }
+
+  /** Where the player is, to start again there after the app comes back. */
+  saveState(): SavedPlayback {
+    return {
+      request: {
+        ...this.current,
+        itemId: this.item?.id ?? this.current.itemId,
+        fileId: this.file?.id ?? this.current.fileId ?? null,
+        startMs: this.livePosition(),
+        fromStart: false,
+        audioIndex: this.audio?.index ?? null,
+        subtitleIndex: this.subtitle?.index ?? null,
+      },
+      quality: this.quality.id,
+      playing: this.wantPlay,
+    };
+  }
+
+  close(): void {
+    if (this.closed) return;
+    const position = this.livePosition();
+    this.closed = true;
+    this.generation++;
+    this.endSession(position);
+    this.sleep.cancel();
+    this.presenter.dispose();
+    this.stopCountdown();
+    for (const t of [this.seekReportTimer, this.detailsTimer, this.trickplayTimer]) if (t !== null) clearTimeout(t);
+    if (this.tickTimer !== null) clearInterval(this.tickTimer);
+    this.unsubscribe?.();
+    this.engineRef?.release();
+    this.engineRef = null;
+  }
+
+  // ---------------------------------------------------------------- Up Next
+
+  private onCredits(): void {
+    const detail = this.item;
+    if (!detail || !hasNext(detail.kind, this.current.queue) || this.state.value.upNext) return;
+    this.lookUpNext((found) => {
+      if (found && !this.closed) this.showUpNext(found, true);
+    });
+  }
+
+  /** Finds what plays next (one lookup at a time), then calls `then` with it. */
+  private lookUpNext(then: (found: ItemSummary | null) => void): void {
+    const detail = this.item;
+    if (!detail) {
+      then(null);
+      return;
+    }
+    const lookup = ++this.nextLookup;
+    nextAfter(this.env.api, detail.id, detail.kind, this.current.queue).then(
+      (found) => {
+        if (lookup !== this.nextLookup || this.closed) return;
+        if (found) this.next = found;
+        then(found);
+      },
+      () => {
+        if (lookup === this.nextLookup && !this.closed) then(null);
+      },
+    );
+  }
+
+  private showUpNext(found: ItemSummary, restartCountdown: boolean): void {
+    this.next = found;
+    if (this.nextDetail?.id !== found.id) {
+      this.env.api.item(found.id).then(
+        (d) => (this.nextDetail = d),
+        () => undefined,
+      );
+    }
+    const image = found.thumb_url ?? found.backdrop_url ?? null;
+    const card: UpNextCard = {
+      itemId: found.id,
+      title: found.title,
+      heading: T.upNext(labelOf(found)),
+      imageUrl: image ? this.env.api.url(withWidth(image, UP_NEXT_IMAGE_WIDTH)) : null,
+      secondsLeft: null,
+    };
+    this.update({ upNext: card });
+    if (!restartCountdown) return;
+    this.stopCountdown();
+    if (!this.env.autoplayNext() || this.sleep.endsWith(this.item?.id ?? null)) return;
+    let left = COUNTDOWN_SECONDS;
+    const step = () => {
+      const current = this.state.value.upNext;
+      if (!current || current.itemId !== found.id) return;
+      if (left <= 0) {
+        this.countdownTimer = null;
+        this.switchTo(found);
+        return;
+      }
+      this.update({ upNext: { ...current, secondsLeft: left } });
+      left--;
+      this.countdownTimer = setTimeout(step, 1000);
+    };
+    step();
+  }
+
+  private stopCountdown(): void {
+    if (this.countdownTimer !== null) clearTimeout(this.countdownTimer);
+    this.countdownTimer = null;
+  }
+
+  private hideUpNext(): void {
+    this.stopCountdown();
+    if (this.state.value.upNext) this.update({ upNext: null });
+  }
+
+  /** Plays `target` on the same engine: the session before ends, the next one starts where `target` resumes. */
+  private switchTo(target: ItemSummary): void {
+    this.hideUpNext();
+    this.nextLookup++;
+    const position = this.livePosition();
+    const endedBefore = this.endSession(position);
+    this.next = null;
+    this.recovery.newItem();
+    this.credits.reset();
+    this.guardMode = null;
+    this.presenter.hide();
+    this.ended = false;
+    this.mediaShown = false;
+    const req: PlayRequest = {
+      ...this.current,
+      itemId: target.id,
+      fileId: null,
+      startMs: startOf(target),
+      fromStart: false,
+      audioIndex: null,
+      subtitleIndex: null,
+    };
+    this.current = req;
+    const sleep = this.state.value.sleep;
+    const title = this.state.value.title;
+    this.state.value = { ...INITIAL, itemId: target.id, title, sleep };
+    this.setClock({ positionMs: req.startMs ?? 0, bufferedMs: 0 });
+    const generation = ++this.generation;
+    const prefetched = this.nextDetail?.id === target.id ? this.nextDetail : null;
+    (async () => {
+      if (endedBefore) await this.env.reporter.flush(END_WAIT_MS);
+      const detail = prefetched ?? (await this.env.api.item(target.id));
+      if (generation !== this.generation || this.closed) return;
+      this.load(detail, req);
+      await this.begin(req.startMs ?? 0, generation);
+    })().catch((e: unknown) => {
+      if (generation === this.generation) this.failWith(e);
+    });
+  }
+
+  // ---------------------------------------------------------------- seek previews
+
+  private loadTrickplay(file: MediaFile | null): void {
+    if (this.trickplayTimer !== null) clearTimeout(this.trickplayTimer);
+    this.trickplayTimer = null;
+    if (!file) return;
+    const started = this.now();
+    const ask = () => {
+      this.env.api.trickplay(file.id).then(
+        (info) => {
+          if (this.file?.id !== file.id || this.closed) return;
+          if (info.count > 0) this.update({ trickplay: { fileId: file.id, info } });
+        },
+        () => {
+          if (this.file?.id !== file.id || this.closed) return;
+          if (this.now() - started < TRICKPLAY_GIVE_UP_MS) this.trickplayTimer = setTimeout(ask, TRICKPLAY_RETRY_MS);
+        },
+      );
+    };
+    ask();
+  }
+
+  // ---------------------------------------------------------------- state
+
+  private publishChoices(): void {
+    const file = this.file;
+    const info = this.info;
+    const audio = audioStreams(file).map((s) => ({ index: s.index, label: streamLabel(s), selected: s.index === this.audio?.index, burnIn: false }));
+    const subs = subtitleStreams(file);
+    const off: TrackChoice = { index: null, label: T.subtitlesOff, selected: !this.subtitle, burnIn: false };
+    const subtitles: TrackChoice[] = subs.length
+      ? [off].concat(
+          subs.map((s) => ({ index: s.index, label: streamLabel(s), selected: s.index === this.subtitle?.index, burnIn: isPicture(s) && !this.sideload })),
+        )
+      : [];
+    const sub = this.subtitle;
+    // Text moves always; pictures when drawn here from the server's .mks.
+    const syncable = !!sub && (!isPicture(sub) || (this.sideload && info?.burn_subtitles !== true));
+    const autoId = info?.auto_quality && this.quality.id === ORIGINAL.id ? info.auto_quality : null;
+    const auto = autoId ? presetById(autoId) : null;
+    const hint = fileHint(file) || null;
+    const qualities: QualityChoice[] = qualitiesFor(file).map((p) => ({
+      id: p.id,
+      label: p.label,
+      hint: p.id !== ORIGINAL.id ? T.converted : auto && auto.id !== ORIGINAL.id ? T.playsAs(auto.label, hint) : hint,
+      selected: p.id === this.quality.id,
+    }));
+    this.update({
+      audio,
+      subtitles,
+      qualities,
+      quality: auto && auto.id !== ORIGINAL.id ? T.autoQuality(auto.label) : this.quality.label,
+      subtitleSync: syncable,
+      subtitleOffsetMs: this.offset,
+    });
+  }
+
+  /** PUT /api/items/{id}/streams: the next episode, or the next viewing, starts with the same tracks. */
+  private saveStreams(): void {
+    const itemId = this.item?.id;
+    if (itemId == null) return;
+    const api = this.env.api;
+    const fileId = this.file?.id ?? null;
+    const audio = this.audio?.index ?? null;
+    const subtitle = this.subtitle?.index ?? null;
+    this.env.reporter.send(() => api.setStreams(itemId, fileId, audio, subtitle));
+  }
+
+  private update(patch: Partial<PlayerState>): void {
+    this.state.value = { ...this.state.value, ...patch };
+  }
+
+  private setClock(patch: Partial<PlayerClock>): void {
+    const c = this.clock.value;
+    const next = { ...c, ...patch };
+    if (next.positionMs !== c.positionMs || next.durationMs !== c.durationMs || next.bufferedMs !== c.bufferedMs) this.clock.value = next;
+  }
+
+  private phase(phase: Phase): void {
+    if (this.state.value.phase.kind === "error") return;
+    const was = this.state.value.phase;
+    if (was.kind === phase.kind) return;
+    batch(() => {
+      this.update({ phase });
+      if (phase.kind === "playing") this.presenter.resume();
+    });
+  }
+
+  private notice(text: string): void {
+    this.update({ notice: text });
+  }
+
+  private fail(message: string, canRetry: boolean): void {
+    this.update({ phase: { kind: "error", message, canRetry }, skipLabel: null });
+  }
+
+  private failWith(e: unknown): void {
+    if (e instanceof SessionStoppedError) {
+      this.stopByServer(e.note, true);
+      return;
+    }
+    const message = e instanceof NetworkError ? "The server can't be reached." : errorMessage(e);
+    const canRetry = !(e instanceof SignedOutError) && !(e instanceof ApiError && (e.status === 403 || e.status === 404 || e.status === 401));
+    this.fail(message, canRetry);
+  }
+}
+
+/** Keyed playback URLs live under `/api/media/` (docs/API.md, "Keyed URLs"). */
+export function isKeyed(url: string): boolean {
+  return /^(https?:\/\/[^/]+)?\/api\/media\/[^/]+\//.test(url);
+}
+
+function videoStreamOf(file: MediaFile | null): MediaStream | null {
+  const videos = (file?.streams ?? []).filter((s) => s.kind === "video");
+  return videos.filter((s) => s.default)[0] ?? videos[0] ?? null;
+}
+
+/** An image address asked for at `width` pixels (the server buckets it). */
+export function withWidth(url: string, width: number): string {
+  return url + (url.indexOf("?") >= 0 ? "&" : "?") + `w=${width}`;
+}

@@ -1,0 +1,24 @@
+{
+  "name": "pley-webos",
+  "private": true,
+  "version": "1.0.0",
+  "description": "pley for LG TVs: a webOS web app that plays through LG's own media pipeline.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "package": "node scripts/build.mjs && node scripts/package.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "check": "tsc -p tsconfig.json && vitest run"
+  },
+  "dependencies": {
+    "pley-tv": "*"
+  },
+  "devDependencies": {
+    "@webos-tools/cli": "^3.2.6",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.1.3",
+    "typescript": "~5.9",
+    "vitest": "^5.0.5"
+  }
+}

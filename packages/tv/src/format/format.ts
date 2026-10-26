@@ -1,0 +1,357 @@
+import type { DynamicRange, ItemSummary, MediaFile, MediaStream, MediaSummary } from "../api/types";
+
+/*
+ * What files, streams, times and sizes are like, in words: the Android
+ * app's labels (core/model/format), which follow the web's.
+ */
+
+const CODECS: Record<string, string> = {
+  h264: "H.264", hevc: "HEVC", h265: "HEVC", av1: "AV1", vp9: "VP9", vp8: "VP8", mpeg4: "MPEG-4", mpeg2video: "MPEG-2",
+  mpeg1video: "MPEG-1", vc1: "VC-1", wmv3: "WMV", msmpeg4v3: "DivX", theora: "Theora", prores: "ProRes", aac: "AAC",
+  ac3: "AC3", eac3: "EAC3", dts: "DTS", truehd: "TrueHD", mlp: "MLP", flac: "FLAC", alac: "ALAC", mp3: "MP3", mp2: "MP2",
+  opus: "Opus", vorbis: "Vorbis", wmav2: "WMA", pcm_s16le: "PCM", pcm_s24le: "PCM", pcm_s32le: "PCM", pcm_f32le: "PCM",
+  subrip: "SRT", srt: "SRT", ass: "ASS", ssa: "SSA", webvtt: "WebVTT", mov_text: "MOV Text", hdmv_pgs_subtitle: "PGS",
+  pgssub: "PGS", dvd_subtitle: "VobSub", dvdsub: "VobSub", dvb_subtitle: "DVB", dvb_teletext: "Teletext", eia_608: "CEA-608",
+};
+
+/** ffprobe's codec name as people know it: "h264" → "H.264", "hdmv_pgs_subtitle" → "PGS"; others upper-cased. */
+export function codecLabel(codec: string | null | undefined): string {
+  if (!codec) return "";
+  return CODECS[codec.toLowerCase()] ?? codec.toUpperCase();
+}
+
+/** 2 → "Stereo", 6 → "5.1", 8 → "7.1", 5 → "5ch"; the layout's name without a count. */
+export function channelsLabel(channels: number | null | undefined, layout?: string | null): string {
+  if (!channels) return layout ?? "";
+  switch (channels) {
+    case 1:
+      return "Mono";
+    case 2:
+      return "Stereo";
+    case 3:
+      return "2.1";
+    case 6:
+      return "5.1";
+    case 7:
+      return "6.1";
+    case 8:
+      return "7.1";
+    default:
+      return `${channels}ch`;
+  }
+}
+
+/** "4K", "1440p", "1080p", "720p", "576p", "480p" or "SD"; `null` without a size. */
+export function resolutionLabel(width: number | null | undefined, height: number | null | undefined): string | null {
+  const w = width ?? 0;
+  const h = height ?? 0;
+  if (!w && !h) return null;
+  if (w >= 3800 || h >= 2100) return "4K";
+  if (w >= 2500 || h >= 1400) return "1440p";
+  if (w >= 1800 || h >= 1000) return "1080p";
+  if (w >= 1200 || h >= 700) return "720p";
+  if (h >= 540) return "576p";
+  if (h >= 470) return "480p";
+  return "SD";
+}
+
+/** The four steps badges use: "4K", "1080p", "720p", "SD"; `null` without a size. */
+export function resolutionBadge(width: number | null | undefined, height: number | null | undefined): string | null {
+  const w = width ?? 0;
+  const h = height ?? 0;
+  if (w >= 3800 || h >= 2100) return "4K";
+  if (w >= 1800 || h >= 1000) return "1080p";
+  if (w >= 1200 || h >= 700) return "720p";
+  return h > 0 ? "SD" : null;
+}
+
+/** "Dolby Vision P8.1", "HDR10+", "HDR10", "HLG", "HDR" (an older server's flag), or `null` for SDR. */
+export function dynamicRangeLabel(
+  range: DynamicRange | null | undefined,
+  dvProfile?: number | null,
+  dvBlCompat?: number | null,
+  hdr?: boolean | null,
+): string | null {
+  switch (range) {
+    case "dolby_vision":
+      if (dvProfile == null) return "Dolby Vision";
+      return `Dolby Vision P${dvProfile}${dvBlCompat && dvBlCompat > 0 ? `.${dvBlCompat}` : ""}`;
+    case "hdr10plus":
+      return "HDR10+";
+    case "hdr10":
+      return "HDR10";
+    case "hlg":
+      return "HLG";
+    case "sdr":
+      return null;
+    default:
+      return hdr ? "HDR" : null;
+  }
+}
+
+export function streamRange(s: MediaStream | null | undefined): string | null {
+  return s ? dynamicRangeLabel(s.dynamic_range, s.dv_profile, s.dv_bl_compat, s.hdr) : null;
+}
+
+/** "DV P8.1", "DV", "HDR10+", "HDR10", "HLG", "HDR", or `null`. */
+export function dynamicRangeShort(range: DynamicRange | null | undefined, dvProfile?: number | null, dvBlCompat?: number | null, hdr?: boolean | null): string | null {
+  const label = dynamicRangeLabel(range, dvProfile, dvBlCompat, hdr);
+  return label ? label.replace("Dolby Vision", "DV") : null;
+}
+
+/** Dolby Atmos, as ffprobe names it in the stream's profile or a title says. */
+export function isAtmos(s: MediaStream | null | undefined): boolean {
+  if (!s || s.kind !== "audio") return false;
+  return /atmos/i.test(s.profile ?? "") || /atmos/i.test(s.title ?? "");
+}
+
+/** "TrueHD Atmos 7.1", "EAC3 5.1", "AAC Stereo". */
+export function audioFormatLabel(s: MediaStream): string {
+  return [codecLabel(s.codec), isAtmos(s) ? "Atmos" : "", channelsLabel(s.channels, s.channel_layout)].filter(Boolean).join(" ");
+}
+
+/**
+ * A track as the pickers list it. Audio: "English (EAC3 5.1)", "English –
+ * Commentary (AAC Stereo)". Subtitles: "French – SDH (SRT, Forced)".
+ * Video: "4K HEVC Dolby Vision P8.1 10-bit".
+ */
+export function streamLabel(s: MediaStream): string {
+  const lang = languageName(s.language);
+  const title = s.title || null;
+  const extra = title && lang && title.toLowerCase().indexOf(lang.toLowerCase()) < 0 ? ` – ${title}` : "";
+  if (s.kind === "audio") {
+    const details = audioFormatLabel(s);
+    const base = title && !lang ? title : lang ?? title ?? "Unknown";
+    return base + extra + (details ? ` (${details})` : "");
+  }
+  if (s.kind === "subtitle") {
+    const base = lang ?? title ?? "Unknown";
+    const flags = [codecLabel(s.codec), s.forced ? "Forced" : "", s.external ? "External" : ""].filter(Boolean).join(", ");
+    return base + extra + (flags ? ` (${flags})` : "");
+  }
+  return [resolutionLabel(s.width, s.height), codecLabel(s.codec), streamRange(s), s.bit_depth && s.bit_depth > 8 ? `${s.bit_depth}-bit` : null]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** The short quality badges of a file: resolution, dynamic range, then "Atmos", else "7.1" or "5.1". */
+export function qualityBadges(file: MediaFile | null | undefined): string[] {
+  if (!file) return [];
+  const video = file.streams.filter((s) => s.kind === "video")[0];
+  const audio = file.streams.filter((s) => s.kind === "audio" && s.default)[0] ?? file.streams.filter((s) => s.kind === "audio")[0];
+  const channels = audio?.channels ?? 0;
+  return [
+    resolutionBadge(file.width ?? video?.width, file.height ?? video?.height),
+    video ? dynamicRangeShort(video.dynamic_range, video.dv_profile, video.dv_bl_compat, video.hdr) : null,
+    isAtmos(audio) ? "Atmos" : channels >= 8 ? "7.1" : channels >= 6 ? "5.1" : null,
+  ].filter((b): b is string => !!b);
+}
+
+/** Badges a listing can give: resolution and dynamic range. */
+export function summaryBadges(media: MediaSummary | null | undefined): string[] {
+  if (!media) return [];
+  return [resolutionBadge(media.width, media.height), dynamicRangeShort(media.dynamic_range)].filter((b): b is string => !!b);
+}
+
+/** The audio track a file starts with: the profile's choice, else the default, else the first. */
+export function startingAudio(file: MediaFile): MediaStream | null {
+  const audio = file.streams.filter((s) => s.kind === "audio");
+  return audio.filter((s) => s.index === file.selected_audio)[0] ?? audio.filter((s) => s.default)[0] ?? audio[0] ?? null;
+}
+
+/** "Final Cut · 4K · HEVC · MKV · 58.2 GB", else "Version 2". */
+export function versionLabel(file: MediaFile, position: number): string {
+  const parts = [file.edition ?? "", resolutionLabel(file.width, file.height) ?? "", codecLabel(file.video_codec), (file.container ?? "").toUpperCase(), file.size > 0 ? formatBytes(file.size) : ""].filter(Boolean);
+  return parts.length ? parts.join(" · ") : `Version ${position + 1}`;
+}
+
+// ---- languages
+
+const LANGUAGES: Record<string, string> = {
+  afr: "Afrikaans", alb: "Albanian", sqi: "Albanian", amh: "Amharic", ara: "Arabic", arm: "Armenian", hye: "Armenian",
+  aze: "Azerbaijani", baq: "Basque", eus: "Basque", bel: "Belarusian", ben: "Bengali", bos: "Bosnian", bre: "Breton",
+  bul: "Bulgarian", bur: "Burmese", mya: "Burmese", cat: "Catalan", chi: "Chinese", zho: "Chinese", cze: "Czech",
+  ces: "Czech", dan: "Danish", dut: "Dutch", nld: "Dutch", eng: "English", est: "Estonian", fao: "Faroese",
+  fil: "Filipino", fin: "Finnish", fre: "French", fra: "French", geo: "Georgian", kat: "Georgian", ger: "German",
+  deu: "German", gle: "Irish", glg: "Galician", gre: "Greek", ell: "Greek", guj: "Gujarati", heb: "Hebrew",
+  hin: "Hindi", hrv: "Croatian", hun: "Hungarian", ice: "Icelandic", isl: "Icelandic", ind: "Indonesian",
+  ita: "Italian", jpn: "Japanese", kan: "Kannada", kaz: "Kazakh", khm: "Khmer", kor: "Korean", kur: "Kurdish",
+  lao: "Lao", lat: "Latin", lav: "Latvian", lit: "Lithuanian", ltz: "Luxembourgish", mac: "Macedonian",
+  mkd: "Macedonian", mal: "Malayalam", mao: "Maori", mri: "Maori", mar: "Marathi", may: "Malay", msa: "Malay",
+  mlt: "Maltese", mon: "Mongolian", nep: "Nepali", nob: "Norwegian Bokmål", nno: "Norwegian Nynorsk",
+  nor: "Norwegian", per: "Persian", fas: "Persian", pol: "Polish", por: "Portuguese", pan: "Punjabi",
+  rum: "Romanian", ron: "Romanian", rus: "Russian", slo: "Slovak", slk: "Slovak", slv: "Slovenian",
+  som: "Somali", spa: "Spanish", srp: "Serbian", swa: "Swahili", swe: "Swedish", tam: "Tamil", tel: "Telugu",
+  tgl: "Tagalog", tha: "Thai", tib: "Tibetan", bod: "Tibetan", tur: "Turkish", ukr: "Ukrainian", urd: "Urdu",
+  uzb: "Uzbek", vie: "Vietnamese", wel: "Welsh", cym: "Welsh", yid: "Yiddish", zul: "Zulu", yue: "Cantonese",
+  cmn: "Mandarin", nan: "Min Nan", hat: "Haitian Creole", haw: "Hawaiian", ibo: "Igbo", yor: "Yoruba",
+  hau: "Hausa", sin: "Sinhala", pus: "Pashto", tat: "Tatar", kir: "Kyrgyz", tuk: "Turkmen", tgk: "Tajik",
+  und: "Unknown", mul: "Multiple", zxx: "No linguistic content", qaa: "Original",
+  af: "Afrikaans", sq: "Albanian", am: "Amharic", ar: "Arabic", hy: "Armenian", az: "Azerbaijani", eu: "Basque",
+  be: "Belarusian", bn: "Bengali", bs: "Bosnian", bg: "Bulgarian", my: "Burmese", ca: "Catalan", zh: "Chinese",
+  cs: "Czech", da: "Danish", nl: "Dutch", en: "English", et: "Estonian", fi: "Finnish", fr: "French", ka: "Georgian",
+  de: "German", ga: "Irish", gl: "Galician", el: "Greek", gu: "Gujarati", he: "Hebrew", hi: "Hindi", hr: "Croatian",
+  hu: "Hungarian", is: "Icelandic", id: "Indonesian", it: "Italian", ja: "Japanese", kn: "Kannada", kk: "Kazakh",
+  km: "Khmer", ko: "Korean", ku: "Kurdish", lo: "Lao", la: "Latin", lv: "Latvian", lt: "Lithuanian",
+  lb: "Luxembourgish", mk: "Macedonian", ml: "Malayalam", mi: "Maori", mr: "Marathi", ms: "Malay", mt: "Maltese",
+  mn: "Mongolian", ne: "Nepali", nb: "Norwegian Bokmål", nn: "Norwegian Nynorsk", no: "Norwegian", fa: "Persian",
+  pl: "Polish", pt: "Portuguese", pa: "Punjabi", ro: "Romanian", ru: "Russian", sk: "Slovak", sl: "Slovenian",
+  so: "Somali", es: "Spanish", sr: "Serbian", sw: "Swahili", sv: "Swedish", ta: "Tamil", te: "Telugu", tl: "Tagalog",
+  th: "Thai", bo: "Tibetan", tr: "Turkish", uk: "Ukrainian", ur: "Urdu", uz: "Uzbek", vi: "Vietnamese", cy: "Welsh",
+  yi: "Yiddish", zu: "Zulu",
+};
+
+/** "eng" → "English", "pt-BR" → "Portuguese (BR)", unknown codes upper-cased; `null` without one. */
+export function languageName(code: string | null | undefined): string | null {
+  const raw = (code ?? "").trim();
+  if (!raw) return null;
+  const parts = raw.toLowerCase().split(/[-_]/);
+  const name = LANGUAGES[parts[0]!];
+  if (!name) return raw.length <= 3 ? raw.toUpperCase() : raw;
+  return parts[1] ? `${name} (${parts[1].toUpperCase()})` : name;
+}
+
+// ---- items
+
+/** "S1 · E3", "E3", or "" with neither number. */
+export function episodeLabel(season: number | null | undefined, episode: number | null | undefined): string {
+  return [season != null ? `S${season}` : null, episode != null ? `E${episode}` : null].filter(Boolean).join(" · ");
+}
+
+/** A season's own title, else "Specials" for season 0, else "Season 2". */
+export function seasonTitle(title: string | null | undefined, index: number | null | undefined): string {
+  if (title) return title;
+  if (index === 0) return "Specials";
+  return index != null ? `Season ${index}` : "Season";
+}
+
+/** "1 movie", "12,345 movies". */
+export function pluralize(n: number, one: string, many = `${one}s`): string {
+  return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
+}
+
+/** The short line under a card, by kind: a year, "3 seasons", "S2 · E5", "Daft Punk · 2001"… */
+export function cardSubtitle(item: ItemSummary): string {
+  switch (item.kind) {
+    case "movie":
+      return item.year != null ? String(item.year) : "";
+    case "show":
+      if (item.child_count) return pluralize(item.child_count, "season");
+      if (item.leaf_count != null) return pluralize(item.leaf_count, "episode");
+      return item.year != null ? String(item.year) : "";
+    case "season":
+      return item.leaf_count != null ? pluralize(item.leaf_count, "episode") : "";
+    case "episode":
+      return episodeLabel(item.parent_index, item.index);
+    case "artist":
+      return item.child_count != null ? pluralize(item.child_count, "album") : "";
+    case "album":
+      return [item.parent_title || null, item.year != null ? String(item.year) : null].filter(Boolean).join(" · ");
+    case "track":
+      return [item.grandparent_title || null, item.parent_title || null].filter(Boolean).join(" · ");
+    default:
+      return "";
+  }
+}
+
+/** How much of an item has been played, 0 to 1. */
+export function progressFraction(positionMs: number, durationMs: number | null | undefined): number {
+  if (positionMs <= 0 || !durationMs || durationMs <= 0) return 0;
+  return Math.max(0, Math.min(1, positionMs / durationMs));
+}
+
+/** An item's resume point is worth showing: started, not finished, not marked watched. */
+export function isInProgress(item: ItemSummary): boolean {
+  const d = item.duration_ms;
+  return !!d && !item.user_state.watched && item.user_state.position_ms > 0 && item.user_state.position_ms < d;
+}
+
+/** Episodes of a show or season not watched yet; 0 for other kinds. */
+export function unwatchedCount(item: ItemSummary): number {
+  return item.leaf_count != null ? Math.max(0, item.leaf_count - (item.viewed_leaf_count ?? 0)) : 0;
+}
+
+/** A video the player plays: a movie, an episode or an extra. */
+export function isPlayableVideo(kind: ItemSummary["kind"]): boolean {
+  return kind === "movie" || kind === "episode" || kind === "extra";
+}
+
+// ---- times
+
+const MINUTE_MS = 60_000;
+
+function wholeMinutes(ms: number): number {
+  return Math.round(ms / MINUTE_MS);
+}
+
+/** 6720000 → "1h 52m", 2700000 → "45m", 29000 → "29s". */
+export function formatDuration(ms: number | null | undefined): string {
+  if (!ms || ms <= 0) return "";
+  const total = wholeMinutes(ms);
+  if (total < 1) return `${Math.max(1, Math.round(ms / 1000))}s`;
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (!h) return `${m}m`;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+/** "58 min" under an hour, "1h 52m" from an hour, "29s" below half a minute. */
+export function formatRuntime(ms: number | null | undefined): string {
+  if (!ms || ms <= 0) return "";
+  const total = wholeMinutes(ms);
+  return total >= 1 && total <= 59 ? `${total} min` : formatDuration(ms);
+}
+
+/** "26 min left", "1h 12m left"; empty without a duration or once nothing is left. */
+export function formatTimeLeft(positionMs: number, durationMs: number | null | undefined): string {
+  if (!durationMs || durationMs <= 0) return "";
+  const left = formatRuntime(Math.max(0, durationMs - positionMs));
+  return left ? `${left} left` : "";
+}
+
+/** Milliseconds → "1:02:03" or "2:03" ("0:00" for nothing). */
+export function formatClock(ms: number | null | undefined): string {
+  if (ms == null || !isFinite(ms) || ms < 0) return "0:00";
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const mm = h > 0 ? pad2(m) : String(m);
+  return (h > 0 ? `${h}:` : "") + mm + ":" + pad2(sec);
+}
+
+export function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+/** A time of day as the TV is set to show it: "21:05" or "9:05 PM". */
+export function formatTimeOfDay(date: Date, hours24: boolean): string {
+  const h = date.getHours();
+  const m = pad2(date.getMinutes());
+  if (hours24) return `${pad2(h)}:${m}`;
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${m} ${h < 12 ? "AM" : "PM"}`;
+}
+
+// ---- sizes
+
+const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"];
+
+/** 1536 → "1.5 KB", 150 MiB → "150 MB": three significant digits, in units of 1024. */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null) return "";
+  let v = bytes;
+  let i = 0;
+  while (v >= 1024 && i < BYTE_UNITS.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${BYTE_UNITS[i]}`;
+}
+
+/** Bits per second → "8.2 Mbps", "12 Mbps", "320 kbps"; empty without a rate. */
+export function formatBitrate(bps: number | null | undefined): string {
+  if (!bps) return "";
+  if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(bps >= 10_000_000 ? 0 : 1)} Mbps`;
+  return `${Math.round(bps / 1000)} kbps`;
+}

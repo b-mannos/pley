@@ -1,0 +1,104 @@
+import type { DynamicRange } from "../api/types";
+import type { EngineError } from "./recovery";
+
+/**
+ * The TV's own player, as the session drives it: Samsung's AVPlay on
+ * Tizen, LG's media pipeline behind a <video> element on webOS. Each app
+ * implements it; everything above it (the server session, recovery,
+ * subtitles, Up Next) is shared.
+ */
+
+export type EngineStatus = "idle" | "buffering" | "ready" | "ended";
+
+/** What to play, and what is known of it before it opens. */
+export interface EngineSource {
+  /** Absolute; carries the session's key when the player can't send headers. */
+  url: string;
+  hls: boolean;
+  /** The container's MIME type for a file played as it is. */
+  mime: string | null;
+  startMs: number;
+  durationHintMs: number | null;
+  video: {
+    codec: string;
+    width: number | null;
+    height: number | null;
+    frameRate: number | null;
+    range: DynamicRange;
+    dvProfile: number | null;
+    bitDepth: number;
+  } | null;
+  /** The audio stream's codec, when played as it is (passthrough or decode). */
+  audioCodec: string | null;
+}
+
+/** An audio track as the engine knows it, in the file's order. */
+export interface EngineTrack {
+  language: string | null;
+  codec: string | null;
+  channels: number | null;
+}
+
+/** What the engine can say about what it plays, for the details panel. Every field is optional. */
+export interface EngineStats {
+  decoder?: string;
+  hardware?: boolean;
+  width?: number;
+  height?: number;
+  frameRate?: number;
+  bitDepth?: number;
+  codec?: string;
+  codecString?: string;
+  /** "HDR10", "Dolby Vision", "HLG", "SDR"… as the engine reports it. */
+  hdr?: string;
+  /** Bits per second of the stream as it arrives. */
+  bitrate?: number;
+  bandwidth?: number;
+  audioCodec?: string;
+  audioChannels?: number;
+  /** "Passed through as E-AC-3", "Decoded to PCM"… */
+  audioOutput?: string;
+  dropped?: number;
+  frames?: number;
+  bufferedAheadMs?: number;
+  /** Lines the engine adds as it is ("Label: value"), when it has more to say. */
+  extra?: string[];
+}
+
+export interface EngineListener {
+  status(status: EngineStatus): void;
+  /** The first picture of a source shows. */
+  firstFrame(): void;
+  error(error: EngineError): void;
+  tracks(): void;
+}
+
+export interface PlayerEngine {
+  /** "AVPlay", "webOS media pipeline". */
+  readonly name: string;
+  setListener(listener: EngineListener): void;
+  /** Opens `source` and starts at `source.startMs`; plays at once when `play` is true. */
+  prepare(source: EngineSource, play: boolean): void;
+  play(): void;
+  pause(): void;
+  seekTo(ms: number): void;
+  /** Stops and closes the source; the engine can prepare another. */
+  stop(): void;
+  /** Gone for good (the player screen closes). */
+  release(): void;
+  positionMs(): number;
+  /** 0 while unknown. */
+  durationMs(): number;
+  bufferedMs(): number;
+  status(): EngineStatus;
+  playing(): boolean;
+  audioTracks(): EngineTrack[];
+  /**
+   * Switches to the audio track at `ordinal` among the file's audio
+   * streams, checked against `language`; false when it can't.
+   */
+  selectAudio(ordinal: number, language: string | null): boolean;
+  /** Dropped and total frames so far, when the engine counts them. */
+  frameCounts(): { dropped: number; total: number } | null;
+  stats(): EngineStats | null;
+}

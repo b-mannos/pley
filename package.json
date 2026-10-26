@@ -4,7 +4,10 @@
   "description": "pley media server monorepo (Rust apps are built with cargo, see Cargo.toml)",
   "workspaces": [
     "apps/web",
-    "apps/desktop"
+    "apps/desktop",
+    "packages/tv",
+    "apps/tizen",
+    "apps/webos"
   ],
   "scripts": {
     "dev": "npm run dev -w apps/web",
@@ -13,7 +16,10 @@
     "lint": "npm run lint -w apps/web",
     "test": "npm test -w apps/web",
     "check": "npm run check -w apps/web && npm run check -w apps/desktop",
-    "desktop": "npm run dev -w apps/desktop"
+    "desktop": "npm run dev -w apps/desktop",
+    "tv:check": "npm run check -w packages/tv && npm run check -w apps/tizen && npm run check -w apps/webos",
+    "tizen": "npm run package -w apps/tizen",
+    "webos": "npm run package -w apps/webos"
   },
   "engines": {
     "node": ">=22"

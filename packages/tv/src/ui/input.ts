@@ -1,0 +1,124 @@
+import { FocusManager, handlersOf } from "./focus";
+import { isDirection, KeyRepeatGate, standardKey, type Key } from "./keys";
+
+/** OK held this long is a long press (Android's ViewConfiguration, older versions). */
+export const LONG_PRESS_MS = 500;
+
+/**
+ * A screen's or overlay's own keys, before focus moves: the player's
+ * keys, Back on a panel. Return true when handled. The newest handler
+ * runs first, as the Android app's back handlers do.
+ */
+export type KeyHandler = (key: Key, e: { repeat: boolean; type: "down" | "up" }) => boolean;
+
+/**
+ * The remote's keys for the whole app: mapped by the platform, held
+ * direction keys gated to one move per 100 ms, OK's tap and long press
+ * told apart on key-up, the menu key once on key-up, then the handlers
+ * on top, then focus.
+ */
+export class Input {
+  readonly focus: FocusManager;
+  readonly gate: KeyRepeatGate;
+  private readonly handlers: KeyHandler[] = [];
+  private readonly mapKey: (e: KeyboardEvent) => Key | null;
+  private okDownAt = 0;
+  private okTimer: ReturnType<typeof setTimeout> | null = null;
+  private okLong = false;
+  private okTarget: HTMLElement | null = null;
+  private menuDown = false;
+  /** While a text field types, keys go to it. */
+  typing: HTMLElement | null = null;
+
+  constructor(focus: FocusManager, mapKey: (e: KeyboardEvent) => Key | null = standardKey, gate = new KeyRepeatGate()) {
+    this.focus = focus;
+    this.mapKey = mapKey;
+    this.gate = gate;
+  }
+
+  /** Adds `handler` on top; returns its removal. */
+  push(handler: KeyHandler): () => void {
+    this.handlers.push(handler);
+    return () => {
+      const i = this.handlers.lastIndexOf(handler);
+      if (i >= 0) this.handlers.splice(i, 1);
+    };
+  }
+
+  attach(target: Window | Document = document): () => void {
+    const down = (e: Event) => this.onKey(e as KeyboardEvent, "down");
+    const up = (e: Event) => this.onKey(e as KeyboardEvent, "up");
+    target.addEventListener("keydown", down, true);
+    target.addEventListener("keyup", up, true);
+    return () => {
+      target.removeEventListener("keydown", down, true);
+      target.removeEventListener("keyup", up, true);
+    };
+  }
+
+  private onKey(e: KeyboardEvent, type: "down" | "up"): void {
+    const key = this.mapKey(e);
+    if (key === null) return;
+    if (this.typing) {
+      // A field types: only Back, OK, Up and Down are the app's.
+      if (key !== "back" && key !== "ok" && key !== "up" && key !== "down") return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    this.dispatch(key, type, e.repeat);
+  }
+
+  /** One key event, already mapped (tests call this). */
+  dispatch(key: Key, type: "down" | "up", repeat: boolean): void {
+    if (isDirection(key) && !this.gate.admit(type, repeat)) return;
+    const event = { repeat, type };
+    // The focused element's own keys first (a field, the jump control, the sync row).
+    const own = handlersOf(this.focus.current)?.onKey;
+    if (own && own(key + (type === "up" ? ":up" : ""), event)) return;
+    for (let i = this.handlers.length - 1; i >= 0; i--) {
+      if (this.handlers[i]!(key, event)) return;
+    }
+    if (key === "ok") {
+      this.ok(type, repeat);
+      return;
+    }
+    if (key === "menu") {
+      if (type === "down") this.menuDown = true;
+      else if (this.menuDown) {
+        this.menuDown = false;
+        handlersOf(this.focus.current)?.onMenu?.();
+      }
+      return;
+    }
+    if (type === "down" && isDirection(key)) this.focus.move(key);
+  }
+
+  private ok(type: "down" | "up", repeat: boolean): void {
+    if (type === "down") {
+      if (repeat) return;
+      this.okDownAt = Date.now();
+      this.okLong = false;
+      this.okTarget = this.focus.current;
+      const target = this.okTarget;
+      if (target) target.setAttribute("data-pressed", "");
+      const long = handlersOf(target)?.onLongSelect;
+      if (long) {
+        this.okTimer = setTimeout(() => {
+          this.okTimer = null;
+          this.okLong = true;
+          target?.removeAttribute("data-pressed");
+          long();
+        }, LONG_PRESS_MS);
+      }
+      return;
+    }
+    if (this.okTimer !== null) clearTimeout(this.okTimer);
+    this.okTimer = null;
+    const target = this.okTarget;
+    this.okTarget = null;
+    target?.removeAttribute("data-pressed");
+    if (this.okLong || !target || target !== this.focus.current || !this.okDownAt) return;
+    this.okDownAt = 0;
+    handlersOf(target)?.onSelect?.();
+  }
+}
