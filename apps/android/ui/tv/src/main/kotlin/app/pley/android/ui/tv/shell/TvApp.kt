@@ -173,6 +173,7 @@ private fun TvShell(
                     rail = rail,
                     onSelect = { select(it.key) },
                     onProfile = { select(PleyKey.Profiles) },
+                    offline = offline.offline,
                 )
             }
         },

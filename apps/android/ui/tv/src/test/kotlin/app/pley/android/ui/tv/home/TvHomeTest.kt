@@ -41,6 +41,7 @@ import app.pley.android.testing.Fixtures
 import app.pley.android.ui.tv.kit.LocalTvRailFocus
 import app.pley.android.ui.tv.kit.TvRailFocus
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import app.pley.android.ui.tv.shell.ANNOUNCE_MS
 import app.pley.android.ui.tv.shell.LocalTvOffline
 import app.pley.android.ui.tv.shell.TvOfflineNotice
 import app.pley.android.ui.tv.shell.TvOfflineState
@@ -50,6 +51,7 @@ import app.pley.android.ui.tv.theme.TvTheme
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -134,11 +136,12 @@ class TvHomeTest {
     }
 
     @Test
-    fun savedRowsWithTheServerAwaySaySoUntilItAnswers() {
+    fun savedRowsWithTheServerAwaySaySoAWhileAndStayMarkedUntilItAnswers() {
         val saved = Fixtures.decode<Hubs>("hubs/home.json")
         sources.home.value = Loadable.Failed(OfflineException(IOException("no answer in time")), saved)
         val offline = TvOfflineState()
         val vm = HomeViewModel(sources, Dispatchers.Unconfined)
+        compose.mainClock.autoAdvance = false
         compose.setContent {
             CompositionLocalProvider(LocalTvOffline provides offline) {
                 Box(Modifier.fillMaxSize()) {
@@ -147,14 +150,19 @@ class TvHomeTest {
                 }
             }
         }
-        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(1_000)
         compose.onNodeWithText("Severance").assertExists()
         compose.onNodeWithText("Showing what pley had saved. Reconnecting…").assertIsDisplayed()
         compose.onNodeWithText("Resume").assertIsFocused()
 
-        sources.home.value = Loadable.Ready(saved, fresh = true)
-        compose.waitForIdle()
+        // Said for a while; the rail's mark stays.
+        compose.mainClock.advanceTimeBy(ANNOUNCE_MS + 1_000)
         compose.onNodeWithText("Showing what pley had saved. Reconnecting…").assertDoesNotExist()
+        assertTrue(offline.offline)
+
+        sources.home.value = Loadable.Ready(saved, fresh = true)
+        compose.mainClock.advanceTimeBy(1_000)
+        assertFalse(offline.offline)
     }
 
     @Test

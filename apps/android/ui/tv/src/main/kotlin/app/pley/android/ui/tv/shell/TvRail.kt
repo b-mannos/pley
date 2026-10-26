@@ -38,6 +38,8 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Border
@@ -159,8 +161,10 @@ internal fun NavigationDrawerScope.TvRail(
     rail: RailState,
     onSelect: (RailItem) -> Unit,
     onProfile: () -> Unit,
+    offline: Boolean = false,
 ) {
     val open = hasFocus
+    val offlineSaid = stringResource(R.string.tv_shell_offline)
     Box(
         Modifier
             .fillMaxHeight()
@@ -194,7 +198,7 @@ internal fun NavigationDrawerScope.TvRail(
             NavigationDrawerItem(
                 selected = rail.current == PROFILE_ITEM,
                 onClick = onProfile,
-                leadingContent = { Avatar(profile) },
+                leadingContent = { Avatar(profile, offline) },
                 // The name over "Switch profile", set close so both lines fit the entry.
                 supportingContent = {
                     Text(
@@ -204,7 +208,10 @@ internal fun NavigationDrawerScope.TvRail(
                     )
                 },
                 // Room for its two lines when open; the entries below keep their 56 dp pitch from y = 75.
-                modifier = Modifier.height(AvatarItemHeight).focusRequester(rail.requester(PROFILE_ITEM)),
+                modifier = Modifier
+                    .height(AvatarItemHeight)
+                    .focusRequester(rail.requester(PROFILE_ITEM))
+                    .semantics { if (offline) stateDescription = offlineSaid },
                 colors = railColors(collapsedSelected = false),
                 scale = railScale,
                 shape = railShape,
@@ -258,21 +265,24 @@ private fun label(item: RailItem): String = when (item.slot) {
     RailSlot.Settings -> stringResource(R.string.tv_shell_rail_settings)
 }
 
-/** The profile's 32 dp circle: its picture, or its initial on its colour. */
+/** The profile's 32 dp circle: its picture, or its initial on its colour; marked while [offline]. */
 @Composable
-private fun Avatar(profile: RailProfile?) {
+private fun Avatar(profile: RailProfile?, offline: Boolean) {
     val color = profile?.color ?: PleyColors.Surface3
-    Box(
-        Modifier.size(AvatarSize).clip(PleyShape.Circle).background(color),
-        contentAlignment = Alignment.Center,
-    ) {
-        val picture = profile?.picture
-        if (picture != null) {
-            Artwork(picture, profile.name, Modifier.size(AvatarSize))
-        } else {
-            val ink = if (color.luminance() > 0.45f) PleyColors.OnAccent else PleyColors.Fg
-            BasicText(profile?.initial ?: "", style = PleyType.Tv.Label.copy(color = ink, fontWeight = PleyType.Bold))
+    Box(Modifier.size(AvatarSize)) {
+        Box(
+            Modifier.size(AvatarSize).clip(PleyShape.Circle).background(color),
+            contentAlignment = Alignment.Center,
+        ) {
+            val picture = profile?.picture
+            if (picture != null) {
+                Artwork(picture, profile.name, Modifier.size(AvatarSize))
+            } else {
+                val ink = if (color.luminance() > 0.45f) PleyColors.OnAccent else PleyColors.Fg
+                BasicText(profile?.initial ?: "", style = PleyType.Tv.Label.copy(color = ink, fontWeight = PleyType.Bold))
+            }
         }
+        if (offline) OfflineMark()
     }
 }
 

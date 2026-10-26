@@ -51,8 +51,9 @@ Wi-Fi even while the phone's default network is mobile data
 
 With the server out of reach, the screens show what was saved of them,
 under "Showing what pley had saved. Reconnecting…": a banner under the
-top bar on phones (leading to the downloads), a notice at the top right
-on TVs. The server's event stream keeps trying, and the screens come back
+top bar on phones (leading to the downloads); on TVs, a notice at the
+top right for a few seconds, then a mark on the rail's avatar while it
+lasts (no corner is free of controls on every TV screen). The server's event stream keeps trying, and the screens come back
 on their own once it answers. A home address or name (`192.168.…`,
 `nas.local`) has 3 s to accept a connection rather than OkHttp's 10, as
 one at home accepts at once or never (`HttpRoot.homeConnectTimeout`), so

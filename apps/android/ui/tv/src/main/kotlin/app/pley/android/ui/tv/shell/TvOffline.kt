@@ -5,9 +5,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,7 +26,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.pley.android.data.Loadable
 import app.pley.android.designsystem.PleyColors
@@ -35,6 +37,7 @@ import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.network.OfflineException
 import app.pley.android.ui.tv.R
+import kotlinx.coroutines.delay
 
 /**
  * Whether what the TV shows came from what was saved, the server out of
@@ -42,18 +45,38 @@ import app.pley.android.ui.tv.R
  * their loads; one the server couldn't answer raises it, a fresh one
  * lowers it. Its events bring the screens back on their own once the
  * server answers again.
+ *
+ * A TV has no corner free of controls on every screen (a library's tabs
+ * sit at the top right, rows of tiles at the bottom), so the notice is
+ * said for a few seconds ([announcing]), and the rail's avatar keeps a
+ * mark while it holds.
  */
 @Stable
 internal class TvOfflineState {
     var offline by mutableStateOf(false)
         private set
 
+    /** The notice shows: from when the server was found out of reach, until [announced]. */
+    var announcing by mutableStateOf(false)
+        private set
+
     fun report(load: Loadable<*>) {
         when (load) {
-            is Loadable.Ready -> if (load.fresh) offline = false
-            is Loadable.Failed -> if (load.error is OfflineException) offline = true
+            is Loadable.Ready -> if (load.fresh) {
+                offline = false
+                announcing = false
+            }
+            is Loadable.Failed -> if (load.error is OfflineException && !offline) {
+                offline = true
+                announcing = true
+            }
             Loadable.Loading -> Unit
         }
+    }
+
+    /** The notice has been shown its time. */
+    fun announced() {
+        announcing = false
     }
 
     /** A screen's state as fresh or not, and the error that kept it from the server's answer. */
@@ -71,14 +94,21 @@ internal fun ReportOffline(load: Loadable<*>?) {
 }
 
 /**
- * "Showing what pley had saved. Reconnecting…" at the top right while
- * [state] holds: the server-off icon and the line on surface3. Never
+ * "Showing what pley had saved. Reconnecting…" at the top right, where TV
+ * toasts are (design spec §2.10), for [ANNOUNCE_MS] once the server is
+ * found out of reach: the server-off icon and the line on surface3. Never
  * focusable, as there is nothing to do but wait; announced when it shows.
  */
 @Composable
 internal fun BoxScope.TvOfflineNotice(state: TvOfflineState) {
+    LaunchedEffect(state.announcing) {
+        if (state.announcing) {
+            delay(ANNOUNCE_MS)
+            state.announced()
+        }
+    }
     AnimatedVisibility(
-        visible = state.offline,
+        visible = state.announcing,
         modifier = Modifier.align(Alignment.TopEnd).padding(top = TvSafeArea.Vertical, end = TvSafeArea.Horizontal),
         enter = fadeIn(PleyMotion.reveal()),
         exit = fadeOut(PleyMotion.reveal()),
@@ -98,10 +128,31 @@ internal fun BoxScope.TvOfflineNotice(state: TvOfflineState) {
     }
 }
 
-/** How far what sits at the top right (toasts) moves down while the notice shows. */
-internal val OfflineNoticeStep: Dp = 56.dp
-
-/** How far [state] moves what sits at the top right down. */
-internal fun offlineStep(state: TvOfflineState): Dp = if (state.offline) OfflineNoticeStep else 0.dp
-
 internal const val TAG_OFFLINE = "tv.offline"
+
+/** How long the notice shows: as long as an error's toast (design spec §2.10). */
+internal const val ANNOUNCE_MS = 6_000L
+
+/**
+ * The rail avatar's mark while the server is out of reach: the server-off
+ * icon on a surface3 disc ringed in the page's colour, astride its lower
+ * right edge as a status badge is.
+ */
+@Composable
+internal fun BoxScope.OfflineMark() {
+    Box(
+        Modifier
+            .align(Alignment.BottomEnd)
+            .offset(x = 6.dp, y = 6.dp)
+            .size(16.dp)
+            .background(PleyColors.Bg, PleyShape.Circle)
+            .padding(2.dp)
+            .background(PleyColors.Surface3, PleyShape.Circle)
+            .testTag(TAG_OFFLINE_MARK),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(PleyIcons.ServerOff, contentDescription = null, size = 9.dp, tint = PleyColors.Fg)
+    }
+}
+
+internal const val TAG_OFFLINE_MARK = "tv.offline.mark"

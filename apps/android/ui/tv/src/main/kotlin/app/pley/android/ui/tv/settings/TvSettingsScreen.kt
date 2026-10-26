@@ -75,8 +75,6 @@ import app.pley.android.ui.tv.onboarding.ProfileAvatar
 import app.pley.android.ui.tv.onboarding.TvDialog
 import app.pley.android.ui.tv.kit.TvTextButton
 import app.pley.android.ui.tv.shell.LocalTvNavigator
-import app.pley.android.ui.tv.shell.LocalTvOffline
-import app.pley.android.ui.tv.shell.offlineStep
 
 /** The TV settings' categories, top to bottom (design spec §4.8). */
 internal enum class Category(val icon: PleyIcon) {
@@ -242,7 +240,7 @@ internal fun TvSettingsScreen(start: Category = Category.Profile) {
             }
         }
         message?.let { text ->
-            Box(Modifier.align(Alignment.TopEnd).padding(top = TvSafeArea.Vertical + offlineStep(LocalTvOffline.current), end = TvSafeArea.Horizontal)) {
+            Box(Modifier.align(Alignment.TopEnd).padding(top = TvSafeArea.Vertical, end = TvSafeArea.Horizontal)) {
                 BasicText(
                     text,
                     style = PleyType.Tv.Label.copy(color = PleyColors.Fg),
