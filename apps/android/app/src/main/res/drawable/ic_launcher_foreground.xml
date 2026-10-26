@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The mark's glyph, centred in the adaptive icon's safe zone. -->
+<!-- The mark's glyph, placed as the favicon places it (a little right and low of its box, so it reads centred), in the adaptive icon's safe zone. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
@@ -9,8 +9,8 @@
     <group
         android:scaleX="1.2"
         android:scaleY="1.2"
-        android:translateX="14.4"
-        android:translateY="12.6">
+        android:translateX="15.6"
+        android:translateY="15.6">
         <path
             android:fillType="evenOdd"
             android:pathData="M17 19a5 5 0 0 1 5-5h13a14 14 0 0 1 0 28h-8v8a5 5 0 0 1-10 0zM30 21v14l12-7z">

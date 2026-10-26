@@ -8,8 +8,8 @@
     <group
         android:scaleX="1.2"
         android:scaleY="1.2"
-        android:translateX="14.4"
-        android:translateY="12.6">
+        android:translateX="15.6"
+        android:translateY="15.6">
         <path
             android:fillColor="#FFFFFFFF"
             android:fillType="evenOdd"
