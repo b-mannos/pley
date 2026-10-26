@@ -235,6 +235,12 @@ data class ProgressReport(
     val state: ProgressState = ProgressState.Playing,
     /** Keeps the session, and its transcode, alive. */
     val sessionId: String? = null,
+    /**
+     * How long ago the report was made, for one sent late (a download played
+     * while the server was out of reach): the server keeps whatever happened
+     * to the item since.
+     */
+    val ageMs: Long? = null,
 )
 
 /**

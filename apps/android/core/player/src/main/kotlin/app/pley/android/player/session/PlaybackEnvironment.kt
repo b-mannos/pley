@@ -10,6 +10,7 @@ import app.pley.android.caps.PlaybackCapsPolicy
 import app.pley.android.data.AppSettings
 import app.pley.android.data.ItemRepository
 import app.pley.android.data.Loadable
+import app.pley.android.data.LocalMedia
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ServerEvent
 import app.pley.android.network.PleyApi
@@ -157,4 +158,6 @@ class PlaybackEnvironment(
     val pictures: PictureSource? = null,
     /** The server's events, to hear of this playback being stopped. */
     val events: Flow<ServerEvent> = emptyFlow(),
+    /** Downloads: files played as they are on the device, without the server. */
+    val local: LocalMedia = LocalMedia.None,
 )

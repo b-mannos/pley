@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.media3.common.text.Cue
 import app.pley.android.caps.CapsSnapshot
 import app.pley.android.common.describe
+import app.pley.android.data.LocalFile
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ItemKind
 import app.pley.android.model.ItemSummary
@@ -11,11 +12,13 @@ import app.pley.android.model.Marker
 import app.pley.android.model.MarkerKind
 import app.pley.android.model.MediaFile
 import app.pley.android.model.MediaStream
+import app.pley.android.model.PlaybackInfo
 import app.pley.android.model.PlaybackMethod
 import app.pley.android.model.PlaybackMode
 import app.pley.android.model.ProgressState
 import app.pley.android.model.ServerEvent
 import app.pley.android.model.StreamChoice
+import app.pley.android.model.SubtitleTrack
 import app.pley.android.model.TranscodeInfo
 import app.pley.android.model.format.episodeLabel
 import app.pley.android.model.format.formatBitrate
@@ -44,6 +47,7 @@ import app.pley.android.player.subtitles.SubtitleSync
 import app.pley.android.player.subtitles.TimedCueTrack
 import app.pley.android.player.trickplay.TrickplayThumbnails
 import java.io.IOException
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -85,6 +89,11 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   move through the server's WebVTT too while an offset is set.
  * - **Sleep timer**, and a session the server stopped: it says so and
  *   plays no more.
+ * - **Downloads.** A file downloaded to the device plays from there as it
+ *   is, with no session on the server; its progress goes through
+ *   [PlaybackEnvironment.local], which keeps it while the server is out of
+ *   reach. A quality picked by hand, or a recovery's fallback, streams
+ *   from the server instead.
  *
  * Runs on [scope]'s dispatcher (the main thread); the engine's events come there too.
  */
@@ -117,6 +126,9 @@ class SessionPlaybackController(
 
     /** The mode a Dolby Vision guard asked for, for this item's later sessions too. */
     private var guardMode: PlaybackMode? = null
+
+    /** A quality was picked by hand in this playback: a downloaded file streams from the server instead. */
+    private var streamingPicked = false
 
     // ---------------------------------------------------------------- the session
 
@@ -188,7 +200,7 @@ class SessionPlaybackController(
 
     private suspend fun prepareFirst() {
         try {
-            val detail = scope.async { env.details.detail(current.itemId) }
+            val detail = scope.async { detailOf(current.itemId) }
             val snapshot = scope.async {
                 try {
                     env.capabilities.snapshot.value ?: env.capabilities.warmUp()
@@ -214,7 +226,8 @@ class SessionPlaybackController(
     private suspend fun load(detail: ItemDetail, req: PlayRequest) {
         item = detail
         current = req
-        val chosen = PlaybackPlan.file(detail, req.fileId, caps, env.policy)
+        val downloaded = req.fileId ?: detail.files.firstOrNull { env.local.file(it.id) != null }?.id
+        val chosen = PlaybackPlan.file(detail, downloaded, caps, env.policy)
         file = chosen
         audio = PlaybackPlan.initialAudio(chosen, req.audioIndex)
         subtitle = PlaybackPlan.initialSubtitle(chosen, req.subtitleIndex)
@@ -296,6 +309,9 @@ class SessionPlaybackController(
         lastAdvancePos = -1
         ui.update { it.copy(phase = PlayerPhase.Preparing, positionMs = atMs, skipLabel = null) }
 
+        val local = env.local.file(chosen.id)?.takeIf { recovery.fallbackMode == null && !streamingPicked }
+        if (local != null) return beginLocal(detail, chosen, local, atMs)
+
         val mode = recovery.fallbackMode ?: guardMode?.takeIf { quality.original } ?: quality.mode
         val decision = caps?.let { c -> runCatching { env.policy.decide(detail, chosen.id, c) }.getOrNull() }
         var choices = PlaybackPlan.Choices(
@@ -355,6 +371,67 @@ class SessionPlaybackController(
         applyTracks()
     }
 
+    /**
+     * Plays [chosen] from its download [local], as it is: a session of the
+     * device's own, whose reports go through the downloads (sent at once,
+     * or kept while the server is out of reach), and the subtitles saved
+     * beside the file.
+     */
+    private fun beginLocal(detail: ItemDetail, chosen: MediaFile, local: LocalFile, atMs: Long) {
+        val info = PlaybackInfo(
+            sessionId = "local-${UUID.randomUUID()}",
+            method = PlaybackMethod.Direct,
+            url = local.uri,
+            fileId = chosen.id,
+            durationMs = chosen.durationMs ?: detail.durationMs ?: 0,
+            audioIndex = audio?.index,
+            subtitles = PlaybackPlan.subtitleStreams(chosen).map { s ->
+                SubtitleTrack(
+                    index = s.index,
+                    codec = s.codec,
+                    language = s.language,
+                    title = s.title,
+                    default = s.default,
+                    forced = s.forced,
+                    external = s.external,
+                    textBased = s.textBased == true,
+                    url = local.subtitles[s.index],
+                )
+            },
+        )
+        sessionState.value = ServerPlaybackSession(LocalReportsApi(env.api, env.local), detail.id, info, env.reporter)
+        live = null
+        ui.update {
+            it.copy(
+                method = texts.downloaded,
+                note = null,
+                canPlayOriginal = false,
+                durationMs = info.durationMs.takeIf { d -> d > 0 } ?: it.durationMs,
+            )
+        }
+        publishChoices()
+        refreshDetails()
+        val engineLink = link ?: return
+        val source = EngineSource(
+            url = local.uri,
+            hls = false,
+            mimeType = PlaybackPlan.mimeTypeOf(chosen.container),
+            video = PlaybackPlan.videoStream(chosen),
+            durationMs = info.durationMs.takeIf { it > 0 },
+        )
+        engineLink.prepare(source, atMs, wantPlay.value)
+        applyTracks()
+    }
+
+    /** The item's details: the server's (or what was saved of them), else a download's while the server is out of reach. */
+    private suspend fun detailOf(itemId: Long): ItemDetail = try {
+        env.details.detail(itemId)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        env.local.detail(itemId) ?: throw e
+    }
+
     /** Reports `stopped` at [positionMs] and deletes the session playing; false when none plays. */
     private fun endSession(positionMs: Long): Boolean {
         val s = session ?: return false
@@ -405,7 +482,7 @@ class SessionPlaybackController(
         val info = session?.info ?: return
         pictureSubtitles?.hide()
         val path = info.subtitles.firstOrNull { it.index == sub.index }?.url ?: "/api/files/${info.fileId}/subtitles/${sub.index}.vtt"
-        serverSubtitles.show(info.fileId, sub.index, env.api.url(path))
+        serverSubtitles.show(info.fileId, sub.index, if (path.startsWith("file:")) path else env.api.url(path))
     }
 
     /** Pictures beside a stream: the server's .mks of the track, at the stream's own positions (the file's). */
@@ -836,6 +913,7 @@ class SessionPlaybackController(
         val chosen = Qualities.forFile(file).firstOrNull { it.id == wanted.id } ?: return
         if (chosen.id == quality.id) return
         quality = chosen
+        streamingPicked = !chosen.original
         recovery.qualityChanged()
         ui.update { it.copy(suggestLowerQuality = false, note = null, canPlayOriginal = false) }
         scope.launch { env.quality.remember(chosen.id) }
@@ -915,7 +993,7 @@ class SessionPlaybackController(
             live = live,
             engine = link?.stats().orEmpty(),
             subtitle = subtitle,
-        )
+        ).let { if (info.url.startsWith("file:")) it.copy(method = texts.downloaded) else it }
         ui.update { it.copy(details = details) }
     }
 
@@ -1068,7 +1146,7 @@ class SessionPlaybackController(
             try {
                 if (endedBefore) withTimeoutOrNull(END_WAIT_MS) { env.reporter.flush() }
                 val prefetched = nextDetail?.takeIf { it.first == target.id }?.second
-                val detail = prefetched ?: env.details.detail(target.id)
+                val detail = prefetched ?: detailOf(target.id)
                 load(detail, req)
                 begin(req.startMs ?: 0)
             } catch (e: CancellationException) {
@@ -1101,7 +1179,9 @@ class SessionPlaybackController(
         val fileHint = chosenFile?.let { f ->
             listOfNotNull(resolutionLabel(f.width, f.height), formatBitrate(f.bitrate).ifEmpty { null }).joinToString(" · ").ifEmpty { null }
         }
-        val qualities = Qualities.forFile(chosenFile).map { preset ->
+        // A download plays as it is: there is nothing to convert, and the server may be away.
+        val downloaded = info?.url?.startsWith("file:") == true
+        val qualities = if (downloaded) emptyList() else Qualities.forFile(chosenFile).map { preset ->
             QualityChoice(
                 id = preset.id,
                 label = texts.quality(preset),

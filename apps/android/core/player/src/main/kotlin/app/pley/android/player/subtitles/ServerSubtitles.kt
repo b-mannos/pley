@@ -9,7 +9,9 @@ import app.pley.android.network.HttpPleyApi
 import app.pley.android.network.OfflineException
 import app.pley.android.network.PleyApi
 import app.pley.android.network.SubtitleText
+import java.io.File
 import java.io.IOException
+import java.net.URI
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -55,7 +57,17 @@ fun interface SubtitleFetcher {
 
 /** Through the API (its own client): for tests and servers without a subtitles client. */
 class ApiSubtitleFetcher(private val api: PleyApi) : SubtitleFetcher {
-    override suspend fun fetch(fileId: Long, index: Int, url: String): SubtitleText = api.subtitles(fileId, index)
+    override suspend fun fetch(fileId: Long, index: Int, url: String): SubtitleText =
+        SavedSubtitles.read(url) ?: api.subtitles(fileId, index)
+}
+
+/** Subtitles saved beside a download (`file:///…/subs/3.vtt`), whole. */
+internal object SavedSubtitles {
+    /** The track at [url] when it is a saved file, else `null`. */
+    suspend fun read(url: String, io: CoroutineDispatcher = Dispatchers.IO): SubtitleText? {
+        if (!url.startsWith("file:")) return null
+        return withContext(io) { SubtitleText(File(URI(url)).readText(), complete = true) }
+    }
 }
 
 /**
@@ -64,6 +76,7 @@ class ApiSubtitleFetcher(private val api: PleyApi) : SubtitleFetcher {
  */
 class OkHttpSubtitleFetcher(private val client: () -> OkHttpClient, private val io: CoroutineDispatcher = Dispatchers.IO) : SubtitleFetcher {
     override suspend fun fetch(fileId: Long, index: Int, url: String): SubtitleText {
+        SavedSubtitles.read(url, io)?.let { return it }
         val http = withContext(io) { client() }
         val request = Request.Builder().url(url).header("Accept", "text/vtt").build()
         return suspendCancellableCoroutine { continuation ->

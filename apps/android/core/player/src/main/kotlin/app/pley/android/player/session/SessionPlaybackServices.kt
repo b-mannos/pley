@@ -7,6 +7,7 @@ import app.pley.android.caps.CapsGraph
 import app.pley.android.common.DeviceProfile
 import app.pley.android.common.Tier
 import app.pley.android.data.DataGraph
+import app.pley.android.data.LocalMedia
 import app.pley.android.network.NetworkGraph
 import app.pley.android.player.PlayRequest
 import app.pley.android.player.PlaybackController
@@ -17,8 +18,8 @@ import app.pley.android.player.PlayerUiState
 import app.pley.android.player.subtitles.OkHttpPictureSource
 import app.pley.android.player.subtitles.OkHttpSubtitleFetcher
 import app.pley.android.player.subtitles.PreferencesSubtitleOffsets
-import java.io.File
 import app.pley.android.player.trickplay.OkHttpSheetSource
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -65,7 +66,8 @@ class SessionPlaybackServices(
         /**
          * The services of the app: the server and profile signed in to now
          * ([DataGraph.session]), the engines of [engines], the capability
-         * probe of [caps], reports from the app's own scope.
+         * probe of [caps], reports from the app's own scope, and the
+         * downloads of [local] (made when a playback first asks).
          */
         fun create(
             context: Context,
@@ -74,6 +76,7 @@ class SessionPlaybackServices(
             caps: CapsGraph,
             profile: DeviceProfile,
             engines: PlayerEngine.Factory,
+            local: () -> LocalMedia = { LocalMedia.None },
         ): SessionPlaybackServices {
             val app = context.applicationContext
             val reporter = SessionReporter(CoroutineScope(SupervisorJob() + Dispatchers.Default))
@@ -110,6 +113,7 @@ class SessionPlaybackServices(
                     offsets = offsets,
                     pictures = OkHttpPictureSource({ network.subtitles(session.issuer) }, pictureDir),
                     events = data.liveUpdates.events,
+                    local = local(),
                 )
             })
         }
