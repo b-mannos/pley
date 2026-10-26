@@ -49,5 +49,18 @@ class SharedRulesTest {
     fun requestsSayTheyAreFromTheApp() {
         assertEquals("pleyAndroid/0.1.0 (Android 17)", UserAgent.of("0.1.0", release = "17"))
         assertEquals("pleyAndroid/0.1.0 (Android ?)", UserAgent.of("0.1.0", release = null))
+        assertEquals(
+            "pleyAndroid/0.1.0 (Android 12; Chromecast HD)",
+            UserAgent.of("0.1.0", release = "12", device = "Chromecast HD"),
+        )
+    }
+
+    @Test
+    fun theDevicesNameIsWhatAHeaderCarries() {
+        val ua = { name: String -> UserAgent.of("0.1.0", release = "14", device = name) }
+        assertEquals("pleyAndroid/0.1.0 (Android 14; Anna's TV - Living room)", ua("Anna’s TV — (Living room);"))
+        assertEquals("pleyAndroid/0.1.0 (Android 14; Den TV)", ua("  Den\tTV 📺 "))
+        assertEquals("pleyAndroid/0.1.0 (Android 14)", ua("📺"))
+        assertEquals(40, UserAgent.cleaned("x".repeat(100)).length)
     }
 }

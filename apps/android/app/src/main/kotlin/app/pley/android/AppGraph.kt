@@ -30,7 +30,7 @@ import okhttp3.OkHttpClient
  */
 class AppGraph(private val app: Application) : ScreensGraph {
     override val device: DeviceProfile by lazy { DeviceProfile.of(app) }
-    val userAgent: String by lazy { UserAgent.of(BuildConfig.VERSION_NAME) }
+    val userAgent: String by lazy { UserAgent.of(BuildConfig.VERSION_NAME, device = UserAgent.deviceName(app)) }
     val root: OkHttpClient by lazy {
         // OkHttp's own startup step, which its androidx.startup initializer would
         // run on the main thread as the app starts (the manifest leaves it out):
