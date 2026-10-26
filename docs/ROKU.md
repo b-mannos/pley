@@ -104,7 +104,17 @@ npm ci
 npm run check     # bsc's compile check, bslint, the unit tests
 npm run smoke     # the whole app in brs-node, against a fake server
 npm run bench     # the list work timed in brs-node
+npm run preview   # the app in a browser, the keyboard as its remote
 ```
+
+`npm run preview` runs the app in brs-node and serves it on
+http://127.0.0.1:8086/: the TV's picture as brs-node draws it, with the
+arrows, Enter (OK), Esc or Backspace (Back), Space (play/pause), `[` and `]`
+(rewind, fast forward) and `*` (options) as the remote, and letters typed
+on its keyboards. It runs against the smoke run's fake server, which allows
+the TV code by itself; `npm run preview -- --server http://<address>:7539`
+runs it against a real one instead, whose `/link` page allows the code.
+`--port` chooses another port.
 
 The unit tests run `components/lib` and `tests/*.test.brs` in brs-node
 (lvcabral's BrightScript engine, whose command line and Node library moved

@@ -9,6 +9,7 @@
     "test": "node scripts/test.mjs",
     "check": "npm run compile && npm run lint && npm test",
     "smoke": "node scripts/smoke.mjs",
+    "preview": "node scripts/preview.mjs",
     "package": "bsc --create-package --out-file out/pley-roku.zip",
     "images": "python scripts/make_images.py",
     "bench": "node scripts/bench.mjs"
