@@ -34,8 +34,12 @@ pub const DESKTOP_ID: &str = "https://hhaidar.github.io/pley/oauth/desktop.json"
 pub const KODI_ID: &str = "https://hhaidar.github.io/pley/oauth/kodi.json";
 /// pley for Roku.
 pub const ROKU_ID: &str = "https://hhaidar.github.io/pley/oauth/roku.json";
+/// pley for Samsung TV (Tizen).
+pub const TIZEN_ID: &str = "https://hhaidar.github.io/pley/oauth/tizen.json";
+/// pley for LG TV (webOS).
+pub const WEBOS_ID: &str = "https://hhaidar.github.io/pley/oauth/webos.json";
 /// The client IDs of pley's own apps, matched as exact strings.
-pub const BUILTIN_IDS: &[&str] = &[ANDROID_ID, DESKTOP_ID, KODI_ID, ROKU_ID];
+pub const BUILTIN_IDS: &[&str] = &[ANDROID_ID, DESKTOP_ID, KODI_ID, ROKU_ID, TIZEN_ID, WEBOS_ID];
 
 /// An app that may ask people to allow it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -456,6 +460,8 @@ static BUILTINS: LazyLock<Vec<Client>> = LazyLock::new(|| {
         (DESKTOP_ID, include_str!("builtin/desktop.json")),
         (KODI_ID, include_str!("builtin/kodi.json")),
         (ROKU_ID, include_str!("builtin/roku.json")),
+        (TIZEN_ID, include_str!("builtin/tizen.json")),
+        (WEBOS_ID, include_str!("builtin/webos.json")),
     ]
     .into_iter()
     .map(|(id, json)| {
@@ -837,11 +843,14 @@ mod tests {
         assert!(parse_document(ANDROID_ID, android_json.as_bytes(), false).is_err());
         assert!(parse_document(DESKTOP_ID, include_str!("builtin/desktop.json").as_bytes(), true).is_ok());
 
-        // Kodi and Roku sign in only with a code: no return address, so no
-        // code can be sent to them, and only being built in allows that.
+        // Kodi, Roku and the Samsung and LG TVs sign in only with a code: no
+        // return address, so no code can be sent to them, and only being
+        // built in allows that.
         for (id, name, json) in [
             (KODI_ID, "pley for Kodi", include_str!("builtin/kodi.json")),
             (ROKU_ID, "pley for Roku", include_str!("builtin/roku.json")),
+            (TIZEN_ID, "pley for Samsung TV", include_str!("builtin/tizen.json")),
+            (WEBOS_ID, "pley for LG TV", include_str!("builtin/webos.json")),
         ] {
             let tv = builtin(id).unwrap();
             assert_eq!(tv.name.as_deref(), Some(name));
@@ -868,7 +877,7 @@ mod tests {
             format!(r#"{{"client_id": "{KODI_ID}", "grant_types": ["refresh_token"], "redirect_uris": []}}"#);
         assert!(parse_document(KODI_ID, no_grant.as_bytes(), true).is_err(), "a code or a return address");
 
-        assert_eq!(BUILTIN_IDS.len(), 4);
+        assert_eq!(BUILTIN_IDS.len(), 6);
         assert!(BUILTIN_IDS.iter().all(|id| builtin(id).is_some_and(|c| c.id == *id)));
         for near in [
             "https://hhaidar.github.io/pley/oauth/android.json/",

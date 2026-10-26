@@ -246,6 +246,11 @@ pub struct PlaybackRequest {
     /// thing at a time, so its previous sessions end when it starts a new one.
     #[serde(default)]
     pub client_id: Option<String>,
+    /// The player can't send the Authorization header with its media
+    /// requests (a TV's own player): the session's addresses carry a key
+    /// of their own instead ([`Session::media_key`]).
+    #[serde(default)]
+    pub keyed_urls: bool,
     /// The transcoder keeps HDR in transcodes (its `hdr_transcode`
     /// capability): set by the server, never read from the player.
     #[serde(skip)]
@@ -1073,6 +1078,10 @@ pub struct Session {
     /// The app grant whose token started it (`None`: a session token). The
     /// Plex API's token-less session files refuse these.
     pub app_grant: Option<i64>,
+    /// What the session's keyed addresses carry (`/api/media/{key}/…`) when
+    /// its player asked for them (`keyed_urls`): 256 random bits that open
+    /// this session's media and nothing else, for as long as it lasts.
+    pub media_key: Option<String>,
     /// Serialises job re-creation when the transcoder lost the job.
     pub recreate: tokio::sync::Mutex<()>,
     last_transcoder_touch: AtomicI64,
@@ -1112,6 +1121,7 @@ impl Session {
             started_at: now,
             play: Mutex::new(PlayState { position_ms: start_ms, state: "playing".into(), updated_at: now }),
             app_grant: None,
+            media_key: None,
             recreate: tokio::sync::Mutex::new(()),
             last_transcoder_touch: AtomicI64::new(now),
             quiet: AtomicBool::new(false),
@@ -1196,7 +1206,21 @@ pub struct Stopped {
     pub item_id: i64,
     /// What the one who stopped it said, if anything.
     pub message: Option<String>,
+    /// Its keyed addresses' key, so they answer `410` too.
+    pub media_key: Option<String>,
     at: i64,
+}
+
+/// A key for a session's keyed addresses (`/api/media/{key}/…`): 256
+/// random bits, prefixed so a leaked one is easy to recognise.
+pub fn new_media_key() -> String {
+    format!("pley_mk_{}", crate::auth::new_token())
+}
+
+/// Whether `a` and `b` are the same key, in time that doesn't depend on
+/// where they differ.
+fn same_key(a: &str, b: &str) -> bool {
+    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 /// How long a stopped session is remembered: longer than a player keeps
@@ -1374,6 +1398,7 @@ impl Sessions {
                 client_id: session.client_id.clone(),
                 item_id: session.item_id,
                 message,
+                media_key: session.media_key.clone(),
                 at: now,
             },
         );
@@ -1386,6 +1411,21 @@ impl Sessions {
     pub fn stopped(&self, id: &str) -> Option<Stopped> {
         let now = now();
         self.stopped.lock().get(id).filter(|s| now - s.at <= STOPPED_KEPT_SECS).cloned()
+    }
+
+    /// The session whose keyed addresses carry `key`.
+    pub fn by_media_key(&self, key: &str) -> Option<Arc<Session>> {
+        self.map.lock().values().find(|s| s.media_key.as_deref().is_some_and(|k| same_key(k, key))).cloned()
+    }
+
+    /// The session stopped lately whose keyed addresses carry `key`.
+    pub fn stopped_by_media_key(&self, key: &str) -> Option<Stopped> {
+        let now = now();
+        self.stopped
+            .lock()
+            .values()
+            .find(|s| now - s.at <= STOPPED_KEPT_SECS && s.media_key.as_deref().is_some_and(|k| same_key(k, key)))
+            .cloned()
     }
 
     /// Whether a session of `user_id` playing `item_id` on `client_id` was
@@ -1816,6 +1856,7 @@ mod tests {
             caps: browser(),
             mode: PlaybackMode::Auto,
             client_id: None,
+            keyed_urls: false,
             hdr_transcodes: false,
             download: false,
         }

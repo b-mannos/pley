@@ -37,6 +37,18 @@ DENY`, `Referrer-Policy: same-origin` and a `Content-Security-Policy` that
 lets pages load only pley's own scripts and styles. Password checks queue
 (a few at a time); when one has waited 10 seconds the answer is `503`.
 
+pley's Samsung and LG TV apps are web apps their TVs load from the TV
+itself, and their web engines hold them to CORS: their requests come with
+`Origin: file://` (or `null`, or an `app://` address, which no website
+has). For those origins only, the API and
+`/.well-known/oauth-authorization-server` answer CORS: a preflight lets
+`Authorization`, `Content-Type`, `Accept` and `Range` through for 10
+minutes, and answers carry `Access-Control-Allow-Origin: *` and expose
+`WWW-Authenticate`, `X-Pley-Complete`, `ETag`, `Content-Range` and
+`Retry-After`. A wildcard never lets a page read an answer made with
+cookies, and the consent page's endpoints (`/api/oauth/requests…`,
+`/api/oauth/device/verify`) never answer CORS.
+
 ### Errors
 
 Non-2xx responses carry:
@@ -565,7 +577,8 @@ TVs and other devices without a usable browser sign in with a code they
 show (OAuth 2.0 Device Authorization Grant, RFC 8628). pley's own apps only:
 anyone may start one, and pley reads no app's description for someone who
 isn't signed in. Today that is pley for Android, which also runs on Android
-TV and Fire TV, pley for Kodi and pley for Roku.
+TV and Fire TV, pley for Kodi, pley for Roku, pley for Samsung TV and pley
+for LG TV.
 
 1. The TV asks **`POST /api/oauth/device`** with `client_id` and an optional
    `scope` (as at `/oauth/authorize`: none means `library`). The answer:
@@ -765,7 +778,7 @@ interface AppGrant {
   scopes: string[];
   profile: { id: Id; name: string };     // the profile it acts as
   approved_by: { id: Id; name: string };
-  device: string | null;            // of its last token request, e.g. "Chrome on Windows"; pley for Android, Kodi and Roku: their platform, e.g. "Android 15", "Kodi 21.2; Windows"
+  device: string | null;            // of its last token request, e.g. "Chrome on Windows"; pley for Android, Kodi, Roku, Samsung TV and LG TV: their platform, e.g. "Android 15", "Kodi 21.2; Windows", "Tizen 7.0", "webOS 23"
   ip: string | null;
   created_at: Timestamp;
   last_used_at: Timestamp;
@@ -790,12 +803,17 @@ Usernames, roles, libraries, age limits and sign-in settings are left out.
 | pley for desktop | `https://hhaidar.github.io/pley/oauth/desktop.json` | `http://127.0.0.1/oauth/callback`, `http://[::1]/oauth/callback` (any port) |
 | pley for Kodi | `https://hhaidar.github.io/pley/oauth/kodi.json` | none: a code only |
 | pley for Roku | `https://hhaidar.github.io/pley/oauth/roku.json` | none: a code only |
+| pley for Samsung TV | `https://hhaidar.github.io/pley/oauth/tizen.json` | none: a code only |
+| pley for LG TV | `https://hhaidar.github.io/pley/oauth/webos.json` | none: a code only |
 
 Their descriptions are built into the server and never fetched, so they
 sign in to servers without internet access. All get refresh tokens and may
 ask for every scope; pley for Android may also sign in with a code, on a TV
-(see [TVs](#tvs)), and pley for Kodi and pley for Roku sign in only that
-way: with no return address, `/oauth/authorize` never sends them a code.
+(see [TVs](#tvs)), and pley for Kodi, Roku, Samsung TV and LG TV sign in
+only that way: with no return address, `/oauth/authorize` never sends them
+a code. The Samsung and LG apps can't set their own User-Agent: the TV's
+web engine names the TV ("Samsung TV", "LG TV", and for an app's grant its
+system, "Tizen 7.0", "webOS 23").
 The consent page marks them "pley's own app"; no other app may use a client
 ID on their host.
 
@@ -1101,6 +1119,7 @@ queue.
 | GET | `/api/playback/{session_id}/master.m3u8` | – | multivariant playlist naming the codecs (see [Dolby Vision remuxes](#dolby-vision-remuxes)), one variant: `index.m3u8` |
 | GET | `/api/playback/{session_id}/{n}.ts` | – | MPEG-TS segment |
 | GET | `/api/files/{id}/stream` | – | raw file, supports `Range` (direct play) |
+| GET | `/api/media/{key}/{file}` | – | a keyed session's media, for a player that can't send the Authorization header: `master.m3u8`, `index.m3u8` and `{n}.ts` of a stream, `file.{ext}` of a direct play (see [Keyed URLs](#keyed-urls)). No token |
 | GET | `/api/files/{id}/subtitles/{index}.vtt` | – | WebVTT (text subtitles; extracted/converted on demand and cached). Any embedded track may come partial: one still being read out of its file comes with the cues found so far and `X-Pley-Complete: 0` (not cached), so check that header and ask again for the rest. A Matroska file's track usually comes whole at once, read through its Cues when they list it. Requests for a subtitle file being converted share that conversion, which goes on (to the cache) when they stop waiting; one that failed is tried again on the next request |
 | GET | `/api/files/{id}/subtitles/{index}.mks` | – | a picture subtitle track (PGS, VobSub with its palette, DVB; in the file or a file next to it) copied as it is into a Matroska file of its own (`video/x-matroska`), for players that show it next to an HLS stream instead of having it drawn onto the video (`picture_subtitles_sideload`). Its times are the original's from the start of the file, so it lines up with the playback position (an HLS stream started at a seek point included). Made once per file version by the transcoder (which reads the whole file for it), cached, then served with `Range` support. `404` for a text track or anything but subtitles; `503` with a transcoder too old to make it |
 | GET | `/api/files/{id}/trickplay` | – | `{ id, interval_ms, width, height, columns, rows, count, sheets }` seek-bar previews; `404` while they are being made (asking, or opening the item, queues them). They are made one file at a time, never during a playback's first 30 s: a playback that starts puts off the file being done, which is made again later |
@@ -1120,6 +1139,7 @@ queue.
   start_ms?: number;              // resume position; transcodes start producing there
   mode?: "auto" | "direct" | "remux" | "transcode"; // default "auto"
   client_id?: string;             // identifies the player (browser tab, device)
+  keyed_urls?: boolean;           // the player can't send the Authorization header: its addresses carry a key (Keyed URLs)
   caps: {                         // what the client can decode natively
     containers: string[];         // e.g. ["mp4","m4v","mov","webm","mp3","m4a","flac","ogg","wav"]
     video_codecs: string[];       // e.g. ["h264","hevc","vp9","av1"]
@@ -1190,6 +1210,33 @@ and its conversion stops (segments then answer `404`, "playback session
 expired"); after 15 minutes it is forgotten. A downloaded file played as it is
 reports without a session; reports made while the server was out of reach are
 sent once it is back, each with its `age_ms`.
+
+### Keyed URLs
+
+An app's token goes only in the Authorization header, and some players
+can't send headers with their media requests: Samsung's AVPlay sets only a
+cookie and a User-Agent, and LG's media pipeline only what the web engine
+gives it. A play request with `keyed_urls: true` gets a session whose
+addresses carry a key of their own instead:
+
+- `PlaybackInfo.url` is `/api/media/{key}/master.m3u8` (or `index.m3u8`)
+  for a stream, whose playlists name their segments relatively, so they
+  carry the key too; and `/api/media/{key}/file.mkv` for a direct play,
+  named for the file's container, with `Range` and `Cache-Control:
+  private, no-store`.
+- The key is `pley_mk_` and 256 random bits, kept in memory only. It opens
+  that session's playlists and segments, or its file, and nothing else:
+  no API route takes it as a token.
+- It ends with the session (closed by its player, or forgotten after 15
+  quiet minutes: `404` "playback session expired", as segments say), with
+  the account (disabled) and with the app's sign-in (signed out, a new
+  password): `404`. A session stopped from elsewhere answers `410
+  session_stopped` here too, with its message.
+- Logs leave the key out (`/api/media/…/12.ts`).
+
+Everything else the player asks for (subtitles, seek previews, its
+reports) goes with the token as usual. pley's Samsung and LG TV apps ask
+for keyed URLs.
 
 ### Version 2
 

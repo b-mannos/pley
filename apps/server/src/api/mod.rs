@@ -121,6 +121,7 @@ pub fn router(state: AppState) -> Router {
         .route("/playback", post(playback::start))
         .route("/playback/{session}", get(playback::status).delete(playback::stop))
         .route("/playback/{session}/{file}", get(playback::hls_file))
+        .route("/media/{key}/{file}", get(playback::keyed_media))
         .route("/files/{id}/stream", get(playback::stream_file))
         .route("/conversions", post(playback::convert))
         .route("/conversions/{id}", get(playback::conversion).delete(playback::cancel_conversion))
@@ -167,6 +168,7 @@ pub fn router(state: AppState) -> Router {
         .route("/.well-known/oauth-authorization-server", get(oauth::metadata))
         .route("/.well-known/{*rest}", any(oauth::no_document))
         .fallback(crate::web::static_handler)
+        .layer(axum::middleware::from_fn(tv_app_cors))
         .layer(SetResponseHeaderLayer::if_not_present(
             header::CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(CONTENT_SECURITY_POLICY),
@@ -193,6 +195,60 @@ pub fn router(state: AppState) -> Router {
 /// the requests of the consent and `/link` pages).
 const FORM_MAX: usize = 16 * 1024;
 
+/// Whether a request comes from one of pley's packaged TV apps: Samsung's
+/// and LG's web runtimes load them from the TV (`file://`), so their
+/// requests come with `Origin: file://`, `null`, or an `app://` address.
+/// No website has such an origin.
+fn tv_app_origin(origin: &[u8]) -> bool {
+    matches!(origin, b"null" | b"file://") || origin.starts_with(b"app://")
+}
+
+/// What CORS opens to the TV apps: the API and the server's metadata, but
+/// never the consent page's own endpoints (they take pley's page only).
+fn cors_path(path: &str) -> bool {
+    if path == "/.well-known/oauth-authorization-server" {
+        return true;
+    }
+    path.starts_with("/api/") && !path.starts_with("/api/oauth/requests") && path != "/api/oauth/device/verify"
+}
+
+/// CORS for pley's packaged TV apps (docs/API.md, "TV apps"). Their web
+/// runtimes enforce it, so their API calls, which carry the app's token in
+/// `Authorization` and never a cookie, are answered with
+/// `Access-Control-Allow-Origin: *` and their preflights let that header
+/// through. A wildcard never lets a page read an answer made with cookies,
+/// and only the TV apps' origins get it at all.
+async fn tv_app_cors(request: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let allowed = request.headers().get(header::ORIGIN).is_some_and(|o| tv_app_origin(o.as_bytes()))
+        && cors_path(request.uri().path());
+    if !allowed {
+        return next.run(request).await;
+    }
+    if request.method() == axum::http::Method::OPTIONS
+        && request.headers().contains_key(header::ACCESS_CONTROL_REQUEST_METHOD)
+    {
+        return (
+            axum::http::StatusCode::NO_CONTENT,
+            [
+                (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
+                (header::ACCESS_CONTROL_ALLOW_METHODS, "GET, HEAD, POST, PUT, PATCH, DELETE"),
+                (header::ACCESS_CONTROL_ALLOW_HEADERS, "Authorization, Content-Type, Accept, Range"),
+                (header::ACCESS_CONTROL_MAX_AGE, "600"),
+            ],
+        )
+            .into_response();
+    }
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+    headers.insert(
+        header::ACCESS_CONTROL_EXPOSE_HEADERS,
+        HeaderValue::from_static("WWW-Authenticate, X-Pley-Complete, ETag, Content-Range, Retry-After"),
+    );
+    response
+}
+
 /// What pages of the web app may load and do: only pley's own scripts and
 /// styles (an injected script can't run, nor send what it finds elsewhere),
 /// pictures from pley and TMDB (Fix Match, artwork), media and hls.js's
@@ -213,7 +269,12 @@ pub(crate) fn truthy(value: &str) -> bool {
 /// `refresh_token`, `device_code`, `user_code`). Bodies and the
 /// Authorization header are never logged.
 pub(crate) fn loggable_uri(uri: &axum::http::Uri) -> String {
-    let Some(query) = uri.query() else { return uri.path().to_owned() };
+    // A keyed media address carries its session's key in the path.
+    let path = match uri.path().strip_prefix("/api/media/") {
+        Some(rest) => format!("/api/media/…{}", rest.find('/').map_or("", |at| &rest[at..])),
+        None => uri.path().to_owned(),
+    };
+    let Some(query) = uri.query() else { return path };
     let query: Vec<String> = query
         .split('&')
         .map(|pair| match pair.split_once('=') {
@@ -237,7 +298,7 @@ pub(crate) fn loggable_uri(uri: &axum::http::Uri) -> String {
             _ => pair.to_owned(),
         })
         .collect();
-    format!("{}?{}", uri.path(), query.join("&"))
+    format!("{}?{}", path, query.join("&"))
 }
 
 #[cfg(test)]
@@ -271,5 +332,18 @@ mod tests {
         let uri: axum::http::Uri = "/link?user_code=BCDF-GHJK&device_code=d&client_id=c".parse().unwrap();
         assert_eq!(loggable_uri(&uri), "/link?user_code=…&device_code=…&client_id=c");
         assert_eq!(loggable_uri(&"/api/items/1".parse().unwrap()), "/api/items/1");
+        // A keyed media address's key is in its path.
+        assert_eq!(loggable_uri(&"/api/media/pley_mk_abc/12.ts".parse().unwrap()), "/api/media/…/12.ts");
+        assert_eq!(loggable_uri(&"/api/media/pley_mk_abc".parse().unwrap()), "/api/media/…");
+    }
+
+    #[test]
+    fn cors_is_for_the_tv_apps_and_never_the_consent_page() {
+        assert!(tv_app_origin(b"file://") && tv_app_origin(b"null") && tv_app_origin(b"app://pley.tizen"));
+        assert!(!tv_app_origin(b"https://evil.example") && !tv_app_origin(b"http://192.168.1.20:7539"));
+        assert!(cors_path("/api/hubs/home") && cors_path("/api/oauth/token") && cors_path("/api/oauth/device"));
+        assert!(cors_path("/.well-known/oauth-authorization-server"));
+        assert!(!cors_path("/api/oauth/requests") && !cors_path("/api/oauth/requests/7/continue"));
+        assert!(!cors_path("/api/oauth/device/verify") && !cors_path("/link") && !cors_path("/"));
     }
 }

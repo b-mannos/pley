@@ -1444,7 +1444,33 @@ fn grant_device(user_agent: &str) -> String {
             return given.unwrap_or(platform).chars().take(60).collect();
         }
     }
+    // Samsung's and LG's TV apps send their TV's own agent: the system's version.
+    if let Some(at) = user_agent.find("Tizen ") {
+        return user_agent[at..].chars().take_while(|c| *c != ')' && *c != ';').take(60).collect();
+    }
+    if user_agent.contains("Web0S") {
+        return webos_version(user_agent).map_or_else(|| "webOS".to_owned(), |v| format!("webOS {v}"));
+    }
     crate::accounts::device_name(Some(user_agent))
+}
+
+/// The webOS of an LG TV's web engine, by its Chromium version: each webOS
+/// ships its own and keeps it through its updates.
+fn webos_version(user_agent: &str) -> Option<&'static str> {
+    let at = user_agent.find("Chrome/")? + "Chrome/".len();
+    let major: u32 = user_agent[at..].split('.').next()?.parse().ok()?;
+    Some(match major {
+        38 => "3",
+        53 => "4",
+        68 => "5",
+        79 => "6",
+        87 => "22",
+        94 => "23",
+        108 => "24",
+        120 => "25",
+        132 => "26",
+        _ => return None,
+    })
 }
 
 async fn apps_of(state: &AppState, user_id: i64) -> ApiResult<Vec<AppGrant>> {
@@ -1502,6 +1528,16 @@ pub async fn sign_out_user_app(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tvs_name_their_system() {
+        let tizen = "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/537.36 (KHTML, like Gecko) 76.0.3809.146/6.0 TV Safari/537.36";
+        assert_eq!(grant_device(tizen), "Tizen 6.0");
+        let webos = "Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.128 Safari/537.36 WebAppManager";
+        assert_eq!(grant_device(webos), "webOS 23");
+        assert_eq!(grant_device(&webos.replace("Chrome/94", "Chrome/99")), "webOS");
+        assert_eq!(grant_device("pleyKodi/0.1.0 (Kodi 21.2; Windows)"), "Kodi 21.2; Windows");
+    }
 
     fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
         let mut headers = HeaderMap::new();

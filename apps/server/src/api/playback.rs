@@ -25,8 +25,8 @@ use crate::error::{ApiResult, AppError};
 use crate::events::ServerEvent;
 use crate::library::sidecar::EXTERNAL_INDEX_BASE;
 use crate::playback::{
-    Method, PlaybackInfo, PlaybackRequest, Session, SessionStatus, TranscodeSpec, decide, sentence, subtitle_tracks,
-    transcode_info,
+    Method, PlaybackInfo, PlaybackRequest, Session, SessionStatus, TranscodeSpec, decide, new_media_key, sentence,
+    subtitle_tracks, transcode_info,
 };
 use crate::state::AppState;
 use crate::streams;
@@ -122,12 +122,18 @@ pub async fn start(
             start_ms,
         );
         session.app_grant = user.app.as_ref().map(|app| app.grant_id);
+        session.media_key = req.keyed_urls.then(new_media_key);
         let session = state.sessions.insert(session);
         state.events.send(ServerEvent::SessionsChanged);
+        let url = match &session.media_key {
+            // Named for its container: some players go by the extension.
+            Some(key) => format!("/api/media/{key}/file.{}", container_extension(file.container.as_deref())),
+            None => format!("/api/files/{}/stream", file.id),
+        };
         return Ok(Json(PlaybackInfo {
             session_id: session.id.clone(),
             method: Method::Direct,
-            url: format!("/api/files/{}/stream", file.id),
+            url,
             hls: false,
             file_id: file.id,
             duration_ms: duration,
@@ -192,15 +198,22 @@ pub async fn start(
         start_ms,
     );
     session.app_grant = user.app.as_ref().map(|app| app.grant_id);
+    session.media_key = req.keyed_urls.then(new_media_key);
     let session = state.sessions.insert_transcode(session, slot);
     state.events.send(ServerEvent::SessionsChanged);
     // Players that read multivariant playlists learn the codecs (Dolby
     // Vision, above all) before the first segment.
     let playlist = if req.caps.master_playlist() { "master.m3u8" } else { "index.m3u8" };
+    // Playlists name their segments by relative addresses, so a keyed
+    // playlist's segments carry the key too.
+    let url = match &session.media_key {
+        Some(key) => format!("/api/media/{key}/{playlist}"),
+        None => format!("/api/playback/{}/{playlist}", session.id),
+    };
     Ok(Json(PlaybackInfo {
         session_id: session.id.clone(),
         method,
-        url: format!("/api/playback/{}/{playlist}", session.id),
+        url,
         hls: true,
         file_id: file.id,
         duration_ms: created.duration_ms,
@@ -595,6 +608,12 @@ pub async fn hls_file(
     Path((id, file)): Path<(String, String)>,
 ) -> ApiResult<Response> {
     let session = owned_session(&state, &user, &id)?;
+    session_hls(&state, &user, &session, &file).await
+}
+
+/// A playlist or segment (`index.m3u8`, `master.m3u8`, `{n}.ts`) of a
+/// transcode session, for `user`.
+async fn session_hls(state: &AppState, user: &AuthUser, session: &Arc<Session>, file: &str) -> ApiResult<Response> {
     if session.touch() {
         state.events.send(ServerEvent::SessionsChanged);
     }
@@ -604,10 +623,10 @@ pub async fn hls_file(
     let job = session.job_id().ok_or_else(|| AppError::not_found("playback session expired"))?;
 
     if file == "index.m3u8" || file == "master.m3u8" {
-        let playlist = match state.transcoder.playlist_file(&job, &file).await {
+        let playlist = match state.transcoder.playlist_file(&job, file).await {
             Err(err) if err.is_job_gone() => {
-                let job = replacement_job(&state, &user, &session, &job).await?;
-                state.transcoder.playlist_file(&job, &file).await?
+                let job = replacement_job(state, user, session, &job).await?;
+                state.transcoder.playlist_file(&job, file).await?
             }
             other => other?,
         };
@@ -624,7 +643,7 @@ pub async fn hls_file(
         .ok_or_else(|| AppError::not_found("unknown playlist file"))?;
     let upstream = match state.transcoder.segment(&job, n).await {
         Err(err) if err.is_job_gone() => {
-            let job = replacement_job(&state, &user, &session, &job).await?;
+            let job = replacement_job(state, user, session, &job).await?;
             state.transcoder.segment(&job, n).await?
         }
         other => other?,
@@ -635,6 +654,64 @@ pub async fn hls_file(
         response = response.header(header::CONTENT_LENGTH, len);
     }
     response.body(Body::from_stream(upstream.bytes_stream())).map_err(|e| AppError::Internal(e.into()))
+}
+
+/// `GET /api/media/{key}/{file}`: a session's media for a player that can't
+/// send the Authorization header, a TV's own player (docs/API.md, "Keyed
+/// URLs"). The key its play request asked for (`keyed_urls`) stands in for
+/// the token, for this session's playlists and segments or its file, and
+/// nothing else; it ends with the session, the account, or the app's
+/// sign-in. A session stopped from elsewhere answers `410` here too.
+pub async fn keyed_media(
+    State(state): State<AppState>,
+    Path((key, file)): Path<(String, String)>,
+    request: Request,
+) -> ApiResult<Response> {
+    let Some(session) = state.sessions.by_media_key(&key) else {
+        return Err(match state.sessions.stopped_by_media_key(&key) {
+            Some(stopped) => AppError::SessionStopped(stopped.message),
+            None => AppError::not_found("playback session expired"),
+        });
+    };
+    let gone = || AppError::not_found("playback session expired");
+    let mut user = AuthUser::load(&state.db, session.user_id).await?.ok_or_else(gone)?;
+    if let Some(grant) = session.app_grant {
+        // Signed out since: the key goes with the token.
+        let access = crate::auth::grants::access_of(&state.db, grant).await?.ok_or_else(gone)?;
+        user.is_admin = false;
+        user.app = Some(Arc::new(access));
+    }
+    if session.transcode.is_some() {
+        return session_hls(&state, &user, &session, &file).await;
+    }
+    // Direct play: the session's own file, whatever its name says ("file.mkv").
+    if file.split('.').next() != Some("file") {
+        return Err(AppError::not_found("unknown file"));
+    }
+    if session.touch() {
+        state.events.send(ServerEvent::SessionsChanged);
+    }
+    let row = visible_file(&state, &user, session.file_id).await?;
+    if !crate::library::walk::leads_to_its_kind(std::path::Path::new(&row.path)) {
+        return Err(AppError::not_found("file not found"));
+    }
+    let response =
+        ServeFile::new(&row.path).oneshot(request).await.map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))?;
+    let mut response = response.map(Body::new);
+    // Never cached anywhere: the address carries a key.
+    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
+    Ok(response)
+}
+
+/// The extension a keyed file's address ends with: its container's, when
+/// it is a plain word ("mkv", "mp4"), else "bin".
+fn container_extension(container: Option<&str>) -> String {
+    match container {
+        Some(c) if !c.is_empty() && c.len() <= 8 && c.chars().all(|ch| ch.is_ascii_alphanumeric()) => {
+            c.to_ascii_lowercase()
+        }
+        _ => "bin".to_owned(),
+    }
 }
 
 /// A media file of an item the user may see.

@@ -566,6 +566,27 @@ pub async fn find_grant_of_token(db: &Db, token: &str) -> Result<Option<(i64, St
     .await?)
 }
 
+/// What grant `grant_id` allows, while it lasts: not ended, not expired, and
+/// its approver not disabled; `None` otherwise. For requests that carry a
+/// session's key instead of the app's token (keyed playback URLs).
+pub async fn access_of(db: &Db, grant_id: i64) -> Result<Option<super::AppAccess>, AppError> {
+    let row: Option<(i64, String, String, i64)> = sqlx::query_as(
+        "SELECT g.id, g.client_id, g.scope, g.approved_by FROM app_grants g JOIN users a ON a.id = g.approved_by
+          WHERE g.id = ? AND g.expires_at > ? AND (g.ends_at IS NULL OR g.ends_at > ?) AND NOT a.disabled",
+    )
+    .bind(grant_id)
+    .bind(now())
+    .bind(now())
+    .fetch_optional(&db.read)
+    .await?;
+    Ok(row.map(|(grant_id, client_id, scope, approved_by)| super::AppAccess {
+        grant_id,
+        client_id: client_id.into(),
+        scopes: Scopes::parse(&scope).unwrap_or_default(),
+        approved_by,
+    }))
+}
+
 /// The grants acting as `user_id` or allowed by them, most recently used first.
 pub async fn list(db: &Db, user_id: i64) -> Result<Vec<GrantRow>, AppError> {
     #[allow(clippy::type_complexity)]

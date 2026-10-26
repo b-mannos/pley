@@ -32,6 +32,9 @@ const PUBLIC: &[(&str, &str)] = &[
     ("POST", "/api/oauth/revoke"),
     // TVs start signing in with a code (pley's own apps only).
     ("POST", "/api/oauth/device"),
+    // A session's media for players that can't send the token: the
+    // session's own key stands in for it (tests/tv_apps.rs).
+    ("GET", "/api/media/{key}/{file}"),
 ];
 
 /// Routes for pley's own sign-in only: how an account signs in, its
