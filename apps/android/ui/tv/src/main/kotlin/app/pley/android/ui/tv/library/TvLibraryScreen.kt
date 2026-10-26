@@ -280,8 +280,14 @@ private fun TvLibraryTab(
                 }
             }
             if (cells != null) {
+                // "23 of 342 movies" when filtered.
+                val of = state.library?.itemCount?.takeIf { params.filtered && it >= cells.total }
                 BasicText(
-                    tvCount(resources, tvItemsPlural(state.kind), cells.total),
+                    if (of != null) {
+                        tvCountOf(resources, tvItemsOfPlural(state.kind), cells.total, of)
+                    } else {
+                        tvCount(resources, tvItemsPlural(state.kind), cells.total)
+                    },
                     style = PleyType.Tv.Caption.copy(color = PleyColors.Muted),
                     maxLines = 1,
                     modifier = Modifier.padding(start = 8.dp),

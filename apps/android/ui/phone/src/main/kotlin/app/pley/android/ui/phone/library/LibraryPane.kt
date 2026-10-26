@@ -115,81 +115,99 @@ internal fun Scrolling(content: @Composable () -> Unit) {
     }
 }
 
-/** The chips over the grid; the count of what matches at the end. */
+/**
+ * The chips over the grid, and the count of what matches: at the end of
+ * the chips, or filtered ("23 of 342 movies") on a line of its own under
+ * them, which then run past the screen's edge.
+ */
 @Composable
 private fun Toolbar(state: LibraryUiState<ArtworkTileModel>, vm: LibraryViewModel<ArtworkTileModel>, total: Int?, onSheet: (LibrarySheet) -> Unit) {
     val metrics = LocalPhoneMetrics.current
     val params = state.params
     val music = state.kind == LibraryKind.Music
     val resources = LocalResources.current
-    LazyRow(
-        modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, top = 8.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        item(key = "sort") {
-            PleyChip(
-                label = stringResource(sortLabel(params.sort)),
-                selected = false,
-                onClick = { onSheet(LibrarySheet.Sort) },
-                icon = if (params.effectiveOrder == app.pley.android.model.SortOrder.Ascending) PleyIcons.ArrowUpNarrowWide else PleyIcons.ArrowDownWideNarrow,
+    val counted = total?.let { n ->
+        val of = state.library?.itemCount?.takeIf { params.filtered && it >= n }
+        if (of != null) countOf(resources, itemsOfPlural(state.kind), n, of) else count(resources, itemsPlural(state.kind), n)
+    }
+    Column {
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, top = 8.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            item(key = "sort") {
+                PleyChip(
+                    label = stringResource(sortLabel(params.sort)),
+                    selected = false,
+                    onClick = { onSheet(LibrarySheet.Sort) },
+                    icon = if (params.effectiveOrder == app.pley.android.model.SortOrder.Ascending) PleyIcons.ArrowUpNarrowWide else PleyIcons.ArrowDownWideNarrow,
+                )
+            }
+            if (!music) {
+                item(key = "unwatched") {
+                    PleyChip(
+                        label = stringResource(R.string.library_unwatched),
+                        selected = params.watched == false,
+                        onClick = { vm.watched(if (params.watched == false) null else false) },
+                    )
+                }
+                item(key = "watched") {
+                    PleyChip(
+                        label = stringResource(R.string.library_watched),
+                        selected = params.watched == true,
+                        onClick = { vm.watched(if (params.watched == true) null else true) },
+                    )
+                }
+                if (state.filters.genres.isNotEmpty() || params.genre != null) {
+                    item(key = "genre") {
+                        PleyChip(
+                            label = params.genre ?: stringResource(R.string.library_genre),
+                            selected = params.genre != null,
+                            onClick = { onSheet(LibrarySheet.Genre) },
+                            dropdown = true,
+                        )
+                    }
+                }
+                if (state.filters.years.isNotEmpty() || params.year != null) {
+                    item(key = "year") {
+                        PleyChip(
+                            label = params.year?.toString() ?: stringResource(R.string.library_year),
+                            selected = params.year != null,
+                            onClick = { onSheet(LibrarySheet.Year) },
+                            dropdown = true,
+                        )
+                    }
+                }
+                if (params.filtered) {
+                    item(key = "clear") {
+                        PleyChip(label = stringResource(R.string.library_clear_filters), selected = false, onClick = vm::clearFilters, icon = PleyIcons.X)
+                    }
+                    item(key = "save") {
+                        val navigator = LocalPhoneNavigator.current
+                        PleyChip(label = stringResource(R.string.library_save_as), selected = false, onClick = { navigator.open(vm.saveAs()) }, icon = PleyIcons.Sparkles)
+                    }
+                }
+            }
+            if (counted != null && !params.filtered) {
+                item(key = "count") {
+                    Text(
+                        counted,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = PleyColors.Muted,
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                }
+            }
+        }
+        if (counted != null && params.filtered) {
+            Text(
+                counted,
+                style = MaterialTheme.typography.labelMedium,
+                color = PleyColors.Muted,
+                modifier = Modifier.padding(start = metrics.marginStart, end = metrics.marginEnd, bottom = 8.dp),
             )
-        }
-        if (!music) {
-            item(key = "unwatched") {
-                PleyChip(
-                    label = stringResource(R.string.library_unwatched),
-                    selected = params.watched == false,
-                    onClick = { vm.watched(if (params.watched == false) null else false) },
-                )
-            }
-            item(key = "watched") {
-                PleyChip(
-                    label = stringResource(R.string.library_watched),
-                    selected = params.watched == true,
-                    onClick = { vm.watched(if (params.watched == true) null else true) },
-                )
-            }
-            if (state.filters.genres.isNotEmpty() || params.genre != null) {
-                item(key = "genre") {
-                    PleyChip(
-                        label = params.genre ?: stringResource(R.string.library_genre),
-                        selected = params.genre != null,
-                        onClick = { onSheet(LibrarySheet.Genre) },
-                        dropdown = true,
-                    )
-                }
-            }
-            if (state.filters.years.isNotEmpty() || params.year != null) {
-                item(key = "year") {
-                    PleyChip(
-                        label = params.year?.toString() ?: stringResource(R.string.library_year),
-                        selected = params.year != null,
-                        onClick = { onSheet(LibrarySheet.Year) },
-                        dropdown = true,
-                    )
-                }
-            }
-            if (params.filtered) {
-                item(key = "clear") {
-                    PleyChip(label = stringResource(R.string.library_clear_filters), selected = false, onClick = vm::clearFilters, icon = PleyIcons.X)
-                }
-                item(key = "save") {
-                    val navigator = LocalPhoneNavigator.current
-                    PleyChip(label = stringResource(R.string.library_save_as), selected = false, onClick = { navigator.open(vm.saveAs()) }, icon = PleyIcons.Sparkles)
-                }
-            }
-        }
-        if (total != null) {
-            item(key = "count") {
-                Text(
-                    count(resources, itemsPlural(state.kind), total),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = PleyColors.Muted,
-                    modifier = Modifier.padding(start = 4.dp),
-                )
-            }
         }
     }
 }

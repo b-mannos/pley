@@ -51,6 +51,9 @@ interface DataGraph {
     val liveUpdates: LiveUpdates
     val settings: AppSettings
 
+    /** How each library was left on this device (nothing kept unless the graph keeps it). */
+    val libraryViews: LibraryViews get() = LibraryViews.None
+
     companion object {
         /**
          * The data side of the app over [network] and [auth]. Making it
@@ -183,6 +186,10 @@ class AppDataGraph(private val env: DataEnvironment) : DataGraph {
             tv = env.profile.isTv,
             debuggable = env.debuggable,
         )
+    }
+
+    override val libraryViews: LibraryViews by lazy {
+        DataStoreLibraryViews(preferences(DataStoreLibraryViews.FILE), sessionImpl.scopes)
     }
 
     /** Deletes what was saved from [issuer]: its snapshots, its HTTP caches, and what is held in memory of it. */

@@ -11,6 +11,7 @@ import app.pley.android.data.HubsRepository
 import app.pley.android.data.LibrariesRepository
 import app.pley.android.data.LibraryItems
 import app.pley.android.data.LibraryItemsRepository
+import app.pley.android.data.LibraryViews
 import app.pley.android.data.Loadable
 import app.pley.android.data.map
 import app.pley.android.data.valueOrNull
@@ -34,8 +35,12 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -45,6 +50,7 @@ import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** What a library page reads, and from where. */
 class LibraryDeps(
@@ -57,6 +63,8 @@ class LibraryDeps(
     val origin: Flow<String?>,
     /** Where tiles and the A to Z are worked out. */
     val compute: CoroutineDispatcher = Dispatchers.Default,
+    /** How each library was left, to open it so again. */
+    val views: LibraryViews = LibraryViews.None,
 ) {
     companion object {
         fun of(graph: ScreensGraph): LibraryDeps = LibraryDeps(
@@ -66,6 +74,7 @@ class LibraryDeps(
             collections = graph.data.collections,
             settings = graph.data.settings,
             origin = graph.data.servers.active,
+            views = graph.data.libraryViews,
         )
     }
 }
@@ -143,9 +152,10 @@ data class LibraryUiState<T : Any>(
  *
  * [params] are the tab, sort and filters, which the screen keeps across
  * process death ([LibraryParams.toQueryString] of [LibraryUiState.params]),
- * handing them back as [saved]; a page opened anew starts on [tab].
- * Each tab reads only once it has been shown. Tiles and the A to Z are
- * worked out off the main thread.
+ * handing them back as [saved]; a page opened anew starts on [tab], with
+ * the sort and filters the library was left in ([LibraryViews]), read
+ * before the page shows anything. Each tab reads only once it has been
+ * shown. Tiles and the A to Z are worked out off the main thread.
  */
 class LibraryViewModel<T : Any>(
     val libraryId: Long,
@@ -155,6 +165,9 @@ class LibraryViewModel<T : Any>(
     private val tiles: TileFactory<T>,
 ) : ViewModel() {
     private val params = MutableStateFlow(saved?.let { LibraryParams.parse(it, tab) } ?: LibraryParams(tab = tab))
+
+    /** The view the library was left in is read (a page that came back has its own). */
+    private val viewRead = MutableStateFlow(saved != null)
     private val retry = MutableStateFlow(0)
     private val builder = GridBuilder(tiles)
 
@@ -168,9 +181,11 @@ class LibraryViewModel<T : Any>(
 
     private val origin: Flow<String> = deps.origin.map { it.orEmpty() }.distinctUntilChanged()
 
-    /** The params a library of the kind can show, once the kind is known. */
-    private val shown: Flow<LibraryParams> = combine(params, library) { p, lib -> lib?.let { p.validFor(it.kind) } ?: p }
-        .distinctUntilChanged()
+    /** The params a library of the kind can show, once the kind is known and the view it was left in read. */
+    private val shown: Flow<LibraryParams> = flow {
+        viewRead.first { it }
+        emitAll(combine(params, library) { p, lib -> lib?.let { p.validFor(it.kind) } ?: p })
+    }.distinctUntilChanged()
 
     /** Tabs shown so far: each reads from the first time it shows, and keeps reading after. */
     private val visited: Flow<Set<LibraryTab>> = shown.map { it.tab }.scan(emptySet<LibraryTab>()) { seen, tab -> seen + tab }
@@ -259,6 +274,20 @@ class LibraryViewModel<T : Any>(
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_AFTER_MS), LibraryUiState(libraryId, params = params.value))
 
+    init {
+        viewModelScope.launch {
+            if (!viewRead.value) {
+                // A slow disk doesn't hold the page up for long: it opens as it is.
+                val left = withTimeoutOrNull(VIEW_READ_MS) { deps.views.of(libraryId) }
+                // Unless something was chosen meanwhile.
+                if (!left.isNullOrEmpty()) params.compareAndSet(LibraryParams(tab = tab), LibraryParams.parse(left, tab).copy(tab = tab))
+                viewRead.value = true
+            }
+            // What is chosen from now on is how the library opens next time.
+            params.map { it.view() }.distinctUntilChanged().drop(1).collect { deps.views.keep(libraryId, it) }
+        }
+    }
+
     /** Shows [tab]; its content starts reading the first time. */
     fun select(tab: LibraryTab) = params.update { it.copy(tab = tab) }
 
@@ -336,6 +365,9 @@ class LibraryViewModel<T : Any>(
     companion object {
         /** How long a page's reads outlive it being on screen (a rotation, a quick look elsewhere). */
         const val STOP_AFTER_MS = 5_000L
+
+        /** How long a page waits for the view its library was left in. */
+        const val VIEW_READ_MS = 500L
 
         /** Where opening [item] goes: artists and albums have pages of their own. */
         fun opens(item: ItemSummary): PleyKey = when (item.kind) {

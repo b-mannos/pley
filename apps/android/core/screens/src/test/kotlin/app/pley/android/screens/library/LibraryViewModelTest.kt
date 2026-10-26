@@ -43,6 +43,7 @@ class LibraryViewModelTest {
     private val hubs = FakeHubs()
     private val collections = FakeCollections()
     private val settings = FakeSettings()
+    private val views = FakeLibraryViews()
 
     @Before
     fun main() = Dispatchers.setMain(dispatcher)
@@ -54,7 +55,7 @@ class LibraryViewModelTest {
         libraryId = libraryId,
         tab = tab,
         saved = saved,
-        deps = LibraryDeps(libraries, items, hubs, collections, settings, MutableStateFlow("http://pley"), dispatcher),
+        deps = LibraryDeps(libraries, items, hubs, collections, settings, MutableStateFlow("http://pley"), dispatcher, views),
         tiles = FakeTiles,
     )
 
@@ -149,6 +150,47 @@ class LibraryViewModelTest {
         advanceUntilIdle()
         assertEquals(LibraryTab.Collections, vm.state.value.params.tab)
         assertEquals(LibraryParams(LibraryTab.Collections, LibrarySort.Year, SortOrder.Ascending), vm.state.value.params)
+        job.cancel()
+    }
+
+    @Test
+    fun aLibraryOpensAsItWasLeft() = runTest(dispatcher) {
+        views.kept[1] = "sort=added&watched=false"
+        val vm = viewModel(tab = LibraryTab.Library)
+        val job = launch { vm.state.collect {} }
+        advanceUntilIdle()
+        assertEquals(LibraryParams(sort = LibrarySort.Added, watched = false), vm.state.value.params)
+        // Read before the listing: it isn't asked for twice.
+        assertEquals(listOf(LibraryQuery(LibrarySort.Added, SortOrder.Descending, unwatched = true)), items.asked.distinct())
+        job.cancel()
+    }
+
+    @Test
+    fun whatIsChosenIsHowTheLibraryOpensNextTime() = runTest(dispatcher) {
+        val vm = viewModel()
+        val job = launch { vm.state.collect {} }
+        advanceUntilIdle()
+        assertTrue("opening keeps nothing", views.kept.isEmpty())
+        vm.sortBy(LibrarySort.Year)
+        vm.genre("Comedy")
+        vm.select(LibraryTab.Recommended)
+        advanceUntilIdle()
+        assertEquals("sort=year&genre=Comedy", views.kept[1])
+        vm.clearFilters()
+        vm.sortBy(LibrarySort.Title)
+        advanceUntilIdle()
+        assertNull("the default view is forgotten", views.kept[1])
+        job.cancel()
+    }
+
+    @Test
+    fun aPageThatComesBackKeepsItsOwnView() = runTest(dispatcher) {
+        views.kept[1] = "sort=added"
+        val vm = viewModel(saved = "sort=year")
+        val job = launch { vm.state.collect {} }
+        advanceUntilIdle()
+        assertEquals(LibrarySort.Year, vm.state.value.params.sort)
+        assertEquals("sort=added", views.kept[1])
         job.cancel()
     }
 

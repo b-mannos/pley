@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { ArrowDownWideNarrow, ArrowUpNarrowWide, FolderSearch, RefreshCw, Sparkles } from "lucide-react";
 import { errorMessage } from "@/api/client";
@@ -21,6 +21,7 @@ import { pluralize } from "@/lib/format";
 import { smartFilterOf } from "@/lib/smartFilter";
 import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
 import { idParam } from "@/lib/ids";
+import { keepView, leftView, viewOf, viewStorageKey, withView } from "@/lib/libraryView";
 
 const SORT_LABELS: Record<LibrarySort, string> = {
   title: "Title",
@@ -54,10 +55,19 @@ export function LibraryPage() {
   const { id } = useParams();
   const libId = idParam(id);
   const lib = useLibrary(libId);
+  const user = useAuth();
   const [params, setParams] = useSearchParams();
   const rawTab = params.get("tab");
   const tab = rawTab === "recommended" || rawTab === "collections" ? rawTab : "library";
   useDocumentTitle(lib.data?.name);
+
+  // Opened without a sort or filters in its address (from the sidebar), a
+  // library shows the ones it was left in, before it lists anything.
+  const viewKey = viewStorageKey(user.id, libId);
+  const restore = withView(params, leftView(viewKey))?.toString() ?? "";
+  useEffect(() => {
+    if (restore) setParams(new URLSearchParams(restore), { replace: true });
+  }, [restore, setParams]);
 
   const setParam = (updates: Record<string, string | null>) => {
     const next = new URLSearchParams(params);
@@ -65,6 +75,7 @@ export function LibraryPage() {
       if (v == null || v === "") next.delete(k);
       else next.set(k, v);
     }
+    keepView(viewKey, viewOf(next));
     setParams(next, { replace: true });
   };
 
@@ -109,7 +120,14 @@ export function LibraryPage() {
       ) : tab === "collections" && kind !== "music" ? (
         <CollectionsTab libraryId={libId} kind={kind} />
       ) : (
-        <LibraryTab libraryId={libId} kind={kind} params={params} setParam={setParam} ready={lib.isSuccess} />
+        <LibraryTab
+          libraryId={libId}
+          kind={kind}
+          params={params}
+          setParam={setParam}
+          ready={lib.isSuccess && !restore}
+          libraryTotal={lib.data?.item_count}
+        />
       )}
     </div>
   );
@@ -148,12 +166,15 @@ function LibraryTab({
   params,
   setParam,
   ready,
+  libraryTotal,
 }: {
   libraryId: number;
   kind: LibraryKind;
   params: URLSearchParams;
   setParam: (u: Record<string, string | null>) => void;
   ready: boolean;
+  /** Everything the library holds for this profile: "23 of 342 movies" when filtered. */
+  libraryTotal?: number;
 }) {
   const user = useAuth();
   const toast = useToast();
@@ -259,7 +280,11 @@ function LibraryTab({
 
           <div className="ml-auto flex items-center gap-3">
             <span className="hidden text-sm tabular-nums text-muted sm:inline">
-              {items.data ? pluralize(items.data.total, noun[0], noun[1]) : ""}
+              {items.data
+                ? filtered && libraryTotal != null && libraryTotal >= items.data.total
+                  ? `${items.data.total.toLocaleString()} of ${pluralize(libraryTotal, noun[0], noun[1])}`
+                  : pluralize(items.data.total, noun[0], noun[1])
+                : ""}
             </span>
             <input
               type="range"

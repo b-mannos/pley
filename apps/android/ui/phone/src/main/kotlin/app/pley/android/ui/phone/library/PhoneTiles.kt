@@ -60,6 +60,20 @@ internal class PhoneTiles(private val resources: Resources) : TileFactory<Artwor
 internal fun count(resources: Resources, @PluralsRes plural: Int, n: Int): String =
     resources.getQuantityString(plural, n, NumberFormat.getIntegerInstance().format(n))
 
+/** "23 of 1,500 movies": [n] of [of] in this locale's digits, with the plural of [of]. */
+internal fun countOf(resources: Resources, @PluralsRes plural: Int, n: Int, of: Int): String {
+    val digits = NumberFormat.getIntegerInstance()
+    return resources.getQuantityString(plural, of, digits.format(n), digits.format(of))
+}
+
+/** The noun of a filtered listing of a library of [kind]: "23 of 1,500 movies". */
+@PluralsRes
+internal fun itemsOfPlural(kind: LibraryKind?): Int = when (kind) {
+    LibraryKind.Shows -> R.plurals.library_count_of_shows
+    LibraryKind.Music -> R.plurals.library_count_of_artists
+    else -> R.plurals.library_count_of_movies
+}
+
 /** The listing's noun for a library of [kind]: "movies", "shows", "artists". */
 @PluralsRes
 internal fun itemsPlural(kind: LibraryKind?): Int = when (kind) {

@@ -7,6 +7,7 @@ import app.pley.android.data.LibrariesRepository
 import app.pley.android.data.LibraryItems
 import app.pley.android.data.LibraryItemsRepository
 import app.pley.android.data.LibraryQuery
+import app.pley.android.data.LibraryViews
 import app.pley.android.data.Loadable
 import app.pley.android.data.Settings
 import app.pley.android.model.CollectionDetail
@@ -86,6 +87,17 @@ class FakeCollections : CollectionsRepository {
 
     override fun collection(collectionId: Long): Flow<Loadable<CollectionDetail>> =
         details.map { all -> all[collectionId]?.let { Loadable.Ready(it, fresh = true) } ?: Loadable.Loading }
+}
+
+/** Views kept by library, as a test sets and reads them. */
+class FakeLibraryViews(vararg left: Pair<Long, String>) : LibraryViews {
+    val kept = mutableMapOf(*left)
+
+    override suspend fun of(libraryId: Long): String? = kept[libraryId]
+
+    override suspend fun keep(libraryId: Long, view: String) {
+        if (view.isEmpty()) kept.remove(libraryId) else kept[libraryId] = view
+    }
 }
 
 class FakeSettings : AppSettings {

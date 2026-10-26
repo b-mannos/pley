@@ -43,6 +43,18 @@
         <item quantity="one">%s artist</item>
         <item quantity="other">%s artists</item>
     </plurals>
+    <plurals name="tv_library_count_of_movies">
+        <item quantity="one">%1$s of %2$s movie</item>
+        <item quantity="other">%1$s of %2$s movies</item>
+    </plurals>
+    <plurals name="tv_library_count_of_shows">
+        <item quantity="one">%1$s of %2$s show</item>
+        <item quantity="other">%1$s of %2$s shows</item>
+    </plurals>
+    <plurals name="tv_library_count_of_artists">
+        <item quantity="one">%1$s of %2$s artist</item>
+        <item quantity="other">%1$s of %2$s artists</item>
+    </plurals>
     <plurals name="tv_library_count_collections">
         <item quantity="one">%s collection</item>
         <item quantity="other">%s collections</item>

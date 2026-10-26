@@ -59,6 +59,20 @@ internal class TvTiles(private val resources: Resources) : TileFactory<ArtworkTi
 internal fun tvCount(resources: Resources, @PluralsRes plural: Int, n: Int): String =
     resources.getQuantityString(plural, n, NumberFormat.getIntegerInstance().format(n))
 
+/** "23 of 1,500 movies": [n] of [of] in this locale's digits, with the plural of [of]. */
+internal fun tvCountOf(resources: Resources, @PluralsRes plural: Int, n: Int, of: Int): String {
+    val digits = NumberFormat.getIntegerInstance()
+    return resources.getQuantityString(plural, of, digits.format(n), digits.format(of))
+}
+
+/** The noun of a filtered listing of a library of [kind]: "23 of 1,500 movies". */
+@PluralsRes
+internal fun tvItemsOfPlural(kind: LibraryKind?): Int = when (kind) {
+    LibraryKind.Shows -> R.plurals.tv_library_count_of_shows
+    LibraryKind.Music -> R.plurals.tv_library_count_of_artists
+    else -> R.plurals.tv_library_count_of_movies
+}
+
 @PluralsRes
 internal fun tvItemsPlural(kind: LibraryKind?): Int = when (kind) {
     LibraryKind.Shows -> R.plurals.tv_library_count_shows
