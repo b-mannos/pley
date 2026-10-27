@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.pley.android.designsystem.PleyColors
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
@@ -46,6 +47,7 @@ import coil3.decode.DataSource
 import coil3.request.SuccessResult
 import coil3.request.transitionFactory
 import coil3.transition.CrossfadeTransition
+import kotlin.math.floor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -234,14 +236,75 @@ private class PlaceholderNode(
             defaultLayoutDirection = currentValueOf(LocalLayoutDirection),
             cacheSize = 0,
         ).also { measurer = it }
-        layout = textMeasurer.measure(
-            text = title,
-            style = style.copy(textAlign = TextAlign.Center),
-            overflow = TextOverflow.Ellipsis,
-            maxLines = 4,
-            constraints = Constraints(minWidth = width, maxWidth = width, maxHeight = height),
-        )
+        val centred = style.copy(textAlign = TextAlign.Center)
+        val constraints = Constraints(minWidth = width, maxWidth = width, maxHeight = height)
+        var text = textMeasurer.measure(title, centred, TextOverflow.Ellipsis, maxLines = 4, constraints = constraints)
+        // A word wider than the box broke across lines: smaller, so that it fits whole.
+        if (text.lineCount > 1 && brokeAWord(title, (0 until text.lineCount - 1).map { text.getLineEnd(it) })) {
+            val scale = wholeWordScale(title, width) { word -> textMeasurer.measure(word, centred, maxLines = 1, softWrap = false).size.width }
+            if (scale < 1f) text = textMeasurer.measure(title, centred.scaled(scale), TextOverflow.Ellipsis, maxLines = 4, constraints = constraints)
+        }
+        layout = text
         layoutSize = size
         return layout
     }
+}
+
+/** At smallest, a placeholder's title is set this much of its style's size so that a word fits whole. */
+internal const val MIN_TITLE_SCALE = 0.7f
+
+/**
+ * Whether lines of [text] ending at [lineEnds] broke a word, as a word
+ * wider than the box is ("Casablan/ca" on a poster): a line ends between
+ * two of a word's letters. Breaks at spaces and after hyphens are the
+ * title's own.
+ */
+internal fun brokeAWord(text: String, lineEnds: List<Int>): Boolean =
+    lineEnds.any { end -> end in 1 until text.length && text[end - 1].inWord() && text[end].inWord() }
+
+/**
+ * How much smaller to set [text] so that its widest word fits [width]
+ * whole: 1 when every word fits, else down to [MIN_TITLE_SCALE] (a word
+ * wider still breaks where it must). [widthOf] measures a word on one line
+ * in the style's own size.
+ */
+internal fun wholeWordScale(text: String, width: Int, widthOf: (String) -> Int): Float {
+    val widest = wordsOf(text).maxOfOrNull(widthOf) ?: return 1f
+    return if (width <= 0 || widest <= width) 1f else (width.toFloat() / widest).coerceAtLeast(MIN_TITLE_SCALE)
+}
+
+/** [text]'s words, which lines break only between: runs of letters and digits. */
+private fun wordsOf(text: String): List<String> {
+    val out = ArrayList<String>()
+    var start = -1
+    for (i in 0..text.length) {
+        val letter = i < text.length && text[i].inWord()
+        if (letter && start < 0) start = i
+        if (!letter && start >= 0) {
+            out += text.substring(start, i)
+            start = -1
+        }
+    }
+    return out
+}
+
+/**
+ * A letter or digit of a word. Not in the scripts whose lines may break
+ * between any two letters (Chinese, Japanese, Korean, Thai and their
+ * neighbours): there a break is no broken word.
+ */
+private fun Char.inWord(): Boolean = isLetterOrDigit() && when (Character.UnicodeScript.of(code)) {
+    Character.UnicodeScript.HAN, Character.UnicodeScript.HIRAGANA, Character.UnicodeScript.KATAKANA,
+    Character.UnicodeScript.HANGUL, Character.UnicodeScript.THAI, Character.UnicodeScript.LAO,
+    Character.UnicodeScript.KHMER, Character.UnicodeScript.MYANMAR,
+    -> false
+    else -> true
+}
+
+/** This style [scale] of its size, down to the half sp, and its line height with it. */
+private fun TextStyle.scaled(scale: Float): TextStyle {
+    if (!fontSize.isSp) return this
+    val size = floor(fontSize.value * scale * 2f) / 2f
+    val ratio = size / fontSize.value
+    return copy(fontSize = size.sp, lineHeight = if (lineHeight.isSp) (lineHeight.value * ratio).sp else lineHeight)
 }

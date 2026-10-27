@@ -9,6 +9,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PixelMap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
@@ -105,6 +106,34 @@ class ArtworkTileTest {
         compose.waitForIdle()
         // Near the top left corner the 135° gradient is at its first colour.
         assertNear(Placeholder.colors(model.title).first, pixel("tile", 14, 14))
+    }
+
+    @Test
+    fun aWordWiderThanThePosterStaysWhole() {
+        // "Extraterrestrial" in Title's 16 sp is wider than a poster's 84 dp of room: smaller, rather than broken.
+        compose.setContent {
+            CompositionLocalProvider(LocalArtworkImageLoader provides loader()) {
+                ArtworkTile(model(title = "Extraterrestrial"), TileKind.Poster, TileStyle.Tv, Modifier.tvTileSize(TileKind.Poster).testTag("tile"))
+            }
+        }
+        compose.waitForIdle()
+        assertEquals(1, textLines(compose.onNodeWithTag("tile").captureToImage().toPixelMap()))
+    }
+
+    /** Lines of light text in [image]: bands of rows with a light pixel, 4 px or more apart, inside the rounded corners. */
+    private fun textLines(image: PixelMap): Int {
+        var lines = 0
+        var gap = -1
+        for (y in 16 until image.height - 16) {
+            val light = (16 until image.width - 16).any { x -> image[x, y].let { it.alpha > 0.9f && maxOf(it.red, it.green, it.blue) > 0.5f } }
+            if (light) {
+                if (gap == -1 || gap >= 4) lines++
+                gap = 0
+            } else if (gap >= 0) {
+                gap++
+            }
+        }
+        return lines
     }
 
     @Test
