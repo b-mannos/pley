@@ -1,3 +1,4 @@
+import { useSignal, type Signal } from "@preact/signals";
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { errorMessage, isApiError, unreachable } from "../../api/client";
@@ -258,21 +259,22 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
   const [panel, setPanel] = useState<PanelKind>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [section, setSection] = useState<string>((entry.state.section as string | undefined) ?? "hero");
-  const [focusedEpisode, setFocusedEpisode] = useState<ItemSummary | null>(null);
-  const restedEpisode = useRested(focusedEpisode);
+  // The episode focus is on: only the info block reads it, so a move along the episodes draws nothing else again.
+  const focusedEpisode = useSignal<ItemSummary | null>(null);
   const [readOn, setReadOn] = useState(0);
   const [summaryCut, setSummaryCut] = useState(false);
   const heroEl = useRef<HTMLDivElement | null>(null);
   const [heroH, setHeroH] = useState(HERO_H);
+  const target: ItemSummary | null = kind === "show" || kind === "season" ? onDeck.data ?? null : item;
+  // The hero's height, measured when what it says changes: reading it lays the page out.
   useLayoutEffect(() => {
     const el = heroEl.current;
     if (!el) return;
     const h = HERO_PAD + el.offsetHeight;
     if (h !== heroH) setHeroH(h);
-  });
+  }, [item, target, fileId, partOf.data]);
 
   // ---- the primary button
-  const target: ItemSummary | null = kind === "show" || kind === "season" ? onDeck.data ?? null : item;
   const playable = kind === "movie" || kind === "episode" ? item.files.length > 0 : !!target;
   const resume = target ? isInProgress(target) : false;
   const epLabel = (kind === "show" || kind === "season") && target ? episodeLabel(target.parent_index, target.index) : "";
@@ -395,7 +397,7 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
               onFocus();
               setSection("episodes");
               entry.state.section = "episodes";
-              setFocusedEpisode(eps[i] ?? null);
+              focusedEpisode.value = eps[i] ?? null;
             }}
             tile={(e, _i, place) => (
               <Tile
@@ -526,46 +528,13 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
   );
 
   const showInfo = section !== "hero";
-  const infoEpisode = section === "seasons" || section === "episodes" ? restedEpisode : null;
   const clip = section === "hero" ? undefined : section === "seasons" || section === "episodes" ? TABS_LINE - 12 : readOn > 0 ? 27 : ROWS_LINE - 12;
   const heroTitle = kind === "season" || kind === "episode" ? item.grandparent_title || item.parent_title || item.title : item.title;
   return (
     <div class="item-page">
       <Backdrop candidates={artCandidates(item, "backdrop")} title={item.title} scrim="item" />
       {showInfo && readOn === 0 && (
-        <div class="item-info in">
-          <div class="t-hero c-fg one-line">{heroTitle}</div>
-          <div style="margin-top:10px">
-            <ItemMeta item={item} file={file} />
-          </div>
-          {infoEpisode ? (
-            <>
-              <div class="t-title c-fg one-line" style="margin-top:14px">
-                {infoEpisode.title}
-              </div>
-              <div class="t-caption c-muted one-line" style="margin-top:4px">
-                {[
-                  `Season ${infoEpisode.parent_index ?? "?"} · Episode ${infoEpisode.index ?? "?"}`,
-                  formatRuntime(infoEpisode.duration_ms),
-                  infoEpisode.release_date ? `Aired ${longDate(infoEpisode.release_date)}` : "",
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </div>
-              {infoEpisode.summary && (
-                <div class="t-body lines-2 info-summary" style="margin-top:6px">
-                  {infoEpisode.summary}
-                </div>
-              )}
-            </>
-          ) : (
-            item.summary && (
-              <div class="t-body lines-2 info-summary" style="margin-top:8px">
-                {item.summary}
-              </div>
-            )
-          )}
-        </div>
+        <ItemInfo item={item} file={file} title={heroTitle} episodes={section === "seasons" || section === "episodes"} focused={focusedEpisode} />
       )}
       <SectionPage sections={sections} clipAbove={clip} extraShift={readOn} focusedKey={section} />
       <div class="rail-fade" />
@@ -585,6 +554,48 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
       )}
       {panel && typeof panel === "object" && <ActionsPanel item={panel.actions} onClose={() => setPanel(null)} />}
       {summaryOpen && <TextDialog title={item.title} text={[item.tagline ?? "", item.summary ?? ""].filter(Boolean).join("\n\n")} onClose={() => setSummaryOpen(false)} />}
+    </div>
+  );
+}
+
+/**
+ * The block over the rows once focus leaves the hero: the title and meta
+ * line, then the episode where focus rests along the episodes, else the
+ * item's summary.
+ */
+function ItemInfo(p: { item: ItemDetail; file: MediaFile | null; title: string; episodes: boolean; focused: Signal<ItemSummary | null> }) {
+  const rested = useRested(p.focused.value);
+  const episode = p.episodes ? rested : null;
+  const item = p.item;
+  return (
+    <div class="item-info in">
+      <div class="t-hero c-fg one-line">{p.title}</div>
+      <div style="margin-top:10px">
+        <ItemMeta item={item} file={p.file} />
+      </div>
+      {episode ? (
+        <>
+          <div class="t-title c-fg one-line" style="margin-top:14px">
+            {episode.title}
+          </div>
+          <div class="t-caption c-muted one-line" style="margin-top:4px">
+            {[`Season ${episode.parent_index ?? "?"} · Episode ${episode.index ?? "?"}`, formatRuntime(episode.duration_ms), episode.release_date ? `Aired ${longDate(episode.release_date)}` : ""]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
+          {episode.summary && (
+            <div class="t-body lines-2 info-summary" style="margin-top:6px">
+              {episode.summary}
+            </div>
+          )}
+        </>
+      ) : (
+        item.summary && (
+          <div class="t-body lines-2 info-summary" style="margin-top:8px">
+            {item.summary}
+          </div>
+        )
+      )}
     </div>
   );
 }

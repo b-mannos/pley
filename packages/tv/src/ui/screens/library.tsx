@@ -1,3 +1,4 @@
+import { useSignal, type Signal } from "@preact/signals";
 import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { Collection, Hub, ItemSummary, Library, LibraryKind, LibrarySort } from "../../api/types";
@@ -139,8 +140,8 @@ function LibraryGridTab(p: { entry: Entry; library: Library; initial: boolean; f
   const filters = useLoad((c) => (music ? Promise.resolve({ genres: [], years: [] }) : ui.api.libraryFilters(lib.id, c)), [lib.id], { live: false });
   const [panel, setPanel] = useState<Panel>(null);
   const [jumpTo, setJumpTo] = useState<{ index: number; n: number } | null>(null);
-  const focusedIndex = useRef<number>((p.entry.state.gridIndex as number | undefined) ?? 0);
-  const [, setFocusTick] = useState(0);
+  // Where focus is in the grid: only the A–Z jump reads it, so a move draws nothing else of the tab again.
+  const focusedIndex = useSignal<number>((p.entry.state.gridIndex as number | undefined) ?? 0);
   const chipsRef = useRef<HTMLElement | null>(null);
   const panelOpener = useRef<string | null>(null);
 
@@ -148,7 +149,7 @@ function LibraryGridTab(p: { entry: Entry; library: Library; initial: boolean; f
     const fitted = fitParams(next, lib.kind);
     store.set(lib.id, fitted);
     p.entry.state.gridIndex = 0;
-    focusedIndex.current = 0;
+    focusedIndex.value = 0;
     setParamsState(fitted);
   };
 
@@ -262,14 +263,13 @@ function LibraryGridTab(p: { entry: Entry; library: Library; initial: boolean; f
           top={GRID_TOP}
           clipTop={GRID_CLIP}
           enterAt={0}
-          startIndex={focusedIndex.current}
+          startIndex={focusedIndex.peek()}
           focusTo={jumpTo}
           cell={cell}
           onFocusIndex={(i) => {
-            focusedIndex.current = i;
+            focusedIndex.value = i;
             p.entry.state.gridIndex = i;
             listing.showing(Math.max(0, i - gridColumns(kind)));
-            setFocusTick((n) => n + 1);
           }}
           onRightEdge={
             jump
@@ -284,7 +284,7 @@ function LibraryGridTab(p: { entry: Entry; library: Library; initial: boolean; f
       {jump && alpha && (
         <JumpControl
           alpha={alpha}
-          focusedIndex={focusedIndex.current}
+          focusedIndex={focusedIndex}
           onJump={(index) => setJumpTo({ index, n: Date.now() })}
           onLeft={() => {
             const g = document.querySelector<HTMLElement>(".grid-cells");
@@ -359,10 +359,10 @@ function bitrateLine(item: ItemSummary): string {
  * The A–Z jump (JumpControl): a box level with the grid's first row that
  * shows the focused title's letter; Up and Down pick another, OK goes there.
  */
-function JumpControl(p: { alpha: AlphaIndex; focusedIndex: number; onJump: (index: number) => void; onLeft: () => boolean }) {
-  const [letter, setLetter] = useState(p.alpha.letterAt(p.focusedIndex));
+function JumpControl(p: { alpha: AlphaIndex; focusedIndex: Signal<number>; onJump: (index: number) => void; onLeft: () => boolean }) {
+  const [letter, setLetter] = useState(p.alpha.letterAt(p.focusedIndex.peek()));
   const [focused, setFocused] = useState(false);
-  const shownLetter = focused ? letter : p.alpha.letterAt(p.focusedIndex);
+  const shownLetter = focused ? letter : p.alpha.letterAt(p.focusedIndex.value);
   const at = LETTERS.indexOf(shownLetter);
   const slot = (l: string | undefined) => (l ? <span class={p.alpha.has(l) ? "c-muted" : "jump-empty"}>{l}</span> : null);
   return (
@@ -372,7 +372,7 @@ function JumpControl(p: { alpha: AlphaIndex; focusedIndex: number; onJump: (inde
         class="jump-box t-title"
         label={`Jump to a letter: ${shownLetter}`}
         onFocus={() => {
-          setLetter(p.alpha.letterAt(p.focusedIndex));
+          setLetter(p.alpha.letterAt(p.focusedIndex.peek()));
           setFocused(true);
         }}
         onBlur={() => setFocused(false)}

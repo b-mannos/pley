@@ -1,3 +1,4 @@
+import { useSignal, type Signal } from "@preact/signals";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { Hub, ItemDetail, ItemSummary } from "../../api/types";
 import { cardSubtitle, episodeLabel, formatRuntime, formatTimeLeft, isInProgress, isPlayableVideo } from "../../format/format";
@@ -146,11 +147,9 @@ function HomeRows(p: { entry: Entry; rows: Hub[] }) {
   const music = (app.libraries.value ?? []).filter((l) => l.kind === "music").map((l) => l.id);
   const hero = heroOf(rows);
   const [inRows, setInRows] = useState<boolean>(!!entry.state.inRows);
-  const [focused, setFocused] = useState<ItemSummary | null>(null);
-  const rested = useRested(focused);
-  const shown = inRows ? rested ?? hero : hero;
+  // The tile focus is on: only the backdrop and the info block read it, so a move draws neither the page nor its rows again.
+  const focused = useSignal<ItemSummary | null>(null);
   const heroDetail = useDetail(hero?.id ?? null);
-  const restedDetail = useDetail(inRows && rested ? rested.id : null);
   const rowIndex = (entry.state.rowIndex as Record<string, number> | undefined) ?? {};
   entry.state.rowIndex = rowIndex;
 
@@ -165,18 +164,6 @@ function HomeRows(p: { entry: Entry; rows: Hub[] }) {
     const cw = rows.filter((h) => h.key.indexOf("continue") === 0)[0];
     for (const i of (cw?.items ?? []).slice(0, 3)) if (!app.cachedItem(i.id)) void app.item(i.id).catch(() => undefined);
   }, []);
-
-  // Where focus rests: the server gets that video ready, and the next two tiles' details come.
-  useEffect(() => {
-    if (!rested) return;
-    prefetchPlayback(app, rested);
-    for (const h of rows) {
-      const at = h.items.findIndex((i) => i.id === rested.id);
-      if (at < 0) continue;
-      for (const n of h.items.slice(at + 1, at + 3)) if (!app.cachedItem(n.id)) void app.item(n.id).catch(() => undefined);
-      break;
-    }
-  }, [rested?.id]);
 
   // Back from a tile's actions that removed it: the tile now in its place.
   useLayoutEffect(() => {
@@ -241,8 +228,7 @@ function HomeRows(p: { entry: Entry; rows: Hub[] }) {
           onFocusIndex={(i) => {
             rowIndex[hub.key] = i;
             onFocus();
-            const item = hub.items[i];
-            setFocused(item ?? null);
+            focused.value = hub.items[i] ?? null;
             if (!inRows) setInRows(true);
             entry.state.inRows = true;
           }}
@@ -270,25 +256,9 @@ function HomeRows(p: { entry: Entry; rows: Hub[] }) {
     });
   });
 
-  const info = shown ? homeInfo(shown, inRows ? restedDetail ?? (shown === hero ? heroDetail : null) : heroDetail) : null;
   return (
     <div class="home">
-      {shown && <Backdrop candidates={artCandidates(shown, "backdrop")} title={shown.title} scrim={inRows ? "rows" : "hero"} />}
-      {shown && info && (
-        <div class={`info-block${inRows ? " in" : ""}`} aria-hidden={!inRows}>
-          <div class="info-title">
-            <div class="t-page c-fg one-line">{info.title}</div>
-          </div>
-          <div style="margin-top:10px">
-            <MetaLine item={shown} detail={inRows ? restedDetail : heroDetail} lead={info.context} runtime={info.runtime} />
-          </div>
-          {info.summary && (
-            <div class="t-body lines-2 info-summary" style="margin-top:8px">
-              {info.summary}
-            </div>
-          )}
-        </div>
-      )}
+      <HomeFocus hero={hero} heroDetail={heroDetail} inRows={inRows} focused={focused} rows={rows} />
       <SectionPage
         sections={sections}
         clipAbove={ROWS_ANCHOR - 12}
@@ -297,6 +267,51 @@ function HomeRows(p: { entry: Entry; rows: Hub[] }) {
       />
       <div class="rail-fade" />
     </div>
+  );
+}
+
+/**
+ * The backdrop and, in the rows, the info block: the hero's, then the
+ * tile's where focus rests (400 ms with no key held). The one part of Home
+ * that follows each move.
+ */
+function HomeFocus(p: { hero: ItemSummary | null; heroDetail: ItemDetail | null; inRows: boolean; focused: Signal<ItemSummary | null>; rows: Hub[] }) {
+  const app = useApp();
+  const rested = useRested(p.focused.value);
+  const shown = p.inRows ? rested ?? p.hero : p.hero;
+  const restedDetail = useDetail(p.inRows && rested ? rested.id : null);
+
+  // Where focus rests: the server gets that video ready, and the next two tiles' details come.
+  useEffect(() => {
+    if (!rested) return;
+    prefetchPlayback(app, rested);
+    for (const h of p.rows) {
+      const at = h.items.findIndex((i) => i.id === rested.id);
+      if (at < 0) continue;
+      for (const n of h.items.slice(at + 1, at + 3)) if (!app.cachedItem(n.id)) void app.item(n.id).catch(() => undefined);
+      break;
+    }
+  }, [rested?.id]);
+
+  if (!shown) return null;
+  const info = homeInfo(shown, p.inRows ? restedDetail ?? (shown === p.hero ? p.heroDetail : null) : p.heroDetail);
+  return (
+    <>
+      <Backdrop candidates={artCandidates(shown, "backdrop")} title={shown.title} scrim={p.inRows ? "rows" : "hero"} />
+      <div class={`info-block${p.inRows ? " in" : ""}`} aria-hidden={!p.inRows}>
+        <div class="info-title">
+          <div class="t-page c-fg one-line">{info.title}</div>
+        </div>
+        <div style="margin-top:10px">
+          <MetaLine item={shown} detail={p.inRows ? restedDetail : p.heroDetail} lead={info.context} runtime={info.runtime} />
+        </div>
+        {info.summary && (
+          <div class="t-body lines-2 info-summary" style="margin-top:8px">
+            {info.summary}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
