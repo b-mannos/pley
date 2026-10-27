@@ -25,10 +25,10 @@ interface FProps extends FocusHandlers {
 export function F(props: FProps) {
   const ref = useRef<HTMLDivElement>(null);
   const ui = useUi();
-  const { onSelect, onLongSelect, onMenu, onFocus, onBlur, onKey } = props;
+  const { onSelect, onLongSelect, onMenu, onFocus, onBlur, onKey, onClick } = props;
   useLayoutEffect(() => {
     const el = ref.current;
-    if (el) setHandlers(el, { onSelect, onLongSelect, onMenu, onFocus, onBlur, onKey });
+    if (el) setHandlers(el, { onSelect, onLongSelect, onMenu, onFocus, onBlur, onKey, onClick });
   });
   useLayoutEffect(() => {
     const el = ref.current;

@@ -96,7 +96,7 @@ export class Input {
     const press = (e: Event) => this.onPress(e as MouseEvent);
     const click = (e: Event) => {
       const el = focusableAt(e.target);
-      if (el && this.focus.inScope(el)) this.click(el);
+      if (el && this.focus.inScope(el)) this.click(el, e as MouseEvent);
     };
     const wheel = (e: Event) => this.onWheel(e as WheelEvent);
     target.addEventListener("keydown", down, true);
@@ -126,7 +126,8 @@ export class Input {
     const el = focusableAt(e.target);
     this.pointerAt = Date.now();
     this.pointerOver = el;
-    if (!el || el === this.focus.current) return;
+    // While a field types, focus stays on it.
+    if (!el || el === this.focus.current || this.typing) return;
     if (this.focus.inScope(el)) this.focus.focus(el, true);
     else this.onPointOutside?.(el);
   }
@@ -163,7 +164,7 @@ export class Input {
    * key's select may already have opened a page whose button is now under
    * the pointer.
    */
-  click(el: HTMLElement): void {
+  click(el: HTMLElement, e?: MouseEvent): void {
     const now = Date.now();
     if ((this.okHeld && now - this.okPressAt < OK_HELD_MAX_MS) || now - this.okReleaseAt < TWIN_MS) {
       this.okReleaseAt = 0;
@@ -171,7 +172,9 @@ export class Input {
     }
     this.clickAt = now;
     this.focus.focus(el, true);
-    handlersOf(el)?.onSelect?.();
+    const h = handlersOf(el);
+    if (h?.onClick && e) h.onClick(e);
+    else h?.onSelect?.();
   }
 
   /**

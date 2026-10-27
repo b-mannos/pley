@@ -21,6 +21,8 @@ export interface FocusHandlers {
   onBlur?: () => void;
   /** Key presses the element handles itself before focus moves (a field, the jump control). */
   onKey?: (key: string, e: { repeat: boolean }) => boolean;
+  /** The pointer's click, in place of `onSelect`, where the place clicked matters (the scrubber seeks there). */
+  onClick?: (e: MouseEvent) => void;
 }
 
 export interface GroupOptions {

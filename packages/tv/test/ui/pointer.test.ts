@@ -90,6 +90,28 @@ describe("the pointer", () => {
     expect(fid(focus)).toBe("c");
   });
 
+  it("hands the click itself to an element that wants its place (the scrubber), OK still selecting it", () => {
+    const { b, input, selected } = setup();
+    const clickedAt: number[] = [];
+    setHandlers(b, { onSelect: () => selected.push("b"), onClick: (e) => clickedAt.push(e.clientX) });
+    click(b);
+    expect(clickedAt).toEqual([x]);
+    expect(selected).toEqual([]);
+    vi.advanceTimersByTime(1000);
+    ok(input);
+    expect(selected).toEqual(["b"]);
+  });
+
+  it("leaves focus on a field while it types", () => {
+    const { a, b, focus, input } = setup();
+    input.typing = a;
+    point(b);
+    expect(fid(focus)).toBe("a");
+    input.typing = null;
+    point(b);
+    expect(fid(focus)).toBe("b");
+  });
+
   it("selects once for an OK press sent both as the key and as a click, in either order", () => {
     const { a, input, selected } = setup();
     // The key, then its click.

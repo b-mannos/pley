@@ -666,10 +666,17 @@ function Scrubber(p: { controller: PlaybackController; targetMs: number | null; 
   const frac = (ms: number) => (d > 0 ? Math.max(0, Math.min(1, ms / d)) : 0);
   const marker = p.markers.filter((m) => thumbMs >= m.start_ms && thumbMs < m.end_ms)[0];
   const markerX = marker ? Math.max(BAR_LEFT, Math.min(BAR_LEFT + BAR_WIDTH, BAR_LEFT + BAR_WIDTH * frac((marker.start_ms + marker.end_ms) / 2))) : 0;
+  const bar = useRef<HTMLDivElement>(null);
+  // The pointer's click seeks to where it is on the bar.
+  const seekAt = (e: MouseEvent) => {
+    const r = bar.current?.getBoundingClientRect();
+    if (!r || !r.width || d <= 0) return;
+    p.controller.seekTo(Math.round(d * Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))));
+  };
   return (
     <>
-      <F class="scrubber" fid="scrubber" label={`${formatClock(clock.positionMs)} of ${formatClock(d)}`}>
-        <div class="bar">
+      <F class="scrubber" fid="scrubber" label={`${formatClock(clock.positionMs)} of ${formatClock(d)}`} onClick={seekAt}>
+        <div ref={bar} class="bar">
           <div class="bar-buffered" style={`width:${frac(clock.bufferedMs) * 100}%`} />
           <div class="bar-played" style={`width:${frac(clock.positionMs) * 100}%`} />
           {p.chapters
