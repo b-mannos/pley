@@ -41,6 +41,9 @@ const SERVER_KEY = "pley.server";
 const SETTINGS_KEY = "pley.settings";
 const HOME_KEY = "pley.home";
 const HOUSEHOLD_KEY = "pley.household";
+/** Who is watching and their libraries, as last heard: the rail and the library pages before the server answers. */
+const ME_KEY = "pley.me";
+const LIBRARIES_KEY = "pley.libraries";
 const SERVERS_KEY = "pley.servers";
 const PROFILES_KEY = "pley.householdProfiles";
 /** How long an item's details are kept for pages and playbacks. */
@@ -91,6 +94,8 @@ export class AppState {
   readonly settings = signal<Settings>(DEFAULT_SETTINGS);
   readonly home = signal<Hub[] | null>(null);
   readonly homeError = signal<unknown>(null);
+  /** The last try at who is watching and the libraries failed (and none were saved): the library pages offer Retry. */
+  readonly accountError = signal<unknown>(null);
   /** Bumped by the server's events, so screens that list things fetch again. */
   readonly changes = signal(0);
   /** The server signed the TV out: show sign-in. */
@@ -138,6 +143,8 @@ export class AppState {
     const server = this.store.get(SERVER_KEY);
     if (server) this.use(server);
     this.home.value = readJson<Hub[]>(this.store, HOME_KEY);
+    this.me.value = readJson<User>(this.store, ME_KEY);
+    this.libraries.value = readJson<Library[]>(this.store, LIBRARIES_KEY);
   }
 
   /** The first screen, from what the TV kept. */
@@ -256,7 +263,7 @@ export class AppState {
   /** The app acts as another profile now: what was shown for the one before goes. */
   async switched(): Promise<void> {
     this.endPlayback();
-    this.store.remove(HOME_KEY);
+    this.forgetAccount();
     this.home.value = null;
     this.homeError.value = null;
     this.items.clear();
@@ -281,7 +288,7 @@ export class AppState {
     this.events?.stop();
     this.events = null;
     this.store.remove(SERVER_KEY);
-    this.store.remove(HOME_KEY);
+    this.forgetAccount();
     this.store.remove(HOUSEHOLD_KEY);
     this.store.remove(PROFILES_KEY);
     this.server.value = null;
@@ -298,7 +305,7 @@ export class AppState {
     this.endPlayback();
     await this.reporter.flush(2_000);
     await this.tokens?.signOut();
-    this.store.remove(HOME_KEY);
+    this.forgetAccount();
     this.home.value = null;
     this.signedOut.value = true;
   }
@@ -311,13 +318,36 @@ export class AppState {
 
   // ---- what the server has
 
-  /** Who is watching, the libraries and the household, after sign-in or a profile switch. */
+  /** What was saved of the profile signed in (Home, who it is, its libraries): another profile, sign-in or server comes. */
+  private forgetAccount(): void {
+    this.store.remove(HOME_KEY);
+    this.store.remove(ME_KEY);
+    this.store.remove(LIBRARIES_KEY);
+  }
+
+  /**
+   * Who is watching, the libraries and the household, after sign-in or a
+   * profile switch; kept, so the rail and the library pages have them
+   * before the server answers next time. A failure is kept for the library
+   * pages' Retry, and the server out of reach shows as such.
+   */
   async loadAccount(): Promise<void> {
     const api = this.api.value;
     if (!api) return;
-    const [me, libraries] = await Promise.all([api.me(), api.libraries()]);
+    let me: User;
+    let libraries: Library[];
+    try {
+      [me, libraries] = await Promise.all([api.me(), api.libraries()]);
+    } catch (e) {
+      this.accountError.value = e;
+      if (unreachable(e)) this.serverAway();
+      throw e;
+    }
+    this.accountError.value = null;
     this.me.value = me;
     this.libraries.value = libraries;
+    this.store.set(ME_KEY, JSON.stringify(me));
+    this.store.set(LIBRARIES_KEY, JSON.stringify(libraries));
     api.profiles().then(
       (profiles) => this.keepHousehold(profiles),
       () => undefined,
@@ -446,6 +476,8 @@ export class AppState {
   private refresh(): void {
     if (this.holds > 0) return;
     void this.loadHome();
+    // Who is watching and the libraries, when the last try failed or none came yet.
+    if (this.accountError.value !== null || !this.libraries.value) void this.loadAccount().catch(() => undefined);
     this.changes.value++;
   }
 

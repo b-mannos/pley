@@ -74,7 +74,7 @@ export function LibraryScreen(p: { entry: Entry; id: number; tab?: LibraryTab })
   const [, setTabState] = useState(0);
   const tabsRef = useRef<HTMLElement | null>(null);
 
-  if (!libraries) return null;
+  if (!libraries) return <LibrariesFailed />;
   if (!library) return <ColumnMessage title="This library isn't here" body="It may have been removed, or this profile may not see it." />;
 
   const showTab = (t: LibraryTab) => {
@@ -680,6 +680,24 @@ export function libraryCountLine(l: Library): string {
   return l.scanning ? `${base} · Scanning…` : base;
 }
 
+/**
+ * The libraries couldn't be had and none were saved (TvLibraries' failure):
+ * why, and Retry; nothing while they are on their way.
+ */
+export function LibrariesFailed(p: { top?: number }) {
+  const app = useApp();
+  const error = app.accountError.value;
+  if (error === null) return null;
+  return (
+    <ColumnMessage
+      top={p.top}
+      title={failedTitle(error, "Couldn't load your libraries")}
+      body={problem(error)}
+      action={{ label: "Retry", icon: "refresh-cw", onSelect: () => void app.loadAccount().catch(() => undefined) }}
+    />
+  );
+}
+
 export function LibrariesScreen(p: { entry: Entry }) {
   const app = useApp();
   const ui = useUi();
@@ -688,7 +706,7 @@ export function LibrariesScreen(p: { entry: Entry }) {
     if (!libraries) void app.loadAccount().catch(() => undefined);
   }, []);
   const [shift, setShift] = useState(0);
-  if (!libraries) return null;
+  if (!libraries) return <LibrariesFailed />;
   if (!libraries.length) return <ColumnMessage title="No libraries yet" body="Ask the server owner to add a library." />;
   return (
     <div class="libraries-page">

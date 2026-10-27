@@ -118,3 +118,46 @@ describe("watch state changed here or elsewhere", () => {
     expect(app.cachedItem(3)).toBeNull();
   });
 });
+
+describe("who is watching and the libraries", () => {
+  const me = { id: 1, name: "Ana" };
+  const libraries = [{ id: 1, name: "Movies", kind: "movies" }];
+  function signedIn(store: KeyValue, answer: () => Promise<unknown>) {
+    const platform = { name: "webos", clientId: "test", storage: store } as unknown as Platform;
+    const app = new AppState(platform, () => Promise.reject(new Error("no network in tests")));
+    (app.api as { value: unknown }).value = {
+      me: () => answer().then(() => me),
+      libraries: () => answer().then(() => libraries),
+      profiles: () => Promise.resolve([]),
+      home: () => Promise.resolve({ hubs: [] }),
+      reachable: () => Promise.reject(new Error("nothing answers there")),
+    };
+    return app;
+  }
+
+  it("are kept, so the next start has them before the server answers", async () => {
+    const store = memoryStore();
+    await signedIn(store, () => Promise.resolve()).loadAccount();
+    const next = signedIn(store, () => new Promise(() => undefined));
+    expect(next.me.value).toEqual(me);
+    expect(next.libraries.value).toEqual(libraries);
+  });
+
+  it("keep a failure for the library pages' Retry, and what was saved stays", async () => {
+    const store = memoryStore();
+    await signedIn(store, () => Promise.resolve()).loadAccount();
+    const app = signedIn(store, () => Promise.reject(new Error("refused")));
+    await expect(app.loadAccount()).rejects.toThrow("refused");
+    expect(app.accountError.value).toBeInstanceOf(Error);
+    expect(app.libraries.value).toEqual(libraries);
+  });
+
+  it("go with the profile", async () => {
+    const store = memoryStore();
+    const app = signedIn(store, () => Promise.resolve());
+    await app.loadAccount();
+    (app as unknown as { forgetAccount(): void }).forgetAccount();
+    expect(store.get("pley.me")).toBeNull();
+    expect(store.get("pley.libraries")).toBeNull();
+  });
+});

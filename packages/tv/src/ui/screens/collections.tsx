@@ -13,7 +13,7 @@ import { ArtTile, Tile } from "../kit/tile";
 import type { Entry } from "../shell/navigator";
 import { ColumnMessage, failedTitle, PageBadge, problem, sentence, useApp, useLoad } from "./common";
 import { openPlayer, pageOf } from "./item-actions";
-import { collectionCount } from "./library";
+import { collectionCount, LibrariesFailed } from "./library";
 
 const ROWS_TOP = 80;
 
@@ -30,7 +30,7 @@ export function CollectionsScreen(p: { entry: Entry; libraryId?: number }) {
     [libraries.map((l) => l.id).join(",")],
   );
   void p.libraryId;
-  if (!app.libraries.value) return null;
+  if (!app.libraries.value) return <LibrariesFailed top={ROWS_TOP} />;
   const groups = (loaded.data ?? []).filter((g) => g.collections.length > 0);
   if (!loaded.data && loaded.error) {
     return <ColumnMessage top={ROWS_TOP} title={failedTitle(loaded.error, "Couldn't load collections")} body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
