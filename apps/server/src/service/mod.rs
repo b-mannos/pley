@@ -223,8 +223,26 @@ fn install(cli: &Cli, args: &InstallArgs) -> anyhow::Result<()> {
         }
         Ok(())
     })?;
-    // Before anything is copied or saved in it: from ProgramData, the folder
-    // inherits read access for every user.
+    let definition = scm::Definition {
+        command_line: format!(
+            "{} --data-dir {} service run",
+            crate::desktop::autostart::windows_quote(&exe.to_string_lossy()),
+            crate::desktop::autostart::windows_quote(&data_dir.to_string_lossy()),
+        ),
+        account,
+        password: password.clone(),
+        restricted: !args.unrestricted,
+        // Its own temporary folder: a restricted service can't write in its
+        // profile's, and others' are no place for its files.
+        environment: vec![format!("TEMP={}", temp.display()), format!("TMP={}", temp.display())],
+    };
+    let restricted = if args.unrestricted { "" } else { ", writing only in its data folder" };
+    steps
+        .run(format!("install the pley service as {}{restricted}", definition.account), || scm::install(&definition))?;
+
+    // Once Windows knows the service's account (icacls refuses SIDs it can't
+    // name), and before anything is copied or saved in the folder: from
+    // ProgramData, it inherits read access for every user.
     let mut allowed = vec![(accounts::service_sid(NAME), "M")];
     if args.account == Account::User {
         allowed.push((steps.run(format!("look up {}", args.user), || accounts::local_user_sid(&args.user))?, "M"));
@@ -251,22 +269,6 @@ fn install(cli: &Cli, args: &InstallArgs) -> anyhow::Result<()> {
         steps.run("forget what FFmpeg could do before", || Ok(std::fs::remove_file(&capabilities)?))?;
     }
 
-    let definition = scm::Definition {
-        command_line: format!(
-            "{} --data-dir {} service run",
-            crate::desktop::autostart::windows_quote(&exe.to_string_lossy()),
-            crate::desktop::autostart::windows_quote(&data_dir.to_string_lossy()),
-        ),
-        account,
-        password: password.clone(),
-        restricted: !args.unrestricted,
-        // Its own temporary folder: a restricted service can't write in its
-        // profile's, and others' are no place for its files.
-        environment: vec![format!("TEMP={}", temp.display()), format!("TMP={}", temp.display())],
-    };
-    let restricted = if args.unrestricted { "" } else { ", writing only in its data folder" };
-    steps
-        .run(format!("install the pley service as {}{restricted}", definition.account), || scm::install(&definition))?;
     if let Some(old) = &args.remove_user {
         let current = args.account == Account::User && old.eq_ignore_ascii_case(&args.user);
         anyhow::ensure!(!current, "--remove-user {old}: the service runs as {old}");
@@ -359,11 +361,14 @@ fn check_data_dir(dir: &Path) -> anyhow::Result<()> {
             );
         }
     }
-    if let Ok(mut entries) = std::fs::read_dir(dir) {
-        let empty = entries.next().is_none();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        let names: Vec<String> =
+            entries.filter_map(Result::ok).map(|e| e.file_name().to_string_lossy().to_ascii_lowercase()).collect();
+        // Its data, or the folders an install that stopped short made.
         let pley = ["pley.db", "pley.toml", "secret.key"].iter().any(|file| dir.join(file).exists());
+        let started = names.iter().all(|name| name == "logs" || name == "tmp");
         anyhow::ensure!(
-            empty || pley,
+            pley || started,
             "{} has other files in it than pley's: choose an empty or a new folder for pley's data",
             dir.display()
         );
@@ -583,6 +588,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(check_data_dir(dir.path()).is_ok(), "empty");
         assert!(check_data_dir(&dir.path().join("new")).is_ok(), "new");
+        std::fs::create_dir(dir.path().join("logs")).unwrap();
+        std::fs::create_dir(dir.path().join("tmp")).unwrap();
+        assert!(check_data_dir(dir.path()).is_ok(), "what an install that stopped short made");
         std::fs::write(dir.path().join("notes.txt"), "").unwrap();
         assert!(check_data_dir(dir.path()).is_err(), "someone else's");
         std::fs::write(dir.path().join("pley.db"), "").unwrap();
@@ -590,7 +598,7 @@ mod tests {
 
         // A junction (any user may make one) in it, or as it.
         let elsewhere = tempfile::tempdir().unwrap();
-        let junction = dir.path().join("logs");
+        let junction = dir.path().join("media");
         let made = std::process::Command::new("cmd")
             .args(["/c", "mklink", "/J"])
             .arg(&junction)
