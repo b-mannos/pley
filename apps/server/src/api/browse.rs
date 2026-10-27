@@ -11,7 +11,6 @@ use super::wants_summaries;
 use crate::auth::AuthUser;
 use crate::catalog::{self, ItemSummary};
 use crate::error::{ApiResult, AppError};
-use crate::library::list_libraries;
 use crate::people::{self, PersonSummary};
 use crate::state::AppState;
 
@@ -21,7 +20,8 @@ pub async fn home(
     Query(query): Query<HashMap<String, String>>,
 ) -> ApiResult<Json<Hubs>> {
     let summaries = wants_summaries(&query);
-    let libraries = list_libraries(&state.db).await?;
+    // A row for each library the user may open, in their order.
+    let libraries = crate::access::visible_libraries(&state.db, &user).await?;
     // Every hub at the same time: they don't depend on each other.
     let (continue_rows, my_list, recent) = tokio::try_join!(
         catalog::continue_watching(&state.db, user.id, None, 20),

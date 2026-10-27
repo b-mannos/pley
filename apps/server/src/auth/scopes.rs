@@ -12,7 +12,8 @@ use axum::http::Method;
 pub enum Scope {
     /// See the profile's libraries, playlists and watch history.
     Library,
-    /// Play, and keep the place, watched marks, ratings and track choices.
+    /// Play, and keep the place, watched marks, ratings, track choices and
+    /// the order of the libraries.
     Play,
     /// Make, change and delete playlists.
     Playlists,
@@ -40,7 +41,9 @@ impl Scope {
     pub fn words(self) -> &'static str {
         match self {
             Scope::Library => "see the profile's libraries, playlists and watch history",
-            Scope::Play => "play titles, and keep the profile's place, watched marks, ratings and track choices",
+            Scope::Play => {
+                "play titles, and keep the profile's place, watched marks, ratings, track choices and library order"
+            }
             Scope::Playlists => "make, change and delete the profile's playlists",
             Scope::Profiles => "switch to the household's other profiles",
         }
@@ -186,6 +189,9 @@ pub const APP_ROUTES: &[(&str, &str, Need)] = &[
     // the profile's track choices for every title (its name, picture and
     // sign-in stay in the web app)
     ("PUT", "/api/me/track-defaults", Need::Scope(Play)),
+    // the order the profile sees its libraries in
+    ("PUT", "/api/me/libraries/order", Need::Scope(Play)),
+    ("DELETE", "/api/me/libraries/order", Need::Scope(Play)),
     // playlists
     ("POST", "/api/playlists", Need::Scope(Playlists)),
     ("PATCH", "/api/playlists/{id}", Need::Scope(Playlists)),
@@ -239,7 +245,7 @@ mod tests {
     fn every_app_route_is_on_a_real_path() {
         // Whether each names a route of api/mod.rs is checked by
         // tests/app_tokens.rs, which reads it.
-        assert_eq!(APP_ROUTES.len(), 58);
+        assert_eq!(APP_ROUTES.len(), 60);
         for (i, (method, path, _)) in APP_ROUTES.iter().enumerate() {
             assert!(["GET", "POST", "PUT", "PATCH", "DELETE"].contains(method), "{method} {path}");
             assert!(path.starts_with("/api/") && !path.ends_with('/'), "{path}");

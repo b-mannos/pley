@@ -95,8 +95,8 @@ async fn track_defaults_need_play() {
         assert_eq!(refused.body["code"], "insufficient_scope");
         assert_eq!(
             refused.body["message"],
-            "this app wasn't allowed to play titles, and keep the profile's place, watched marks, ratings and track \
-             choices: sign in to it again to allow it"
+            "this app wasn't allowed to play titles, and keep the profile's place, watched marks, ratings, track \
+             choices and library order: sign in to it again to allow it"
         );
     }
     assert_eq!(stored(&app, ann).await, defaults(None, None, "forced"));

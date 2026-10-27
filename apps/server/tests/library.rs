@@ -179,6 +179,83 @@ async fn libraries_are_listed_in_the_order_administrators_choose() {
 }
 
 #[tokio::test]
+async fn each_profile_may_list_its_libraries_in_its_own_order() {
+    use pley::events::ServerEvent;
+
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("tv/Show (2015)/Season 01/Show - S01E01.mkv", 1024);
+    app.media_file("movies/Alien (1979).mkv", 1024);
+    app.media_file("music/Band/Record (2001)/01 - Song.mp3", 512);
+    let tv = app.library(&admin, "TV", "shows", "tv").await;
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let music = app.library(&admin, "Music", "music", "music").await;
+    let (bob, bob_id) = app.user(&admin, "bob", json!({})).await;
+    let (kid, kid_id) = app.user(&admin, "kid", json!({"all_libraries": false, "library_ids": [movies, music]})).await;
+
+    // An app with the play scope sorts its profile's libraries: theirs
+    // alone, on every list (the libraries, Home's rows, Plex's sections).
+    let (app_token, _) = app.app_token(bob_id, "library play").await;
+    let mut events = app.state.events.subscribe();
+    let mine = app.put("/api/me/libraries/order", &app_token, json!({"ids": [music, movies, tv]})).await;
+    assert_eq!(mine.status, StatusCode::OK, "{:?}", mine.body);
+    assert_eq!(names(&mine.body), ["Music", "Movies", "TV"], "the answer is the new order");
+    assert_eq!(library_names(&app, &bob).await, ["Music", "Movies", "TV"]);
+    assert_eq!(library_names(&app, &admin).await, ["TV", "Movies", "Music"], "others keep the shared order");
+    let rows = ["Recently Added in Music", "Recently Added in Movies", "Recently Added in TV"];
+    assert_eq!(titles(&app.get("/api/hubs/home", &bob).await.body["hubs"]), rows);
+    let shared = app.get("/api/libraries?order=shared", &bob).await;
+    assert_eq!(names(&shared.body), ["TV", "Movies", "Music"], "the shared order, asked for");
+    let told: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+    assert!(
+        told.iter().any(|e| matches!(e, ServerEvent::OwnLibraryOrderChanged { user_id } if *user_id == bob_id)),
+        "their other devices are told"
+    );
+    let json = serde_json::to_value(&told[0]).unwrap();
+    assert_eq!(json, json!({"type": "libraries_changed"}), "as the shared order's change is");
+
+    // It lists the libraries the profile may open, each once.
+    for (ids, status) in [
+        (json!([music, movies, music]), StatusCode::BAD_REQUEST),
+        (json!([music, movies]), StatusCode::CONFLICT),
+        (json!([music, movies, tv, 999]), StatusCode::CONFLICT),
+    ] {
+        let reply = app.put("/api/me/libraries/order", &bob, json!({"ids": ids})).await;
+        assert_eq!(reply.status, status, "{ids}: {:?}", reply.body);
+    }
+    let theirs = app.put("/api/me/libraries/order", &kid, json!({"ids": [music, movies, tv]})).await;
+    assert_eq!(theirs.status, StatusCode::CONFLICT, "TV isn't theirs to place");
+    let theirs = app.put("/api/me/libraries/order", &kid, json!({"ids": [music, movies]})).await;
+    assert_eq!(theirs.status, StatusCode::OK, "{:?}", theirs.body);
+    assert_eq!(library_names(&app, &kid).await, ["Music", "Movies"]);
+    let library_only = app.app_token(kid_id, "library").await.0;
+    let refused = app.put("/api/me/libraries/order", &library_only, json!({"ids": [movies, music]})).await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN, "an app without the play scope");
+
+    // The shared order changing leaves a chosen one alone; a library the
+    // profile is given since, or a new one, comes after the ones it places.
+    let order = app.put("/api/libraries/order", &admin, json!({"ids": [movies, tv, music]})).await;
+    assert_eq!(names(&order.body), ["Movies", "TV", "Music"]);
+    assert_eq!(library_names(&app, &bob).await, ["Music", "Movies", "TV"]);
+    let given = app.patch(&format!("/api/users/{kid_id}"), &admin, json!({"all_libraries": true})).await;
+    assert_eq!(given.status, StatusCode::OK, "{:?}", given.body);
+    assert_eq!(library_names(&app, &kid).await, ["Music", "Movies", "TV"]);
+    app.media_file("anime/Akira (1988).mkv", 1024);
+    let anime = app.library(&admin, "Anime", "movies", "anime").await;
+    assert_eq!(library_names(&app, &bob).await, ["Music", "Movies", "TV", "Anime"]);
+    assert_eq!(app.delete(&format!("/api/libraries/{movies}"), &admin).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(library_names(&app, &bob).await, ["Music", "TV", "Anime"]);
+
+    // Forgetting it: the shared order again.
+    let back = app.delete("/api/me/libraries/order", &app_token).await;
+    assert_eq!(back.status, StatusCode::OK, "{:?}", back.body);
+    assert_eq!(names(&back.body), ["TV", "Music", "Anime"]);
+    assert_eq!(library_names(&app, &bob).await, ["TV", "Music", "Anime"]);
+    let again = app.put("/api/me/libraries/order", &bob, json!({"ids": [anime, music, tv]})).await;
+    assert_eq!(names(&again.body), ["Anime", "Music", "TV"]);
+}
+
+#[tokio::test]
 async fn folders_that_go_offline_keep_their_items() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;

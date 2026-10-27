@@ -683,7 +683,7 @@ Turning apps by other publishers off signs all of them out.
 | Scope | Allows |
 |---|---|
 | `library` | see the profile's libraries, playlists and watch history |
-| `play` | play titles, and keep the profile's place, watched marks, ratings and track choices |
+| `play` | play titles, and keep the profile's place, watched marks, ratings, track choices and library order |
 | `playlists` | make, change and delete the profile's playlists |
 | `profiles` | switch to the household's other profiles; pley's own apps only, since a profile's PIN is typed into the app |
 
@@ -744,6 +744,8 @@ sign-in settings among them.
 | DELETE | `/api/watchlist/{id}` | `play` |
 | DELETE | `/api/sessions/{id}` | `play` |
 | PUT | `/api/me/track-defaults` | `play` |
+| PUT | `/api/me/libraries/order` | `play` |
+| DELETE | `/api/me/libraries/order` | `play` |
 | POST | `/api/playlists` | `playlists` |
 | PATCH | `/api/playlists/{id}` | `playlists` |
 | DELETE | `/api/playlists/{id}` | `playlists` |
@@ -914,9 +916,11 @@ may open only some libraries see those, in that order.
 
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
-| GET | `/api/libraries` | – | `Library[]` in their order |
+| GET | `/api/libraries` | query: `order=shared` | `Library[]` in the user's own order when they chose one (the ones it places first, any others after them in the shared order), else in the shared order; `order=shared`: in the shared order whatever the user chose (Settings → Libraries) |
 | POST | `/api/libraries` *(admin)* | `{ name, kind, paths: string[] }` | `Library` (a scan is queued automatically) |
-| PUT | `/api/libraries/order` *(admin)* | `{ ids: Id[] }` (every library, once) | `Library[]` in the new order. `400` when an id is listed twice, `409` when `ids` aren't the libraries there are (one was added or deleted since they were listed) |
+| PUT | `/api/libraries/order` *(admin)* | `{ ids: Id[] }` (every library, once) | `Library[]` in the new order: the shared order, which everyone who hasn't chosen their own sees. `400` when an id is listed twice, `409` when `ids` aren't the libraries there are (one was added or deleted since they were listed) |
+| PUT | `/api/me/libraries/order` | `{ ids: Id[] }` (every library the user may open, once) | `Library[]` in the new order: the user's own, on every list of their libraries (Home's rows and the Plex-compatible API's sections too), whatever the shared order becomes. Libraries they are given later, and new ones, come after it. `400` when an id is listed twice, `409` when `ids` aren't the libraries the user may open. `libraries_changed` to the user's streams. For apps allowed `play` too |
+| DELETE | `/api/me/libraries/order` | – | `Library[]` in the shared order, which the user sees again; `libraries_changed` to the user's streams |
 | GET | `/api/libraries/{id}` | – | `Library` |
 | PATCH | `/api/libraries/{id}` *(admin)* | `{ name?, paths? }` | `Library` |
 | DELETE | `/api/libraries/{id}` *(admin)* | – | `204` |
@@ -1635,7 +1639,7 @@ type ServerEvent =
   | { type: "scan_progress"; library_id: Id; phase: ScanStatus["phase"]; processed: number; total: number }
   | { type: "scan_finished"; library_id: Id; added: number; updated: number; removed: number }
   | { type: "library_changed"; library_id: Id }      // items/metadata changed → refetch
-  | { type: "libraries_changed" }                    // library created/updated/deleted, or the order changed
+  | { type: "libraries_changed" }                    // library created/updated/deleted, or the order changed (the user's own: to their streams only)
   | { type: "sessions_changed" }
   | { type: "watchlist_changed" }                    // the user's My List changed (their streams only)
   | { type: "user_state_changed"; item_ids: Id[]; children: boolean } // the user's watch state changed (their streams only)

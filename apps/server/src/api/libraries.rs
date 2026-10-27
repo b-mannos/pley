@@ -78,10 +78,32 @@ pub(crate) async fn visible_library(state: &AppState, user: &AuthUser, id: i64) 
     library_or_404(state, id).await
 }
 
-pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<LibraryDto>>> {
+#[derive(Deserialize, Default)]
+pub struct ListQuery {
+    order: Option<String>,
+}
+
+/// The libraries the user may open, in their own order; with
+/// `order=shared`, in the order everyone sees them in (the one
+/// administrators choose, in Settings).
+pub async fn list(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Query(query): Query<ListQuery>,
+) -> ApiResult<Json<Vec<LibraryDto>>> {
+    let libraries = if query.order.as_deref() == Some("shared") {
+        access::shared_order(&state.db, &user).await?
+    } else {
+        access::visible_libraries(&state.db, &user).await?
+    };
+    listed(&state, &user, libraries).await
+}
+
+/// `libraries` as `user` sees them.
+async fn listed(state: &AppState, user: &AuthUser, libraries: Vec<LibraryRow>) -> ApiResult<Json<Vec<LibraryDto>>> {
     let mut out = Vec::new();
-    for lib in access::visible_libraries(&state.db, &user).await? {
-        out.push(for_user(&user, to_dto(&state, &lib, Some(&user)).await?));
+    for lib in libraries {
+        out.push(for_user(user, to_dto(state, &lib, Some(user)).await?));
     }
     Ok(Json(out))
 }
@@ -203,22 +225,57 @@ pub struct LibraryOrder {
     ids: Vec<i64>,
 }
 
-/// The order libraries are listed in, for everyone: `ids` lists every
-/// library once. Answers them in their new order.
+impl LibraryOrder {
+    /// `400` when an id is listed twice.
+    fn check(&self) -> ApiResult<()> {
+        let mut seen = HashSet::new();
+        match self.ids.iter().find(|id| !seen.insert(**id)) {
+            Some(id) => Err(AppError::bad_request(format!("library {id} is listed twice"))),
+            None => Ok(()),
+        }
+    }
+}
+
+/// The order libraries are listed in, for everyone who hasn't chosen their
+/// own: `ids` lists every library once. Answers them in their new order.
 pub async fn reorder(
     State(state): State<AppState>,
     AdminUser(admin): AdminUser,
     Json(body): Json<LibraryOrder>,
 ) -> ApiResult<Json<Vec<LibraryDto>>> {
-    let mut seen = HashSet::new();
-    if let Some(id) = body.ids.iter().find(|id| !seen.insert(**id)) {
-        return Err(AppError::bad_request(format!("library {id} is listed twice")));
-    }
+    body.check()?;
     if !set_order(&state.db, &body.ids).await? {
         return Err(AppError::conflict("the libraries have changed: the order must list each of them once"));
     }
     state.events.send(ServerEvent::LibrariesChanged);
-    list(State(state), admin).await
+    let libraries = access::shared_order(&state.db, &admin).await?;
+    listed(&state, &admin, libraries).await
+}
+
+/// `PUT /api/me/libraries/order`: the order the user sees their libraries
+/// in, theirs alone: `ids` lists each library they may open once. Answers
+/// them in it.
+pub async fn set_my_order(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Json(body): Json<LibraryOrder>,
+) -> ApiResult<Json<Vec<LibraryDto>>> {
+    body.check()?;
+    if !access::set_own_order(&state.db, &user, &body.ids).await? {
+        return Err(AppError::conflict("your libraries have changed: the order must list each of them once"));
+    }
+    state.events.send(ServerEvent::OwnLibraryOrderChanged { user_id: user.id });
+    let libraries = access::visible_libraries(&state.db, &user).await?;
+    listed(&state, &user, libraries).await
+}
+
+/// `DELETE /api/me/libraries/order`: the user sees their libraries in the
+/// order everyone does again. Answers them in it.
+pub async fn forget_my_order(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<LibraryDto>>> {
+    access::forget_own_order(&state.db, &user).await?;
+    state.events.send(ServerEvent::OwnLibraryOrderChanged { user_id: user.id });
+    let libraries = access::shared_order(&state.db, &user).await?;
+    listed(&state, &user, libraries).await
 }
 
 pub async fn remove(State(state): State<AppState>, _admin: AdminUser, Path(id): Path<i64>) -> ApiResult<StatusCode> {
