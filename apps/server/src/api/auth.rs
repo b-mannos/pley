@@ -7,11 +7,10 @@ use serde::{Deserialize, Serialize};
 use crate::accounts::{self, UserDto};
 use crate::auth::grants::APP_TOKEN_PREFIX;
 use crate::auth::{
-    AuthUser, ClientIp, CurrentToken, clear_cookie, dummy_password_hash, forwarded_https, hash_password, hash_token,
-    session_cookie, token_from_parts, validate_password, validate_username, verify_password,
+    AuthUser, ClientIp, CurrentToken, SourceIp, clear_cookie, dummy_password_hash, forwarded_https, hash_password,
+    hash_token, session_cookie, token_from_parts, validate_password, validate_username, verify_password,
 };
 use crate::error::{ApiResult, AppError};
-use crate::setup::Peer;
 use crate::state::AppState;
 use crate::util::now;
 
@@ -83,7 +82,7 @@ pub struct SetupRequest {
 pub async fn setup(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Peer(peer): Peer,
+    SourceIp(source): SourceIp,
     ClientIp(ip): ClientIp,
     Json(body): Json<SetupRequest>,
 ) -> ApiResult<Response> {
@@ -95,8 +94,7 @@ pub async fn setup(
     }
     // 5 tries every 15 minutes from each address: someone guessing doesn't
     // lock the owner out (31^8 codes; a restart makes a new one).
-    let peer = peer.map(|ip| ip.to_canonical().to_string()).unwrap_or_default();
-    let attempt = state.auth.throttle.begin(&format!("setup-code:{peer}"))?;
+    let attempt = state.auth.throttle.begin_setup_code(source)?;
     if !state.auth.setup.matches(body.setup_code.as_deref().unwrap_or_default()) {
         attempt.failed();
         return Err(AppError::forbidden(
@@ -129,10 +127,16 @@ pub async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
     ClientIp(ip): ClientIp,
+    SourceIp(source): SourceIp,
     Json(body): Json<Credentials>,
 ) -> ApiResult<Response> {
     let username = body.username.trim().to_owned();
-    let attempt = state.auth.throttle.begin(&format!("login:{}", username.to_lowercase()))?;
+    // No account has a longer name (`validate_username`): nothing to check,
+    // and nothing to count and keep.
+    if username.chars().count() > 64 {
+        return Err(AppError::Unauthorized);
+    }
+    let attempt = state.auth.throttle.begin_password(&username, source)?;
     let row: Option<(i64, String, bool)> =
         sqlx::query_as("SELECT id, password_hash, disabled FROM users WHERE username = ?")
             .bind(&username)
@@ -173,7 +177,8 @@ pub(crate) async fn confirm_password(state: &AppState, user: &AuthUser, password
     if hash.starts_with('!') {
         return Err(AppError::forbidden("this account has no password: an administrator can give it one"));
     }
-    let attempt = state.auth.throttle.begin(&format!("login:{}", user.username.to_lowercase()))?;
+    // Counted apart from sign-ins, which anyone can fail on purpose.
+    let attempt = state.auth.throttle.begin(&format!("confirm:{}", user.id))?;
     if !verify_password(password.unwrap_or_default(), hash).await? {
         attempt.failed();
         return Err(AppError::forbidden("the password is wrong"));
@@ -241,7 +246,7 @@ pub async fn change_password(
     if hash.starts_with('!') {
         return Err(AppError::bad_request("this account has no password: an administrator can give it one"));
     }
-    let attempt = state.auth.throttle.begin(&format!("login:{}", user.username.to_lowercase()))?;
+    let attempt = state.auth.throttle.begin(&format!("confirm:{}", user.id))?;
     if !verify_password(body.current_password, hash).await? {
         attempt.failed();
         return Err(AppError::bad_request("the current password is wrong"));

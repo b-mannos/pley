@@ -5,10 +5,8 @@
 //! and reverse proxies hide that, and a web page can reach servers on its
 //! visitor's network (DNS rebinding).
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 
-use axum::extract::{ConnectInfo, FromRequestParts};
-use axum::http::request::Parts;
 use parking_lot::Mutex;
 
 /// Letters and digits that can't be mistaken for one another.
@@ -45,18 +43,6 @@ impl SetupCode {
     /// Setup is done: the code no longer claims anything.
     pub fn clear(&self) {
         *self.0.lock() = None;
-    }
-}
-
-/// The address a request came from: the other end of its connection, never
-/// a header (which anyone can send), so guesses can be counted per address.
-pub struct Peer(pub Option<IpAddr>);
-
-impl<S: Send + Sync> FromRequestParts<S> for Peer {
-    type Rejection = std::convert::Infallible;
-
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        Ok(Peer(parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|ConnectInfo(addr)| addr.ip())))
     }
 }
 

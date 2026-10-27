@@ -2,6 +2,7 @@
 //! password attempt throttling, avatars, device names and invitation codes.
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -210,12 +211,31 @@ struct Attempts {
 }
 
 const MAX_FAILURES: u32 = 5;
+/// Failed sign-ins to one account from every address together: someone
+/// guessing from elsewhere (5 a window from each address) doesn't lock its
+/// owner out, and many addresses still don't get many guesses.
+const MAX_ACCOUNT_FAILURES: u32 = 50;
+/// Wrong setup codes from every address together (31^8 codes).
+const MAX_SETUP_FAILURES: u32 = 1000;
 const WINDOW: Duration = Duration::from_secs(15 * 60);
+/// Keys counted at most. Each failure is an Argon2 check, so filling it
+/// takes a while; then new keys wait until old windows end.
+const MAX_KEYS: usize = 100_000;
 
 impl Throttle {
     /// Reserve an attempt for `key`, or `Err` with the remaining wait while
     /// it is locked out (or the attempts left are all in flight).
     pub fn begin(&self, key: &str) -> Result<Attempt<'_>, AppError> {
+        self.begin_with(key, MAX_FAILURES)
+    }
+
+    fn begin_with(&self, key: &str, max_failures: u32) -> Result<Attempt<'_>, AppError> {
+        if self.attempts.len() >= MAX_KEYS && !self.attempts.contains_key(key) {
+            self.purge();
+            if self.attempts.len() >= MAX_KEYS {
+                return Err(AppError::TooManyRequests("too many attempts, try again later".into()));
+            }
+        }
         let mut entry = self.attempts.entry(key.to_owned()).or_insert(Attempts {
             failures: 0,
             in_flight: 0,
@@ -225,12 +245,45 @@ impl Throttle {
             entry.failures = 0;
             entry.since = Instant::now();
         }
-        if entry.failures + entry.in_flight >= MAX_FAILURES {
+        if entry.failures + entry.in_flight >= max_failures {
             let minutes = WINDOW.saturating_sub(entry.since.elapsed()).as_secs().div_ceil(60).max(1);
             return Err(AppError::TooManyRequests(format!("too many attempts, try again in {minutes} min")));
         }
         entry.in_flight += 1;
         Ok(Attempt { throttle: self, key: key.to_owned(), settled: false })
+    }
+
+    /// Reserve a password attempt for the account `username` from `source`:
+    /// 5 failures a window from each address, [`MAX_ACCOUNT_FAILURES`] from
+    /// all of them.
+    pub fn begin_password(&self, username: &str, source: Option<IpAddr>) -> Result<CountedAttempt<'_>, AppError> {
+        let account = username.to_lowercase();
+        self.begin_counted(&format!("login:{account}"), source, MAX_ACCOUNT_FAILURES)
+    }
+
+    /// Reserve a guess of the setup code from `source`: 5 failures a window
+    /// from each address, [`MAX_SETUP_FAILURES`] from all of them. Behind a
+    /// proxy each client counts on its own, and someone on the local network
+    /// naming other addresses still gets few guesses.
+    pub fn begin_setup_code(&self, source: Option<IpAddr>) -> Result<CountedAttempt<'_>, AppError> {
+        self.begin_counted("setup-code", source, MAX_SETUP_FAILURES)
+    }
+
+    fn begin_counted(
+        &self,
+        key: &str,
+        source: Option<IpAddr>,
+        max_overall: u32,
+    ) -> Result<CountedAttempt<'_>, AppError> {
+        let source = source.map(|ip| ip.to_canonical().to_string()).unwrap_or_default();
+        let here = self.begin(&format!("{key}@{source}"))?;
+        let overall = self.begin_with(key, max_overall)?;
+        Ok(CountedAttempt { here, overall })
+    }
+
+    /// Forget windows that ended: keys nobody uses again would stay forever.
+    pub fn purge(&self) {
+        self.attempts.retain(|_, a| a.in_flight > 0 || a.since.elapsed() < WINDOW);
     }
 
     fn settle(&self, key: &str, outcome: Outcome) {
@@ -281,6 +334,25 @@ impl Drop for Attempt<'_> {
         if !self.settled {
             self.throttle.settle(&self.key, Outcome::Abandoned);
         }
+    }
+}
+
+/// An attempt counted for its address and for all addresses together
+/// ([`Throttle::begin_password`], [`Throttle::begin_setup_code`]).
+pub struct CountedAttempt<'a> {
+    here: Attempt<'a>,
+    overall: Attempt<'a>,
+}
+
+impl CountedAttempt<'_> {
+    pub fn failed(self) {
+        self.here.failed();
+        self.overall.failed();
+    }
+
+    pub fn succeeded(self) {
+        self.here.succeeded();
+        self.overall.succeeded();
     }
 }
 
@@ -439,6 +511,36 @@ mod tests {
         }
         assert!(t.begin("login:amy").is_ok());
         assert!(t.attempts.get("login:amy").is_none_or(|a| a.failures == 0));
+    }
+
+    #[test]
+    fn someone_guessing_elsewhere_does_not_lock_the_owner_out() {
+        let t = Throttle::default();
+        let guesser = Some(IpAddr::from([203, 0, 113, 7]));
+        let owner = Some(IpAddr::from([192, 168, 1, 20]));
+        for _ in 0..MAX_FAILURES {
+            t.begin_password("Amy", guesser).expect("allowed").failed();
+        }
+        assert!(t.begin_password("amy", guesser).is_err(), "locked out from that address");
+        t.begin_password("amy", owner).expect("the owner still signs in").succeeded();
+        // Many addresses together still get few guesses.
+        let t = Throttle::default();
+        for n in 0..MAX_ACCOUNT_FAILURES {
+            let source = Some(IpAddr::from([10, 0, (n / 250) as u8, (n % 250) as u8]));
+            t.begin_password("amy", source).expect("allowed").failed();
+        }
+        assert!(t.begin_password("amy", owner).is_err());
+    }
+
+    #[test]
+    fn ended_windows_are_forgotten() {
+        let t = Throttle::default();
+        t.begin("login:amy").expect("allowed").failed();
+        t.attempts.get_mut("login:amy").expect("counted").since = Instant::now() - WINDOW;
+        t.begin("login:bob").expect("allowed").failed();
+        t.purge();
+        assert!(t.attempts.get("login:amy").is_none());
+        assert!(t.attempts.get("login:bob").is_some());
     }
 
     #[test]

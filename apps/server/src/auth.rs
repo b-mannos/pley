@@ -526,6 +526,7 @@ impl AuthService {
         let now = now();
         self.cache.retain(|_, s| s.expires_at > now && s.touched_at > 0);
         self.apps.retain(|_, a| a.expires_at > now);
+        self.throttle.purge();
     }
 
     /// The user an app's access token acts as, with the app's rights: never

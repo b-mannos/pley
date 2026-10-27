@@ -39,12 +39,15 @@ Only the latest release gets fixes.
 **Setup.** The administrator account takes the setup code from the log,
 wherever the request seems to come from: Docker, reverse proxies and DNS
 rebinding make the internet look local. Guesses are limited to 5 every 15
-minutes from each address; a restart makes a new code.
+minutes from each address (behind a proxy, each client's), 1000 from all of
+them; a restart makes a new code.
 
 **Passwords.** Argon2id hashes; at least 8 characters, not the username, not
-a common password. Sign-ins, PINs and the current password on changes are
-limited to 5 failures every 15 minutes per account, and password checks
-queue, so a flood of sign-ins can't exhaust memory. A PIN stops working
+a common password. Sign-ins are limited to 5 failures every 15 minutes per
+account from each address and 50 from all of them, so someone guessing
+elsewhere doesn't lock its owner out; PINs and the current password on
+changes to 5 per account. Password checks queue and failures are forgotten
+as their window ends, so a flood of sign-ins can't exhaust memory. A PIN stops working
 after 100 wrong tries in a row, until it is set again. A new password signs
 the account out on every other device.
 
