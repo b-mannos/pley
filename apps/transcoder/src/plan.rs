@@ -554,8 +554,8 @@ impl Plan {
     }
 
     /// The software encoder that stands in for the planned hardware one
-    /// when hardware sessions run out: for HDR kept, one that makes Main 10
-    /// too.
+    /// when hardware sessions run out or the hardware encoder fails: for HDR
+    /// kept, one that makes Main 10 too.
     pub fn software_stand_in<'a>(&self, ff: &'a Ffmpeg) -> Option<&'a EncoderInfo> {
         let planned = self.encoder().filter(|e| e.hardware)?;
         let main10 = self.video.as_ref().is_some_and(|v| v.hdr.is_some());

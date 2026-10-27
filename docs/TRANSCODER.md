@@ -236,7 +236,11 @@ half-made ones are deleted.
      are stopped first, then open requests get 5 s to finish.
 6. **Failure handling.** If ffmpeg fails twice at the same segment, the error is
    returned instead of retrying forever. The job's `last_error` holds ffmpeg's
-   last log lines.
+   last log lines. A process whose hardware encoder fails before its first
+   segment (a driver update, a GPU gone, a session refused) hands the job to
+   the software encoder, as when hardware sessions run out, with a warning
+   on the job; once that happened to three jobs, `capabilities.json` is
+   deleted, so the next start tests the encoders again.
 
 ## Transcoding features
 

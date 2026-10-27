@@ -217,9 +217,8 @@ async fn run(args: Args) -> anyhow::Result<()> {
     let _ = std::fs::remove_dir_all(&jobs_dir);
     std::fs::create_dir_all(&jobs_dir)?;
 
-    let ff = Arc::new(
-        ffmpeg::Ffmpeg::detect(&args.ffmpeg, &args.ffprobe, &work_dir.join("capabilities.json"), args.redetect).await,
-    );
+    let capabilities = work_dir.join("capabilities.json");
+    let ff = Arc::new(ffmpeg::Ffmpeg::detect(&args.ffmpeg, &args.ffprobe, &capabilities, args.redetect).await);
     let metrics = Arc::new(metrics::Metrics::default());
     let prober = Arc::new(probe::Prober::new(ff.clone(), metrics.clone(), args.probe_concurrency));
     // Seek previews, fingerprints, keyframe scans and probes wait for starting playbacks.
@@ -245,6 +244,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         metrics.clone(),
         jobs_dir.clone(),
         shader_cache(&work_dir),
+        Some(capabilities),
         limits.clone(),
         background,
     );

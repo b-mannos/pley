@@ -353,6 +353,7 @@ async fn jobs_edit_segments_before_serving_them() {
         metrics,
         dir.path().join("jobs"),
         None,
+        None,
         limits,
         background,
     );

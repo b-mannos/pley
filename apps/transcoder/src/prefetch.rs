@@ -429,6 +429,7 @@ mod tests {
             metrics,
             dir.join("jobs"),
             None,
+            None,
             Limits { max_jobs: 1, max_hw_jobs: 0 },
             background,
         );

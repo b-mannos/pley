@@ -58,6 +58,10 @@ const PREEMPT_GRACE: Duration = Duration::from_secs(3);
 const STOP_COST: Duration = Duration::from_millis(300);
 /// Segments deleted per lock acquisition when pruning.
 const PRUNE_BATCH: usize = 32;
+/// Jobs whose hardware encoder failed before the capability cache is
+/// deleted, so that the next start tests the encoders again: a driver
+/// update or a GPU gone leaves the cache saying they work.
+const HARDWARE_FAILURES: u32 = 3;
 /// A process starts (and background work waits, see [`crate::background`])
 /// until it has made this many segments: what players buffer before they
 /// play.
@@ -132,6 +136,10 @@ pub struct JobManager {
     jobs_dir: PathBuf,
     /// libplacebo's shader cache (see [`crate::plan::shader_cache_option`]).
     shader_cache: Option<PathBuf>,
+    /// The capability cache, deleted after [`HARDWARE_FAILURES`] jobs whose
+    /// hardware encoder failed.
+    capabilities: Option<PathBuf>,
+    hardware_failures: AtomicU32,
     pub limits: Limits,
     pub slots: Arc<Slots>,
     /// Background work, held while jobs start.
@@ -181,6 +189,9 @@ struct Runtime {
     started_any: bool,
     warnings: Vec<String>,
     encoder_override: Option<EncoderInfo>,
+    /// The hardware encoder failed before its first segment: the software
+    /// one takes over (see [`JobManager::spawn`]).
+    hardware_failed: bool,
     failures: HashMap<u32, u32>,
     /// The automatic preset of the running process (index in
     /// [`adaptive::LADDER`]), and when it started or moved.
@@ -265,6 +276,7 @@ impl JobManager {
         metrics: Arc<Metrics>,
         jobs_dir: PathBuf,
         shader_cache: Option<PathBuf>,
+        capabilities: Option<PathBuf>,
         limits: Limits,
         background: Arc<Background>,
     ) -> Arc<Self> {
@@ -278,6 +290,8 @@ impl JobManager {
             metrics,
             jobs_dir,
             shader_cache,
+            capabilities,
+            hardware_failures: AtomicU32::new(0),
             limits,
             jobs: Mutex::default(),
             closed: AtomicBool::new(false),
@@ -491,6 +505,20 @@ impl JobManager {
         Ok(())
     }
 
+    /// A job's hardware encoder failed: after [`HARDWARE_FAILURES`], the
+    /// next start tests the encoders again.
+    fn hardware_failed(&self) {
+        let failures = self.hardware_failures.fetch_add(1, Relaxed) + 1;
+        let Some(cache) = self.capabilities.as_ref().filter(|_| failures == HARDWARE_FAILURES) else { return };
+        match std::fs::remove_file(cache) {
+            Ok(()) => tracing::warn!(
+                "the hardware encoder failed {failures} jobs: the encoders are tested again at the next start"
+            ),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => tracing::warn!("could not delete {}: {err}", cache.display()),
+        }
+    }
+
     /// Software encodes running now.
     fn software_encodes(&self) -> u32 {
         self.list().iter().filter(|job| job.encodes_in_software()).count() as u32
@@ -560,14 +588,28 @@ impl JobManager {
         let limit = (start + PROCESS_WINDOW).min(plan.segment_count());
         let end = job.first_ready(start + 1, limit).unwrap_or(limit);
         let planned = plan.encoder();
-        let want_hw = planned.is_some_and(|e| e.hardware);
+        let stand_in = plan.software_stand_in(&self.ff);
+        // Once the hardware encoder failed the job, the software one takes over.
+        let retreat = stand_in.filter(|_| job.runtime.lock().hardware_failed);
+        let want_hw = planned.is_some_and(|e| e.hardware) && retreat.is_none();
         let slot = self
             .slots
             .take(want_hw)
             .ok_or_else(|| ApiError::Busy(format!("all {} transcode slots are in use", self.limits.max_jobs)))?;
         let hw = slot.hw;
-        let fallback = if want_hw && !hw {
-            let Some(software) = plan.software_stand_in(&self.ff) else {
+        let fallback = if let Some(software) = retreat {
+            if job.warn("the hardware encoder failed, using software encoding") {
+                let failed = planned.map_or("the hardware encoder", |e| e.name.as_str());
+                tracing::warn!(
+                    job = %job.id,
+                    "{failed} failed before its first segment: encoding with {} instead",
+                    software.name
+                );
+                self.hardware_failed();
+            }
+            Some(software)
+        } else if want_hw && !hw {
+            let Some(software) = stand_in else {
                 return Err(ApiError::Busy(format!(
                     "all {} hardware encoder sessions are in use and no software encoder is available",
                     self.limits.max_hw_jobs
@@ -851,11 +893,14 @@ impl Job {
         }
     }
 
-    fn warn(&self, message: &str) {
+    /// Adds `message` to the job's warnings: whether it is a new one.
+    fn warn(&self, message: &str) -> bool {
         let mut rt = self.runtime.lock();
-        if !rt.warnings.iter().any(|w| w == message) {
+        let new = !rt.warnings.iter().any(|w| w == message);
+        if new {
             rt.warnings.push(message.to_owned());
         }
+        new
     }
 
     pub fn record_served(&self, bytes: u64) {
@@ -883,7 +928,7 @@ impl Job {
             // Stopped long ago, gone at last: the job is the running one's.
             return;
         }
-        rt.process = None;
+        let process = rt.process.take();
         if killed {
             rt.state = JobState::Idle;
         } else if success {
@@ -906,6 +951,12 @@ impl Job {
             rt.last_error = Some(message);
             rt.state = JobState::Failed;
             *rt.failures.entry(next).or_insert(0) += 1;
+            // A hardware encoder failing before it made anything (a driver
+            // update, a GPU gone, a session refused) won't do better at the
+            // next try.
+            if process.is_some_and(|p| p.hardware && next == p.start_segment) {
+                rt.hardware_failed = true;
+            }
         }
     }
 
@@ -1412,8 +1463,20 @@ mod tests {
         let background = Background::new();
         let keyframes = KeyframeStore::new(ff.clone(), metrics.clone(), background.clone(), dir.join("keyframes"));
         let extractor = Arc::new(Extractor::new(ff.clone(), prober.clone(), metrics.clone(), dir.join("subtitles"), 1));
-        let limits = Limits { max_jobs: 2, max_hw_jobs: 0 };
-        JobManager::new(ff, prober, keyframes, extractor, metrics, dir.join("jobs"), None, limits, background)
+        let limits = Limits { max_jobs: 2, max_hw_jobs: 1 };
+        let capabilities = Some(dir.join("capabilities.json"));
+        JobManager::new(
+            ff,
+            prober,
+            keyframes,
+            extractor,
+            metrics,
+            dir.join("jobs"),
+            None,
+            capabilities,
+            limits,
+            background,
+        )
     }
 
     #[tokio::test]
@@ -1514,6 +1577,101 @@ mod tests {
         }
         assert!(!background.held(), "free once its first segments are out");
         jobs.remove(&created.id).await;
+    }
+
+    /// A hardware encoder that fails before its first segment hands the job
+    /// to the software one. Needs FFmpeg on the PATH (skipped otherwise).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_hardware_encoder_that_fails_hands_the_job_to_software() {
+        use pley_transcoder_api::{EncoderInfo, HwAccel, VideoRequest};
+        let ok =
+            |tool: &str| std::process::Command::new(tool).arg("-version").output().is_ok_and(|o| o.status.success());
+        if !(ok("ffmpeg") && ok("ffprobe")) {
+            eprintln!("ffmpeg not found: skipped");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("clip.mkv");
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i"])
+            .arg("testsrc2=size=320x180:rate=25:duration=10")
+            .args(["-c:v", "libx264", "-preset", "ultrafast", "-g", "25"])
+            .arg(&input)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let encoder = |name: &str, hardware: bool, accel: HwAccel| EncoderInfo {
+            name: name.into(),
+            codec: VideoCodec::H264,
+            hardware,
+            accel,
+            main10: false,
+        };
+        let ff = Ffmpeg {
+            ffmpeg: "ffmpeg".into(),
+            ffprobe: "ffprobe".into(),
+            caps: pley_transcoder_api::Capabilities {
+                ffmpeg_available: true,
+                ffprobe_available: true,
+                // One FFmpeg doesn't know: it fails at once, as a broken
+                // driver's would.
+                encoders: vec![
+                    encoder("h264_pley_broken", true, HwAccel::Amf),
+                    encoder("libx264", false, HwAccel::None),
+                ],
+                ..Default::default()
+            },
+            segment_times_relative: true,
+        };
+        let jobs = manager_with(dir.path(), ff);
+        let created = jobs
+            .create(JobRequest {
+                input: input.to_string_lossy().into_owned(),
+                video: Some(VideoRequest::default()),
+                segment_seconds: Some(2.0),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(created.video.as_ref().and_then(|v| v.encoder.as_deref()), Some("h264_pley_broken"));
+        let job = jobs.get(&created.id).unwrap();
+        jobs.segment(&job, 0).await.expect("made in software");
+        let status = job.status();
+        assert_eq!(status.video.as_ref().and_then(|v| v.encoder.as_deref()), Some("libx264"));
+        assert!(status.warnings.iter().any(|w| w.contains("hardware encoder failed")), "{:?}", status.warnings);
+        assert_eq!(status.process.map(|p| p.hardware), Some(false));
+        assert_eq!(jobs.hardware_failures.load(Relaxed), 1);
+        jobs.remove(&created.id).await;
+    }
+
+    #[tokio::test]
+    async fn hardware_failing_jobs_have_the_encoders_tested_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let jobs = manager(dir.path());
+        let cache = dir.path().join("capabilities.json");
+        std::fs::write(&cache, "{}").unwrap();
+        for _ in 1..HARDWARE_FAILURES {
+            jobs.hardware_failed();
+        }
+        assert!(cache.exists(), "a job or two: the hardware may be busy");
+        jobs.hardware_failed();
+        assert!(!cache.exists(), "tested again at the next start");
+    }
+
+    #[test]
+    fn only_a_hardware_process_failing_before_its_first_segment_hands_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let job = job(dir.path(), vec![0, 4_000, 8_000, 12_000]);
+        let (metrics, tail) = (Metrics::default(), Mutex::new(VecDeque::new()));
+        let exits = |hardware: bool, start: u32, next: u32, killed: bool| {
+            job.runtime.lock().process = Some(ProcessStatus { hardware, start_segment: start, ..Default::default() });
+            job.on_exit(0, 3, next, Ok(exit(1)), killed, &tail, &metrics);
+            job.runtime.lock().hardware_failed
+        };
+        assert!(!exits(true, 1, 1, true), "stopped on purpose");
+        assert!(!exits(true, 1, 2, false), "it made segment 1: the encoder works");
+        assert!(!exits(false, 1, 1, false), "software");
+        assert!(exits(true, 1, 1, false));
     }
 
     #[test]

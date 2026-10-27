@@ -499,6 +499,7 @@ mod tests {
             metrics.clone(),
             dir.join("jobs"),
             None,
+            None,
             limits.clone(),
             background,
         );
