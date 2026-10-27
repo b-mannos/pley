@@ -13,7 +13,7 @@ import { PersonScreen } from "./person";
 import { CollectionScreen, CollectionsScreen } from "./collections";
 import { AlbumScreen, ArtistScreen, NowPlayingScreen } from "./music";
 import { AddToPlaylistScreen, NewPlaylistScreen, PlaylistScreen, PlaylistsScreen } from "./playlists";
-import { HistoryScreen, SettingsScreen } from "./settings";
+import { DiagnosticsScreen, HistoryScreen, SettingsScreen } from "./settings";
 import { PlayerScreen } from "../player/player";
 
 /** One page of the back stack, by its key (the Android app's TvEntries). */
@@ -80,6 +80,9 @@ export function Screen(p: { entry: Entry; state: AppState }) {
       break;
     case "history":
       page = <HistoryScreen entry={p.entry} />;
+      break;
+    case "diagnostics":
+      page = <DiagnosticsScreen />;
       break;
     case "nowPlaying":
       page = <NowPlayingScreen />;

@@ -24,6 +24,7 @@ export type PageKey =
   | { name: "newPlaylist"; smart?: { libraryId: number; filter: string } }
   | { name: "settings" }
   | { name: "history" }
+  | { name: "diagnostics" }
   | { name: "nowPlaying" }
   | { name: "player"; request: PlayRequest; pressedAt: number };
 

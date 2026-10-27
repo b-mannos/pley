@@ -452,7 +452,9 @@ export class AppState {
   // ---- the TV's capabilities
 
   /** The capabilities, probed once (after the first screen is drawn), again after Settings change them. */
-  caps(): Promise<Probe | null> {
+  caps(fresh = false): Promise<Probe | null> {
+    // Diagnostics' Check again: asked of the TV anew.
+    if (fresh) this.capsPromise = null;
     if (!this.capsPromise) {
       const s = this.settings.value;
       this.capsPromise = this.platform.probe({ truehd: s.passthroughTrueHd, dts: s.passthroughDts }).catch(() => null);

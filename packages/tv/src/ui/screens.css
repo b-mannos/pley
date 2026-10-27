@@ -503,7 +503,18 @@
 .settings-facts { padding: 12px 0 0 20px; }
 .settings-fact { display: flex; padding: 3px 0; }
 .settings-fact > :first-child { width: 150px; flex: none; }
-.settings-probe { padding: 3px 0; }
+/* Diagnostics: a column that scrolls with focus; every line takes it (the accent fill, as every row). */
+.diagnostics-page { position: absolute; left: 0; top: 0; width: 960px; height: 540px; overflow: hidden; }
+.diagnostics-column { position: absolute; left: 96px; right: 48px; top: 27px; padding-bottom: 160px; will-change: transform; transition: transform 200ms var(--focus-ease); }
+.reduced .diagnostics-column { transition: none; }
+.diagnostics-heading { margin: 20px 0 8px; }
+.diagnostics-line { display: flex; min-height: 36px; box-sizing: border-box; padding: 8px 16px; margin-bottom: 2px; border-radius: 4px; color: var(--fg); }
+.diagnostics-label { width: 180px; flex: none; color: var(--muted); }
+.diagnostics-value { flex: 1; min-width: 0; }
+.diagnostics-line[data-focused] { background: var(--accent); color: var(--on-accent); }
+.diagnostics-line[data-focused] .diagnostics-label { color: var(--on-accent); }
+.diagnostics-note { padding-left: 16px; }
+.diagnostics-again { padding-top: 12px; }
 .web-dialog { display: flex; max-width: 640px; padding: 28px; }
 .web-qr { margin-left: 28px; padding: 4px; background: #fff; border-radius: 4px; flex: none; }
 

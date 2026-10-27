@@ -5,7 +5,7 @@ import type { HistoryEntry, SubtitleMode } from "../../api/types";
 import { displayAddress } from "../../auth/addresses";
 import { episodeLabel } from "../../format/format";
 import { PRESETS } from "../../player/quality";
-import type { Settings } from "../../state";
+import type { AppState, Settings } from "../../state";
 import { useUi } from "../context";
 import { Art, artCandidates } from "../kit/art";
 import { Pill, TextButton } from "../kit/buttons";
@@ -93,11 +93,6 @@ export function SettingsScreen(p: { entry: Entry }) {
   const canDefaults = scopes.indexOf("play") >= 0 && !readOnly;
   const server = app.server.value;
   const household = app.profiles.value ?? app.savedHousehold();
-  const [probeLines, setProbeLines] = useState<string[] | null>(null);
-  useEffect(() => {
-    if (shown === "diagnostics") void app.caps().then((r) => setProbeLines(r ? r.lines : []));
-  }, [shown]);
-
   const show = (c: Category) => {
     setShown(c);
     p.entry.state.category = c;
@@ -356,34 +351,27 @@ export function SettingsScreen(p: { entry: Entry }) {
       rows.push(<SettingRow key="switchserver" fid="row-switchserver" icon="arrow-left" label="Switch server" chevron onSelect={() => ui.nav.restart({ name: "servers" })} />);
       break;
     case "diagnostics": {
-      const d = app.platform.device();
-      const facts: [string, string][] = [
-        ["Model", d.model],
-        ["System", d.os],
-        ["Firmware", d.firmware ?? "—"],
-        ["Web engine", d.chromium ? `Chromium ${d.chromium}` : "—"],
-        ["Tier", app.platform.tier()],
-      ];
+      rows.push(
+        <SettingRow
+          key="diagnostics"
+          fid="row-diagnostics"
+          icon="gauge"
+          label="Open diagnostics"
+          value="What this TV decodes and shows, and why"
+          chevron
+          onSelect={() => ui.nav.open({ name: "diagnostics" })}
+        />,
+      );
       rows.push(
         <div key="facts" class="settings-facts">
-          {facts.map(([l, v]) => (
+          {deviceFacts(app).map(([l, v]) => (
             <div key={l} class="settings-fact">
               <div class="t-caption c-muted">{l}</div>
               <div class="t-caption c-fg">{v}</div>
             </div>
           ))}
-          <div class="t-label c-subtle" style="margin-top:12px">
-            What this TV tells the server it plays
-          </div>
-          {(probeLines ?? ["Asking the TV…"]).map((l, i) => (
-            <div key={i} class="t-caption c-fg settings-probe">
-              {l}
-            </div>
-          ))}
         </div>,
       );
-      // A focusable line, so the pane can be reached and read.
-      rows.unshift(<SettingRow key="refresh" fid="row-probe" icon="refresh-cw" label="Ask the TV again" onSelect={() => setProbeLines(null)} />);
       break;
     }
     case "about":
@@ -728,6 +716,70 @@ function HistoryMessage(p: { title: string; body: string; action: string; onActi
 }
 
 /** "0.2.0 (1a2b3c4d5)": the app's version and the commit it was built from, when known. */
+/** What the TV says about itself, label and value (Settings' Diagnostics and the Diagnostics page). */
+function deviceFacts(app: AppState): [string, string][] {
+  const d = app.platform.device();
+  return [
+    ["Model", d.model],
+    ["System", d.os],
+    ["Firmware", d.firmware ?? "—"],
+    ["Web engine", d.chromium ? `Chromium ${d.chromium}` : "—"],
+    ["Tier", app.platform.tier()],
+  ];
+}
+
+/**
+ * Diagnostics (TvDiagnosticsScreen): the app and the TV, then what the
+ * TV told the server it plays, one line each. Every line takes focus, so
+ * the remote scrolls through them; nothing acts but Check again, after a
+ * check that failed.
+ */
+export function DiagnosticsScreen() {
+  const app = useApp();
+  const [lines, setLines] = useState<string[] | null | "failed">(null);
+  const check = (fresh: boolean) => {
+    setLines(null);
+    void app.caps(fresh).then((r) => setLines(r ? r.lines : "failed"));
+  };
+  useEffect(() => check(false), []);
+  const column = useRef<HTMLDivElement>(null);
+  const shift = useScrollToFocus(column, 540 - 27);
+  const facts: [string, string][] = [["App", `${app.platform.appName} ${buildLabel(app.platform.version)}`] as [string, string]].concat(deviceFacts(app));
+  return (
+    <div class="diagnostics-page">
+      <div ref={column} class="diagnostics-column" style={`transform:translateY(${-shift}px)`}>
+        <div class="t-page c-fg">Diagnostics</div>
+        <G kind="col" class="diagnostics-lines">
+          <div class="t-section c-fg diagnostics-heading">This TV</div>
+          {facts.map(([label, value], i) => (
+            <F key={label} class="diagnostics-line" initial={i === 0} label={`${label}: ${value}`}>
+              <span class="t-body diagnostics-label">{label}</span>
+              <span class="t-body diagnostics-value">{value}</span>
+            </F>
+          ))}
+          <div class="t-section c-fg diagnostics-heading">What it plays</div>
+          {lines === null && <div class="t-body c-muted diagnostics-note">Checking what this TV plays…</div>}
+          {lines === "failed" && (
+            <>
+              <div class="t-body c-danger diagnostics-note">The check of this TV failed.</div>
+              <G kind="row" class="diagnostics-again">
+                <Pill label="Check again" icon="refresh-cw" fid="again" onSelect={() => check(true)} />
+              </G>
+            </>
+          )}
+          {Array.isArray(lines) &&
+            lines.map((line, i) => (
+              <F key={i} class="diagnostics-line" label={line}>
+                <span class="t-body diagnostics-value">{line}</span>
+              </F>
+            ))}
+        </G>
+      </div>
+      <div class="rail-fade" />
+    </div>
+  );
+}
+
 export function buildLabel(version: string): string {
   const commit = typeof __PLEY_COMMIT__ === "string" ? __PLEY_COMMIT__ : "";
   return commit && commit !== "unknown" ? `${version} (${commit})` : version;
