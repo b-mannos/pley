@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import type { MediaFile, MediaStream } from "@/api/types";
 import { cn } from "@/lib/cn";
@@ -78,12 +78,44 @@ function StreamTable({ streams }: { streams: MediaStream[] }) {
   );
 }
 
-function FileInfo({ file, title }: { file: MediaFile; title?: string }) {
+/** A button that shows or hides what follows it, closed to begin with. */
+function Disclosure({
+  label,
+  className,
+  panelClassName,
+  children,
+}: {
+  label: ReactNode;
+  className?: string;
+  panelClassName?: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls={panelId}
+        className={cn("flex items-center gap-2 text-sm font-semibold transition-colors hover:text-fg", className)}
+      >
+        <ChevronDown aria-hidden className={cn("size-4 shrink-0 transition-transform", open && "rotate-180")} />
+        {label}
+      </button>
+      <div id={panelId} hidden={!open} className={panelClassName}>
+        {open ? children : null}
+      </div>
+    </>
+  );
+}
+
+function FileInfo({ file }: { file: MediaFile }) {
   const order: Record<MediaFile["streams"][number]["kind"], number> = { video: 0, audio: 1, subtitle: 2 };
   const streams = [...file.streams].sort((a, b) => order[a.kind] - order[b.kind] || a.index - b.index);
   return (
     <div className="rounded-lg border border-border bg-surface/80 p-4 backdrop-blur">
-      {title ? <h3 className="mb-2 text-sm font-semibold">{title}</h3> : null}
       <dl>
         <Row label="File">
           <span className="break-all font-mono text-xs text-fg/80">{file.path}</span>
@@ -110,28 +142,39 @@ function FileInfo({ file, title }: { file: MediaFile; title?: string }) {
   );
 }
 
+/**
+ * What the files are (codecs, sizes, streams), hidden until asked for. With
+ * several versions, each one opens on its own too.
+ */
 export function MediaInfo({ files }: { files: MediaFile[] }) {
-  const [open, setOpen] = useState(false);
   if (!files.length) return null;
+  const only = files.length === 1 ? files[0] : undefined;
   return (
     <section className="mt-10 max-w-4xl">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="flex items-center gap-2 text-sm font-semibold text-muted transition-colors hover:text-fg"
+      <Disclosure
+        className="text-muted"
+        panelClassName="mt-3"
+        label={
+          <>
+            Media info{" "}
+            {files.length > 1 ? <span className="text-subtle">({files.length} versions)</span> : null}
+          </>
+        }
       >
-        <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
-        Media info
-        {files.length > 1 ? <span className="text-subtle">({files.length} versions)</span> : null}
-      </button>
-      {open ? (
-        <div className="mt-3 space-y-3">
-          {files.map((f, i) => (
-            <FileInfo key={f.id} file={f} title={f.edition ?? (files.length > 1 ? `Version ${i + 1}` : undefined)} />
-          ))}
-        </div>
-      ) : null}
+        {only ? (
+          <FileInfo file={only} />
+        ) : (
+          <ul className="space-y-2">
+            {files.map((f, i) => (
+              <li key={f.id}>
+                <Disclosure className="text-fg/90" panelClassName="mt-2" label={f.edition ?? `Version ${i + 1}`}>
+                  <FileInfo file={f} />
+                </Disclosure>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Disclosure>
     </section>
   );
 }
