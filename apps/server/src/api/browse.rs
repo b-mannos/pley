@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use super::items::item_or_404;
 use super::libraries::{Hub, Hubs};
+use super::wants_summaries;
 use crate::auth::AuthUser;
 use crate::catalog::{self, ItemSummary};
 use crate::error::{ApiResult, AppError};
@@ -14,7 +15,12 @@ use crate::library::list_libraries;
 use crate::people::{self, PersonSummary};
 use crate::state::AppState;
 
-pub async fn home(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Hubs>> {
+pub async fn home(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Query(query): Query<HashMap<String, String>>,
+) -> ApiResult<Json<Hubs>> {
+    let summaries = wants_summaries(&query);
     let libraries = list_libraries(&state.db).await?;
     // Every hub at the same time: they don't depend on each other.
     let (continue_rows, my_list, recent) = tokio::try_join!(
@@ -33,13 +39,13 @@ pub async fn home(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
             key: "continue_watching".into(),
             title: "Continue Watching".into(),
             library_id: None,
-            items: continue_rows.iter().map(|r| r.to_summary()).collect(),
+            items: continue_rows.iter().map(|r| r.to_summary_with(summaries)).collect(),
         },
         Hub {
             key: "my_list".into(),
             title: "My List".into(),
             library_id: None,
-            items: my_list.iter().map(|r| r.to_summary()).collect(),
+            items: my_list.iter().map(|r| r.to_summary_with(summaries)).collect(),
         },
     ];
     for (lib, rows) in libraries.iter().zip(recent) {
@@ -48,7 +54,7 @@ pub async fn home(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
             // "in" reads right whatever the library is called.
             title: format!("Recently Added in {}", lib.name),
             library_id: Some(lib.id),
-            items: rows.iter().map(|r| r.to_summary()).collect(),
+            items: rows.iter().map(|r| r.to_summary_with(summaries)).collect(),
         });
     }
     hubs.retain(|h| !h.items.is_empty());
@@ -87,5 +93,6 @@ pub async fn search(
     // Titles and people at the same time.
     let (rows, people) =
         tokio::try_join!(catalog::search(&state.db, user.id, q, limit), people::search(&state.db, user.id, q, 12))?;
-    Ok(Json(SearchResults { items: rows.iter().map(|r| r.to_summary()).collect(), people }))
+    let summaries = wants_summaries(&query);
+    Ok(Json(SearchResults { items: rows.iter().map(|r| r.to_summary_with(summaries)).collect(), people }))
 }

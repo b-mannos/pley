@@ -144,10 +144,16 @@ pub struct ItemList {
     items: Vec<ItemSummary>,
 }
 
-pub async fn children(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<Json<ItemList>> {
+pub async fn children(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<i64>,
+    Query(query): Query<HashMap<String, String>>,
+) -> ApiResult<Json<ItemList>> {
     item_or_404(&state, user.id, id).await?;
     let rows = catalog::children(&state.db, user.id, id).await?;
-    Ok(Json(ItemList { items: rows.iter().map(ItemRow::to_summary).collect() }))
+    let summaries = super::wants_summaries(&query);
+    Ok(Json(ItemList { items: rows.iter().map(|r| r.to_summary_with(summaries)).collect() }))
 }
 
 /// "More Like This" for movies and shows (`limit`, default 20).

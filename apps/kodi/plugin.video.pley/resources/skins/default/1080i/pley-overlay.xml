@@ -9,6 +9,15 @@
       <bottom>150</bottom>
       <width>620</width>
       <height>160</height>
+      <!-- Up Next on a card: a shadow alone is lost on a bright picture. -->
+      <control type="image">
+        <left>-24</left>
+        <top>-24</top>
+        <width>668</width>
+        <height>190</height>
+        <texture colordiffuse="E60F172A">pley-white.png</texture>
+        <visible>Control.IsVisible(3003)</visible>
+      </control>
       <control type="label" id="3003">
         <left>0</left>
         <top>0</top>
@@ -36,7 +45,7 @@
           <aligny>center</aligny>
           <textcolor>FFFFFFFF</textcolor>
           <focusedcolor>FF0F172A</focusedcolor>
-          <texturenofocus colordiffuse="B3000000">pley-white.png</texturenofocus>
+          <texturenofocus colordiffuse="33FFFFFF">pley-white.png</texturenofocus>
           <texturefocus colordiffuse="FF38BDF8">pley-white.png</texturefocus>
           <onright>3001</onright>
         </control>

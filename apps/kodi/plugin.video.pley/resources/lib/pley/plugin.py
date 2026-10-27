@@ -78,10 +78,14 @@ class Plugin:
     def items(self, items: list, content: str | None = None, in_season: bool = False) -> None:
         """`in_season`: a season's episodes, which need no show in their
         names; elsewhere (Home's rows, search, playlists) they say it."""
+        kinds = {item["kind"] for item in items}
+        # Among films and shows, episodes show their show's poster, as the
+        # others do theirs; on their own, their stills.
+        posters = kinds != {"episode"}
         base = self.proxy_base
         entries = []
         for item in items:
-            li = listing.list_item(base, item, with_show=not in_season)
+            li = listing.list_item(base, item, with_show=not in_season, posters=posters)
             li.addContextMenuItems(self.menu(item))
             if item["kind"] in listing.PLAYABLE:
                 # The resume point goes along, so playing needs no details first.
@@ -90,9 +94,8 @@ class Plugin:
             else:
                 entries.append((self.url(route="item", id=item["id"]), li, True))
         xbmcplugin.addDirectoryItems(self.handle, entries, len(entries))
-        kinds = {item["kind"] for item in items}
         if content is None and len(kinds) == 1:
-            content = listing.CONTENT.get(kinds.pop())
+            content = listing.CONTENT.get(next(iter(kinds)))
         elif content is None and kinds and kinds <= {"movie", "show", "episode", "extra"}:
             # A row of films and episodes: poster views still apply.
             content = "movies"
@@ -194,7 +197,7 @@ class Plugin:
 
     def route_hub(self) -> None:
         key = self.params["key"]
-        hubs = self.client().get("/api/hubs/home").get("hubs", [])
+        hubs = self.client().get("/api/hubs/home", summaries=1).get("hubs", [])
         hub = next((h for h in hubs if h["key"] == key), None)
         self.items(hub["items"] if hub else [])
         self.end()
@@ -203,7 +206,9 @@ class Plugin:
         library, kind = self.params["id"], self.params.get("kind")
         offset = int(self.params.get("offset", 0))
         client = self.client()
-        items = lambda: client.get("/api/libraries/%s/items" % library, sort="title", offset=offset, limit=PAGE)  # noqa: E731
+        items = lambda: client.get(  # noqa: E731
+            "/api/libraries/%s/items" % library, sort="title", offset=offset, limit=PAGE, summaries=1
+        )
         if offset == 0 and kind in ("movies", "shows"):
             sets, page = together(lambda: client.get("/api/libraries/%s/collections" % library), items)
             if sets.get("collections"):
@@ -219,7 +224,7 @@ class Plugin:
         self.end()
 
     def route_item(self) -> None:
-        children = self.client().get("/api/items/%s/children" % self.params["id"]).get("items", [])
+        children = self.client().get("/api/items/%s/children" % self.params["id"], summaries=1).get("items", [])
         self.items(children, in_season=True)
         if children and children[0]["kind"] in ("episode", "track"):
             xbmcplugin.addSortMethod(self.handle, xbmcplugin.SORT_METHOD_UNSORTED)
@@ -245,7 +250,7 @@ class Plugin:
         self.end()
 
     def route_collection(self) -> None:
-        self.items(self.client().get("/api/collections/%s" % self.params["id"]).get("items", []))
+        self.items(self.client().get("/api/collections/%s" % self.params["id"], summaries=1).get("items", []))
         self.end()
 
     def route_playlists(self) -> None:
@@ -258,7 +263,7 @@ class Plugin:
         self.end()
 
     def route_playlist(self) -> None:
-        entries = self.client().get("/api/playlists/%s" % self.params["id"]).get("entries", [])
+        entries = self.client().get("/api/playlists/%s" % self.params["id"], summaries=1).get("entries", [])
         self.items([entry["item"] for entry in entries])
         self.end()
 
@@ -272,7 +277,7 @@ class Plugin:
                 # watched mark) shows them again rather than the keyboard.
                 xbmc.executebuiltin("Container.Update(%s)" % self.url(route="search", q=query))
             return
-        found = self.client().get("/api/search", q=query, limit=100)
+        found = self.client().get("/api/search", q=query, limit=100, summaries=1)
         items = found.get("items", [])
         if not items:
             kodi.notify(kodi.text("nothing_found"))

@@ -54,7 +54,10 @@ def label(item: dict, with_show: bool = False) -> str:
     return item["title"]
 
 
-def art(base: str, item: dict) -> dict:
+def art(base: str, item: dict, posters: bool = False) -> dict:
+    """`posters`: an episode's show's poster as its own too, for a row of
+    films and episodes. Kodi's own episodes have none, and skins show one in
+    place of the episode's still when there is."""
     poster = image(base, item.get("poster_url"), 500)
     backdrop_url = item.get("backdrop_url")
     if not backdrop_url and item["kind"] in ("movie", "show") and item.get("id") is not None:
@@ -66,8 +69,11 @@ def art(base: str, item: dict) -> dict:
     still = image(base, item.get("thumb_url"), 640)
     found = {}
     if item["kind"] == "episode":
+        # An episode's poster is its show's (the server's fallback).
         found["thumb"] = still or poster
-        found["poster"] = poster
+        found["tvshow.poster"] = poster
+        if posters:
+            found["poster"] = poster
     elif item["kind"] in MUSIC:
         found["thumb"] = poster
     else:
@@ -78,10 +84,10 @@ def art(base: str, item: dict) -> dict:
     return {k: v for k, v in found.items() if v}
 
 
-def list_item(base: str, item: dict, with_show: bool = False) -> xbmcgui.ListItem:
+def list_item(base: str, item: dict, with_show: bool = False, posters: bool = False) -> xbmcgui.ListItem:
     kind = item["kind"]
     li = xbmcgui.ListItem(label(item, with_show), offscreen=True)
-    li.setArt(art(base, item))
+    li.setArt(art(base, item, posters))
     state = item.get("user_state") or {}
     seconds = (item.get("duration_ms") or 0) // 1000
     if kind in MUSIC:

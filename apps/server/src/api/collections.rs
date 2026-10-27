@@ -51,19 +51,20 @@ pub struct CollectionDetail {
     items: Vec<ItemSummary>,
 }
 
-async fn detail(state: &AppState, user: &AuthUser, id: i64) -> ApiResult<CollectionDetail> {
+async fn detail(state: &AppState, user: &AuthUser, id: i64, summaries: bool) -> ApiResult<CollectionDetail> {
     let (collection, items) = collections::get(&state.db, user, id)
         .await?
         .ok_or_else(|| AppError::not_found(format!("collection {id} not found")))?;
-    Ok(CollectionDetail { collection, items: items.iter().map(|r| r.to_summary()).collect() })
+    Ok(CollectionDetail { collection, items: items.iter().map(|r| r.to_summary_with(summaries)).collect() })
 }
 
 pub async fn get(
     State(state): State<AppState>,
     user: AuthUser,
     Path(id): Path<i64>,
+    Query(query): Query<HashMap<String, String>>,
 ) -> ApiResult<Json<CollectionDetail>> {
-    Ok(Json(detail(&state, &user, id).await?))
+    Ok(Json(detail(&state, &user, id, super::wants_summaries(&query)).await?))
 }
 
 #[derive(Deserialize)]
@@ -114,7 +115,7 @@ pub async fn create(
         }
     };
     state.events.send(ServerEvent::LibraryChanged { library_id });
-    Ok((StatusCode::CREATED, Json(detail(&state, &admin, id).await?)))
+    Ok((StatusCode::CREATED, Json(detail(&state, &admin, id, false).await?)))
 }
 
 #[derive(Deserialize)]
@@ -162,7 +163,7 @@ pub async fn update(
     collections::update(&state.db, id, title.as_deref(), summary.as_ref().map(|s| s.as_deref()), body.sort.as_deref())
         .await?;
     state.events.send(ServerEvent::LibraryChanged { library_id });
-    Ok(Json(detail(&state, &admin, id).await?))
+    Ok(Json(detail(&state, &admin, id, false).await?))
 }
 
 pub async fn delete(State(state): State<AppState>, _admin: AdminUser, Path(id): Path<i64>) -> ApiResult<StatusCode> {

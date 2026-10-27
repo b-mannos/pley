@@ -17,6 +17,7 @@ mod playlists;
 mod two_step;
 mod watchlist;
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use axum::Router;
@@ -262,6 +263,12 @@ const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self'; st
 /// Query string helper: `"true"`/`"1"` → true.
 pub(crate) fn truthy(value: &str) -> bool {
     matches!(value, "1" | "true" | "yes")
+}
+
+/// `summaries=1`: a list's movies, shows and seasons with their synopses
+/// (see [`ItemRow::to_summary_with`](crate::catalog::ItemRow::to_summary_with)).
+pub(crate) fn wants_summaries(query: &HashMap<String, String>) -> bool {
+    query.get("summaries").is_some_and(|v| truthy(v))
 }
 
 /// The request URI for logs, with credentials in the query left out:

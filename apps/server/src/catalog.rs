@@ -361,6 +361,17 @@ impl ItemRow {
             media: None,
         }
     }
+
+    /// [`to_summary`](Self::to_summary), with the synopsis of every kind
+    /// when the client asked for them (`summaries=1`): Kodi shows what its
+    /// lists carry, and nothing else, on a title's page.
+    pub fn to_summary_with(&self, summaries: bool) -> ItemSummary {
+        let mut summary = self.to_summary();
+        if summaries {
+            summary.summary = self.summary.clone();
+        }
+        summary
+    }
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -1705,6 +1716,8 @@ mod tests {
         let summary = show.to_summary();
         assert!(summary.user_state.watched, "every episode watched");
         assert_eq!(summary.summary, None, "listings leave synopses out, except for episodes");
+        assert_eq!(show.to_summary_with(true).summary.as_deref(), Some("Plane crash."), "unless asked");
+        assert_eq!(show.to_summary_with(false).summary, None);
         show.viewed_leaf_count = Some(1);
         assert!(!show.to_summary().user_state.watched);
         (show.leaf_count, show.viewed_leaf_count) = (Some(0), Some(0));

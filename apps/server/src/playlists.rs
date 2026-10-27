@@ -277,10 +277,17 @@ pub async fn get_rows(db: &Db, user: &AuthUser, id: i64) -> sqlx::Result<Option<
     Ok(Some(dto_of(row, entries)))
 }
 
-/// A playlist and its visible entries, if it belongs to the user.
-pub async fn get(db: &Db, user: &AuthUser, id: i64) -> sqlx::Result<Option<(PlaylistDto, Vec<EntryDto>)>> {
+/// A playlist and its visible entries, if it belongs to the user; with every
+/// entry's synopsis when `summaries` (see `ItemRow::to_summary_with`).
+pub async fn get(
+    db: &Db,
+    user: &AuthUser,
+    id: i64,
+    summaries: bool,
+) -> sqlx::Result<Option<(PlaylistDto, Vec<EntryDto>)>> {
     Ok(get_rows(db, user, id).await?.map(|(dto, rows)| {
-        let entries = rows.iter().map(|(entry_id, row)| EntryDto { entry_id: *entry_id, item: row.to_summary() });
+        let entries =
+            rows.iter().map(|(entry_id, row)| EntryDto { entry_id: *entry_id, item: row.to_summary_with(summaries) });
         (dto, entries.collect())
     }))
 }

@@ -76,6 +76,13 @@ go to it.
   server for a lower one, converted. Subtitles beside a file are named as
   Kodi names its own (`3.eng.forced.vtt`), so Kodi lists them by language
   and picks a forced one as it picks those.
+- **Listings** carry what Kodi shows of a title, since it asks the plugin
+  for nothing more: synopses of every kind (`summaries=1`, docs/API.md),
+  and artwork as Kodi's own library has it. An episode's still is its
+  `thumb` and its show's poster its `tvshow.poster`: skins show an
+  episode's own `poster` in place of its still. Only in a row of films and
+  episodes (Home's) is the show's poster the episode's `poster` too, so
+  poster views stay posters.
 - **Progress**: the service tells the server where playback is every 10
   seconds while it plays and every 30 while it is paused (the server lets a
   player it hasn't heard from for 90 seconds go, and its conversion with
@@ -96,7 +103,9 @@ go to it.
   doesn't pause it, from a marker's start until a second before its end and
   for 10 seconds at most, since it holds the remote while it shows; an
   episode's credits bring up the next one, which plays after 10 seconds
-  unless it is cancelled, also when the episode ends on its own.
+  unless it is cancelled, also when the episode ends on its own. Up Next
+  says which on a dark card, since a shadow alone is lost on a bright
+  picture.
 - **Without the server** (switched off, or another network), every screen
   says "Can't reach <server>" with Try again and Choose a server. pley
   needs no internet: sign-in, artwork and playback all come from the
@@ -168,6 +177,9 @@ back.
 ## Not yet
 
 - "Who's watching?" and switching profiles (the `profiles` scope).
+- A title's information page shows its synopsis, not its cast, genres or
+  crew: lists don't carry them (the playing title has them, from its
+  details).
 - Making and editing playlists; people's pages.
 - Picture subtitles (PGS, VobSub) with a converted stream: only text
   subtitles come beside it. Files played as they are show every kind.

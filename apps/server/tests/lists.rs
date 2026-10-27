@@ -437,6 +437,52 @@ async fn hidden_items_stay_hidden_in_collections_and_playlists() {
 }
 
 #[tokio::test]
+async fn lists_carry_synopses_when_asked() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Alpha (2001).mkv");
+    app.media_file("tv/Show (2015)/Season 01/Show - S01E01 - Pilot.mkv");
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let tv = app.library(&admin, "TV", "shows", "tv").await;
+    let alpha = app.ids(movies, &admin).await["Alpha"];
+    let show = app.ids(tv, &admin).await["Show"];
+    let season = app.get(&format!("/api/items/{show}/children"), &admin).await.body["items"][0]["id"].as_i64().unwrap();
+    for (id, text) in [(alpha, "A film."), (season, "A season.")] {
+        let edited = app.patch(&format!("/api/items/{id}"), &admin, json!({"summary": text})).await;
+        assert_eq!(edited.status, StatusCode::OK, "{:?}", edited.body);
+    }
+    let collection = app.collection(&admin, movies, "Favourites", &[alpha]).await;
+    let playlist = app.post("/api/playlists", &admin, json!({"title": "Tonight", "item_ids": [alpha]})).await;
+    let playlist = playlist.body["id"].as_i64().unwrap();
+    let recent = format!("recently_added:{movies}");
+
+    // Each list, and where its first title is in the answer.
+    let lists = [
+        (format!("/api/libraries/{movies}/items?sort=title"), "/items/0"),
+        ("/api/hubs/home?x=1".to_owned(), ""),
+        (format!("/api/items/{show}/children?x=1"), "/items/0"),
+        (format!("/api/collections/{collection}?x=1"), "/items/0"),
+        (format!("/api/playlists/{playlist}?x=1"), "/entries/0/item"),
+        ("/api/search?q=alpha".to_owned(), "/items/0"),
+    ];
+    for (path, at) in lists {
+        let first = |body: &Value| -> Value {
+            if at.is_empty() {
+                let hubs = body["hubs"].as_array().unwrap();
+                return hubs.iter().find(|h| h["key"] == json!(recent)).unwrap()["items"][0].clone();
+            }
+            body.pointer(at).unwrap().clone()
+        };
+        let plain = app.get(&path, &admin).await;
+        assert_eq!(plain.status, StatusCode::OK, "{path}: {:?}", plain.body);
+        assert_eq!(first(&plain.body).get("summary"), None, "{path} leaves synopses out");
+        let asked = app.get(&format!("{path}&summaries=1"), &admin).await;
+        let expected = if path.contains("children") { "A season." } else { "A film." };
+        assert_eq!(first(&asked.body)["summary"], json!(expected), "{path}");
+    }
+}
+
+#[tokio::test]
 async fn playlists_expand_reorder_and_keep_to_one_kind() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;

@@ -151,7 +151,7 @@ interface ItemSummary {
   leaf_count?: number;              // show/season: #episodes, artist/album: #tracks
   viewed_leaf_count?: number;       // show/season: #watched episodes
   child_count?: number;             // show: #seasons, artist: #albums
-  summary?: string;                 // in lists only for episodes; always in ItemDetail
+  summary?: string;                 // in lists only for episodes, every kind's with `summaries=1` (below); always in ItemDetail
   release_date?: string;            // "YYYY-MM-DD"
   extra_type?: string;              // kind "extra": trailer | featurette | behind_the_scenes | deleted_scene | interview | scene | short | other
   media?: MediaSummary;             // only in library listings sorted by bitrate
@@ -305,6 +305,13 @@ interface PlaybackInfo {
                                     // "20m", "15m" = 15 Mbps 4K, "12m", "8m", "4m", "2m"); null when a quality was asked for
 }
 ```
+
+Lists leave out the synopses of movies, shows, seasons and the rest: a big
+library's would be several times larger. `summaries=1` in the query of
+`GET /api/hubs/home`, `/api/libraries/{id}/items`, `/api/items/{id}/children`,
+`/api/collections/{id}`, `/api/playlists/{id}` and `/api/search` brings every
+item's `summary`, for a client that shows nothing more of a title than its
+lists carry (Kodi's information page).
 
 ---
 
@@ -910,7 +917,7 @@ may open only some libraries see those, in that order.
 | DELETE | `/api/libraries/{id}` *(admin)* | – | `204` |
 | POST | `/api/libraries/{id}/scan` *(admin)* | `{ force?: boolean }` (force = re-probe files and refresh metadata) | `202` |
 | POST | `/api/libraries/scan` *(admin)* | – | `202` (scan all) |
-| GET | `/api/libraries/{id}/items` | query: `sort=title\|year\|added\|rating\|user_rating\|release\|duration\|last_played\|bitrate` (default `title`), `order=asc\|desc`, `watched=true\|false`, `genre=<name>`, `year=<yyyy>`, `offset`, `limit` | `{ total: number, items: ItemSummary[] }` — top-level items only; `total` counts every match, not just the page; `watched=true` matches shows whose every episode is watched. Items leave out `backdrop_url` and `thumb_url` (grids show posters). Answers carry an `ETag` and `Cache-Control: private, no-cache`; `If-None-Match` with the same tag answers `304` while the library, the user's watch state and their access are unchanged |
+| GET | `/api/libraries/{id}/items` | query: `sort=title\|year\|added\|rating\|user_rating\|release\|duration\|last_played\|bitrate` (default `title`), `order=asc\|desc`, `watched=true\|false`, `genre=<name>`, `year=<yyyy>`, `offset`, `limit`, `summaries=1` (with synopses, see ItemSummary) | `{ total: number, items: ItemSummary[] }` — top-level items only; `total` counts every match, not just the page; `watched=true` matches shows whose every episode is watched. Items leave out `backdrop_url` and `thumb_url` (grids show posters). Answers carry an `ETag` and `Cache-Control: private, no-cache`; `If-None-Match` with the same tag answers `304` while the library, the user's watch state and their access are unchanged |
 | GET | `/api/libraries/{id}/filters` | – | `{ genres: string[], years: number[] }` |
 | GET | `/api/libraries/{id}/hubs` | – | `{ hubs: Hub[] }` (continue watching, recently added, recently released, top rated – empty hubs omitted) |
 

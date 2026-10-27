@@ -8,7 +8,7 @@ use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::truthy;
+use super::{truthy, wants_summaries};
 use crate::access;
 use crate::auth::{AdminUser, AuthUser};
 use crate::catalog::{self, ItemSummary, LibraryQuery, ME_CTE, SortKey, VISIBLE, VISIBLE_ITEMS};
@@ -335,8 +335,11 @@ pub async fn items(
     };
     let (rows, total) = catalog::library_items(&state.db, user.id, &q).await?;
     // Library grids show posters: the other pictures are left out.
-    let mut items: Vec<ItemSummary> =
-        rows.iter().map(|r| catalog::ItemSummary { backdrop_url: None, thumb_url: None, ..r.to_summary() }).collect();
+    let summaries = wants_summaries(&query);
+    let mut items: Vec<ItemSummary> = rows
+        .iter()
+        .map(|r| catalog::ItemSummary { backdrop_url: None, thumb_url: None, ..r.to_summary_with(summaries) })
+        .collect();
     // Sorted by bitrate, the posters say what the files are like.
     if sort == SortKey::Bitrate {
         let mut media = catalog::media_summaries(&state.db, &items).await?;

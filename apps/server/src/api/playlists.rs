@@ -1,7 +1,9 @@
 //! Playlists (per user, private) — see `crate::playlists`.
 
+use std::collections::HashMap;
+
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 
@@ -35,8 +37,8 @@ pub struct PlaylistDetail {
     entries: Vec<EntryDto>,
 }
 
-async fn detail(state: &AppState, user: &AuthUser, id: i64) -> ApiResult<PlaylistDetail> {
-    let (playlist, entries) = playlists::get(&state.db, user, id)
+async fn detail(state: &AppState, user: &AuthUser, id: i64, summaries: bool) -> ApiResult<PlaylistDetail> {
+    let (playlist, entries) = playlists::get(&state.db, user, id, summaries)
         .await?
         .ok_or_else(|| AppError::not_found(format!("playlist {id} not found")))?;
     Ok(PlaylistDetail { playlist, entries })
@@ -46,8 +48,9 @@ pub async fn get(
     State(state): State<AppState>,
     user: AuthUser,
     Path(id): Path<i64>,
+    Query(query): Query<HashMap<String, String>>,
 ) -> ApiResult<Json<PlaylistDetail>> {
-    Ok(Json(detail(&state, &user, id).await?))
+    Ok(Json(detail(&state, &user, id, super::wants_summaries(&query)).await?))
 }
 
 #[derive(Deserialize)]
@@ -96,7 +99,7 @@ pub async fn create(
         let (lib, filter) = smart_filter_of(&state, &user, body.library_id, filter).await?;
         let kind = if lib.kind() == crate::library::LibraryKind::Music { Kind::Audio } else { Kind::Video };
         let id = playlists::create_smart(&state.db, &user, &title, kind, lib.id, &filter).await?;
-        return Ok((StatusCode::CREATED, Json(detail(&state, &user, id).await?)));
+        return Ok((StatusCode::CREATED, Json(detail(&state, &user, id, false).await?)));
     }
     let kind = match body.kind.as_deref() {
         Some(k) => Kind::parse(k).ok_or_else(|| AppError::bad_request("kind must be video or audio"))?,
@@ -111,7 +114,7 @@ pub async fn create(
         playlists::delete(&state.db, &user, id).await?;
         return Err(err);
     }
-    Ok((StatusCode::CREATED, Json(detail(&state, &user, id).await?)))
+    Ok((StatusCode::CREATED, Json(detail(&state, &user, id, false).await?)))
 }
 
 #[derive(Deserialize)]
@@ -145,7 +148,7 @@ pub async fn rename(
             return Err(AppError::not_found(format!("playlist {id} not found")));
         }
     }
-    Ok(Json(detail(&state, &user, id).await?))
+    Ok(Json(detail(&state, &user, id, false).await?))
 }
 
 pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<StatusCode> {
@@ -206,5 +209,5 @@ pub async fn reorder(
     if !playlists::reorder(&state.db, &user, id, &body.entry_ids).await? {
         return Err(AppError::not_found(format!("playlist {id} not found")));
     }
-    Ok(Json(detail(&state, &user, id).await?))
+    Ok(Json(detail(&state, &user, id, false).await?))
 }

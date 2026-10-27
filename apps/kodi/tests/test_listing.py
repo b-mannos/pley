@@ -33,7 +33,15 @@ class ListingTest(unittest.TestCase):
         self.assertEqual(tag["setResumePoint"], (600.0, 1800.0))
         self.assertEqual(tag["setPlaycount"], 0)
         self.assertEqual(li.art["thumb"], BASE + "/api/items/31/images/thumb?v=9&w=640")
+        # The show's poster goes as the show's: skins show an episode's own
+        # poster in place of its still.
+        self.assertEqual(li.art["tvshow.poster"], BASE + "/api/items/30/images/poster?v=9&w=500")
+        self.assertNotIn("poster", li.art)
+
+    def test_episodes_among_films_show_their_shows_poster(self):
+        li = listing.list_item(BASE, EPISODE, with_show=True, posters=True)
         self.assertEqual(li.art["poster"], BASE + "/api/items/30/images/poster?v=9&w=500")
+        self.assertEqual(li.art["thumb"], BASE + "/api/items/31/images/thumb?v=9&w=640")
 
     def test_shows_open_and_count_their_episodes(self):
         show = {"id": 30, "library_id": 2, "kind": "show", "title": "The Show", "sort_title": "Show", "added_at": 0,
