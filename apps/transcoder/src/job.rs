@@ -171,6 +171,10 @@ pub struct Job {
 #[derive(Default)]
 struct Runtime {
     state: JobState,
+    /// Counts the processes started: the latest one's is the only exit that
+    /// says how the job stands (one stopped long before may go after
+    /// another started, see [`Proc::stop`]).
+    generation: u64,
     process: Option<ProcessStatus>,
     last_error: Option<String>,
     restarts: u32,
@@ -608,8 +612,9 @@ impl JobManager {
         };
 
         let start_ms = plan.boundaries[start as usize];
-        {
+        let generation = {
             let mut rt = job.runtime.lock();
+            rt.generation += 1;
             if rt.started_any {
                 rt.restarts += 1;
             }
@@ -626,7 +631,8 @@ impl JobManager {
                 preset: preset_name.clone(),
                 ..Default::default()
             });
-        }
+            rt.generation
+        };
 
         let next = Arc::new(AtomicU32::new(start));
         let tail = Arc::new(Mutex::new(VecDeque::new()));
@@ -657,7 +663,7 @@ impl JobManager {
             // must not start another one that writes them again.
             let _ = lister.await;
             drop(slot);
-            job_ref.on_exit(end, next_ref.load(Relaxed), status, killed, &tail, &metrics);
+            job_ref.on_exit(generation, end, next_ref.load(Relaxed), status, killed, &tail, &metrics);
             let _ = exit_tx.send(true);
             job_ref.notify.notify_waiters();
         });
@@ -857,8 +863,12 @@ impl Job {
         self.served_bytes.fetch_add(bytes, Relaxed);
     }
 
+    /// Process `generation` exited, at segment `next` of those it was to
+    /// make up to `end`.
+    #[allow(clippy::too_many_arguments)]
     fn on_exit(
         &self,
+        generation: u64,
         end: u32,
         next: u32,
         status: std::io::Result<ExitStatus>,
@@ -869,6 +879,10 @@ impl Job {
         let success = status.as_ref().is_ok_and(ExitStatus::success);
         tracing::debug!(job = %self.id, "ffmpeg exited at segment {next} (killed: {killed}, success: {success})");
         let mut rt = self.runtime.lock();
+        if rt.generation != generation {
+            // Stopped long ago, gone at last: the job is the running one's.
+            return;
+        }
         rt.process = None;
         if killed {
             rt.state = JobState::Idle;
@@ -1603,25 +1617,46 @@ mod tests {
         let job = job(dir.path(), vec![0, 4_000, 8_000]);
         let metrics = Metrics::default();
         let tail = Mutex::new(VecDeque::new());
-        job.on_exit(2, 2, Ok(exit(0)), false, &tail, &metrics);
+        job.on_exit(0, 2, 2, Ok(exit(0)), false, &tail, &metrics);
         assert_eq!(job.status().state, JobState::Finished, "produced up to the end");
-        job.on_exit(1, 1, Ok(exit(0)), false, &tail, &metrics);
+        job.on_exit(0, 1, 1, Ok(exit(0)), false, &tail, &metrics);
         assert_eq!(job.status().state, JobState::Idle, "the window ended before the file did");
-        job.on_exit(2, 1, Ok(exit(1)), true, &tail, &metrics);
+        job.on_exit(0, 2, 1, Ok(exit(1)), true, &tail, &metrics);
         assert_eq!(job.status().state, JobState::Idle, "stopped on purpose is no failure");
         assert_eq!(metrics.process_failures.load(Relaxed), 0);
 
         // A failure keeps the end of ffmpeg's output.
         tail.lock().extend(["one", "two", "three", "four", "five"].map(String::from));
-        job.on_exit(2, 1, Ok(exit(1)), false, &tail, &metrics);
+        job.on_exit(0, 2, 1, Ok(exit(1)), false, &tail, &metrics);
         let status = job.status();
         assert_eq!(status.state, JobState::Failed);
         assert_eq!(status.last_error.as_deref(), Some("two | three | four | five"));
-        job.on_exit(2, 1, Err(std::io::Error::other("gone")), false, &Mutex::new(VecDeque::new()), &metrics);
+        job.on_exit(0, 2, 1, Err(std::io::Error::other("gone")), false, &Mutex::new(VecDeque::new()), &metrics);
         assert!(job.status().last_error.unwrap().contains("could not be awaited: gone"));
         assert_eq!(metrics.process_failures.load(Relaxed), 2);
         assert_eq!(metrics.jobs_failed.load(Relaxed), 1, "a failing job counts once");
         assert_eq!(job.runtime.lock().failures.get(&1), Some(&2), "failures per start segment");
+    }
+
+    #[test]
+    fn a_process_stopped_long_ago_leaves_the_running_one_be() {
+        let dir = tempfile::tempdir().unwrap();
+        let job = job(dir.path(), vec![0, 4_000, 8_000]);
+        let (metrics, tail) = (Metrics::default(), Mutex::new(VecDeque::new()));
+        {
+            let mut rt = job.runtime.lock();
+            rt.generation = 2;
+            rt.state = JobState::Running;
+            rt.process = Some(ProcessStatus { pid: Some(7), ..Default::default() });
+        }
+        // The first process, which outlived its stop by seconds...
+        job.on_exit(1, 2, 1, Ok(exit(1)), true, &tail, &metrics);
+        let status = job.status();
+        assert_eq!((status.state, status.process.and_then(|p| p.pid)), (JobState::Running, Some(7)));
+        // ...then the second, the running one.
+        job.on_exit(2, 2, 1, Ok(exit(1)), true, &tail, &metrics);
+        let status = job.status();
+        assert_eq!((status.state, status.process), (JobState::Idle, None));
     }
 
     #[test]
