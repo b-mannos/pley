@@ -36,6 +36,8 @@ export function PlaylistsScreen(p: { entry: Entry }) {
     return <ColumnMessage top={80} title={failedTitle(loaded.error, "Couldn't load your playlists")} body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
   }
   if (!list) return null;
+  // Back to the grid where it was; a playlist deleted there leaves focus on the one now in its place.
+  const start = Math.min((p.entry.state.index as number | undefined) ?? 0, Math.max(0, list.length - 1));
   return (
     <div class="playlists-page">
       <div class="t-page c-fg" style="position:absolute;left:96px;top:27px">
@@ -52,7 +54,7 @@ export function PlaylistsScreen(p: { entry: Entry }) {
           count={list.length}
           top={96}
           clipTop={82}
-          startIndex={(p.entry.state.index as number | undefined) ?? 0}
+          startIndex={start}
           onFocusIndex={(i) => (p.entry.state.index = i)}
           cell={(i, place) => {
             const pl = list[i]!;
@@ -63,7 +65,7 @@ export function PlaylistsScreen(p: { entry: Entry }) {
                 subtitle={playlistMeta(pl)}
                 candidates={pl.artwork}
                 fid={`playlist/${pl.id}`}
-                initial={i === 0}
+                initial={i === start}
                 priority={place.priority}
                 onFocus={place.onFocus}
                 onSelect={() => ui.nav.open({ name: "playlist", id: pl.id })}
