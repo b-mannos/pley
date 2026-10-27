@@ -4,6 +4,7 @@ import { errorMessage, isApiError } from "../../api/client";
 import type { HistoryEntry, SubtitleMode } from "../../api/types";
 import { displayAddress } from "../../auth/addresses";
 import { episodeLabel } from "../../format/format";
+import { initMusic } from "../../player/music";
 import { PRESETS } from "../../player/quality";
 import type { AppState, Settings } from "../../state";
 import { useUi } from "../context";
@@ -148,7 +149,8 @@ export function SettingsScreen(p: { entry: Entry }) {
               <ProfileAvatar name={me.display_name || me.name} color={me.avatar_color} picture={me.avatar_url} size={48} />
               <div style="margin-left:16px;min-width:0">
                 <div class="t-title c-fg one-line">{me.display_name || me.name}</div>
-                <div class="t-caption c-muted one-line">{`User${server ? ` · ${displayAddress(server)}` : ""}`}</div>
+                {/* A managed profile says so; an account needs no word for what it is (Android's header). */}
+                <div class="t-caption c-muted one-line">{[me.managed ? "Managed profile" : "", server ? displayAddress(server) : ""].filter(Boolean).join(" · ")}</div>
               </div>
             </>
           ) : (
@@ -440,7 +442,7 @@ export function SettingsScreen(p: { entry: Entry }) {
       {signOut && (
         <Dialog
           title="Sign out?"
-          body={`pley signs this TV out of ${server ? displayAddress(server) : "the server"} and deletes what it saved from it.`}
+          body={`pley signs this TV out of ${server ? displayAddress(server) : "the server"} and deletes what it saved from it.${initMusic(app).now.value ? " The music stops." : ""}`}
           onDismiss={() => {
             setSignOut(false);
             focusRow("category-signout");

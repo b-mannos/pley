@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { errorMessage } from "../../api/client";
 import type { ItemSummary, PersonSummary } from "../../api/types";
 import { cardSubtitle, episodeLabel } from "../../format/format";
 import { Cancel } from "../../net/transport";
@@ -10,7 +9,7 @@ import { G } from "../kit/focusable";
 import { Row, rowHeight, SectionPage, type Section } from "../kit/row";
 import { ArtTile, Tile, type TileKind } from "../kit/tile";
 import type { Entry } from "../shell/navigator";
-import { sentence, useApp } from "./common";
+import { failedTitle, problem, useApp } from "./common";
 import { pageOf } from "./item-actions";
 import { RowsSkeleton } from "./library";
 
@@ -107,6 +106,11 @@ export function SearchScreen(p: { entry: Entry; query?: string }) {
         },
         (e) => {
           if (c.cancelled) return;
+          // A failure takes the place of what an earlier search found, which no longer matches the field.
+          setResults(null);
+          setShownQuery("");
+          p.entry.state.results = undefined;
+          p.entry.state.shownQuery = undefined;
           setLoading(false);
           setError(e);
         },
@@ -274,9 +278,9 @@ export function SearchScreen(p: { entry: Entry; query?: string }) {
       )}
       {query && error && !results ? (
         <div class="search-notice">
-          <div class="t-title c-fg">Search failed</div>
+          <div class="t-title c-fg">{failedTitle(error, "Search failed")}</div>
           <div class="t-body c-muted" style="margin-top:8px">
-            {sentence(errorMessage(error))}
+            {problem(error)}
           </div>
         </div>
       ) : null}

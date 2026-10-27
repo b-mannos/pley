@@ -14,6 +14,8 @@ export interface User {
   username: string;
   name: string;
   display_name: string | null;
+  /** A profile without a password, reached by switching. */
+  managed?: boolean;
   avatar_url: string | null;
   avatar_color: string | null;
   audio_language: string | null;
