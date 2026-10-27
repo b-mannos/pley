@@ -27,6 +27,10 @@
 //                                           540×405 and 290×218, Roku's home screen
 //                                           tiles, as the Android TV app's banner
 //   apps/roku/images/splash_{fhd,hd,sd}.png the logo on the Roku app's background
+//   apps/android/app/src/main/res/drawable-{xhdpi,xxhdpi,xxxhdpi}/tv_banner.png
+//                                           the Android TV app's banner, 320×180 dp:
+//                                           TV home screens show it, and Fire TV's
+//                                           shows it as the app's icon
 //   deploy/stores/                          the stores' listing pictures (README.md
 //                                           there): icons, Play's feature graphic,
 //                                           the TV banner
@@ -37,7 +41,7 @@
 //
 //   node scripts/render-icons.mjs
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
@@ -266,6 +270,13 @@ try {
   for (const [name, width, height] of [["splash_fhd.png", 1920, 1080], ["splash_hd.png", 1280, 720], ["splash_sd.png", 720, 480]]) {
     writeFileSync(join(roku, name), rgb72(await r.png(splash(width, height, "#16191e"), width, height)));
   }
+  // The Android TV app's banner, sharp on a 4K TV's home screen too.
+  const res = join(root, "apps/android/app/src/main/res");
+  for (const [density, scale] of [["xhdpi", 1], ["xxhdpi", 1.5], ["xxxhdpi", 2]]) {
+    const [width, height] = [320 * scale, 180 * scale];
+    mkdirSync(join(res, `drawable-${density}`), { recursive: true });
+    writeFileSync(join(res, `drawable-${density}`, "tv_banner.png"), rgb72(await r.png(banner(width, height), width, height)));
+  }
   // The stores': Google Play rounds the square icon's corners itself, so the P sits as on the
   // Android app's adaptive icon; the feature graphic and TV banner are the banner, opaque.
   const stores = join(root, "deploy/stores");
@@ -273,7 +284,7 @@ try {
   writeFileSync(join(stores, "icon-114.png"), rgb72(await r.png(maskable(114, (114 / 512) * 7.449), 114)));
   writeFileSync(join(stores, "feature-graphic-1024x500.png"), rgb72(await r.png(banner(1024, 500), 1024, 500)));
   writeFileSync(join(stores, "tv-banner-1280x720.png"), rgb72(await r.png(banner(1280, 720), 1280, 720)));
-  console.log("rendered the web's maskable icon and PNG favicon, the desktop's .ico and .icns, the Samsung and LG apps' icons and LG's splash, Kodi's icon and fanart, Roku's icons and splash screens, and the stores' pictures");
+  console.log("rendered the web's maskable icon and PNG favicon, the desktop's .ico and .icns, the Samsung and LG apps' icons and LG's splash, Kodi's icon and fanart, Roku's icons and splash screens, the Android TV banner, and the stores' pictures");
 } finally {
   r.close();
 }

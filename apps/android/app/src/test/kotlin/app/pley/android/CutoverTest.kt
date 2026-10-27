@@ -54,6 +54,8 @@ class CutoverTest {
         val tv = all.filter { LEANBACK_LAUNCHER in it.categories() }
         assertEquals(listOf("TvActivity"), tv.map { it.simpleName() })
         assertEquals("@drawable/tv_banner", tv.single().attr("banner"))
+        // Fire TV's home screen shows a sideloaded app by this icon, in a 16:9 tile.
+        assertEquals("@drawable/tv_banner", tv.single().attr("icon"))
     }
 
     @Test
