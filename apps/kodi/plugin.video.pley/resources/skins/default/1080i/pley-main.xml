@@ -30361,7 +30361,7 @@
           <top>18</top>
           <width>64</width>
           <height>64</height>
-          <texture colordiffuse="$INFO[Window.Property(pley.avatar.color)]">circle.png</texture>
+          <texture colordiffuse="FF222731">circle.png</texture>
         </control>
         <control type="label" id="132">
           <left>39</left>
@@ -30369,11 +30369,11 @@
           <width>64</width>
           <height>64</height>
           <font>font32_title</font>
-          <textcolor>$INFO[Window.Property(pley.avatar.ink)]</textcolor>
+          <textcolor>FFE9EBEF</textcolor>
           <align>center</align>
           <aligny>center</aligny>
           <scroll>false</scroll>
-          <label>$INFO[Window.Property(pley.avatar.initial)]</label>
+          <label />
         </control>
         <control type="image" id="133">
           <left>39</left>

@@ -26,8 +26,12 @@ class Control:
         self.position = None
         self.items = []
 
-    def setLabel(self, text):
+    def setLabel(self, text, font=None, textColor=None):
         self.label = text
+        self.text_color = textColor
+
+    def setColorDiffuse(self, color):
+        self.diffuse = color
 
     def setVisible(self, shown):
         self.visible = shown
@@ -43,6 +47,9 @@ class Control:
 
     def getSelectedPosition(self):
         return 0
+
+    def setImage(self, path, use_cache=True):
+        self.image = path
 
 
 class FakeWindow(window.Window):
@@ -65,6 +72,9 @@ class FakeWindow(window.Window):
 
     def setFocusId(self, control_id):
         self.focused = control_id
+
+    def getFocusId(self):
+        return self.focused or 0
 
     def setProperty(self, name, value):
         pass
@@ -106,6 +116,10 @@ class Dialogs:
 
             def input(self, heading, *args, **kwargs):
                 return outer.typed.pop(0)
+
+            def contextmenu(self, entries):
+                outer.shown.append((list(entries), -1))
+                return outer.picks.pop(0)
 
         window.xbmcgui.Dialog = Dialog
         return self
@@ -226,6 +240,72 @@ class WindowTest(unittest.TestCase):
             library.filter_menu()
         self.assertEqual(win.session.client.posts, [("/api/playlists", {"title": "Seen", "smart_filter": "unwatched=0&sort=year%3Adesc", "library_id": 4})])
         self.assertEqual(len(win.opened), 1)
+
+    def test_sorting_the_libraries(self):
+        movies, shows, music = ({"id": 1, "name": "Movies", "kind": "movies"}, {"id": 2, "name": "TV Shows", "kind": "shows"}, {"id": 3, "name": "Music", "kind": "music"})
+        every = {lib["id"]: lib for lib in (movies, shows, music)}
+
+        class Server:
+            """PUT and DELETE /api/me/libraries/order, noted; the answer is
+            the libraries in their new order."""
+
+            def __init__(self, missing=False):
+                self.missing, self.calls = missing, []
+
+            def put(self, path, body=None):
+                self.calls.append(("PUT", path, body))
+                if self.missing:
+                    raise window.api.ApiError(404, "not_found", "no such route")
+                return [every[i] for i in body["ids"]]
+
+            def delete(self, path):
+                self.calls.append(("DELETE", path, None))
+                return [movies, shows, music]
+
+        win = FakeWindow()
+        win.libraries = [movies, shows, music]
+        win.session.client = Server()
+        shows_page = window.Library(win, shows, None)
+        self.assertEqual(shows_page.rail, "lib1")
+        win.screen = shows_page
+        # Sort libraries: TV Shows, then First; Back when done.
+        with Dialogs(picks=[1, 0, -1]) as asked:
+            win.sort_libraries()
+        self.assertEqual(asked.shown[0][0], ["Movies", "TV Shows", "Music", window.T("server_order")])
+        self.assertEqual(asked.shown[1], ([window.T("first"), window.T("after") % "Movies", window.T("after") % "Music"], 1))
+        self.assertEqual(win.session.client.calls, [("PUT", "/api/me/libraries/order", {"ids": [2, 1, 3]})])
+        self.assertEqual([lib["id"] for lib in win.libraries], [2, 1, 3])
+        self.assertEqual(win.made[L.rail_labels(L.RAIL_LIBRARIES[0])[0]].label, "TV Shows")
+        # The rail's mark stays on the library open.
+        self.assertEqual(shows_page.rail, "lib0")
+        # A rail library's menu: the first has no Move up.
+        with Dialogs(picks=[0]) as asked:
+            win.library_menu(L.RAIL_LIBRARIES[0])
+        self.assertEqual(asked.shown[0][0], [window.T("move_down"), window.T("server_order")])
+        self.assertEqual(win.session.client.calls[-1][2], {"ids": [1, 2, 3]})
+        self.assertEqual(win.focused, L.RAIL_LIBRARIES[1])
+        with Dialogs(picks=[2]):
+            win.library_menu(L.RAIL_LIBRARIES[1])
+        self.assertEqual(win.session.client.calls[-1], ("DELETE", "/api/me/libraries/order", None))
+        # An older server has no such route: it says so.
+        win.session.client = Server(missing=True)
+        with Dialogs(picks=[0]):
+            win.library_menu(L.RAIL_LIBRARIES[0])
+        self.assertEqual(win.toasts[-1], window.T("sort_needs_newer_server"))
+        self.assertEqual([lib["id"] for lib in win.libraries], [1, 2, 3])
+        # Sorted on another device: libraries_changed refreshes the window,
+        # and the rail follows.
+        win.session.get = lambda path, **query: [music, movies, shows]
+        win.session.details = {}
+        win.session.lock = window.threading.Lock()
+        win.screen = shows_page
+        # The page redrawn takes focus; someone in the rail stays there.
+        shows_page.refresh = lambda: win.setFocusId(L.LIBRARY_SORT)
+        win.setFocusId(L.RAIL_SEARCH)
+        win.changed()
+        self.assertEqual(win.made[L.rail_labels(L.RAIL_LIBRARIES[0])[0]].label, "Music")
+        self.assertEqual(shows_page.rail, "lib2")
+        self.assertEqual(win.focused, L.RAIL_SEARCH)
 
     def test_rows_fill_and_place(self):
         win = FakeWindow()

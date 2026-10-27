@@ -64,7 +64,11 @@ side by side with Kodi's were the reference):
 - **The rail** on the left: the profile, Search, Home, each library,
   Playlists, Collections and Settings (the add-on's). Collapsed it shows
   icons, the current page's marked; Left opens it over the page with each
-  entry's name.
+  entry's name. The libraries come in the profile's order: the profile's
+  menu has Sort libraries (a library, then where it goes), a library's
+  menu key Move up, Move down and Use the server's order, each saved at
+  once for every device of the profile's (`PUT /api/me/libraries/order`);
+  sorted elsewhere, the rail follows.
 - **Home**: the hero for what to watch next (the first of Continue
   Watching, else the newest) over its backdrop, with Resume or Play, From
   start, Info and Watched; under it the server's rows. Down goes into the

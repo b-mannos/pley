@@ -586,3 +586,31 @@ msgstr ""
 msgctxt "#30187"
 msgid "%s of %s"
 msgstr ""
+
+msgctxt "#30188"
+msgid "Sort libraries"
+msgstr ""
+
+msgctxt "#30189"
+msgid "Use the server's order"
+msgstr ""
+
+msgctxt "#30190"
+msgid "Move up"
+msgstr ""
+
+msgctxt "#30191"
+msgid "Move down"
+msgstr ""
+
+msgctxt "#30192"
+msgid "First"
+msgstr ""
+
+msgctxt "#30193"
+msgid "After %s"
+msgstr ""
+
+msgctxt "#30194"
+msgid "Sorting libraries needs a newer pley on the server."
+msgstr ""

@@ -145,6 +145,13 @@ TEXT = {
     "save_as": 30185,
     "save_filters": 30186,
     "count_of": 30187,
+    "sort_libraries": 30188,
+    "server_order": 30189,
+    "move_up": 30190,
+    "move_down": 30191,
+    "first": 30192,
+    "after": 30193,
+    "sort_needs_newer_server": 30194,
 }
 
 

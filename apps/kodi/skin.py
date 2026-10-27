@@ -525,7 +525,9 @@ def rail() -> list:
         return nav(onup=str(order[i - 1]) if i else None, ondown=str(order[i + 1]) if i + 1 < len(order) else None)
 
     # The avatar: the profile's initial on its colour, or its picture; open,
-    # its name and the server.
+    # its name and the server. The window colours the circle and the initial
+    # itself: Kodi reads a colour's $INFO in the window on top, a dialog's
+    # while one is open.
     avatar = L.RAIL_AVATAR
     focused = "Control.HasFocus(%d)" % avatar
     out.append(
@@ -537,8 +539,8 @@ def rail() -> list:
             100,
             [
                 button(avatar, 8, 0, 528, 100, "round12.png", None, animations=[anim("Focus", ZOOM_PILL)], navigation=links(avatar)),
-                image(39, 18, 64, 64, "circle.png", id_=L.RAIL_COLOR, color="$INFO[%s]" % prop("pley.avatar.color")),
-                label(39, 18, 64, 64, L.FONT_TITLE, "$INFO[%s]" % prop("pley.avatar.ink"), "$INFO[%s]" % prop("pley.avatar.initial"), id_=L.RAIL_INITIAL, align="center"),
+                image(39, 18, 64, 64, "circle.png", id_=L.RAIL_COLOR, color=L.SURFACE3),
+                label(39, 18, 64, 64, L.FONT_TITLE, L.FG, "", id_=L.RAIL_INITIAL, align="center"),
                 image(39, 18, 64, 64, "$INFO[%s]" % prop("pley.avatar.picture"), id_=L.RAIL_PICTURE, diffuse="mask-circle.png", aspect="scale", background="true"),
                 label(128, 12, 400, 44, L.FONT_BODY_LARGE, L.FG, "$INFO[%s]" % prop("pley.avatar.name"), id_=L.RAIL_NAME, visible=opened + " + !" + focused, animations=fades(150)),
                 label(128, 52, 400, 34, L.FONT_CAPTION, L.MUTED, "$INFO[%s]" % prop("pley.avatar.server"), id_=L.RAIL_SUBTITLE, visible=opened + " + !" + focused, animations=fades(150)),

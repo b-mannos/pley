@@ -314,10 +314,18 @@ class Window(xbmcgui.WindowXML):
             if self.closing or self.screen is None:
                 return
             self.session.forget()
+            rail = self.getFocusId() if self.focus_in_rail() else None
             try:
+                # A library added, renamed or moved (on any of the profile's devices).
+                libraries = self.session.get("/api/libraries")
+                if [rail_view(lib) for lib in libraries] != [rail_view(lib) for lib in self.libraries]:
+                    self.place_libraries(libraries)
                 self.screen.refresh()
             except api.ApiError as e:
                 kodi.log("refreshing %s: %s" % (self.screen.name, e.message), xbmc.LOGWARNING)
+            if rail is not None and self.getFocusId() != rail:
+                # Someone in the rail stays there, whatever the page redrew.
+                self.setFocusId(rail)
 
     # ---------------------------------------------------------- navigation
 
@@ -390,13 +398,12 @@ class Window(xbmcgui.WindowXML):
     def setup_rail(self) -> None:
         name = self.me.get("name") or self.me.get("username") or ""
         self.prop("pley.avatar.name", name)
-        self.prop("pley.avatar.initial", name[:1].upper())
         self.prop("pley.avatar.server", kodi.setting("server_name") or "")
         tint = (self.me.get("avatar_color") or "").lstrip("#")
-        self.prop("pley.avatar.color", "FF" + tint.upper() if len(tint) == 6 else L.SURFACE3)
         # Text on a light colour is dark, as the Android app's avatar draws it.
         light = len(tint) == 6 and luminance(tint) > 0.45
-        self.prop("pley.avatar.ink", L.ON_ACCENT if light else L.FG)
+        self.c(L.RAIL_COLOR).setColorDiffuse("FF" + tint.upper() if len(tint) == 6 else L.SURFACE3)
+        self.c(L.RAIL_INITIAL).setLabel(name[:1].upper(), textColor=L.ON_ACCENT if light else L.FG)
         if self.me.get("avatar_url"):
             self.prop("pley.avatar.picture", image(self.session.base, self.me["avatar_url"], 128))
         y = L.RAIL_TOP + 2 * L.RAIL_PITCH
@@ -456,11 +463,98 @@ class Window(xbmcgui.WindowXML):
                 self.go(Library(self, self.libraries[i], "lib%d" % i))
 
     def account(self) -> None:
-        chosen = xbmcgui.Dialog().contextmenu([T("choose_server"), T("sign_out")])
-        if chosen == 0:
-            self.leave_for("choose_server")
-        elif chosen == 1:
-            self.leave_for("sign_out")
+        actions = [(T("choose_server"), lambda: self.leave_for("choose_server"))]
+        if len(self.libraries) > 1:
+            actions.append((T("sort_libraries"), self.sort_libraries))
+        actions.append((T("sign_out"), lambda: self.leave_for("sign_out")))
+        chosen = xbmcgui.Dialog().contextmenu([name for name, _ in actions])
+        if chosen >= 0:
+            actions[chosen][1]()
+
+    # ---------------------------------------------- the libraries' order
+
+    def sort_libraries(self) -> None:
+        """Sort libraries (the Android TV app's, in Settings): a library,
+        then where it goes; each move is saved at once, for the profile on
+        all its devices."""
+        while True:
+            names = [lib.get("name") or "" for lib in self.libraries]
+            chosen = xbmcgui.Dialog().select(T("sort_libraries"), names + [T("server_order")])
+            if chosen < 0:
+                return
+            if chosen == len(names):
+                return self.use_server_order()
+            moving = self.libraries[chosen]
+            others = [lib for lib in self.libraries if lib is not moving]
+            places = [T("first")] + [T("after") % (lib.get("name") or "") for lib in others]
+            to = xbmcgui.Dialog().select(names[chosen], places, preselect=chosen)
+            if to < 0 or to == chosen:
+                continue
+            ids = [lib["id"] for lib in others]
+            ids.insert(to, moving["id"])
+            if not self.save_order(ids):
+                return
+
+    def library_menu(self, control_id: int) -> None:
+        """A rail library's menu: Move up, Move down, the server's order."""
+        i = L.RAIL_LIBRARIES.index(control_id)
+        if i >= len(self.libraries) or len(self.libraries) < 2:
+            return
+        ids = [lib["id"] for lib in self.libraries]
+        actions = []
+        if i > 0:
+            actions.append((T("move_up"), i - 1))
+        if i + 1 < len(ids):
+            actions.append((T("move_down"), i + 1))
+        actions.append((T("server_order"), None))
+        chosen = xbmcgui.Dialog().contextmenu([name for name, _ in actions])
+        if chosen < 0:
+            return
+        to = actions[chosen][1]
+        if to is None:
+            return self.use_server_order()
+        ids.insert(to, ids.pop(i))
+        if self.save_order(ids) and to < len(L.RAIL_LIBRARIES):
+            self.setFocusId(L.RAIL_LIBRARIES[to])
+
+    def save_order(self, ids: list) -> bool:
+        """The profile's own order (PUT /api/me/libraries/order): whether it
+        was saved."""
+        return self.reorder(lambda: self.session.client.put("/api/me/libraries/order", {"ids": ids}))
+
+    def use_server_order(self) -> bool:
+        return self.reorder(lambda: self.session.client.delete("/api/me/libraries/order"))
+
+    def reorder(self, change) -> bool:
+        try:
+            libraries = change()
+        except api.ApiError as e:
+            # A server from before libraries had an order of the profile's own.
+            self.toast(T("sort_needs_newer_server") if e.status in (404, 405) else T("server_error") % e.message, 6)
+            if e.status == 409:
+                # A library came or went since they were listed: the rail as they are now.
+                try:
+                    self.place_libraries(self.session.get("/api/libraries"))
+                except api.ApiError:
+                    pass
+            return False
+        self.place_libraries(libraries)
+        if isinstance(self.screen, Home):
+            # Home's rows follow the libraries' order.
+            self.screen.refresh()
+        return True
+
+    def place_libraries(self, libraries: list) -> None:
+        """The rail in the libraries' order, its mark staying on the library
+        open."""
+        self.libraries = libraries
+        self.setup_rail()
+        for screen in self.stack + ([self.screen] if self.screen is not None else []):
+            if isinstance(screen, Library) and (screen.rail or "").startswith("lib"):
+                at = next((i for i, lib in enumerate(libraries) if lib["id"] == screen.library["id"]), None)
+                screen.rail = "lib%d" % at if at is not None else "home"
+        if self.screen is not None:
+            self.prop("pley.rail", self.screen.rail or (self.stack[0].rail if self.stack else "home"))
 
     def leave_for(self, after: str) -> None:
         """Closes the window, and does `after` (run())."""
@@ -477,6 +571,8 @@ class Window(xbmcgui.WindowXML):
             if code in BACK:
                 return self.back()
             focus = self.getFocusId()
+            if code in (CONTEXT_MENU, MENU) and focus in L.RAIL_LIBRARIES:
+                return self.library_menu(focus)
             if code in (CONTEXT_MENU, MENU) and self.screen is not None:
                 return self.screen.menu(focus)
             if code in MOVES and self.screen is not None:
@@ -670,6 +766,11 @@ class Window(xbmcgui.WindowXML):
         if kind == "track":
             return self.play(item, from_start=True)
         self.open(Item(self, item["id"], item))
+
+
+def rail_view(library: dict) -> tuple:
+    """What the rail shows of a library."""
+    return library.get("id"), library.get("name"), library.get("kind")
 
 
 def luminance(hex_rgb: str) -> float:
@@ -974,7 +1075,7 @@ class Home(Screen):
             hero = self.hero
             win.later(lambda: self.session.detail(hero["id"]), lambda _: self.hero is hero and self.draw_hero())
 
-    def hero_mode(self) -> None:
+    def hero_mode(self, take_focus: bool = True) -> None:
         win = self.win
         self.in_rows = False
         win.prop("pley.mode", "hero")
@@ -983,7 +1084,8 @@ class Home(Screen):
         if self.hero is not None:
             win.prop("pley.backdrop", tiles.backdrop(self.session.base, self.hero))
         self.rows.place(None, 768)
-        win.setFocusId(L.HOME_PLAY)
+        if take_focus:
+            win.setFocusId(L.HOME_PLAY)
 
     def rows_mode(self, i: int) -> None:
         self.in_rows = True
@@ -1092,7 +1194,8 @@ class Home(Screen):
             self.rows_mode(at)
             self.rows.focus(at, max(position, 0))
         elif not self.in_rows:
-            self.hero_mode()
+            # Focus in the rail stays there.
+            self.hero_mode(take_focus=not self.win.focus_in_rail())
 
 
 class Item(Screen):
