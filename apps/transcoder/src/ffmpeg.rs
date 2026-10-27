@@ -2,7 +2,8 @@
 //! Discovery of the local FFmpeg installation: version, working encoders
 //! (test-encodes, not just "compiled in"), tone mappers, throttling support and
 //! segment muxer semantics. Results are cached on disk keyed by the binaries'
-//! size and modification time because FFmpeg start-up can be slow (antivirus
+//! size and modification time, and the GPUs the system shows
+//! ([`crate::devices`]), because FFmpeg start-up can be slow (antivirus
 //! scanning of large static builds).
 
 use std::collections::HashSet;
@@ -16,10 +17,11 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
 
+use crate::devices;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 6;
+const DETECTION_REVISION: u32 = 7;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -194,7 +196,13 @@ fn cache_key(ffmpeg: &Path, ffprobe: &Path) -> String {
             })
             .unwrap_or_else(|_| format!("{}:missing", p.display()))
     };
-    format!("rev{DETECTION_REVISION}|{}|{}|{}", env!("CARGO_PKG_VERSION"), stamp(ffmpeg), stamp(ffprobe))
+    format!(
+        "rev{DETECTION_REVISION}|{}|{}|{}|{}",
+        env!("CARGO_PKG_VERSION"),
+        stamp(ffmpeg),
+        stamp(ffprobe),
+        devices::stamp()
+    )
 }
 
 fn read_cache(path: &Path, key: &str) -> Option<CacheFile> {
@@ -244,14 +252,12 @@ fn leak(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }
 
-pub const VAAPI_DEVICE: &str = "/dev/dri/renderD128";
-
 /// A test encode with `name`; `main10`: 10-bit HEVC (Main 10), as
 /// transcodes that keep HDR encode it ([`crate::plan`]'s encoder arguments).
 async fn test_encoder(ffmpeg: &Path, name: &str, accel: HwAccel, main10: bool) -> bool {
     let mut args: Vec<&str> = vec!["-hide_banner", "-nostdin", "-loglevel", "error"];
     if accel == HwAccel::Vaapi {
-        args.extend(["-vaapi_device", VAAPI_DEVICE]);
+        args.extend(["-vaapi_device", devices::vaapi_device()]);
     }
     args.extend(["-f", "lavfi", "-i", "color=black:s=320x240:r=25:d=0.2", "-frames:v", "3"]);
     match (accel, main10) {
@@ -274,6 +280,36 @@ async fn test_encoder(ffmpeg: &Path, name: &str, accel: HwAccel, main10: bool) -
 }
 
 const HDR_TAGS: &str = "setparams=color_trc=smpte2084:color_primaries=bt2020:colorspace=bt2020nc";
+
+/// Whether FFmpeg's Vulkan device is a GPU, as far as it says: Mesa's
+/// llvmpipe (in every Mesa install, and in the Docker image) is Vulkan on
+/// the CPU.
+async fn vulkan_on_gpu(ffmpeg: &Path) -> bool {
+    let args = [
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "verbose",
+        "-init_hw_device",
+        "vulkan=vk",
+        "-f",
+        "lavfi",
+        "-i",
+        "nullsrc=s=16x16:d=0.04",
+        "-frames:v",
+        "1",
+        "-f",
+        "null",
+        "-",
+    ];
+    run(ffmpeg, &args, Duration::from_secs(30)).await.is_none_or(|out| !software_vulkan(&out.text))
+}
+
+/// FFmpeg's verbose log choosing a CPU device: "Device 0 selected: llvmpipe
+/// (LLVM 19.1.7, 256 bits) (software) (0x0)".
+fn software_vulkan(log: &str) -> bool {
+    log.lines().any(|line| line.contains(" selected: ") && line.contains("(software)"))
+}
 
 async fn test_filter(ffmpeg: &Path, pre: &[&str], vf: &str) -> bool {
     let mut args: Vec<&str> = vec!["-hide_banner", "-nostdin", "-loglevel", "error"];
@@ -419,14 +455,18 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
     }));
 
     let has = |f: &str| filter_names.contains(f);
+    // Whether libplacebo works, and on a GPU.
     let libplacebo_test = async {
         if !has("libplacebo") {
-            return false;
+            return (false, false);
         }
         let vf = format!(
             "{HDR_TAGS},libplacebo=w=160:h=120:format=yuv420p:colorspace=bt709:color_primaries=bt709:color_trc=bt709:tonemapping=auto"
         );
-        test_filter(ffmpeg, &["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"], &vf).await
+        tokio::join!(
+            test_filter(ffmpeg, &["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"], &vf),
+            vulkan_on_gpu(ffmpeg)
+        )
     };
     let opencl_test = async {
         if !has("tonemap_opencl") {
@@ -467,7 +507,7 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
         matches!(run(ffmpeg, &args, timeout).await, Some(Output { success: true, .. }))
     };
 
-    let (encoder_results, libplacebo, opencl, zscale, readrate, relative) = tokio::join!(
+    let (encoder_results, (libplacebo, libplacebo_on_gpu), opencl, zscale, readrate, relative) = tokio::join!(
         encoder_tests,
         libplacebo_test,
         opencl_test,
@@ -482,9 +522,15 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
         working.iter().filter(|e| e.hardware).cloned().chain(working.iter().filter(|e| !e.hardware).cloned()).collect();
     caps.hdr_transcode = caps.encoders.iter().any(|e| e.main10);
 
-    for (ok, mapper) in
+    // libplacebo on a CPU's Vulkan (Mesa's llvmpipe) tone maps several
+    // times slower than zscale: it comes last then, for Dolby Vision
+    // profile 5, which only it shows in its colors.
+    let mappers = if libplacebo_on_gpu {
         [(libplacebo, Tonemapper::Libplacebo), (opencl, Tonemapper::Opencl), (zscale, Tonemapper::Zscale)]
-    {
+    } else {
+        [(opencl, Tonemapper::Opencl), (zscale, Tonemapper::Zscale), (libplacebo, Tonemapper::Libplacebo)]
+    };
+    for (ok, mapper) in mappers {
         if ok {
             caps.tonemappers.push(mapper);
         }
@@ -494,7 +540,7 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
     caps.subtitle_burn_text = has("subtitles");
     caps.readrate = readrate;
 
-    let gpu = detect_gpu_pipelines(ffmpeg, &encoder_names, &filter_names, &caps, libplacebo).await;
+    let gpu = detect_gpu_pipelines(ffmpeg, &encoder_names, &filter_names, &caps, libplacebo && libplacebo_on_gpu).await;
     caps.vulkan_decode = gpu.vulkan_decode;
     caps.vulkan_encode = gpu.vulkan_encode;
     caps.gpu_pipelines = gpu.pipelines;
@@ -560,7 +606,7 @@ async fn detect_gpu_pipelines(
     if cfg!(target_os = "linux") && working("h264_vaapi") && hwaccel("vaapi") && filters.contains("scale_vaapi") {
         candidates.push((
             HwAccel::Vaapi,
-            vec!["-hwaccel", "vaapi", "-hwaccel_device", VAAPI_DEVICE, "-hwaccel_output_format", "vaapi"],
+            vec!["-hwaccel", "vaapi", "-hwaccel_device", devices::vaapi_device(), "-hwaccel_output_format", "vaapi"],
             "scale_vaapi=w=160:h=120:format=nv12",
             vec!["-c:v", "h264_vaapi"],
         ));
@@ -809,6 +855,17 @@ mod tests {
         assert_eq!(ff.pick_main10_encoder(HwAccel::Auto).0, None);
         assert_eq!(ff.software_encoder_for(VideoCodec::Hevc, true), None);
         assert!(ff.software_encoder_for(VideoCodec::Hevc, false).is_some());
+    }
+
+    #[test]
+    fn vulkan_on_the_cpu_is_told_apart() {
+        let device =
+            |line: &str| format!("[AVHWDeviceContext @ 0x55] GPU listing:\n[AVHWDeviceContext @ 0x55] {line}\n");
+        assert!(software_vulkan(&device("Device 0 selected: llvmpipe (LLVM 19.1.7, 256 bits) (software) (0x0)")));
+        assert!(!software_vulkan(&device("Device 0 selected: NVIDIA GeForce RTX 5070 (discrete) (0x2c05)")));
+        assert!(!software_vulkan(&device("Device 1 selected: Intel(R) Arc(tm) Graphics (integrated) (0x7d55)")));
+        // Listed, not chosen.
+        assert!(!software_vulkan(&device("    1: llvmpipe (LLVM 19.1.7, 256 bits) (software) (0x0)")));
     }
 
     #[test]

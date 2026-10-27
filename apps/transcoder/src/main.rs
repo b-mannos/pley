@@ -10,6 +10,7 @@ mod adaptive;
 mod background;
 mod cache;
 mod convert;
+mod devices;
 mod dovi;
 mod error;
 mod extract;

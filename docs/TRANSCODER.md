@@ -252,14 +252,17 @@ half-made ones are deleted.
 - **Encoders.** At startup each candidate encoder is test-encoded rather than
   just listed:
   - NVENC, QSV and AMF on Windows and Linux
-  - VAAPI on Linux
+  - VAAPI on Linux, on the first Intel or AMD render node
+    (`PLEY_VAAPI_DEVICE` names another)
   - VideoToolbox on macOS
   - libx264 and libx265 as software fallbacks
 
   `hwaccel = auto` picks the first hardware encoder that works. Forced
   keyframes are IDR frames (`-forced-idr`), so every segment can be decoded on
   its own. The results are cached in `capabilities.json`, keyed by the ffmpeg
-  binary's size and modification time.
+  binary's size and modification time and by the GPUs the system shows (its
+  render nodes and their drivers, NVIDIA's driver), so a GPU given later is
+  tested.
 - **Hardware decoding.** The decoder is paired with the encoder: `cuda` with
   NVENC, `d3d11va` with QSV/AMF on Windows, `vaapi`, or `videotoolbox`. Frames
   come back to system memory, and ffmpeg falls back to software decoding by
@@ -270,6 +273,10 @@ half-made ones are deleted.
     reshaping, so **profile 5** (IPTPQc2) renders with correct colors.
   - `tonemap_opencl` on the GPU.
   - `zscale` plus `tonemap` on the CPU.
+
+  When Vulkan only runs on the CPU (Mesa's llvmpipe, with no GPU),
+  libplacebo comes last: it is several times slower than zscale there, and
+  only profile 5 picks it, for its colors.
 
   libplacebo keeps the shaders it compiles in the work directory's
   `libplacebo/` folder (made at start-up, with an absolute path, since FFmpeg

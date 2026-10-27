@@ -84,11 +84,33 @@ pub fn input_arg(path: &Path) -> OsString {
     arg
 }
 
-/// Resolve a program name through `PATH` (and `PATHEXT` on Windows).
+/// Homebrew's ffmpeg-full, which is never on `PATH` (it is keg-only): its
+/// FFmpeg has the tone mappers and subtitle burn-in Homebrew's ffmpeg leaves
+/// out. Apple silicon's folder, then Intel's.
+const MACOS_BEFORE_PATH: [&str; 2] = ["/opt/homebrew/opt/ffmpeg-full/bin", "/usr/local/opt/ffmpeg-full/bin"];
+/// Homebrew's own folders, which an app started from the Finder doesn't
+/// have on `PATH`.
+const MACOS_AFTER_PATH: [&str; 2] = ["/opt/homebrew/bin", "/usr/local/bin"];
+
+/// Resolve a program name through `PATH` (and `PATHEXT` on Windows); on
+/// macOS, Homebrew's ffmpeg-full first and its folders last.
 pub fn resolve_executable(program: &Path) -> Option<PathBuf> {
     if program.components().count() > 1 || program.is_absolute() {
         return program.is_file().then(|| program.to_path_buf());
     }
+    let homebrew = |dirs: [&str; 2]| {
+        dirs.into_iter().map(|dir| Path::new(dir).join(program)).find(|candidate| candidate.is_file())
+    };
+    if cfg!(target_os = "macos") {
+        if let Some(found) = homebrew(MACOS_BEFORE_PATH) {
+            return Some(found);
+        }
+        return on_path(program).or_else(|| homebrew(MACOS_AFTER_PATH));
+    }
+    on_path(program)
+}
+
+fn on_path(program: &Path) -> Option<PathBuf> {
     let exts: Vec<String> = if cfg!(windows) {
         std::env::var("PATHEXT")
             .unwrap_or_else(|_| ".EXE;.CMD;.BAT".into())

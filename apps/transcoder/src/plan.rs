@@ -20,7 +20,8 @@ use pley_transcoder_api::{
     is_text_subtitle_codec,
 };
 
-use crate::ffmpeg::{Ffmpeg, VAAPI_DEVICE};
+use crate::devices::vaapi_device;
+use crate::ffmpeg::Ffmpeg;
 use crate::tsedit::Edits;
 use crate::util::{MEDIA_INPUT_OPTIONS, input_arg, secs};
 
@@ -722,7 +723,7 @@ impl Plan {
                     "-hwaccel",
                     "vaapi",
                     "-hwaccel_device",
-                    VAAPI_DEVICE,
+                    vaapi_device(),
                     "-hwaccel_output_format",
                     "vaapi",
                 ]),
@@ -744,7 +745,7 @@ impl Plan {
                         _ => {}
                     }
                     if encoder.is_some_and(|e| e.accel == HwAccel::Vaapi) {
-                        a.push_all(["-vaapi_device", VAAPI_DEVICE]);
+                        a.push_all(["-vaapi_device", vaapi_device()]);
                     }
                     if let Some(dec) = &v.hw_decode {
                         a.push_all(["-hwaccel", dec.as_str()]);
