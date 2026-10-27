@@ -68,6 +68,21 @@ class DownloadRunnerTest {
     }
 
     @Test
+    fun aQueuedDownloadHasItsPictureBeforeItsTurn() = runBlocking {
+        val picture = Random(3).nextBytes(2_000)
+        server.enqueue(MockResponse.Builder().code(200).body(Buffer().write(picture)).build())
+        val saved = add()
+
+        runner().savePicture(saved, detail().copy(thumbUrl = "/api/items/42/thumb"))
+
+        val queued = store.get(saved.key)!!
+        assertEquals(DownloadState.Queued, queued.state)
+        assertTrue(queued.image)
+        assertArrayEquals(picture, store.imageOf(queued).readBytes())
+        assertEquals("/api/items/42/thumb", server.takeRequest().url.encodedPath)
+    }
+
+    @Test
     fun aFileCutShortGoesOnFromWhereItStopped() = runBlocking {
         val saved = add()
         store.partOf(saved).apply { parentFile!!.mkdirs() }.writeBytes(body.copyOfRange(0, 100_000))

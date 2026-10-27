@@ -229,16 +229,7 @@ internal class DownloadRunner(
         val detail = api.item(saved.itemId)
         val dir = store.dirOf(saved).apply { mkdirs() }
         withContext(io) { writeWhole(store.detailOf(saved), PleyJson.encodeToString(ItemDetail.serializer(), detail)) }
-        val picture = (detail.thumbUrl ?: detail.posterUrl ?: detail.backdropUrl)?.let { path ->
-            try {
-                fetch(sources.images, api.url(path, IMAGE_WIDTH), store.imageOf(saved))
-                true
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: IOException) {
-                false
-            }
-        } ?: false
+        val picture = fetchPicture(saved, api, detail)
         val file = detail.files.firstOrNull { it.id == saved.fileId }
         val tracks = file?.streams.orEmpty().filter { it.kind == StreamKind.Subtitle && it.textBased == true }
         // Asked for once each: the file needn't wait for the server to read a track out of it.
@@ -264,6 +255,29 @@ internal class DownloadRunner(
             )
         } ?: throw CancellationException("removed")
     }
+
+    /**
+     * [saved]'s picture, saved as it is queued: the episodes of a season
+     * queued together show their stills before their turn comes.
+     */
+    suspend fun savePicture(saved: Saved, detail: ItemDetail) {
+        if (fetchPicture(saved, sources.api(saved.server, saved.userId), detail)) {
+            withContext(io) { store.update(saved.key) { it.copy(image = true) } }
+        }
+    }
+
+    /** A still, else the poster or the backdrop, into [Saved]'s picture: whether there is one. */
+    private suspend fun fetchPicture(saved: Saved, api: PleyApi, detail: ItemDetail): Boolean =
+        (detail.thumbUrl ?: detail.posterUrl ?: detail.backdropUrl)?.let { path ->
+            try {
+                fetch(sources.images, api.url(path, IMAGE_WIDTH), store.imageOf(saved))
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: IOException) {
+                false
+            }
+        } ?: false
 
     /**
      * A text track as the server's WebVTT, saved as far as it goes: the

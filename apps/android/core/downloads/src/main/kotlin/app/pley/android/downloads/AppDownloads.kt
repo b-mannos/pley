@@ -120,9 +120,12 @@ class AppDownloads internal constructor(
         val api = sources.api(s.issuer, userId)
         val wanted = itemIds.distinct().filter { id -> store.get(Key(s.issuer, userId, id)) == null }
         if (wanted.isEmpty()) return
-        val saved = wanted.mapNotNull { id -> savedOf(api.item(id), s.issuer, userId) }
-        withContext(io) { store.add(saved) }
-        if (saved.isNotEmpty()) start()
+        val saved = wanted.mapNotNull { id -> api.item(id).let { detail -> savedOf(detail, s.issuer, userId)?.let { it to detail } } }
+        withContext(io) { store.add(saved.map { it.first }) }
+        if (saved.isEmpty()) return
+        start()
+        // Their pictures now, not each in its turn: a season's list shows its stills at once.
+        scope.launch(io) { saved.forEach { (one, detail) -> runner.savePicture(one, detail) } }
     }
 
     override fun remove(itemId: Long) {
