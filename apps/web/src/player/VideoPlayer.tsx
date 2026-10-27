@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { errorMessage, isApiError } from "@/api/client";
 import { onServerEvent } from "@/api/events";
-import { fetchNext, invalidateWatchState, useTrickplay } from "@/api/hooks";
+import { fetchNext, invalidateWatchState, keys, useTrickplay } from "@/api/hooks";
 import type { ItemDetail, ItemSummary, PlaybackInfo, PlaybackMode, PlaybackState, ServerEvent } from "@/api/types";
 import { useOptionalAudioPlayer } from "@/audio/AudioPlayer";
 import { Slider } from "@/components/Slider";
@@ -1080,9 +1080,12 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
   /** Store the choice so the next episode (or the next viewing) starts with the same tracks. */
   const rememberTracks = (audio: number | null, sub: number | null) => {
-    void saveStreamChoice(item.id, { file_id: file?.id ?? null, audio_index: audio, subtitle_index: sub }).then(() =>
-      qc.invalidateQueries({ queryKey: ["item"], predicate: (q) => q.queryKey[1] !== item.id }),
-    );
+    void saveStreamChoice(item.id, { file_id: file?.id ?? null, audio_index: audio, subtitle_index: sub }).then(() => {
+      void qc.invalidateQueries({ queryKey: ["item"], predicate: (q) => q.queryKey[1] !== item.id });
+      // This one is asked again once it shows again (its page, or played
+      // again), not while it plays.
+      void qc.invalidateQueries({ queryKey: keys.item(item.id), refetchType: "none" });
+    });
   };
   const changeAudio = (index: number) => {
     if (index === (audioIndex ?? audioStreams.find((s) => s.default)?.index ?? audioStreams[0]?.index)) return;

@@ -389,6 +389,30 @@ describe("VideoPlayer subtitle timing", () => {
     expect(window.localStorage.getItem("pley.subtitleOffsets")).toBe("{}");
   });
 
+  it("remembers subtitles turned on, for the next episode and for this one played again", async () => {
+    const requests = serve([session("s1")], {
+      "PUT /api/items/7/streams": () => undefined,
+      "GET /api/items/8": () => detail({ id: 8 }),
+    });
+    const item = detail();
+    const file = item.files[0];
+    if (!file) throw new Error("no file");
+    file.streams = [english];
+    const { client } = renderWithProviders(<VideoPlayer item={item} startMs={0} fileId={null} audio={null} sub={null} />);
+    client.setQueryData(["item", 7], item);
+    client.setQueryData(["item", 8], detail({ id: 8 }));
+    await waitFor(() => expect(requests.some((r) => r.path === "/api/playback")).toBe(true));
+
+    fireEvent.keyDown(document, { key: "c" });
+    await waitFor(() =>
+      expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ file_id: 3, audio_index: null, subtitle_index: 3 }),
+    );
+    // The next one is asked again; this one once it shows again, not while it plays.
+    await waitFor(() => expect(client.getQueryState(["item", 7])?.isInvalidated).toBe(true));
+    expect(client.getQueryState(["item", 8])?.isInvalidated || requests.some((r) => r.path === "/api/items/8")).toBe(true);
+    expect(requests.some((r) => r.path === "/api/items/7")).toBe(false);
+  });
+
   it("moves the track's own cues in native fullscreen, where the browser draws them", async () => {
     window.localStorage.setItem("pley.subtitleOffsets", JSON.stringify({ f3: 1 }));
     const onTrack: FakeCue[] = [];

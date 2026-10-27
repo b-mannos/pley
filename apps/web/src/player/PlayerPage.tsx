@@ -1,8 +1,10 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { LoaderCircle, TriangleAlert } from "lucide-react";
 import { errorMessage } from "@/api/client";
-import { useItem } from "@/api/hooks";
+import { keys, useItem } from "@/api/hooks";
+import type { Id } from "@/api/types";
 import { decodeId, idParam } from "@/lib/ids";
 import { androidPlayer } from "@/lib/shell";
 import { itemUrl } from "@/lib/urls";
@@ -62,6 +64,15 @@ export function PlayerPage() {
   // (`?web=1`: it couldn't, the web player plays).
   const native = useMemo(() => androidPlayer(), []);
   const data = item.data;
+  // A copy known to be out of date (tracks were picked for the show, or
+  // the profile's defaults changed) would start with the tracks it names:
+  // the player waits for the new one, unless asking fails. Only before the
+  // item first plays: a refetch while it plays changes nothing shown.
+  const qc = useQueryClient();
+  const [shown, setShown] = useState<Id | null>(null);
+  const outdated =
+    shown !== itemId && !!data && item.isFetching && !!qc.getQueryState(keys.item(itemId))?.isInvalidated;
+  if (data && !outdated && shown !== itemId) setShown(itemId);
   /** Back where the player was opened from; opened straight (a bookmark, a new tab), to `fallback`. */
   const back = (fallback: string) => {
     const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
@@ -84,7 +95,7 @@ export function PlayerPage() {
   }, [handOff, data?.id]);
 
   if (!Number.isFinite(itemId) || itemId <= 0) return <Navigate to="/" replace />;
-  if (item.isPending || handOff) return <Loading />;
+  if (item.isPending || handOff || outdated) return <Loading />;
   // A failed background refetch (e.g. after watch state changed) keeps the
   // previous data: don't tear down a playing video because of it.
   if (!data) {

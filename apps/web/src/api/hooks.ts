@@ -254,7 +254,13 @@ export function useUpdateProfile() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: ProfilePatch) => api.patch<User>("/api/me", body),
-    onSuccess: (user) => rememberMe(qc, user),
+    onSuccess: (user, body) => {
+      rememberMe(qc, user);
+      // Titles start with the tracks these pick (each file's `selected_*`).
+      if ("audio_language" in body || "subtitle_language" in body || "subtitle_mode" in body) {
+        void qc.invalidateQueries({ queryKey: ["item"] });
+      }
+    },
   });
 }
 

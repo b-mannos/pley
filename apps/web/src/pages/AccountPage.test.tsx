@@ -51,6 +51,15 @@ describe("PlaybackCard", () => {
     await waitFor(() => expect(lastSave(requests)?.body).toEqual({ audio_language: null }));
   });
 
+  it("has titles already loaded asked for again, since they start with the tracks these pick", async () => {
+    const user = userEvent.setup();
+    serve();
+    const { client } = renderWithProviders(<PlaybackCard />);
+    client.setQueryData(["item", 7], { id: 7 });
+    await user.selectOptions(screen.getByLabelText("Subtitles"), "Always");
+    await waitFor(() => expect(client.getQueryState(["item", 7])?.isInvalidated).toBe(true));
+  });
+
   it("explains that a language is needed", () => {
     serve();
     renderWithProviders(<PlaybackCard />, { user: { ...testUser, subtitle_mode: "always" } });
