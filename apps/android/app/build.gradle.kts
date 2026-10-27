@@ -23,7 +23,9 @@ android {
     namespace = "app.pley.android"
 
     defaultConfig {
-        applicationId = "app.pley.android"
+        // The id Google Play and the Amazon Appstore know the app by. The code
+        // keeps its namespace, and sign-in its app.pley.android: scheme.
+        applicationId = "com.formandelement.pley"
         versionCode = versionCodeOf(pleyVersion)
         versionName = pleyVersion
         buildConfigField("String", "COMMIT", "\"$pleyCommit\"")

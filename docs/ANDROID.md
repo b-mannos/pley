@@ -1,6 +1,6 @@
 # Android and TV apps
 
-One app, `app.pley.android`, for phones, tablets, Android TV, Google TV and
+One app, `com.formandelement.pley`, for phones, tablets, Android TV, Google TV and
 Fire TV (Fire OS 7 and later; Android 8 is the minimum), native in Kotlin
 and Compose: `MainActivity` on phones and tablets, `TvActivity` on TVs. It
 replaced a web view app (0.1: a list of servers, the server's web app and
@@ -257,7 +257,7 @@ an emulator or device with API 33 or later:
 
 They land in `app/src/main/generated/baselineProfiles` and are committed.
 Sideloaded installs only use them after the device's overnight compile;
-testers run `adb shell cmd package compile -m speed-profile -f app.pley.android`.
+testers run `adb shell cmd package compile -m speed-profile -f com.formandelement.pley`.
 
 ## Emulators
 

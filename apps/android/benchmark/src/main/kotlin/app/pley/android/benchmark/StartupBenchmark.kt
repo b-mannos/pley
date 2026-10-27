@@ -38,4 +38,4 @@ class StartupBenchmark {
 }
 
 /** The app under test. */
-const val TARGET = "app.pley.android"
+const val TARGET = "com.formandelement.pley"
