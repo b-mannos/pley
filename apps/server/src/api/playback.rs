@@ -258,8 +258,9 @@ pub async fn status(
         None => None,
     };
     let transcode = transcode.map(|mut info| {
-        // FFmpeg's last words name the media file.
-        if user.app.is_some() && info.last_error.is_some() {
+        // FFmpeg's last words name the media file: an administrator's (as
+        // in `for_viewer`).
+        if !user.is_admin && info.last_error.is_some() {
             info.last_error = Some("the conversion failed".to_owned());
         }
         info
