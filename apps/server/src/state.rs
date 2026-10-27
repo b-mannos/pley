@@ -79,7 +79,11 @@ impl AppState {
             std::fs::create_dir_all(&dir).map_err(|e| anyhow::anyhow!("cannot create {}: {e}", dir.display()))?;
         }
         crate::util::keep_private(&config.data_dir);
-        crate::util::keep_private(&config.transcode_dir);
+        // A transcode folder of its own choosing (`/tmp`, say) stays as it
+        // is: the transcoder keeps what it makes there private.
+        if config.transcode_dir.starts_with(&config.data_dir) {
+            crate::util::keep_private(&config.transcode_dir);
+        }
         let db = Db::open(&config.db_path()).await?;
         let backups = Backups::new(db.clone(), &config.data_dir);
         crate::ratings::backfill(&db).await?;
