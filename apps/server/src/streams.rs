@@ -157,36 +157,116 @@ pub fn from_selection(streams: &[MediaStream], audio: Option<i64>, subtitle: Opt
     }
 }
 
+/// What a player does with audio, for choosing among the tracks of a
+/// language: the play request's capabilities (`playback::Caps`). Without
+/// them (an item's details) the file's default and order choose, as the
+/// device isn't known.
+pub trait AudioOut {
+    /// Plays this codec as it is: decoded, or passed through to a receiver.
+    fn plays(&self, codec: &str) -> bool;
+    /// Sends this codec as it is to a receiver, which keeps its Atmos or DTS:X.
+    fn passes_through(&self, codec: &str) -> bool;
+    /// Switches a file's audio tracks itself; for any other player, a track
+    /// but the file's default makes the file stream (HLS).
+    fn switches_tracks(&self) -> bool;
+    /// The most channels its output takes, when it says.
+    fn channels(&self) -> Option<i64>;
+}
+
+/// How a track sounds on a player, better greater: as many channels as its
+/// output takes (what a conversion makes of the others), mixed for no more
+/// than that (a stereo mix beats a 5.1 one folded down), lossless, object
+/// audio (Atmos, DTS:X) sent on to a receiver, then the bitrate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Sound {
+    channels: i64,
+    native: bool,
+    lossless: bool,
+    objects: bool,
+    bitrate: i64,
+}
+
+/// Whether `out` plays `s` as it is, and how it sounds there. A track it
+/// can't play is converted: E-AC-3, AC-3 or AAC, 5.1 at most (stereo for
+/// version 1 players, which name no channels), so only its channels count.
+fn fit(s: &MediaStream, out: &dyn AudioOut) -> (bool, Sound) {
+    let channels = s.channels.unwrap_or(2);
+    if !out.plays(&s.codec) {
+        let channels = channels.min(out.channels().unwrap_or(2)).min(6);
+        return (false, Sound { channels, native: false, lossless: false, objects: false, bitrate: 0 });
+    }
+    // DTS-HD Master Audio is lossless; its core and High Resolution Audio aren't.
+    let master_audio = s.profile.as_deref().is_some_and(|p| p.split(|c: char| !c.is_alphanumeric()).any(|w| w == "MA"));
+    let lossless = matches!(s.codec.as_str(), "truehd" | "mlp" | "flac" | "alac")
+        || s.codec.starts_with("pcm_")
+        || (s.codec == "dts" && master_audio);
+    // Atmos and DTS:X, as FFmpeg names the profile ("Dolby TrueHD + Dolby Atmos"), or the title does.
+    let objects = [s.profile.as_deref(), s.title.as_deref()].into_iter().flatten().any(|text| {
+        let text = text.to_lowercase();
+        text.contains("atmos") || text.contains("dts:x")
+    });
+    let sound = Sound {
+        channels: out.channels().map_or(channels, |most| channels.min(most)),
+        native: out.channels().is_none_or(|most| channels <= most),
+        lossless,
+        objects: objects && out.passes_through(&s.codec),
+        bitrate: s.bitrate.unwrap_or(0),
+    };
+    (true, sound)
+}
+
 /// Pick the tracks of `streams` that best match `pref`, or without one the
-/// user's `defaults` (see [`by_default`]).
-pub fn resolve(pref: Option<&StreamPreference>, defaults: &Defaults, streams: &[MediaStream]) -> Selection {
+/// user's `defaults` (see [`by_default`]). With the player's `out`, of the
+/// tracks of the language chosen the one it plays best: as it is rather
+/// than converted, then (unless a choice names its title) with the file as
+/// it is rather than streamed, then as it sounds there ([`Sound`]).
+pub fn resolve(
+    pref: Option<&StreamPreference>,
+    defaults: &Defaults,
+    streams: &[MediaStream],
+    out: Option<&dyn AudioOut>,
+) -> Selection {
     let audio_streams: Vec<&MediaStream> = streams.iter().filter(|s| s.kind == StreamKind::Audio).collect();
     let subtitle_streams: Vec<&MediaStream> = streams.iter().filter(|s| s.kind == StreamKind::Subtitle).collect();
     let default_audio = audio_streams.iter().copied().find(|s| s.default).or(audio_streams.first().copied());
 
     let Some(pref) = pref else {
-        return by_default(defaults, &audio_streams, &subtitle_streams, default_audio);
+        return by_default(defaults, &audio_streams, &subtitle_streams, default_audio, out);
     };
 
-    let audio = pref.audio_language.as_deref().and_then(|language| {
-        audio_streams
+    let wanted = audio_kind(pref.audio_title.as_deref());
+    let audio = match (pref.audio_language.as_deref(), pref.audio_title.as_deref()) {
+        (Some(language), _) => {
+            let in_language =
+                audio_streams.iter().copied().filter(|s| same_language(s.language.as_deref(), Some(language)));
+            in_language
+                .max_by_key(|s| {
+                    let fits = out.map(|out| fit(s, out));
+                    (
+                        audio_kind(s.title.as_deref()) == wanted,
+                        fits.is_some_and(|(plays, _)| plays),
+                        same_title(s.title.as_deref(), pref.audio_title.as_deref()),
+                        out.is_some_and(|out| as_is(s, out, default_audio)),
+                        fits.map(|(_, sound)| sound),
+                        s.default,
+                        // Prefer the earliest track among equals.
+                        std::cmp::Reverse(s.index),
+                    )
+                })
+                // Not in this file (an episode without it): as without a choice.
+                .or_else(|| automatic_audio(defaults, audio_streams.as_slice(), default_audio, out))
+        }
+        // A track without a language was chosen: the one with its title, as for subtitles.
+        (None, Some(title)) => audio_streams
             .iter()
-            .filter(|s| same_language(s.language.as_deref(), Some(language)))
-            .max_by_key(|s| {
-                let commentary = is_commentary(s.title.as_deref());
-                let wanted_commentary = is_commentary(pref.audio_title.as_deref());
-                (
-                    same_title(s.title.as_deref(), pref.audio_title.as_deref()),
-                    commentary == wanted_commentary,
-                    s.default,
-                    // Prefer the earliest track among equals.
-                    std::cmp::Reverse(s.index),
-                )
-            })
-            .map(|s| s.index)
-    });
+            .copied()
+            .find(|s| s.language.is_none() && same_title(s.title.as_deref(), Some(title)))
+            .or_else(|| automatic_audio(defaults, audio_streams.as_slice(), default_audio, out)),
+        // Only subtitles were chosen: the audio is chosen as without a choice.
+        (None, None) => automatic_audio(defaults, audio_streams.as_slice(), default_audio, out),
+    };
     // Only pin the audio when it differs from what the file plays anyway.
-    let audio = audio.filter(|&i| default_audio.is_none_or(|d| d.index != i));
+    let audio = audio.map(|s| s.index).filter(|&i| default_audio.is_none_or(|d| d.index != i));
 
     let subtitle = if pref.subtitles {
         subtitle_streams
@@ -214,24 +294,55 @@ pub fn resolve(pref: Option<&StreamPreference>, defaults: &Defaults, streams: &[
     Selection { audio, subtitle }
 }
 
-/// Tracks for a title the user picked none for: the main track in their audio
-/// language (the file's default without one), and subtitles as their mode
-/// says. Forced subtitles in the language of the audio translate foreign
-/// dialogue the viewer is meant to read: every mode but `off` shows them
-/// when nothing else is shown.
+/// Whether `out` plays `s` with the file as it is: it plays the codec, and
+/// the track is the file's default or the player switches tracks itself.
+fn as_is(s: &MediaStream, out: &dyn AudioOut, default_audio: Option<&MediaStream>) -> bool {
+    out.plays(&s.codec) && (out.switches_tracks() || default_audio.is_some_and(|d| d.index == s.index))
+}
+
+/// The audio of a title the user picked none for: the main track in their
+/// audio language; `None`, the file's default. With the player's `out`, the
+/// main track of that language it plays best, and without their language
+/// in the file, of the default track's language: a default the player can't
+/// play gives way to one it can (an E-AC-3 track next to a TrueHD one).
+fn automatic_audio<'a>(
+    defaults: &Defaults,
+    audio_streams: &[&'a MediaStream],
+    default_audio: Option<&'a MediaStream>,
+    out: Option<&dyn AudioOut>,
+) -> Option<&'a MediaStream> {
+    let present = |language: &str| audio_streams.iter().any(|s| same_language(s.language.as_deref(), Some(language)));
+    let language = defaults
+        .audio_language
+        .as_deref()
+        .filter(|l| present(l))
+        .or_else(|| out.and(default_audio).and_then(|d| d.language.as_deref()).filter(|l| known_language(l)))?;
+    audio_streams.iter().copied().filter(|s| same_language(s.language.as_deref(), Some(language))).max_by_key(|s| {
+        let fits = out.map(|out| fit(s, out));
+        (
+            audio_kind(s.title.as_deref()) == AudioKind::Main,
+            fits.is_some_and(|(plays, _)| plays),
+            out.is_some_and(|out| as_is(s, out, default_audio)),
+            fits.map(|(_, sound)| sound),
+            s.default,
+            std::cmp::Reverse(s.index),
+        )
+    })
+}
+
+/// Tracks for a title the user picked none for: the audio of
+/// [`automatic_audio`], and subtitles as their mode says. Forced subtitles
+/// in the language of the audio translate foreign dialogue the viewer is
+/// meant to read: every mode but `off` shows them when nothing else is
+/// shown.
 fn by_default(
     defaults: &Defaults,
     audio_streams: &[&MediaStream],
     subtitle_streams: &[&MediaStream],
     default_audio: Option<&MediaStream>,
+    out: Option<&dyn AudioOut>,
 ) -> Selection {
-    let preferred = defaults.audio_language.as_deref().and_then(|language| {
-        audio_streams
-            .iter()
-            .copied()
-            .filter(|s| same_language(s.language.as_deref(), Some(language)))
-            .max_by_key(|s| (!is_commentary(s.title.as_deref()), s.default, std::cmp::Reverse(s.index)))
-    });
+    let preferred = automatic_audio(defaults, audio_streams, default_audio, out);
     let playing = preferred.or(default_audio);
     // Only pin the audio when it differs from what the file plays anyway.
     let audio = preferred.filter(|p| default_audio.is_none_or(|d| d.index != p.index)).map(|s| s.index);
@@ -386,8 +497,32 @@ fn is_forced(s: &MediaStream) -> bool {
         })
 }
 
-fn is_commentary(title: Option<&str>) -> bool {
-    title.is_some_and(|t| t.to_lowercase().contains("commentary"))
+/// What an audio track holds, from its title: the film's own sound, or a
+/// commentary or a description for blind viewers laid over it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AudioKind {
+    Main,
+    Commentary,
+    Description,
+}
+
+fn audio_kind(title: Option<&str>) -> AudioKind {
+    let Some(title) = title else { return AudioKind::Main };
+    let title = title.to_lowercase();
+    if title.contains("commentary") {
+        AudioKind::Commentary
+    } else if title.contains("descri") || title.split(|c: char| !c.is_alphanumeric()).any(|w| w == "ad") {
+        // "Audio Description", "Descriptive Audio", "Described Video", "English AD".
+        AudioKind::Description
+    } else {
+        AudioKind::Main
+    }
+}
+
+/// A language tag that names a language: not undetermined, several, none,
+/// or uncoded (`und`, `mul`, `zxx`, `mis`), whose tracks may be anything.
+fn known_language(code: &str) -> bool {
+    !matches!(normalize_language(code).as_str(), "und" | "mul" | "zxx" | "mis" | "")
 }
 
 #[cfg(test)]
@@ -446,43 +581,43 @@ mod tests {
 
         // Next episode: tracks moved; the full English subtitles are found again.
         let next = episode(10);
-        assert_eq!(resolve(Some(&pref), &NONE, &next), Selection { audio: None, subtitle: Some(15) });
+        assert_eq!(resolve(Some(&pref), &NONE, &next, None), Selection { audio: None, subtitle: Some(15) });
     }
 
     #[test]
     fn forced_and_sdh_choices_are_kept_apart() {
         let pref = from_selection(&episode(0), None, Some(4));
         assert!(pref.subtitle_forced);
-        assert_eq!(resolve(Some(&pref), &NONE, &episode(10)).subtitle, Some(14));
+        assert_eq!(resolve(Some(&pref), &NONE, &episode(10), None).subtitle, Some(14));
 
         let pref = from_selection(&episode(0), None, Some(6));
-        assert_eq!(resolve(Some(&pref), &NONE, &episode(10)).subtitle, Some(16));
+        assert_eq!(resolve(Some(&pref), &NONE, &episode(10), None).subtitle, Some(16));
     }
 
     #[test]
     fn audio_language_is_followed_but_commentary_avoided() {
         let pref = from_selection(&episode(0), Some(2), None);
         assert_eq!(pref.audio_language.as_deref(), Some("eng"));
-        assert_eq!(resolve(Some(&pref), &NONE, &episode(10)), Selection { audio: Some(12), subtitle: None });
+        assert_eq!(resolve(Some(&pref), &NONE, &episode(10), None), Selection { audio: Some(12), subtitle: None });
         // Choosing the default track pins nothing.
         let pref = from_selection(&episode(0), Some(1), None);
-        assert_eq!(resolve(Some(&pref), &NONE, &episode(10)).audio, None);
+        assert_eq!(resolve(Some(&pref), &NONE, &episode(10), None).audio, None);
     }
 
     #[test]
     fn subtitles_off_stays_off_and_missing_languages_are_skipped() {
         let pref = from_selection(&episode(0), None, None);
         assert!(!pref.subtitles);
-        assert_eq!(resolve(Some(&pref), &NONE, &episode(10)).subtitle, None);
+        assert_eq!(resolve(Some(&pref), &NONE, &episode(10), None).subtitle, None);
 
         let pref = StreamPreference { subtitles: true, subtitle_language: Some("ger".into()), ..Default::default() };
-        assert_eq!(resolve(Some(&pref), &NONE, &episode(0)).subtitle, None);
+        assert_eq!(resolve(Some(&pref), &NONE, &episode(0), None).subtitle, None);
     }
 
     #[test]
     fn language_codes_are_normalized() {
         let pref = StreamPreference { subtitles: true, subtitle_language: Some("en".into()), ..Default::default() };
-        assert_eq!(resolve(Some(&pref), &NONE, &episode(0)).subtitle, Some(5));
+        assert_eq!(resolve(Some(&pref), &NONE, &episode(0), None).subtitle, Some(5));
         assert!(same_language(Some("fra"), Some("fre")));
         assert!(same_language(Some("en-US"), Some("eng")));
     }
@@ -491,13 +626,13 @@ mod tests {
     fn a_chosen_commentary_track_is_followed() {
         let pref = from_selection(&episode(0), Some(3), None);
         assert_eq!(pref.audio_title.as_deref(), Some("Director's Commentary"));
-        assert_eq!(resolve(Some(&pref), &NONE, &episode(10)).audio, Some(13));
+        assert_eq!(resolve(Some(&pref), &NONE, &episode(10), None).audio, Some(13));
     }
 
     #[test]
     fn missing_audio_languages_keep_the_default_track() {
         let pref = StreamPreference { audio_language: Some("ger".into()), ..Default::default() };
-        assert_eq!(resolve(Some(&pref), &NONE, &episode(0)), Selection::default());
+        assert_eq!(resolve(Some(&pref), &NONE, &episode(0), None), Selection::default());
         // Indexes that are not audio (or don't exist) describe nothing.
         let pref = from_selection(&episode(0), Some(4), Some(1));
         assert_eq!(pref, StreamPreference::default());
@@ -515,10 +650,14 @@ mod tests {
         };
         let pref = from_selection(&streams(0), None, Some(3));
         assert_eq!((pref.subtitle_language.as_deref(), pref.subtitle_title.as_deref()), (None, Some("Karaoke")));
-        assert_eq!(resolve(Some(&pref), &NONE, &streams(10)).subtitle, Some(13), "the untagged track with that title");
+        assert_eq!(
+            resolve(Some(&pref), &NONE, &streams(10), None).subtitle,
+            Some(13),
+            "the untagged track with that title"
+        );
         // No untagged track with that title: subtitles stay off.
         let pref = StreamPreference { subtitles: true, subtitle_title: Some("Signs".into()), ..Default::default() };
-        assert_eq!(resolve(Some(&pref), &NONE, &streams(0)).subtitle, None);
+        assert_eq!(resolve(Some(&pref), &NONE, &streams(0), None).subtitle, None);
     }
 
     #[test]
@@ -530,9 +669,9 @@ mod tests {
             sub(4, Some("eng"), Some("English [CC]"), false, true),
         ];
         let pref = StreamPreference { subtitles: true, subtitle_language: Some("eng".into()), ..Default::default() };
-        assert_eq!(resolve(Some(&pref), &NONE, &streams).subtitle, Some(3), "text, no SDH, earliest");
+        assert_eq!(resolve(Some(&pref), &NONE, &streams, None).subtitle, Some(3), "text, no SDH, earliest");
         let sdh = StreamPreference { subtitle_title: Some("SDH".into()), ..pref };
-        assert_eq!(resolve(Some(&sdh), &NONE, &streams).subtitle, Some(4), "`CC` marks SDH too");
+        assert_eq!(resolve(Some(&sdh), &NONE, &streams, None).subtitle, Some(4), "`CC` marks SDH too");
         assert!(!is_sdh(Some("Accent")), "a word, not two letters inside one");
     }
 
@@ -548,11 +687,11 @@ mod tests {
     #[test]
     fn without_a_preference_only_matching_forced_subtitles_show() {
         let mut streams = episode(0);
-        assert_eq!(resolve(None, &NONE, &streams), Selection::default());
+        assert_eq!(resolve(None, &NONE, &streams, None), Selection::default());
         // English audio by default: the English forced track is shown.
         streams[1].default = false;
         streams[2].default = true;
-        assert_eq!(resolve(None, &NONE, &streams).subtitle, Some(4));
+        assert_eq!(resolve(None, &NONE, &streams, None).subtitle, Some(4));
     }
 
     #[test]
@@ -566,25 +705,28 @@ mod tests {
             subtitle_mode: mode,
         };
         // English audio, its main track, not the commentary.
-        let english = resolve(None, &with(Some("en"), None, SubtitleMode::Forced), &film);
+        let english = resolve(None, &with(Some("en"), None, SubtitleMode::Forced), &film, None);
         assert_eq!(english, Selection { audio: Some(12), subtitle: Some(14) }, "and its forced subtitles");
         // The default track is already Japanese: not pinned.
-        assert_eq!(resolve(None, &with(Some("jpn"), None, SubtitleMode::Off), &film), Selection::default());
+        assert_eq!(resolve(None, &with(Some("jpn"), None, SubtitleMode::Off), &film, None), Selection::default());
         // Foreign audio, subtitles in the reader's language: the full track, not SDH or forced.
         let reader = with(None, Some("eng"), SubtitleMode::Foreign);
-        assert_eq!(resolve(None, &reader, &film).subtitle, Some(15));
+        assert_eq!(resolve(None, &reader, &film, None).subtitle, Some(15));
         // The audio is in the reader's language: only forced ones.
         let at_home = with(Some("eng"), Some("eng"), SubtitleMode::Foreign);
-        assert_eq!(resolve(None, &at_home, &film), Selection { audio: Some(12), subtitle: Some(14) });
+        assert_eq!(resolve(None, &at_home, &film, None), Selection { audio: Some(12), subtitle: Some(14) });
         // Always, in French; in a language the file lacks, forced ones at most.
-        assert_eq!(resolve(None, &with(None, Some("fr"), SubtitleMode::Always), &film).subtitle, Some(17));
-        assert_eq!(resolve(None, &with(None, Some("ger"), SubtitleMode::Always), &film).subtitle, None);
-        assert_eq!(resolve(None, &with(Some("eng"), Some("ger"), SubtitleMode::Always), &film).subtitle, Some(14));
+        assert_eq!(resolve(None, &with(None, Some("fr"), SubtitleMode::Always), &film, None).subtitle, Some(17));
+        assert_eq!(resolve(None, &with(None, Some("ger"), SubtitleMode::Always), &film, None).subtitle, None);
+        assert_eq!(
+            resolve(None, &with(Some("eng"), Some("ger"), SubtitleMode::Always), &film, None).subtitle,
+            Some(14)
+        );
         // Off is off, forced subtitles included.
-        assert_eq!(resolve(None, &with(Some("eng"), None, SubtitleMode::Off), &film).subtitle, None);
+        assert_eq!(resolve(None, &with(Some("eng"), None, SubtitleMode::Off), &film, None).subtitle, None);
         // A remembered choice wins over the defaults.
         let chosen = StreamPreference { subtitles: false, ..Default::default() };
-        assert_eq!(resolve(Some(&chosen), &with(None, Some("fre"), SubtitleMode::Always), &film).subtitle, None);
+        assert_eq!(resolve(Some(&chosen), &with(None, Some("fre"), SubtitleMode::Always), &film, None).subtitle, None);
         assert!(valid_language("eng") && valid_language("fr") && !valid_language("English") && !valid_language("EN"));
         // Both ISO 639-2 forms and the two-letter code are one language.
         assert!(same_language(Some("ces"), Some("cze")) && same_language(Some("el"), Some("gre")));
@@ -604,17 +746,176 @@ mod tests {
             sub(4, Some("eng"), Some("SDH"), false, true),
         ];
         let with = |mode| Defaults { audio_language: None, subtitle_language: Some("eng".into()), subtitle_mode: mode };
-        assert_eq!(resolve(None, &with(SubtitleMode::Forced), &film).subtitle, Some(2), "forced, for English audio");
-        assert_eq!(resolve(None, &with(SubtitleMode::Always), &film).subtitle, Some(3), "full ones, not the forced");
+        assert_eq!(
+            resolve(None, &with(SubtitleMode::Forced), &film, None).subtitle,
+            Some(2),
+            "forced, for English audio"
+        );
+        assert_eq!(
+            resolve(None, &with(SubtitleMode::Always), &film, None).subtitle,
+            Some(3),
+            "full ones, not the forced"
+        );
         // Picked, they are found again as forced in the next file.
         let pref = from_selection(&film, None, Some(2));
         assert!(pref.subtitle_forced);
         let mut next = film.clone();
         next.swap(1, 2);
         (next[1].index, next[2].index) = (2, 3);
-        assert_eq!(resolve(Some(&pref), &NONE, &next).subtitle, Some(3));
+        assert_eq!(resolve(Some(&pref), &NONE, &next, None).subtitle, Some(3));
         // A word, not letters inside one; anime's "Signs & Songs" too.
         assert!(!is_forced(&sub(5, None, Some("Unforced Errors"), false, true)));
         assert!(is_forced(&sub(5, None, Some("Signs & Songs"), false, true)));
+    }
+
+    /// A player for the tests: the codecs it decodes and those it passes
+    /// through, whether it switches tracks, its output's channels.
+    struct Player {
+        decodes: &'static [&'static str],
+        passes: &'static [&'static str],
+        switches: bool,
+        channels: Option<i64>,
+    }
+
+    impl AudioOut for Player {
+        fn plays(&self, codec: &str) -> bool {
+            self.decodes.contains(&codec) || self.passes.contains(&codec)
+        }
+        fn passes_through(&self, codec: &str) -> bool {
+            self.passes.contains(&codec)
+        }
+        fn switches_tracks(&self) -> bool {
+            self.switches
+        }
+        fn channels(&self) -> Option<i64> {
+            self.channels
+        }
+    }
+
+    /// A TV with a 7.1 receiver taking everything.
+    const THEATER: Player =
+        Player { decodes: &["aac"], passes: &["ac3", "eac3", "truehd", "dts"], switches: true, channels: Some(8) };
+    /// A TV with a 5.1 soundbar: Dolby Digital (Plus) passed through.
+    const SOUNDBAR: Player = Player { decodes: &["aac"], passes: &["ac3", "eac3"], switches: true, channels: Some(6) };
+    /// A phone: AAC and Dolby Digital (Plus) decoded, stereo.
+    const PHONE: Player = Player { decodes: &["aac", "ac3", "eac3"], passes: &[], switches: true, channels: Some(2) };
+    /// Chrome, a version 1 player: AAC, a file's default track only, no channels said.
+    const CHROME: Player =
+        Player { decodes: &["aac", "mp3", "opus", "flac"], passes: &[], switches: false, channels: None };
+    /// Safari, also version 1: Dolby Digital too.
+    const SAFARI: Player = Player { decodes: &["aac", "ac3", "eac3"], passes: &[], switches: false, channels: None };
+
+    fn track(index: i64, codec: &str, channels: i64, title: Option<&str>, default: bool) -> MediaStream {
+        MediaStream { codec: codec.into(), channels: Some(channels), ..audio(index, "eng", title, default) }
+    }
+
+    /// A 4K film: English TrueHD 7.1 with Atmos (the default), AC-3 5.1,
+    /// AAC stereo, a commentary and an audio description, French AC-3 5.1.
+    fn film() -> Vec<MediaStream> {
+        let mut atmos = track(1, "truehd", 8, Some("English Atmos"), true);
+        atmos.profile = Some("Dolby TrueHD + Dolby Atmos".into());
+        vec![
+            MediaStream { index: 0, kind: StreamKind::Video, codec: "hevc".into(), ..Default::default() },
+            atmos,
+            track(2, "ac3", 6, Some("English 5.1"), false),
+            track(3, "aac", 2, Some("English Stereo"), false),
+            track(4, "aac", 2, Some("Commentary"), false),
+            track(5, "aac", 2, Some("Audio Description"), false),
+            MediaStream { language: Some("fre".into()), ..track(6, "ac3", 6, None, false) },
+        ]
+    }
+
+    #[test]
+    fn each_player_gets_the_track_of_the_language_it_plays_best() {
+        let play = |out: &Player| resolve(None, &NONE, &film(), Some(out)).audio;
+        // The receiver takes the default's TrueHD and its Atmos: nothing to pin.
+        assert_eq!(play(&THEATER), None);
+        // The soundbar takes no TrueHD: Dolby Digital 5.1 as it is, not TrueHD converted.
+        assert_eq!(play(&SOUNDBAR), Some(2));
+        // The phone's stereo: the stereo mix, not 5.1 folded down.
+        assert_eq!(play(&PHONE), Some(3));
+        // Chrome plays AAC only: the stereo track, copied into a stream, never the
+        // commentary or the description, though they play as they are too.
+        assert_eq!(play(&CHROME), Some(3));
+        // Safari plays Dolby Digital: 5.1 rather than stereo.
+        assert_eq!(play(&SAFARI), Some(2));
+        // An item's details don't know the player: the default, as ever.
+        assert_eq!(resolve(None, &NONE, &film(), None).audio, None);
+        // The profile's language first: French, as it is.
+        let french = Defaults { audio_language: Some("fr".into()), ..NONE };
+        assert_eq!(resolve(None, &french, &film(), Some(&CHROME)).audio, Some(6), "converted: the only French track");
+    }
+
+    #[test]
+    fn a_player_that_plays_only_the_default_keeps_it_when_it_plays() {
+        // Safari plays both: the default plays with the file as it is, the other only in a stream.
+        let streams = vec![track(1, "aac", 2, None, true), track(2, "eac3", 6, None, false)];
+        assert_eq!(resolve(None, &NONE, &streams, Some(&SAFARI)).audio, None);
+        // A player that switches tracks itself takes the 5.1.
+        let switching = Player { switches: true, ..SAFARI };
+        assert_eq!(resolve(None, &NONE, &streams, Some(&switching)).audio, Some(2));
+    }
+
+    #[test]
+    fn a_remembered_choice_keeps_its_kind_and_title_where_they_play() {
+        let streams = film();
+        // The commentary, wherever.
+        let commentary = from_selection(&streams, Some(4), None);
+        assert_eq!(resolve(Some(&commentary), &NONE, &streams, Some(&THEATER)).audio, Some(4));
+        // A stereo mix picked on purpose stays, where Atmos would play too.
+        let stereo = from_selection(&streams, Some(3), None);
+        assert_eq!(resolve(Some(&stereo), &NONE, &streams, Some(&THEATER)).audio, Some(3));
+        // Atmos picked at home; on the phone, which takes no TrueHD, the English track it plays best.
+        let atmos = from_selection(&streams, Some(1), None);
+        assert_eq!(resolve(Some(&atmos), &NONE, &streams, Some(&THEATER)).audio, None);
+        assert_eq!(resolve(Some(&atmos), &NONE, &streams, Some(&PHONE)).audio, Some(3));
+        assert_eq!(resolve(Some(&atmos), &NONE, &streams, Some(&SOUNDBAR)).audio, Some(2));
+    }
+
+    #[test]
+    fn subtitles_chosen_alone_leave_the_audio_to_the_defaults_and_the_player() {
+        let subtitles =
+            StreamPreference { subtitles: true, subtitle_language: Some("eng".into()), ..Default::default() };
+        assert_eq!(resolve(Some(&subtitles), &NONE, &film(), Some(&SOUNDBAR)).audio, Some(2));
+        let french = Defaults { audio_language: Some("fre".into()), ..NONE };
+        assert_eq!(resolve(Some(&subtitles), &french, &film(), None).audio, Some(6));
+    }
+
+    #[test]
+    fn tracks_without_a_known_language_are_never_swapped() {
+        let mut streams = film();
+        for s in streams.iter_mut().filter(|s| s.kind == StreamKind::Audio) {
+            s.language = Some("und".into());
+        }
+        assert_eq!(resolve(None, &NONE, &streams, Some(&SOUNDBAR)).audio, None, "undetermined: may be any language");
+        for s in &mut streams {
+            s.language = None;
+        }
+        assert_eq!(resolve(None, &NONE, &streams, Some(&SOUNDBAR)).audio, None);
+        // One picked without a language is found again by its title.
+        let picked = from_selection(&streams, Some(2), None);
+        assert_eq!((picked.audio_language.as_deref(), picked.audio_title.as_deref()), (None, Some("English 5.1")));
+        assert_eq!(resolve(Some(&picked), &NONE, &streams, None).audio, Some(2));
+    }
+
+    #[test]
+    fn lossless_and_object_audio_are_told_apart() {
+        let dts = |profile: &str| MediaStream { profile: Some(profile.into()), ..track(1, "dts", 6, None, true) };
+        assert!(fit(&dts("DTS-HD MA"), &THEATER).1.lossless);
+        assert!(fit(&dts("DTS-HD MA + DTS:X"), &THEATER).1.objects);
+        assert!(!fit(&dts("DTS"), &THEATER).1.lossless && !fit(&dts("DTS-HD HRA"), &THEATER).1.lossless);
+        // Atmos decoded on the device is lost: it counts only passed through.
+        let joc =
+            MediaStream { profile: Some("Dolby Digital Plus + Dolby Atmos".into()), ..track(1, "eac3", 6, None, true) };
+        assert!(fit(&joc, &SOUNDBAR).1.objects && !fit(&joc, &PHONE).1.objects);
+        for (title, kind) in [
+            ("Audio Description", AudioKind::Description),
+            ("English AD", AudioKind::Description),
+            ("Descriptive Video Service", AudioKind::Description),
+            ("Director's Commentary", AudioKind::Commentary),
+            ("Adventure Mix", AudioKind::Main),
+        ] {
+            assert_eq!(audio_kind(Some(title)), kind, "{title}");
+        }
     }
 }

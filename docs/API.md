@@ -227,7 +227,9 @@ interface MediaFile {
   streams: MediaStream[];
   edition: string | null;           // from `{edition-Final Cut}` in the file's or its folder's name
   selected_audio: number | null;    // tracks to start with for this user (remembered
-  selected_subtitle: number | null; // choice or their defaults); null = default / off
+  selected_subtitle: number | null; // choice or their defaults); null = default / off. The audio
+                                    // for an unknown player: a play request picks the track of
+                                    // that language its player plays best (`audio_index` below)
   chapters: Chapter[];              // from the container, by start time (empty if none)
 }
 
@@ -967,7 +969,7 @@ may open only some libraries see those, in that order.
 | POST | `/api/items/{id}/artwork/{kind}/upload` *(admin)* | raw image bytes (≤ 25 MB) | `ItemDetail`; stored as JPEG and locked |
 | DELETE | `/api/items/{id}/artwork/{kind}` *(admin)* | – | `204`; back to local or downloaded artwork |
 | PUT | `/api/items/{id}/rating` | `{ rating: number \| null }` (0-10, rounded to half stars; `null` clears it) | `204`; the user's own rating, shown as `user_state.rating` |
-| PUT | `/api/items/{id}/streams` | `{ file_id?, audio_index, subtitle_index }` (`subtitle_index: null` = off) | `204`. Remembers the choice for the whole show (episodes) or the movie, as language/title/forced, so every episode starts with its own matching tracks. |
+| PUT | `/api/items/{id}/streams` | `{ file_id?, audio_index?, subtitle_index }` (`subtitle_index: null` = off) | `204`. Remembers the choice for the whole show (episodes) or the movie, as language/title/forced, so every episode starts with its own matching tracks. `audio_index` left out keeps the audio chosen before (subtitles alone were picked); `null` remembers none, so each play chooses it as for a title without a choice. Players send it only when the person picked an audio track. |
 | POST | `/api/items/{id}/unwatched` | – | `204`; `user_state_changed` to the user's streams, unless nothing changed |
 | POST | `/api/items/{id}/refresh` *(admin)* | – | `202` re-fetch metadata from the item's source (movies: TMDB; shows, seasons, episodes: the TV source; artists, albums, tracks: MusicBrainz). `400` when that source is off or lacks its key. |
 | POST | `/api/items/{id}/analyze` *(admin)* | – | `202` find the intro and credits again: a movie's chapters, or every episode of an episode's season, a season or a show. `400` for other kinds. |
@@ -1165,7 +1167,7 @@ queue.
 {
   item_id: Id;
   file_id?: Id;                   // default: first file of the item
-  audio_index?: number | null;    // ffprobe stream index, default: the track the user's choices pick (the file's `selected_audio`), else the file's default audio stream
+  audio_index?: number | null;    // ffprobe stream index; left out: the server picks (below). Players name one only when the person picked it
   subtitle_index?: number | null; // only needed for image-based subs (forces burn-in transcode)
   max_bitrate?: number | null;    // kbps, null/absent = original quality
   max_height?: number | null;     // e.g. 1080, 720, 480
@@ -1207,6 +1209,32 @@ queue.
   };
 }
 ```
+
+**The audio track.** Without `audio_index`, the server picks, and
+`PlaybackInfo.audio_index` says which track plays (a player that switches
+tracks itself plays that one in direct play). The language: the one the
+profile chose for the show or movie (a track it picked), else its audio
+language, else the language of the file's default track. Of that
+language's tracks, the main sound (never a commentary or an audio
+description, unless picked), then the one this player plays best:
+
+1. as it is (decoded, or passed through), rather than converted;
+2. a picked track's title (a stereo mix picked on purpose stays);
+3. with the file as it is: the file's default, or any track for a
+   player that switches tracks itself (`audio_track_switching`); other
+   tracks need a stream;
+4. as many channels as `audio_channels` says the output takes, mixed for
+   no more than that (a stereo mix beats a 5.1 one folded down on
+   stereo), lossless (TrueHD, DTS-HD MA, FLAC, PCM), Atmos or DTS:X when
+   passed through, the bitrate;
+5. the file's default, then the first.
+
+Tracks whose language is undetermined (`und`) or missing are never
+swapped for one another. A TV whose receiver takes TrueHD gets the TrueHD
+Atmos track; with a 5.1 soundbar, the Dolby Digital track as it is rather
+than the TrueHD converted; a phone, a stereo mix; Chrome, an AAC track
+copied into a stream. Item details (`selected_audio`) don't know the
+player, so they give the language's default track.
 
 Decision (`mode: "auto"`): **direct** when container + codecs are all supported,
 the dynamic range can be shown, the requested audio track is the default one,

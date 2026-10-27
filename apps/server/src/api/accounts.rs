@@ -6,9 +6,10 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 use super::auth::{Me, confirm_password, login_response, me};
+use super::nullable;
 use crate::accounts::{self, NO_PASSWORD, UserDto};
 use crate::auth::{
     AdminUser, AuthUser, ClientIp, CurrentToken, hash_password, hash_token, validate_password, validate_username,
@@ -17,11 +18,6 @@ use crate::error::{ApiResult, AppError};
 use crate::state::AppState;
 use crate::streams::{self, SubtitleMode};
 use crate::util::now;
-
-/// `Some(None)` for an explicit `null`, `None` when the field is absent.
-fn nullable<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<Option<T>>, D::Error> {
-    Option::<T>::deserialize(d).map(Some)
-}
 
 fn check_age(max_age: Option<i64>) -> ApiResult<()> {
     match max_age {

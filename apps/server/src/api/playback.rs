@@ -88,15 +88,14 @@ pub async fn start(
     let _starting = state.sessions.begin_start();
     let info = file.media_info();
     let streams = file.streams();
-    // No audio track named: the one the user's choices pick (what the item's
-    // details told the player, `selected_audio`), not just the file's
-    // default. A player that plays its own pick as it is would otherwise get
-    // a session for the default track, find it isn't the one it shows, and
-    // start another (a job made for nothing).
+    // No audio track named: the one the user's choices pick, not just the
+    // file's default, and of the tracks of that language the one this
+    // player plays best (as it is, then with the file as it is, then as it
+    // sounds on its output). `PlaybackInfo.audio_index` tells the player.
     if req.audio_index.is_none() {
         let pref = streams::load(&state.db, user.id, streams::scope(&row)).await?;
         let defaults = streams::defaults(&state.db, user.id).await?;
-        req.audio_index = streams::resolve(pref.as_ref(), &defaults, &streams).audio;
+        req.audio_index = streams::resolve(pref.as_ref(), &defaults, &streams, Some(&req.caps)).audio;
     }
     let decision = decide(&file, info.as_ref(), &streams, &req);
     let mut reasons = decision.reasons.clone();
@@ -515,7 +514,7 @@ pub async fn convert(
     if req.audio_index.is_none() {
         let pref = streams::load(&state.db, user.id, streams::scope(&row)).await?;
         let defaults = streams::defaults(&state.db, user.id).await?;
-        req.audio_index = streams::resolve(pref.as_ref(), &defaults, &streams).audio;
+        req.audio_index = streams::resolve(pref.as_ref(), &defaults, &streams, Some(&req.caps)).audio;
     }
     let decision = decide(&file, info.as_ref(), &streams, &req);
     if decision.method == Method::Direct {

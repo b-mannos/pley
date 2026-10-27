@@ -208,6 +208,22 @@ impl Caps {
     }
 }
 
+/// What the player does with audio, for choosing among a language's tracks.
+impl crate::streams::AudioOut for Caps {
+    fn plays(&self, codec: &str) -> bool {
+        self.plays_audio(codec)
+    }
+    fn passes_through(&self, codec: &str) -> bool {
+        self.is_v2() && self.audio_passthrough.as_deref().is_some_and(|list| listed(list, codec))
+    }
+    fn switches_tracks(&self) -> bool {
+        self.is_v2() && self.audio_track_switching == Some(true)
+    }
+    fn channels(&self) -> Option<i64> {
+        self.audio_channels.filter(|_| self.is_v2()).map(i64::from)
+    }
+}
+
 /// How the client wants the media delivered.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]

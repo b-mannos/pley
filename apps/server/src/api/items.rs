@@ -35,7 +35,7 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i
         let pref = streams::load(&state.db, user.id, scope).await?;
         let defaults = streams::defaults(&state.db, user.id).await?;
         for file in &mut detail.files {
-            let selection = streams::resolve(pref.as_ref(), &defaults, &file.streams);
+            let selection = streams::resolve(pref.as_ref(), &defaults, &file.streams, None);
             file.selected_audio = selection.audio;
             file.selected_subtitle = selection.subtitle;
         }
@@ -114,7 +114,11 @@ pub async fn prefetch(State(state): State<AppState>, user: AuthUser, Path(id): P
 pub struct StreamChoice {
     /// File the indexes refer to (default: the item's first file).
     file_id: Option<i64>,
-    audio_index: Option<i64>,
+    /// Left out: the audio chosen before stays (subtitles alone were
+    /// picked). `null`: no audio of its own, chosen on each play as for a
+    /// title without a choice.
+    #[serde(default, deserialize_with = "super::nullable")]
+    audio_index: Option<Option<i64>>,
     /// `None` = subtitles off.
     subtitle_index: Option<i64>,
 }
@@ -134,8 +138,14 @@ pub async fn set_streams(
         None => files.first(),
     }
     .ok_or_else(|| AppError::not_found("file not found"))?;
-    let pref = streams::from_selection(&file.streams(), choice.audio_index, choice.subtitle_index);
-    streams::save(&state.db, user.id, streams::scope(&row), &pref).await?;
+    let scope = streams::scope(&row);
+    let mut pref = streams::from_selection(&file.streams(), choice.audio_index.flatten(), choice.subtitle_index);
+    if choice.audio_index.is_none()
+        && let Some(before) = streams::load(&state.db, user.id, scope).await?
+    {
+        (pref.audio_language, pref.audio_title) = (before.audio_language, before.audio_title);
+    }
+    streams::save(&state.db, user.id, scope, &pref).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

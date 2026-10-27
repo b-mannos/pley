@@ -308,6 +308,13 @@ const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self'; st
     connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; \
     frame-ancestors 'none'";
 
+/// `Some(None)` for an explicit `null`, `None` when the field is absent.
+pub(crate) fn nullable<'de, D: serde::Deserializer<'de>, T: serde::Deserialize<'de>>(
+    d: D,
+) -> Result<Option<Option<T>>, D::Error> {
+    <Option<T> as serde::Deserialize>::deserialize(d).map(Some)
+}
+
 /// Query string helper: `"true"`/`"1"` → true.
 pub(crate) fn truthy(value: &str) -> bool {
     matches!(value, "1" | "true" | "yes")

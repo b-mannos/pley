@@ -151,7 +151,20 @@ fn probe_result(path: &str) -> Option<MediaInfo> {
         return None;
     }
     let mkv = path.ends_with(".mkv");
-    let streams = if mkv {
+    let titled = |index, codec, title: &str, default| MediaStream {
+        title: Some(title.into()),
+        ..audio(index, codec, "eng", default)
+    };
+    let streams = if path.contains("Lossless") {
+        // A film with its English sound three ways: TrueHD (the default), Dolby Digital 5.1, stereo.
+        vec![
+            video("h264"),
+            titled(1, "truehd", "TrueHD 7.1", true),
+            titled(2, "ac3", "Dolby Digital 5.1", false),
+            titled(3, "aac", "Stereo", false),
+            subtitle(4, "subrip", "eng", true),
+        ]
+    } else if mkv {
         vec![
             video("h264"),
             audio(1, "ac3", "eng", true),
@@ -1214,6 +1227,53 @@ async fn the_audio_the_user_picked_plays_unless_another_is_named() {
     let english = play(app, admin, json!({"item_id": feature, "caps": browser(), "audio_index": 1})).await;
     assert_eq!(english.body["audio_index"], json!(1));
     assert_eq!(w.fake.last_request().audio.unwrap().stream_index, Some(1));
+}
+
+/// Without a track named, the server plays the one of the user's language
+/// that the player plays best: Chrome the stereo AAC track (copied into a
+/// stream, rather than the TrueHD converted), a TV with a 5.1 soundbar its
+/// Dolby Digital as it is. Subtitles chosen alone leave that so; a track
+/// picked is played on every player that plays it, until audio is chosen
+/// as `null` (automatic) again.
+#[tokio::test]
+async fn the_audio_a_player_plays_best_is_chosen_for_it() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    app.media_file("lossless/Lossless (2022)/Lossless (2022).mkv", 5120);
+    let library = app.library(admin, "Lossless", "movies", "lossless").await;
+    let film = app.ids(library, admin).await["Lossless"];
+    let file = app.file_of(film).await;
+    let soundbar = json!({
+        "containers": ["mkv", "mp4"], "video_codecs": ["h264"], "audio_codecs": ["aac", "ac3", "eac3"],
+        "caps_version": 2, "audio_decode": ["aac"], "audio_passthrough": ["ac3", "eac3"], "audio_channels": 6,
+        "audio_track_switching": true
+    });
+    let chosen = async |caps: &Value| {
+        let started = play(app, admin, json!({"item_id": film, "caps": caps})).await;
+        assert_eq!(started.status, StatusCode::OK, "{}", started.body);
+        (started.body["method"].as_str().unwrap_or_default().to_owned(), started.body["audio_index"].clone())
+    };
+    assert_eq!(chosen(&browser()).await, ("remux".to_owned(), json!(3)));
+    assert_eq!(w.fake.last_request().audio.unwrap().mode, AudioMode::Copy, "copied, not converted");
+    assert_eq!(chosen(&soundbar).await, ("direct".to_owned(), json!(2)));
+    // The item's details don't know the player: its default, as before.
+    assert_eq!(app.get(&format!("/api/items/{film}"), admin).await.body["files"][0]["selected_audio"], Value::Null);
+
+    let choose = async |choice: Value| {
+        let put = app.put(&format!("/api/items/{film}/streams"), admin, choice).await;
+        assert_eq!(put.status, StatusCode::NO_CONTENT, "{}", put.body);
+    };
+    // Subtitles alone: the audio stays the player's best.
+    choose(json!({"file_id": file, "subtitle_index": 4})).await;
+    assert_eq!(chosen(&soundbar).await.1, json!(2));
+    // The stereo track picked: played on the soundbar too, and subtitles chosen later keep it.
+    choose(json!({"file_id": file, "audio_index": 3, "subtitle_index": 4})).await;
+    assert_eq!(chosen(&soundbar).await, ("direct".to_owned(), json!(3)));
+    choose(json!({"file_id": file, "subtitle_index": null})).await;
+    assert_eq!(chosen(&soundbar).await.1, json!(3));
+    // Audio chosen as `null`: automatic again.
+    choose(json!({"file_id": file, "audio_index": null, "subtitle_index": null})).await;
+    assert_eq!(chosen(&soundbar).await.1, json!(2));
 }
 
 #[tokio::test]
