@@ -120,6 +120,8 @@ export interface PlayerState {
   reconnecting: boolean;
   /** Time to the first frame of the session playing, in ms; `null` before it shows. */
   firstFrameMs: number | null;
+  /** Times the video stopped to wait for more once it played, seeks aside (Info's Stalls). */
+  stalls: number;
 }
 
 export interface PlayerClock {
@@ -154,6 +156,7 @@ const INITIAL: PlayerState = {
   stoppedByServer: false,
   reconnecting: false,
   firstFrameMs: null,
+  stalls: 0,
 };
 
 /** What a player needs from the app around it. */
@@ -186,6 +189,8 @@ export interface SavedPlayback {
 }
 
 export const TICK_MS = 500;
+/** Buffering this soon after a seek is the seek's, not a stall. */
+const SEEK_SETTLE_MS = 2_000;
 export const PROGRESS_MS = 10_000;
 /** While paused: the server forgets players it hasn't heard from for 90 s. */
 export const PAUSED_HEARTBEAT_MS = 30_000;
@@ -266,6 +271,8 @@ export class PlaybackController {
   private lastPositionMs = 0;
   private startedAtMs = 0;
   private mediaShown = false;
+  /** When a seek of the player's own was asked (its buffering is no stall). */
+  private seekedAt = -1e9;
   private wantPlay = true;
   private ended = false;
   private closed = false;
@@ -590,7 +597,10 @@ export class PlaybackController {
     if (!this.info || this.closed) return;
     switch (status) {
       case "buffering":
-        if (!this.ended) this.phase({ kind: "buffering" });
+        if (this.ended) break;
+        // A stall: it played, and no seek of its own asked it to wait.
+        if (this.state.value.phase.kind === "playing" && this.now() - this.seekedAt > SEEK_SETTLE_MS) this.update({ stalls: this.state.value.stalls + 1 });
+        this.phase({ kind: "buffering" });
         break;
       case "ready":
         this.mediaShown = true;
@@ -938,6 +948,7 @@ export class PlaybackController {
       return;
     }
     engine.seekTo(target);
+    this.seekedAt = this.now();
     this.lastPositionMs = target;
     this.startedAtMs = target;
     this.recovery.onJump();

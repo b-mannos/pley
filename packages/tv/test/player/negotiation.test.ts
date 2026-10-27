@@ -454,3 +454,35 @@ describe("the server out of reach", () => {
     c.close();
   });
 });
+
+describe("stalls (Info's count)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("count a playing video waiting for more, not the wait a seek of its own brings", async () => {
+    vi.useFakeTimers();
+    const w = world(item(file()), () => info());
+    w.env.now = () => Date.now();
+    const c = new PlaybackController({ itemId: 70 }, w.env, 0);
+    c.start();
+    await vi.advanceTimersByTimeAsync(50);
+    const now = (s: EngineStatus) => {
+      w.engine.state = s;
+      w.engine.listener?.status(s);
+    };
+    now("ready");
+    expect(c.state.value.phase.kind).toBe("playing");
+    now("buffering");
+    now("ready");
+    expect(c.state.value.stalls).toBe(1);
+    c.seekTo(1_200_000);
+    now("buffering");
+    now("ready");
+    expect(c.state.value.stalls).toBe(1);
+    await vi.advanceTimersByTimeAsync(3_000);
+    now("buffering");
+    expect(c.state.value.stalls).toBe(2);
+    c.close();
+  });
+});

@@ -182,6 +182,7 @@ export function readoutSections(state: PlayerState, stats: EngineStats | null, e
     if (stats.bitrate) tv.facts.push({ label: "Current bitrate", value: formatBitrate(stats.bitrate) });
     if (stats.dropped !== undefined && stats.frames) tv.facts.push({ label: "Dropped frames", value: `${stats.dropped} of ${stats.frames}` });
     if (stats.bufferedAheadMs !== undefined) tv.facts.push({ label: "Buffered ahead", value: `${Math.round(stats.bufferedAheadMs / 1000)} s` });
+    tv.facts.push({ label: "Stalls", value: String(state.stalls) });
     for (const line of stats.extra ?? []) {
       const i = line.indexOf(":");
       if (i > 0) tv.facts.push({ label: line.slice(0, i), value: line.slice(i + 1).trim() });
@@ -264,8 +265,14 @@ export function CompactReadout(p: { state: PlayerState; controller: PlaybackCont
   const stats = p.stats();
   const lines: [string, string][] = [["Playback", d.pipeline ? `${d.method} · ${d.pipeline}` : d.method]];
   for (const r of d.rows) lines.push([r.label, r.value]);
+  const sub = d.subtitle;
+  lines.push(["Subtitles", sub ? [sub.language ?? "", codecLabel(sub.codec)].filter(Boolean).join(" · ") : "Off"]);
+  // The file's bitrate, then what arrives now when that differs: "18 Mbps → 8 Mbps".
+  const rates = [d.file?.bitrate ? formatBitrate(d.file.bitrate) : "", stats?.bitrate ? formatBitrate(stats.bitrate) : ""].filter((r, i, a) => r && a.indexOf(r) === i);
+  if (rates.length) lines.push(["Bitrate", rates.join(" → ")]);
   if (stats?.width && stats.height) lines.push(["Decoded", `${stats.width}×${stats.height}${stats.hdr ? ` · ${stats.hdr}` : ""}`]);
-  if (stats?.bufferedAheadMs !== undefined) lines.push(["Buffer", `${Math.round(stats.bufferedAheadMs / 1000)} s ahead`]);
+  if (stats?.dropped !== undefined && stats.frames) lines.push(["Dropped", `${stats.dropped} of ${stats.frames}`]);
+  if (stats?.bufferedAheadMs !== undefined) lines.push(["Buffer", `${Math.round(stats.bufferedAheadMs / 1000)} s ahead${stats.bandwidth ? ` · ${formatBitrate(stats.bandwidth)}` : ""}`]);
   return (
     <div class="compact-readout">
       {lines.map(([l, v]) => (
