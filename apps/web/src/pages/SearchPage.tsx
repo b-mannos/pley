@@ -5,7 +5,7 @@ import { useSearch } from "@/api/hooks";
 import type { ItemKind, ItemSummary } from "@/api/types";
 import { aspectFor, CardSkeleton, MediaCard } from "@/components/cards";
 import { PersonCard } from "@/components/PersonCard";
-import { EmptyState, SectionTitle, Spinner } from "@/components/ui";
+import { Button, EmptyState, SectionTitle, Spinner } from "@/components/ui";
 import { useDocumentTitle, useElementWidth } from "@/lib/hooks";
 
 const GROUPS: { kind: ItemKind; title: string }[] = [
@@ -69,7 +69,14 @@ export function SearchPage() {
   }
 
   if (search.isError) {
-    return <EmptyState className="min-h-[60vh]" title="Search failed" description={errorMessage(search.error)} />;
+    return (
+      <EmptyState
+        className="min-h-[60vh]"
+        title="Couldn't search your libraries"
+        description={errorMessage(search.error)}
+        action={<Button onClick={() => void search.refetch()}>Retry</Button>}
+      />
+    );
   }
 
   const results = search.data?.items ?? [];

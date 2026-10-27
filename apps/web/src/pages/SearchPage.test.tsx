@@ -51,5 +51,7 @@ describe("SearchPage", () => {
     mockApi({ "GET /api/search": () => apiError(500, "internal", "index is rebuilding") });
     search("heat");
     expect(await screen.findByText("Index is rebuilding")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Couldn't search your libraries" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 });
