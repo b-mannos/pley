@@ -373,10 +373,13 @@ export function nudge(shift: number, lo: number, hi: number, viewLo: number, vie
  * The browser's focus to `el` (a screen reader reads it), without the
  * scrolling it brings: engines before Chrome 64 have no preventScroll and
  * scroll every box up to the page to show it, and nothing here scrolls
- * but by transform, so each box goes back to its top.
+ * but by transform, so each box goes back to its top. Elements take the
+ * browser's focus only from here (their tabindex is given here), so a
+ * click doesn't give it them while no reader is on.
  */
 function giveDomFocus(el: HTMLElement): void {
   if (document.activeElement === el) return;
+  if (!el.hasAttribute("tabindex")) el.tabIndex = -1;
   try {
     el.focus({ preventScroll: true });
   } catch {

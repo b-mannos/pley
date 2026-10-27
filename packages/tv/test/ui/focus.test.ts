@@ -170,7 +170,6 @@ describe("a TV's screen reader", () => {
   it("has the browser's focus follow the app's while it is on, and only then", () => {
     const a = item("a", "96,100,100,40");
     const b = item("b", "210,100,100,40");
-    for (const x of [a, b]) x.tabIndex = -1;
     const { focus } = page(group("row", [a, b]));
     focus.focus(a);
     expect(document.activeElement).toBe(document.body);

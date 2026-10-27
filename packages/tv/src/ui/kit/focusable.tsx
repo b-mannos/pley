@@ -46,7 +46,6 @@ export function F(props: FProps) {
       data-fdisabled={props.disabled ? "" : undefined}
       aria-label={props.label}
       role="button"
-      tabIndex={-1}
     >
       {props.children}
     </div>
