@@ -93,7 +93,8 @@ class AccountScreensTest {
     fun meShowsTheProfileAndItsTrackDefaults() {
         show { MeScreen() }
         waitFor("Anna")
-        compose.onNodeWithText("User · 192.168.1.20:7539").assertExists()
+        // The profile's line: the server alone (the Switch server button names it too).
+        compose.onNode(hasText("192.168.1.20:7539") and !hasClickAction()).assertExists()
         compose.onNodeWithText("English").assertExists()
         compose.onNodeWithText("Only for foreign dialogue").assertExists()
         // Forced subtitles follow the audio: no subtitle language to choose.

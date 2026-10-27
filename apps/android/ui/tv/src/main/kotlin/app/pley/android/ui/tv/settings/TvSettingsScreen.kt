@@ -556,8 +556,9 @@ private fun ProfileHeader(me: MeUiState) {
         Column {
             BasicText(profile.name, style = PleyType.Tv.Title.copy(color = PleyColors.Fg), maxLines = 1, overflow = TextOverflow.Ellipsis)
             BasicText(
-                listOf(
-                    stringResource(if (profile.managed) R.string.tv_account_role_managed else R.string.tv_account_role_user),
+                // A managed profile says so; an account needs no word for what it is.
+                listOfNotNull(
+                    if (profile.managed) stringResource(R.string.tv_account_role_managed) else null,
                     hostPort(profile.server),
                 ).joinToString(" · "),
                 style = PleyType.Tv.Caption.copy(color = PleyColors.Muted),

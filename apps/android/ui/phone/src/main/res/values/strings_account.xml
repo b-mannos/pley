@@ -3,7 +3,6 @@
     <!-- Me (design spec §4.8; apps/web/src/pages/AccountPage.tsx). -->
     <string name="account_me">Me</string>
     <string name="account_role_managed">Managed profile</string>
-    <string name="account_role_user">User</string>
     <string name="account_switch_profile">Switch profile</string>
     <string name="account_activity">Activity</string>
     <string name="account_history">Watch history</string>

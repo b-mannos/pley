@@ -12,7 +12,6 @@
 
     <!-- Profile: who is watching and their track defaults (AccountPage.tsx). -->
     <string name="tv_account_role_managed">Managed profile</string>
-    <string name="tv_account_role_user">User</string>
     <string name="tv_account_switch_profile">Switch profile</string>
     <string name="tv_account_audio_language">Audio language</string>
     <string name="tv_account_subtitles">Subtitles</string>

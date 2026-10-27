@@ -280,8 +280,9 @@ private fun ProfileHeader(profile: MeProfile?, onSwitch: () -> Unit) {
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            listOf(
-                stringResource(if (profile.managed) R.string.account_role_managed else R.string.account_role_user),
+            // A managed profile says so; an account needs no word for what it is.
+            listOfNotNull(
+                if (profile.managed) stringResource(R.string.account_role_managed) else null,
                 hostPort(profile.server),
             ).joinToString(" · "),
             style = MaterialTheme.typography.bodyMedium,
