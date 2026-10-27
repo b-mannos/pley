@@ -4,7 +4,7 @@ import type { ClientCaps, ItemDetail, MediaFile, MediaStream, PlaybackInfo, Play
 import type { KeyValue } from "../../src/auth/tokens";
 import { PlaybackController, type PlayerEnv } from "../../src/player/controller";
 import type { EngineListener, EngineSource, EngineStatus, PlayerEngine } from "../../src/player/engine";
-import { dvContainerMode, dvRetryMode, initialAudio, playbackRequest, type Choices } from "../../src/player/plan";
+import { dvContainerMode, dvRetryMode, initialAudio, initialSubtitle, playbackRequest, withTracks, type Choices } from "../../src/player/plan";
 import { ORIGINAL } from "../../src/player/quality";
 import { Reporter } from "../../src/player/reporter";
 import { NetworkError } from "../../src/net/transport";
@@ -146,6 +146,16 @@ describe("the audio to start with", () => {
     const req = playbackRequest(70, choices({ file: f, audio: initialAudio(f, null, LG) }), "webos-abc", LG, true);
     expect(req.audio_index).toBe(3);
     expect(playbackRequest(70, choices(), "webos-abc", LG, true).audio_index).toBeUndefined();
+  });
+});
+
+describe("tracks picked on the title's page", () => {
+  it("are the ones a playback started from its details begins with, the other versions left alone", () => {
+    const picked = withTracks(item(file()), 7, 2, 4);
+    const f = picked.files[0]!;
+    expect([initialAudio(f, null, { ...LG, audio_passthrough: ["truehd"] })?.index, initialSubtitle(f, null)?.index]).toEqual([2, 4]);
+    expect(initialSubtitle(withTracks(picked, 7, 2, null).files[0]!, null)).toBeNull();
+    expect(withTracks(item(file()), 8, 2, 4).files[0]).toEqual(file());
   });
 });
 

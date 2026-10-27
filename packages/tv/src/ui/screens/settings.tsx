@@ -127,7 +127,11 @@ export function SettingsScreen(p: { entry: Entry }) {
     const before = me;
     app.me.value = { ...me, audio_language: audio, subtitle_language: subtitle, subtitle_mode: mode };
     ui.api.setTrackDefaults(audio, subtitle, mode).then(
-      () => ui.toast("Saved"),
+      () => {
+        // Titles kept start with the tracks these pick now.
+        app.tracksChanged(null);
+        ui.toast("Saved");
+      },
       (e) => {
         app.me.value = before;
         if (isApiError(e, 403) || isApiError(e, 404) || isApiError(e, 405)) {

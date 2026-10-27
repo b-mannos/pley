@@ -21,7 +21,7 @@ import {
   audioFormatLabel,
 } from "../../format/format";
 import { mediaFacts } from "../../format/media-info";
-import { audioStreams, subtitleStreams } from "../../player/plan";
+import { audioStreams, subtitleStreams, withTracks } from "../../player/plan";
 import { useUi } from "../context";
 import { artCandidates } from "../kit/art";
 import { Backdrop, useRested } from "../kit/backdrop";
@@ -553,7 +553,7 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
       )}
       <SectionPage sections={sections} clipAbove={clip} extraShift={readOn} focusedKey={section} />
       <div class="rail-fade" />
-      {panel === "tracks" && file && <TracksPanel item={item} file={file} files={item.files} onVersion={(f) => setFileId(f.id)} onClose={() => setPanel(null)} />}
+      {panel === "tracks" && file && <TracksPanel item={item} file={file} files={item.files} onVersion={(f) => setFileId(f.id)} onClose={() => setPanel(null)} onSaved={p.reload} />}
       {panel === "more" && (
         <MorePanel
           item={item}
@@ -940,14 +940,18 @@ function MediaInfoCard(p: { file: MediaFile; title: string | null }) {
 }
 
 /** Audio and subtitles (TvPanels' Tracks): the version, the audio track, the subtitles; saved for the item. */
-function TracksPanel(p: { item: ItemDetail; file: MediaFile; files: MediaFile[]; onVersion: (f: MediaFile) => void; onClose: () => void }) {
+function TracksPanel(p: { item: ItemDetail; file: MediaFile; files: MediaFile[]; onVersion: (f: MediaFile) => void; onClose: () => void; onSaved: () => void }) {
+  const app = useApp();
   const ui = useUi();
   const audio = audioStreams(p.file);
   const subs = subtitleStreams(p.file);
   const [chosenAudio, setChosenAudio] = useState<number | null>(p.file.selected_audio ?? audio.filter((a) => a.default)[0]?.index ?? audio[0]?.index ?? null);
   const [chosenSub, setChosenSub] = useState<number | null>(p.file.selected_subtitle ?? null);
   const save = (a: number | null, s: number | null) => {
-    ui.api.setStreams(p.item.id, p.file.id, a, s).catch((e) => ui.toast(sentence(errorMessage(e)), true));
+    // Play, pressed at once, starts with these (the player starts from the
+    // details kept); the show's other episodes are asked for again.
+    app.tracksChanged(withTracks(p.item, p.file.id, a, s));
+    ui.api.setStreams(p.item.id, p.file.id, a, s).then(p.onSaved, (e) => ui.toast(sentence(errorMessage(e)), true));
   };
   const firstChecked = p.files.length > 1 ? "version" : audio.length >= 2 ? "audio" : "subs";
   return (

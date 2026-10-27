@@ -94,6 +94,20 @@ describe("watch state changed here or elsewhere", () => {
     expect(app.cachedItem(2)).toBeNull();
   });
 
+  it("keeps the title tracks were picked for, as picked, and forgets the rest", () => {
+    const { app } = setup();
+    app.keepItem(detail(1, 10, 100));
+    app.keepItem(detail(2, 10, 100));
+    const picked = { ...detail(1, 10, 100), title: "with the tracks picked" };
+    app.tracksChanged(picked);
+    expect(app.cachedItem(1)).toBe(picked);
+    // Another episode of the show starts with the choice too: asked again.
+    expect(app.cachedItem(2)).toBeNull();
+    // New defaults: every title is asked again.
+    app.tracksChanged(null);
+    expect(app.cachedItem(1)).toBeNull();
+  });
+
   it("says the server is out of reach for 6 s, then keeps the mark until it answers", () => {
     const { app } = setup();
     app.serverAway();

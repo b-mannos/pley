@@ -490,6 +490,17 @@ export class AppState {
   }
 
   /**
+   * Tracks were picked for `detail`'s title (the whole show for an
+   * episode), or the profile's defaults changed (`detail` null): the
+   * details kept name the tracks they started with before. `detail`, with
+   * the choice in it, is kept; the others go.
+   */
+  tracksChanged(detail: ItemDetail | null): void {
+    this.items.clear();
+    if (detail) this.keepItem(detail);
+  }
+
+  /**
    * A playback is on top (`true`) or has ended (`false`). Meanwhile Home and
    * the pages wait to ask again; once it ends they do, and the details kept
    * go, since its own reports moved resume points and watched marks.

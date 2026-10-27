@@ -307,6 +307,8 @@ export class PlaybackController {
 
   private next: ItemSummary | null = null;
   private nextDetail: ItemDetail | null = null;
+  /** Track choices saved so far (saveStreams). */
+  private choicesSaved = 0;
   private nextLookup = 0;
   /** When the screen asked to play: the first frame is timed from it. */
   private pressedAt: number;
@@ -1184,8 +1186,12 @@ export class PlaybackController {
   private showUpNext(found: ItemSummary, restartCountdown: boolean): void {
     this.next = found;
     if (this.nextDetail?.id !== found.id) {
+      const choices = this.choicesSaved;
       this.env.api.item(found.id).then(
-        (d) => (this.nextDetail = d),
+        (d) => {
+          // Tracks picked meanwhile change what it starts with: asked again then.
+          if (choices === this.choicesSaved) this.nextDetail = d;
+        },
         () => undefined,
       );
     }
@@ -1333,6 +1339,10 @@ export class PlaybackController {
     const audio = this.audio?.index ?? null;
     const subtitle = this.subtitle?.index ?? null;
     this.env.reporter.send(() => api.setStreams(itemId, fileId, audio, subtitle));
+    // The next episode's details, asked for before, name the tracks it
+    // started with then: it is asked for again, after this choice is saved.
+    this.choicesSaved++;
+    this.nextDetail = null;
   }
 
   private update(patch: Partial<PlayerState>): void {
