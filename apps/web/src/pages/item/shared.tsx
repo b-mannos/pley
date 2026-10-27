@@ -73,14 +73,20 @@ export function ItemPageShell({ item, children }: { item: ItemSummary; children:
 export function MetaLine({ parts, className }: { parts: (ReactNode | null | undefined | false)[]; className?: string }) {
   const visible = parts.filter((p) => p !== null && p !== undefined && p !== false && p !== "");
   if (!visible.length) return null;
+  // Each part leads with its dot, and the line starts a dot and a gap to the left, out of
+  // sight: a line that wraps doesn't begin with a dot.
   return (
-    <div className={cn("flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-sm text-muted", className)}>
-      {visible.map((p, i) => (
-        <span key={i} className="flex items-center gap-2.5">
-          {i > 0 ? <span className="text-subtle">·</span> : null}
-          {p}
-        </span>
-      ))}
+    <div className={cn("overflow-hidden text-sm text-muted", className)}>
+      <div className="-ml-3.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+        {visible.map((p, i) => (
+          <span key={i} className="flex items-center gap-2.5">
+            <span className="w-1 text-center text-subtle" aria-hidden>
+              ·
+            </span>
+            {p}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
