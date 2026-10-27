@@ -21,6 +21,10 @@ The API listens on `0.0.0.0:32400`, its usual port, by default.
 | Environment | `PLEY_PLEX_BIND` |
 | `pley.toml` | `plex_bind = "0.0.0.0:32400"` |
 
+By default it listens on every address, or only on this computer's when
+pley's own address is (`--bind 127.0.0.1:7539` behind a proxy): its
+clients send their tokens in the clear.
+
 If the port is taken (another media server uses it on the same machine), pley logs a
 warning and keeps running without this API. Pick another port with
 `--plex-bind`.

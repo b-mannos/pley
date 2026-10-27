@@ -34,9 +34,17 @@ struct Tracked {
 
 static TRACKED: LazyLock<Mutex<HashMap<String, Tracked>>> = LazyLock::new(Mutex::default);
 static NEXT_KEY: AtomicI64 = AtomicI64::new(1);
+/// Sessions tracked before those that ended are forgotten here too: only
+/// tools asking for sessions forget them otherwise, and a client making up
+/// a new identifier for every report would add one each time.
+const FORGET_ENDED_AT: usize = 512;
 
-fn remember(session_id: &str, client: &ClientInfo) {
+fn remember(state: &AppState, session_id: &str, client: &ClientInfo) {
     let mut tracked = TRACKED.lock();
+    if tracked.len() >= FORGET_ENDED_AT {
+        let live: std::collections::HashSet<String> = state.sessions.list().iter().map(|s| s.id.clone()).collect();
+        tracked.retain(|id, _| live.contains(id));
+    }
     let entry = tracked
         .entry(session_id.to_owned())
         .or_insert_with(|| Tracked { key: NEXT_KEY.fetch_add(1, Ordering::Relaxed), client: ClientInfo::default() });
@@ -252,7 +260,7 @@ async fn report(
                     time_ms,
                 ));
                 session.update(time_ms, play_state);
-                remember(&session.id, client);
+                remember(state, &session.id, client);
                 state.events.send(ServerEvent::SessionsChanged);
             }
         }
@@ -617,7 +625,7 @@ pub async fn universal_start(
     };
     let Json(info) =
         crate::api::playback::start(State(state.clone()), user, Json(request)).await.map_err(PlexError::from)?;
-    remember(&info.session_id, &client);
+    remember(&state, &info.session_id, &client);
 
     let audio_only = row.kind == "track";
     let height = params

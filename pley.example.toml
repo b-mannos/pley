@@ -14,7 +14,8 @@
 
 # Plex-compatible API for Plex tools (docs/COMPATIBILITY.md). "off" disables it; if the
 # port is taken (a real Plex server), pley logs a warning and runs without it.
-# Several addresses, as with bind.
+# Several addresses, as with bind. By default every address, or 127.0.0.1
+# when bind is only this computer's (behind a proxy, say).
 # plex_bind = "0.0.0.0:32400"
 
 # Answer the pley apps looking for servers on the local network (UDP, on the

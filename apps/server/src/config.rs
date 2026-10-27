@@ -198,6 +198,9 @@ impl Config {
             Some(value) => parse_binds(&value)?,
         };
         let plex_binds = match cli.plex_bind.clone().or(file.plex_bind) {
+            // Kept to this computer when pley is (behind a proxy, say): the
+            // compatibility API's tokens travel in the clear.
+            None if binds.iter().all(|bind| bind.ip().is_loopback()) => vec![SocketAddr::new(binds[0].ip(), PLEX_PORT)],
             None => vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), PLEX_PORT)],
             Some(value) if is_off(&value) => Vec::new(),
             Some(value) => parse_binds(&value)?,
@@ -471,6 +474,18 @@ mod tests {
         assert_eq!(config.extra_binds, ["100.64.0.7:7539".parse::<SocketAddr>().unwrap()]);
         assert_eq!(config.plex_bind, Some("127.0.0.1:32400".parse().unwrap()));
         assert_eq!(config.plex_extra_binds, ["100.64.0.7:32400".parse::<SocketAddr>().unwrap()]);
+    }
+
+    #[test]
+    fn pley_kept_to_this_computer_keeps_the_plex_api_there_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut args = cli(dir.path());
+        args.bind = Some("127.0.0.1:7539".into());
+        let config = Config::load(&args).unwrap();
+        assert_eq!(config.plex_bind, Some("127.0.0.1:32400".parse().unwrap()));
+        args.bind = Some("127.0.0.1:7539,192.168.1.20:7539".into());
+        let config = Config::load(&args).unwrap();
+        assert_eq!(config.plex_bind, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), PLEX_PORT)));
     }
 
     /// Command line options as if none were given (built directly, so the
