@@ -39,6 +39,9 @@ class Control:
     def setPosition(self, x, y):
         self.position = (x, y)
 
+    def setHeight(self, height):
+        self.height = height
+
     def reset(self):
         self.items = []
 
@@ -306,6 +309,28 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(win.made[L.rail_labels(L.RAIL_LIBRARIES[0])[0]].label, "Music")
         self.assertEqual(shows_page.rail, "lib2")
         self.assertEqual(win.focused, L.RAIL_SEARCH)
+
+    def test_the_rail_fits_every_library_above_settings(self):
+        for count in range(len(L.RAIL_LIBRARIES) + 1):
+            win = FakeWindow()
+            win.libraries = [{"id": i, "name": "Library %d" % i, "kind": "movies"} for i in range(count)]
+            win.setup_rail()
+            entries = [L.RAIL_SEARCH, L.RAIL_HOME, *L.RAIL_LIBRARIES[:count], L.RAIL_PLAYLISTS, L.RAIL_COLLECTIONS]
+            # Each pill's top and bottom on the screen, Settings' where skin.py puts it.
+            pills = []
+            for entry in entries:
+                group, pill = win.made[L.rail_group(entry)], win.made[entry]
+                top = group.position[1] + pill.position[1]
+                pills.append((top, top + pill.height))
+                self.assertEqual(win.made[L.rail_pill(entry)].height, pill.height)
+            pills.append((L.RAIL_SETTINGS_Y - L.RAIL_ROW // 2, L.RAIL_SETTINGS_Y + L.RAIL_ROW // 2))
+            for (_, above), (below, _) in zip(pills, pills[1:]):
+                self.assertGreaterEqual(below - above, L.RAIL_GAP, "%d libraries: %s" % (count, pills))
+            # The icons (40 tall) still fit their pills.
+            self.assertGreaterEqual(min(bottom - top for top, bottom in pills), 60, count)
+            # Few libraries keep the rail as it was.
+            if count <= 2:
+                self.assertEqual(win.made[L.rail_group(L.RAIL_PLAYLISTS)].position[1], L.RAIL_TOP + (2 + count) * L.RAIL_PITCH - 50)
 
     def test_rows_fill_and_place(self):
         win = FakeWindow()

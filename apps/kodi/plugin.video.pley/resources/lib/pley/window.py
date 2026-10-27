@@ -406,7 +406,11 @@ class Window(xbmcgui.WindowXML):
         self.c(L.RAIL_INITIAL).setLabel(name[:1].upper(), textColor=L.ON_ACCENT if light else L.FG)
         if self.me.get("avatar_url"):
             self.prop("pley.avatar.picture", image(self.session.base, self.me["avatar_url"], 128))
-        y = L.RAIL_TOP + 2 * L.RAIL_PITCH
+        pitch = L.rail_pitch(len(self.libraries))
+        y = L.RAIL_TOP
+        for entry in (L.RAIL_SEARCH, L.RAIL_HOME):
+            self.place_rail_entry(entry, y, pitch)
+            y += pitch
         for i, entry in enumerate(L.RAIL_LIBRARIES):
             group = L.rail_group(entry)
             if i < len(self.libraries):
@@ -416,14 +420,23 @@ class Window(xbmcgui.WindowXML):
                     self.c(control).setImage(icon, False)
                 for control in L.rail_labels(entry):
                     self.put(control, library.get("name"))
-                self.place(group, 0, y - 50)
+                self.place_rail_entry(entry, y, pitch)
                 self.visible(group, True)
-                y += L.RAIL_PITCH
+                y += pitch
             else:
                 self.visible(group, False)
         for entry in (L.RAIL_PLAYLISTS, L.RAIL_COLLECTIONS):
-            self.place(L.rail_group(entry), 0, y - 50)
-            y += L.RAIL_PITCH
+            self.place_rail_entry(entry, y, pitch)
+            y += pitch
+
+    def place_rail_entry(self, entry: int, y: int, pitch: int) -> None:
+        """An entry's group centred on `y`, its pills as tall as `pitch`
+        leaves room for (the icon and name stay centred in the group)."""
+        self.place(L.rail_group(entry), 0, y - L.RAIL_ROW // 2)
+        row = L.rail_row(pitch)
+        for control in (entry, L.rail_pill(entry)):
+            self.place(control, 8, (L.RAIL_ROW - row) // 2)
+            self.c(control).setHeight(row)
 
     def focus_in_rail(self) -> bool:
         return self.getFocusId() in L.RAIL_ENTRIES

@@ -51,6 +51,17 @@ class SkinTest(unittest.TestCase):
             ids = [c.get("id") for c in parse(name).iter("control") if c.get("id")]
             self.assertEqual([i for i, n in collections.Counter(ids).items() if n > 1], [], name)
 
+    def test_masks_keep_to_a_cropped_pictures_place(self):
+        # Kodi stretches a mask over the whole picture by default, cropped
+        # parts too: a portrait photo's circle came out a clipped oval.
+        masked = [
+            c for c in parse(L.WINDOW).iter("control")
+            if c.find("texture") is not None and c.find("texture").get("diffuse") and c.findtext("aspectratio") == "scale"
+        ]
+        self.assertTrue(masked)
+        for c in masked:
+            self.assertEqual(c.find("aspectratio").get("scalediffuse"), "false", c.find("texture").text)
+
     def test_the_window_has_every_control_it_moves_and_fills(self):
         ids = {int(c.get("id")) for c in parse(L.WINDOW).iter("control") if c.get("id")}
         wanted = set(L.RAIL_ENTRIES) | set(L.SCREENS.values())

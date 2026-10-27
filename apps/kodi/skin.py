@@ -95,6 +95,12 @@ def tex(name: str, **attrs) -> dict:
 
 
 def image(left, top, width, height, texture, id_=None, color=None, visible=None, animations=(), border=None, diffuse=None, aspect=None, fade=None, background=None):
+    if diffuse and aspect == "scale":
+        # A picture that fills its place is cropped, and Kodi stretches a
+        # mask over the whole picture unless told otherwise: a portrait
+        # photo's circle was a tall oval cut flat at the top and bottom.
+        # The mask keeps to the place, as the picture is seen.
+        aspect = {"text": aspect, "attrs": {"scalediffuse": "false"}}
     return control(
         "image",
         id_,
@@ -565,7 +571,7 @@ def rail() -> list:
                 544,
                 100,
                 [
-                    image(8, 0, 528, 100, "round12.png", color=L.SURFACE3, border=14, visible=opened + " + " + current + " + !" + focused),
+                    image(8, 0, 528, 100, "round12.png", id_=L.rail_pill(entry), color=L.SURFACE3, border=14, visible=opened + " + " + current + " + !" + focused),
                     image(16, 30, 8, 40, "round4.png", color=L.ACCENT, border=4, visible="!" + opened + " + " + current),
                     button(entry, 8, 0, 528, 100, "round12.png", None, animations=[anim("Focus", ZOOM_PILL)], navigation=links(entry)),
                     image(48, 30, 40, 40, icon, id_=rest_icon, color=L.MUTED, visible="!%s + !%s" % (focused, current)),

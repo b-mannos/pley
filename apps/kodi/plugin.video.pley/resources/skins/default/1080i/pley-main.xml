@@ -1079,7 +1079,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -1262,7 +1262,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -1478,7 +1478,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -1569,7 +1569,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -1693,7 +1693,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -1876,7 +1876,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -2113,7 +2113,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -2296,7 +2296,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -2512,7 +2512,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -2603,7 +2603,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -2727,7 +2727,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -2910,7 +2910,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -3147,7 +3147,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -3330,7 +3330,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -3546,7 +3546,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -3637,7 +3637,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -3761,7 +3761,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -3944,7 +3944,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -4181,7 +4181,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -4364,7 +4364,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -4580,7 +4580,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -4671,7 +4671,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -4795,7 +4795,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -4978,7 +4978,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -5215,7 +5215,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -5398,7 +5398,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -5614,7 +5614,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -5705,7 +5705,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -5829,7 +5829,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -6012,7 +6012,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -6249,7 +6249,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -6432,7 +6432,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -6648,7 +6648,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -6739,7 +6739,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -6863,7 +6863,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -7046,7 +7046,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -7283,7 +7283,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -7466,7 +7466,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -7682,7 +7682,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -7773,7 +7773,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -7897,7 +7897,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -8080,7 +8080,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -8317,7 +8317,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -8500,7 +8500,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -8716,7 +8716,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -8807,7 +8807,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -8931,7 +8931,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -9114,7 +9114,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -9351,7 +9351,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -9534,7 +9534,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -9750,7 +9750,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -9841,7 +9841,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -9965,7 +9965,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -10148,7 +10148,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -10384,7 +10384,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -10567,7 +10567,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -10782,7 +10782,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -10873,7 +10873,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -10996,7 +10996,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -11179,7 +11179,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -12637,7 +12637,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -12820,7 +12820,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -13036,7 +13036,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -13127,7 +13127,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -13252,7 +13252,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -13347,7 +13347,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -13472,7 +13472,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
             </control>
@@ -13537,7 +13537,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -13656,7 +13656,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -13839,7 +13839,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -14055,7 +14055,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -14146,7 +14146,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -14271,7 +14271,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -14366,7 +14366,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -14491,7 +14491,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
             </control>
@@ -14556,7 +14556,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -14675,7 +14675,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -14858,7 +14858,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -15074,7 +15074,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -15165,7 +15165,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -15290,7 +15290,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -15385,7 +15385,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -15510,7 +15510,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
             </control>
@@ -15575,7 +15575,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -15693,7 +15693,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -15876,7 +15876,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -16091,7 +16091,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -16182,7 +16182,7 @@
                 <height>230</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -16306,7 +16306,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -16401,7 +16401,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -16525,7 +16525,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
             </control>
@@ -16590,7 +16590,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -17005,7 +17005,7 @@
                   <height>288</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-grid.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -17163,7 +17163,7 @@
                   <height>288</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-grid.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -17351,7 +17351,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -17446,7 +17446,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -17571,7 +17571,7 @@
                   <height>264</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -17758,7 +17758,7 @@
                   <height>264</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -18014,7 +18014,7 @@
                   <height>324</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -18197,7 +18197,7 @@
                   <height>324</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -18413,7 +18413,7 @@
                   <height>230</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -18504,7 +18504,7 @@
                   <height>230</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -18628,7 +18628,7 @@
                   <height>264</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -18811,7 +18811,7 @@
                   <height>264</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -19048,7 +19048,7 @@
                   <height>324</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -19231,7 +19231,7 @@
                   <height>324</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -19447,7 +19447,7 @@
                   <height>230</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -19538,7 +19538,7 @@
                   <height>230</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -19662,7 +19662,7 @@
                   <height>264</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -19845,7 +19845,7 @@
                   <height>264</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -20082,7 +20082,7 @@
                   <height>324</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -20265,7 +20265,7 @@
                   <height>324</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -20481,7 +20481,7 @@
                   <height>230</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -20572,7 +20572,7 @@
                   <height>230</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -20696,7 +20696,7 @@
                   <height>264</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -20879,7 +20879,7 @@
                   <height>264</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -21116,7 +21116,7 @@
                   <height>324</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -21299,7 +21299,7 @@
                   <height>324</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -21515,7 +21515,7 @@
                   <height>230</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -21606,7 +21606,7 @@
                   <height>230</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -21730,7 +21730,7 @@
                   <height>264</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -21913,7 +21913,7 @@
                   <height>264</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -22149,7 +22149,7 @@
                   <height>324</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -22332,7 +22332,7 @@
                   <height>324</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -22547,7 +22547,7 @@
                   <height>230</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -22638,7 +22638,7 @@
                   <height>230</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-landscape.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -22761,7 +22761,7 @@
                   <height>264</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -22944,7 +22944,7 @@
                   <height>264</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -23247,7 +23247,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -23430,7 +23430,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -23647,7 +23647,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -23742,7 +23742,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -23867,7 +23867,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
             </control>
@@ -23932,7 +23932,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -24030,7 +24030,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -24213,7 +24213,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -24450,7 +24450,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -24633,7 +24633,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -24850,7 +24850,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -24945,7 +24945,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -25070,7 +25070,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
             </control>
@@ -25135,7 +25135,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -25233,7 +25233,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -25416,7 +25416,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -25653,7 +25653,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -25836,7 +25836,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -26053,7 +26053,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -26148,7 +26148,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -26273,7 +26273,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
             </control>
@@ -26338,7 +26338,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -26436,7 +26436,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -26619,7 +26619,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -26856,7 +26856,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -27039,7 +27039,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -27256,7 +27256,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -27351,7 +27351,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -27476,7 +27476,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
             </control>
@@ -27541,7 +27541,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -27639,7 +27639,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -27822,7 +27822,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -28058,7 +28058,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -28241,7 +28241,7 @@
                 <height>324</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-poster.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -28457,7 +28457,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -28552,7 +28552,7 @@
                   <height>208</height>
                   <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                   <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                  <aspectratio>scale</aspectratio>
+                  <aspectratio scalediffuse="false">scale</aspectratio>
                   <fadetime>150</fadetime>
                 </control>
                 <control type="image">
@@ -28676,7 +28676,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
             </control>
@@ -28741,7 +28741,7 @@
                 <height>192</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-circle.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -28838,7 +28838,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -29021,7 +29021,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -29269,7 +29269,7 @@
                 <height>288</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-grid.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -29427,7 +29427,7 @@
                 <height>288</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-grid.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -29614,7 +29614,7 @@
                 <height>208</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -29709,7 +29709,7 @@
                 <height>208</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-episode.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -29833,7 +29833,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -30020,7 +30020,7 @@
                 <height>264</height>
                 <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
                 <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
-                <aspectratio>scale</aspectratio>
+                <aspectratio scalediffuse="false">scale</aspectratio>
                 <fadetime>150</fadetime>
               </control>
               <control type="image">
@@ -30381,7 +30381,7 @@
           <width>64</width>
           <height>64</height>
           <texture diffuse="mask-circle.png" background="true">$INFO[Window.Property(pley.avatar.picture)]</texture>
-          <aspectratio>scale</aspectratio>
+          <aspectratio scalediffuse="false">scale</aspectratio>
         </control>
         <control type="label" id="130">
           <left>128</left>
@@ -30445,7 +30445,7 @@
         <top>144</top>
         <width>544</width>
         <height>100</height>
-        <control type="image">
+        <control type="image" id="1117">
           <left>8</left>
           <top>0</top>
           <width>528</width>
@@ -30553,7 +30553,7 @@
         <top>256</top>
         <width>544</width>
         <height>100</height>
-        <control type="image">
+        <control type="image" id="1127">
           <left>8</left>
           <top>0</top>
           <width>528</width>
@@ -30661,7 +30661,7 @@
         <top>368</top>
         <width>544</width>
         <height>100</height>
-        <control type="image">
+        <control type="image" id="1137">
           <left>8</left>
           <top>0</top>
           <width>528</width>
@@ -30769,7 +30769,7 @@
         <top>480</top>
         <width>544</width>
         <height>100</height>
-        <control type="image">
+        <control type="image" id="1147">
           <left>8</left>
           <top>0</top>
           <width>528</width>
@@ -30877,7 +30877,7 @@
         <top>592</top>
         <width>544</width>
         <height>100</height>
-        <control type="image">
+        <control type="image" id="1157">
           <left>8</left>
           <top>0</top>
           <width>528</width>
@@ -30985,7 +30985,7 @@
         <top>704</top>
         <width>544</width>
         <height>100</height>
-        <control type="image">
+        <control type="image" id="1167">
           <left>8</left>
           <top>0</top>
           <width>528</width>
@@ -31093,7 +31093,7 @@
         <top>816</top>
         <width>544</width>
         <height>100</height>
-        <control type="image">
+        <control type="image" id="1177">
           <left>8</left>
           <top>0</top>
           <width>528</width>
@@ -31201,7 +31201,7 @@
         <top>928</top>
         <width>544</width>
         <height>100</height>
-        <control type="image">
+        <control type="image" id="1187">
           <left>8</left>
           <top>0</top>
           <width>528</width>
@@ -31309,7 +31309,7 @@
         <top>1040</top>
         <width>544</width>
         <height>100</height>
-        <control type="image">
+        <control type="image" id="1197">
           <left>8</left>
           <top>0</top>
           <width>528</width>
@@ -31417,7 +31417,7 @@
         <top>1152</top>
         <width>544</width>
         <height>100</height>
-        <control type="image">
+        <control type="image" id="1207">
           <left>8</left>
           <top>0</top>
           <width>528</width>
@@ -31525,7 +31525,7 @@
         <top>924</top>
         <width>544</width>
         <height>100</height>
-        <control type="image">
+        <control type="image" id="1217">
           <left>8</left>
           <top>0</top>
           <width>528</width>

@@ -118,6 +118,8 @@ RAIL_ENTRIES = (RAIL_AVATAR, RAIL_SEARCH, RAIL_HOME) + RAIL_LIBRARIES + (RAIL_PL
 RAIL_TOP = 194  # the first entry's middle, under the avatar's 86
 RAIL_PITCH = 112
 RAIL_SETTINGS_Y = 974
+RAIL_ROW = 100  # an entry's pill, as tall as the space between entries allows
+RAIL_GAP = 12  # at least, between two pills
 RAIL_AVATAR_Y = 86
 RAIL_NAME, RAIL_SUBTITLE, RAIL_INITIAL, RAIL_PICTURE, RAIL_COLOR = 130, 131, 132, 133, 134
 
@@ -134,6 +136,28 @@ def rail_icons(entry: int) -> tuple:
 
 def rail_labels(entry: int) -> tuple:
     return entry * 10 + 4, entry * 10 + 5, entry * 10 + 6
+
+
+def rail_pill(entry: int) -> int:
+    """The pill behind the current entry while the rail is open."""
+    return entry * 10 + 7
+
+
+def rail_pitch(libraries: int) -> int:
+    """How far apart the entries from Search to Collections are: closer
+    than RAIL_PITCH when there are too many for Collections to end a step
+    above Settings (with four libraries it was on Settings, with six off
+    the screen)."""
+    entries = 2 + min(libraries, len(RAIL_LIBRARIES)) + 2
+    # The last entry's middle, half its pill and a gap above Settings' pill:
+    # TOP + (entries - 1) * pitch + (pitch - GAP) / 2 + GAP <= Settings' top.
+    room = RAIL_SETTINGS_Y - RAIL_ROW // 2 - RAIL_TOP - RAIL_GAP // 2
+    return min(RAIL_PITCH, 2 * room // (2 * entries - 1))
+
+
+def rail_row(pitch: int) -> int:
+    """How tall an entry's pill is at `pitch`."""
+    return min(RAIL_ROW, pitch - RAIL_GAP)
 
 
 # Screens: each a group, shown alone.
