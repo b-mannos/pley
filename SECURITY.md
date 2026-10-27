@@ -63,7 +63,9 @@ on the same page, so they take the code as well.
 
 **Sessions.** Random 256-bit tokens, stored hashed. Browsers keep them in an
 `HttpOnly`, `SameSite=Lax` cookie only: no answer gives a page's script the
-token. Event streams end once their session is signed out. Switching from a
+token. What changes anything with the cookie must come from pley's own page
+(`Sec-Fetch-Site`, or `Origin`): a page on another port of the same host is
+the same site to the browser. Event streams end once their session is signed out. Switching from a
 restricted profile to one that can see more (an administrator, a higher age
 limit, other libraries) takes that profile's PIN, or its password (and code).
 

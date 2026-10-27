@@ -179,19 +179,7 @@ fn from_this_site(parts: &Parts) -> bool {
     if site.is_some_and(|site| site != "same-origin") {
         return false;
     }
-    let Some(origin) = parts.headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else { return false };
-    let Ok(origin) = Url::parse(origin) else { return false };
-    if !matches!(origin.scheme(), "http" | "https") {
-        return false;
-    }
-    let Some(host) = parts.headers.get(header::HOST).and_then(|v| v.to_str().ok()) else { return false };
-    if host.contains(['/', '\\', '?', '#', '@']) {
-        return false;
-    }
-    let Ok(host) = Url::parse(&format!("{}://{}", origin.scheme(), host.trim())) else { return false };
-    origin.host().is_some()
-        && origin.host() == host.host()
-        && origin.port_or_known_default() == host.port_or_known_default()
+    crate::auth::origin_is_host(parts)
 }
 
 // ------------------------------------------------------------------ requests (the consent page)

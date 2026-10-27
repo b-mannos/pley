@@ -173,6 +173,19 @@ async fn setup_login_and_permissions() {
     assert_eq!(me.body["username"], json!("admin"));
     assert_eq!(me.body["is_admin"], json!(true));
 
+    // Another site's page changes nothing with the cookie (a page on another
+    // port of this host is the same site to the browser); pley's own does.
+    let clean = |extra: &'static [(&'static str, &'static str)]| {
+        let mut headers = vec![("cookie", cookie_pair.as_str())];
+        headers.extend_from_slice(extra);
+        let app = &app;
+        async move { app.call(Method::POST, "/api/system/storage/clean", None, None, &headers).await.status }
+    };
+    assert_eq!(clean(&[("sec-fetch-site", "same-site")]).await, StatusCode::FORBIDDEN);
+    assert_eq!(clean(&[("origin", "http://nas:8080"), ("host", "nas:7539")]).await, StatusCode::FORBIDDEN);
+    assert_ne!(clean(&[("sec-fetch-site", "same-origin")]).await, StatusCode::FORBIDDEN);
+    assert_ne!(clean(&[("origin", "http://nas:7539"), ("host", "nas:7539")]).await, StatusCode::FORBIDDEN);
+
     // A regular user cannot use admin endpoints.
     let created =
         app.post("/api/users", &admin, json!({"username": "bob", "password": "bob-password", "is_admin": false})).await;

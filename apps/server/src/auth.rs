@@ -18,8 +18,8 @@ use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use axum::extract::{FromRequestParts, MatchedPath};
-use axum::http::header;
 use axum::http::request::Parts;
+use axum::http::{Method, header};
 use base64::Engine;
 use dashmap::DashMap;
 use sha2::{Digest, Sha256};
@@ -905,7 +905,47 @@ async fn authenticate(parts: &Parts, state: &AppState) -> Result<AuthUser, AppEr
         // headers keep it): refused, with no other token tried.
         return Err(AppError::TokenPlacement);
     }
+    // The session's cookie goes along with requests other sites' pages
+    // make too (a page on another port of this host is the same site to
+    // the browser), and SameSite=Lax lets their POSTs through when there is
+    // no body to ask about first: what changes anything with it comes from
+    // pley's own page. A token sent on purpose (a header, `?token=`) is no
+    // cookie.
+    if !matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS)
+        && token_without_cookie(parts).is_none()
+        && from_another_site(parts)
+    {
+        return Err(AppError::forbidden("this request didn't come from pley's page"));
+    }
     state.auth.validate(&token).await.ok_or(AppError::Unauthorized)
+}
+
+/// Whether a browser says another site's page made this request: by
+/// `Sec-Fetch-Site`, or, without it (older browsers), by an `Origin` other
+/// than the server it went to. A request saying neither isn't a page's.
+fn from_another_site(parts: &Parts) -> bool {
+    if let Some(site) = parts.headers.get("sec-fetch-site") {
+        return site.as_bytes() != b"same-origin";
+    }
+    parts.headers.contains_key(header::ORIGIN) && !origin_is_host(parts)
+}
+
+/// Whether the request's `Origin` is the server it was sent to (its
+/// `Host`): scheme-less hosts and ports compared, nothing else in `Host`.
+pub(crate) fn origin_is_host(parts: &Parts) -> bool {
+    let Some(origin) = parts.headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else { return false };
+    let Ok(origin) = url::Url::parse(origin) else { return false };
+    if !matches!(origin.scheme(), "http" | "https") {
+        return false;
+    }
+    let Some(host) = parts.headers.get(header::HOST).and_then(|v| v.to_str().ok()) else { return false };
+    if host.contains(['/', '\\', '?', '#', '@']) {
+        return false;
+    }
+    let Ok(host) = url::Url::parse(&format!("{}://{}", origin.scheme(), host.trim())) else { return false };
+    origin.host().is_some()
+        && origin.host() == host.host()
+        && origin.port_or_known_default() == host.port_or_known_default()
 }
 
 /// Whether the app's token opens the route of this request.
