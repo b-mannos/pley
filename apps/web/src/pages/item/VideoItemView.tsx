@@ -71,8 +71,11 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
   const subChoice = sub.file === (file?.id ?? null) ? sub.index : "auto";
   const subIndex = subChoice === "auto" ? (file?.selected_subtitle ?? null) : subChoice;
 
-  /** Remember a choice made here for the whole show (or this movie). */
-  const remember = (nextAudio: number | null, nextSub: number | null) => {
+  /**
+   * Remember a choice made here for the whole show (or this movie). Audio left out
+   * (`undefined`: only subtitles were picked) keeps the audio as it was chosen.
+   */
+  const remember = (nextAudio: number | null | undefined, nextSub: number | null) => {
     if (!file) return;
     // This item's copy says so at once: the player starts from it, maybe
     // before the choice is saved (and leaves out an Off or a default track).
@@ -81,7 +84,9 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
         ? {
             ...old,
             files: old.files.map((f) =>
-              f.id === file.id ? { ...f, selected_audio: nextAudio, selected_subtitle: nextSub } : f,
+              f.id === file.id
+                ? { ...f, selected_audio: nextAudio === undefined ? f.selected_audio : nextAudio, selected_subtitle: nextSub }
+                : f,
             ),
           }
         : old,
@@ -97,7 +102,8 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
     void play(item, {
       fromStart,
       fileId: item.files.length > 1 ? file?.id : undefined,
-      audio: audioIndex != null && audioIndex !== defaultAudio?.index ? audioIndex : undefined,
+      // A track picked here plays as picked; otherwise the server picks the one this browser plays best.
+      audio: audioChoice !== "auto" && audioChoice != null ? audioChoice : undefined,
       sub: subIndex ?? undefined,
     });
 
@@ -234,7 +240,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
                   onChange={(v) => {
                     const index = v === "off" ? null : Number(v);
                     setSub({ file: file.id, index });
-                    remember(audioIndex, index);
+                    remember(audioChoice === "auto" ? undefined : audioIndex, index);
                   }}
                 >
                   <option value="off">Off</option>

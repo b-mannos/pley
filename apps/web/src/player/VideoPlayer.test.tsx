@@ -405,7 +405,8 @@ describe("VideoPlayer subtitle timing", () => {
 
     fireEvent.keyDown(document, { key: "c" });
     await waitFor(() =>
-      expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ file_id: 3, audio_index: null, subtitle_index: 3 }),
+      // The audio left out: a subtitle change keeps what was picked before.
+      expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ file_id: 3, subtitle_index: 3 }),
     );
     // The next one is asked again; this one once it shows again, not while it plays.
     await waitFor(() => expect(client.getQueryState(["item", 7])?.isInvalidated).toBe(true));
@@ -454,6 +455,48 @@ describe("VideoPlayer subtitle timing", () => {
     await waitFor(() => expect(onTrack.map((c) => [c.startTime, c.endTime])).toEqual([[2, 3]]));
     expect(track.mode).toBe("showing");
     expect(onTrack[0]?.text).toBe("Hello");
+  });
+});
+
+describe("VideoPlayer audio", () => {
+  /** English TrueHD (the file's default) and AAC, English subtitles; the remembered choice the AAC. */
+  function withTracks(): ItemDetail {
+    const item = detail();
+    const file = item.files[0];
+    if (!file) throw new Error("no file");
+    file.streams = [
+      makeStream({ index: 0, kind: "video" }),
+      makeStream({ index: 1, kind: "audio", codec: "truehd", language: "eng", default: true }),
+      makeStream({ index: 2, kind: "audio", codec: "aac", language: "eng", default: false }),
+      makeStream({ index: 3, kind: "subtitle", codec: "subrip", language: "eng", default: false, text_based: true }),
+    ];
+    file.selected_audio = 2;
+    return item;
+  }
+  const put = (requests: FakeRequest[]) =>
+    requests.filter((r) => r.method === "PUT" && r.path === "/api/items/7/streams").map((r) => r.body as Record<string, unknown>);
+
+  it("leaves the audio to the server, which plays what this browser plays best, and saves subtitles alone without it", async () => {
+    const requests = serve([session("s1", { audio_index: 2 })], { "PUT /api/items/7/streams": () => undefined });
+    renderWithProviders(<VideoPlayer item={withTracks()} startMs={0} fileId={null} audio={null} sub={null} />);
+    await waitFor(() => expect(hlsInstances).toHaveLength(1));
+    const started = requests.find((r) => r.method === "POST" && r.path === "/api/playback")?.body as Record<string, unknown>;
+    expect(started.audio_index).toBeNull();
+
+    fireEvent.keyDown(document, { key: "c" });
+    await waitFor(() => expect(put(requests)).toHaveLength(1));
+    expect(put(requests)[0]).toEqual({ file_id: 3, subtitle_index: 3 });
+  });
+
+  it("plays and keeps a track picked", async () => {
+    const requests = serve([session("s1", { audio_index: 1 })], { "PUT /api/items/7/streams": () => undefined });
+    renderWithProviders(<VideoPlayer item={withTracks()} startMs={0} fileId={null} audio={1} sub={null} />);
+    await waitFor(() => expect(hlsInstances).toHaveLength(1));
+    expect((requests.find((r) => r.method === "POST" && r.path === "/api/playback")?.body as Record<string, unknown>).audio_index).toBe(1);
+
+    fireEvent.keyDown(document, { key: "c" });
+    await waitFor(() => expect(put(requests)).toHaveLength(1));
+    expect(put(requests)[0]).toEqual({ file_id: 3, audio_index: 1, subtitle_index: 3 });
   });
 });
 

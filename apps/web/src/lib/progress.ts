@@ -44,10 +44,13 @@ export async function stoppedStream(url: string): Promise<StoppedBy | null> {
   }
 }
 
-/** Remember the chosen tracks for this show (or movie); `subtitle_index: null` = off. */
+/**
+ * Remember the chosen tracks for this show (or movie); `subtitle_index: null` = off.
+ * `audio_index` left out keeps the audio chosen before (subtitles alone were picked).
+ */
 export function saveStreamChoice(
   itemId: Id,
-  body: { file_id: Id | null; audio_index: number | null; subtitle_index: number | null },
+  body: { file_id: Id | null; audio_index?: number | null; subtitle_index: number | null },
 ): Promise<void> {
   return api.put<void>(`/api/items/${itemId}/streams`, body).catch(() => undefined);
 }

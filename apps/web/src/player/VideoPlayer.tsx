@@ -194,8 +194,10 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const subStreams = useMemo(() => file?.streams.filter((s) => s.kind === "subtitle") ?? [], [file]);
 
   // Explicit tracks from the URL win; otherwise the remembered choice for the show / movie.
+  // The audio is left to the server unless picked: of the chosen language, it plays the
+  // track this browser plays best, and the session says which (`info.audio_index`).
   const trickplay = useTrickplay(file?.id);
-  const [audioIndex, setAudioIndex] = useState<number | null>(initialAudio ?? file?.selected_audio ?? null);
+  const [audioIndex, setAudioIndex] = useState<number | null>(initialAudio ?? null);
   const [subIndex, setSubIndex] = useState<number | null>(initialSub ?? file?.selected_subtitle ?? null);
   const [quality, setQuality] = useLocalStorage<string>("pley.quality", "original");
   // One menu: the original plays the best way the browser can, every other
@@ -1078,8 +1080,12 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     }
   };
 
-  /** Store the choice so the next episode (or the next viewing) starts with the same tracks. */
-  const rememberTracks = (audio: number | null, sub: number | null) => {
+  /**
+   * Store the choice so the next episode (or the next viewing) starts with the same tracks.
+   * Audio left out (`undefined`) keeps what was picked before: the server's choice for this
+   * browser isn't saved, another device may play another track of that language better.
+   */
+  const rememberTracks = (audio: number | null | undefined, sub: number | null) => {
     void saveStreamChoice(item.id, { file_id: file?.id ?? null, audio_index: audio, subtitle_index: sub }).then(() => {
       void qc.invalidateQueries({ queryKey: ["item"], predicate: (q) => q.queryKey[1] !== item.id });
       // This one is asked again once it shows again (its page, or played
@@ -1088,7 +1094,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     });
   };
   const changeAudio = (index: number) => {
-    if (index === (audioIndex ?? audioStreams.find((s) => s.default)?.index ?? audioStreams[0]?.index)) return;
+    const playing = audioIndex ?? info?.audio_index ?? audioStreams.find((s) => s.default)?.index ?? audioStreams[0]?.index;
+    if (index === playing) return;
     startMsRef.current = currentMs();
     setAudioIndex(index);
     rememberTracks(index, subIndex);
@@ -1105,7 +1112,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const nextBurn = s && s.text_based === false ? s.index : null;
     if (nextBurn !== burnIndex) startMsRef.current = currentMs();
     setSubIndex(index);
-    rememberTracks(audioIndex, index);
+    rememberTracks(audioIndex ?? undefined, index);
   };
   const cycleSubtitles = () => {
     const texts = subStreams.filter((s) => s.text_based !== false);
