@@ -65,17 +65,31 @@ export function resolutionBadge(width: number | null | undefined, height: number
   return h > 0 ? "SD" : null;
 }
 
-/** "Dolby Vision P8.1", "HDR10+", "HDR10", "HLG", "HDR" (an older server's flag), or `null` for SDR. */
+/**
+ * "Dolby Vision P8.1" (the base layer's compatibility from profile 8 on:
+ * profile 7's is always Blu-ray HDR10, never "P7.6"), "Dolby Vision P7 FEL"
+ * (or MEL) with `dvEl`, "+ HDR10+" with `hdr10plus`, "HDR10+", "HDR10",
+ * "HLG", "HDR" (an older server's flag), or `null` for SDR: the server's
+ * names (docs/API.md, MediaStream), as the web and Android say.
+ */
 export function dynamicRangeLabel(
   range: DynamicRange | null | undefined,
   dvProfile?: number | null,
   dvBlCompat?: number | null,
   hdr?: boolean | null,
+  dvEl?: "fel" | "mel" | null,
+  hdr10plus?: boolean | null,
 ): string | null {
   switch (range) {
-    case "dolby_vision":
-      if (dvProfile == null) return "Dolby Vision";
-      return `Dolby Vision P${dvProfile}${dvBlCompat && dvBlCompat > 0 ? `.${dvBlCompat}` : ""}`;
+    case "dolby_vision": {
+      let label = "Dolby Vision";
+      if (dvProfile != null) {
+        const compat = dvProfile >= 8 && (dvBlCompat === 1 || dvBlCompat === 2 || dvBlCompat === 4) ? `.${dvBlCompat}` : "";
+        const layer = dvProfile === 7 && dvEl ? ` ${dvEl.toUpperCase()}` : "";
+        label += ` P${dvProfile}${compat}${layer}`;
+      }
+      return hdr10plus ? `${label} + HDR10+` : label;
+    }
     case "hdr10plus":
       return "HDR10+";
     case "hdr10":
@@ -89,14 +103,29 @@ export function dynamicRangeLabel(
   }
 }
 
+/** A video stream's whole format: "Dolby Vision P8.1 + HDR10+", "Dolby Vision P7 FEL", "HDR10+"… */
 export function streamRange(s: MediaStream | null | undefined): string | null {
-  return s ? dynamicRangeLabel(s.dynamic_range, s.dv_profile, s.dv_bl_compat, s.hdr) : null;
+  return s ? dynamicRangeLabel(s.dynamic_range, s.dv_profile, s.dv_bl_compat, s.hdr, s.dv_el, s.hdr10plus) : null;
 }
 
-/** "DV P8.1", "DV", "HDR10+", "HDR10", "HLG", "HDR", or `null`. */
-export function dynamicRangeShort(range: DynamicRange | null | undefined, dvProfile?: number | null, dvBlCompat?: number | null, hdr?: boolean | null): string | null {
-  const label = dynamicRangeLabel(range, dvProfile, dvBlCompat, hdr);
+/** "DV P8.1", "DV P7 FEL", "DV", "HDR10+", "HDR10", "HLG", "HDR", or `null`: HDR10+ with Dolby Vision is a badge of its own. */
+export function dynamicRangeShort(
+  range: DynamicRange | null | undefined,
+  dvProfile?: number | null,
+  dvBlCompat?: number | null,
+  hdr?: boolean | null,
+  dvEl?: "fel" | "mel" | null,
+): string | null {
+  const label = dynamicRangeLabel(range, dvProfile, dvBlCompat, hdr, dvEl);
   return label ? label.replace("Dolby Vision", "DV") : null;
+}
+
+/** A video stream's dynamic range badges: "DV P8.1", and "HDR10+" too for Dolby Vision + HDR10+. */
+export function dynamicRangeBadges(s: MediaStream | null | undefined): string[] {
+  if (!s) return [];
+  const badge = dynamicRangeShort(s.dynamic_range, s.dv_profile, s.dv_bl_compat, s.hdr, s.dv_el);
+  if (!badge) return [];
+  return s.dynamic_range === "dolby_vision" && s.hdr10plus ? [badge, "HDR10+"] : [badge];
 }
 
 /** Dolby Atmos, as ffprobe names it in the stream's profile or a title says. */
@@ -142,7 +171,7 @@ export function qualityBadges(file: MediaFile | null | undefined): string[] {
   const channels = audio?.channels ?? 0;
   return [
     resolutionBadge(file.width ?? video?.width, file.height ?? video?.height),
-    video ? dynamicRangeShort(video.dynamic_range, video.dv_profile, video.dv_bl_compat, video.hdr) : null,
+    ...dynamicRangeBadges(video),
     isAtmos(audio) ? "Atmos" : channels >= 8 ? "7.1" : channels >= 6 ? "5.1" : null,
   ].filter((b): b is string => !!b);
 }

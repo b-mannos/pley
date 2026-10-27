@@ -178,6 +178,9 @@ export interface MediaStream {
   dv_profile?: number;
   dv_bl_compat?: number;
   dv_level?: number;
+  /** Profile 7's enhancement layer: full or minimal (absent: not known). */
+  dv_el?: "fel" | "mel";
+  /** HDR10+ in the first frames (Dolby Vision and PQ streams; absent: not looked for). */
   hdr10plus?: boolean;
   /** Numbered as ffprobe numbers it (HEVC 5.1 = 153, H.264 5.1 = 51). */
   level?: number;
@@ -254,6 +257,8 @@ export interface PlaybackInfo {
   reasons?: string[];
   reason: string | null;
   auto_quality?: string | null;
+  /** What the screen gets of HDR video, by name: "Dolby Vision P8.1", "HDR10 (Dolby Vision base layer)", "SDR (tone-mapped)"… */
+  video_range?: string | null;
 }
 
 export interface TranscodeInfo {

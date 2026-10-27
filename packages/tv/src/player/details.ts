@@ -1,5 +1,5 @@
 import type { MediaFile, MediaStream, PlaybackInfo, PlaybackMethod, TranscodeInfo } from "../api/types";
-import { codecLabel, formatBitrate, resolutionLabel } from "../format/format";
+import { codecLabel, formatBitrate, resolutionLabel, streamRange } from "../format/format";
 import { isPicture } from "./plan";
 import type { FallbackReason } from "./recovery";
 
@@ -78,15 +78,22 @@ const ENCODERS: Record<string, string> = {
   h264_videotoolbox: "VideoToolbox", hevc_videotoolbox: "VideoToolbox", h264_vulkan: "Vulkan", hevc_vulkan: "Vulkan", h264_v4l2m2m: "V4L2",
 };
 const PIPELINE: Record<string, string> = { gpu: "GPU", hybrid: "GPU and CPU", cpu: "CPU", copy: "copy" };
-const RANGE: Record<string, string> = { dolby_vision: "Dolby Vision", hdr10plus: "HDR10+", hdr10: "HDR10", hlg: "HLG" };
 const CHANNELS: Record<number, string> = { 1: "1.0", 2: "2.0", 3: "2.1", 6: "5.1", 7: "6.1", 8: "7.1" };
 
-/** A video stream as "HEVC 4K Dolby Vision P8.1". */
+/** A video stream as "HEVC 4K Dolby Vision P8.1", "HEVC 4K Dolby Vision P7 FEL". */
 export function videoLabel(v: MediaStream | null): string {
   if (!v) return "";
-  let range = v.dynamic_range ? RANGE[v.dynamic_range] ?? "" : "";
-  if (v.dynamic_range === "dolby_vision" && v.dv_profile != null) range += ` P${v.dv_profile}${v.dv_bl_compat ? `.${v.dv_bl_compat}` : ""}`;
-  return [codecLabel(v.codec), resolutionLabel(v.width, v.height) ?? "", range].filter(Boolean).join(" ");
+  return [codecLabel(v.codec), resolutionLabel(v.width, v.height) ?? "", streamRange(v) ?? ""].filter(Boolean).join(" ");
+}
+
+/**
+ * What the screen gets of HDR video: the live transcode's tone mapping when
+ * there is one, else what the server said ("HDR10 (Dolby Vision base
+ * layer)"), else `null` (SDR video, or an older server).
+ */
+export function shownAs(info: PlaybackInfo, live: TranscodeInfo | null): string | null {
+  if (live?.tonemap) return `SDR (tone-mapped with ${live.tonemap})`;
+  return info.video_range ?? null;
 }
 
 /** An audio stream as "TrueHD 7.1". */
@@ -141,7 +148,8 @@ export function buildDetails(opts: {
   if (audio) rows.push({ label: "Audio", value: audioRow });
   if (bitrate) rows.push({ label: "Bitrate", value: bitrate });
   if (transcode?.video === "transcode" && transcode.encoder) rows.push({ label: "Encoder", value: encoderLabel(transcode) });
-  if (transcode?.tonemap) rows.push({ label: "HDR", value: `Tone mapped to SDR (${transcode.tonemap})` });
+  const shown = video ? shownAs(info, transcode) : null;
+  if (shown) rows.push({ label: "Shown as", value: shown });
   if (transcode?.subtitle_burn) rows.push({ label: "Subtitles", value: T.burnedIn });
   if (transcode?.speed && transcode.speed > 0) {
     const speed = transcode.speed.toFixed(1);

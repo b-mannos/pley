@@ -81,6 +81,7 @@ export function dolbyVisionDetails(s: MediaStream): string | null {
   const base: Record<number, string> = { 0: "no compatible base layer", 1: "HDR10", 2: "SDR", 4: "HLG", 6: "Blu-ray HDR10" };
   const b = base[compat];
   if (b) parts.push(compat === 0 ? b : `${b}-compatible base layer`);
+  if (s.dv_profile === 7 && s.dv_el) parts.push(s.dv_el === "fel" ? "full enhancement layer" : "minimal enhancement layer");
   return parts.join(" · ");
 }
 
@@ -106,11 +107,9 @@ export function fileName(path: string): string {
   return i >= 0 ? path.slice(i + 1) : path;
 }
 
-/** HDR of a video stream: "Dolby Vision P8.1 + HDR10+", "HDR10", "SDR". */
+/** HDR of a video stream: "Dolby Vision P8.1 + HDR10+", "Dolby Vision P7 FEL", "HDR10", "SDR". */
 function hdrValue(s: MediaStream): string {
-  const range = streamRange(s);
-  if (!range) return "SDR";
-  return s.dynamic_range === "dolby_vision" && s.hdr10plus ? `${range} + HDR10+` : range;
+  return streamRange(s) ?? "SDR";
 }
 
 /** A file's blocks: the file, then each stream, video first. */
