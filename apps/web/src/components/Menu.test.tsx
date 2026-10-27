@@ -67,4 +67,25 @@ describe("Menu", () => {
     await user.click(trigger);
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
+
+  it("is used from the keyboard: focus on its items, arrows, Escape back to the trigger", async () => {
+    const user = userEvent.setup();
+    const onRefresh = renderMenu();
+    const trigger = screen.getByRole("button", { name: "More" });
+
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    const refresh = screen.getByRole("menuitem", { name: "Refresh metadata" });
+    expect(refresh).toHaveFocus();
+    // The disabled item is skipped: the only other one wraps around to it.
+    await user.keyboard("{ArrowDown}");
+    expect(refresh).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    await user.keyboard("{Enter}");
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
 });
