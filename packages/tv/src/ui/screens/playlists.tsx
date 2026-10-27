@@ -12,6 +12,7 @@ import { PosterGrid } from "../kit/grid";
 import { Icon } from "../kit/icons";
 import { PanelHeading, PanelTitle, SidePanel } from "../kit/panel";
 import { describeSmartFilter } from "./library-data";
+import { memo } from "../kit/memo";
 import { ArtTile } from "../kit/tile";
 import type { Entry } from "../shell/navigator";
 import { ColumnMessage, Dialog, failedTitle, PageBadge, problem, sentence, useApp, useLoad } from "./common";
@@ -475,8 +476,14 @@ function PlaylistSkeleton() {
   );
 }
 
-/** A line of a track list (TvTrackLine): number, title and subtitle, duration; the playing one marked. */
-export function TrackLine(p: {
+/**
+ * A line of a track list (TvTrackLine): number, title and subtitle,
+ * duration; the playing one marked. Drawn again only when what it shows
+ * changes, so a long queue costs nothing when the track moves on.
+ */
+export const TrackLine = memo(TrackLineView);
+
+function TrackLineView(p: {
   fid?: string;
   number: string;
   title: string;
@@ -488,6 +495,7 @@ export function TrackLine(p: {
   initial?: boolean;
   onSelect: () => void;
   onActions?: () => void;
+  onFocus?: () => void;
 }) {
   return (
     <F
@@ -498,6 +506,7 @@ export function TrackLine(p: {
       onSelect={p.onSelect}
       onLongSelect={p.onActions}
       onMenu={p.onActions}
+      onFocus={p.onFocus}
     >
       <div class="track-number t-caption">{p.current ? <Icon name={p.playing ? "audio-lines" : "play"} size={18} /> : p.number}</div>
       <div class="track-text">

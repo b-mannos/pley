@@ -701,6 +701,12 @@
 .play-big[data-focused] { background: var(--accent); color: var(--on-accent); transform: scale(1.08); transition: transform 150ms var(--focus-ease); }
 .play-big[data-pressed] { background: var(--accent-bright); transform: scale(1); }
 .now-queue { height: 215px; overflow: hidden; }
+/* Its lines at a fixed pitch (51: 49 and 2 between), only those near what shows there (NowQueue). */
+.queue-scroll { will-change: transform; transition: transform 200ms var(--focus-ease); }
+.reduced .queue-scroll { transition: none; }
+.queue-lines { position: relative; }
+.queue-slot { position: absolute; left: 0; right: 0; }
+.queue-slot .track-line { height: 49px; margin-bottom: 0; }
 .now-dim { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.7); z-index: 10; }
 
 /* ---------------------------------------------------------------- player */

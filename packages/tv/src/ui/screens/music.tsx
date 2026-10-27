@@ -245,7 +245,7 @@ export function AlbumScreen(p: { entry: Entry; id: number; trackId?: number }) {
         {problemText && <div class="t-caption c-danger" style="margin-top:8px">{problemText}</div>}
       </G>
       <div class="album-list">
-        <div ref={listRef} style={`transform:translateY(${-shift}px)`}>
+        <div ref={listRef} class="scroll-y" style={`transform:translateY(${-shift}px)`}>
           {!children.data ? (
             [0, 1, 2, 3, 4, 5, 6, 7].map((i) => <div key={i} class="skeleton" style="width:480px;height:36px;border-radius:4px;margin:4px 0" />)
           ) : !tracks.length ? (
@@ -289,12 +289,7 @@ export function NowPlayingScreen() {
   const player = musicPlayer();
   const now = player.now.value;
   const sleep = player.sleep.value;
-  const [, setTick] = useState(0);
   const [dim, setDim] = useState(false);
-  useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), 500);
-    return () => clearInterval(t);
-  }, []);
   // Any key wakes the page; two minutes without one dim it.
   useEffect(() => {
     let timer = setTimeout(() => setDim(true), 120_000);
@@ -342,14 +337,10 @@ export function NowPlayingScreen() {
       }),
     [],
   );
-  const queueRef = useRef<HTMLDivElement>(null);
-  const shift = useScrollToFocus(queueRef, 215);
   if (!now) return <MusicMessage title="Nothing is playing" body="Play an album or an artist and it shows here." action="Back" onAction={() => ui.nav.pop()} />;
   const t = now.track;
   const art = t.poster_url ?? (t.parent_id ? `/api/items/${t.parent_id}/images/poster` : null);
   const byline = [t.grandparent_title ?? "", t.parent_title ?? ""].filter(Boolean).join(" · ");
-  const pos = player.positionMs();
-  const dur = player.durationMs();
   const status =
     now.error === "offline"
       ? "Can't reach the server."
@@ -383,7 +374,7 @@ export function NowPlayingScreen() {
           {byline}
         </div>
         <div class={`t-caption now-status ${now.error ? "c-danger" : "c-subtle"}`}>{status}</div>
-        <Scrubber positionMs={pos} durationMs={dur} bufferedMs={player.bufferedMs()} onSeek={(ms) => player.seekTo(ms)} onToggle={() => player.toggle()} />
+        <NowScrubber playing={now.playing} />
         <G kind="row" class="now-controls">
           <div class="now-round">
             <Round label={now.shuffle ? "Stop shuffling" : "Shuffle"} icon="shuffle" onSelect={() => player.setShuffle(!now.shuffle)} />
@@ -406,29 +397,95 @@ export function NowPlayingScreen() {
             <div class="t-label c-subtle" style="margin:0 0 4px 12px">
               Up next
             </div>
-            <div class="now-queue">
-              <div ref={queueRef} style={`transform:translateY(${-shift}px)`}>
-                <G kind="col" restore onEnter={() => queueRef.current?.querySelector<HTMLElement>(".track-line.current") ?? null}>
-                  {list.map((q, i) => (
-                    <TrackLine
-                      key={`${q.id}-${i}`}
-                      number={String(i + 1)}
-                      title={q.title}
-                      subtitle={[q.grandparent_title ?? "", q.parent_title ?? ""].filter(Boolean).join(" · ")}
-                      duration={q.duration_ms ? formatClock(q.duration_ms) : ""}
-                      current={i === now.index}
-                      playing={i === now.index && now.playing}
-                      onSelect={() => player.jumpTo(i)}
-                    />
-                  ))}
-                </G>
-              </div>
-            </div>
+            <NowQueue list={list} index={now.index} playing={now.playing} onJump={(i) => player.jumpTo(i)} />
           </>
         )}
       </G>
       {dim && <div class="now-dim" />}
     </div>
+  );
+}
+
+/** A queue line's pitch (the line, 49, and 2 between lines), and the queue's height. */
+const QUEUE_ROW = 51;
+const QUEUE_H = 215;
+
+/**
+ * The queue (TvNowPlayingScreen's "Up next"): lines at a fixed pitch, only
+ * those near what shows drawn, so a queue of hundreds opens and moves as
+ * one of ten does. The focused line sits second in the box; while focus is
+ * elsewhere, the line focused last, else the one playing.
+ */
+function NowQueue(p: { list: ItemSummary[]; index: number; playing: boolean; onJump: (i: number) => void }) {
+  const [focused, setFocused] = useState<number | null>(null);
+  const group = useRef<HTMLElement | null>(null);
+  const n = p.list.length;
+  const anchor = Math.min(n - 1, focused ?? p.index);
+  // Whole lines from the box's top, one above the focused line: no half line under "Up next".
+  const shift = Math.max(0, Math.min(n * QUEUE_ROW - QUEUE_H, (anchor - 1) * QUEUE_ROW));
+  const first = Math.max(0, Math.floor(shift / QUEUE_ROW) - 3);
+  const last = Math.min(n, first + Math.ceil(QUEUE_H / QUEUE_ROW) + 7);
+  const lines = [];
+  for (let i = first; i < last; i++) {
+    const q = p.list[i]!;
+    lines.push(
+      <div key={`${q.id}-${i}`} class="queue-slot" style={`top:${i * QUEUE_ROW}px`}>
+        <TrackLine
+          number={String(i + 1)}
+          title={q.title}
+          subtitle={[q.grandparent_title ?? "", q.parent_title ?? ""].filter(Boolean).join(" · ")}
+          duration={q.duration_ms ? formatClock(q.duration_ms) : ""}
+          current={i === p.index}
+          playing={i === p.index && p.playing}
+          onFocus={() => setFocused(i)}
+          onSelect={() => p.onJump(i)}
+        />
+      </div>,
+    );
+  }
+  return (
+    <div class="now-queue">
+      <div class="queue-scroll" style={`transform:translateY(${-shift}px)`}>
+        <G
+          kind="col"
+          restore
+          class="queue-lines"
+          style={`height:${n * QUEUE_ROW}px`}
+          elRef={(el) => (group.current = el)}
+          onEnter={() => group.current?.querySelector<HTMLElement>(".track-line.current") ?? null}
+        >
+          {lines}
+        </G>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The scrubber and its times, the one part of Now Playing that follows the
+ * clock: drawn again on each whole second of the track while it plays (so
+ * no second shows for half a second or one and a half), each second while
+ * paused, and at once after a seek; the page and its queue aren't.
+ */
+function NowScrubber(p: { playing: boolean }) {
+  const player = musicPlayer();
+  const [, setBeat] = useState(0);
+  const pos = player.positionMs();
+  useEffect(() => {
+    const t = setTimeout(() => setBeat((n) => n + 1), p.playing ? Math.max(200, 1005 - (pos % 1000)) : 1000);
+    return () => clearTimeout(t);
+  });
+  return (
+    <Scrubber
+      positionMs={pos}
+      durationMs={player.durationMs()}
+      bufferedMs={player.bufferedMs()}
+      onSeek={(ms) => {
+        player.seekTo(ms);
+        setBeat((n) => n + 1);
+      }}
+      onToggle={() => player.toggle()}
+    />
   );
 }
 
