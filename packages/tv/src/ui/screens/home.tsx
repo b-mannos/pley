@@ -166,6 +166,13 @@ function HomeRows(p: { entry: Entry; rows: Hub[] }) {
   }, []);
 
   // Back from the rows: the page goes back to its hero (focus on Play), then to the rail, as on Android TV.
+  // Far down the rows the hero isn't drawn: the page goes to its top first, and Play takes focus once it's there.
+  const [toHero, setToHero] = useState(0);
+  const backToHero = () => {
+    const play = document.querySelector<HTMLElement>('.home [data-fid="hero/play"]');
+    if (play) ui.focus.focus(play);
+    ui.toRail();
+  };
   useEffect(
     () =>
       ui.input.push((key, e) => {
@@ -174,13 +181,18 @@ function HomeRows(p: { entry: Entry; rows: Hub[] }) {
         const at = ui.focus.current;
         if (!home || !at || !home.contains(at)) return false;
         if (e.type !== "down" || e.repeat) return true;
-        const play = home.querySelector<HTMLElement>('[data-fid="hero/play"]');
-        if (play) ui.focus.focus(play);
-        ui.toRail();
+        if (!hero || home.querySelector('[data-fid="hero/play"]')) backToHero();
+        else {
+          entry.state.section = "hero";
+          setToHero((n) => n + 1);
+        }
         return true;
       }),
     [inRows],
   );
+  useLayoutEffect(() => {
+    if (toHero) backToHero();
+  }, [toHero]);
 
   // Back from a tile's actions that removed it: the tile now in its place.
   useLayoutEffect(() => {

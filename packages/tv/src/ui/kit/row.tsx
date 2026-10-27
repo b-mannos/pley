@@ -163,7 +163,10 @@ export interface Section {
  * rows), a hero section brings the page back to its top, and once
  * scrolled nothing draws above the anchor line − 12. As the Android app's
  * lazy column, only the sections within a screen of what shows are drawn;
- * a row drawn again comes back to its tile by its `enterAt`.
+ * a row drawn again comes back to its tile by its `enterAt`, and a jump of
+ * more than a screen (Back to Home's hero) happens at once, as Android's
+ * scrollToItem, rather than sliding past sections that aren't drawn. A
+ * new `focusedKey` from the page brings that section into view.
  */
 export function SectionPage(p: {
   sections: Section[];
@@ -176,6 +179,17 @@ export function SectionPage(p: {
   extraShift?: number;
 }) {
   const [focusedKey, setFocusedKey] = useState<string | null>(p.focusedKey ?? null);
+  const asked = useRef(p.focusedKey);
+  let key = focusedKey;
+  if (p.focusedKey !== asked.current) {
+    asked.current = p.focusedKey;
+    if (p.focusedKey !== undefined && p.focusedKey !== focusedKey) {
+      key = p.focusedKey;
+      setFocusedKey(key);
+    }
+  }
+  const scrollEl = useRef<HTMLElement | null>(null);
+  const shown = useRef<number | null>(null);
   const top = p.top ?? 0;
   let y = top;
   const positions: { section: Section; y: number }[] = [];
@@ -183,15 +197,21 @@ export function SectionPage(p: {
     positions.push({ section: s, y });
     y += s.height + ROW_GAP;
   }
-  const at = positions.filter((x) => x.section.key === focusedKey)[0];
+  const at = positions.filter((x) => x.section.key === key)[0];
   let shift = 0;
   if (at && at.section.anchor !== null) shift = Math.max(0, at.y - at.section.anchor);
   shift += p.extraShift ?? 0;
   const clip = shift > 0 && p.clipAbove !== undefined ? `clip-path:inset(${p.clipAbove}px 0 0 0);-webkit-clip-path:inset(${p.clipAbove}px 0 0 0)` : "";
   const near = positions.filter(({ section, y: sy }) => sy + section.height >= shift - SCREEN && sy <= shift + 2 * SCREEN);
+  const jump = shown.current !== null && Math.abs(shift - shown.current) > SCREEN;
+  // A jump's place is applied now, so the next render, which puts the slide back, doesn't animate it.
+  useLayoutEffect(() => {
+    if (jump && scrollEl.current) void scrollEl.current.offsetHeight;
+    shown.current = shift;
+  });
   return (
     <div class={p.class} style={`position:absolute;left:0;top:0;right:0;bottom:0;${clip}`}>
-      <G kind="col" class="page-scroll" style={`transform:translateY(${-shift}px)`}>
+      <G kind="col" class="page-scroll" style={`transform:translateY(${-shift}px)${jump ? ";transition:none" : ""}`} elRef={(el) => (scrollEl.current = el)}>
         {near.map(({ section, y: sy }) => (
           <div key={section.key} style={`position:absolute;left:0;right:0;top:${sy}px;height:${section.height}px`}>
             {section.render(() => {
