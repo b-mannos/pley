@@ -380,8 +380,14 @@ export interface MediaStream {
   dynamic_range?: DynamicRange;
   /** Dolby Vision profile (5, 7, 8, …). */
   dv_profile?: number;
-  /** DV base-layer compatibility id (1 = HDR10, 4 = HLG, 0 = none). */
+  /** DV base-layer compatibility id (1 = HDR10, 2 = SDR, 4 = HLG, 6 = Blu-ray HDR10 (profile 7), 0 = none). */
   dv_bl_compat?: number;
+  /** Dolby Vision level. */
+  dv_level?: number;
+  /** Profile 7's enhancement layer: full or minimal (absent: not known). */
+  dv_el?: "fel" | "mel";
+  /** HDR10+ in the first frames (Dolby Vision and PQ streams; absent: not looked for). */
+  hdr10plus?: boolean;
   profile?: string;
   // audio
   channels?: number;
@@ -436,6 +442,12 @@ export interface PlaybackInfo {
    * video isn't converted.
    */
   auto_quality?: string | null;
+  /**
+   * What the screen gets of HDR video, by name: "Dolby Vision P8.1", "HDR10
+   * (Dolby Vision base layer)", "SDR (tone-mapped)"… Absent for SDR video
+   * and from older servers.
+   */
+  video_range?: string | null;
 }
 
 /** `GET /api/playback/{session}`: how a session plays, with its transcode's live numbers. */

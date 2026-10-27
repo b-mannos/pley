@@ -8,7 +8,7 @@ import { ASPECT_CLASS, type CardAspect } from "@/components/cards";
 import { useToast } from "@/components/Toast";
 import { Badge, Button, IconButton, ProgressBar } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { dynamicRangeBadge, formatRemaining, progressFraction } from "@/lib/format";
+import { dynamicRangeBadges, formatRemaining, progressFraction } from "@/lib/format";
 import { backdropCandidates, posterCandidates, thumbCandidates } from "@/lib/images";
 
 /** A section of an item's page (its seasons, episodes, albums, tracks) that couldn't load, with Retry. */
@@ -229,8 +229,7 @@ export function qualityBadgeLabels(item: ItemDetail): string[] {
   else if (w >= 1800 || h >= 1000) badges.push("1080p");
   else if (w >= 1200 || h >= 700) badges.push("720p");
   else if (h > 0) badges.push("SD");
-  const range = dynamicRangeBadge(video);
-  if (range) badges.push(range);
+  badges.push(...dynamicRangeBadges(video));
   if (audio?.channels && audio.channels >= 6) badges.push(audio.channels >= 8 ? "7.1" : "5.1");
   return badges;
 }

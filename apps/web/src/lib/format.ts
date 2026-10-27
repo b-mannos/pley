@@ -267,16 +267,31 @@ export function streamLabel(s: MediaStream): string {
     .join(" ");
 }
 
-/** "Dolby Vision P8.1", "HDR10+", "HDR10", "HLG", "HDR" (unknown HDR flavour) or null for SDR. */
-export function dynamicRangeLabel(
-  s: Pick<MediaStream, "dynamic_range" | "dv_profile" | "dv_bl_compat" | "hdr"> | null | undefined,
-): string | null {
+type RangeFields = Pick<MediaStream, "dynamic_range" | "dv_profile" | "dv_bl_compat" | "dv_el" | "hdr10plus" | "hdr">;
+
+/**
+ * A Dolby Vision profile as the server names it: "P8.1", "P8.4", "P5",
+ * "P7 FEL" (the base layer's compatibility only from profile 8 on: profile
+ * 7's is always Blu-ray HDR10, never "P7.6").
+ */
+function dolbyVisionProfile(s: RangeFields): string | null {
+  if (s.dv_profile == null) return null;
+  const compat = s.dv_profile >= 8 && [1, 2, 4].includes(s.dv_bl_compat ?? -1) ? `.${s.dv_bl_compat}` : "";
+  const layer = s.dv_profile === 7 && s.dv_el ? ` ${s.dv_el.toUpperCase()}` : "";
+  return `P${s.dv_profile}${compat}${layer}`;
+}
+
+/**
+ * "Dolby Vision P8.1", "Dolby Vision P7 FEL", "Dolby Vision P8.1 + HDR10+",
+ * "HDR10+", "HDR10", "HLG", "HDR" (unknown HDR flavour) or null for SDR: the
+ * server's names (docs/API.md, MediaStream), as Android and the TV apps say.
+ */
+export function dynamicRangeLabel(s: RangeFields | null | undefined): string | null {
   if (!s) return null;
   switch (s.dynamic_range) {
     case "dolby_vision": {
-      if (s.dv_profile == null) return "Dolby Vision";
-      const compat = s.dv_bl_compat != null && s.dv_bl_compat > 0 ? `.${s.dv_bl_compat}` : "";
-      return `Dolby Vision P${s.dv_profile}${compat}`;
+      const profile = dolbyVisionProfile(s);
+      return `Dolby Vision${profile ? ` ${profile}` : ""}${s.hdr10plus ? " + HDR10+" : ""}`;
     }
     case "hdr10plus":
       return "HDR10+";
@@ -291,12 +306,18 @@ export function dynamicRangeLabel(
   }
 }
 
-/** Badge text for a dynamic range ("Dolby Vision P8", "HDR10+", "HDR10", "HLG", "HDR"), or null for SDR. */
-export function dynamicRangeBadge(s: Pick<MediaStream, "dynamic_range" | "dv_profile" | "hdr"> | null | undefined): string | null {
+/**
+ * Badge text for a dynamic range ("DV P8.1", "DV P7 FEL", "HDR10+", "HDR10",
+ * "HLG", "HDR"), or null for SDR. Dolby Vision + HDR10+ takes two badges:
+ * see {@link dynamicRangeBadges}.
+ */
+export function dynamicRangeBadge(s: RangeFields | null | undefined): string | null {
   if (!s) return null;
   switch (s.dynamic_range) {
-    case "dolby_vision":
-      return s.dv_profile != null ? `Dolby Vision P${s.dv_profile}` : "Dolby Vision";
+    case "dolby_vision": {
+      const profile = dolbyVisionProfile(s);
+      return profile ? `DV ${profile}` : "DV";
+    }
     case "hdr10plus":
       return "HDR10+";
     case "hdr10":
@@ -308,6 +329,13 @@ export function dynamicRangeBadge(s: Pick<MediaStream, "dynamic_range" | "dv_pro
     default:
       return s.hdr ? "HDR" : null;
   }
+}
+
+/** The dynamic range's badges: "DV P8.1", and "HDR10+" too for Dolby Vision + HDR10+. */
+export function dynamicRangeBadges(s: RangeFields | null | undefined): string[] {
+  const badge = dynamicRangeBadge(s);
+  if (!badge) return [];
+  return s?.dynamic_range === "dolby_vision" && s.hdr10plus ? [badge, "HDR10+"] : [badge];
 }
 
 /**

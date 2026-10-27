@@ -33,6 +33,7 @@ function streamDetails(s: MediaStream): string[] {
     if (s.bit_depth) parts.push(`${s.bit_depth}-bit`);
     const range = dynamicRangeLabel(s);
     if (range) parts.push(range);
+    if (s.dynamic_range === "dolby_vision" && s.dv_level != null) parts.push(`DV level ${s.dv_level}`);
     if (s.profile) parts.push(s.profile);
   } else if (s.kind === "audio") {
     const ch = channelsLabel(s.channels, s.channel_layout);

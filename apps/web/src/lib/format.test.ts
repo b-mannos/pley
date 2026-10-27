@@ -6,6 +6,7 @@ import {
   channelsLabel,
   codecLabel,
   dynamicRangeBadge,
+  dynamicRangeBadges,
   dynamicRangeLabel,
   episodeLabel,
   formatAgo,
@@ -281,6 +282,17 @@ describe("dynamic range", () => {
     expect(dynamicRangeLabel({ dynamic_range: "dolby_vision" })).toBe("Dolby Vision");
     expect(dynamicRangeLabel({ dynamic_range: "dolby_vision", dv_profile: 5, dv_bl_compat: 0 })).toBe("Dolby Vision P5");
     expect(dynamicRangeLabel({ dynamic_range: "dolby_vision", dv_profile: 8, dv_bl_compat: 4 })).toBe("Dolby Vision P8.4");
+    // Profile 7's base layer (Blu-ray, compatibility 6) isn't named: never "P7.6".
+    expect(dynamicRangeLabel({ dynamic_range: "dolby_vision", dv_profile: 7, dv_bl_compat: 6 })).toBe("Dolby Vision P7");
+    expect(dynamicRangeLabel({ dynamic_range: "dolby_vision", dv_profile: 7, dv_bl_compat: 6, dv_el: "fel" })).toBe(
+      "Dolby Vision P7 FEL",
+    );
+    expect(dynamicRangeLabel({ dynamic_range: "dolby_vision", dv_profile: 7, dv_bl_compat: 6, dv_el: "mel" })).toBe(
+      "Dolby Vision P7 MEL",
+    );
+    expect(dynamicRangeLabel({ dynamic_range: "dolby_vision", dv_profile: 8, dv_bl_compat: 1, hdr10plus: true })).toBe(
+      "Dolby Vision P8.1 + HDR10+",
+    );
     expect(dynamicRangeLabel({ dynamic_range: "hdr10plus" })).toBe("HDR10+");
     expect(dynamicRangeLabel({ dynamic_range: "hdr10" })).toBe("HDR10");
     expect(dynamicRangeLabel({ dynamic_range: "hlg" })).toBe("HLG");
@@ -293,13 +305,27 @@ describe("dynamic range", () => {
     expect(dynamicRangeLabel(null)).toBeNull();
   });
 
-  it("badges leave out the base layer", () => {
-    expect(dynamicRangeBadge({ dynamic_range: "dolby_vision", dv_profile: 7 })).toBe("Dolby Vision P7");
-    expect(dynamicRangeBadge({ dynamic_range: "dolby_vision" })).toBe("Dolby Vision");
+  it("badges say DV, as Android and the TV apps do", () => {
+    expect(dynamicRangeBadge({ dynamic_range: "dolby_vision", dv_profile: 8, dv_bl_compat: 1 })).toBe("DV P8.1");
+    expect(dynamicRangeBadge({ dynamic_range: "dolby_vision", dv_profile: 7, dv_bl_compat: 6 })).toBe("DV P7");
+    expect(dynamicRangeBadge({ dynamic_range: "dolby_vision", dv_profile: 7, dv_bl_compat: 6, dv_el: "fel" })).toBe("DV P7 FEL");
+    expect(dynamicRangeBadge({ dynamic_range: "dolby_vision" })).toBe("DV");
     expect(dynamicRangeBadge({ dynamic_range: "hdr10plus" })).toBe("HDR10+");
     expect(dynamicRangeBadge({ hdr: true })).toBe("HDR");
     expect(dynamicRangeBadge({ dynamic_range: "sdr" })).toBeNull();
     expect(dynamicRangeBadge(undefined)).toBeNull();
+  });
+
+  it("Dolby Vision + HDR10+ takes both badges", () => {
+    expect(dynamicRangeBadges({ dynamic_range: "dolby_vision", dv_profile: 8, dv_bl_compat: 1, hdr10plus: true })).toEqual([
+      "DV P8.1",
+      "HDR10+",
+    ]);
+    expect(dynamicRangeBadges({ dynamic_range: "dolby_vision", dv_profile: 8, dv_bl_compat: 1, hdr10plus: false })).toEqual([
+      "DV P8.1",
+    ]);
+    expect(dynamicRangeBadges({ dynamic_range: "hdr10plus", hdr10plus: true })).toEqual(["HDR10+"]);
+    expect(dynamicRangeBadges({ dynamic_range: "sdr" })).toEqual([]);
   });
 });
 

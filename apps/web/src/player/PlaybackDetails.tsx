@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { usePlaybackStatus } from "@/api/hooks";
-import type { DynamicRange, MediaFile, MediaStream, PlaybackInfo, PlaybackMethod, TranscodeInfo, TranscodePipeline } from "@/api/types";
-import { codecLabel, formatBitrate, resolutionLabel } from "@/lib/format";
+import type { MediaFile, MediaStream, PlaybackInfo, PlaybackMethod, TranscodeInfo, TranscodePipeline } from "@/api/types";
+import { codecLabel, dynamicRangeLabel, formatBitrate, resolutionLabel } from "@/lib/format";
 
 /** What each way of playing is called (as in Plex). */
 export const METHOD_LABEL: Record<PlaybackMethod, string> = {
@@ -20,13 +20,6 @@ const METHOD_TEXT: Record<PlaybackMethod, string> = {
   direct: "The original file, as it is.",
   remux: "The original video, in a format this player opens.",
   transcode: "Converted for this player.",
-};
-
-const RANGE: Partial<Record<DynamicRange, string>> = {
-  dolby_vision: "Dolby Vision",
-  hdr10plus: "HDR10+",
-  hdr10: "HDR10",
-  hlg: "HLG",
 };
 
 const ENCODERS: Record<string, string> = {
@@ -54,14 +47,20 @@ const PIPELINE: Record<TranscodePipeline, string> = {
   copy: "copy",
 };
 
-/** A video stream as `"HEVC 4K Dolby Vision P8.1"`. */
+/** A video stream as `"HEVC 4K Dolby Vision P8.1"`, `"HEVC 4K Dolby Vision P7 FEL"`. */
 export function videoLabel(v: MediaStream | undefined): string {
   if (!v) return "";
-  let range = v.dynamic_range ? (RANGE[v.dynamic_range] ?? "") : "";
-  if (v.dynamic_range === "dolby_vision" && v.dv_profile != null) {
-    range += ` P${v.dv_profile}${v.dv_bl_compat ? `.${v.dv_bl_compat}` : ""}`;
-  }
-  return [codecLabel(v.codec), resolutionLabel(v.width, v.height), range].filter(Boolean).join(" ");
+  return [codecLabel(v.codec), resolutionLabel(v.width, v.height), dynamicRangeLabel(v)].filter(Boolean).join(" ");
+}
+
+/**
+ * What the screen gets of HDR video: the live transcode's tone mapping when
+ * there is one, else what the server said ("HDR10 (Dolby Vision base
+ * layer)"), else nothing (SDR video, or an older server).
+ */
+export function shownAsLabel(info: PlaybackInfo, live: TranscodeInfo | null): string | null {
+  if (live?.tonemap) return `SDR (tone-mapped with ${live.tonemap})`;
+  return info.video_range ?? null;
 }
 
 /** An audio stream as `"TrueHD 7.1"`. */
@@ -137,6 +136,7 @@ export function PlaybackDetails({
   const bitrate = formatBitrate(file?.bitrate);
   const bitrateRow = live?.bitrate_out && bitrate ? `${bitrate} → ${formatBitrate(live.bitrate_out)}` : bitrate;
   const ahead = live ? Math.max(0, Math.round((live.transcoded_ms - positionMs) / 1000)) : 0;
+  const shownAs = video ? shownAsLabel(info, live) : null;
 
   return (
     <div className="px-4 pb-3 pt-1">
@@ -154,7 +154,7 @@ export function PlaybackDetails({
         {audio ? <Row label="Audio">{audioRow}</Row> : null}
         {bitrateRow ? <Row label="Bitrate">{bitrateRow}</Row> : null}
         {live?.video === "transcode" && live.encoder ? <Row label="Encoder">{encoderLabel(live)}</Row> : null}
-        {live?.tonemap ? <Row label="HDR">Tone mapped to SDR ({live.tonemap})</Row> : null}
+        {shownAs ? <Row label="Shown as">{shownAs}</Row> : null}
         {live?.subtitle_burn ? <Row label="Subtitles">Drawn onto the video</Row> : null}
         {live?.speed ? (
           <Row label="Speed">
