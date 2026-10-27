@@ -155,7 +155,8 @@ export function useServerEvents(enabled: boolean) {
     };
 
     const setScanning = (id: Id, scanning: boolean) => {
-      qc.setQueryData<Library[]>(keys.libraries, (old) =>
+      // The user's order and the shared one (Settings) alike.
+      qc.setQueriesData<Library[]>({ queryKey: keys.libraries }, (old) =>
         old?.map((l) => (l.id === id && l.scanning !== scanning ? { ...l, scanning } : l)),
       );
     };

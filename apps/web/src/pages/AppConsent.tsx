@@ -13,7 +13,7 @@ import { AuthLayout } from "./AuthLayout";
 /** What each scope lets an app do, for the profile it acts as. */
 const SCOPE_WORDS: Record<string, (profile: string) => string> = {
   library: (p) => `See ${p}'s libraries, playlists and watch history.`,
-  play: (p) => `Play titles, and keep ${p}'s place, watched marks, ratings and track choices.`,
+  play: (p) => `Play titles, and keep ${p}'s place, watched marks, ratings, track choices and library order.`,
   playlists: (p) => `Make, change and delete ${p}'s playlists.`,
   profiles: () => "Switch to the household's other profiles. Profiles with a PIN still ask for it.",
 };

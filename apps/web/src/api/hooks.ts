@@ -46,6 +46,7 @@ export const keys = {
   server: ["server"] as const,
   me: ["me"] as const,
   libraries: ["libraries"] as const,
+  sharedLibraries: ["libraries", "shared"] as const,
   library: (id: Id) => ["library", id] as const,
   libraryItems: (id: Id, q: LibraryItemsQuery) => ["library", id, "items", q] as const,
   libraryFilters: (id: Id) => ["library", id, "filters"] as const,
@@ -310,8 +311,16 @@ export function useSignOutDevice() {
  * their code (App.tsx), and the pages read it from the cache.
  */
 export const queries = {
+  /** The libraries in the user's order: their own, else the shared one. */
   libraries: () =>
     queryOptions({ queryKey: keys.libraries, queryFn: () => api.get<Library[]>("/api/libraries"), staleTime: 30_000 }),
+  /** The libraries in the order everyone who hasn't sorted their own sees (Settings). */
+  sharedLibraries: () =>
+    queryOptions({
+      queryKey: keys.sharedLibraries,
+      queryFn: () => api.get<Library[]>("/api/libraries?order=shared"),
+      staleTime: 30_000,
+    }),
   users: () => queryOptions({ queryKey: keys.users, queryFn: () => api.get<User[]>("/api/users") }),
   invites: () => queryOptions({ queryKey: keys.invites, queryFn: () => api.get<Invite[]>("/api/invites") }),
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => api.get<Settings>("/api/settings") }),
@@ -321,22 +330,50 @@ export const queries = {
   item: (id: Id) => queryOptions({ queryKey: keys.item(id), queryFn: ({ signal }) => api.get<ItemDetail>(`/api/items/${id}`, { signal }) }),
 };
 
-/** The key of {@link useReorderLibraries}'s moves. */
+/** The keys of the moves of the shared order ({@link useReorderLibraries}) and of the user's own ({@link useSortMyLibraries}). */
 const libraryOrderKey = ["libraries", "order"] as const;
+const ownLibraryOrderKey = ["libraries", "own-order"] as const;
+
+/** The newest move of `key` still being saved: the ids in their new order. */
+function usePendingOrder(key: readonly unknown[]): Id[] | undefined {
+  return useMutationState({
+    filters: { mutationKey: key, status: "pending" },
+    select: (mutation) => mutation.state.variables as Id[] | undefined,
+  }).at(-1);
+}
+
+/** Both lists hold the same libraries in the same order. */
+function sameOrder(a: Library[] | undefined, b: Library[] | undefined): boolean {
+  return !!a && !!b && a.length === b.length && a.every((l, i) => l.id === b[i]?.id);
+}
 
 /**
- * The libraries, in the order of the newest move still being saved
- * ({@link useReorderLibraries}). The cache only ever holds what the server
+ * The libraries in the user's order, as of the newest move still being
+ * saved ({@link useSortMyLibraries}); a move of the shared order shows too
+ * while the user sees that one. The cache only ever holds what the server
  * said, so a fetch that lands meanwhile can't undo a move on screen, and a
  * move that isn't saved simply drops out.
  */
 export function useLibraries() {
-  const moving = useMutationState({
-    filters: { mutationKey: libraryOrderKey, status: "pending" },
-    select: (mutation) => mutation.state.variables as Id[] | undefined,
-  }).at(-1);
-  const select = useCallback((list: Library[]) => (moving ? reordered(list, moving, (l) => l.id) : list), [moving]);
+  const qc = useQueryClient();
+  const own = usePendingOrder(ownLibraryOrderKey);
+  const shared = usePendingOrder(libraryOrderKey);
+  const select = useCallback(
+    (list: Library[]) => {
+      if (own) return reordered(list, own, (l) => l.id);
+      if (shared && sameOrder(list, qc.getQueryData<Library[]>(keys.sharedLibraries))) return reordered(list, shared, (l) => l.id);
+      return list;
+    },
+    [own, shared, qc],
+  );
   return useQuery({ ...queries.libraries(), select });
+}
+
+/** The libraries in the shared order (Settings), as of the newest move still being saved ({@link useReorderLibraries}). */
+export function useSharedLibraries() {
+  const moving = usePendingOrder(libraryOrderKey);
+  const select = useCallback((list: Library[]) => (moving ? reordered(list, moving, (l) => l.id) : list), [moving]);
+  return useQuery({ ...queries.sharedLibraries(), select });
 }
 
 export function useLibrary(id: Id) {
@@ -465,10 +502,11 @@ export function useDeleteLibrary() {
 }
 
 /**
- * The order libraries are listed in, for everyone (`ids`: all of them).
- * Lists show it at once, the sidebar too ({@link useLibraries}), and go back
- * to the saved order by themselves if it isn't saved. Moves are saved one at
- * a time, in the order they were made.
+ * The order libraries are listed in, for everyone who hasn't sorted their
+ * own (`ids`: all of them). Lists show it at once, the sidebar too while it
+ * shows this order ({@link useLibraries}), and go back to the saved order by
+ * themselves if it isn't saved. Moves are saved one at a time, in the order
+ * they were made.
  */
 export function useReorderLibraries() {
   const qc = useQueryClient();
@@ -481,14 +519,60 @@ export function useReorderLibraries() {
     onMutate: () => ({ by: me() }),
     onSuccess: (data, _ids, move) => {
       if (me() !== move.by) return;
-      qc.setQueryData(keys.libraries, data);
+      // Without an order of their own, the user sees this one: at once, then
+      // as the server says (an own order can look just like the shared one).
+      const followed = sameOrder(qc.getQueryData<Library[]>(keys.libraries), qc.getQueryData<Library[]>(keys.sharedLibraries));
+      qc.setQueryData(keys.sharedLibraries, data);
+      if (followed) qc.setQueryData(keys.libraries, data);
+      void qc.invalidateQueries({ queryKey: keys.libraries, exact: true });
       // The home page has a row for each library, in this order.
       void qc.invalidateQueries({ queryKey: keys.homeHubs });
     },
     onError: () => {
       // Refused, perhaps because libraries came or went meanwhile: once the
       // last move is settled, see how they are now.
-      if (qc.isMutating({ mutationKey: libraryOrderKey }) <= 1) void qc.invalidateQueries({ queryKey: keys.libraries, exact: true });
+      if (qc.isMutating({ mutationKey: libraryOrderKey }) <= 1) void qc.invalidateQueries({ queryKey: keys.sharedLibraries, exact: true });
+    },
+  });
+}
+
+/**
+ * The order the user sees their libraries in, theirs alone (`ids`: every
+ * library they see). Shown at once ({@link useLibraries}) and saved one move
+ * at a time, as {@link useReorderLibraries} does the shared order.
+ */
+export function useSortMyLibraries() {
+  const qc = useQueryClient();
+  const me = () => qc.getQueryData<User>(keys.me)?.id;
+  return useMutation({
+    mutationKey: ownLibraryOrderKey,
+    scope: { id: "own-library-order" },
+    mutationFn: (ids: Id[]) => api.put<Library[]>("/api/me/libraries/order", { ids }),
+    onMutate: () => ({ by: me() }),
+    onSuccess: (data, _ids, move) => {
+      if (me() !== move.by) return;
+      qc.setQueryData(keys.libraries, data);
+      // The home page has a row for each library, in this order.
+      void qc.invalidateQueries({ queryKey: keys.homeHubs });
+    },
+    onError: () => {
+      if (qc.isMutating({ mutationKey: ownLibraryOrderKey }) <= 1) void qc.invalidateQueries({ queryKey: keys.libraries, exact: true });
+    },
+  });
+}
+
+/** The user sees their libraries in the shared order again: after the moves still being saved. */
+export function useForgetMyLibraryOrder() {
+  const qc = useQueryClient();
+  const me = () => qc.getQueryData<User>(keys.me)?.id;
+  return useMutation({
+    scope: { id: "own-library-order" },
+    mutationFn: () => api.del<Library[]>("/api/me/libraries/order"),
+    onMutate: () => ({ by: me() }),
+    onSuccess: (data, _vars, forgot) => {
+      if (me() !== forgot.by) return;
+      qc.setQueryData(keys.libraries, data);
+      void qc.invalidateQueries({ queryKey: keys.homeHubs });
     },
   });
 }

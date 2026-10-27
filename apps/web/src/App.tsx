@@ -138,7 +138,7 @@ const router = createBrowserRouter([
                 ...onDemand(
                   () => import("@/pages/settings/LibrariesSettings"),
                   (m) => m.LibrariesSettings,
-                  (prefetch) => [prefetch(queries.libraries()), prefetch(queries.activity())],
+                  (prefetch) => [prefetch(queries.sharedLibraries()), prefetch(queries.activity())],
                 ),
               },
               {

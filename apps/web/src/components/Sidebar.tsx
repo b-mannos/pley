@@ -1,12 +1,13 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router";
-import { Film, House, List, ListMusic, ListVideo, LoaderCircle, Music, Plus, Settings, Tv, X } from "lucide-react";
+import { ArrowUpDown, Film, House, List, ListMusic, ListVideo, LoaderCircle, Music, Plus, Settings, Tv, X } from "lucide-react";
 import { useLibraries } from "@/api/hooks";
 import { usePlaylists } from "@/api/lists";
 import type { LibraryKind } from "@/api/types";
 import { useAuth } from "@/auth";
 import { cn } from "@/lib/cn";
 import { Logo } from "./Logo";
+import { SortLibrariesModal } from "./SortLibrariesModal";
 import { IconButton, Skeleton } from "./ui";
 import { libraryUrl, playlistUrl } from "@/lib/urls";
 
@@ -44,6 +45,7 @@ function NavItem({ to, icon, children, end, trailing }: { to: string; icon: Reac
 function SidebarContent({ onClose }: { onClose?: () => void }) {
   const user = useAuth();
   const libs = useLibraries();
+  const [sorting, setSorting] = useState(false);
 
   return (
     <nav className="flex h-full flex-col overflow-y-auto px-3 pb-4 pt-4" aria-label="Main">
@@ -64,7 +66,15 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
         </NavItem>
       </div>
 
-      <div className="mb-1.5 mt-6 px-3 text-xs font-medium text-subtle">Libraries</div>
+      <div className="mb-0.5 mt-5 flex h-7 items-center justify-between pl-3 pr-1 text-xs font-medium text-subtle">
+        Libraries
+        {(libs.data?.length ?? 0) > 1 ? (
+          <IconButton label="Sort libraries" className="size-7 text-subtle" onClick={() => setSorting(true)}>
+            <ArrowUpDown className="size-3.5" />
+          </IconButton>
+        ) : null}
+      </div>
+      <SortLibrariesModal open={sorting} onClose={() => setSorting(false)} />
       <div className="space-y-0.5">
         {libs.isPending
           ? Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="mx-3 my-2.5 h-5" />)

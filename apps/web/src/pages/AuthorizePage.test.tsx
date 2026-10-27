@@ -182,7 +182,7 @@ describe("AuthorizePage", () => {
     const rows = screen.getAllByRole("listitem").map((li) => li.textContent);
     expect(rows).toEqual([
       "See Admin's libraries, playlists and watch history.",
-      "Play titles, and keep Admin's place, watched marks, ratings and track choices.",
+      "Play titles, and keep Admin's place, watched marks, ratings, track choices and library order.",
       "Make, change and delete Admin's playlists.",
     ]);
     expect(

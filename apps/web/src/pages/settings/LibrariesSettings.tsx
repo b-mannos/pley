@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, EllipsisVertical, FolderPlus, GripVertical, Pencil, Plus, RefreshCw, ScanSearch, Trash2 } from "lucide-react";
 import { errorMessage } from "@/api/client";
-import { keys, useActivity, useDeleteLibrary, useLibraries, useReorderLibraries, useScanAll, useScanLibrary } from "@/api/hooks";
+import { keys, useActivity, useDeleteLibrary, useReorderLibraries, useScanAll, useScanLibrary, useSharedLibraries } from "@/api/hooks";
 import type { Id, Library, ScanStatus } from "@/api/types";
 import { moved, useDragReorder } from "@/components/lists/reorder";
 import { Menu, MenuItem, MenuSeparator } from "@/components/Menu";
@@ -202,7 +202,8 @@ function LibraryRow({
 
 export function LibrariesSettings() {
   useDocumentTitle("Libraries");
-  const libs = useLibraries();
+  // In the shared order, whatever order the administrator sees them in.
+  const libs = useSharedLibraries();
   const activity = useActivity();
   const toast = useToast();
   const qc = useQueryClient();
@@ -230,7 +231,7 @@ export function LibrariesSettings() {
         toast.error(errorMessage(e));
         // The list is back in the saved order: say where the library went,
         // which also makes trying again read out (the note changes).
-        const saved = qc.getQueryData<Library[]>(keys.libraries) ?? [];
+        const saved = qc.getQueryData<Library[]>(keys.sharedLibraries) ?? [];
         const back = saved.findIndex((l) => l.id === lib.id);
         setMoveNote(back < 0 ? `${lib.name} wasn't moved` : `${lib.name} moved back to position ${back + 1} of ${saved.length}`);
       },
@@ -287,7 +288,7 @@ export function LibrariesSettings() {
         <div>
           <h2 className="text-lg font-semibold">Libraries</h2>
           <p className="text-sm text-muted">
-            Folders pley watches for movies, shows and music.{reorderable ? " Everyone sees them in this order." : null}
+            Folders pley watches for movies, shows and music.{reorderable ? " Everyone sees them in this order, unless they sort their own." : null}
           </p>
         </div>
         <div className="flex gap-2">

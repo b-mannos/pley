@@ -14,15 +14,16 @@ const libraries = [library(1, "Movies", "movies"), library(2, "TV", "shows"), li
 const names = libraries.map((l) => l.name);
 
 /**
- * The libraries; a new order is saved as asked unless `order` answers
- * otherwise, and `refetch` answers the libraries after the first time (both
- * may hold the answer back).
+ * The libraries, the same in the shared order and the user's (who hasn't
+ * sorted their own); a new order is saved as asked unless `order` answers
+ * otherwise (`save` saves it), and `refetch` answers the libraries after the
+ * first time (both may hold the answer back).
  */
 function serve({
   list = libraries,
   order,
   refetch,
-}: { list?: Library[]; order?: (req: FakeRequest) => unknown; refetch?: () => unknown } = {}) {
+}: { list?: Library[]; order?: (req: FakeRequest, save: () => Library[]) => unknown; refetch?: () => unknown } = {}) {
   let current = list;
   let fetched = 0;
   return mockApi({
@@ -30,13 +31,18 @@ function serve({
     "GET /api/activity": () => ({ scans: [], sessions: [] }),
     "GET /api/playlists": () => ({ playlists: [] }),
     "PUT /api/libraries/order": (req) => {
-      if (order) return order(req);
-      const { ids } = req.body as { ids: number[] };
-      current = ids.flatMap((id) => list.filter((l) => l.id === id));
-      return current;
+      const save = () => {
+        const { ids } = req.body as { ids: number[] };
+        current = ids.flatMap((id) => list.filter((l) => l.id === id));
+        return current;
+      };
+      return order ? order(req, save) : save();
     },
   });
 }
+
+/** Where the settings page fetches the libraries: in the shared order. */
+const SHARED = "/api/libraries?order=shared";
 
 /** An answer to give later: `answer` sends it. */
 function heldBack() {
@@ -196,7 +202,7 @@ describe("LibrariesSettings", () => {
     const drag = dataTransfer();
     fireEvent.dragStart(gripOf("TV"), { dataTransfer: drag });
     // Another administrator deletes Movies meanwhile: TV is first now.
-    await act(() => client.setQueryData(["libraries"], [libraries[1], libraries[2]]));
+    await act(() => client.setQueryData(["libraries", "shared"], [libraries[1], libraries[2]]));
     await waitFor(() => expect(namesIn(list)).toEqual(["TV", "Music"]));
     expect(rowOf("TV")).toHaveClass("opacity-40");
     fireEvent.dragOver(rowOf("Music"), { dataTransfer: drag });
@@ -206,10 +212,10 @@ describe("LibrariesSettings", () => {
     expect(puts(requests)[0]?.body).toEqual({ ids: [3, 2] });
   });
 
-  it("shows the new order in the sidebar before the server answers", async () => {
+  it("shows the new order in the sidebar before the server answers, while the sidebar shows the shared one", async () => {
     const user = userEvent.setup();
     const saved = heldBack();
-    serve({ order: saved.reply });
+    serve({ order: (_req, save) => saved.reply().then(save) });
     const { client } = renderWithProviders(
       <>
         <Sidebar open={false} onClose={() => {}} />
@@ -240,7 +246,7 @@ describe("LibrariesSettings", () => {
     // What a server event does (a scan finished, another tab's change).
     await act(() => client.invalidateQueries({ queryKey: ["libraries"] }));
     await settle();
-    expect(requests.filter((r) => r.path === "/api/libraries")).toHaveLength(2);
+    expect(requests.filter((r) => r.path === SHARED)).toHaveLength(2);
     expect(namesIn(list)).toEqual(["Movies", "Music", "TV"]);
 
     saved.answer([libraries[0], libraries[2], libraries[1]]);
@@ -295,7 +301,7 @@ describe("LibrariesSettings", () => {
     await waitFor(() => expect(namesIn(list)).toEqual(["Movies", "TV", "Music"]));
     expect(screen.getByRole("status")).toHaveTextContent("Music moved back to position 3 of 3");
     expect(screen.getByRole("button", { name: "Move Music up" })).toHaveFocus();
-    await waitFor(() => expect(requests.filter((r) => r.path === "/api/libraries")).toHaveLength(2));
+    await waitFor(() => expect(requests.filter((r) => r.path === SHARED)).toHaveLength(2));
     refetched.answer(libraries);
   });
 
@@ -382,7 +388,36 @@ describe("LibrariesSettings", () => {
     saved.answer([libraries[0], libraries[2], libraries[1]]);
 
     await waitFor(() => expect(move?.state.status).toBe("success"));
+    expect(client.getQueryData(["libraries", "shared"])).toBeUndefined();
     expect(client.getQueryData(["libraries"])).toBeUndefined();
+  });
+
+  it("leaves a user's own order alone in the sidebar", async () => {
+    const user = userEvent.setup();
+    const own = [libraries[2], libraries[1], libraries[0]] as Library[];
+    mockApi({
+      "GET /api/libraries": (req) => (req.path === SHARED ? libraries : own),
+      "GET /api/activity": () => ({ scans: [], sessions: [] }),
+      "GET /api/playlists": () => ({ playlists: [] }),
+      "PUT /api/libraries/order": () => [libraries[0], libraries[2], libraries[1]],
+    });
+    const { client } = renderWithProviders(
+      <>
+        <Sidebar open={false} onClose={() => {}} />
+        <LibrariesSettings />
+      </>,
+    );
+    const sidebar = await screen.findByRole("navigation", { name: "Main" });
+    const list = await screen.findByRole("list", { name: "Libraries" });
+    await waitFor(() => expect(namesIn(sidebar)).toEqual(["Music", "TV", "Movies"]));
+    expect(namesIn(list)).toEqual(["Movies", "TV", "Music"]);
+    expect(screen.getByText("Everyone sees them in this order, unless they sort their own.", { exact: false })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Move Music up" }));
+    await waitFor(() => expect(namesIn(list)).toEqual(["Movies", "Music", "TV"]));
+    await waitFor(() => expect(client.isMutating()).toBe(0));
+    await settle();
+    expect(namesIn(sidebar)).toEqual(["Music", "TV", "Movies"]);
   });
 
   it("has nothing to move with a single library", async () => {
@@ -393,6 +428,6 @@ describe("LibrariesSettings", () => {
     expect(screen.queryByRole("button", { name: /^Move / })).not.toBeInTheDocument();
     expect(rowOf("Movies")).not.toHaveAttribute("draggable");
     expect(rowOf("Movies").querySelector("[data-drag-handle]")).toBeNull();
-    expect(screen.queryByText("Everyone sees them in this order.", { exact: false })).not.toBeInTheDocument();
+    expect(screen.queryByText("Everyone sees them in this order", { exact: false })).not.toBeInTheDocument();
   });
 });

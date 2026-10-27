@@ -210,7 +210,7 @@ describe("LinkPage", () => {
     expect(screen.getByText("pley's own app")).toBeInTheDocument();
     expect(screen.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
       "See Admin's libraries, playlists and watch history.",
-      "Play titles, and keep Admin's place, watched marks, ratings and track choices.",
+      "Play titles, and keep Admin's place, watched marks, ratings, track choices and library order.",
     ]);
     expect(screen.getByText("It goes to:")).toBeInTheDocument();
     expect(screen.getByText(/^the TV or device showing/)).toHaveTextContent("the TV or device showing BCDF-GHJK");
