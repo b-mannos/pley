@@ -882,17 +882,36 @@ function Details(p: { item: ItemDetail; file: MediaFile | null; onVersion: (f: M
               <PanelRow key={f.id} fid={`version/${f.id}`} label={versionLong(f) || "Version"} checked={p.file?.id === f.id} onSelect={() => p.onVersion(f)} />
             ))}
           </G>
-          <div class="t-title c-fg" style="margin-top:20px">
-            Media info
-          </div>
-          <div style="margin-top:8px">
-            {item.files.map((f, n) => (
-              <MediaInfoCard key={f.id} file={f} title={f.edition ?? (item.files.length > 1 ? `Version ${n + 1}` : null)} />
-            ))}
-          </div>
+          <MediaInfo item={item} />
         </>
       )}
     </div>
+  );
+}
+
+/** Media info, closed until OK opens it, as on the web and Android: few want every stream. */
+function MediaInfo(p: { item: ItemDetail }) {
+  const [open, setOpen] = useState(false);
+  const files = p.item.files;
+  return (
+    <>
+      <G kind="col" style="margin-top:20px">
+        <PanelRow
+          fid="media-info"
+          label="Media info"
+          sub="Each file's video, audio and subtitle streams"
+          icon={open ? "chevron-up" : "chevron-down"}
+          onSelect={() => setOpen(!open)}
+        />
+      </G>
+      {open && (
+        <div style="margin-top:8px">
+          {files.map((f, n) => (
+            <MediaInfoCard key={f.id} file={f} title={f.edition ?? (files.length > 1 ? `Version ${n + 1}` : null)} />
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
