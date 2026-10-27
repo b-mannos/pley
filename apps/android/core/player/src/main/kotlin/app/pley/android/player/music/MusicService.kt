@@ -1,7 +1,6 @@
 package app.pley.android.player.music
 
 import android.app.PendingIntent
-import android.content.Intent
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
@@ -61,12 +60,13 @@ class MusicService : MediaSessionService() {
         super.onDestroy()
     }
 
-    /** Tapping the notification opens the app (MainActivity, which hands over to the TV's on a TV). */
-    private fun openApp(): PendingIntent? {
-        val intent = Intent(Intent.ACTION_MAIN)
-            .setClassName(this, MAIN_ACTIVITY)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        return PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    /**
+     * Tapping the notification opens the app as its icon does: the app's
+     * task comes back as it was, with no second window over it (on a TV,
+     * MainActivity hands over to the TV's window already open).
+     */
+    private fun openApp(): PendingIntent? = packageManager.getLaunchIntentForPackage(packageName)?.let {
+        PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
     /** Accepts the app, the system's controllers and Media3's notification; refuses everyone else. */
@@ -86,7 +86,6 @@ class MusicService : MediaSessionService() {
 
     private companion object {
         const val SESSION_ID = "pley.music"
-        const val MAIN_ACTIVITY = "app.pley.android.MainActivity"
     }
 }
 

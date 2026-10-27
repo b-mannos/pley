@@ -19,8 +19,9 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 
 /**
- * The native app on phones and tablets. A TV that opens it is sent to
- * TvActivity. The splash screen stays only while the startup read runs,
+ * The native app on phones and tablets. A TV that opens it (the music's
+ * notification, a launcher) is sent to TvActivity, the one already open if
+ * there is one. The splash screen stays only while the startup read runs,
  * 300 ms at most: nothing here waits for the network. The first screen is
  * chosen from that read alone (PhoneApp's start gate). The window is drawn
  * edge to edge, and Back is predictive (the manifest's
@@ -32,7 +33,9 @@ class MainActivity : ComponentActivity() {
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
         if (isTelevision()) {
-            startActivity(Intent(this, TvActivity::class.java))
+            startActivity(
+                Intent(this, TvActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            )
             finish()
             return
         }
