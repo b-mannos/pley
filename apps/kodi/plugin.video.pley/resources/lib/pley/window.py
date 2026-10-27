@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import threading
 import time
+import unicodedata
 
 import xbmc
 import xbmcgui
@@ -53,39 +54,75 @@ def color(text: str, argb: str) -> str:
     return "[COLOR %s]%s[/COLOR]" % (argb, text)
 
 
+# Noto Sans's advance widths (Estuary's font) from " " to "~", in 2048ths of
+# an em. Kodi draws them at 0.943 of that, and its bold 0.075 em wider a
+# character: so its screenshots measure.
+ADVANCES = (
+    532, 550, 835, 1323, 1171, 1701, 1499, 460, 614, 614, 1128, 1171, 548, 659, 548, 761,
+    1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 1171, 548, 548, 1171, 1171, 1171, 888,
+    1841, 1308, 1331, 1294, 1495, 1138, 1062, 1490, 1517, 694, 559, 1267, 1073, 1857, 1556, 1599,
+    1239, 1599, 1273, 1124, 1138, 1497, 1228, 1904, 1200, 1159, 1171, 673, 761, 673, 1171, 909,
+    575, 1148, 1259, 983, 1259, 1155, 704, 1259, 1265, 528, 528, 1093, 528, 1914, 1265, 1239,
+    1259, 1259, 845, 980, 739, 1265, 1040, 1609, 1083, 1044, 962, 778, 1128, 778, 1171,
+)
+DRAWN, BOLDER = 0.943, 0.075
+
+
+def advance(ch: str) -> int:
+    """How far `ch` moves the pen in Noto Sans, in 2048ths of an em."""
+    code = ord(ch)
+    if 32 <= code < 127:
+        return ADVANCES[code - 32]
+    if ch == "…":
+        return 1619
+    if code >= 0x2E80:  # CJK, kana, hangul: square
+        return 2048
+    # An accented letter as wide as its letter, anything else as a digit.
+    base = ord(unicodedata.normalize("NFD", ch)[0])
+    return ADVANCES[base - 32] if 32 <= base < 127 else 1171
+
+
 def text_width(text: str, size: int, bold: bool = False) -> float:
-    """About how wide `text` is in Estuary's Noto Sans at `size` px."""
-    em = 0.6 if bold else 0.56
-    return len(text) * size * em
+    """How wide Kodi draws `text` in Estuary's Noto Sans at `size` px."""
+    em = sum(advance(ch) for ch in text) / 2048 * DRAWN
+    if bold:
+        em += BOLDER * len(text)
+    return em * size
+
+
+def wrap(text: str, size: int, width: int, bold: bool = False) -> list:
+    """`text`'s words, line by line, as Kodi wraps them in a column `width` wide."""
+    space = text_width(" ", size, bold)
+    rows, line, used = [], [], 0.0
+    for word in text.split():
+        w = text_width(word, size, bold)
+        if line and used + space + w > width:
+            rows.append(line)
+            line, used = [], 0.0
+        used += (space if line else 0) + w
+        line.append(word)
+    if line:
+        rows.append(line)
+    return rows
 
 
 def lines(text: str, size: int, width: int, most: int, bold: bool = False) -> int:
-    """About how many lines `text` takes in a column `width` wide."""
-    if not text:
-        return 0
-    words_ = text.split()
-    count, line = 1, 0.0
-    space = size * 0.26
-    for word in words_:
-        w = text_width(word, size, bold)
-        if line and line + space + w > width:
-            count += 1
-            line = w
-        else:
-            line += (space if line else 0) + w
-    return min(count, most)
+    """How many lines `text` takes in a column `width` wide, up to `most`."""
+    return min(len(wrap(text or "", size, width, bold)), most)
 
 
 def clamp(text: str, size: int, width: int, most: int) -> str:
     """`text` cut at a word with "…" where it runs past `most` lines (Kodi's
     text boxes stop at a line without saying more was there)."""
     text = " ".join((text or "").split())
-    if lines(text, size, width, most + 1) <= most:
+    rows = wrap(text, size, width)
+    if len(rows) <= most:
         return text
-    cut = text
-    while cut and lines(cut + "…", size, width, most + 1) > most:
-        cut = cut.rsplit(" ", 1)[0] if " " in cut else cut[:-1]
-    return cut.rstrip(" ,.;:") + "…"
+    last = " ".join(rows[most - 1])
+    while last and text_width(last + "…", size) > width:
+        last = last.rsplit(" ", 1)[0] if " " in last else last[:-1]
+    kept = [" ".join(row) for row in rows[: most - 1]] + [last]
+    return " ".join(kept).rstrip(" ,.;:") + "…"
 
 
 # Work posted to the window's thread (Window.post) is announced by this.

@@ -59,6 +59,16 @@ class FakeWindow(window.Window):
 
 
 class WindowTest(unittest.TestCase):
+    def test_text_as_wide_as_kodi_draws_it(self):
+        # As the lab Kodi's screenshots measure them (Estuary at 1080p).
+        line = "A burnt-out chef inherits a failing flower farm and a stubborn goat,"
+        self.assertAlmostEqual(window.text_width(line, 30), 887, delta=9)
+        self.assertAlmostEqual(window.text_width("Continue Watching", 36, bold=True), 350, delta=8)
+        self.assertEqual(window.wrap(line + " and finds out she's better at one of them.", 30, L.TEXT_WIDTH)[0][-1], "goat,")
+        self.assertEqual(window.lines("A storm keeps the fleet ashore, and old grudges come out at the pub.", 30, L.TEXT_WIDTH, 3), 1)
+        self.assertEqual(window.advance("é"), window.advance("e"))
+        self.assertEqual(window.lines("", 30, L.TEXT_WIDTH, 3), 0)
+
     def test_summaries_are_cut_at_a_word(self):
         text = " ".join(["lighthouse"] * 60)
         cut = window.clamp(text, 30, L.TEXT_WIDTH, 2)
