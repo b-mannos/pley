@@ -8,12 +8,13 @@ import { Chip, PanelRow, Tab } from "../kit/buttons";
 import { F, G } from "../kit/focusable";
 import { gridColumns, PosterGrid } from "../kit/grid";
 import { Icon, type IconName } from "../kit/icons";
+import { useRested } from "../kit/backdrop";
 import { PanelTitle, SidePanel } from "../kit/panel";
 import { Row, rowHeight, SectionPage, type Section } from "../kit/row";
 import { ArtTile, SeeAllTile, SkeletonTile, Tile, TILES, type TileKind } from "../kit/tile";
 import type { Entry, LibraryTab } from "../shell/navigator";
 import { ColumnMessage, failedTitle, problem, useApp, useLoad } from "./common";
-import { pageOf } from "./item-actions";
+import { pageOf, prefetchPlayback } from "./item-actions";
 import {
   AlphaIndex,
   countLabel,
@@ -282,6 +283,7 @@ function LibraryGridTab(p: { entry: Entry; library: Library; initial: boolean; f
           }
         />
       )}
+      {!message && <GridRest at={focusedIndex} itemAt={(i) => listing.at(i) ?? null} />}
       {jump && alpha && (
         <JumpControl
           alpha={alpha}
@@ -354,6 +356,24 @@ function LibraryGridTab(p: { entry: Entry; library: Library; initial: boolean; f
       )}
     </>
   );
+}
+
+/**
+ * Where focus rests in the grid (400 ms, no key held): the title's details
+ * come, and the server gets a video ready, as on Home's rows, so OK opens
+ * its page whole and Play starts at once.
+ */
+function GridRest(p: { at: Signal<number>; itemAt: (index: number) => ItemSummary | null }) {
+  const app = useApp();
+  const rested = useRested(p.itemAt(p.at.value));
+  useEffect(() => {
+    if (!rested) return;
+    prefetchPlayback(app, rested);
+    // Music has pages of its own (an artist's, an album's), which ask for their own.
+    const music = rested.kind === "artist" || rested.kind === "album" || rested.kind === "track";
+    if (!music && !app.cachedItem(rested.id)) void app.item(rested.id).catch(() => undefined);
+  }, [rested?.id]);
+  return null;
 }
 
 /** "42 Mbps · 23.4 GB", or "Bitrate unknown". */
