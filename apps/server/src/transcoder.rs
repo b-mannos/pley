@@ -6,7 +6,7 @@
 //! backoff) and forwards its log output. In *external* mode it talks to a
 //! transcoder running elsewhere (`transcoder_url`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -91,6 +91,9 @@ pub struct Transcoder {
 const PREFETCH_EVERY: Duration = Duration::from_secs(120);
 /// Files remembered as read ahead before the oldest are forgotten.
 const PREFETCHES_KEPT: usize = 512;
+/// The transcoder's last lines on its error output kept, to say why it
+/// went (an error report with its causes takes a few).
+const LAST_WORDS: usize = 12;
 
 #[derive(Clone)]
 struct ManagedSpec {
@@ -629,12 +632,29 @@ impl Transcoder {
         let stdout = child.stdout.take().ok_or("no stdout")?;
         let stderr = child.stderr.take().ok_or("no stderr")?;
 
-        tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                forward_log(&line);
+        let said = Arc::new(Mutex::new(VecDeque::new()));
+        let reader = tokio::spawn({
+            let said = said.clone();
+            async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    forward_log(&line);
+                    let mut said = said.lock();
+                    if said.len() == LAST_WORDS {
+                        said.pop_front();
+                    }
+                    said.push_back(line);
+                }
             }
         });
+        // What it said last, once it has all been read (it went).
+        let why_gone = |reader: tokio::task::JoinHandle<()>| {
+            let said = said.clone();
+            async move {
+                let _ = tokio::time::timeout(Duration::from_secs(2), reader).await;
+                last_words(&said.lock())
+            }
+        };
 
         let mut stdout_lines = BufReader::new(stdout).lines();
         // Stopping while it starts (probing ffmpeg and the GPU takes seconds)
@@ -661,7 +681,8 @@ impl Transcoder {
             Ok(Some(addr)) => addr,
             Ok(None) => {
                 let status = child.wait().await.map(|s| s.to_string()).unwrap_or_default();
-                return Err(format!("transcoder exited before announcing its address ({status})"));
+                let why = why_gone(reader).await;
+                return Err(format!("transcoder exited before announcing its address ({status}){why}"));
             }
             Err(_) => return Err("transcoder did not start within 120s".into()),
         };
@@ -689,7 +710,10 @@ impl Transcoder {
             return self.stop_child(&mut child, &mut stdin).await;
         }
         tokio::select! {
-            status = child.wait() => Err(format!("transcoder exited ({})", status.map(|s| s.to_string()).unwrap_or_default())),
+            status = child.wait() => {
+                let status = status.map(|s| s.to_string()).unwrap_or_default();
+                Err(format!("transcoder exited ({status}){}", why_gone(reader).await))
+            }
             _ = stop => self.stop_child(&mut child, &mut stdin).await,
         }
     }
@@ -735,7 +759,8 @@ fn forward_log(line: &str) {
     let body =
         trimmed.split_once(" INFO ").or_else(|| trimmed.split_once(" WARN ")).or_else(|| trimmed.split_once(" ERROR "));
     let message = body.map(|(_, m)| m.trim()).unwrap_or(trimmed);
-    if trimmed.contains(" ERROR ") {
+    // `Error: …`: why it couldn't start (or went), as `main` reports it.
+    if trimmed.contains(" ERROR ") || trimmed.starts_with("Error:") {
         tracing::error!("[transcoder] {message}");
     } else if trimmed.contains(" WARN ") {
         tracing::warn!("[transcoder] {message}");
@@ -744,6 +769,20 @@ fn forward_log(line: &str) {
     } else {
         tracing::info!("[transcoder] {message}");
     }
+}
+
+/// Why a transcoder that went did, from its last lines on its error
+/// output, for the error the admin sees: its `Error:` report (with its
+/// causes) when it gave one, else its last lines; `""` when it said nothing.
+fn last_words(said: &VecDeque<String>) -> String {
+    let lines: Vec<&str> = said.iter().map(|line| line.trim()).filter(|line| !line.is_empty()).collect();
+    let from = match lines.iter().rposition(|line| line.starts_with("Error:")) {
+        Some(report) => report,
+        None => lines.len().saturating_sub(3),
+    };
+    let words = lines[from..].join(" ");
+    let words = words.strip_prefix("Error:").map_or(words.as_str(), str::trim_start);
+    if words.is_empty() { String::new() } else { format!(": {words}") }
 }
 
 async fn api_error(resp: reqwest::Response) -> TranscoderError {
@@ -769,6 +808,27 @@ mod tests {
             AppError::Unavailable(message) => assert!(!message.contains("127.0.0.1"), "{message}"),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn a_transcoder_that_goes_says_why() {
+        let said = |lines: &[&str]| last_words(&lines.iter().map(|l| (*l).to_owned()).collect());
+        assert_eq!(
+            said(&[
+                "2026-10-27T03:00:00Z  INFO pley-transcoder 1.0 starting",
+                "Error: the token must be a secret of at least 16 characters, not an example",
+                "",
+            ]),
+            ": the token must be a secret of at least 16 characters, not an example"
+        );
+        // With its causes.
+        assert_eq!(
+            said(&["Error: cannot listen", "", "Caused by:", "    Address in use"]),
+            ": cannot listen Caused by: Address in use"
+        );
+        // No report (a crash): its last lines.
+        assert_eq!(said(&["one", "two", "three", "four"]), ": two three four");
+        assert_eq!(said(&[]), "");
     }
 
     #[test]
