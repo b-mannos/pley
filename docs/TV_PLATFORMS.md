@@ -336,15 +336,23 @@ server).
 
 What keeps them quick on a 2018 TV:
 
-- One script (387 KB minified, 126 KB compressed) and one stylesheet,
+- One script (410 KB minified, 135 KB compressed) and one stylesheet,
   packaged with the fonts: nothing is downloaded before the first screen,
   which comes from what the TV saved, before any network.
 - Preact with signals, compiled ahead for Chrome 53 (LG) and 56
-  (Samsung), with a few small polyfills.
+  (Samsung), with a few small polyfills, and a prelude ahead of the
+  script for what esbuild's own helpers read as the script starts.
 - The page is laid out at 960×540 and zoomed to the TV's graphics plane
   (1920×1080, or 1280×720 on LG's HD sets).
-- Only `transform` and `opacity` move; no filters, blurs or big shadows.
-  Held keys move rows without animating.
+- Only `transform` and `opacity` move, on the compositor; no filters,
+  blurs, big shadows, or anything that lays out a frame (the rail's
+  entries grow by scaling, the scrubber's thumb too). Held keys move rows
+  without animating.
+- A move draws only what follows it: tiles are drawn again only when what
+  they show changes, and what follows focus (Home's backdrop and info,
+  the episode info, the A–Z jump) reads it from a signal, so the page and
+  its rows aren't drawn again. The player's half-second tick draws only
+  its clock.
 - Rows and grids draw only what is near the screen. Pictures are asked
   for at the width they are drawn (the server's width buckets) and loaded
   nearest-focus first, fewer at a time on low-end sets.
