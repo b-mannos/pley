@@ -44,15 +44,17 @@ Run the setup. Its pages:
    - The port (7539), the Plex-compatible API (port 32400, for Plex apps) and
      whether the pley apps find the server on the local network.
    Setup says when another program has the port.
-5. **FFmpeg**: the one the installer carries, when it was built with one
-   (see Building the installer), copied next to pley from a folder (a
-   build's `bin` folder, with its DLLs: gyan.dev's, or one built for Dolby
-   Vision FEL), downloaded (gyan.dev's full build, checked against its
-   SHA-256; x64 only), or the one on PATH. A service sees only the system's
-   PATH.
+
+FFmpeg comes with the installer and goes next to pley: a release's carries
+gyan.dev's full build (NVENC, Quick Sync, AMF and Vulkan tone mapping), and
+an installer built with another one carries that one, such as an FFmpeg built
+for Dolby Vision FEL (see Building the installer). Each install replaces it.
 
 The last page gives pley's address and the link that creates the
-administrator account, and says which encoders pley found in FFmpeg.
+administrator account (or, with an earlier pley's data, says to sign in as
+before), and says which encoders pley found in FFmpeg. A service runs in the
+background, without an icon in the notification area: the Start menu's
+`pley-server` opens it.
 
 ## What Setup sets up
 
@@ -69,19 +71,19 @@ administrator account, and says which encoders pley found in FFmpeg.
 ## Updating
 
 Run the new version's setup. It remembers the last install's choices, stops
-pley, replaces it and starts it again.
+pley, replaces it and its FFmpeg, and starts it again.
 
 ## Uninstalling
 
 **Settings → Apps → pley-server → Uninstall**. The uninstaller removes the
 service, the user Setup made, the firewall rule, the start at sign-in, the
-programs and the FFmpeg copy, and asks whether to delete the data folder
+programs and FFmpeg, and asks whether to delete the data folder
 too (no, unless you say so).
 
 ## Installing without the wizard
 
 ```
-pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=service /FFMPEG=download
+pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=service /LAN=yes
 ```
 
 | Option | Values | Default |
@@ -96,7 +98,6 @@ pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=s
 | `/LAN=` | `yes` or `no`: listen on the network | `no` |
 | `/PORT=` | The port | `7539` |
 | `/PLEX=`, `/DISCOVERY=` | `yes` or `no` (discovery with `/LAN=yes`) | `no`, `yes` |
-| `/FFMPEG=` | `bundled`, `keep`, `download`, `path` or a folder | the installer's own, or the FFmpeg on PATH, copied; downloaded without one |
 
 Setup's own options work too, such as `/DIR=` (where pley goes) and
 `/LOG=<file>`. An update keeps the last choices for the options not given. A
@@ -172,10 +173,11 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Archive -Installer
 
 or, around a release folder already built,
 `scripts\build-installer.ps1 -Release dist\pley-<version>-windows-x86_64`.
-`-Ffmpeg <an FFmpeg build's bin folder>` makes the installer carry that
-FFmpeg (and the DLLs next to it) and offer it first, for computers that
-don't have it, and `-Flavor fel` adds a name to the file:
-`pley-server-<version>-fel-windows-x86_64-setup.exe`.
+The installer carries the FFmpeg on PATH (where WinGet's link leads), or the
+one `-Ffmpeg <an FFmpeg build's bin folder>` names, with the DLLs next to it;
+`-Flavor fel` adds a name to the file:
+`pley-server-<version>-fel-windows-x86_64-setup.exe`. Releases carry
+gyan.dev's full build, at the version and checksum set in `release.yml`.
 `ISCC /DTest …` builds one that installs in the notification area without
 administrator rights (no shortcuts nor start at sign-in), to try Setup's
 code on a development machine.

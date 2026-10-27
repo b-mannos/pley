@@ -395,9 +395,9 @@ fn is_link(path: &Path) -> bool {
 }
 
 /// Once the pley serving `data_dir` that started at unix time `since` or
-/// later answers: its address, the link that sets it up (while it has no
-/// account) and what it found FFmpeg can do, in lines the installer reads
-/// (`running: `, `setup: `, `ffmpeg: `).
+/// later answers: its address, whether it has accounts already or else the
+/// link that sets it up, and what it found FFmpeg can do, in lines the
+/// installer reads (`running: `, `accounts: yes`, `setup: `, `ffmpeg: `).
 fn report(data_dir: &Path, since: i64) -> anyhow::Result<()> {
     let log_file = data_dir.join("logs").join("pley.log");
     let read_log = || String::from_utf8_lossy(&std::fs::read(&log_file).unwrap_or_default()).into_owned();
@@ -419,6 +419,10 @@ fn report(data_dir: &Path, since: i64) -> anyhow::Result<()> {
         std::thread::sleep(Duration::from_millis(500));
     }
     println!("running: http://{addr}");
+    // Set up already (its data copied from a pley that was): no setup code.
+    if get(addr, "/api/server").is_some_and(|body| body.contains(r#""setup_required":false"#)) {
+        println!("accounts: yes");
+    }
     let link = |code: &str| format!("http://{addr}/setup#code={code}");
     // The setup code is logged as pley starts; what FFmpeg can do comes
     // once the transcoder has tried it (seconds, with a GPU).
@@ -446,14 +450,20 @@ fn report(data_dir: &Path, since: i64) -> anyhow::Result<()> {
 
 /// Whether pley answers `/api/health` on `addr`.
 fn answers(addr: SocketAddr) -> bool {
-    let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_secs(2)) else { return false };
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-    let request = format!("GET /api/health HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
-    if stream.write_all(request.as_bytes()).is_err() {
-        return false;
-    }
-    let mut status = [0u8; 12];
-    stream.read_exact(&mut status).is_ok() && status.ends_with(b" 200")
+    get(addr, "/api/health").is_some()
+}
+
+/// The body of `path` on `addr`, when pley answers it with 200.
+fn get(addr: SocketAddr, path: &str) -> Option<String> {
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    let request = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).ok()?;
+    let response = String::from_utf8_lossy(&response);
+    let (head, body) = response.split_once("\r\n\r\n")?;
+    head.lines().next()?.contains(" 200 ").then(|| body.to_owned())
 }
 
 /// How the log writes unix time `secs` (UTC, to the second), at the start

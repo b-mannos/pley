@@ -1,15 +1,16 @@
 # Windows installer from a release folder (Inno Setup 6.7 or newer):
 #   powershell -ExecutionPolicy Bypass -File scripts\build-installer.ps1 -Release dist\pley-<version>-windows-<arch>
-#     [-OutDir dist] [-Ffmpeg <an FFmpeg build's bin folder> -Flavor <name>]
+#     [-OutDir dist] [-Ffmpeg <an FFmpeg build's bin folder>] [-Flavor <name>]
 # Output: pley-server-<version>[-<flavor>]-windows-<arch>-setup.exe in -OutDir (default: dist).
 # scripts\build.ps1 -Installer runs it. What the installer does is in
 # deploy\windows\README.md.
 param(
     [Parameter(Mandatory)][string]$Release,
     [string]$OutDir,
-    # An FFmpeg build's bin folder for the installer to carry (offered first),
-    # and a name for the build in the file name, such as fel.
+    # The FFmpeg the installer carries and pley runs: an FFmpeg build's bin
+    # folder (ffmpeg.exe, ffprobe.exe and its DLLs). Default: the one on PATH.
     [string]$Ffmpeg,
+    # A name for the build in the file name, such as fel.
     [string]$Flavor
 )
 
@@ -33,16 +34,31 @@ $iscc = @(
 ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 if (-not $iscc) { throw "Inno Setup 6.7 or newer isn't installed (winget install JRSoftware.InnoSetup), or set ISCC to its ISCC.exe" }
 
-$defines = @("/DAppVersion=$version", "/DSourceDir=$Release", "/DArch=$arch", "/DOutputDir=$((Resolve-Path $OutDir).Path)")
-if ($Ffmpeg) {
-    $Ffmpeg = (Resolve-Path $Ffmpeg).Path
-    foreach ($exe in "ffmpeg.exe", "ffprobe.exe") {
-        if (-not (Test-Path (Join-Path $Ffmpeg $exe))) { throw "$Ffmpeg has no $exe" }
-    }
-    # "ffmpeg version n9.0.2-pley-dovi-el Copyright…" names it.
-    $label = (& (Join-Path $Ffmpeg "ffmpeg.exe") -hide_banner -version | Select-Object -First 1) -replace '^ffmpeg version (\S+).*$', 'FFmpeg $1'
-    $defines += "/DFfmpegDir=$Ffmpeg", "/DFfmpegLabel=$label"
+if (-not $Ffmpeg) {
+    # The FFmpeg on PATH, in the folder its link leads to (WinGet's are links).
+    $found = Get-Command ffmpeg.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $found) { throw "no FFmpeg for the installer: pass -Ffmpeg <an FFmpeg build's bin folder>, or put one on PATH" }
+    $item = Get-Item $found.Source
+    $exe = if ($item.LinkType) { @($item.Target)[0] } else { $item.FullName }
+    if (-not [IO.Path]::IsPathRooted($exe)) { $exe = Join-Path $item.DirectoryName $exe }
+    $Ffmpeg = Split-Path $exe -Parent
 }
+$Ffmpeg = (Resolve-Path $Ffmpeg).Path
+foreach ($exe in "ffmpeg.exe", "ffprobe.exe") {
+    if (-not (Test-Path (Join-Path $Ffmpeg $exe))) { throw "$Ffmpeg has no $exe" }
+}
+# "ffmpeg version n9.0.2-pley-dovi-el Copyright…" names it.
+$label = "FFmpeg"
+try {
+    $first = & (Join-Path $Ffmpeg "ffmpeg.exe") -hide_banner -version | Select-Object -First 1
+    if ($first -match '^ffmpeg version (\S+)') { $label = "FFmpeg $($Matches[1])" }
+} catch {}
+Write-Host "carrying $label from $Ffmpeg"
+
+$defines = @(
+    "/DAppVersion=$version", "/DSourceDir=$Release", "/DArch=$arch", "/DOutputDir=$((Resolve-Path $OutDir).Path)",
+    "/DFfmpegDir=$Ffmpeg", "/DFfmpegLabel=$label"
+)
 if ($Flavor) { $defines += "/DFlavor=$Flavor" }
 & $iscc /Q @defines (Join-Path $root "deploy\windows\pley.iss")
 if ($LASTEXITCODE) { throw "the installer didn't build" }

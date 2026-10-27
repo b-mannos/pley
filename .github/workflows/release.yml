@@ -231,12 +231,24 @@ jobs:
           merge-multiple: true
       - name: Inno Setup
         run: choco install innosetup --version=6.7.1 --no-progress -y
+      # The FFmpeg the installers carry: gyan.dev's full build, the version
+      # and checksum set here (x64; ARM64 Windows runs it emulated).
+      - name: FFmpeg
+        shell: pwsh
+        env:
+          FFMPEG_URL: https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-full_build.7z
+          FFMPEG_SHA256: f0e46253c70dfe902bac915dfb4224f0cf1b7c6eeab9da2ccc9a5581f9a71b13
+        run: |
+          Invoke-WebRequest $env:FFMPEG_URL -OutFile ffmpeg.7z
+          if ((Get-FileHash ffmpeg.7z -Algorithm SHA256).Hash -ne $env:FFMPEG_SHA256) { throw "ffmpeg.7z isn't the build expected" }
+          7z x ffmpeg.7z -offmpeg | Out-Null
       - name: Build the installers
         shell: pwsh
         run: |
+          $ffmpeg = (Get-Item ffmpeg/*/bin).FullName
           foreach ($zip in Get-ChildItem archives/pley-*-windows-*.zip) {
             Expand-Archive $zip -DestinationPath staging
-            ./scripts/build-installer.ps1 -Release "staging/$($zip.BaseName)"
+            ./scripts/build-installer.ps1 -Release "staging/$($zip.BaseName)" -Ffmpeg $ffmpeg
           }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

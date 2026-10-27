@@ -119,8 +119,9 @@ jobs:
         shell: pwsh
         run: |
           $release = New-Item -ItemType Directory dist/pley-0.0.0-windows-x86_64
-          Set-Content -Path "$release/pley.exe", "$release/pley-transcoder.exe" -Value "stand-in"
-          ./scripts/build-installer.ps1 -Release $release
+          $ffmpeg = New-Item -ItemType Directory dist/ffmpeg/bin
+          Set-Content -Path "$release/pley.exe", "$release/pley-transcoder.exe", "$ffmpeg/ffmpeg.exe", "$ffmpeg/ffprobe.exe" -Value "stand-in"
+          ./scripts/build-installer.ps1 -Release $release -Ffmpeg $ffmpeg
 
   msrv:
     name: Rust 1.95 (minimum supported)

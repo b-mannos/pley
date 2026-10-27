@@ -1,6 +1,6 @@
 ; pley's Windows installer, built with Inno Setup 6.7 or newer:
-;   ISCC /DAppVersion=0.1.0 /DSourceDir=<folder with pley.exe> [/DArch=arm64]
-;        [/DFfmpegDir=<an FFmpeg build's bin folder> /DFfmpegLabel=<its name>] [/DFlavor=fel] deploy\windows\pley.iss
+;   ISCC /DAppVersion=0.1.0 /DSourceDir=<folder with pley.exe> /DFfmpegDir=<an FFmpeg build's bin folder>
+;        [/DFfmpegLabel=<its name>] [/DArch=arm64] [/DFlavor=fel] deploy\windows\pley.iss
 ; scripts\build.ps1 -Installer builds it next to the release archive.
 ; README.md in this folder says what it sets up and how to install silently.
 
@@ -26,16 +26,14 @@
 #ifndef OutputDir
   #define OutputDir "..\..\dist"
 #endif
-; An FFmpeg carried by the installer (ffmpeg.exe, ffprobe.exe and the DLLs
-; next to them), offered first: one built for Dolby Vision FEL, say.
-#ifdef FfmpegDir
-  #define Bundled "True"
-  #ifndef FfmpegLabel
-    #define FfmpegLabel "FFmpeg"
-  #endif
-#else
-  #define Bundled "False"
-  #define FfmpegLabel ""
+; The FFmpeg pley runs, which the installer carries: ffmpeg.exe, ffprobe.exe
+; and the DLLs next to them (gyan.dev's build, or one built for Dolby Vision
+; FEL, say).
+#ifndef FfmpegDir
+  #error Pass /DFfmpegDir=<an FFmpeg build's bin folder>
+#endif
+#ifndef FfmpegLabel
+  #define FfmpegLabel "FFmpeg"
 #endif
 ; A name for a build that differs from the release's, in its file name.
 #ifdef Flavor
@@ -75,8 +73,6 @@ OutputDir={#OutputDir}
 OutputBaseFilename=pley-server-{#AppVersion}{#Flavored}-windows-{#ArchName}-setup
 Compression=lzma2/max
 SolidCompression=yes
-; The FFmpeg download is a .7z with files larger than memory should hold.
-ArchiveExtraction=enhanced/nopassword
 ; pley is stopped by PrepareToInstall, which knows how.
 CloseApplications=no
 SetupLogging=yes
@@ -93,11 +89,13 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; Extracted on its own first to stop the pley being updated (PrepareToInstall).
 Source: "{#SourceDir}\pley.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\*"; Excludes: "pley.exe"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-#ifdef FfmpegDir
-Source: "{#FfmpegDir}\ffmpeg.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion; Check: BundledFfmpeg
-Source: "{#FfmpegDir}\ffprobe.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion; Check: BundledFfmpeg
-Source: "{#FfmpegDir}\*.dll"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion skipifsourcedoesntexist; Check: BundledFfmpeg
-#endif
+; FFmpeg in a folder of its own, emptied first (CurStepChanged), with its
+; license when the build has one beside its bin folder.
+Source: "{#FfmpegDir}\ffmpeg.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion
+Source: "{#FfmpegDir}\ffprobe.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion
+Source: "{#FfmpegDir}\*.dll"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#FfmpegDir}\..\LICENSE*"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#FfmpegDir}\..\README.txt"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion skipifsourcedoesntexist
 
 #ifndef Test
 [Icons]
@@ -117,10 +115,9 @@ const
   // What the last install set up, for the next install and the uninstaller.
   StateKey = 'Software\pley\Setup';
   RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
-  FfmpegUrl = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z';
 
 var
-  ModePage, NetworkPage, FfmpegPage: TWizardPage;
+  ModePage, NetworkPage: TWizardPage;
   ServiceRadio, UserRadio, TrayRadio: TNewRadioButton;
   RestrictCheck, AutostartCheck: TNewCheckBox;
   UserPage: TInputQueryWizardPage;
@@ -131,14 +128,12 @@ var
   LocalRadio, LanRadio: TNewRadioButton;
   PortEdit: TNewEdit;
   PlexCheck, DiscoveryCheck: TNewCheckBox;
-  BundledRadio, KeepRadio, FolderRadio, DownloadRadio, PathRadio: TNewRadioButton;
-  FolderEdit: TNewEdit;
-  FolderButton: TNewButton;
-  DownloadPage: TDownloadWizardPage;
   // The last install's, from StateKey.
   PrevMode, PrevDataDir, PrevUser: String;
-  // What pley said once it ran, and what went wrong.
+  // What pley said once it ran (HasAccounts: it was set up already), and
+  // what went wrong.
   Running, SetupLink, FfmpegInfo, Failure: String;
+  HasAccounts: Boolean;
   // Uninstall.
   DeleteData: Boolean;
 
@@ -150,11 +145,6 @@ function SetEnvironmentVariable(Name, Value: String): BOOL;
 function IsTray: Boolean;
 begin
   Result := TrayRadio.Checked;
-end;
-
-function BundledFfmpeg: Boolean;
-begin
-  Result := BundledRadio.Checked;
 end;
 
 function ModeName: String;
@@ -342,12 +332,6 @@ begin
   CopyCheck.Checked := True;
 end;
 
-procedure FolderButtonClick(Sender: TObject);
-begin
-  Browse(FolderEdit, 'The folder with ffmpeg.exe and ffprobe.exe:');
-  FolderRadio.Checked := True;
-end;
-
 procedure UpdateControls(Sender: TObject);
 begin
   RestrictCheck.Enabled := not TrayRadio.Checked;
@@ -355,16 +339,6 @@ begin
   DiscoveryCheck.Enabled := LanRadio.Checked;
   CopyEdit.Enabled := CopyCheck.Checked;
   CopyButton.Enabled := CopyCheck.Checked;
-end;
-
-// The FFmpeg folder found on PATH, if any.
-function FfmpegOnPath: String;
-begin
-  Result := FileSearch('ffmpeg.exe', GetEnv('PATH'));
-  if Result <> '' then
-    Result := ExtractFileDir(Result);
-  if (Result <> '') and not FileExists(AddBackslash(Result) + 'ffprobe.exe') then
-    Result := '';
 end;
 
 procedure CreatePages;
@@ -432,39 +406,12 @@ begin
   PlexCheck := AddCheck(NetworkPage, Top, 'Plex-compatible API on port 32400', 'For Plex apps. Leave it off unless you use them.');
   DiscoveryCheck := AddCheck(NetworkPage, Top, 'Let the pley apps find this server',
     'They look for servers on the local network, on the same port (UDP).');
-
-  FfmpegPage := CreateCustomPage(NetworkPage.ID, 'FFmpeg', 'What pley transcodes with');
-  Top := 0;
-  if {#Bundled} then
-    BundledRadio := AddRadio(FfmpegPage, Top, 'The FFmpeg that comes with this installer', '{#FfmpegLabel}.')
-  else
-  begin
-    BundledRadio := AddRadio(FfmpegPage, Top, '', '');
-    BundledRadio.Visible := False;
-  end;
-  KeepRadio := AddRadio(FfmpegPage, Top, 'Keep the FFmpeg installed with pley', '');
-  FolderRadio := AddRadio(FfmpegPage, Top, 'Copy FFmpeg from this folder:',
-    'Copied next to pley, where a service can run it: ffmpeg.exe, ffprobe.exe and any DLLs with them, ' +
-    'such as gyan.dev''s build or one built for Dolby Vision FEL.');
-  AddFolder(FfmpegPage, Top, FolderEdit, FolderButton, @FolderButtonClick);
-  DownloadRadio := AddRadio(FfmpegPage, Top, 'Download FFmpeg',
-    'The latest release of gyan.dev''s full build, about 170 MB, checked against its SHA-256: NVENC, Quick Sync, AMF and ' +
-    'Vulkan tone mapping.');
-  PathRadio := AddRadio(FfmpegPage, Top, 'Use the FFmpeg on PATH',
-    'A service only sees the system''s PATH, not yours.');
-#if Arch == "arm64"
-  // gyan.dev builds for x64 only.
-  DownloadRadio.Visible := False;
-#endif
-
-  DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), 'Downloading FFmpeg', nil);
-  DownloadPage.ShowBaseNameInsteadOfUrl := True;
 end;
 
 // The choices of the last install (or of Setup's command line).
 procedure LoadChoices;
 var
-  Mode, Ffmpeg: String;
+  Mode: String;
 begin
   Mode := Lowercase(CmdParam('MODE', GetPreviousData('Mode', 'service')));
   ServiceRadio.Checked := Mode = 'service';
@@ -489,31 +436,6 @@ begin
   PortEdit.Text := CmdParam('PORT', GetPreviousData('Port', '7539'));
   PlexCheck.Checked := Flag('PLEX', GetPreviousData('Plex', 'no') = 'yes');
   DiscoveryCheck.Checked := Flag('DISCOVERY', GetPreviousData('Discovery', 'yes') = 'yes');
-
-  Ffmpeg := CmdParam('FFMPEG', '');
-  FolderEdit.Text := GetPreviousData('FfmpegFolder', FfmpegOnPath);
-  // The FFmpeg an installer carries is what it was built for: its default.
-  if {#Bundled} and ((Ffmpeg = '') or (CompareText(Ffmpeg, 'bundled') = 0)) then
-    BundledRadio.Checked := True
-  else if CompareText(Ffmpeg, 'download') = 0 then
-    DownloadRadio.Checked := True
-  else if CompareText(Ffmpeg, 'path') = 0 then
-    PathRadio.Checked := True
-  else if CompareText(Ffmpeg, 'keep') = 0 then
-    KeepRadio.Checked := True
-  else if Ffmpeg <> '' then
-  begin
-    FolderEdit.Text := Ffmpeg;
-    FolderRadio.Checked := True;
-  end
-  else if GetPreviousData('Ffmpeg', '') = 'path' then
-    PathRadio.Checked := True
-  else if GetPreviousData('Ffmpeg', '') <> '' then
-    KeepRadio.Checked := True
-  else if (FolderEdit.Text <> '') or not DownloadRadio.Visible then
-    FolderRadio.Checked := True
-  else
-    DownloadRadio.Checked := True;
   UpdateControls(nil);
 end;
 
@@ -527,8 +449,6 @@ begin
 end;
 
 procedure RegisterPreviousData(PreviousDataKey: Integer);
-var
-  Ffmpeg: String;
 begin
   SetPreviousData(PreviousDataKey, 'Mode', ModeName);
   SetPreviousData(PreviousDataKey, 'Restrict', YesNo(RestrictCheck.Checked));
@@ -541,9 +461,6 @@ begin
   SetPreviousData(PreviousDataKey, 'Port', Port);
   SetPreviousData(PreviousDataKey, 'Plex', YesNo(PlexCheck.Checked));
   SetPreviousData(PreviousDataKey, 'Discovery', YesNo(DiscoveryCheck.Checked));
-  if PathRadio.Checked then Ffmpeg := 'path' else Ffmpeg := 'copied';
-  SetPreviousData(PreviousDataKey, 'Ffmpeg', Ffmpeg);
-  SetPreviousData(PreviousDataKey, 'FfmpegFolder', FolderEdit.Text);
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
@@ -614,7 +531,6 @@ end;
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   Dir, Other: String;
-  Hash: AnsiString;
 begin
   Result := True;
   if CurPageID = ModePage.ID then
@@ -678,37 +594,6 @@ begin
     end
     else
       Result := PortsFree;
-  end
-  else if CurPageID = FfmpegPage.ID then
-  begin
-    Dir := AddBackslash(Trim(FolderEdit.Text));
-    if FolderRadio.Checked and not (FileExists(Dir + 'ffmpeg.exe') and FileExists(Dir + 'ffprobe.exe')) then
-    begin
-      SuppressibleMsgBox('Choose the folder that has ffmpeg.exe and ffprobe.exe (an FFmpeg build''s bin folder).', mbError, MB_OK, IDOK);
-      Result := False;
-    end;
-  end
-  else if (CurPageID = wpReady) and DownloadRadio.Checked then
-  begin
-    DownloadPage.Clear;
-    DownloadPage.Show;
-    try
-      try
-        // The checksum gyan.dev publishes next to the build it points to.
-        DownloadTemporaryFile(FfmpegUrl + '.sha256', 'ffmpeg.7z.sha256', '', nil);
-        if not LoadStringFromFile(ExpandConstant('{tmp}\ffmpeg.7z.sha256'), Hash) then
-          RaiseException('the checksum didn''t download');
-        DownloadPage.Add(FfmpegUrl, 'ffmpeg.7z', Lowercase(Trim(Copy(Hash, 1, 64))));
-        DownloadPage.Download;
-      except
-        if not DownloadPage.AbortedByUser then
-          SuppressibleMsgBox('FFmpeg didn''t download: ' + GetExceptionMessage + #13#10#13#10 +
-            'Go back and choose an FFmpeg folder, or try again.', mbCriticalError, MB_OK, IDOK);
-        Result := False;
-      end;
-    finally
-      DownloadPage.Hide;
-    end;
   end;
 end;
 
@@ -741,17 +626,7 @@ begin
     S := S + NewLine + Space + 'Plex-compatible API on port 32400';
   if Discovery then
     S := S + NewLine + Space + 'Found by the pley apps on the network';
-  S := S + NewLine + NewLine + 'FFmpeg:' + NewLine + Space;
-  if BundledRadio.Checked then
-    S := S + 'The one that comes with this installer ({#FfmpegLabel})'
-  else if KeepRadio.Checked then
-    S := S + 'The one installed with pley'
-  else if FolderRadio.Checked then
-    S := S + 'Copied from ' + Trim(FolderEdit.Text)
-  else if DownloadRadio.Checked then
-    S := S + 'Downloaded from gyan.dev'
-  else
-    S := S + 'The one on PATH';
+  S := S + NewLine + NewLine + 'FFmpeg:' + NewLine + Space + '{#FfmpegLabel}';
   Result := S;
 end;
 
@@ -821,7 +696,9 @@ begin
     else if Copy(Line, 1, 7) = 'setup: ' then
       SetupLink := Copy(Line, 8, MaxInt)
     else if Copy(Line, 1, 8) = 'ffmpeg: ' then
-      FfmpegInfo := Copy(Line, 9, MaxInt);
+      FfmpegInfo := Copy(Line, 9, MaxInt)
+    else if Line = 'accounts: yes' then
+      HasAccounts := True;
   end;
   for I := 0 to GetArrayLength(Output.StdErr) - 1 do
   begin
@@ -835,86 +712,10 @@ begin
     Result := '';
 end;
 
-// Copies ffmpeg.exe, ffprobe.exe and the DLLs next to them into {app}\ffmpeg.
-function CopyFfmpeg(const Source: String): Boolean;
-var
-  From, Dest: String;
-  Rec: TFindRec;
+// The ffmpeg and ffprobe options for pley: the FFmpeg Setup installed.
+function FfmpegOptions: String;
 begin
-  From := AddBackslash(Source);
-  Dest := ExpandConstant('{app}\ffmpeg\');
-  Result := CompareText(From, Dest) = 0;
-  if Result then
-    Exit;
-  DelTree(Dest, True, True, True);
-  ForceDirectories(Dest);
-  Result := CopyFile(From + 'ffmpeg.exe', Dest + 'ffmpeg.exe', False) and CopyFile(From + 'ffprobe.exe', Dest + 'ffprobe.exe', False);
-  if FindFirst(From + '*.dll', Rec) then
-    try
-      repeat
-        Result := Result and CopyFile(From + Rec.Name, Dest + Rec.Name, False);
-      until not FindNext(Rec);
-    finally
-      FindClose(Rec);
-    end;
-end;
-
-// The bin folder in the unpacked download (ffmpeg-<version>-full_build\bin).
-function UnpackedBin(const Dir: String): String;
-var
-  Rec: TFindRec;
-begin
-  Result := '';
-  if FindFirst(AddBackslash(Dir) + '*', Rec) then
-    try
-      repeat
-        if (Rec.Name <> '.') and (Rec.Name <> '..')
-          and FileExists(AddBackslash(Dir) + Rec.Name + '\bin\ffmpeg.exe') then
-          Result := AddBackslash(Dir) + Rec.Name + '\bin';
-      until (Result <> '') or not FindNext(Rec);
-    finally
-      FindClose(Rec);
-    end;
-end;
-
-// FFmpeg in place; the ffmpeg and ffprobe options for pley.
-function InstallFfmpeg(var Options: String): Boolean;
-var
-  Unpacked, Bin: String;
-begin
-  Result := True;
-  if PathRadio.Checked then
-  begin
-    // pley in the notification area runs the one Setup finds, however it
-    // is started; a service looks on the system's PATH.
-    Bin := '';
-    if TrayRadio.Checked then
-      Bin := FfmpegOnPath;
-    if Bin <> '' then
-      Options := ' --ffmpeg ' + AddQuotes(Bin + '\ffmpeg.exe') + ' --ffprobe ' + AddQuotes(Bin + '\ffprobe.exe')
-    else
-      Options := ' --ffmpeg ffmpeg --ffprobe ffprobe';
-    Exit;
-  end;
-  if FolderRadio.Checked then
-  begin
-    SetStatus('Copying FFmpeg...');
-    Result := CopyFfmpeg(Trim(FolderEdit.Text));
-  end
-  else if DownloadRadio.Checked then
-  begin
-    SetStatus('Unpacking FFmpeg...');
-    Unpacked := ExpandConstant('{tmp}\ffmpeg');
-    try
-      ExtractArchive(ExpandConstant('{tmp}\ffmpeg.7z'), Unpacked, '', True, nil);
-      Bin := UnpackedBin(Unpacked);
-      Result := (Bin <> '') and CopyFfmpeg(Bin);
-    except
-      Log(GetExceptionMessage);
-      Result := False;
-    end;
-  end;
-  Options := ' --ffmpeg ' + AddQuotes(ExpandConstant('{app}\ffmpeg\ffmpeg.exe')) +
+  Result := ' --ffmpeg ' + AddQuotes(ExpandConstant('{app}\ffmpeg\ffmpeg.exe')) +
     ' --ffprobe ' + AddQuotes(ExpandConstant('{app}\ffmpeg\ffprobe.exe'));
 end;
 
@@ -1030,16 +831,11 @@ var
   Options: String;
 begin
   // The FFmpeg it carries replaces the one there was, DLLs and all.
-  if (CurStep = ssInstall) and BundledRadio.Checked then
+  if CurStep = ssInstall then
     DelTree(ExpandConstant('{app}\ffmpeg'), True, True, True);
   if CurStep <> ssPostInstall then
     Exit;
-  if not InstallFfmpeg(Options) then
-  begin
-    Failure := 'FFmpeg couldn''t be put in ' + ExpandConstant('{app}\ffmpeg') + '. Run Setup again and choose another FFmpeg.';
-    Options := '';
-  end;
-  Options := '--data-dir ' + AddQuotes(DataDir('')) + ' --bind ' + BindAddress + ' --plex-bind ' + PlexBind + Options;
+  Options := '--data-dir ' + AddQuotes(DataDir('')) + ' --bind ' + BindAddress + ' --plex-bind ' + PlexBind + FfmpegOptions;
   SetStatus('Opening Windows Firewall...');
   Firewall;
   if Failure = '' then
@@ -1067,7 +863,7 @@ begin
     Exit;
   if Pos('not found', FfmpegInfo) > 0 then
   begin
-    Result := 'pley didn''t find a working FFmpeg, so it can''t transcode: run Setup again and choose another one.';
+    Result := 'pley''s FFmpeg doesn''t work here, so pley can''t transcode: its log says why.';
     Exit;
   end;
   Start := Pos('encoders [', FfmpegInfo);
@@ -1087,16 +883,7 @@ end;
 procedure CurPageChanged(CurPageID: Integer);
 var
   Text: String;
-  HasCopy: Boolean;
 begin
-  if CurPageID = FfmpegPage.ID then
-  begin
-    // Only on reinstalls.
-    HasCopy := FileExists(ExpandConstant('{app}\ffmpeg\ffmpeg.exe'));
-    KeepRadio.Visible := HasCopy;
-    if KeepRadio.Checked and not HasCopy then
-      FolderRadio.Checked := True;
-  end;
   if CurPageID <> wpFinished then
     Exit;
   if Failure <> '' then
@@ -1105,8 +892,16 @@ begin
   else
   begin
     Text := 'pley is running at ' + Running + '.';
+    if not TrayRadio.Checked then
+      Text := Text + ' It runs as a Windows service, in the background: no icon in the notification area. ' +
+        'Open it from the Start menu (pley-server).';
     if SetupLink <> '' then
-      Text := Text + ' Open it to create your administrator account (the link holds a setup code; a new one is made each time pley starts until then).';
+      Text := Text + #13#10#13#10 + 'Open it to create your administrator account: the link holds the setup code (a new ' +
+        'one is made each time pley starts until then).'
+    else if HasAccounts then
+      Text := Text + #13#10#13#10 + 'Sign in with your pley account: this pley is set up already.'
+    else
+      Text := Text + #13#10#13#10 + 'Its setup code is in its log: ' + DataDir('') + '\logs\pley.log ("setup#code=").';
     if FfmpegSummary <> '' then
       Text := Text + #13#10#13#10 + FfmpegSummary;
     if LocalRadio.Checked then
