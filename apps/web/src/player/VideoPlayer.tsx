@@ -1321,7 +1321,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           </button>
         </div>
       ) : error ? (
-        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-black/85 p-6 text-center">
+        <div role="alert" className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-black/85 p-6 text-center">
           {unreachable ? <ServerOff className="size-12 text-accent" /> : <TriangleAlert className="size-12 text-accent" />}
           <div className="max-w-lg">
             <div className="text-lg font-semibold">{unreachable ? "Can't reach your server" : "Playback error"}</div>
