@@ -272,7 +272,7 @@
   width: 464px;
   transition: opacity 150ms linear;
 }
-.hero.hidden { opacity: 0; }
+.hero.hidden { opacity: 0; pointer-events: none; }
 /* The hero's place while it is hidden: the pointer moving into it brings the hero back. */
 .hero-zone { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
 .hero-title { height: 72px; display: flex; flex-direction: column; justify-content: flex-end; }

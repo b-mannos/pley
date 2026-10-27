@@ -304,12 +304,20 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
 
   // ---- sections
   const sections: Section[] = [];
+  // The pointer moving back up into the hero's place, hidden while it was on the rows below, brings it back.
+  const pointedAtHero = () => {
+    const buttons = document.querySelector<HTMLElement>(".item-buttons");
+    const el = (buttons && ui.focus.rememberedIn(buttons)) ?? buttons?.querySelector<HTMLElement>("[data-f]:not([data-fdisabled])") ?? null;
+    if (el && ui.input.pointerMoved && ui.focus.inScope(el)) ui.focus.focus(el, true);
+  };
   sections.push({
     key: "hero",
     height: heroH,
     anchor: null,
-    render: (onFocus) => (
+    render: (onFocus) => [
+      section !== "hero" && <div key="zone" class="hero-zone" onMouseMove={pointedAtHero} />,
       <ItemHero
+        key="hero"
         heroRef={heroEl}
         item={item}
         target={target}
@@ -344,8 +352,8 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
         onPlaylist={() => ui.nav.open({ name: "addToPlaylist", itemIds: [item.id], title: item.title })}
         onMore={() => setPanel("more")}
         onSummaryCut={setSummaryCut}
-      />
-    ),
+      />,
+    ],
   });
   const seasonList = seasons.data ?? [];
   const multiSeason = kind !== "episode" && seasonList.length > 1;
