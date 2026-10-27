@@ -12,7 +12,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
-import app.pley.android.common.perf.StartupSignals
 import app.pley.android.ui.phone.shell.PhoneApp
 import app.pley.android.ui.phone.shell.PhoneStart
 import kotlinx.coroutines.Dispatchers
@@ -37,17 +36,17 @@ class MainActivity : ComponentActivity() {
             finish()
             return
         }
+        val app = application as PleyApplication
+        val startup = app.startupFor(savedInstanceState)
         val shownAt = SystemClock.uptimeMillis()
         splash.setKeepOnScreenCondition {
-            !StartupSignals.startupRead.value && SystemClock.uptimeMillis() - shownAt < SPLASH_LIMIT_MS
+            !startup.isCompleted && SystemClock.uptimeMillis() - shownAt < SPLASH_LIMIT_MS
         }
         // pley is dark whatever the system's theme: light icons on both bars.
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
-        val app = application as PleyApplication
-        val startup = app.startup
         setContent {
             PhoneApp(
                 start = readNow(startup),

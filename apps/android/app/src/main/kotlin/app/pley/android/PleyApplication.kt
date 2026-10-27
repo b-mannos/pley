@@ -1,6 +1,7 @@
 package app.pley.android
 
 import android.app.Application
+import android.os.Bundle
 import android.os.StrictMode
 import androidx.tracing.trace
 import app.pley.android.common.AppBuild
@@ -16,6 +17,7 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import java.util.ServiceLoader
 import java.util.concurrent.Callable
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -32,9 +34,11 @@ import kotlinx.coroutines.launch
 class PleyApplication : Application(), PleyGraphOwner, DownloadsOwner, SingletonImageLoader.Factory {
     val graph: AppGraph by lazy { AppGraph(this) }
 
-    /** What the first screen is chosen by (StartupRead). */
-    lateinit var startup: Deferred<StartupState>
-        private set
+    /** What the latest window's first screen was chosen by (StartupRead): read as the process starts, then by [startupFor]. */
+    @Volatile
+    private lateinit var startup: Deferred<StartupState>
+
+    private val windows = AtomicInteger()
 
     override val screensGraph: ScreensGraph
         get() = graph
@@ -51,6 +55,19 @@ class PleyApplication : Application(), PleyGraphOwner, DownloadsOwner, Singleton
             restartDemoServer()
             warmGraph()
         }
+    }
+
+    /**
+     * What a new window's first screen is chosen by. The first window
+     * takes the read made as the process started. The process outlives its
+     * windows (Back on a TV, or on a phone's Home, ends the window only), so
+     * a later window starting afresh reads again: a server may have been
+     * linked, or signed out of, since. A window brought back with its saved
+     * state takes the last read, as its screens come back by themselves.
+     */
+    fun startupFor(savedInstanceState: Bundle?): Deferred<StartupState> {
+        if (windows.getAndIncrement() > 0 && savedInstanceState == null) startup = StartupRead.start(this)
+        return startup
     }
 
     /**

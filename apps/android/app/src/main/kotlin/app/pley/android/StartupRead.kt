@@ -5,7 +5,6 @@ import androidx.tracing.trace
 import app.pley.android.common.Addresses
 import app.pley.android.common.Servers
 import app.pley.android.common.TraceNames
-import app.pley.android.common.perf.StartupSignals
 import app.pley.android.data.LegacyPreferences
 import app.pley.android.data.SavedServersJson
 import app.pley.android.data.StartupFiles
@@ -32,21 +31,18 @@ data class StartupState(
 }
 
 /**
- * The one disk read before the first frame, off the main thread: the
- * server in use, whether the app holds tokens for it, and Home's snapshot.
- * Never the network, never the Keystore. The splash screen waits for it
- * (300 ms at most).
+ * The one disk read before a window's first frame, off the main thread:
+ * the server in use, whether the app holds tokens for it, and Home's
+ * snapshot. Never the network, never the Keystore. The splash screen
+ * waits for it (300 ms at most). Made as the process starts, and again for
+ * each later window (PleyApplication.startupFor).
  */
 object StartupRead {
 
     fun start(context: Context): Deferred<StartupState> {
         val app = context.applicationContext
         return CoroutineScope(SupervisorJob() + Dispatchers.IO).async {
-            try {
-                trace(TraceNames.STARTUP_READ) { read(app) }
-            } finally {
-                StartupSignals.markStartupRead()
-            }
+            trace(TraceNames.STARTUP_READ) { read(app) }
         }
     }
 

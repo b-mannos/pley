@@ -15,7 +15,9 @@ import app.pley.android.ui.tv.shell.TvShellSource
  * The native app on TVs (Android TV, Google TV, Fire TV). Back goes
  * through the activity's back dispatcher only (Compose's BackHandler; the
  * manifest turns on the system's back callbacks), which Fire OS 16 needs:
- * it can skip onBackPressed. The last Back finishes the activity.
+ * it can skip onBackPressed. The last Back finishes the activity, not the
+ * process: the next one reads again what its first screen is chosen by
+ * (PleyApplication.startupFor).
  *
  * Debug builds take two extras, for trying the frame on an emulator:
  * `--es tier T0|T1|T2` overrides the device's tier, and `--ez demo true`
@@ -37,12 +39,13 @@ class TvActivity : ComponentActivity() {
         val source = if (demo) {
             null
         } else {
+            val read = app.startupFor(savedInstanceState)
             TvShellSource.of(
                 app.graph,
-                startup = { app.startup.await().let { it.server to it.signedIn } },
+                startup = { read.await().let { it.server to it.signedIn } },
                 // "Who's watching?" at a cold start needs the household's size, saved on this device.
                 householdSize = {
-                    val startup = app.startup.await()
+                    val startup = read.await()
                     Household.sizeAtStart(app, { app.graph }, startup.server, startup.signedIn)
                 },
             )
