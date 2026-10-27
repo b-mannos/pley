@@ -1,6 +1,6 @@
 import { Link, isRouteErrorResponse, useRouteError } from "react-router";
 import { Compass, TriangleAlert } from "lucide-react";
-import { Button, EmptyState } from "@/components/ui";
+import { Button, buttonClass, EmptyState } from "@/components/ui";
 import { useDocumentTitle } from "@/lib/hooks";
 
 export function NotFoundPage() {
@@ -12,8 +12,8 @@ export function NotFoundPage() {
       title="Page not found"
       description="The page you're looking for doesn't exist or was moved."
       action={
-        <Link to="/">
-          <Button variant="primary">Go home</Button>
+        <Link to="/" className={buttonClass("primary")}>
+          Go home
         </Link>
       }
     />
@@ -37,8 +37,8 @@ export function RouteErrorPage() {
         action={
           <div className="flex gap-2">
             <Button onClick={() => window.location.reload()}>Reload</Button>
-            <a href="/">
-              <Button variant="primary">Go home</Button>
+            <a href="/" className={buttonClass("primary")}>
+              Go home
             </a>
           </div>
         }

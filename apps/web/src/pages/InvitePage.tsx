@@ -5,7 +5,7 @@ import { errorMessage, isApiError } from "@/api/client";
 import { useAcceptInvite, useInviteCheck, useLogout, useMe } from "@/api/hooks";
 import { Splash } from "@/auth";
 import { PasswordInput } from "@/components/PasswordInput";
-import { Button, Field, TextInput } from "@/components/ui";
+import { Button, buttonClass, Field, TextInput } from "@/components/ui";
 import { formatRelative } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
 import { MIN_PASSWORD_LENGTH, passwordProblem } from "@/lib/passwords";
@@ -39,10 +39,8 @@ export function InvitePage() {
                 : errorMessage(check.error)}
             </p>
           </div>
-          <Link to="/login" className="block">
-            <Button variant="primary" className="w-full">
-              Go to sign in
-            </Button>
+          <Link to="/login" className={buttonClass("primary", "md", "w-full")}>
+            Go to sign in
           </Link>
         </div>
       </AuthLayout>

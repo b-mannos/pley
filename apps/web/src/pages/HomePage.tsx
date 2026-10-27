@@ -4,7 +4,7 @@ import { errorMessage } from "@/api/client";
 import { useHomeHubs, useLibraries } from "@/api/hooks";
 import { useAuth } from "@/auth";
 import { HubRow, HubRowSkeleton } from "@/components/HubRow";
-import { Button, EmptyState } from "@/components/ui";
+import { Button, buttonClass, EmptyState } from "@/components/ui";
 import { useDocumentTitle } from "@/lib/hooks";
 
 export function HomePage() {
@@ -26,10 +26,8 @@ export function HomePage() {
         }
         action={
           user.is_admin ? (
-            <Link to="/settings/libraries?add=1">
-              <Button variant="primary" size="lg">
-                Add a library
-              </Button>
+            <Link to="/settings/libraries?add=1" className={buttonClass("primary", "lg")}>
+              Add a library
             </Link>
           ) : undefined
         }
@@ -73,8 +71,8 @@ export function HomePage() {
         }
         action={
           user.is_admin && !scanning ? (
-            <Link to="/settings/libraries">
-              <Button>Manage libraries</Button>
+            <Link to="/settings/libraries" className={buttonClass()}>
+              Manage libraries
             </Link>
           ) : undefined
         }
