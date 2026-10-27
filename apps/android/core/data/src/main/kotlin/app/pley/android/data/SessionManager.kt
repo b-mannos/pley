@@ -11,6 +11,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -216,8 +217,12 @@ internal class SessionManager(
         val active = origin ?: return
         // Revokes the grant, then forgets the tokens: Tokens.signedIn turns false.
         auth.tokens(active).signOut()
-        forgetData(active)
-        servers.setProfile(active, null)
+        // The shells follow the session to sign-in at once, which ends the screen
+        // that asked (and its scope): what was saved from the server goes all the same.
+        withContext(NonCancellable) {
+            forgetData(active)
+            servers.setProfile(active, null)
+        }
     }
 
     /** Must hold [lock]. */

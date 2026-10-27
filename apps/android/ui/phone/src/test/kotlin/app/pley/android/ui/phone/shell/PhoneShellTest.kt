@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import app.pley.android.auth.SignOutReason
+import app.pley.android.data.SessionState
 import app.pley.android.network.ApiException
 import app.pley.android.screens.PleyKey
 import app.pley.android.testing.screens.onboarding.FakeOnboardingSource
@@ -180,6 +181,25 @@ class PhoneShellTest {
         signInPage().assertExists()
         assertEquals(listOf(PleyKey.SignIn(TestGraph.SERVER)), shell.navigation.root.toList())
         compose.onNodeWithText("You were signed out: sign in again.").assertExists()
+    }
+
+    @Test
+    fun signedOutBeforeTheShellListenedItStillGoesToSigningIn() {
+        // The tokens couldn't be read as the app started: the event went before anyone listened.
+        val graph = TestGraph()
+        graph.sessionState.value = SessionState.SignedOut(TestGraph.SERVER)
+        val shell = show(PhoneStart(TestGraph.SERVER, signedIn = true), graph)
+        compose.waitUntil(5_000) { !shell.navigation.inside }
+        signInPage().assertExists()
+        assertEquals(listOf(PleyKey.SignIn(TestGraph.SERVER)), shell.navigation.root.toList())
+    }
+
+    @Test
+    fun signedOutOfAnotherServerLeavesThisOneAlone() {
+        val shell = show(PhoneStart(TestGraph.SERVER, signedIn = true))
+        compose.runOnIdle { shell.graph.sessionState.value = SessionState.SignedOut("http://10.0.0.9:7539") }
+        compose.waitForIdle()
+        assertTrue(shell.navigation.inside)
     }
 
     @Test

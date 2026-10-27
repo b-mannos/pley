@@ -72,6 +72,7 @@ class TestGraph(server: String? = SERVER) : ScreensGraph {
     val active = MutableStateFlow(server)
     val scans = MutableStateFlow<List<ScanState>>(emptyList())
     val music = MutableStateFlow<NowPlaying?>(null)
+    val sessionState = MutableStateFlow<SessionState>(SessionState.Starting)
 
     override val device = DeviceProfile(FormFactor.Phone, fireTv = false, tier = Tier.T2, model = "test", totalRamBytes = 8L shl 30, lowRam = false)
 
@@ -117,7 +118,7 @@ class TestGraph(server: String? = SERVER) : ScreensGraph {
         }
         override val session = object : SessionRepository {
             override val session: StateFlow<Session?> = MutableStateFlow(null)
-            override val state: StateFlow<SessionState> = MutableStateFlow(SessionState.Starting)
+            override val state: StateFlow<SessionState> = this@TestGraph.sessionState
             override suspend fun signOut() = Unit
         }
         override val snapshots: SnapshotStore get() = unused("snapshots")

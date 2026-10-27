@@ -72,6 +72,7 @@ import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
 import app.pley.android.common.TestTags
 import app.pley.android.common.perf.StartupSignals
+import app.pley.android.data.SessionState
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyMotion
 import app.pley.android.designsystem.icon.Icon
@@ -171,9 +172,11 @@ internal fun PhoneShell(
 
 /**
  * Work that waits for the first frame: the sign-in module's events
- * (signed out by the server), the server in use, live updates while the
- * app is started, the music playing, and the capability probe. The
- * graph's parts are made off the main thread.
+ * (signed out by the server) and the session (signed out before the shell
+ * listened, as when this device can't read its tokens anymore), the
+ * server in use, live updates while the app is started, the music
+ * playing, and the capability probe. The graph's parts are made off the
+ * main thread.
  */
 @Composable
 private fun AfterFirstFrame(shell: PhoneShellState, graph: () -> ScreensGraph) {
@@ -184,6 +187,10 @@ private fun AfterFirstFrame(shell: PhoneShellState, graph: () -> ScreensGraph) {
         launch {
             val events = withContext(Dispatchers.Default) { g.auth.events }
             events.collect(shell::on)
+        }
+        launch {
+            val session = withContext(Dispatchers.Default) { g.data.session.state }
+            session.collect { if (it is SessionState.SignedOut) shell.signedOut(it.issuer) }
         }
         launch {
             val active = withContext(Dispatchers.Default) { g.data.servers.active }

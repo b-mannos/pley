@@ -131,11 +131,11 @@ class Tokens(
     val signedIn: StateFlow<Boolean> = _signedIn.asStateFlow()
 
     /** What the server allowed, or nothing when signed out. */
-    fun scopes(): Set<String> = store.load(issuer)?.scopes().orEmpty()
+    fun scopes(): Set<String> = load()?.scopes().orEmpty()
 
     /** The access token to send, refreshed when it ends within a minute; `null` when signed out. */
     suspend fun accessToken(): String? {
-        val tokens = store.load(issuer) ?: return null.also { _signedIn.value = false }
+        val tokens = load() ?: return null
         if (tokens.accessUsable(clock())) return tokens.accessToken
         return refresh(tokens.accessToken)
     }
@@ -146,10 +146,7 @@ class Tokens(
      * token is used and nothing is sent.
      */
     suspend fun refresh(stale: String?): String = mutex.withLock {
-        val tokens = store.load(issuer) ?: run {
-            _signedIn.value = false
-            throw SignedOutException()
-        }
+        val tokens = load() ?: throw SignedOutException()
         if (tokens.accessToken != stale && tokens.accessUsable(clock())) return@withLock tokens.accessToken
         val refresh = tokens.refreshToken ?: run { signedOut() }
         val answer = try {
@@ -192,10 +189,7 @@ class Tokens(
      * switch-profile grant of pley's own apps). A wrong PIN changes nothing.
      */
     suspend fun switchProfile(profile: Long, pin: String?): Unit = mutex.withLock {
-        val tokens = store.load(issuer) ?: run {
-            _signedIn.value = false
-            throw SignedOutException()
-        }
+        val tokens = load() ?: throw SignedOutException()
         val refresh = tokens.refreshToken ?: signedOut()
         val form = mutableListOf(
             "grant_type" to SWITCH_PROFILE_GRANT,
@@ -243,6 +237,13 @@ class Tokens(
         _signedIn.value = true
         previous
     }
+
+    /**
+     * The tokens kept, opened. None (signed out, or kept but unreadable:
+     * the Keystore's key went) means signed out, which [signedIn] says at
+     * once, whoever read them first; unless a sign-in kept new ones since.
+     */
+    private fun load(): StoredTokens? = store.load(issuer).also { if (it == null && !store.has(issuer)) _signedIn.value = false }
 
     private fun signedOut(): Nothing {
         end(SignOutReason.ENDED)

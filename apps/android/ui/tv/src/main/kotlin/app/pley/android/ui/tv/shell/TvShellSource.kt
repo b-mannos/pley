@@ -3,6 +3,7 @@ package app.pley.android.ui.tv.shell
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import app.pley.android.auth.AuthEvent
+import app.pley.android.data.SessionState
 import app.pley.android.data.valueOrNull
 import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.model.Library
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 
 /**
  * What the TV's frame reads: how to start, what the rail lists, and who
@@ -46,7 +48,11 @@ interface TvShellSource {
      */
     suspend fun keepUpdated()
 
-    /** The servers the app was signed out of without being asked (a refused sign-in): sign-in shows again. */
+    /**
+     * The servers the app is signed out of while in use: a refused sign-in,
+     * a sign-out, tokens this device can't read anymore (found before the
+     * shell listened too). Sign-in shows again.
+     */
     val signedOut: Flow<String> get() = emptyFlow()
 
     /** pley's own "Reduce motion" switch (the system's setting counts as well). */
@@ -138,7 +144,11 @@ private class GraphShellSource(
         offMain { graph.data.liveUpdates.scans }.collect { }
     }
 
-    override val signedOut: Flow<String> = offMain { graph.auth.events }.filterIsInstance<AuthEvent.SignedOut>().map { it.issuer }
+    // The session says so too, for a sign-out before anything listened to the events.
+    override val signedOut: Flow<String> = merge(
+        offMain { graph.auth.events }.filterIsInstance<AuthEvent.SignedOut>().map { it.issuer },
+        offMain { graph.data.session.state }.filterIsInstance<SessionState.SignedOut>().map { it.issuer },
+    )
 
     override val reduceMotion: Flow<Boolean> = offMain { graph.data.settings.settings }.map { it.reduceMotion }.distinctUntilChanged()
 

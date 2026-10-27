@@ -66,6 +66,17 @@ class SignedInStateTest {
     }
 
     @Test
+    fun unreadableTokensFoundAsTheAppStartsSignOutToo() {
+        TokenStore(shelf, testVault()).save(savedTokens(issuer))
+        val store = TokenStore(shelf, vault)
+        val tokens = Tokens(issuer, store, endpointsClient(), events)
+        assertTrue(tokens.signedIn.value)
+        // The app's warm-up opens them before any request: nobody may hear the event yet.
+        assertEquals(emptySet<String>(), tokens.scopes())
+        assertFalse(tokens.signedIn.value)
+    }
+
+    @Test
     fun aSignInTheServerEndedSaysSo() = runTest {
         val heard = mutableListOf<AuthEvent>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { events.events.collect { heard += it } }

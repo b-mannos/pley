@@ -102,17 +102,25 @@ class PhoneShellState internal constructor(
         navigation.restart(server?.let { PleyKey.SignIn(it) } ?: PleyKey.Servers)
     }
 
-    /** The sign-in module ended a sign-in: if it was this server's, back to signing in to it. */
+    /** The sign-in module ended a sign-in: if it was this server's, back to signing in to it, saying why. */
     internal fun on(event: AuthEvent) {
         when (event) {
-            is AuthEvent.SignedOut -> {
-                val current = server
-                if (!navigation.inside || (current != null && current != event.issuer)) return
-                offlineState.value = false
-                navigation.restart(PleyKey.SignIn(event.issuer))
-                toasts.show(sentence(event.reason.message), error = true)
-            }
+            is AuthEvent.SignedOut -> if (signedOut(event.issuer)) toasts.show(sentence(event.reason.message), error = true)
         }
+    }
+
+    /**
+     * The session says the app is signed out of [issuer] (however that came
+     * about, before the shell listened too): if it is this server's, back
+     * to signing in to it. Whether the app is signing in to it now.
+     */
+    internal fun signedOut(issuer: String): Boolean {
+        val current = server
+        if (current != null && current != issuer) return false
+        if (!navigation.inside) return navigation.root.lastOrNull() == PleyKey.SignIn(issuer)
+        offlineState.value = false
+        navigation.restart(PleyKey.SignIn(issuer))
+        return true
     }
 
     private fun sentence(text: String): String {
