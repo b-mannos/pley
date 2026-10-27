@@ -532,7 +532,7 @@ export function DashboardSettings() {
         {system.isPending ? (
           <Skeleton className="h-48" />
         ) : system.isError ? (
-          <EmptyState title="Couldn't load system info" description={errorMessage(system.error)} />
+          <EmptyState title="Couldn't load system info" description={errorMessage(system.error)} action={<Button onClick={() => void system.refetch()}>Retry</Button>} />
         ) : (
           <div className="grid gap-4 xl:grid-cols-2">
             <div className="space-y-4">

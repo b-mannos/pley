@@ -144,7 +144,7 @@ function RecommendedTab({ libraryId, kind }: { libraryId: number; kind: LibraryK
     );
   }
   if (hubs.isError) {
-    return <EmptyState title="Couldn't load recommendations" description={errorMessage(hubs.error)} />;
+    return <EmptyState title="Couldn't load recommendations" description={errorMessage(hubs.error)} action={<Button onClick={() => void hubs.refetch()}>Retry</Button>} />;
   }
   const visible = hubs.data.hubs.filter((h) => h.items.length > 0);
   if (!visible.length) {

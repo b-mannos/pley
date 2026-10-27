@@ -237,7 +237,13 @@ export function NetworkSettings() {
 
   if (network.isPending || (!form && !network.isError)) return <PageSpinner />;
   if (network.isError || !form || !data) {
-    return <EmptyState title="Couldn't load the network settings" description={errorMessage(network.error)} />;
+    return (
+      <EmptyState
+        title="Couldn't load the network settings"
+        description={errorMessage(network.error)}
+        action={<Button onClick={() => void network.refetch()}>Retry</Button>}
+      />
+    );
   }
 
   const set = (patch: Partial<Form>) => setForm((f) => (f ? { ...f, ...patch } : f));

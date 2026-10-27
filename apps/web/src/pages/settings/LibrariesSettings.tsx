@@ -314,7 +314,7 @@ export function LibrariesSettings() {
 
       {/* A list once loaded stays up when fetching it again fails. */}
       {!libs.data ? (
-        <EmptyState title="Couldn't load libraries" description={errorMessage(libs.error)} />
+        <EmptyState title="Couldn't load libraries" description={errorMessage(libs.error)} action={<Button onClick={() => void libs.refetch()}>Retry</Button>} />
       ) : libs.data.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border-strong">
           <EmptyState

@@ -590,7 +590,9 @@ export function UsersSettings() {
   const [deleting, setDeleting] = useState<User | null>(null);
 
   if (users.isPending) return <PageSpinner />;
-  if (users.isError) return <EmptyState title="Couldn't load users" description={errorMessage(users.error)} />;
+  if (users.isError) {
+    return <EmptyState title="Couldn't load users" description={errorMessage(users.error)} action={<Button onClick={() => void users.refetch()}>Retry</Button>} />;
+  }
 
   // Keep the dialog's user in sync with refetched data.
   const dialogUser = dialog?.user ? (users.data.find((u) => u.id === dialog.user?.id) ?? dialog.user) : null;

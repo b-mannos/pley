@@ -187,7 +187,9 @@ export function InvitesSettings() {
   const [deleting, setDeleting] = useState<Invite | null>(null);
 
   if (invites.isPending) return <PageSpinner />;
-  if (invites.isError) return <EmptyState title="Couldn't load invitations" description={errorMessage(invites.error)} />;
+  if (invites.isError) {
+    return <EmptyState title="Couldn't load invitations" description={errorMessage(invites.error)} action={<Button onClick={() => void invites.refetch()}>Retry</Button>} />;
+  }
 
   return (
     <div className="space-y-5">

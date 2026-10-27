@@ -204,7 +204,9 @@ export function ServerSettings() {
   }, [form, settings.data]);
 
   if (settings.isPending || (!form && !settings.isError)) return <PageSpinner />;
-  if (settings.isError || !form) return <EmptyState title="Couldn't load settings" description={errorMessage(settings.error)} />;
+  if (settings.isError || !form) {
+    return <EmptyState title="Couldn't load settings" description={errorMessage(settings.error)} action={<Button onClick={() => void settings.refetch()}>Retry</Button>} />;
+  }
 
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => setForm((f) => (f ? { ...f, [key]: value } : f));
   // A source can't stay chosen once its key is gone.
