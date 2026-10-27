@@ -3,6 +3,21 @@ import { isDirection, KeyRepeatGate, standardKey, type Key } from "./keys";
 
 /** OK held this long is a long press (Android's ViewConfiguration, older versions). */
 export const LONG_PRESS_MS = 500;
+/** One OK press that webOS sends as the key and as a click: the two come this close. */
+const TWIN_MS = 400;
+/** An OK key down longer than this lost its key-up: clicks count again. */
+const OK_HELD_MAX_MS = 10_000;
+/** Wheel notches closer than this are a run: a held key. */
+const WHEEL_RUN_MS = 300;
+/** The pointer counts as showing this long after it last moved (webOS hides it a few seconds after). */
+const POINTER_SHOWN_MS = 3_000;
+
+/** The focusable element an event happened in, unless it is disabled. */
+function focusableAt(target: EventTarget | null): HTMLElement | null {
+  const t = target as Element | null;
+  const el = t && t.closest ? t.closest<HTMLElement>("[data-f]") : null;
+  return el && !el.hasAttribute("data-fdisabled") ? el : null;
+}
 
 /**
  * A screen's or overlay's own keys, before focus moves: the player's
@@ -33,6 +48,27 @@ export class Input {
   lastKeyAt = 0;
   /** A direction nothing on the page took (Left with nothing further left goes to the rail). */
   onMoveFailed: ((dir: "left" | "right" | "up" | "down") => void) | null = null;
+  /**
+   * Whether the mouse event being handled moved the pointer (LG's Magic
+   * Remote, a mouse): what the page slides under a still pointer doesn't
+   * take focus from the keys.
+   */
+  pointerMoved = false;
+  private pointerX = NaN;
+  private pointerY = NaN;
+  private pressed: HTMLElement | null = null;
+  /** When the pointer last moved (0: the keys took over since), and the focusable element it moved onto. */
+  private pointerAt = 0;
+  private pointerOver: HTMLElement | null = null;
+  /** The pointer moved onto something outside where focus may go now (the rail while a page has it). */
+  onPointOutside: ((el: HTMLElement) => void) | null = null;
+  // One OK press may come as the key and as a click (webOS, the pointer showing): the second does nothing.
+  private okHeld = false;
+  private okPressAt = 0;
+  private okReleaseAt = 0;
+  private okSwallowed = false;
+  private clickAt = 0;
+  private wheelAt = 0;
   /** A held direction key began or ended: rows and tiles move without animating meanwhile. */
   onHolding: ((holding: boolean) => void) | null = null;
   private wasHolding = false;
@@ -56,12 +92,115 @@ export class Input {
   attach(target: Window | Document = document): () => void {
     const down = (e: Event) => this.onKey(e as KeyboardEvent, "down");
     const up = (e: Event) => this.onKey(e as KeyboardEvent, "up");
+    const move = (e: Event) => this.onPointer(e as MouseEvent);
+    const press = (e: Event) => this.onPress(e as MouseEvent);
+    const click = (e: Event) => {
+      const el = focusableAt(e.target);
+      if (el && this.focus.inScope(el)) this.click(el);
+    };
+    const wheel = (e: Event) => this.onWheel(e as WheelEvent);
     target.addEventListener("keydown", down, true);
     target.addEventListener("keyup", up, true);
+    target.addEventListener("mousemove", move, true);
+    target.addEventListener("mousedown", press, true);
+    target.addEventListener("mouseup", press, true);
+    target.addEventListener("click", click, true);
+    target.addEventListener("wheel", wheel, { capture: true, passive: true });
     return () => {
       target.removeEventListener("keydown", down, true);
       target.removeEventListener("keyup", up, true);
+      target.removeEventListener("mousemove", move, true);
+      target.removeEventListener("mousedown", press, true);
+      target.removeEventListener("mouseup", press, true);
+      target.removeEventListener("click", click, true);
+      target.removeEventListener("wheel", wheel, true);
     };
+  }
+
+  /** The pointer moved: what it moved onto takes focus, by pointer (see `FocusManager.byPointer`). */
+  private onPointer(e: MouseEvent): void {
+    this.pointerMoved = e.clientX !== this.pointerX || e.clientY !== this.pointerY;
+    this.pointerX = e.clientX;
+    this.pointerY = e.clientY;
+    if (!this.pointerMoved) return;
+    const el = focusableAt(e.target);
+    this.pointerAt = Date.now();
+    this.pointerOver = el;
+    if (!el || el === this.focus.current) return;
+    if (this.focus.inScope(el)) this.focus.focus(el, true);
+    else this.onPointOutside?.(el);
+  }
+
+  /** A press shows on what it is on, as OK's does. */
+  private onPress(e: MouseEvent): void {
+    if (this.pressed) this.pressed.removeAttribute("data-pressed");
+    this.pressed = null;
+    if (e.type !== "mousedown") return;
+    const el = focusableAt(e.target);
+    if (!el || !this.focus.inScope(el)) return;
+    el.setAttribute("data-pressed", "");
+    this.pressed = el;
+  }
+
+  /**
+   * The Magic Remote's wheel (a mouse's) moves focus up and down as the
+   * keys do, a notch a step; notches in a quick run are a held key, one
+   * move every 100 ms, without animating.
+   */
+  private onWheel(e: WheelEvent): void {
+    if (!e.deltaY || this.typing) return;
+    const now = Date.now();
+    if (now - this.wheelAt < KeyRepeatGate.MOVE_INTERVAL) return;
+    const repeat = now - this.wheelAt < WHEEL_RUN_MS;
+    this.wheelAt = now;
+    this.dispatch(e.deltaY > 0 ? "down" : "up", "down", repeat);
+  }
+
+  /**
+   * A click on `el` (the pointer) focuses and selects it, unless it is the
+   * click half of an OK press the key made or is making: with the Magic
+   * Remote's pointer showing, webOS may send one press both ways, and the
+   * key's select may already have opened a page whose button is now under
+   * the pointer.
+   */
+  click(el: HTMLElement): void {
+    const now = Date.now();
+    if ((this.okHeld && now - this.okPressAt < OK_HELD_MAX_MS) || now - this.okReleaseAt < TWIN_MS) {
+      this.okReleaseAt = 0;
+      return;
+    }
+    this.clickAt = now;
+    this.focus.focus(el, true);
+    handlersOf(el)?.onSelect?.();
+  }
+
+  /**
+   * Whether an OK key event belongs to the pointer and does nothing as a
+   * key: the key half of a press whose click came first, or OK while the
+   * pointer shows over nothing that takes focus (OK clicks where the
+   * pointer is: on a panel's scrim it closes the panel, not the row
+   * focused in it).
+   */
+  private okTwin(type: "down" | "up", repeat: boolean): boolean {
+    const now = Date.now();
+    if (type === "down") {
+      if (repeat) return this.okSwallowed;
+      const pointing = this.pointerAt > 0 && now - this.pointerAt < POINTER_SHOWN_MS;
+      this.okSwallowed = now - this.clickAt < TWIN_MS || (pointing && !this.pointerOver);
+      this.clickAt = 0;
+      if (!this.okSwallowed) {
+        this.okHeld = true;
+        this.okPressAt = now;
+      }
+      return this.okSwallowed;
+    }
+    const swallowed = this.okSwallowed;
+    this.okSwallowed = false;
+    if (!swallowed) {
+      this.okHeld = false;
+      this.okReleaseAt = now;
+    }
+    return swallowed;
   }
 
   private onKey(e: KeyboardEvent, type: "down" | "up"): void {
@@ -79,7 +218,10 @@ export class Input {
   /** One key event, already mapped (tests call this). */
   dispatch(key: Key, type: "down" | "up", repeat: boolean): void {
     if (type === "down") this.lastKeyAt = Date.now();
+    if (key === "ok" && this.okTwin(type, repeat)) return;
     if (isDirection(key)) {
+      // The keys take over from the pointer (webOS hides it).
+      if (type === "down") this.pointerAt = 0;
       const admitted = this.gate.admit(type, repeat);
       this.heldNow();
       if (!admitted) return;

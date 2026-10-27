@@ -548,7 +548,7 @@ function WebDialog(p: { url: string; onClose: () => void }) {
   );
   return (
     <div ref={trap} class="dialog-root">
-      <div class="scrim in" />
+      <div class="scrim in" onClick={p.onClose} />
       <div class="dialog web-dialog">
         <div style="width:300px">
           <div class="t-title c-fg">Manage your account on the web</div>

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { Collection, Hub, ItemSummary, Library, LibraryKind, LibrarySort } from "../../api/types";
 import { formatBitrate, formatBytes, pluralize } from "../../format/format";
 import { useUi } from "../context";
+import { nudge } from "../focus";
 import { Chip, PanelRow, Tab } from "../kit/buttons";
 import { F, G } from "../kit/focusable";
 import { gridColumns, PosterGrid } from "../kit/grid";
@@ -723,9 +724,10 @@ export function LibrariesScreen(p: { entry: Entry }) {
                 fid={`library/${l.id}`}
                 initial={i === 0}
                 label={`${l.name}, ${libraryCountLine(l)}`}
-                onFocus={() => {
-                  const row = Math.floor(i / 3);
-                  setShift(Math.max(0, row * 96 - 96));
+                onFocus={(el) => {
+                  const view = el.offsetParent as HTMLElement | null;
+                  if (ui.focus.byPointer && view) setShift((s) => nudge(s, el.offsetTop, el.offsetTop + el.offsetHeight, 0, view.clientHeight));
+                  else setShift(Math.max(0, Math.floor(i / 3) * 96 - 96));
                   p.entry.state.lib = l.id;
                 }}
                 onSelect={() => ui.nav.open({ name: "library", id: l.id })}

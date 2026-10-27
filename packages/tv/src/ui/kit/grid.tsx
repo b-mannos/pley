@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useUi } from "../context";
-import type { Dir } from "../focus";
+import { nudge, type Dir } from "../focus";
 import { FocusWatch, G } from "./focusable";
 import { GUTTER } from "./row";
 import { TILES, type TileKind } from "./tile";
@@ -52,7 +52,8 @@ export interface GridProps {
  * A grid of tiles (TvPosterGrid): rows of 7 posters or 5 squares from x 96;
  * the focused row's wells stay at the grid's top line and the rows slide
  * under it. Only the rows near the screen are drawn, so a library of
- * thousands moves as lightly as one of ten.
+ * thousands moves as lightly as one of ten. What the pointer focuses
+ * leaves the grid where it is, but for a row cut off at an edge (`nudge`).
  */
 export function PosterGrid(p: GridProps) {
   const ui = useUi();
@@ -63,13 +64,17 @@ export function PosterGrid(p: GridProps) {
   const heroH = p.hero ? p.heroHeight ?? 0 : 0;
   const [focused, setFocused] = useState(p.startIndex ?? p.enterAt ?? 0);
   const [inHero, setInHero] = useState(!!p.hero && p.startIndex === undefined);
+  /** Where the pointer left the grid, until a key moves focus in it. */
+  const [held, setHeld] = useState<number | null>(null);
   const row = Math.floor(Math.min(focused, Math.max(0, p.count - 1)) / cols);
   // Rows' wells in the content, from its top; the content slides by `t`.
   const rowY = (r: number) => (heroH ? heroH + GRID_ROW_GAP : 0) + r * pitch;
   const contentH = rows ? rowY(rows - 1) + spec.h + CAPTION_BLOCK + (p.bottomPad ?? 41) : heroH;
   const restT = heroH ? 0 : p.top - p.clipTop;
   const minT = Math.min(restT, 540 - p.clipTop - contentH);
-  const t = inHero ? 0 : Math.max(minT, Math.min(restT, p.top - p.clipTop - rowY(row)));
+  const t = held ?? (inHero ? 0 : Math.max(minT, Math.min(restT, p.top - p.clipTop - rowY(row))));
+  const shown = useRef(t);
+  shown.current = t;
   const visible = Math.ceil((540 - p.clipTop) / pitch) + 1;
   const firstRow = Math.max(0, Math.floor((-t - (heroH ? heroH + GRID_ROW_GAP : 0)) / pitch) - 1);
   const lastRow = Math.min(rows, firstRow + visible + 2);
@@ -81,6 +86,11 @@ export function PosterGrid(p: GridProps) {
       focusedEl.current = el;
       setFocused(i);
       setInHero(false);
+      if (ui.focus.byPointer) {
+        // The content shows from -t to -t + (540 − clipTop): the cell's row comes in whole, if it is cut off.
+        const y = rowY(Math.floor(i / cols));
+        setHeld(-nudge(-shown.current, y, y + spec.h + CAPTION_BLOCK, 0, 540 - p.clipTop, -restT, -minT));
+      } else setHeld(null);
       p.onFocusIndex?.(i);
     },
     priority: Math.abs(Math.floor(i / cols) - row),
@@ -113,6 +123,7 @@ export function PosterGrid(p: GridProps) {
     if (!p.focusTo) return;
     setFocused(p.focusTo.index);
     setInHero(false);
+    setHeld(null);
   }, [p.focusTo?.n]);
   useLayoutEffect(() => {
     if (!p.focusTo || !group.current) return;
@@ -134,7 +145,14 @@ export function PosterGrid(p: GridProps) {
       <div class="grid-content" style={`transform:translateY(${t}px)`}>
         {p.hero && (
           <div class="grid-hero" style={`height:${heroH}px`}>
-            <FocusWatch onFocus={() => setInHero(true)}>{p.hero}</FocusWatch>
+            <FocusWatch
+              onFocus={() => {
+                setInHero(true);
+                if (!ui.focus.byPointer) setHeld(null);
+              }}
+            >
+              {p.hero}
+            </FocusWatch>
           </div>
         )}
         <G

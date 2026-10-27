@@ -3,6 +3,7 @@ import { errorMessage } from "../../../api/client";
 import { candidates, origin, unencrypted } from "../../../auth/addresses";
 import { check, connect, ConnectError, hostPort, problemText, subnetOf, sweep, type ConnectProblem, type ServerInfo } from "../../../auth/servers";
 import { useUi } from "../../context";
+import { nudge } from "../../focus";
 import { Pill, TextButton } from "../../kit/buttons";
 import { F, G } from "../../kit/focusable";
 import { TextField } from "../../kit/field";
@@ -256,7 +257,9 @@ export function ServersScreen() {
                       lookalike={lookalike}
                       onFocus={() => {
                         const top = i * (ROW_H + ROW_GAP);
-                        setShift(Math.max(0, Math.min(top - 90, contentHeight - LIST_MAX)));
+                        const max = Math.max(0, contentHeight - LIST_MAX);
+                        if (ui.focus.byPointer) setShift((s) => nudge(s, top, top + ROW_H, 0, listHeight, 0, max));
+                        else setShift(Math.max(0, Math.min(top - 90, max)));
                       }}
                       onSelect={() => choose(r.url)}
                       onLongSelect={r.saved ? () => setForgetting(r) : undefined}

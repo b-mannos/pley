@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useUi } from "../context";
-import type { Dir } from "../focus";
+import { nudge, topIn, type Dir } from "../focus";
 import { G } from "./focusable";
 import { TILES, type TileKind } from "./tile";
 
@@ -9,6 +9,8 @@ import { TILES, type TileKind } from "./tile";
 export const GUTTER = 96;
 /** A row's tiles all fit when they end by here (960 − 48). */
 const FIT_END = 912;
+/** The rail's box at the screen's left: the pointer reaches a page right of it. */
+const RAIL_EDGE = 72;
 
 export const HEADER = 24;
 export const HEADER_TO_TILES = 14;
@@ -72,15 +74,20 @@ export interface RowProps<T> {
  * returns to its own last tile; Left from the first tile goes to the
  * rail, Right at the end stops. Only the tiles near the screen are drawn.
  * When the focused tile leaves (its actions removed it), focus goes to
- * the tile now at its place, or the last.
+ * the tile now at its place, or the last. A tile the pointer focuses
+ * leaves the track where it is, but for one cut off at an edge (`nudge`).
  */
 export function Row<T>(p: RowProps<T>) {
   const ui = useUi();
   const spec = TILES[p.kind];
   const count = p.items.length + (p.seeAll ? 1 : 0);
   const [focused, setFocused] = useState(Math.min(p.enterAt ?? 0, Math.max(0, count - 1)));
+  /** Where the pointer left the track, until a key moves focus in it. */
+  const [held, setHeld] = useState<number | null>(null);
   const at = Math.min(focused, Math.max(0, count - 1));
-  const offset = rowOffset(p.kind, count, at);
+  const offset = held ?? rowOffset(p.kind, count, at);
+  const shown = useRef(offset);
+  shown.current = offset;
   const [first, last] = windowOf(p.kind, count, offset);
   const groupEl = useRef<HTMLElement | null>(null);
   const focusedEl = useRef<HTMLElement | null>(null);
@@ -88,6 +95,10 @@ export function Row<T>(p: RowProps<T>) {
     const onFocus = (el: HTMLElement) => {
       focusedEl.current = el;
       setFocused(i);
+      if (ui.focus.byPointer) {
+        const x = GUTTER + i * (spec.w + spec.gap);
+        setHeld(nudge(shown.current, x, x + spec.w, RAIL_EDGE, 960, 0, rowOffset(p.kind, count, count - 1)));
+      } else setHeld(null);
       p.onFocusIndex?.(i);
     };
     return { onFocus, priority: Math.abs(i - at) };
@@ -166,7 +177,9 @@ export interface Section {
  * a row drawn again comes back to its tile by its `enterAt`, and a jump of
  * more than a screen (Back to Home's hero) happens at once, as Android's
  * scrollToItem, rather than sliding past sections that aren't drawn. A
- * new `focusedKey` from the page brings that section into view.
+ * new `focusedKey` from the page brings that section into view. What the
+ * pointer focuses leaves the page where it is, but for an element cut off
+ * at the screen's bottom or under the clip line (`nudge`).
  */
 export function SectionPage(p: {
   sections: Section[];
@@ -178,14 +191,20 @@ export function SectionPage(p: {
   /** Read on past the focused section's line (text below the last row that takes focus). */
   extraShift?: number;
 }) {
+  const ui = useUi();
   const [focusedKey, setFocusedKey] = useState<string | null>(p.focusedKey ?? null);
+  /** Where the pointer left the page, until a key moves focus on it. */
+  const [held, setHeld] = useState<number | null>(null);
   const asked = useRef(p.focusedKey);
   let key = focusedKey;
+  let hold = held;
   if (p.focusedKey !== asked.current) {
     asked.current = p.focusedKey;
     if (p.focusedKey !== undefined && p.focusedKey !== focusedKey) {
       key = p.focusedKey;
       setFocusedKey(key);
+      hold = null;
+      setHeld(null);
     }
   }
   const scrollEl = useRef<HTMLElement | null>(null);
@@ -201,6 +220,7 @@ export function SectionPage(p: {
   let shift = 0;
   if (at && at.section.anchor !== null) shift = Math.max(0, at.y - at.section.anchor);
   shift += p.extraShift ?? 0;
+  if (hold !== null) shift = hold;
   const clip = shift > 0 && p.clipAbove !== undefined ? `clip-path:inset(${p.clipAbove}px 0 0 0);-webkit-clip-path:inset(${p.clipAbove}px 0 0 0)` : "";
   const near = positions.filter(({ section, y: sy }) => sy + section.height >= shift - SCREEN && sy <= shift + 2 * SCREEN);
   const jump = shown.current !== null && Math.abs(shift - shown.current) > SCREEN;
@@ -216,6 +236,13 @@ export function SectionPage(p: {
           <div key={section.key} style={`position:absolute;left:0;right:0;top:${sy}px;height:${section.height}px`}>
             {section.render(() => {
               setFocusedKey(section.key);
+              const el = ui.focus.current;
+              const box = scrollEl.current;
+              // A hero (the page's top) brings the page to its top for the pointer too: it is big enough to stay under it.
+              if (ui.focus.byPointer && section.anchor !== null && el && box && box.contains(el)) {
+                const lo = topIn(el, box);
+                setHeld(nudge(shown.current ?? shift, lo, lo + el.offsetHeight, p.clipAbove ?? 0, SCREEN));
+              } else setHeld(null);
               p.onFocusSection?.(section.key);
             })}
           </div>

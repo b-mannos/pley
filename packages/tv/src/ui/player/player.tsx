@@ -421,6 +421,17 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
       }),
     [c],
   );
+  // The pointer (the Magic Remote, a mouse) moving shows the controls and keeps them up, as a key does.
+  useEffect(() => {
+    const moved = () => {
+      if (!ui.input.pointerMoved) return;
+      lastInput.current = Date.now();
+      const st = c.state.value;
+      if (!controlsRef.current && !panelRef.current && !st.upNext && st.phase.kind !== "error") show("scrubber");
+    };
+    document.addEventListener("mousemove", moved);
+    return () => document.removeEventListener("mousemove", moved);
+  }, [c]);
   // The handler above is pushed once: it reaches this render's media keys and state through these.
   const mediaRef = useRef(media);
   mediaRef.current = media;

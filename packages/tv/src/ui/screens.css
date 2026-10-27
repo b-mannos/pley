@@ -273,6 +273,8 @@
   transition: opacity 150ms linear;
 }
 .hero.hidden { opacity: 0; }
+/* The hero's place while it is hidden: the pointer moving into it brings the hero back. */
+.hero-zone { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
 .hero-title { height: 72px; display: flex; flex-direction: column; justify-content: flex-end; }
 .hero-summary { margin-top: 10px; color: rgba(233, 235, 239, 0.85); }
 .hero-buttons { margin-top: 20px; }
@@ -284,6 +286,7 @@
   opacity: 0;
   transition: opacity 150ms linear;
   z-index: 2;
+  pointer-events: none;
 }
 .info-block.in { opacity: 1; }
 .info-title { height: 52px; display: flex; flex-direction: column; justify-content: flex-end; }
@@ -416,7 +419,7 @@
   width: 464px;
   transition: opacity 150ms linear;
 }
-.item-hero.hidden { opacity: 0; }
+.item-hero.hidden { opacity: 0; pointer-events: none; }
 .item-buttons { margin-top: 22px; }
 .item-info {
   position: absolute;
@@ -593,7 +596,7 @@
 
 /* A playlist's page: the top and the entries scroll as one column; the backdrop darkens under the entries. */
 .playlist-content { position: absolute; left: 0; top: 0; width: 960px; will-change: transform; transition: transform 240ms cubic-bezier(0.2, 0, 0, 1); }
-.playlist-dim { position: absolute; left: 0; top: 0; width: 960px; height: 540px; background: rgba(11, 13, 16, 0.92); opacity: 0; will-change: opacity; transition: opacity 240ms cubic-bezier(0.2, 0, 0, 1); }
+.playlist-dim { position: absolute; left: 0; top: 0; width: 960px; height: 540px; pointer-events: none; background: rgba(11, 13, 16, 0.92); opacity: 0; will-change: opacity; transition: opacity 240ms cubic-bezier(0.2, 0, 0, 1); }
 .playlist-dim.in { opacity: 1; }
 .reduced .playlist-content,
 .reduced .playlist-dim { transition: none; }

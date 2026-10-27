@@ -157,6 +157,16 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
         leave(false);
         return true;
       },
+      pointTo: (target) => {
+        const el = root.current;
+        if (!el || !el.contains(target)) return;
+        if (ui.focus.root !== el) {
+          opener.current = ui.focus.current;
+          ui.focus.trap(el);
+        }
+        ui.focus.focus(target, true);
+        open.value = true;
+      },
     };
     p.railRef(api);
   });
@@ -215,7 +225,16 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
   const color = profileColor(me?.avatar_color);
   return (
     <>
-      <div class={`rail-scrim${open.value ? " in" : ""}`} />
+      {/* The pointer moving out over the page, or clicking it, closes the rail: focus goes back to the page. */}
+      <div
+        class={`rail-scrim${open.value ? " in" : ""}`}
+        onMouseMove={() => {
+          if (open.value && ui.input.pointerMoved) leave(true);
+        }}
+        onClick={() => {
+          if (open.value) leave(true);
+        }}
+      />
       <div ref={root} class={`rail${open.value ? " open" : ""}`}>
         <div class="rail-panel" />
         <div class="rail-edge" />
@@ -276,4 +295,6 @@ export interface RailApi {
   backToContent(): void;
   /** A page chosen in the rail has something to focus: the rail lets go, true when it held focus for it. */
   handOver(): boolean;
+  /** The pointer moved onto `el`: an entry of the rail opens it, focused there. */
+  pointTo(el: HTMLElement): void;
 }

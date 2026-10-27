@@ -355,40 +355,49 @@ function Hero(p: { item: ItemSummary; detail: ItemDetail | null; hidden: boolean
     p.onFocus();
     prefetchPlayback(app, item);
   };
+  // The pointer moving back up into the hero's place, hidden while it was on the rows, brings it back.
+  const pointedAt = () => {
+    const group = groupRef.current;
+    const el = (group && ui.focus.rememberedIn(group)) ?? resumeRef.current?.querySelector<HTMLElement>("[data-f]") ?? null;
+    if (el && ui.input.pointerMoved && ui.focus.inScope(el)) ui.focus.focus(el, true);
+  };
   return (
-    <div class={`hero${p.hidden ? " hidden" : ""}`}>
-      <div class="hero-title">
-        <div class="t-hero c-fg lines-2">{info.title}</div>
-      </div>
-      {info.context && <div class="t-title c-fg one-line" style="margin-top:10px;width:464px">{info.context}</div>}
-      <div style="margin-top:8px">
-        <MetaLine item={item} detail={p.detail} runtime={info.runtime} />
-      </div>
-      {info.timeLeft && <div class="t-caption c-fg one-line" style="margin-top:10px">{info.timeLeft}</div>}
-      {info.summary && <div class="t-body-large lines-3 hero-summary">{info.summary}</div>}
-      <G
-        kind="row"
-        restore
-        class="buttons hero-buttons"
-        elRef={(el) => (groupRef.current = el)}
-        onEnter={() => (groupRef.current && ui.focus.rememberedIn(groupRef.current)) ?? resumeRef.current?.querySelector<HTMLElement>("[data-f]") ?? null}
-      >
-        <div ref={(el) => {
-          resumeRef.current = el;
-        }} style="display:flex">
-          <Pill label={info.inProgress ? "Resume" : "Play"} icon="play" fid="hero/play" initial onFocus={focus} onSelect={() => void playItem(app, ui, item)} />
+    <>
+      {p.hidden && <div class="hero-zone" onMouseMove={pointedAt} />}
+      <div class={`hero${p.hidden ? " hidden" : ""}`}>
+        <div class="hero-title">
+          <div class="t-hero c-fg lines-2">{info.title}</div>
         </div>
-        {info.inProgress && <Round label="From start" icon="rotate-ccw" fid="hero/start" onFocus={focus} onSelect={() => void playItem(app, ui, item, { fromStart: true })} />}
-        <Round label="Info" icon="info" fid="hero/info" onFocus={focus} onSelect={() => ui.nav.open(pageOf(item))} />
-        <Round
-          label={info.watched ? "Mark as unwatched" : "Mark as watched"}
-          icon="circle-check"
-          fid="hero/watched"
-          onFocus={focus}
-          onSelect={() => void setWatched(app, ui, item, !info.watched)}
-        />
-      </G>
-    </div>
+        {info.context && <div class="t-title c-fg one-line" style="margin-top:10px;width:464px">{info.context}</div>}
+        <div style="margin-top:8px">
+          <MetaLine item={item} detail={p.detail} runtime={info.runtime} />
+        </div>
+        {info.timeLeft && <div class="t-caption c-fg one-line" style="margin-top:10px">{info.timeLeft}</div>}
+        {info.summary && <div class="t-body-large lines-3 hero-summary">{info.summary}</div>}
+        <G
+          kind="row"
+          restore
+          class="buttons hero-buttons"
+          elRef={(el) => (groupRef.current = el)}
+          onEnter={() => (groupRef.current && ui.focus.rememberedIn(groupRef.current)) ?? resumeRef.current?.querySelector<HTMLElement>("[data-f]") ?? null}
+        >
+          <div ref={(el) => {
+            resumeRef.current = el;
+          }} style="display:flex">
+            <Pill label={info.inProgress ? "Resume" : "Play"} icon="play" fid="hero/play" initial onFocus={focus} onSelect={() => void playItem(app, ui, item)} />
+          </div>
+          {info.inProgress && <Round label="From start" icon="rotate-ccw" fid="hero/start" onFocus={focus} onSelect={() => void playItem(app, ui, item, { fromStart: true })} />}
+          <Round label="Info" icon="info" fid="hero/info" onFocus={focus} onSelect={() => ui.nav.open(pageOf(item))} />
+          <Round
+            label={info.watched ? "Mark as unwatched" : "Mark as watched"}
+            icon="circle-check"
+            fid="hero/watched"
+            onFocus={focus}
+            onSelect={() => void setWatched(app, ui, item, !info.watched)}
+          />
+        </G>
+      </div>
+    </>
   );
 }
 

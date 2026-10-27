@@ -141,6 +141,13 @@ export function nearest(from: DOMRect, candidates: Element[], dir: Dir | null): 
 
 export class FocusManager {
   current: HTMLElement | null = null;
+  /**
+   * Whether the pointer (LG's Magic Remote, a mouse) gave the current
+   * focus: rows, pages and lists stay where they are then, moving only to
+   * bring in an element cut off at their edge (`nudge`), so what the
+   * pointer is on stays under it.
+   */
+  byPointer = false;
   /** Focus traps, innermost last: the page, then panels and dialogs on top of it. */
   private traps: { root: HTMLElement; opener: HTMLElement | null }[] = [];
   private readonly listeners: ((el: HTMLElement | null) => void)[] = [];
@@ -183,9 +190,10 @@ export class FocusManager {
     return !!root && root.contains(el);
   }
 
-  focus(el: HTMLElement | null): boolean {
+  focus(el: HTMLElement | null, byPointer = false): boolean {
     if (!el || !el.isConnected || !focusable(el)) return false;
     if (el === this.current) return true;
+    this.byPointer = byPointer;
     const was = this.current;
     if (was) {
       was.removeAttribute("data-focused");
@@ -323,4 +331,27 @@ function step(opts: GroupOptions, items: Element[], node: Element, dir: Dir, fro
       return nearest(fromRect, others, dir);
     }
   }
+}
+
+/**
+ * Where a scroller goes when the pointer focused an element in it
+ * (`FocusManager.byPointer`): nowhere, unless the element is cut off at
+ * the view's edge, and then only as far as brings it in whole, so the
+ * pointer stays on what it points at, as in LG's own apps. `shift` is how
+ * far the content is moved (a content position less `shift` is where it
+ * shows); the element spans `lo` to `hi` in the content, and the view
+ * shows `viewLo` to `viewHi`. The result stays within `min` and `max`.
+ */
+export function nudge(shift: number, lo: number, hi: number, viewLo: number, viewHi: number, min = 0, max = Infinity): number {
+  let s = shift;
+  if (hi - s > viewHi) s = hi - viewHi;
+  if (lo - s < viewLo) s = lo - viewLo;
+  return Math.max(min, Math.min(max, s));
+}
+
+/** `el`'s top in `box`'s content, by layout (what slides `box` is left out); `box` is a positioned ancestor. */
+export function topIn(el: HTMLElement, box: HTMLElement): number {
+  let top = 0;
+  for (let n: HTMLElement | null = el; n && n !== box; n = n.offsetParent as HTMLElement | null) top += n.offsetTop;
+  return top;
 }

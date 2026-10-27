@@ -473,6 +473,7 @@ body {
   opacity: 0;
   transition: opacity 150ms linear;
   z-index: 50;
+  pointer-events: none;
 }
 .toast.in { opacity: 1; }
 .toast.error { color: var(--danger-text); }
@@ -617,6 +618,11 @@ body {
   transition: opacity 200ms var(--focus-ease);
   will-change: opacity;
 }
+/* Closed, the rail's panel and its entries' labels are out of the pointer's way: the page under them takes it. */
+.rail-panel,
+.rail-edge,
+.rail-item .label { pointer-events: none; }
+.rail.open .rail-panel { pointer-events: auto; }
 .rail.open .rail-panel,
 .rail.open .rail-edge { opacity: 1; }
 .rail-scrim {

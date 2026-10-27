@@ -17,7 +17,11 @@ interface FProps extends FocusHandlers {
   elRef?: (el: HTMLDivElement | null) => void;
 }
 
-/** Something the remote focuses: a tile, a button, a row of a panel. */
+/**
+ * Something the remote focuses: a tile, a button, a row of a panel. The
+ * pointer (LG's Magic Remote, a mouse) focuses what it moves onto and
+ * selects what it clicks, through Input's listeners on the document.
+ */
 export function F(props: FProps) {
   const ref = useRef<HTMLDivElement>(null);
   const ui = useUi();
@@ -42,12 +46,6 @@ export function F(props: FProps) {
       data-fdisabled={props.disabled ? "" : undefined}
       aria-label={props.label}
       role="button"
-      onMouseEnter={() => {
-        if (!props.disabled && ref.current && ui.focus.inScope(ref.current)) ui.focus.focus(ref.current);
-      }}
-      onClick={() => {
-        if (!props.disabled) onSelect?.();
-      }}
     >
       {props.children}
     </div>

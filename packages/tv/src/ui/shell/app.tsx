@@ -148,8 +148,10 @@ export function App(p: ShellProps) {
   // A held direction key: rows and tiles move without animating. Told as keys come, so an idle TV runs no timer.
   useEffect(() => {
     input.onHolding = (holding) => document.getElementById("app")?.classList.toggle("holding", holding);
+    input.onPointOutside = (el) => rail.current?.pointTo(el);
     return () => {
       input.onHolding = null;
+      input.onPointOutside = null;
     };
   }, []);
 

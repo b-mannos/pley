@@ -5,6 +5,7 @@ import { formatClock, formatDuration, pluralize } from "../../format/format";
 import { musicPlayer } from "../../player/music";
 import { sleepLabel } from "../../player/sleep";
 import { useUi } from "../context";
+import { nudge } from "../focus";
 import { Art } from "../kit/art";
 import { Backdrop } from "../kit/backdrop";
 import { Pill, Round, TextButton } from "../kit/buttons";
@@ -414,15 +415,21 @@ const QUEUE_H = 215;
  * The queue (TvNowPlayingScreen's "Up next"): lines at a fixed pitch, only
  * those near what shows drawn, so a queue of hundreds opens and moves as
  * one of ten does. The focused line sits second in the box; while focus is
- * elsewhere, the line focused last, else the one playing.
+ * elsewhere, the line focused last, else the one playing. A line the
+ * pointer focuses leaves the queue where it is, but for one cut off.
  */
 function NowQueue(p: { list: ItemSummary[]; index: number; playing: boolean; onJump: (i: number) => void }) {
+  const ui = useUi();
   const [focused, setFocused] = useState<number | null>(null);
+  const [held, setHeld] = useState<number | null>(null);
   const group = useRef<HTMLElement | null>(null);
   const n = p.list.length;
   const anchor = Math.min(n - 1, focused ?? p.index);
+  const max = Math.max(0, n * QUEUE_ROW - QUEUE_H);
   // Whole lines from the box's top, one above the focused line: no half line under "Up next".
-  const shift = Math.max(0, Math.min(n * QUEUE_ROW - QUEUE_H, (anchor - 1) * QUEUE_ROW));
+  const shift = held ?? Math.max(0, Math.min(max, (anchor - 1) * QUEUE_ROW));
+  const shown = useRef(shift);
+  shown.current = shift;
   const first = Math.max(0, Math.floor(shift / QUEUE_ROW) - 3);
   const last = Math.min(n, first + Math.ceil(QUEUE_H / QUEUE_ROW) + 7);
   const lines = [];
@@ -437,7 +444,10 @@ function NowQueue(p: { list: ItemSummary[]; index: number; playing: boolean; onJ
           duration={q.duration_ms ? formatClock(q.duration_ms) : ""}
           current={i === p.index}
           playing={i === p.index && p.playing}
-          onFocus={() => setFocused(i)}
+          onFocus={() => {
+            setFocused(i);
+            setHeld(ui.focus.byPointer ? nudge(shown.current, i * QUEUE_ROW, i * QUEUE_ROW + QUEUE_ROW - 2, 0, QUEUE_H, 0, max) : null);
+          }}
           onSelect={() => p.onJump(i)}
         />
       </div>,

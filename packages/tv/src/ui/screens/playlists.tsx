@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { errorMessage, isApiError } from "../../api/client";
 import type { ItemSummary, Playlist, PlaylistEntry } from "../../api/types";
 import { cardSubtitle, episodeLabel, formatDuration, pluralize, seasonTitle } from "../../format/format";
 import { useUi } from "../context";
+import { nudge } from "../focus";
 import { Art, artCandidates } from "../kit/art";
 import { Backdrop } from "../kit/backdrop";
 import { Pill, PanelRow, Round } from "../kit/buttons";
@@ -138,6 +139,8 @@ function PlaylistPage(p: { entry: Entry; pl: Playlist & { entries: PlaylistEntry
   const [overlay, setOverlay] = useState<Overlay>(null);
   /** The focused entry's index; -1 in the top. */
   const [at, setAt] = useState<number>((p.entry.state.index as number | undefined) ?? -1);
+  /** Where the pointer left the column, until a key moves focus in it. */
+  const [held, setHeld] = useState<number | null>(null);
   // The server's answer holds the order sent: it shows as it is.
   useEffect(() => {
     if (moving === null) setOrder(null);
@@ -183,6 +186,7 @@ function PlaylistPage(p: { entry: Entry; pl: Playlist & { entries: PlaylistEntry
     ids.splice(to, 0, ids.splice(from, 1)[0]!);
     setOrder(ids);
     setAt(to);
+    setHeld(null);
     p.entry.state.index = to;
   };
   const drop = () => {
@@ -230,8 +234,12 @@ function PlaylistPage(p: { entry: Entry; pl: Playlist & { entries: PlaylistEntry
     );
   };
 
-  // The column scrolls with focus: the top at rest in it, a focused entry's top at its line.
-  const shift = at >= 0 ? Math.max(0, LIST_TOP + at * ROW_H - ROW_ANCHOR) : 0;
+  // The column scrolls with focus: the top at rest in it, a focused entry's top at its line;
+  // what the pointer focuses leaves it where it is, but for an entry cut off.
+  const shift = held ?? (at >= 0 ? Math.max(0, LIST_TOP + at * ROW_H - ROW_ANCHOR) : 0);
+  const shown = useRef(shift);
+  shown.current = shift;
+  const hold = (lo: number, hi: number) => setHeld(ui.focus.byPointer ? nudge(shown.current, lo, hi, 0, 540, 0, Math.max(0, LIST_TOP + (entries.length - 1) * ROW_H - ROW_ANCHOR)) : null);
   const first = Math.max(0, Math.floor((shift - LIST_TOP) / ROW_H) - 2);
   const last = Math.min(entries.length, first + Math.ceil(540 / ROW_H) + 4);
   const rows = [];
@@ -248,6 +256,7 @@ function PlaylistPage(p: { entry: Entry; pl: Playlist & { entries: PlaylistEntry
         onFocus={() => {
           setAt(i);
           p.entry.state.index = i;
+          hold(LIST_TOP + i * ROW_H, LIST_TOP + (i + 1) * ROW_H);
         }}
         onPlay={() => play(i)}
         onMore={() => setOverlay({ actions: e })}
@@ -257,9 +266,11 @@ function PlaylistPage(p: { entry: Entry; pl: Playlist & { entries: PlaylistEntry
       />,
     );
   }
+  const buttonsTop = canPlay ? 361 : 341;
   const topFocus = () => {
     setAt(-1);
     p.entry.state.index = -1;
+    hold(buttonsTop, buttonsTop + 44);
   };
   const acting = overlay && typeof overlay === "object" ? overlay.actions : null;
   const actingTitles = acting ? entryTitles(acting.item) : null;
@@ -282,7 +293,7 @@ function PlaylistPage(p: { entry: Entry; pl: Playlist & { entries: PlaylistEntry
             <span class="t-label c-muted lines-2">{facts}</span>
           </div>
         </div>
-        <G kind="row" restore class="buttons playlist-buttons" style={`top:${canPlay ? 361 : 341}px`} onEdge={railOnLeft(ui.toRail)}>
+        <G kind="row" restore class="buttons playlist-buttons" style={`top:${buttonsTop}px`} onEdge={railOnLeft(ui.toRail)}>
           <Pill label="Play" icon="play" fid="play" initial={canPlay} disabled={!canPlay} onFocus={topFocus} onSelect={() => play(0)} />
           <Round label="Shuffle" icon="shuffle" fid="shuffle" disabled={entries.length < 2} onFocus={topFocus} onSelect={() => play(0, true)} />
           {editable && <Round label="Rename" icon="pencil" fid="rename" initial={!canPlay} onFocus={topFocus} onSelect={() => setOverlay("rename")} />}

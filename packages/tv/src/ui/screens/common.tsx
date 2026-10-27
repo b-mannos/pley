@@ -222,7 +222,8 @@ export function MetaLine(p: { item: ItemSummary; detail?: ItemDetail | null; lea
 
 /**
  * A dialog over the page (TvDialog): a title, a body, buttons at the
- * right; Back dismisses it. Focus stays inside it.
+ * right; Back, or the pointer's click outside it, dismisses it. Focus
+ * stays inside it.
  */
 export function Dialog(p: {
   title: string;
@@ -243,7 +244,7 @@ export function Dialog(p: {
   );
   return (
     <div ref={trap} class="dialog-root" role="dialog" aria-label={p.title}>
-      <div class="scrim in" />
+      <div class="scrim in" onClick={p.onDismiss} />
       <div class="dialog small">
         <div class="t-title c-fg">{p.title}</div>
         {p.body && <div class="t-body c-muted" style="margin-top:8px">{p.body}</div>}
