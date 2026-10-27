@@ -29,7 +29,8 @@ function setup() {
   const b = item("b");
   const c = item("c");
   const blank = el("div", { class: "blank" });
-  const root = el("div", {}, [group("col", [a, b, c]), blank]);
+  const scrim = el("div", { class: "scrim" });
+  const root = el("div", {}, [group("col", [a, b, c]), blank, scrim]);
   document.body.appendChild(root);
   const focus = new FocusManager();
   focus.setPage(root);
@@ -38,7 +39,7 @@ function setup() {
   focus.focus(a);
   const selected: string[] = [];
   for (const x of [a, b, c]) setHandlers(x, { onSelect: () => selected.push(x.getAttribute("data-fid")!) });
-  return { a, b, c, blank, focus, input, selected };
+  return { a, b, c, blank, scrim, focus, input, selected };
 }
 
 let x = 0;
@@ -90,16 +91,46 @@ describe("the pointer", () => {
     expect(fid(focus)).toBe("c");
   });
 
-  it("hands the click itself to an element that wants its place (the scrubber), OK still selecting it", () => {
-    const { b, input, selected } = setup();
+  it("hands the click's place to an element that wants it (the scrubber); OK over it is that click", () => {
+    const { b, focus, input, selected } = setup();
     const clickedAt: number[] = [];
-    setHandlers(b, { onSelect: () => selected.push("b"), onClick: (e) => clickedAt.push(e.clientX) });
+    setHandlers(b, { onSelect: () => selected.push("b"), onClick: (at) => clickedAt.push(at.clientX) });
     click(b);
     expect(clickedAt).toEqual([x]);
     expect(selected).toEqual([]);
+    // OK with the pointer showing over it: a click at the pointer, the key doing nothing more, its own click dropped.
     vi.advanceTimersByTime(1000);
+    point(b);
+    input.dispatch("ok", "down", false);
+    click(b);
+    input.dispatch("ok", "up", false);
+    expect(clickedAt).toEqual([x - 7, x]);
+    expect(selected).toEqual([]);
+    // Once the keys took over, OK on it is the key's.
+    input.dispatch("up", "down", false);
+    input.dispatch("down", "down", false);
+    expect(fid(focus)).toBe("b");
     ok(input);
     expect(selected).toEqual(["b"]);
+  });
+
+  it("gives focus back the way its opener had it when a panel closes", () => {
+    const { a, b, focus } = setup();
+    point(b);
+    const panel = item("row");
+    document.body.appendChild(panel);
+    focus.trap(panel);
+    focus.focus(panel);
+    expect(focus.byPointer).toBe(false);
+    focus.release(panel);
+    expect(fid(focus)).toBe("b");
+    expect(focus.byPointer).toBe(true);
+    focus.focus(a);
+    focus.trap(panel);
+    focus.focus(panel);
+    focus.release(panel);
+    expect(fid(focus)).toBe("a");
+    expect(focus.byPointer).toBe(false);
   });
 
   it("leaves focus on a field while it types", () => {
@@ -154,22 +185,27 @@ describe("the pointer", () => {
     expect(selected).toEqual(["a"]);
   });
 
-  it("makes OK do nothing while it shows over nothing, until the keys take over or it goes", () => {
-    const { blank, focus, input, selected } = setup();
-    point(blank);
+  it("makes OK do nothing as a key while it shows over a scrim, whose click closes what it is under", () => {
+    const { blank, scrim, focus, input, selected } = setup();
+    point(scrim);
     ok(input);
     expect(selected).toEqual([]);
-    // A direction key: webOS hides the pointer, and OK is the key's again.
-    input.dispatch("down", "down", false);
-    input.dispatch("down", "up", false);
+    // Any other key (Back, a direction): webOS hides the pointer, and OK is the key's again.
+    input.dispatch("back", "down", false);
+    input.dispatch("back", "up", false);
     ok(input);
-    expect(selected).toEqual(["b"]);
-    expect(fid(focus)).toBe("b");
+    expect(selected).toEqual(["a"]);
     // Left alone, the pointer hides after a few seconds.
-    point(blank);
+    point(scrim);
     vi.advanceTimersByTime(3500);
     ok(input);
-    expect(selected).toEqual(["b", "b"]);
+    expect(selected).toEqual(["a", "a"]);
+    // Over a gap that isn't a scrim, OK is the key's: what has focus.
+    vi.advanceTimersByTime(1000);
+    point(blank);
+    ok(input);
+    expect(selected).toEqual(["a", "a", "a"]);
+    expect(fid(focus)).toBe("a");
   });
 
   it("tells the shell when it moves onto something outside where focus may go (the rail)", () => {

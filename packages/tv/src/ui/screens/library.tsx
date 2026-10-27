@@ -724,10 +724,11 @@ export function LibrariesScreen(p: { entry: Entry }) {
                 fid={`library/${l.id}`}
                 initial={i === 0}
                 label={`${l.name}, ${libraryCountLine(l)}`}
-                onFocus={(el) => {
-                  const view = el.offsetParent as HTMLElement | null;
-                  if (ui.focus.byPointer && view) setShift((s) => nudge(s, el.offsetTop, el.offsetTop + el.offsetHeight, 0, view.clientHeight));
-                  else setShift(Math.max(0, Math.floor(i / 3) * 96 - 96));
+                onFocus={() => {
+                  // Cards 80 high every 96 from 8 down, in a view from y 81 to the screen's bottom.
+                  const top = 8 + Math.floor(i / 3) * 96;
+                  if (ui.focus.byPointer) setShift((s) => nudge(s, top, top + 80, 0, 540 - 81));
+                  else setShift(Math.max(0, top - 8 - 96));
                   p.entry.state.lib = l.id;
                 }}
                 onSelect={() => ui.nav.open({ name: "library", id: l.id })}

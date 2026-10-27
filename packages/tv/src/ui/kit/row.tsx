@@ -125,7 +125,7 @@ export function Row<T>(p: RowProps<T>) {
     const group = groupEl.current;
     if (!group || !count) return;
     const target = group.querySelector<HTMLElement>(`[data-index="${at}"] [data-f]`) ?? lastTile(group);
-    if (target) ui.focus.focus(target);
+    if (target) ui.focus.focus(target, ui.focus.byPointer);
   });
   const height = spec.h + TILES_TO_CAPTION + CAPTION;
   return (
@@ -196,6 +196,7 @@ export function SectionPage(p: {
   /** Where the pointer left the page, until a key moves focus on it. */
   const [held, setHeld] = useState<number | null>(null);
   const asked = useRef(p.focusedKey);
+  const readOn = useRef(p.extraShift);
   let key = focusedKey;
   let hold = held;
   if (p.focusedKey !== asked.current) {
@@ -203,6 +204,14 @@ export function SectionPage(p: {
     if (p.focusedKey !== undefined && p.focusedKey !== focusedKey) {
       key = p.focusedKey;
       setFocusedKey(key);
+      hold = null;
+      setHeld(null);
+    }
+  }
+  // Reading on (Down past the last row) moves the page as the keys put it.
+  if (p.extraShift !== readOn.current) {
+    readOn.current = p.extraShift;
+    if (hold !== null) {
       hold = null;
       setHeld(null);
     }

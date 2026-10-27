@@ -44,15 +44,15 @@ function setup() {
       ),
     });
   }
-  const page = (focusedKey?: string) => (
+  const page = (focusedKey?: string, extraShift?: number) => (
     <UiContext.Provider value={ui}>
-      <SectionPage sections={sections} clipAbove={160} focusedKey={focusedKey} />
+      <SectionPage sections={sections} clipAbove={160} focusedKey={focusedKey} extraShift={extraShift} />
     </UiContext.Provider>
   );
   act(() => render(page(), root));
   const scroll = () => (root.querySelector(".page-scroll") as HTMLElement).getAttribute("style") ?? "";
   const el = (fid: string) => root.querySelector<HTMLElement>(`[data-fid="${fid}"]`);
-  return { root, focus, page, scroll, el, rerender: (k?: string) => act(() => render(page(k), root)) };
+  return { root, focus, page, scroll, el, rerender: (k?: string, extra?: number) => act(() => render(page(k, extra), root)) };
 }
 
 // Rows start at 436 + 28 and come every 328: row i's header at 464 + 328 i.
@@ -103,5 +103,13 @@ describe("a page of sections", () => {
     // And the first's again, now under the clip line: down only as far as shows it below the line.
     act(() => void focus.focus(el("tile0"), true));
     expect(scroll()).toContain(`translateY(${-(rowY(0) + 40 - 160)}px)`);
+  });
+
+  it("reads on past its last row from where the keys put it, after the pointer", () => {
+    const { focus, scroll, el, rerender } = setup();
+    act(() => void focus.focus(el("tile0"), true));
+    expect(scroll()).toContain(`translateY(${-(704 - 540)}px)`);
+    rerender(undefined, 160);
+    expect(scroll()).toContain(`translateY(${-(rowY(0) - 172 + 160)}px)`);
   });
 });

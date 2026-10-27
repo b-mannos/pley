@@ -115,7 +115,7 @@ export function PosterGrid(p: GridProps) {
     if (!was || was.isConnected || ui.focus.current !== was || !group.current || !p.count) return;
     const at = Math.min(focused, p.count - 1);
     const el = group.current.querySelector<HTMLElement>(`[data-index="${at}"] [data-f]`);
-    if (el) ui.focus.focus(el);
+    if (el) ui.focus.focus(el, ui.focus.byPointer);
   });
 
   // A jump: the target's row comes up, then the target takes focus.

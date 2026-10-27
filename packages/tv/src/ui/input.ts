@@ -57,9 +57,9 @@ export class Input {
   private pointerX = NaN;
   private pointerY = NaN;
   private pressed: HTMLElement | null = null;
-  /** When the pointer last moved (0: the keys took over since), and the focusable element it moved onto. */
+  /** When the pointer last moved (0: the keys took over since), and what it moved onto. */
   private pointerAt = 0;
-  private pointerOver: HTMLElement | null = null;
+  private pointerTarget: Element | null = null;
   /** The pointer moved onto something outside where focus may go now (the rail while a page has it). */
   onPointOutside: ((el: HTMLElement) => void) | null = null;
   // One OK press may come as the key and as a click (webOS, the pointer showing): the second does nothing.
@@ -125,7 +125,7 @@ export class Input {
     if (!this.pointerMoved) return;
     const el = focusableAt(e.target);
     this.pointerAt = Date.now();
-    this.pointerOver = el;
+    this.pointerTarget = e.target as Element | null;
     // While a field types, focus stays on it.
     if (!el || el === this.focus.current || this.typing) return;
     if (this.focus.inScope(el)) this.focus.focus(el, true);
@@ -164,7 +164,7 @@ export class Input {
    * key's select may already have opened a page whose button is now under
    * the pointer.
    */
-  click(el: HTMLElement, e?: MouseEvent): void {
+  click(el: HTMLElement, at?: { clientX: number; clientY: number }): void {
     const now = Date.now();
     if ((this.okHeld && now - this.okPressAt < OK_HELD_MAX_MS) || now - this.okReleaseAt < TWIN_MS) {
       this.okReleaseAt = 0;
@@ -173,37 +173,50 @@ export class Input {
     this.clickAt = now;
     this.focus.focus(el, true);
     const h = handlersOf(el);
-    if (h?.onClick && e) h.onClick(e);
+    if (h?.onClick && at) h.onClick(at);
     else h?.onSelect?.();
   }
 
   /**
-   * Whether an OK key event belongs to the pointer and does nothing as a
-   * key: the key half of a press whose click came first, or OK while the
-   * pointer shows over nothing that takes focus (OK clicks where the
-   * pointer is: on a panel's scrim it closes the panel, not the row
-   * focused in it).
+   * Whether an OK key event belongs to the pointer and does nothing more as
+   * a key: the key half of a press whose click came first; OK while the
+   * pointer shows over a scrim (OK clicks where the pointer is: the
+   * scrim's click closes what it is under, not the row focused in it); and
+   * OK while it shows over what takes a click's place (the scrubber),
+   * which clicks there. Over anything else OK is the key's, the click
+   * that may follow it the twin `click` drops.
    */
   private okTwin(type: "down" | "up", repeat: boolean): boolean {
     const now = Date.now();
-    if (type === "down") {
-      if (repeat) return this.okSwallowed;
-      const pointing = this.pointerAt > 0 && now - this.pointerAt < POINTER_SHOWN_MS;
-      this.okSwallowed = now - this.clickAt < TWIN_MS || (pointing && !this.pointerOver);
-      this.clickAt = 0;
-      if (!this.okSwallowed) {
-        this.okHeld = true;
-        this.okPressAt = now;
+    if (type === "up") {
+      const swallowed = this.okSwallowed;
+      this.okSwallowed = false;
+      if (this.okHeld) {
+        this.okHeld = false;
+        this.okReleaseAt = now;
       }
-      return this.okSwallowed;
+      return swallowed;
     }
-    const swallowed = this.okSwallowed;
+    if (repeat) return this.okSwallowed;
+    if (now - this.clickAt < TWIN_MS) {
+      this.clickAt = 0;
+      this.okSwallowed = true;
+      return true;
+    }
+    this.okHeld = true;
+    this.okPressAt = now;
     this.okSwallowed = false;
-    if (!swallowed) {
-      this.okHeld = false;
-      this.okReleaseAt = now;
+    if (this.pointerAt === 0 || now - this.pointerAt >= POINTER_SHOWN_MS) return false;
+    // What is under the pointer now: what showed under a still pointer since it moved counts.
+    const t = (typeof document.elementFromPoint === "function" ? document.elementFromPoint(this.pointerX, this.pointerY) : null) ?? this.pointerTarget;
+    if (t && t.closest && t.closest(".scrim, .rail-scrim")) this.okSwallowed = true;
+    const over = focusableAt(t);
+    const clickAt = over && over === this.focus.current ? handlersOf(over)?.onClick : undefined;
+    if (clickAt) {
+      clickAt({ clientX: this.pointerX, clientY: this.pointerY });
+      this.okSwallowed = true;
     }
-    return swallowed;
+    return this.okSwallowed;
   }
 
   private onKey(e: KeyboardEvent, type: "down" | "up"): void {
@@ -222,9 +235,9 @@ export class Input {
   dispatch(key: Key, type: "down" | "up", repeat: boolean): void {
     if (type === "down") this.lastKeyAt = Date.now();
     if (key === "ok" && this.okTwin(type, repeat)) return;
+    // Any other key takes over from the pointer (webOS hides it).
+    if (type === "down" && key !== "ok") this.pointerAt = 0;
     if (isDirection(key)) {
-      // The keys take over from the pointer (webOS hides it).
-      if (type === "down") this.pointerAt = 0;
       const admitted = this.gate.admit(type, repeat);
       this.heldNow();
       if (!admitted) return;

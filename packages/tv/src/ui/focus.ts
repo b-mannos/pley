@@ -21,8 +21,13 @@ export interface FocusHandlers {
   onBlur?: () => void;
   /** Key presses the element handles itself before focus moves (a field, the jump control). */
   onKey?: (key: string, e: { repeat: boolean }) => boolean;
-  /** The pointer's click, in place of `onSelect`, where the place clicked matters (the scrubber seeks there). */
-  onClick?: (e: MouseEvent) => void;
+  /**
+   * The pointer's click, in place of `onSelect`, where the place clicked
+   * matters (the scrubber seeks there); OK while the pointer shows over the
+   * element is that click. `clientX` and `clientY` are the browser's,
+   * in the screen's pixels.
+   */
+  onClick?: (at: { clientX: number; clientY: number }) => void;
 }
 
 export interface GroupOptions {
@@ -167,8 +172,12 @@ export class FocusManager {
   syncDom(): void {
     if (this.domFocus && this.current && this.current.isConnected) giveDomFocus(this.current);
   }
-  /** Focus traps, innermost last: the page, then panels and dialogs on top of it. */
-  private traps: { root: HTMLElement; opener: HTMLElement | null }[] = [];
+  /**
+   * Focus traps, innermost last: the page, then panels and dialogs on top
+   * of it, each with what opened it and whether the pointer had focused
+   * that (so it gets focus back the same way, and nothing slides for it).
+   */
+  private traps: { root: HTMLElement; opener: HTMLElement | null; byPointer: boolean }[] = [];
   private readonly listeners: ((el: HTMLElement | null) => void)[] = [];
 
   get root(): HTMLElement | null {
@@ -178,21 +187,21 @@ export class FocusManager {
 
   /** Focus stays inside `root` until `release(root)`; the element focused before gets it back then. */
   trap(root: HTMLElement): void {
-    this.traps.push({ root, opener: this.current });
+    this.traps.push({ root, opener: this.current, byPointer: this.byPointer });
   }
 
   release(root: HTMLElement, restore = true): void {
     const at = this.traps.map((t) => t.root).lastIndexOf(root);
     if (at < 0) return;
     const [t] = this.traps.splice(at, 1);
-    if (restore && t?.opener && t.opener.isConnected && at === this.traps.length) this.focus(t.opener);
+    if (restore && t?.opener && t.opener.isConnected && at === this.traps.length) this.focus(t.opener, t.byPointer);
     else if (this.current && !this.current.isConnected) this.current = null;
   }
 
   /** The root page, under every trap: what the shell renders. */
   setPage(root: HTMLElement): void {
-    if (this.traps.length) this.traps[0] = { root, opener: null };
-    else this.traps.push({ root, opener: null });
+    if (this.traps.length) this.traps[0] = { root, opener: null, byPointer: false };
+    else this.traps.push({ root, opener: null, byPointer: false });
   }
 
   onChange(listener: (el: HTMLElement | null) => void): () => void {
