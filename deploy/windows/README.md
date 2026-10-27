@@ -44,10 +44,12 @@ Run the setup. Its pages:
    - The port (7539), the Plex-compatible API (port 32400, for Plex apps) and
      whether the pley apps find the server on the local network.
    Setup says when another program has the port.
-5. **FFmpeg**: copied next to pley from a folder (a build's `bin` folder,
-   with its DLLs: gyan.dev's, or one built for Dolby Vision FEL),
-   downloaded (gyan.dev's full build, checked against its SHA-256; x64
-   only), or the one on PATH. A service sees only the system's PATH.
+5. **FFmpeg**: the one the installer carries, when it was built with one
+   (see Building the installer), copied next to pley from a folder (a
+   build's `bin` folder, with its DLLs: gyan.dev's, or one built for Dolby
+   Vision FEL), downloaded (gyan.dev's full build, checked against its
+   SHA-256; x64 only), or the one on PATH. A service sees only the system's
+   PATH.
 
 The last page gives pley's address and the link that creates the
 administrator account, and says which encoders pley found in FFmpeg.
@@ -94,7 +96,7 @@ pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=s
 | `/LAN=` | `yes` or `no`: listen on the network | `no` |
 | `/PORT=` | The port | `7539` |
 | `/PLEX=`, `/DISCOVERY=` | `yes` or `no` (discovery with `/LAN=yes`) | `no`, `yes` |
-| `/FFMPEG=` | `keep`, `download`, `path` or a folder | the FFmpeg on PATH, copied; downloaded without one |
+| `/FFMPEG=` | `bundled`, `keep`, `download`, `path` or a folder | the installer's own, or the FFmpeg on PATH, copied; downloaded without one |
 
 Setup's own options work too, such as `/DIR=` (where pley goes) and
 `/LOG=<file>`. An update keeps the last choices for the options not given. A
@@ -170,6 +172,10 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Archive -Installer
 
 or, around a release folder already built,
 `scripts\build-installer.ps1 -Release dist\pley-<version>-windows-x86_64`.
+`-Ffmpeg <an FFmpeg build's bin folder>` makes the installer carry that
+FFmpeg (and the DLLs next to it) and offer it first, for computers that
+don't have it, and `-Flavor fel` adds a name to the file:
+`pley-server-<version>-fel-windows-x86_64-setup.exe`.
 `ISCC /DTest …` builds one that installs in the notification area without
 administrator rights (no shortcuts nor start at sign-in), to try Setup's
 code on a development machine.

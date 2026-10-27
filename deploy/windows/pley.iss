@@ -1,5 +1,6 @@
 ; pley's Windows installer, built with Inno Setup 6.7 or newer:
-;   ISCC /DAppVersion=0.1.0 /DSourceDir=<folder with pley.exe> [/DArch=arm64] deploy\windows\pley.iss
+;   ISCC /DAppVersion=0.1.0 /DSourceDir=<folder with pley.exe> [/DArch=arm64]
+;        [/DFfmpegDir=<an FFmpeg build's bin folder> /DFfmpegLabel=<its name>] [/DFlavor=fel] deploy\windows\pley.iss
 ; scripts\build.ps1 -Installer builds it next to the release archive.
 ; README.md in this folder says what it sets up and how to install silently.
 
@@ -24,6 +25,23 @@
 #endif
 #ifndef OutputDir
   #define OutputDir "..\..\dist"
+#endif
+; An FFmpeg carried by the installer (ffmpeg.exe, ffprobe.exe and the DLLs
+; next to them), offered first: one built for Dolby Vision FEL, say.
+#ifdef FfmpegDir
+  #define Bundled "True"
+  #ifndef FfmpegLabel
+    #define FfmpegLabel "FFmpeg"
+  #endif
+#else
+  #define Bundled "False"
+  #define FfmpegLabel ""
+#endif
+; A name for a build that differs from the release's, in its file name.
+#ifdef Flavor
+  #define Flavored "-" + Flavor
+#else
+  #define Flavored ""
 #endif
 
 [Setup]
@@ -54,7 +72,7 @@ WizardSmallImageFile=..\..\apps\web\public\icon-192.png
 UninstallDisplayIcon={app}\pley.exe
 UninstallDisplayName=pley-server
 OutputDir={#OutputDir}
-OutputBaseFilename=pley-server-{#AppVersion}-windows-{#ArchName}-setup
+OutputBaseFilename=pley-server-{#AppVersion}{#Flavored}-windows-{#ArchName}-setup
 Compression=lzma2/max
 SolidCompression=yes
 ; The FFmpeg download is a .7z with files larger than memory should hold.
@@ -75,6 +93,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; Extracted on its own first to stop the pley being updated (PrepareToInstall).
 Source: "{#SourceDir}\pley.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\*"; Excludes: "pley.exe"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+#ifdef FfmpegDir
+Source: "{#FfmpegDir}\ffmpeg.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion; Check: BundledFfmpeg
+Source: "{#FfmpegDir}\ffprobe.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion; Check: BundledFfmpeg
+Source: "{#FfmpegDir}\*.dll"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion skipifsourcedoesntexist; Check: BundledFfmpeg
+#endif
 
 #ifndef Test
 [Icons]
@@ -108,7 +131,7 @@ var
   LocalRadio, LanRadio: TNewRadioButton;
   PortEdit: TNewEdit;
   PlexCheck, DiscoveryCheck: TNewCheckBox;
-  KeepRadio, FolderRadio, DownloadRadio, PathRadio: TNewRadioButton;
+  BundledRadio, KeepRadio, FolderRadio, DownloadRadio, PathRadio: TNewRadioButton;
   FolderEdit: TNewEdit;
   FolderButton: TNewButton;
   DownloadPage: TDownloadWizardPage;
@@ -127,6 +150,11 @@ function SetEnvironmentVariable(Name, Value: String): BOOL;
 function IsTray: Boolean;
 begin
   Result := TrayRadio.Checked;
+end;
+
+function BundledFfmpeg: Boolean;
+begin
+  Result := BundledRadio.Checked;
 end;
 
 function ModeName: String;
@@ -407,6 +435,13 @@ begin
 
   FfmpegPage := CreateCustomPage(NetworkPage.ID, 'FFmpeg', 'What pley transcodes with');
   Top := 0;
+  if {#Bundled} then
+    BundledRadio := AddRadio(FfmpegPage, Top, 'The FFmpeg that comes with this installer', '{#FfmpegLabel}.')
+  else
+  begin
+    BundledRadio := AddRadio(FfmpegPage, Top, '', '');
+    BundledRadio.Visible := False;
+  end;
   KeepRadio := AddRadio(FfmpegPage, Top, 'Keep the FFmpeg installed with pley', '');
   FolderRadio := AddRadio(FfmpegPage, Top, 'Copy FFmpeg from this folder:',
     'Copied next to pley, where a service can run it: ffmpeg.exe, ffprobe.exe and any DLLs with them, ' +
@@ -457,7 +492,10 @@ begin
 
   Ffmpeg := CmdParam('FFMPEG', '');
   FolderEdit.Text := GetPreviousData('FfmpegFolder', FfmpegOnPath);
-  if CompareText(Ffmpeg, 'download') = 0 then
+  // The FFmpeg an installer carries is what it was built for: its default.
+  if {#Bundled} and ((Ffmpeg = '') or (CompareText(Ffmpeg, 'bundled') = 0)) then
+    BundledRadio.Checked := True
+  else if CompareText(Ffmpeg, 'download') = 0 then
     DownloadRadio.Checked := True
   else if CompareText(Ffmpeg, 'path') = 0 then
     PathRadio.Checked := True
@@ -704,7 +742,9 @@ begin
   if Discovery then
     S := S + NewLine + Space + 'Found by the pley apps on the network';
   S := S + NewLine + NewLine + 'FFmpeg:' + NewLine + Space;
-  if KeepRadio.Checked then
+  if BundledRadio.Checked then
+    S := S + 'The one that comes with this installer ({#FfmpegLabel})'
+  else if KeepRadio.Checked then
     S := S + 'The one installed with pley'
   else if FolderRadio.Checked then
     S := S + 'Copied from ' + Trim(FolderEdit.Text)
@@ -989,6 +1029,9 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   Options: String;
 begin
+  // The FFmpeg it carries replaces the one there was, DLLs and all.
+  if (CurStep = ssInstall) and BundledRadio.Checked then
+    DelTree(ExpandConstant('{app}\ffmpeg'), True, True, True);
   if CurStep <> ssPostInstall then
     Exit;
   if not InstallFfmpeg(Options) then
