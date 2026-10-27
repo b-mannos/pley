@@ -9,7 +9,9 @@ import app.pley.android.model.ItemSummary
 import app.pley.android.network.OfflineException
 import app.pley.android.testing.network.FakePleyApi
 import java.io.IOException
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -48,6 +50,34 @@ class ItemDetailsTest {
         runCatching { details.detail(7) }
 
         assertEquals(1, api.calls("item").size)
+    }
+
+    @Test
+    fun aCopyBeingAskedAgainWaitsForTheServersTracks() = runBlocking {
+        // Subtitles were turned on for the show since this episode was held.
+        val held = ItemDetail(id = 7, libraryId = 1, kind = ItemKind.Episode, title = "Pilot")
+        val now = held.copy(title = "Pilot, with the tracks picked since")
+        val details = ItemDetails.snapshotFirst(items(Loadable.Ready(held, fresh = false), Loadable.Ready(now, fresh = true)), api)
+
+        assertEquals(now, details.detail(7))
+        assertEquals(0, api.calls("item").size)
+    }
+
+    @Test
+    fun aCopyBeingAskedAgainPlaysWhenTheServerCantAnswer() = runBlocking {
+        val held = ItemDetail(id = 7, libraryId = 1, kind = ItemKind.Episode, title = "Pilot")
+        val failed = ItemDetails.snapshotFirst(items(Loadable.Ready(held, fresh = false), Loadable.Failed(away(), held)), api)
+        assertEquals(held, failed.detail(7))
+        // Nothing within the wait: what is held plays.
+        val silent = object : ItemRepository by items() {
+            override fun detail(itemId: Long): Flow<Loadable<ItemDetail>> = flow {
+                emit(Loadable.Ready(held, fresh = false))
+                awaitCancellation()
+            }
+        }
+        val started = System.nanoTime()
+        assertEquals(held, ItemDetails.snapshotFirst(silent, api).detail(7))
+        assertTrue((System.nanoTime() - started) / 1_000_000 < ItemDetails.FRESH_WAIT_MS + 1_000)
     }
 
     private fun away() = OfflineException(IOException("no answer in time"))

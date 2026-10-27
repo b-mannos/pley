@@ -55,6 +55,13 @@ interface WatchStateRepository {
     suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?)
 
     /**
+     * The player saved these tracks for [itemId] itself: its page, and
+     * playing it again, start with them; the show's other episodes are
+     * asked for again, since the choice is the whole show's.
+     */
+    fun streamsChosen(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) = Unit
+
+    /**
      * Takes [itemId] out of Continue Watching, Home's and the libraries'
      * (an episode: its whole show), until it is played again. Its progress
      * and watched mark stay.

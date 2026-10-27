@@ -164,7 +164,11 @@ class SessionHarness(
         pictures = pictures,
         events = events,
         local = local,
+        tracksChosen = { itemId, choice -> synchronized(tracksChosen) { tracksChosen += itemId to choice } },
     )
+
+    /** What the app was told of tracks the player saved (PlaybackEnvironment.tracksChosen). */
+    val tracksChosen = mutableListOf<Pair<Long, StreamChoice>>()
 
     /** Starts playing [request] and lets the server answer. */
     fun play(request: PlayRequest): SessionPlaybackController {

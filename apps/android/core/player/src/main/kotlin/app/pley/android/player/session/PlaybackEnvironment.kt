@@ -13,6 +13,7 @@ import app.pley.android.data.Loadable
 import app.pley.android.data.LocalMedia
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ServerEvent
+import app.pley.android.model.StreamChoice
 import app.pley.android.network.OfflineException
 import app.pley.android.network.PleyApi
 import app.pley.android.player.subtitles.Media3VttParser
@@ -30,6 +31,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** An item's details for playing: what was saved first, else the server's. */
 fun interface ItemDetails {
@@ -41,7 +43,11 @@ fun interface ItemDetails {
 
         /**
          * The repository's first answer (its snapshot, so playing starts
-         * without waiting on the network), else the server's.
+         * without waiting on the network), else the server's. A copy that is
+         * being asked for again (older, or out of date since tracks were
+         * picked or the profile's defaults changed) names the tracks it
+         * started with then, and an old resume point: the server's answer
+         * is waited for [FRESH_WAIT_MS] at most.
          */
         fun snapshotFirst(items: ItemRepository, api: PleyApi): ItemDetails = ItemDetails { id ->
             var before = true
@@ -64,12 +70,29 @@ fun interface ItemDetails {
                 null
             }
             when (first) {
-                is Loadable.Ready -> first.value
+                is Loadable.Ready -> if (first.fresh) first.value else latest(items, id) ?: first.value
                 // Out of reach, asking again would only wait as long again.
                 is Loadable.Failed -> first.stale ?: if (first.error is OfflineException) throw first.error else api.item(id)
                 else -> api.item(id)
             }
         }
+
+        /** The server's answer for [id] if it comes within [FRESH_WAIT_MS], else `null`. */
+        private suspend fun latest(items: ItemRepository, id: Long): ItemDetail? = try {
+            withTimeoutOrNull(FRESH_WAIT_MS) {
+                when (val answer = items.detail(id).first { (it is Loadable.Ready && it.fresh) || it is Loadable.Failed }) {
+                    is Loadable.Ready -> answer.value
+                    else -> null
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+
+        /** How long a playback waits for the server's details when what is held may be out of date. */
+        const val FRESH_WAIT_MS = 1_500L
     }
 }
 
@@ -174,4 +197,10 @@ class PlaybackEnvironment(
     val events: Flow<ServerEvent> = emptyFlow(),
     /** Downloads: files played as they are on the device, without the server. */
     val local: LocalMedia = LocalMedia.None,
+    /**
+     * Tracks picked in the player, saved by it (PUT /api/items/{id}/streams):
+     * what the app holds of the item, and of the show's other episodes, is
+     * told (WatchStateRepository.streamsChosen).
+     */
+    val tracksChosen: (itemId: Long, choice: StreamChoice) -> Unit = { _, _ -> },
 )

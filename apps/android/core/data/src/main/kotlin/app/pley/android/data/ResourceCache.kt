@@ -317,7 +317,12 @@ internal class Entry<T>(
         synchronized(this) {
             if (snapshotJob == null && serializer != null) snapshotJob = cache.app.launch { readSnapshot(serializer) }
         }
-        if (stale()) load()
+        if (stale()) {
+            // What is held is shown while the server is asked again: no
+            // longer the server's latest (a player waits a moment for that).
+            state.update { if (it is Loadable.Ready && it.fresh) Loadable.Ready(it.value, fresh = false) else it }
+            load()
+        }
     }
 
     /**

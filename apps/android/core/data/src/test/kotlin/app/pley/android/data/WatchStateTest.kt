@@ -6,8 +6,11 @@ import app.pley.android.model.ItemList
 import app.pley.android.model.ItemSummary
 import app.pley.android.model.RatingRequest
 import app.pley.android.model.StreamChoice
+import app.pley.android.model.SubtitleMode
+import app.pley.android.model.TrackDefaults
 import app.pley.android.network.ApiException
 import app.pley.android.testing.Fixtures
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -152,5 +155,47 @@ class WatchStateTest {
         assertEquals(2, chosen.files.first().selectedAudio)
         assertNull(chosen.files.first().selectedSubtitle)
         assertEquals(listOf<Any?>(101L, StreamChoice(file.id, 2, null)), data.api.calls("setStreams").single().args)
+    }
+
+    @Test
+    fun `tracks the player saved show at once, and another episode held is asked again before it plays`() = runTest {
+        val data = signedIn(folder.newFolder())
+        val movie = collect(data.graph.items.detail(101))
+        val run = appRun()
+        val episode = collect(data.graph.items.detail(203), run)
+        testScheduler.runCurrent()
+        run.cancel()
+        val file = movie.last().valueOrNull!!.files.first()
+        val asked = data.api.calls("item").size
+
+        // The player saved them itself: nothing more goes to the server.
+        data.graph.watchState.streamsChosen(101, file.id, 2, 1)
+        assertEquals(2, movie.last().valueOrNull!!.files.first().selectedAudio)
+        assertEquals(1, movie.last().valueOrNull!!.files.first().selectedSubtitle)
+        assertTrue(data.api.calls("setStreams").isEmpty())
+
+        // The episode held says it is out of date while the server is asked again.
+        val again = collect(data.graph.items.detail(203))
+        testScheduler.runCurrent()
+        assertEquals(episode.last().valueOrNull, again.first().valueOrNull)
+        assertFalse((again.first() as Loadable.Ready).fresh)
+        assertTrue((again.last() as Loadable.Ready).fresh)
+        assertEquals(asked + 1, data.api.calls("item").size)
+    }
+
+    @Test
+    fun `new track defaults have the titles held asked again`() = runTest {
+        val data = signedIn(folder.newFolder())
+        val run = appRun()
+        collect(data.graph.items.detail(101), run)
+        testScheduler.runCurrent()
+        run.cancel()
+        val asked = data.api.calls("item").size
+
+        data.graph.trackDefaults.save(TrackDefaults(audioLanguage = "fre", subtitleLanguage = null, subtitleMode = SubtitleMode.Always))
+        val again = collect(data.graph.items.detail(101))
+        testScheduler.runCurrent()
+        assertFalse((again.first() as Loadable.Ready).fresh)
+        assertEquals(asked + 1, data.api.calls("item").size)
     }
 }

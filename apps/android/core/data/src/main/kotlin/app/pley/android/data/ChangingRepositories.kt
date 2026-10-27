@@ -185,7 +185,16 @@ internal class CachedWatchState(private val cache: ResourceCache) : WatchStateRe
     override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) {
         val patched = cache.patchAll(ItemPatch.streams(itemId, fileId, audioIndex, subtitleIndex)::apply)
         undoing(patched) { cache.api(cache.profile()).setStreams(itemId, StreamChoice(fileId, audioIndex, subtitleIndex)) }
-        // A show's episodes share the choice: their pages are asked again when shown.
+        othersAskedAgain(itemId)
+    }
+
+    override fun streamsChosen(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) {
+        cache.patchAll(ItemPatch.streams(itemId, fileId, audioIndex, subtitleIndex)::apply)
+        othersAskedAgain(itemId)
+    }
+
+    /** A show's episodes share the choice: their pages are asked again when shown, and a player waits for that. */
+    private fun othersAskedAgain(itemId: Long) {
         cache.revalidate { key, _ -> key.startsWith("item:") && key != SnapshotKeys.item(itemId) }
     }
 }
@@ -239,6 +248,8 @@ fun interface TrackDefaultsRoute {
 internal class SessionTrackDefaults(
     private val session: SessionManager,
     private val route: TrackDefaultsRoute,
+    /** Titles held start with the tracks the defaults picked: asked again once they change. */
+    private val cache: ResourceCache? = null,
 ) : TrackDefaultsRepository {
     override fun defaults(): Flow<Loadable<TrackDefaults>> = session.meState.map { me ->
         when (me) {
@@ -263,6 +274,7 @@ internal class SessionTrackDefaults(
             throw e
         }
         session.updateMe(issuer, me)
+        cache?.revalidate { key, _ -> key.startsWith("item:") }
     }
 }
 

@@ -109,6 +109,8 @@ class TracksTest {
             listOf(text.index, picture.index, null),
             streamChoices(movie.id).map { it.subtitleIndex },
         )
+        // The app's copy of the item (its page, playing it again) is told each time.
+        assertEquals(streamChoices(movie.id).map { movie.id to it }, h.tracksChosen)
         assertEquals(0, h.api.count("subtitles"))
     }
 

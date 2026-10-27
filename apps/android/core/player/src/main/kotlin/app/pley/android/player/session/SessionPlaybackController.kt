@@ -187,6 +187,9 @@ class SessionPlaybackController(
 
     private var next: ItemSummary? = null
     private var nextDetail: Pair<Long, ItemDetail>? = null
+
+    /** Track choices saved so far ([saveStreams]). */
+    private var choicesSaved = 0
     private var countdown: Job? = null
     private var nextLookup: Job? = null
 
@@ -1116,9 +1119,12 @@ class SessionPlaybackController(
         next = found
         // The next item's details and still, ahead of time.
         if (nextDetail?.first != found.id) {
+            val choices = choicesSaved
             scope.launch {
                 try {
-                    nextDetail = found.id to env.details.detail(found.id)
+                    val detail = env.details.detail(found.id)
+                    // Tracks picked meanwhile change what it starts with: asked again then.
+                    if (choices == choicesSaved) nextDetail = found.id to detail
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
@@ -1260,6 +1266,11 @@ class SessionPlaybackController(
         val itemId = item?.id ?: return
         val choice = StreamChoice(fileId = file?.id, audioIndex = audio?.index, subtitleIndex = subtitle?.index)
         env.reporter.send { env.api.setStreams(itemId, choice) }
+        env.tracksChosen(itemId, choice)
+        // The next episode's details, asked for before, name the tracks it
+        // started with then: it is asked for again, after this choice is saved.
+        choicesSaved++
+        nextDetail = null
     }
 
     private fun dropTrickplay() {
