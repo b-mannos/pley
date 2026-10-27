@@ -34,6 +34,22 @@ export function artCandidates(item: ItemSummary, kind: ArtKind): string[] {
   return out;
 }
 
+/** The placeholder's padding, each side. */
+const TITLE_PAD = 12;
+/** A bold glyph's width in ems, about, for the title's longest word. */
+const GLYPH_EM = 0.56;
+
+/**
+ * The size a placeholder's title is set in, in px: Title's 16, or smaller
+ * so that its longest word fits across the tile whole ("Casablanca" on a
+ * poster), down to 11; a word longer still breaks where it must.
+ */
+export function placeholderTitleSize(title: string, width: number): number {
+  const longest = title.split(/\s+/).reduce((n, word) => Math.max(n, word.length), 0);
+  const fits = (width - 2 * TITLE_PAD) / (longest * GLYPH_EM);
+  return fits >= 16 ? 16 : Math.max(11, Math.floor(fits));
+}
+
 /**
  * One picture from its candidates, `width` canvas px wide: the first that
  * loads wins. Until then the title's gradient, with the title on it when
@@ -101,11 +117,16 @@ export function Art(props: {
     const t = setTimeout(() => setState((s) => (s.url === shown ? { ...s, covered: true } : s)), instant ? 0 : 160);
     return () => clearTimeout(t);
   }, [loaded, covered, shown]);
+  const titleSize = props.showTitle ? placeholderTitleSize(props.title, props.width) : 16;
   return (
     <div class={props.class} style={props.style}>
       {!covered && (
         <div class="tile-placeholder" style={{ background: placeholderGradient(props.title) }}>
-          {props.showTitle && <div class="t-title lines-4">{props.title}</div>}
+          {props.showTitle && (
+            <div class="t-title lines-4" style={titleSize < 16 ? `font-size:${titleSize}px;line-height:${Math.round(titleSize * 1.375)}px` : undefined}>
+              {props.title}
+            </div>
+          )}
         </div>
       )}
       {shown && (

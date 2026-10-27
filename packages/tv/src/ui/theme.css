@@ -656,7 +656,9 @@ body {
 }
 .rail.open .rail-item.current { background: var(--surface3); }
 .rail.open .rail-item.current::before { display: none; }
-.rail-item[data-focused] {
+/* Focus wins over the current entry's Surface3 once the rail is open (its own entry has focus first). */
+.rail-item[data-focused],
+.rail.open .rail-item[data-focused] {
   background: var(--accent);
   color: var(--on-accent);
   transform: scale(1.05);
