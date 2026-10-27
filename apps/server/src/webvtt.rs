@@ -1,0 +1,94 @@
+//! WebVTT cues moved in time, for `GET /api/files/{id}/subtitles/{index}.vtt?offset_ms=`:
+//! players that draw subtitles themselves move them as they draw (Android,
+//! the TVs' web app), but Roku's Video node draws a sideloaded track as it
+//! comes, so its subtitle sync asks the server for the track moved.
+
+/// The most a track is moved, either way: ten minutes.
+pub const MAX_OFFSET_MS: i64 = 600_000;
+
+/// `text` with every cue `offset_ms` later (earlier when negative). A time
+/// that would come before the start is the start. Everything but the cues'
+/// timing lines stays as it was, their settings too.
+pub fn shift(text: &str, offset_ms: i64) -> String {
+    if offset_ms == 0 {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len() + text.len() / 8);
+    for line in text.split_inclusive('\n') {
+        match moved_timing(line, offset_ms) {
+            Some(moved) => out.push_str(&moved),
+            None => out.push_str(line),
+        }
+    }
+    out
+}
+
+/// A cue's timing line ("00:01.000 --> 00:04.000 line:90%") moved, or
+/// `None` for any other line. WebVTT allows `-->` nowhere else.
+fn moved_timing(line: &str, offset_ms: i64) -> Option<String> {
+    let (start, rest) = line.split_once("-->")?;
+    let start = time_ms(start.trim())?;
+    let rest = rest.trim_start();
+    let end_len = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    let (end, after) = rest.split_at(end_len);
+    let end = time_ms(end)?;
+    let moved = |ms: i64| clock((ms + offset_ms).max(0));
+    Some(format!("{} --> {}{}", moved(start), moved(end), after))
+}
+
+/// "01:02:03.456" or "02:03.456" in milliseconds.
+fn time_ms(text: &str) -> Option<i64> {
+    let (clock, millis) = text.split_once('.')?;
+    let number = |part: &str| -> Option<i64> {
+        if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        part.parse().ok()
+    };
+    if millis.len() != 3 {
+        return None;
+    }
+    let parts: Vec<&str> = clock.split(':').collect();
+    let (hours, minutes, seconds) = match parts.as_slice() {
+        [minutes, seconds] => (0, number(minutes)?, number(seconds)?),
+        [hours, minutes, seconds] => (number(hours)?, number(minutes)?, number(seconds)?),
+        _ => return None,
+    };
+    Some(((hours * 60 + minutes) * 60 + seconds) * 1000 + number(millis)?)
+}
+
+/// Milliseconds as "01:02:03.456".
+fn clock(ms: i64) -> String {
+    format!("{:02}:{:02}:{:02}.{:03}", ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TRACK: &str = "WEBVTT\n\nNOTE made by pley\n\n1\n00:01.000 --> 00:04.000 line:90% align:center\nHello\n\n01:00:02.500 --> 01:00:03.000\r\n<i>there</i>\r\n";
+
+    #[test]
+    fn moves_every_cue_and_nothing_else() {
+        assert_eq!(
+            shift(TRACK, 300),
+            "WEBVTT\n\nNOTE made by pley\n\n1\n00:00:01.300 --> 00:00:04.300 line:90% align:center\nHello\n\n01:00:02.800 --> 01:00:03.300\r\n<i>there</i>\r\n"
+        );
+        assert_eq!(shift(TRACK, 0), TRACK);
+    }
+
+    #[test]
+    fn earlier_stops_at_the_start() {
+        let moved = shift("WEBVTT\n\n00:00.500 --> 00:02.000\nHi\n", -1_000);
+        assert_eq!(moved, "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nHi\n");
+    }
+
+    #[test]
+    fn leaves_what_isnt_a_timing_line() {
+        // Not times: left as they are.
+        assert_eq!(shift("a --> b\n", 300), "a --> b\n");
+        assert_eq!(shift("00:01 --> 00:02.000\n", 300), "00:01 --> 00:02.000\n");
+        assert_eq!(time_ms("1:02:03.456"), Some(3_723_456));
+        assert_eq!(clock(3_723_456), "01:02:03.456");
+    }
+}

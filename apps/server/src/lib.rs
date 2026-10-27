@@ -47,6 +47,7 @@ pub mod trickplay;
 pub mod two_step;
 pub mod util;
 pub mod web;
+pub mod webvtt;
 
 use std::net::SocketAddr;
 use std::time::Duration;

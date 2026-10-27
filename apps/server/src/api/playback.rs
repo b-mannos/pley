@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use axum::Json;
 use axum::body::{Body, Bytes};
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use dashmap::DashMap;
@@ -31,6 +31,7 @@ use crate::playback::{
 };
 use crate::state::AppState;
 use crate::streams;
+use crate::webvtt;
 
 /// Length of HLS segments. Nothing plays before FFmpeg has written a whole
 /// segment, and every start, seek and quality switch starts a process that
@@ -816,12 +817,22 @@ pub async fn stream_file(
     Ok(response)
 }
 
+/// What a subtitle file is asked for with.
+#[derive(Deserialize, Default)]
+pub struct SubtitleQuery {
+    /// A text track's cues moved this much (positive: later), for players
+    /// that can't move them themselves (Roku's subtitle sync).
+    offset_ms: Option<i64>,
+}
+
 /// `/api/files/{id}/subtitles/{index}.vtt`: a text track (or subtitle file)
-/// as WebVTT; `{index}.mks`: a picture track in a Matroska file of its own.
+/// as WebVTT, moved by `offset_ms` when asked; `{index}.mks`: a picture
+/// track in a Matroska file of its own.
 pub async fn subtitles(
     State(state): State<AppState>,
     user: AuthUser,
     Path((id, name)): Path<(i64, String)>,
+    Query(query): Query<SubtitleQuery>,
     request: Request,
 ) -> ApiResult<Response> {
     if let Some(index) = name.strip_suffix(".mks") {
@@ -835,6 +846,8 @@ pub async fn subtitles(
         .ok_or_else(|| AppError::not_found("unknown subtitle file"))?;
     let file = visible_file(&state, &user, id).await?;
     let (sidecar, version) = subtitle_source(&file, index).await?;
+    let offset = query.offset_ms.unwrap_or(0).clamp(-webvtt::MAX_OFFSET_MS, webvtt::MAX_OFFSET_MS);
+    let moved = |text: String| if offset == 0 { text } else { webvtt::shift(&text, offset) };
     let cache =
         state.config.cache_dir().join("subtitles").join(format!("{}_{}_{}{version}.vtt", file.id, index, file.mtime));
     // Anything but WebVTT is a file cut short by an earlier version (written
@@ -842,7 +855,7 @@ pub async fn subtitles(
     if let Ok(text) = tokio::fs::read_to_string(&cache).await
         && text.starts_with("WEBVTT")
     {
-        return Ok(vtt(text));
+        return Ok(vtt(moved(text)));
     }
     let Some(path) = sidecar else {
         // An embedded track: the cues found so far, at once, while the rest
@@ -852,7 +865,7 @@ pub async fn subtitles(
             state.transcoder.subtitles_so_far(&file.path, index).await.map_err(|err| for_viewer(&user, err))?;
         if complete {
             cache_subtitles(&cache, text.as_bytes()).await;
-            return Ok(vtt(text));
+            return Ok(vtt(moved(text)));
         }
         return Ok((
             [
@@ -860,7 +873,7 @@ pub async fn subtitles(
                 (header::CACHE_CONTROL, "no-store"),
                 (header::HeaderName::from_static(SUBTITLES_COMPLETE_HEADER), "0"),
             ],
-            text,
+            moved(text),
         )
             .into_response());
     };
@@ -868,7 +881,7 @@ pub async fn subtitles(
     let made = extract_once(cache, async move { Ok(transcoder.subtitles(&path, None).await?.into_bytes()) })
         .await
         .map_err(|err| for_viewer(&user, err))?;
-    Ok(vtt(String::from_utf8_lossy(&made).into_owned()))
+    Ok(vtt(moved(String::from_utf8_lossy(&made).into_owned())))
 }
 
 /// Where subtitle `index` of `file` comes from: a sidecar's path (`None`:

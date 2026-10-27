@@ -1015,6 +1015,27 @@ async fn subtitles_are_converted_once() {
 }
 
 #[tokio::test]
+async fn subtitles_come_moved_when_asked() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let file = app.file_of(w.movies["Feature"]).await;
+    let track = format!("/api/files/{file}/subtitles/4.vtt");
+    let plain = app.get(&track, admin).await.text();
+    assert!(plain.contains("00:00.000 --> 00:01.000"), "{plain}");
+    // Later or earlier, from the same cached track; never before the start.
+    let later = app.get(&format!("{track}?offset_ms=300"), admin).await;
+    assert_eq!(later.status, StatusCode::OK);
+    assert!(later.text().contains("00:00:00.300 --> 00:00:01.300"), "{}", later.text());
+    let earlier = app.get(&format!("{track}?offset_ms=-500"), admin).await.text();
+    assert!(earlier.contains("00:00:00.000 --> 00:00:00.500"), "{earlier}");
+    assert_eq!(app.get(&format!("{track}?offset_ms=0"), admin).await.text(), plain);
+    assert_eq!(w.fake.subtitles.lock().len(), 1, "converted once");
+    let sidecar = app.get(&format!("/api/files/{file}/subtitles/1000.vtt?offset_ms=1000"), admin).await.text();
+    assert!(sidecar.contains("00:00:01.000 --> 00:00:02.000"), "{sidecar}");
+    assert_eq!(app.get(&format!("{track}?offset_ms=soon"), admin).await.status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn picture_subtitles_come_in_files_of_their_own() {
     let w = world().await;
     let (app, admin) = (&w.app, w.admin.as_str());
