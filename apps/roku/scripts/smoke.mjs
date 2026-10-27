@@ -90,6 +90,19 @@ function qrDrawn() {
   const at = (y * frame.width + x) * 4;
   return frame.data[at] > 200 && frame.data[at + 1] > 200 && frame.data[at + 2] > 200;
 }
+// The subtitle sync panel's title, in the accent, at the top of the player
+// (from 608, 112).
+function syncDrawn() {
+  if (!frame) return false;
+  for (let y = 112; y < 144; y += 2) {
+    for (let x = 608; x < 800; x += 2) {
+      const at = (Math.round(y * (frame.height / 1080)) * frame.width + Math.round(x * (frame.width / 1920))) * 4;
+      if (frame.data[at] < 120 && frame.data[at + 1] > 150 && frame.data[at + 2] > 200) return true;
+    }
+  }
+  return false;
+}
+
 async function drawnWithin(ms, test) {
   const until = Date.now() + ms;
   while (Date.now() < until) {
@@ -212,6 +225,7 @@ async function signOut() {
 }
 
 const qr = { shown: false, hidden: false };
+const sync = { label: false };
 // Home asks again only after playing, or when its rows are a minute old.
 const home = { kept: false, loadedAt: 0 };
 
@@ -240,6 +254,13 @@ async function walk() {
   await press("select"); // Resume
   await waitFor(/^POST \/api\/playback$/, since, "a playback session");
   shoot("player");
+  // Subtitle sync: Down brings it up, right moves the subtitles later, and
+  // Back closes it, the stream opening again with its text track moved.
+  await press("down");
+  await press("right", 3);
+  sync.label = await drawnWithin(2500, syncDrawn);
+  shoot("player-sync");
+  await press("back");
   since = mark();
   await press("back"); // stopped, then the session closed
   await waitFor(/^DELETE \/api\/playback\//, since, "closing the session");
@@ -373,6 +394,8 @@ const checks = [
   ["loaded Home", asked(/^GET \/api\/hubs\/home$/)],
   ["asked to play with its capabilities", asked(/^POST \/api\/playback$/)],
   ["asked for the picture subtitles to be drawn", fixture.playbacks.some((p) => p.item === 103 && p.subtitle_index === 4)],
+  ["showed subtitle sync", sync.label],
+  ["remembered the subtitles 0.3 s later", registry !== null && /offsets.*\|\d+\\",300\]/.test(JSON.stringify([...registry]))],
   ["closed a session that came after Back", fixture.closed.includes("s1")],
   ["closed the session it played", fixture.closed.length > 1],
   ["reported where it stopped", fixture.progress.some((p) => p.state === "stopped" && p.session_id)],

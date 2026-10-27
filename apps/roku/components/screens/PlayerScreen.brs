@@ -5,7 +5,8 @@
 ' otherwise it starts again where it was, with a new session and the
 ' current token (a token that ran out answers 401 to the Video node).
 ' Skip Intro and Skip Credits follow the web player: an episode's credits
-' bring up Up Next instead.
+' bring up Up Next instead. Down brings up subtitle sync for a file with
+' text subtitles (SubtitleSync.brs).
 
 sub init()
     m.video = m.top.findNode("video")
@@ -22,6 +23,9 @@ sub init()
     m.noticeText = m.top.findNode("noticeText")
     m.noticeButtons = m.top.findNode("noticeButtons")
     m.countdownTimer = m.top.findNode("countdownTimer")
+    m.sync = m.top.findNode("sync")
+    m.syncValue = m.top.findNode("syncValue")
+    m.syncButtons = m.top.findNode("syncButtons")
     m.clock = CreateObject("roTimespan")
     m.started = false
     ' Which opening the answers belong to: answers for an earlier one are dropped.
@@ -54,6 +58,14 @@ sub init()
     m.skipMarker = invalid
     m.skipKey = ""
     m.skipDismissed = false
+    ' Subtitle sync: the file's offset, under what it is remembered, the
+    ' offset when the panel opened, and how many text tracks there are.
+    m.syncMs = 0
+    m.syncKey = ""
+    m.syncWas = 0
+    m.textTracks = 0
+    m.syncButtons.buttons = ["Done", "Reset"]
+    m.syncButtons.observeField("buttonSelected", "onSyncButton")
     m.video.notificationInterval = 1
     m.video.observeField("state", "onState")
     m.video.observeField("position", "onPosition")
@@ -107,6 +119,8 @@ sub open(itemId as dynamic, startMs as integer, item as dynamic, mode as string)
     m.skipMarker = invalid
     m.skipKey = ""
     m.skipDismissed = false
+    m.textTracks = 0
+    m.sync.visible = false
     hideSkip()
     hideUpNext()
     m.notice.visible = false
@@ -187,18 +201,13 @@ sub begin()
     m.durationMs = httpNumber(m.info.duration_ms, 0)
     m.markers = playerFileMarkers(m.item, m.info.file_id)
     m.upNextAt = playerUpNextAt(m.durationMs, m.markers)
+    ' The sync remembered for this file moves every text track.
+    m.syncKey = syncKey(m.global.session.server, m.info.file_id)
+    m.syncMs = syncOffset(syncSection(), m.syncKey)
     stream = contentStream(m.info, m.item, m.global.session.server, m.startMs)
-    content = CreateObject("roSGNode", "ContentNode")
-    content.url = stream.url
-    content.streamFormat = stream.streamFormat
-    content.title = stream.title
-    content.playStart = stream.playStart
-    content.subtitleTracks = stream.subtitleTracks
-    if LCase(Left(stream.url, 8)) = "https://" then nodesFill(content, { HttpCertificatesFile: "common:/certs/ca-bundle.crt" })
-    m.video.setHttpAgent(uiHttpAgent())
-    m.video.content = content
+    m.textTracks = stream.subtitleTracks.Count()
+    showStream(stream, syncTrackUrl(stream.subtitle, m.syncMs))
     if stream.subtitle <> ""
-        m.video.subtitleTrack = stream.subtitle
         captionsOn()
     else
         captionsBack()
@@ -206,6 +215,79 @@ sub begin()
     m.video.control = "play"
     m.video.setFocus(true)
     m.lastReportAt = m.clock.TotalMilliseconds()
+end sub
+
+' Gives the Video node stream, its text tracks moved as the sync says,
+' showing the track subtitle ("" leaves it to the Roku).
+sub showStream(stream as object, subtitle as string)
+    content = CreateObject("roSGNode", "ContentNode")
+    content.url = stream.url
+    content.streamFormat = stream.streamFormat
+    content.title = stream.title
+    content.playStart = stream.playStart
+    content.subtitleTracks = syncTracks(stream.subtitleTracks, m.syncMs)
+    if LCase(Left(stream.url, 8)) = "https://" then nodesFill(content, { HttpCertificatesFile: "common:/certs/ca-bundle.crt" })
+    m.video.setHttpAgent(uiHttpAgent())
+    m.video.content = content
+    if subtitle <> "" then m.video.subtitleTrack = subtitle
+end sub
+
+' Where subtitle sync is remembered on this Roku.
+function syncSection() as object
+    return CreateObject("roRegistrySection", "subtitleSync")
+end function
+
+' Subtitle sync is offered while a file with text subtitles plays.
+function syncOffered() as boolean
+    return m.info <> invalid and m.textTracks > 0 and not m.notice.visible and not m.upNext.visible
+end function
+
+sub openSync()
+    hideSkip()
+    m.syncWas = m.syncMs
+    m.syncValue.text = syncLabel(m.syncMs)
+    m.sync.visible = true
+    m.syncButtons.focusButton = 0
+    m.syncButtons.setFocus(true)
+end sub
+
+sub stepSync(byMs as integer)
+    m.syncMs = syncClamp(m.syncMs + byMs)
+    m.syncValue.text = syncLabel(m.syncMs)
+end sub
+
+sub onSyncButton(event as object)
+    if m.syncButtons.buttons[event.getData()] = "Reset"
+        stepSync(-m.syncMs)
+    else
+        closeSync()
+    end if
+end sub
+
+' Done or Back: a new offset is remembered for the file, and the stream
+' opens again where it was, its text tracks moved by the server.
+sub closeSync()
+    if not m.sync.visible then return
+    m.sync.visible = false
+    m.video.setFocus(true)
+    if m.syncMs = m.syncWas then return
+    syncRemember(syncSection(), m.syncKey, m.syncMs)
+    reopen()
+end sub
+
+' The stream again from where it is: the same session and address, the
+' subtitles that showed shown again, moved.
+sub reopen()
+    if m.item = invalid or m.info = invalid then return
+    position = m.positionMs
+    seconds = m.video.position
+    if seconds <> invalid and seconds > 0 then position = Int(seconds * 1000)
+    showing = syncBaseUrl(httpString(m.video.currentSubtitleTrack))
+    if showing = "" then showing = syncBaseUrl(httpString(m.video.subtitleTrack))
+    m.positionMs = position
+    m.loading.visible = true
+    showStream(contentStream(m.info, m.item, m.global.session.server, position), syncTrackUrl(showing, m.syncMs))
+    m.video.control = "play"
 end sub
 
 ' Roku shows a subtitle track only while captions are on, a setting of
@@ -279,7 +361,7 @@ sub updateSkip()
         if marker <> invalid then m.skip.text = playerSkipLabel(marker)
     end if
     m.skipMarker = marker
-    shown = marker <> invalid and not m.skipDismissed and m.video.state = "playing" and not m.upNext.visible and not m.notice.visible
+    shown = marker <> invalid and not m.skipDismissed and m.video.state = "playing" and not m.upNext.visible and not m.notice.visible and not m.sync.visible
     if shown = m.skip.visible then return
     if shown
         m.skip.visible = true
@@ -485,6 +567,7 @@ sub onNext(event as object)
 end sub
 
 sub showUpNext()
+    closeSync()
     hideSkip()
     m.upNextShown = true
     m.nextTitle.text = m.next.title
@@ -544,18 +627,42 @@ sub playNext()
     open(nextEpisode.itemId, nextEpisode.startMs, invalid, "auto")
 end sub
 
-' While Up Next counts down: Back cancels it, and play, fast forward and
-' rewind cancel it and act on the video. Otherwise Back leaves the player
+' While subtitle sync shows: left and right (rewind and fast forward too)
+' move the subtitles, Back closes it. While Up Next counts down: Back
+' cancels it, and play, fast forward and rewind cancel it and act on the
+' video. Otherwise Down brings up subtitle sync, and Back leaves the player
 ' (the scene), which closes the session.
 function onKeyEvent(key as string, press as boolean) as boolean
-    if not press or not m.upNext.visible then return false
-    if key = "back"
-        cancelUpNext()
-        return true
+    if not press then return false
+    if m.sync.visible
+        if key = "left" or key = "rewind"
+            stepSync(-syncStepMs())
+            return true
+        end if
+        if key = "right" or key = "fastforward"
+            stepSync(syncStepMs())
+            return true
+        end if
+        if key = "back"
+            closeSync()
+            return true
+        end if
+        return false
     end if
-    if key = "play" or key = "fastforward" or key = "rewind" or key = "replay"
-        cancelUpNext()
-        playerKey(key)
+    if m.upNext.visible
+        if key = "back"
+            cancelUpNext()
+            return true
+        end if
+        if key = "play" or key = "fastforward" or key = "rewind" or key = "replay"
+            cancelUpNext()
+            playerKey(key)
+            return true
+        end if
+        return false
+    end if
+    if key = "down" and syncOffered()
+        openSync()
         return true
     end if
     return false

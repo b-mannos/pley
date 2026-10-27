@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The player: the Video node with its own controls, Skip Intro and Skip
-     Credits, Up Next before the end of an episode, and what went wrong when
-     it did. -->
+     Credits, Up Next before the end of an episode, subtitle sync (Down), and
+     what went wrong when it did. -->
 <component name="PlayerScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -18,6 +18,7 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Format.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Player.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Content.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/SubtitleSync.brs" />
     <children>
         <Rectangle width="1920" height="1080" color="0x000000FF" />
         <Video id="video" width="1920" height="1080">
@@ -32,6 +33,14 @@
             <Label id="nextLine" translation="[540, 156]" width="880" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
             <Label id="countdown" translation="[540, 214]" width="880" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
             <ButtonGroup id="nextButtons" iconUri="" focusedIconUri="" translation="[1460, 60]" minWidth="360" />
+        </Group>
+        <!-- At the top, clear of the subtitles it moves. -->
+        <Group id="sync" translation="[560, 72]" visible="false">
+            <Rectangle width="800" height="236" color="0x16191EE6" />
+            <Label translation="[48, 40]" text="Subtitle sync" color="0x38BDF8FF" font="font:SmallerBoldSystemFont" />
+            <Label id="syncValue" translation="[48, 84]" width="340" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <Label translation="[48, 150]" width="360" wrap="true" maxLines="2" text="Left: earlier · Right: later" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+            <ButtonGroup id="syncButtons" iconUri="" focusedIconUri="" translation="[440, 48]" minWidth="312" />
         </Group>
         <Group id="notice" visible="false">
             <Rectangle width="1920" height="1080" color="0x16191EF2" />

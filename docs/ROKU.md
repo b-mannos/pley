@@ -9,7 +9,7 @@ Play from start, Search with the on-screen keyboard, and Settings with
 Switch server and Sign out. The player plays files as they are whenever the
 Roku can (it reports what it decodes, from `roDeviceInfo`), HLS otherwise,
 reports progress, offers Skip Intro and Skip Credits as the web player does,
-and the next episode at the credits of one. Music isn't played yet: music
+the next episode at the credits of one, and subtitle sync (Down). Music isn't played yet: music
 libraries and their titles are left out.
 
 It talks to the pley server and nothing else, so it works on a home network
@@ -65,6 +65,17 @@ Rules the code keeps:
   subtitle track only with captions on, a setting of the whole Roku: when
   pley picks one, it turns captions on for that playback and back as they
   were after, unless the person changed them meanwhile.
+- Subtitle sync, as the Android TV player's Sync: Down while a file with
+  text subtitles plays brings it up at the top of the screen; left and
+  right (rewind and fast forward too) move the subtitles 0.1 s, from 10 s
+  earlier to 10 s later, shown as "+0.3 s"; Reset puts them back, Done or
+  Back closes it. The Video node draws a sideloaded track as it comes and
+  has no delay, so the server moves the cues (`offset_ms` on every text
+  track's address, docs/API.md) and the stream opens again where it was,
+  the same session, the subtitles that showed shown again. The offset is
+  remembered for each file of each server in the registry (section
+  `subtitleSync`, the latest 50 files) and moves the file's subtitles from
+  the start the next time.
 - Every request says `pleyRoku/<version> (Roku OS <version>; <model>)`, the
   model being `roDeviceInfo`'s display name: the server's `/link` page shows
   that part to whoever types the code.
@@ -124,7 +135,8 @@ from `brs-engine` to `brs-node`): each `sub test_…()` is a test.
 the app with the remote: sign-in with a code and its QR code, Home, a
 title's details after a refused token, Back while the player starts (the
 session that comes after is closed), the player with picture subtitles to
-draw, Home asking again after it, a library's second page, a show, Search,
+draw and its subtitle sync (shown, moved 0.3 s and remembered), Home
+asking again after it, a library's second page, a show, Search,
 Home not asking again after it, Settings, the server gone and Retry, then
 signing out and in again on a server without QR codes; then it starts the
 app again, signed in, in a second process (brs-node runs one app per
