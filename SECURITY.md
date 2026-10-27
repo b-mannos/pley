@@ -107,10 +107,12 @@ styles, no other site may frame pley (`frame-ancestors 'none'`,
 headers.
 
 **Files.** A symbolic link in a library is followed only to a file of the
-same kind (a video to a video), when the library is scanned and again when
-the file is played: a link named like a film can't hand out other files. On
-Unix the data folder (database, backups, log) is readable by pley's account
-only.
+same kind (a video to a video, a picture to a picture), when the library is
+scanned and again when the file is played or the picture or subtitle
+served: a link named like a film can't hand out other files. The data
+folder (database, backups, log, settings) is kept to pley's account: mode
+0700 on Unix; on Windows, a folder every account could use (one on D:\,
+say) is limited to pley's account, SYSTEM and the administrators.
 
 **Transcoder.** The transcoder pley starts listens on `127.0.0.1` with a
 random token. One started on another machine refuses to listen on the

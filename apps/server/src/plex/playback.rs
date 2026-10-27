@@ -135,6 +135,11 @@ pub async fn part_file(
     Ok(response)
 }
 
+/// Largest sidecar subtitle file served as it is (a film's subtitles are
+/// well under 1 MB; picture subtitles are far bigger, and players don't
+/// fetch those here).
+const MAX_SIDECAR_BYTES: u64 = 64 * 1024 * 1024;
+
 /// `/library/streams/{id}`: a subtitle stream (sidecar files as they are,
 /// embedded text subtitles converted to WebVTT).
 pub async fn stream_file(
@@ -146,7 +151,18 @@ pub async fn stream_file(
     let index = meta::stream_index(file.id, id).ok_or(PlexError::NotFound)?;
     catalog::item(&state.db, user.id, file.item_id).await?.ok_or(PlexError::NotFound)?;
     if index >= EXTERNAL_INDEX_BASE {
-        let sub = file.external_subs().into_iter().find(|s| s.index == index).ok_or(PlexError::NotFound)?;
+        // Only a subtitle file (not a link swapped in since the scan, to
+        // pley's database or /dev/zero), and only one of subtitle size.
+        let sub = file
+            .external_subs()
+            .into_iter()
+            .find(|s| s.index == index)
+            .filter(|s| crate::library::walk::leads_to_its_kind(std::path::Path::new(&s.path)))
+            .ok_or(PlexError::NotFound)?;
+        let meta = tokio::fs::metadata(&sub.path).await.map_err(|_| PlexError::NotFound)?;
+        if !meta.is_file() || meta.len() > MAX_SIDECAR_BYTES {
+            return Err(PlexError::NotFound);
+        }
         let bytes = tokio::fs::read(&sub.path).await.map_err(|_| PlexError::NotFound)?;
         return Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], bytes).into_response());
     }

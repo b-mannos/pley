@@ -201,11 +201,13 @@ impl Store {
         self.handed_out.lock().add(name);
     }
 
-    /// The file behind a reference: a blob in the store, or a local file.
+    /// The file behind a reference: a blob in the store, or a local file. A
+    /// local file that became a link to anything but a picture since the
+    /// scan found it (`poster.jpg` to pley's database) is no file.
     pub fn path(&self, reference: &str) -> Option<PathBuf> {
         match reference.strip_prefix(BLOB_PREFIX) {
             Some(name) => valid_blob_name(name).then(|| self.blobs.join(&name[..2]).join(name)),
-            None => Some(PathBuf::from(reference)),
+            None => Some(PathBuf::from(reference)).filter(|path| crate::library::walk::leads_to_its_kind(path)),
         }
     }
 
@@ -771,7 +773,23 @@ mod tests {
         assert!(store.exists(&a));
         let path = store.path(&a).unwrap();
         assert!(path.starts_with(dir.path().join("metadata").join("blobs")));
-        assert_eq!(store.path("C:/media/poster.jpg").unwrap(), PathBuf::from("C:/media/poster.jpg"));
+        let poster = dir.path().join("poster.jpg");
+        std::fs::write(&poster, b"\xff\xd8\xff\xe0 picture").unwrap();
+        assert_eq!(store.path(&poster.to_string_lossy()), Some(poster));
+        assert_eq!(store.path(&dir.path().join("gone.jpg").to_string_lossy()), None);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_picture_swapped_for_a_link_to_another_file_is_no_picture() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path()).await;
+        let secret = dir.path().join("secret.key");
+        std::fs::write(&secret, b"secret").unwrap();
+        let poster = dir.path().join("poster.jpg");
+        std::os::unix::fs::symlink(&secret, &poster).unwrap();
+        assert_eq!(store.path(&poster.to_string_lossy()), None);
+        assert!(!store.exists(&poster.to_string_lossy()));
     }
 
     async fn store_in(dir: &Path) -> Store {

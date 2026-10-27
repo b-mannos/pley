@@ -1156,8 +1156,14 @@ fn artwork_changes(rows: Vec<ArtworkRow>, sidecars: &Sidecars) -> Vec<ArtworkCha
             let after = match (current, local) {
                 (Some(cur), Some(new)) if *cur == new => return None,
                 (_, Some(new)) => Some(new),
-                // Clear local artwork that vanished (downloaded art lives in the blob store).
-                (Some(cur), None) if !crate::store::is_blob(cur) && !Path::new(cur).exists() => None,
+                // Clear local artwork that vanished, or became a link to
+                // something else (downloaded art lives in the blob store).
+                (Some(cur), None)
+                    if !crate::store::is_blob(cur)
+                        && !(Path::new(cur).exists() && super::walk::leads_to_its_kind(Path::new(cur))) =>
+                {
+                    None
+                }
                 _ => return None,
             };
             Some((current.clone(), after))
