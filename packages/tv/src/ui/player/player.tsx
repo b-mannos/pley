@@ -14,6 +14,7 @@ import { useUi } from "../context";
 import { Pill, TextButton } from "../kit/buttons";
 import { F, G } from "../kit/focusable";
 import { Icon, type IconName } from "../kit/icons";
+import { Toast } from "../kit/toast";
 import { sentence, useApp } from "../screens/common";
 import { chapterName, CompactReadout, PlayerPanels, type PlayerPanel } from "./panels";
 import { PictureSubtitles, TextSubtitles } from "./subtitles";
@@ -547,7 +548,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
           </G>
         </div>
       )}
-      {toast && <div class={`toast in t-label${controls ? " low" : ""}${toast.error ? " error" : ""}`}>{toast.text}</div>}
+      <Toast toast={toast ? { text: toast.text, error: toast.error, id: toast.n } : null} low={controls} />
     </div>
   );
 }

@@ -42,10 +42,13 @@ export function Backdrop(p: { candidates: string[]; title: string; scrim: ScrimK
             tryAt(i + 1);
             return;
           }
-          setSlots((s) => {
-            const shown = s.top === "a" ? s.a : s.b;
-            if (shown === objectUrl) return s;
-            return s.top === "a" ? { a: s.a, b: objectUrl, top: "b" } : { a: objectUrl, b: s.b, top: "a" };
+          whenDecoded(objectUrl, () => {
+            if (cancelled) return;
+            setSlots((s) => {
+              const shown = s.top === "a" ? s.a : s.b;
+              if (shown === objectUrl) return s;
+              return s.top === "a" ? { a: s.a, b: objectUrl, top: "b" } : { a: objectUrl, b: s.b, top: "a" };
+            });
           });
         }, -1),
       );
@@ -76,6 +79,24 @@ export function Backdrop(p: { candidates: string[]; title: string; scrim: ScrimK
       />
     </div>
   );
+}
+
+/**
+ * Calls `then` once the picture at `url` is decoded (img.decode, Chromium
+ * 64), else once it has loaded: a crossfade that starts then never waits
+ * on a 1280-wide picture's decoding half way through.
+ */
+function whenDecoded(url: string, then: () => void): void {
+  const img = new Image();
+  img.src = url;
+  if (typeof img.decode === "function") {
+    img.decode().then(then, then);
+  } else if (img.complete) {
+    then();
+  } else {
+    img.onload = () => then();
+    img.onerror = () => then();
+  }
 }
 
 /**

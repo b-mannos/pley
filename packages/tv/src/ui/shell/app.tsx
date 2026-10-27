@@ -9,6 +9,7 @@ import { initMusic } from "../../player/music";
 import { AppContext, Dialog } from "../screens/common";
 import { Screen } from "../screens/screens";
 import { Icon } from "../kit/icons";
+import { Toast } from "../kit/toast";
 import { Navigator, type Entry, type PageKey } from "./navigator";
 import { currentEntry, OFFLINE_TEXT, Rail, railEntries, type RailApi } from "./rail";
 
@@ -252,11 +253,7 @@ export function App(p: ShellProps) {
           />
         )}
         {curtain.value > 0 && <div key={curtain.value} class="curtain fade" />}
-        {toast.value && (
-          <div class={`toast in t-label${toast.value.error ? " error" : ""}`} role="status">
-            {toast.value.text}
-          </div>
-        )}
+        <Toast toast={toast.value} />
       </UiContext.Provider>
     </AppContext.Provider>
   );

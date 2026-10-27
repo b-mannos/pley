@@ -135,7 +135,13 @@ export function Art(props: {
           src={shown}
           alt=""
           decoding="async"
-          onLoad={() => setState({ url: shown, loaded: true, covered: false })}
+          onLoad={(e) => {
+            // Its fade starts once it is decoded, not while it still is.
+            const done = () => setState({ url: shown, loaded: true, covered: false });
+            const img = e.currentTarget as HTMLImageElement;
+            if (typeof img.decode === "function") img.decode().then(done, done);
+            else done();
+          }}
         />
       )}
     </div>
