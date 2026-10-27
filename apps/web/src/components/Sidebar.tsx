@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router";
 import { ArrowUpDown, Film, House, List, ListMusic, ListVideo, LoaderCircle, Music, Plus, Settings, Tv, X } from "lucide-react";
 import { useLibraries } from "@/api/hooks";
@@ -7,6 +7,7 @@ import type { LibraryKind } from "@/api/types";
 import { useAuth } from "@/auth";
 import { cn } from "@/lib/cn";
 import { Logo } from "./Logo";
+import { keepTabInside } from "./Modal";
 import { SortLibrariesModal } from "./SortLibrariesModal";
 import { IconButton, Skeleton } from "./ui";
 import { libraryUrl, playlistUrl } from "@/lib/urls";
@@ -149,6 +150,7 @@ function PlaylistsSection() {
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const location = useLocation();
+  const drawerRef = useRef<HTMLElement>(null);
 
   // Close the drawer after navigating.
   useEffect(() => {
@@ -156,13 +158,24 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
+  // Open, the drawer takes the keyboard (Tab stays in it, the page behind
+  // doesn't scroll); closed, focus goes back to the button that opened it.
   useEffect(() => {
     if (!open) return;
+    const opener = document.activeElement as HTMLElement | null;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    drawerRef.current?.querySelector<HTMLElement>("a[href], button")?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
+      if (e.key === "Tab" && drawerRef.current) keepTabInside(e, drawerRef.current);
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+      if (opener?.isConnected) opener.focus();
+    };
   }, [open, onClose]);
 
   return (
@@ -173,7 +186,13 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       {open ? (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 animate-fade-in bg-black/60" onClick={onClose} />
-          <aside className="absolute inset-y-0 left-0 w-72 max-w-[85vw] animate-pop-in border-r border-border bg-surface shadow-2xl">
+          <aside
+            ref={drawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Menu"
+            className="absolute inset-y-0 left-0 w-72 max-w-[85vw] animate-pop-in border-r border-border bg-surface shadow-2xl"
+          >
             <SidebarContent onClose={onClose} />
           </aside>
         </div>

@@ -15,6 +15,23 @@ export interface ModalProps {
   locked?: boolean;
 }
 
+/** Keeps Tab and Shift+Tab inside `container`: past its last control, back to its first. */
+export function keepTabInside(e: KeyboardEvent, container: HTMLElement) {
+  const focusables = container.querySelectorAll<HTMLElement>(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  );
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+  if (!first || !last) return;
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
 export function Modal({ open, onClose, title, children, footer, size = "md", locked }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -32,22 +49,7 @@ export function Modal({ open, onClose, title, children, footer, size = "md", loc
     document.body.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onEscape(e);
-      if (e.key === "Tab" && panelRef.current) {
-        // Minimal focus trap.
-        const focusables = panelRef.current.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        );
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        if (!first || !last) return;
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
+      if (e.key === "Tab" && panelRef.current) keepTabInside(e, panelRef.current);
     };
     document.addEventListener("keydown", onKey, true);
     // Focus the first input (or the panel) on open.
