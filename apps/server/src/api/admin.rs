@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::AdminUser;
 use crate::error::{ApiResult, AppError};
+use crate::network::{self, Adapter, Fixed, Listen, Listener};
 use crate::playback::{TranscodeInfo, transcode_info};
 use crate::providers::{Check, ProviderError};
 use crate::settings::{Settings, SettingsPatch};
@@ -163,6 +164,67 @@ fn object(name: &str) -> String {
         Some(rest) => format!("the {rest}"),
         None => name.to_owned(),
     }
+}
+
+// ------------------------------------------------------------------ network
+
+/// Where pley listens, and could: Settings → Network.
+#[derive(Debug, Serialize)]
+pub struct NetworkInfo {
+    #[serde(flatten)]
+    listen: Listen,
+    fixed: Fixed,
+    listeners: Vec<Listener>,
+    adapters: Vec<Adapter>,
+    /// Where a change is saved.
+    config_file: String,
+    /// Windows Firewall decides which kinds of network reach pley.
+    windows: bool,
+}
+
+async fn network_info(state: &AppState) -> ApiResult<NetworkInfo> {
+    let adapters = tokio::task::spawn_blocking(network::adapters).await.map_err(anyhow::Error::from)?;
+    Ok(NetworkInfo {
+        listen: state.network.wanted(),
+        fixed: state.network.fixed,
+        listeners: state.network.listeners(),
+        adapters,
+        config_file: state.network.config_file.display().to_string(),
+        windows: cfg!(windows),
+    })
+}
+
+pub async fn get_network(State(state): State<AppState>, _admin: AdminUser) -> ApiResult<Json<NetworkInfo>> {
+    Ok(Json(network_info(&state).await?))
+}
+
+/// Listens as `listen` says from now on, and from the next start on.
+pub async fn put_network(
+    State(state): State<AppState>,
+    AdminUser(user): AdminUser,
+    Json(listen): Json<Listen>,
+) -> ApiResult<Json<NetworkInfo>> {
+    listen.check().map_err(AppError::bad_request)?;
+    let (now, fixed) = (state.network.wanted(), state.network.fixed);
+    if (fixed.web && listen.web != now.web)
+        || (fixed.plex && listen.plex != now.plex)
+        || (fixed.discovery && listen.discovery != now.discovery)
+    {
+        return Err(AppError::bad_request("the command line or the environment sets that: change it there"));
+    }
+    if listen != now {
+        let addresses =
+            |list: &[std::net::SocketAddr]| list.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
+        tracing::info!(
+            "{} changed where pley listens: {} (the Plex-compatible API: {}; discovery {})",
+            user.username,
+            addresses(&listen.web),
+            if listen.plex.is_empty() { "off".to_owned() } else { addresses(&listen.plex) },
+            if listen.discovery { "on" } else { "off" },
+        );
+        state.network.change(listen).await.map_err(|err| AppError::Unavailable(format!("{err:#}")))?;
+    }
+    Ok(Json(network_info(&state).await?))
 }
 
 // ------------------------------------------------------------------ system

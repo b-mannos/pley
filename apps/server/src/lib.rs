@@ -25,6 +25,7 @@ pub mod library;
 pub mod logging;
 pub mod markers;
 pub mod metadata;
+pub mod network;
 pub mod oauth;
 pub mod overrides;
 pub mod people;
@@ -190,8 +191,10 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 /// this server.
 ///
 /// Before the database is opened, the data directory is locked (one server
-/// per data directory, see [`instance`]) and both ports are bound: a second
-/// copy, or one whose port is taken, stops without touching anything.
+/// per data directory, see [`instance`]) and the first address is bound: a
+/// second copy, or one whose port is taken, stops without touching anything.
+/// The other addresses, the Plex-compatible API and discovery follow (see
+/// [`network`]).
 ///
 /// On shutdown the listeners close, the event streams end, and requests in
 /// progress get [`Config::shutdown_grace`] to finish; connections still open
@@ -205,12 +208,8 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     let listener =
         tokio::net::TcpListener::bind(bind).await.map_err(|e| anyhow::anyhow!("cannot listen on {bind}: {e}"))?;
     let addr = listener.local_addr()?;
-    let plex = plex::bind(config.plex_bind).await;
-    let discovery = if config.discovery { discovery::bind(addr).await } else { None };
-    let (extra_binds, plex_extra_binds) = (config.extra_binds.clone(), config.plex_extra_binds.clone());
-    let (discovery_on, retry) = (config.discovery, config.extra_bind_retry);
 
-    let grace = config.shutdown_grace;
+    let (grace, retry) = (config.shutdown_grace, config.extra_bind_retry);
     let state = AppState::init(config).await?;
     state.start_background_tasks();
     let app = api::router(state.clone());
@@ -226,51 +225,17 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     let tray = tray.and_then(|launch| launch(desktop::TrayContext::new(&state, addr)));
 
     let stopping = state.stopping.clone();
-    // The other addresses, served as soon as they exist, until pley stops.
-    let extras = tokio_util::task::TaskTracker::new();
-    for extra in extra_binds {
-        let (app, state, stopping) = (app.clone(), state.clone(), stopping.clone());
-        extras.spawn(listen_when_possible(extra, "pley", retry, stopping.clone(), move |listener| async move {
-            if discovery_on && let Some(socket) = discovery::bind(extra).await {
-                tokio::spawn(discovery::serve(state, socket, extra.port(), stopping.clone()));
-            }
-            http::serve(listener, app, stopping.cancelled_owned()).await;
-        }));
-    }
-    for extra in plex_extra_binds {
-        let (state, stopping) = (state.clone(), stopping.clone());
-        extras.spawn(listen_when_possible(
-            extra,
-            "the Plex-compatible API",
-            retry,
-            stopping.clone(),
-            move |listener| plex::serve(state, listener, stopping.cancelled_owned()),
-        ));
-    }
-    extras.close();
-    let web = http::serve(listener, app, stopping.clone().cancelled_owned());
-    let plex = plex.map(|listener| plex::serve(state.clone(), listener, stopping.clone().cancelled_owned()));
-    if let Some(socket) = discovery {
-        tokio::spawn(discovery::serve(state.clone(), socket, addr.port(), stopping.clone()));
-    }
-    let serving = async move {
-        let plex = async move {
-            if let Some(plex) = plex {
-                plex.await;
-            }
-        };
-        tokio::join!(web, plex, extras.wait());
-    };
-    tokio::pin!(serving);
-    let stopped = tokio::select! {
-        () = &mut serving => true,
-        () = shutdown_signal(&stopping) => false,
-    };
+    let listeners = tokio_util::task::TaskTracker::new();
+    let network = tokio::spawn(network::run(state.clone(), app, listener, retry, listeners.clone()));
+    shutdown_signal(&stopping).await;
     tracing::info!("shutting down");
     LISTENING.store(false, std::sync::atomic::Ordering::SeqCst);
     set_shutting_down(true);
     stopping.cancel();
-    if !stopped && tokio::time::timeout(grace, serving).await.is_err() {
+    // It stops at once: then no listener starts any more.
+    let _ = network.await;
+    listeners.close();
+    if tokio::time::timeout(grace, listeners.wait()).await.is_err() {
         tracing::warn!(
             "not waiting any longer for connections still open {}s after the shutdown signal (a film playing?)",
             grace.as_secs_f32()
@@ -282,41 +247,6 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     set_stopped(true);
     drop(tray);
     Ok(())
-}
-
-/// Listens on `addr` as soon as it can, trying every `retry`, and hands the
-/// listener to `serve`: a network adapter's address may come after pley
-/// (Wi-Fi, a VPN like Tailscale). Gives up when pley stops.
-async fn listen_when_possible<F, Fut>(
-    addr: SocketAddr,
-    what: &'static str,
-    retry: Duration,
-    stopping: CancellationToken,
-    serve: F,
-) where
-    F: FnOnce(tokio::net::TcpListener) -> Fut,
-    Fut: std::future::Future<Output = ()>,
-{
-    let mut told = false;
-    loop {
-        match tokio::net::TcpListener::bind(addr).await {
-            Ok(listener) => {
-                // Not "pley … listening on", which marks a start in the log.
-                tracing::info!("listening on http://{addr} too ({what})");
-                return serve(listener).await;
-            }
-            Err(err) => {
-                if !told {
-                    tracing::warn!("{what} can't listen on {addr} yet ({err}): trying every {}s", retry.as_secs_f32());
-                    told = true;
-                }
-                tokio::select! {
-                    () = stopping.cancelled() => return,
-                    () = tokio::time::sleep(retry) => {}
-                }
-            }
-        }
-    }
 }
 
 /// `pley reset-password <user> <password>`: recovery path for a lost admin password.

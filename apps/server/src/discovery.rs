@@ -4,7 +4,6 @@
 //! network get an answer, and only so many a second, so the port can't be
 //! used to flood anyone.
 
-use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -29,21 +28,6 @@ pub struct Announcement<'a> {
     pub version: &'a str,
     /// The web port, on the address the answer comes from.
     pub port: u16,
-}
-
-/// The discovery socket next to the web server's address, or `None` when
-/// only this computer can reach the server, or the port is taken.
-pub async fn bind(web: SocketAddr) -> Option<UdpSocket> {
-    if web.ip().is_loopback() {
-        return None;
-    }
-    match UdpSocket::bind(web).await {
-        Ok(socket) => Some(socket),
-        Err(err) => {
-            tracing::warn!("LAN discovery off: cannot listen on UDP {web}: {err}");
-            None
-        }
-    }
 }
 
 /// Answer discovery requests on `socket` until `stopping` is cancelled.

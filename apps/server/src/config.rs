@@ -169,18 +169,19 @@ pub struct Config {
     /// from: the internet, or nowhere in tests (which may also give fixed
     /// ones). pley's own apps are built in either way.
     pub client_documents: crate::oauth::fetch::Source,
+    /// The config file given, or `pley.toml` in the data directory: where
+    /// the web app saves where pley listens (see [`crate::network`]).
+    pub config_file: PathBuf,
+    /// Where pley listens, as far as the command line or the environment
+    /// sets it: the web app can't change that.
+    pub network_fixed: crate::network::Fixed,
 }
 
 impl Config {
     pub fn load(cli: &Cli) -> anyhow::Result<Self> {
         let default_data_dir = cli.data_dir.clone().unwrap_or_else(default_data_dir);
-        let config_path = match &cli.config {
-            Some(p) => Some(p.clone()),
-            None => {
-                let candidate = default_data_dir.join("pley.toml");
-                candidate.exists().then_some(candidate)
-            }
-        };
+        let config_file = absolutize(&cli.config.clone().unwrap_or_else(|| default_data_dir.join("pley.toml")));
+        let config_path = (cli.config.is_some() || config_file.exists()).then(|| config_file.clone());
         let file: FileConfig = match &config_path {
             Some(path) => {
                 let text =
@@ -221,6 +222,12 @@ impl Config {
             event_recheck: EVENT_RECHECK,
             extra_bind_retry: EXTRA_BIND_RETRY,
             client_documents: crate::oauth::fetch::Source::Internet,
+            network_fixed: crate::network::Fixed {
+                web: cli.bind.is_some(),
+                plex: cli.plex_bind.is_some(),
+                discovery: cli.no_discovery,
+            },
+            config_file,
             data_dir,
             transcode_dir,
         })
@@ -249,6 +256,8 @@ impl Config {
             event_recheck: EVENT_RECHECK,
             extra_bind_retry: EXTRA_BIND_RETRY,
             client_documents: crate::oauth::fetch::Source::Off,
+            config_file: data_dir.join("pley.toml"),
+            network_fixed: crate::network::Fixed::default(),
         }
     }
 
@@ -314,17 +323,45 @@ pub fn save_config(cli: &Cli, path: &Path, discovery: Option<bool>) -> anyhow::R
     if let Some(discovery) = discovery.or(cli.no_discovery.then_some(false)) {
         values.push(("discovery", discovery.into()));
     }
+    write_keys(path, &values)
+}
+
+/// Saves where pley listens (Settings → Network, see [`crate::network`]) in
+/// the config file `path`, but what `fixed` says the command line or the
+/// environment sets.
+pub fn save_listen(path: &Path, listen: &crate::network::Listen, fixed: crate::network::Fixed) -> anyhow::Result<()> {
+    let list = |addrs: &[SocketAddr]| addrs.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
+    let mut values: Vec<(&str, toml::Value)> = Vec::new();
+    if !fixed.web {
+        values.push(("bind", list(&listen.web).into()));
+    }
+    if !fixed.plex {
+        let plex = if listen.plex.is_empty() { "off".to_owned() } else { list(&listen.plex) };
+        values.push(("plex_bind", plex.into()));
+    }
+    if !fixed.discovery {
+        values.push(("discovery", listen.discovery.into()));
+    }
+    write_keys(path, &values)
+}
+
+/// Sets `values` in the config file `path` (made if missing), whose other
+/// lines and comments stay. The file is replaced whole: pley never reads
+/// half of it.
+fn write_keys(path: &Path, values: &[(&str, toml::Value)]) -> anyhow::Result<()> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(err) => return Err(err).with_context(|| format!("reading config file {}", path.display())),
     };
-    let text = set_keys(&text, &values);
+    let text = set_keys(&text, values);
     toml::from_str::<FileConfig>(&text).with_context(|| format!("checking the new {}", path.display()))?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    std::fs::write(path, text).with_context(|| format!("writing config file {}", path.display()))
+    let new = path.with_extension("toml.new");
+    std::fs::write(&new, text).with_context(|| format!("writing config file {}", new.display()))?;
+    std::fs::rename(&new, path).with_context(|| format!("replacing config file {}", path.display()))
 }
 
 /// `text` with each key of `values` set: on its line, or a new one at the
@@ -551,6 +588,35 @@ mod tests {
         args.bind = Some("nope".into());
         assert!(save_config(&args, &file, None).is_err(), "an unreadable address isn't saved");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
+    }
+
+    #[test]
+    fn where_pley_listens_is_saved_but_what_the_command_line_sets() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::load(&cli(dir.path())).unwrap();
+        assert_eq!(config.config_file, dir.path().join("pley.toml"), "made when first saved");
+        assert_eq!(config.network_fixed, crate::network::Fixed::default());
+        let listen = crate::network::Listen {
+            web: vec!["127.0.0.1:7540".parse().unwrap(), "192.168.1.10:7540".parse().unwrap()],
+            plex: Vec::new(),
+            discovery: false,
+        };
+        save_listen(&config.config_file, &listen, config.network_fixed).unwrap();
+        let config = Config::load(&cli(dir.path())).unwrap();
+        assert_eq!(crate::network::Listen::of(&config), listen);
+
+        // PLEY_BIND (or --bind) wins: it isn't saved over, the rest is.
+        let mut args = cli(dir.path());
+        args.bind = Some("0.0.0.0:7539".into());
+        let fixed = Config::load(&args).unwrap();
+        assert_eq!(fixed.network_fixed, crate::network::Fixed { web: true, plex: false, discovery: false });
+        let mut changed = crate::network::Listen::of(&fixed);
+        changed.plex = vec!["127.0.0.1:32400".parse().unwrap()];
+        save_listen(&fixed.config_file, &changed, fixed.network_fixed).unwrap();
+        let text = std::fs::read_to_string(&fixed.config_file).unwrap();
+        assert!(text.contains("bind = \"127.0.0.1:7540, 192.168.1.10:7540\""), "{text}");
+        assert!(text.contains("plex_bind = \"127.0.0.1:32400\""), "{text}");
+        assert!(!dir.path().join("pley.toml.new").exists());
     }
 
     #[test]

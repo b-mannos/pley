@@ -1668,6 +1668,22 @@ type ServerEvent =
 | PUT | `/api/settings` | partial `Settings` | `Settings` |
 | POST | `/api/settings/test` | `{ service: "tmdb" \| "tvdb" \| "tvmaze" \| "musicbrainz" \| "transcoder", api_key?, pin? }` | `{ ok, message, ms }`: one request to the service, with the key and PIN given (not saved) or else the saved ones. `message` says what happened, for people |
 | GET | `/api/fs` | `path` (omit for roots/drives) | `{ path: string \| null, parent: string \| null, entries: { name: string, path: string }[] }` – directories only |
+| GET | `/api/network` | – | `Network`: where pley listens, and could |
+| PUT | `/api/network` | `{ web, plex, discovery }` | `Network`, once the new listeners listen or have tried for a moment (3 s at most). Saved in the config file for the next start. `400` for addresses pley can't listen on together, and for a change of what the command line or the environment sets |
+
+```ts
+interface Network {
+  web: string[];          // the web app and API: "127.0.0.1:7539", "192.168.1.10:7539", "0.0.0.0:7539"
+  plex: string[];         // the Plex-compatible API; [] = off
+  discovery: boolean;     // answer the pley apps on the networks (never on loopback addresses)
+  fixed: { web: boolean; plex: boolean; discovery: boolean }; // set by --bind/PLEY_BIND, --plex-bind/PLEY_PLEX_BIND, --no-discovery
+  listeners: { kind: "web" | "plex" | "discovery"; address: string; error: string | null }[]; // error: why not (yet); tried again every 30 s
+  adapters: { name: string; description: string | null; up: boolean; addresses: string[]; // IPv4, loopback left out
+              network: { name: string; kind: "public" | "private" | "domain" } | null }[]; // as Windows knows it
+  config_file: string;    // where a change is saved
+  windows: boolean;       // Windows Firewall decides which kinds of network reach pley
+}
+```
 
 ```ts
 interface Settings {

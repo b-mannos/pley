@@ -175,7 +175,10 @@ Options come from command-line flags, `PLEY_*` environment variables or
 
 Everything else (server name, metadata sources and keys, hardware
 acceleration, tone mapping, transcode limits, scanning) is set in the web app
-under **Settings → Server**.
+under **Settings → Server**. Where pley listens (the networks, the port, the
+Plex-compatible API and discovery) changes in **Settings → Network** too,
+while pley runs: it is saved in `pley.toml`, unless `--bind`, `--plex-bind`
+or `--no-discovery` (or their `PLEY_*` variables) set it.
 
 pley stops cleanly, giving playback a few seconds to finish, on Ctrl+C,
 `SIGTERM`, the tray's Quit and, on Windows, `taskkill` without `/F`, closing

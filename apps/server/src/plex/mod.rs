@@ -52,19 +52,6 @@ pub fn service(state: AppState) -> Service {
     MapRequestLayer::new(normalize as fn(Request) -> Request).layer(router(state, info))
 }
 
-/// The listener of this API when `plex_bind` is configured. A port that is
-/// taken (a real Plex server, for instance) only disables this API.
-pub async fn bind(addr: Option<SocketAddr>) -> Option<tokio::net::TcpListener> {
-    let addr = addr?;
-    match tokio::net::TcpListener::bind(addr).await {
-        Ok(listener) => Some(listener),
-        Err(err) => {
-            tracing::warn!("Plex-compatible API disabled: cannot listen on {addr}: {err}");
-            None
-        }
-    }
-}
-
 /// Serve this API on `listener` until `shutdown` completes, then wait for the
 /// requests in progress (the main server limits that wait).
 pub async fn serve(

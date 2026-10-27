@@ -21,7 +21,9 @@ import type {
   LibraryItemsQuery,
   LibraryItemsResponse,
   LibraryKind,
+  ListenChoice,
   LoginResponse,
+  NetworkSettings,
   PersonDetail,
   RecoveryCodes,
   ProfilePatch,
@@ -66,6 +68,7 @@ export const keys = {
   invites: ["invites"] as const,
   invite: (code: string) => ["invite", code] as const,
   settings: ["settings"] as const,
+  network: ["network"] as const,
   twoStep: ["me", "two-step"] as const,
   system: ["system"] as const,
   storage: ["system", "storage"] as const,
@@ -312,6 +315,7 @@ export const queries = {
   users: () => queryOptions({ queryKey: keys.users, queryFn: () => api.get<User[]>("/api/users") }),
   invites: () => queryOptions({ queryKey: keys.invites, queryFn: () => api.get<Invite[]>("/api/invites") }),
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => api.get<Settings>("/api/settings") }),
+  network: () => queryOptions({ queryKey: keys.network, queryFn: () => api.get<NetworkSettings>("/api/network") }),
   system: () => queryOptions({ queryKey: keys.system, queryFn: () => api.get<SystemInfo>("/api/system"), staleTime: 10_000 }),
   activity: () => queryOptions({ queryKey: keys.activity, queryFn: () => api.get<Activity>("/api/activity"), staleTime: 2_000 }),
   item: (id: Id) => queryOptions({ queryKey: keys.item(id), queryFn: ({ signal }) => api.get<ItemDetail>(`/api/items/${id}`, { signal }) }),
@@ -970,6 +974,23 @@ export function useSaveSettings() {
       void qc.invalidateQueries({ queryKey: keys.system });
       void qc.invalidateQueries({ queryKey: keys.server });
     },
+  });
+}
+
+/** Where pley listens and could; again every 5 s while an address waits to be listened on. */
+export function useNetwork() {
+  return useQuery({
+    ...queries.network(),
+    refetchInterval: (query) => (query.state.data?.listeners.some((l) => l.error) ? 5_000 : false),
+  });
+}
+
+/** Listen elsewhere: answers once the new addresses listen, or have tried for a moment. */
+export function useSaveNetwork() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ListenChoice) => api.put<NetworkSettings>("/api/network", body),
+    onSuccess: (data) => qc.setQueryData(keys.network, data),
   });
 }
 

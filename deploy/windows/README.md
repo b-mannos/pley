@@ -47,11 +47,13 @@ Run the setup. Its pages:
    - **Every network**, those that come later too.
    - The port (7539) and the Plex-compatible API (port 32400, for Plex apps),
      on the same networks. Setup says when another program has a port.
-5. **Windows Firewall**, when other devices may reach pley: which kinds of
-   network to let it through on (private and domain, not public, unless you
-   say otherwise), from devices on those networks only or from any address
-   (through a VPN too), and whether the pley apps on the network find the
-   server. The rule covers the networks chosen only.
+   - All of it changes later in pley, while it runs: **Settings → Network**.
+5. **Windows Firewall**: which kinds of network to let pley through on
+   (private and domain, not public, unless you say otherwise), from devices
+   on those networks only or from any address (through a VPN too), and
+   whether the pley apps on the network find the server. The rule is for
+   pley wherever it listens, so a network chosen later in its settings is
+   let through too, if it is of a kind chosen here.
 
 FFmpeg comes with the installer and goes next to pley: a release's carries
 gyan.dev's full build (NVENC, Quick Sync, AMF and Vulkan tone mapping), and
@@ -72,7 +74,7 @@ background, without an icon in the notification area: the Start menu's
 | Options | `pley.toml` in the data folder: the address, the Plex-compatible API, discovery and FFmpeg |
 | The service | `pley` ("pley-server" in Services): starts with Windows (delayed), restarts when it stops on its own, has 30 s to stop as Windows shuts down, and keeps its temporary files in the data folder's `tmp` |
 | The data folder | Owned by the administrators; only SYSTEM, the administrators, the service (and its user) and you may open it |
-| The firewall | A rule named `pley` for its ports, on the kinds of network and from the devices chosen, when others may reach it |
+| The firewall | A rule named `pley` for pley, on the kinds of network and from the devices chosen |
 | The notification area | pley starts when you sign in (Start pley at login, in its menu) |
 | Start menu | `pley-server` (pley's page, or pley itself) and `pley-server logs` |
 
@@ -128,7 +130,7 @@ pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=s
 | `/LISTEN=` | `local`, `all`, or the addresses of the networks to listen on, separated by commas | `local` |
 | `/PORT=` | The port | `7539` |
 | `/PLEX=` | `yes` or `no`: the Plex-compatible API | `no` |
-| `/FIREWALL=` | The kinds of network to let pley through on: `private`, `domain`, `public` (separated by commas), or `none` | `private,domain` |
+| `/FIREWALL=` | The kinds of network to let pley through on, wherever it listens: `private`, `domain`, `public` (separated by commas), or `none` | `private,domain` |
 | `/FROM=` | `subnet` (devices on those networks) or `any` (a VPN too) | `subnet` |
 | `/DISCOVERY=` | `yes` or `no`: found by the pley apps, when others may reach it | `yes` |
 
@@ -171,8 +173,10 @@ save-config` saves the same options for pley outside a service.
   Setup refuses a data folder that is, or holds, a link or junction: one
   made in ProgramData before pley was installed could otherwise send its
   changes anywhere.
-- **The network.** pley listens on `127.0.0.1` unless told otherwise, and
-  the firewall rule, for the network choice only, covers private networks.
+- **The network.** pley listens on `127.0.0.1` unless told otherwise (in
+  Setup, or by an administrator in **Settings → Network**), and the
+  firewall lets it through on private and domain networks only, unless you
+  choose public ones too.
 - **Setup isn't signed yet**: SmartScreen warns (**More info → Run anyway**).
   Each release's installer has build provenance:
   `gh attestation verify <file> --repo <owner>/<repo>`.

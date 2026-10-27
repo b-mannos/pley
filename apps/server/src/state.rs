@@ -45,6 +45,8 @@ pub struct Inner {
     pub two_step: crate::two_step::TwoStep,
     /// Sign-ins of apps in progress (see [`crate::oauth`]).
     pub oauth: crate::oauth::AuthorizationServer,
+    /// Where the server listens, and wants to (see [`crate::network`]).
+    pub network: crate::network::Network,
     pub started_at: Instant,
     /// Cancelled when the server starts shutting down (the tray's Quit
     /// cancels it to ask for that). Responses that never end on their own,
@@ -128,6 +130,7 @@ impl AppState {
         }
         Ok(Self {
             inner: Arc::new(Inner {
+                network: crate::network::Network::new(&config),
                 auth,
                 sessions,
                 markers,

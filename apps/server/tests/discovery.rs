@@ -41,8 +41,3 @@ async fn servers_tell_apps_on_the_network_where_they_are() {
     stopping.cancel();
     tokio::time::timeout(Duration::from_secs(5), served).await.unwrap().unwrap();
 }
-
-#[tokio::test]
-async fn servers_only_this_computer_can_reach_stay_quiet() {
-    assert!(pley::discovery::bind("127.0.0.1:0".parse().unwrap()).await.is_none());
-}

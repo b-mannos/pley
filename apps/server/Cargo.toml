@@ -90,6 +90,11 @@ libc = "0.2"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    # The network adapters, for Settings -> Network (src/network.rs).
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+    "Win32_System_Com",
     # The Windows service (src/service): its accounts, sign-ins and the
     # Service Control Manager.
     "Win32_NetworkManagement_NetManagement",

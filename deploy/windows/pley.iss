@@ -241,9 +241,11 @@ begin
   Result := LanRadio.Checked or (ChosenIps <> '');
 end;
 
+// pley answers on the networks it listens on only, now or once it listens
+// on some (Settings, Network).
 function Discovery: Boolean;
 begin
-  Result := Reachable and DiscoveryCheck.Checked;
+  Result := DiscoveryCheck.Checked;
 end;
 
 // The Windows Firewall profiles the rule is for, such as "private,domain".
@@ -570,7 +572,8 @@ begin
         KindText(AdapterKinds.Strings[I]);
   if Networks <> '' then
     AddText(FirewallPage, Top, 0, 'This computer''s networks:' + Networks);
-  AddText(FirewallPage, Top, 0, 'Let pley through on networks Windows takes for:');
+  AddText(FirewallPage, Top, 0, 'Where pley listens on networks, chosen here or later in pley (Settings, Network), ' +
+    'let it through on networks Windows takes for:');
   PrivateCheck := AddCheck(FirewallPage, Top, 'Private (home)', '');
   DomainCheck := AddCheck(FirewallPage, Top, 'Domain (a workplace''s)', '');
   PublicCheck := AddCheck(FirewallPage, Top, 'Public (cafes, hotels: not recommended)', '');
@@ -699,7 +702,7 @@ end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
-  Result := ((PageID = UserPage.ID) and not UserRadio.Checked) or ((PageID = FirewallPage.ID) and not Reachable);
+  Result := (PageID = UserPage.ID) and not UserRadio.Checked;
 end;
 
 function DefaultDataDir: String;
@@ -863,16 +866,13 @@ begin
     S := S + 'This computer only (127.0.0.1:' + Port + ')';
   if PlexCheck.Checked then
     S := S + NewLine + Space + 'Plex-compatible API on port 32400';
-  if Reachable then
-  begin
-    if Profiles = '' then
-      S := S + NewLine + Space + 'Not let through Windows Firewall'
-    else if AnyRadio.Checked then
-      S := S + NewLine + Space + 'Let through Windows Firewall on ' + Profiles + ' networks, from any address'
-    else
-      S := S + NewLine + Space + 'Let through Windows Firewall on ' + Profiles + ' networks, from devices on them';
-  end;
-  if Discovery then
+  if Profiles = '' then
+    S := S + NewLine + Space + 'Not let through Windows Firewall'
+  else if AnyRadio.Checked then
+    S := S + NewLine + Space + 'Let through Windows Firewall on ' + Profiles + ' networks, from any address'
+  else
+    S := S + NewLine + Space + 'Let through Windows Firewall on ' + Profiles + ' networks, from devices on them';
+  if Reachable and Discovery then
     S := S + NewLine + Space + 'Found by the pley apps on the network';
   S := S + NewLine + NewLine + 'FFmpeg:' + NewLine + Space + '{#FfmpegLabel}';
   Result := S;
@@ -967,7 +967,9 @@ begin
     ' --ffprobe ' + AddQuotes(ExpandConstant('{app}\ffmpeg\ffprobe.exe'));
 end;
 
-// Lets pley through Windows Firewall when it listens on the network.
+// Lets pley through Windows Firewall on the kinds of network chosen. pley
+// decides where it listens and on which ports, which its Settings change:
+// the rule is for pley, wherever it listens.
 procedure Firewall;
 var
   Code: Integer;
@@ -975,21 +977,15 @@ var
 begin
   Netsh := ExpandConstant('{sys}\netsh.exe');
   Exec(Netsh, 'advfirewall firewall delete rule name="pley"', '', SW_HIDE, ewWaitUntilTerminated, Code);
-  if not Reachable or (Profiles = '') then
+  if Profiles = '' then
     Exit;
   Rule := 'advfirewall firewall add rule name="pley" dir=in action=allow profile=' + Profiles + ' program="' +
     ExpandConstant('{app}\pley.exe') + '"';
-  // Only to the networks chosen, and from devices on them unless any address may.
-  if ChosenIps <> '' then
-    Rule := Rule + ' localip=' + ChosenIps;
+  // From devices on those networks, unless any address may.
   if SubnetRadio.Checked then
     Rule := Rule + ' remoteip=localsubnet';
-  if PlexCheck.Checked then
-    Exec(Netsh, Rule + ' protocol=TCP localport=' + Port + ',32400', '', SW_HIDE, ewWaitUntilTerminated, Code)
-  else
-    Exec(Netsh, Rule + ' protocol=TCP localport=' + Port, '', SW_HIDE, ewWaitUntilTerminated, Code);
-  if Discovery then
-    Exec(Netsh, Rule + ' protocol=UDP localport=' + Port, '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Exec(Netsh, Rule + ' protocol=TCP', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Exec(Netsh, Rule + ' protocol=UDP', '', SW_HIDE, ewWaitUntilTerminated, Code);
 end;
 
 function RunCommand: String;

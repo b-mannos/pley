@@ -7,7 +7,8 @@
 # Address to listen on. Use 127.0.0.1:7539 to stay local-only. Several,
 # separated by commas, listen on chosen networks only: pley must be able to
 # listen on the first as it starts, and tries the others until it can (a
-# Wi-Fi or VPN address may come later).
+# Wi-Fi or VPN address may come later). The web app's Settings → Network
+# changes bind, plex_bind and discovery here, and keeps the other lines.
 # bind = "0.0.0.0:7539"
 # bind = "127.0.0.1:7539, 192.168.1.10:7539, 100.64.0.7:7539"
 

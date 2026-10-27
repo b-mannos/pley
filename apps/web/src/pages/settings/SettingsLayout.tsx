@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { NavLink, Outlet } from "react-router";
-import { LayoutDashboard, LibraryBig, MailPlus, Server, Users } from "lucide-react";
+import { LayoutDashboard, LibraryBig, MailPlus, Network, Server, Users } from "lucide-react";
 import { RequireAdmin } from "@/auth";
 import { PageSpinner } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -13,6 +13,7 @@ const NAV = [
   { to: "/settings/users", label: "Users", icon: Users },
   { to: "/settings/invitations", label: "Invitations", icon: MailPlus },
   { to: "/settings/server", label: "Server", icon: Server },
+  { to: "/settings/network", label: "Network", icon: Network },
 ];
 
 export function SettingsLayout() {

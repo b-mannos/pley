@@ -115,12 +115,14 @@ impl TrayContext {
         let _ = self.commands.send(command);
     }
 
-    /// Opens the web app in the browser: its setup page with the setup
-    /// code filled in, while the server has no account.
+    /// Opens the web app in the browser, where it listens now (Settings →
+    /// Network may have moved it): its setup page with the setup code filled
+    /// in, while the server has no account.
     pub(crate) fn open_web_ui(&self) {
+        let url = self.state.network.web_url().unwrap_or_else(|| self.url.clone());
         match self.state.auth.setup.shown() {
-            Some(code) => open(format!("{}/setup?code={code}", self.url)),
-            None => open(&self.url),
+            Some(code) => open(format!("{url}/setup?code={code}")),
+            None => open(&url),
         }
     }
 

@@ -92,6 +92,80 @@ async fn more_addresses_are_served_and_one_taken_is_tried_until_free() {
     assert!(!answers(second).await, "{second} closed with pley");
 }
 
+/// A port nothing listens on (as long as nothing takes it meanwhile).
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn where_pley_listens_changes_while_it_runs() {
+    let data = tempfile::tempdir().unwrap();
+    let mut config = config(data.path());
+    config.extra_bind_retry = Duration::from_millis(100);
+    let (first, ctx, server) = start(config).await;
+    let made =
+        pley_exe().args(["reset-password", "admin", "test-pass-1", "--admin", "--data-dir"]).arg(data.path()).output();
+    assert!(tokio::time::timeout(Duration::from_secs(60), made).await.unwrap().unwrap().status.success());
+    let http = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(10)).build().unwrap();
+    let login: serde_json::Value = http
+        .post(format!("http://{first}/api/auth/login"))
+        .json(&json!({"username": "admin", "password": "test-pass-1"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let token = login["token"].as_str().unwrap().to_owned();
+    let change = |at: String, body: serde_json::Value| {
+        let (http, token) = (http.clone(), token.clone());
+        async move {
+            let reply =
+                http.put(format!("http://{at}/api/network")).bearer_auth(token).json(&body).send().await.unwrap();
+            assert_eq!(reply.status(), reqwest::StatusCode::OK);
+            reply.json::<serde_json::Value>().await.unwrap()
+        }
+    };
+    let answers = |at: String| {
+        let http = http.clone();
+        async move { http.get(format!("http://{at}/api/health")).send().await.is_ok_and(|r| r.status().is_success()) }
+    };
+
+    // Two addresses instead of the first: the answer comes once they listen.
+    let (a, b) = (format!("127.0.0.1:{}", free_port()), format!("127.0.0.1:{}", free_port()));
+    let now = change(first.clone(), json!({"web": [&a, &b], "plex": [], "discovery": false})).await;
+    let listening =
+        |now: &serde_json::Value| now["listeners"].as_array().unwrap().iter().filter(|l| l["error"].is_null()).count();
+    assert_eq!(listening(&now), 2, "{now}");
+    assert!(answers(a.clone()).await && answers(b.clone()).await);
+    assert!(!answers(first.clone()).await, "the first address closed");
+    let saved = std::fs::read_to_string(data.path().join("pley.toml")).unwrap();
+    assert!(saved.contains(&format!("bind = \"{a}, {b}\"")), "{saved}");
+
+    // One taken by another program is listened on once it is free; the
+    // Plex-compatible API opens.
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let later = taken.local_addr().unwrap().to_string();
+    let plex = format!("127.0.0.1:{}", free_port());
+    let now = change(b.clone(), json!({"web": [&b, &later], "plex": [&plex], "discovery": false})).await;
+    let waiting: Vec<_> = now["listeners"].as_array().unwrap().iter().filter(|l| !l["error"].is_null()).collect();
+    assert_eq!(waiting.len(), 1, "{now}");
+    assert_eq!(waiting[0]["address"], later.as_str());
+    assert!(!answers(a.clone()).await, "{a} closed");
+    let identity = http.get(format!("http://{plex}/identity")).send().await.unwrap();
+    assert!(identity.status().is_success(), "the Plex-compatible API answers");
+    drop(taken);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !answers(later.clone()).await {
+        assert!(Instant::now() < deadline, "pley never listened on {later} once it was free");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    ctx.send(Command::Quit);
+    stopped(server, Duration::from_secs(10)).await.unwrap();
+    assert!(!answers(b).await && !answers(later).await, "closed with pley");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn one_server_per_data_directory() {
     let data = tempfile::tempdir().unwrap();

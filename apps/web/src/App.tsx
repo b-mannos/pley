@@ -166,6 +166,14 @@ const router = createBrowserRouter([
                 ),
               },
               {
+                path: "network",
+                ...onDemand(
+                  () => import("@/pages/settings/NetworkSettings"),
+                  (m) => m.NetworkSettings,
+                  (prefetch) => [prefetch(queries.network())],
+                ),
+              },
+              {
                 path: "dashboard",
                 ...onDemand(
                   () => import("@/pages/settings/DashboardSettings"),

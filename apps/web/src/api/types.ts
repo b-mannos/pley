@@ -679,6 +679,49 @@ export interface TranscoderStatus {
   jobs: TranscoderJob[];
 }
 
+/** Where pley listens: addresses such as `127.0.0.1:7539` (Settings → Network). */
+export interface ListenChoice {
+  /** The web app and its API. */
+  web: string[];
+  /** The Plex-compatible API: off when empty. */
+  plex: string[];
+  /** Whether the pley apps on the networks find the server. */
+  discovery: boolean;
+}
+
+export type ListenerKind = "web" | "plex" | "discovery";
+
+export interface NetworkListener {
+  kind: ListenerKind;
+  address: string;
+  /** Why pley doesn't listen there (yet). */
+  error: string | null;
+}
+
+export interface NetworkAdapter {
+  /** "Wi-Fi", "Ethernet", "eth0". */
+  name: string;
+  /** The hardware, on Windows. */
+  description: string | null;
+  /** Connected. */
+  up: boolean;
+  /** Its IPv4 addresses. */
+  addresses: string[];
+  /** The network it is on, as Windows knows it. */
+  network: { name: string; kind: "public" | "private" | "domain" } | null;
+}
+
+export interface NetworkSettings extends ListenChoice {
+  /** What the command line or the environment sets: it can't change here. */
+  fixed: { web: boolean; plex: boolean; discovery: boolean };
+  listeners: NetworkListener[];
+  adapters: NetworkAdapter[];
+  /** Where a change is saved. */
+  config_file: string;
+  /** Windows Firewall decides which kinds of network reach pley. */
+  windows: boolean;
+}
+
 export interface SystemInfo {
   name: string;
   version: string;

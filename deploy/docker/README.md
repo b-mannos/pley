@@ -79,6 +79,9 @@ All in `.env` ([.env.example](.env.example) explains each one):
 
 Settings that change at runtime (TMDB key, hardware acceleration, tone
 mapping, transcode limits) are in pley's web UI, in **Settings → Server**.
+**Settings → Network** shows where pley listens, which the compose file
+sets here (`PLEY_BIND`, `PLEY_PLEX_BIND`, `PLEY_NO_DISCOVERY`): change it
+there.
 
 ### More media folders
 
