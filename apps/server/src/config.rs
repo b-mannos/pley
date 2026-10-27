@@ -22,6 +22,9 @@ pub const PLEX_PORT: u16 = 32400;
 pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 /// How often an open event stream checks that its token still works.
 pub const EVENT_RECHECK: Duration = Duration::from_secs(30);
+/// How often an address the server can't listen on yet is tried again
+/// (see [`Config::extra_binds`]).
+pub const EXTRA_BIND_RETRY: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Parser)]
 #[command(name = "pley", version = crate::VERSION_AND_COMMIT, about = "pley — a fast, self-hosted media server")]
@@ -37,11 +40,13 @@ pub struct Cli {
     #[arg(long, env = "PLEY_DATA_DIR", global = true)]
     pub data_dir: Option<PathBuf>,
 
-    /// Address to listen on, e.g. `0.0.0.0:7539` or just a port
+    /// Address to listen on, e.g. `0.0.0.0:7539` or just a port; several separated by commas,
+    /// such as `127.0.0.1:7539,192.168.1.10:7539` (one adapter's address, and this computer)
     #[arg(long, env = "PLEY_BIND", global = true)]
     pub bind: Option<String>,
 
-    /// Address of the Plex-compatible API (default `0.0.0.0:32400`, `off` to disable)
+    /// Address of the Plex-compatible API (default `0.0.0.0:32400`, `off` to disable); several
+    /// separated by commas, as with --bind
     #[arg(long, env = "PLEY_PLEX_BIND", global = true)]
     pub plex_bind: Option<String>,
 
@@ -129,9 +134,15 @@ struct FileConfig {
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// Where the server listens, which it must be able to at startup.
     pub bind: SocketAddr,
+    /// Where it listens too, once it can: a network adapter's address may
+    /// come after pley (Wi-Fi, a VPN like Tailscale).
+    pub extra_binds: Vec<SocketAddr>,
     /// Plex-compatible API listener (`None`: disabled).
     pub plex_bind: Option<SocketAddr>,
+    /// Where that API listens too, as [`Config::extra_binds`].
+    pub plex_extra_binds: Vec<SocketAddr>,
     pub data_dir: PathBuf,
     /// Work directory handed to the managed transcoder (segments, caches).
     pub transcode_dir: PathBuf,
@@ -152,6 +163,8 @@ pub struct Config {
     pub discovery: bool,
     /// See [`EVENT_RECHECK`] (tests shorten it).
     pub event_recheck: Duration,
+    /// See [`EXTRA_BIND_RETRY`] (tests shorten it).
+    pub extra_bind_retry: Duration,
     /// Where the client metadata documents of other publishers' apps come
     /// from: the internet, or nowhere in tests (which may also give fixed
     /// ones). pley's own apps are built in either way.
@@ -179,17 +192,22 @@ impl Config {
 
         let data_dir = cli.data_dir.clone().or(file.data_dir).unwrap_or(default_data_dir);
         let data_dir = absolutize(&data_dir);
-        let bind = cli.bind.clone().or(file.bind).map(|s| parse_bind(&s)).transpose()?;
-        let plex_bind = match cli.plex_bind.clone().or(file.plex_bind) {
-            None => Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), PLEX_PORT)),
-            Some(value) if is_off(&value) => None,
-            Some(value) => Some(parse_bind(&value)?),
+        let binds = match cli.bind.clone().or(file.bind) {
+            None => vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_PORT)],
+            Some(value) => parse_binds(&value)?,
+        };
+        let plex_binds = match cli.plex_bind.clone().or(file.plex_bind) {
+            None => vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), PLEX_PORT)],
+            Some(value) if is_off(&value) => Vec::new(),
+            Some(value) => parse_binds(&value)?,
         };
         let transcode_dir = file.transcode_dir.map(|p| absolutize(&p)).unwrap_or_else(|| data_dir.join("transcode"));
 
         Ok(Self {
-            bind: bind.unwrap_or(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_PORT)),
-            plex_bind,
+            bind: binds[0],
+            extra_binds: binds[1..].to_vec(),
+            plex_bind: plex_binds.first().copied(),
+            plex_extra_binds: plex_binds.iter().skip(1).copied().collect(),
             ffmpeg: cli.ffmpeg.clone().or(file.ffmpeg).unwrap_or_else(|| PathBuf::from("ffmpeg")),
             ffprobe: cli.ffprobe.clone().or(file.ffprobe).unwrap_or_else(|| PathBuf::from("ffprobe")),
             web_dir: cli.web_dir.clone().or(file.web_dir),
@@ -201,6 +219,7 @@ impl Config {
             shutdown_grace: SHUTDOWN_GRACE,
             discovery: !cli.no_discovery && file.discovery.unwrap_or(true),
             event_recheck: EVENT_RECHECK,
+            extra_bind_retry: EXTRA_BIND_RETRY,
             client_documents: crate::oauth::fetch::Source::Internet,
             data_dir,
             transcode_dir,
@@ -212,7 +231,9 @@ impl Config {
     pub fn for_data_dir(data_dir: &Path) -> Self {
         Self {
             bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            extra_binds: Vec::new(),
             plex_bind: None,
+            plex_extra_binds: Vec::new(),
             data_dir: data_dir.to_path_buf(),
             transcode_dir: data_dir.join("transcode"),
             ffmpeg: PathBuf::from("ffmpeg"),
@@ -226,6 +247,7 @@ impl Config {
             shutdown_grace: SHUTDOWN_GRACE,
             discovery: false,
             event_recheck: EVENT_RECHECK,
+            extra_bind_retry: EXTRA_BIND_RETRY,
             client_documents: crate::oauth::fetch::Source::Off,
         }
     }
@@ -275,12 +297,12 @@ impl Cli {
 pub fn save_config(cli: &Cli, path: &Path, discovery: Option<bool>) -> anyhow::Result<()> {
     let mut values: Vec<(&str, toml::Value)> = Vec::new();
     if let Some(bind) = &cli.bind {
-        parse_bind(bind)?;
+        parse_binds(bind)?;
         values.push(("bind", bind.trim().into()));
     }
     if let Some(plex_bind) = &cli.plex_bind {
         if !is_off(plex_bind) {
-            parse_bind(plex_bind)?;
+            parse_binds(plex_bind)?;
         }
         values.push(("plex_bind", plex_bind.trim().into()));
     }
@@ -368,6 +390,15 @@ fn parse_bind(value: &str) -> anyhow::Result<SocketAddr> {
     value.parse().with_context(|| format!("invalid bind address '{value}'"))
 }
 
+/// One address or several, separated by commas; the first is the one the
+/// server must be able to listen on as it starts.
+fn parse_binds(value: &str) -> anyhow::Result<Vec<SocketAddr>> {
+    let binds =
+        value.split(',').filter(|part| !part.trim().is_empty()).map(parse_bind).collect::<anyhow::Result<Vec<_>>>()?;
+    anyhow::ensure!(!binds.is_empty(), "no address to listen on in '{value}'");
+    Ok(binds)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -385,6 +416,24 @@ mod tests {
         );
         assert_eq!(parse_bind("[::1]:7539").unwrap(), "[::1]:7539".parse().unwrap());
         assert!(parse_bind("70000").is_err());
+
+        let several = parse_binds(" 127.0.0.1:7539, 192.168.1.10:7539 ,").unwrap();
+        assert_eq!(several, ["127.0.0.1:7539".parse().unwrap(), "192.168.1.10:7539".parse().unwrap()]);
+        assert!(parse_binds(" , ").is_err());
+        assert!(parse_binds("127.0.0.1:7539, nope").is_err(), "every address must be one");
+    }
+
+    #[test]
+    fn several_addresses_listen_and_the_plex_api_follows() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut args = cli(dir.path());
+        args.bind = Some("127.0.0.1:7539,100.64.0.7:7539".into());
+        args.plex_bind = Some("127.0.0.1:32400, 100.64.0.7:32400".into());
+        let config = Config::load(&args).unwrap();
+        assert_eq!(config.bind, "127.0.0.1:7539".parse().unwrap());
+        assert_eq!(config.extra_binds, ["100.64.0.7:7539".parse::<SocketAddr>().unwrap()]);
+        assert_eq!(config.plex_bind, Some("127.0.0.1:32400".parse().unwrap()));
+        assert_eq!(config.plex_extra_binds, ["100.64.0.7:32400".parse::<SocketAddr>().unwrap()]);
     }
 
     /// Command line options as if none were given (built directly, so the

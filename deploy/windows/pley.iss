@@ -125,9 +125,18 @@ var
   CopyCheck: TNewCheckBox;
   CopyEdit: TNewEdit;
   CopyButton: TNewButton;
-  LocalRadio, LanRadio: TNewRadioButton;
+  // Network: this computer only, chosen networks (adapters), or every one.
+  LocalRadio, AdaptersRadio, LanRadio: TNewRadioButton;
+  AdapterList: TNewCheckListBox;
+  // This computer's IPv4 addresses (and any an earlier install chose), their
+  // adapters' names and the kind of network Windows takes each for, in
+  // AdapterList's order.
+  AdapterIps, AdapterNames, AdapterKinds: TStringList;
   PortEdit: TNewEdit;
   PlexCheck, DiscoveryCheck: TNewCheckBox;
+  FirewallPage: TWizardPage;
+  PrivateCheck, DomainCheck, PublicCheck: TNewCheckBox;
+  SubnetRadio, AnyRadio: TNewRadioButton;
   // The last install's, from StateKey.
   PrevMode, PrevDataDir, PrevUser: String;
   // What pley said once it ran (HasAccounts: it was set up already), and
@@ -139,6 +148,11 @@ var
 
 function SetEnvironmentVariable(Name, Value: String): BOOL;
   external 'SetEnvironmentVariableW@kernel32.dll stdcall';
+
+function PowerShell: String;
+begin
+  Result := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+end;
 
 // ---- the choices ----
 
@@ -167,27 +181,90 @@ begin
   Result := Trim(PortEdit.Text);
 end;
 
-function BindAddress: String;
+// The addresses of the networks chosen, separated by commas.
+function ChosenIps: String;
+var
+  I: Integer;
+begin
+  Result := '';
+  if AdaptersRadio.Checked then
+    for I := 0 to AdapterIps.Count - 1 do
+      if AdapterList.Checked[I] then
+      begin
+        if Result <> '' then
+          Result := Result + ',';
+        Result := Result + AdapterIps.Strings[I];
+      end;
+end;
+
+// Where pley listens on port P: everywhere, or this computer and the
+// networks chosen. 127.0.0.1 comes first: pley must listen there as it
+// starts, and an adapter's address may come later (pley tries again).
+function AddressesWith(const P: String): String;
+var
+  I: Integer;
 begin
   if LanRadio.Checked then
-    Result := '0.0.0.0:' + Port
+    Result := '0.0.0.0:' + P
   else
-    Result := '127.0.0.1:' + Port;
+  begin
+    Result := '127.0.0.1:' + P;
+    if AdaptersRadio.Checked then
+      for I := 0 to AdapterIps.Count - 1 do
+        if AdapterList.Checked[I] then
+          Result := Result + ',' + AdapterIps.Strings[I] + ':' + P;
+  end;
+end;
+
+function BindAddress: String;
+begin
+  Result := AddressesWith(Port);
 end;
 
 function PlexBind: String;
 begin
-  if not PlexCheck.Checked then
-    Result := 'off'
-  else if LanRadio.Checked then
-    Result := '0.0.0.0:32400'
+  if PlexCheck.Checked then
+    Result := AddressesWith('32400')
   else
-    Result := '127.0.0.1:32400';
+    Result := 'off';
+end;
+
+// Whether other devices may reach pley.
+function Reachable: Boolean;
+begin
+  Result := LanRadio.Checked or (ChosenIps <> '');
 end;
 
 function Discovery: Boolean;
 begin
-  Result := LanRadio.Checked and DiscoveryCheck.Checked;
+  Result := Reachable and DiscoveryCheck.Checked;
+end;
+
+// The Windows Firewall profiles the rule is for, such as "private,domain".
+function Profiles: String;
+begin
+  Result := '';
+  if PrivateCheck.Checked then
+    Result := Result + ',private';
+  if DomainCheck.Checked then
+    Result := Result + ',domain';
+  if PublicCheck.Checked then
+    Result := Result + ',public';
+  if Result <> '' then
+    Delete(Result, 1, 1);
+end;
+
+// "private network", from Windows' NetworkCategory.
+function KindText(const Kind: String): String;
+begin
+  if Kind = 'Private' then
+    Result := 'private network'
+  else if Kind = 'Public' then
+    Result := 'public network'
+  else if Kind = 'DomainAuthenticated' then
+    Result := 'domain network'
+  else
+    Result := '';
 end;
 
 function WebAddress(Param: String): String;
@@ -336,15 +413,75 @@ procedure UpdateControls(Sender: TObject);
 begin
   RestrictCheck.Enabled := not TrayRadio.Checked;
   AutostartCheck.Enabled := TrayRadio.Checked;
-  DiscoveryCheck.Enabled := LanRadio.Checked;
+  AdapterList.Enabled := AdaptersRadio.Checked;
   CopyEdit.Enabled := CopyCheck.Checked;
   CopyButton.Enabled := CopyCheck.Checked;
 end;
 
+// Ticking a network chooses "these networks".
+procedure AdapterClicked(Sender: TObject);
+begin
+  AdaptersRadio.Checked := True;
+  UpdateControls(nil);
+end;
+
+// This computer's networks: its IPv4 addresses (not loopback nor
+// link-local), each with its adapter's name and the kind of network Windows
+// takes it for.
+procedure FindAdapters;
+var
+  Code, I, Bar: Integer;
+  Output: TExecOutput;
+  Line, Rest: String;
+begin
+  AdapterIps := TStringList.Create;
+  AdapterNames := TStringList.Create;
+  AdapterKinds := TStringList.Create;
+  try
+    if not ExecAndCaptureOutput(PowerShell, '-NoProfile -ExecutionPolicy Bypass -Command "' +
+      '$kinds = @{}; Get-NetConnectionProfile -ErrorAction SilentlyContinue | ' +
+      'ForEach-Object { $kinds[$_.InterfaceAlias] = [string]$_.NetworkCategory }; ' +
+      'Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | ' +
+      'Where-Object { $_.IPAddress -notlike ''127.*'' -and $_.IPAddress -notlike ''169.254.*'' } | ' +
+      'ForEach-Object { $_.IPAddress + ''|'' + $_.InterfaceAlias + ''|'' + $kinds[$_.InterfaceAlias] }"',
+      '', SW_HIDE, ewWaitUntilTerminated, Code, Output) then
+      Exit;
+  except
+    Log(GetExceptionMessage);
+    Exit;
+  end;
+  for I := 0 to GetArrayLength(Output.StdOut) - 1 do
+  begin
+    Line := Trim(Output.StdOut[I]);
+    Bar := Pos('|', Line);
+    if Bar = 0 then
+      Continue;
+    AdapterIps.Add(Copy(Line, 1, Bar - 1));
+    Rest := Copy(Line, Bar + 1, MaxInt);
+    Bar := Pos('|', Rest);
+    AdapterNames.Add(Copy(Rest, 1, Bar - 1));
+    AdapterKinds.Add(Copy(Rest, Bar + 1, MaxInt));
+    Log('Network: ' + Line);
+  end;
+end;
+
+// A network in AdapterList: "Ethernet (192.168.1.10)", "private network".
+procedure AddAdapter(const Ip, Name, Kind: String);
+var
+  Caption: String;
+begin
+  if Name = '' then
+    Caption := Ip + ' (not on this computer now)'
+  else
+    Caption := Name + ' (' + Ip + ')';
+  AdapterList.AddCheckBox(Caption, KindText(Kind), 0, False, True, False, False, nil);
+end;
+
 procedure CreatePages;
 var
-  Top: Integer;
+  Top, I: Integer;
   PortLabel: TNewStaticText;
+  Networks: String;
 begin
   ModePage := CreateCustomPage(wpSelectDir, 'How pley runs', 'When pley starts and which account it runs as.');
   Top := 0;
@@ -383,13 +520,26 @@ begin
   AddFolder(DataPage, Top, CopyEdit, CopyButton, @CopyButtonClick);
   CopyCheck.OnClick := @UpdateControls;
 
-  NetworkPage := CreateCustomPage(DataPage.ID, 'Network', 'Who can reach pley');
+  NetworkPage := CreateCustomPage(DataPage.ID, 'Network', 'Where pley listens');
   Top := 0;
-  LocalRadio := AddRadio(NetworkPage, Top, 'Only this computer',
-    'pley listens on 127.0.0.1: for a reverse proxy on this computer that serves it to others, with HTTPS.');
-  LanRadio := AddRadio(NetworkPage, Top, 'Devices on my network too',
-    'pley listens on every network, and Setup lets it through Windows Firewall on networks Windows treats as private.');
+  LocalRadio := AddRadio(NetworkPage, Top, 'Only this computer (recommended with a reverse proxy)',
+    'On 127.0.0.1, for a reverse proxy here that serves pley to others with HTTPS.');
+  AdaptersRadio := AddRadio(NetworkPage, Top, 'This computer and these networks:', '');
+  Top := Top - ScaleY(4);
+  AdapterList := TNewCheckListBox.Create(NetworkPage);
+  AdapterList.Parent := NetworkPage.Surface;
+  AdapterList.Left := ScaleX(18);
+  AdapterList.Top := Top;
+  AdapterList.Width := NetworkPage.SurfaceWidth - ScaleX(18);
+  AdapterList.Height := ScaleY(56);
+  AdapterList.Flat := True;
+  for I := 0 to AdapterIps.Count - 1 do
+    AddAdapter(AdapterIps.Strings[I], AdapterNames.Strings[I], AdapterKinds.Strings[I]);
+  AdapterList.OnClickCheck := @AdapterClicked;
+  Top := Top + AdapterList.Height + ScaleY(8);
+  LanRadio := AddRadio(NetworkPage, Top, 'Every network, those that come later too', '');
   LocalRadio.OnClick := @UpdateControls;
+  AdaptersRadio.OnClick := @UpdateControls;
   LanRadio.OnClick := @UpdateControls;
   PortLabel := TNewStaticText.Create(NetworkPage);
   PortLabel.Parent := NetworkPage.Surface;
@@ -403,15 +553,59 @@ begin
   PortEdit.Width := ScaleX(60);
   PortLabel.FocusControl := PortEdit;
   Top := Top + PortEdit.Height + ScaleY(14);
-  PlexCheck := AddCheck(NetworkPage, Top, 'Plex-compatible API on port 32400', 'For Plex apps. Leave it off unless you use them.');
-  DiscoveryCheck := AddCheck(NetworkPage, Top, 'Let the pley apps find this server',
-    'They look for servers on the local network, on the same port (UDP).');
+  PlexCheck := AddCheck(NetworkPage, Top, 'Plex-compatible API on port 32400, for Plex apps', '');
+
+  FirewallPage := CreateCustomPage(NetworkPage.ID, 'Windows Firewall', 'Which devices may reach pley');
+  Top := 0;
+  Networks := '';
+  for I := 0 to AdapterIps.Count - 1 do
+    if KindText(AdapterKinds.Strings[I]) <> '' then
+      Networks := Networks + #13#10 + '   ' + AdapterNames.Strings[I] + ' (' + AdapterIps.Strings[I] + '): ' +
+        KindText(AdapterKinds.Strings[I]);
+  if Networks <> '' then
+    AddText(FirewallPage, Top, 0, 'This computer''s networks:' + Networks);
+  AddText(FirewallPage, Top, 0, 'Let pley through on networks Windows takes for:');
+  PrivateCheck := AddCheck(FirewallPage, Top, 'Private (home)', '');
+  DomainCheck := AddCheck(FirewallPage, Top, 'Domain (a workplace''s)', '');
+  PublicCheck := AddCheck(FirewallPage, Top, 'Public (cafes, hotels: not recommended)', '');
+  AddText(FirewallPage, Top, 0, 'From:');
+  SubnetRadio := AddRadio(FirewallPage, Top, 'Devices on those networks only', '');
+  AnyRadio := AddRadio(FirewallPage, Top, 'Any address, through a VPN such as Tailscale too', '');
+  DiscoveryCheck := AddCheck(FirewallPage, Top, 'Let the pley apps on the network find this server', '');
+end;
+
+// Ticks the networks of Ips (addresses separated by commas), adding those
+// this computer doesn't have now (a VPN's, say).
+procedure CheckAdapters(Ips: String);
+var
+  Comma, Index: Integer;
+  Ip: String;
+begin
+  Ips := Ips + ',';
+  while Ips <> '' do
+  begin
+    Comma := Pos(',', Ips);
+    Ip := Trim(Copy(Ips, 1, Comma - 1));
+    Delete(Ips, 1, Comma);
+    if Ip = '' then
+      Continue;
+    Index := AdapterIps.IndexOf(Ip);
+    if Index < 0 then
+    begin
+      AdapterIps.Add(Ip);
+      AdapterNames.Add('');
+      AdapterKinds.Add('');
+      AddAdapter(Ip, '', '');
+      Index := AdapterIps.Count - 1;
+    end;
+    AdapterList.Checked[Index] := True;
+  end;
 end;
 
 // The choices of the last install (or of Setup's command line).
 procedure LoadChoices;
 var
-  Mode: String;
+  Mode, Listen, Ips, Firewall: String;
 begin
   Mode := Lowercase(CmdParam('MODE', GetPreviousData('Mode', 'service')));
   ServiceRadio.Checked := Mode = 'service';
@@ -431,10 +625,29 @@ begin
   CopyEdit.Text := CmdParam('COPYDATA', '');
   CopyCheck.Checked := CopyEdit.Text <> '';
 
-  LanRadio.Checked := Flag('LAN', GetPreviousData('Lan', 'no') = 'yes');
-  LocalRadio.Checked := not LanRadio.Checked;
+  // local, all, or the addresses of the networks chosen (/LISTEN=10.0.0.5,100.64.0.7).
+  Listen := Lowercase(Trim(CmdParam('LISTEN', GetPreviousData('Listen', 'local'))));
+  Ips := GetPreviousData('Addresses', '');
+  if (Listen <> 'local') and (Listen <> 'all') and (Listen <> 'adapters') then
+  begin
+    Ips := Listen;
+    Listen := 'adapters';
+  end;
+  LocalRadio.Checked := Listen = 'local';
+  LanRadio.Checked := Listen = 'all';
+  AdaptersRadio.Checked := Listen = 'adapters';
+  if AdaptersRadio.Checked then
+    CheckAdapters(Ips);
   PortEdit.Text := CmdParam('PORT', GetPreviousData('Port', '7539'));
   PlexCheck.Checked := Flag('PLEX', GetPreviousData('Plex', 'no') = 'yes');
+
+  // Private and domain networks, from devices on them, unless told otherwise.
+  Firewall := Lowercase(CmdParam('FIREWALL', GetPreviousData('Firewall', 'private,domain')));
+  PrivateCheck.Checked := Pos('private', Firewall) > 0;
+  DomainCheck.Checked := Pos('domain', Firewall) > 0;
+  PublicCheck.Checked := Pos('public', Firewall) > 0;
+  AnyRadio.Checked := Lowercase(CmdParam('FROM', GetPreviousData('From', 'subnet'))) = 'any';
+  SubnetRadio.Checked := not AnyRadio.Checked;
   DiscoveryCheck.Checked := Flag('DISCOVERY', GetPreviousData('Discovery', 'yes') = 'yes');
   UpdateControls(nil);
 end;
@@ -444,6 +657,7 @@ begin
   RegQueryStringValue(HKA, StateKey, 'Mode', PrevMode);
   RegQueryStringValue(HKA, StateKey, 'DataDir', PrevDataDir);
   RegQueryStringValue(HKA, StateKey, 'CreatedUser', PrevUser);
+  FindAdapters;
   CreatePages;
   LoadChoices;
 end;
@@ -457,15 +671,29 @@ begin
   SetPreviousData(PreviousDataKey, 'Share', UserPage.Values[1]);
   SetPreviousData(PreviousDataKey, 'ShareUser', UserPage.Values[2]);
   SetPreviousData(PreviousDataKey, 'DataDir', DataDir(''));
-  SetPreviousData(PreviousDataKey, 'Lan', YesNo(LanRadio.Checked));
+  if LanRadio.Checked then
+    SetPreviousData(PreviousDataKey, 'Listen', 'all')
+  else if AdaptersRadio.Checked then
+    SetPreviousData(PreviousDataKey, 'Listen', 'adapters')
+  else
+    SetPreviousData(PreviousDataKey, 'Listen', 'local');
+  SetPreviousData(PreviousDataKey, 'Addresses', ChosenIps);
   SetPreviousData(PreviousDataKey, 'Port', Port);
   SetPreviousData(PreviousDataKey, 'Plex', YesNo(PlexCheck.Checked));
+  if Profiles = '' then
+    SetPreviousData(PreviousDataKey, 'Firewall', 'none')
+  else
+    SetPreviousData(PreviousDataKey, 'Firewall', Profiles);
+  if AnyRadio.Checked then
+    SetPreviousData(PreviousDataKey, 'From', 'any')
+  else
+    SetPreviousData(PreviousDataKey, 'From', 'subnet');
   SetPreviousData(PreviousDataKey, 'Discovery', YesNo(DiscoveryCheck.Checked));
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
-  Result := (PageID = UserPage.ID) and not UserRadio.Checked;
+  Result := ((PageID = UserPage.ID) and not UserRadio.Checked) or ((PageID = FirewallPage.ID) and not Reachable);
 end;
 
 function DefaultDataDir: String;
@@ -482,11 +710,6 @@ var
 begin
   N := StrToIntDef(Port, 0);
   Result := (N > 0) and (N < 65536) and (IntToStr(N) = Port);
-end;
-
-function PowerShell: String;
-begin
-  Result := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
 end;
 
 // The program listening on TCP port Number, other than the pley installed
@@ -587,14 +810,22 @@ begin
   end
   else if CurPageID = NetworkPage.ID then
   begin
-    if not ValidPort then
+    if AdaptersRadio.Checked and (ChosenIps = '') then
+    begin
+      SuppressibleMsgBox('Tick the networks pley listens on, or choose "Only this computer".', mbError, MB_OK, IDOK);
+      Result := False;
+    end
+    else if not ValidPort then
     begin
       SuppressibleMsgBox('The port is a number from 1 to 65535, such as 7539.', mbError, MB_OK, IDOK);
       Result := False;
     end
     else
       Result := PortsFree;
-  end;
+  end
+  else if (CurPageID = FirewallPage.ID) and (Profiles = '') then
+    Result := SuppressibleMsgBox('pley won''t be let through Windows Firewall, so only this computer will reach it ' +
+      '(unless another rule lets it). Go on?', mbConfirmation, MB_YESNO, IDYES) = IDYES;
 end;
 
 function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo, MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
@@ -617,13 +848,24 @@ begin
   S := S + NewLine + NewLine + 'Data folder:' + NewLine + Space + DataDir('');
   if CopyCheck.Checked then
     S := S + NewLine + Space + 'With the data copied from ' + Trim(CopyEdit.Text);
-  S := S + NewLine + NewLine + 'Network:' + NewLine + Space + 'http://' + BindAddress;
+  S := S + NewLine + NewLine + 'Network:' + NewLine + Space;
   if LanRadio.Checked then
-    S := S + ', let through Windows Firewall'
+    S := S + 'Every network, port ' + Port
+  else if Reachable then
+    S := S + 'This computer and ' + ChosenIps + ', port ' + Port
   else
-    S := S + ', this computer only';
+    S := S + 'This computer only (127.0.0.1:' + Port + ')';
   if PlexCheck.Checked then
     S := S + NewLine + Space + 'Plex-compatible API on port 32400';
+  if Reachable then
+  begin
+    if Profiles = '' then
+      S := S + NewLine + Space + 'Not let through Windows Firewall'
+    else if AnyRadio.Checked then
+      S := S + NewLine + Space + 'Let through Windows Firewall on ' + Profiles + ' networks, from any address'
+    else
+      S := S + NewLine + Space + 'Let through Windows Firewall on ' + Profiles + ' networks, from devices on them';
+  end;
   if Discovery then
     S := S + NewLine + Space + 'Found by the pley apps on the network';
   S := S + NewLine + NewLine + 'FFmpeg:' + NewLine + Space + '{#FfmpegLabel}';
@@ -727,10 +969,15 @@ var
 begin
   Netsh := ExpandConstant('{sys}\netsh.exe');
   Exec(Netsh, 'advfirewall firewall delete rule name="pley"', '', SW_HIDE, ewWaitUntilTerminated, Code);
-  if not LanRadio.Checked then
+  if not Reachable or (Profiles = '') then
     Exit;
-  Rule := 'advfirewall firewall add rule name="pley" dir=in action=allow profile=private,domain program="' +
+  Rule := 'advfirewall firewall add rule name="pley" dir=in action=allow profile=' + Profiles + ' program="' +
     ExpandConstant('{app}\pley.exe') + '"';
+  // Only to the networks chosen, and from devices on them unless any address may.
+  if ChosenIps <> '' then
+    Rule := Rule + ' localip=' + ChosenIps;
+  if SubnetRadio.Checked then
+    Rule := Rule + ' remoteip=localsubnet';
   if PlexCheck.Checked then
     Exec(Netsh, Rule + ' protocol=TCP localport=' + Port + ',32400', '', SW_HIDE, ewWaitUntilTerminated, Code)
   else

@@ -198,6 +198,8 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     let addr = listener.local_addr()?;
     let plex = plex::bind(config.plex_bind).await;
     let discovery = if config.discovery { discovery::bind(addr).await } else { None };
+    let (extra_binds, plex_extra_binds) = (config.extra_binds.clone(), config.plex_extra_binds.clone());
+    let (discovery_on, retry) = (config.discovery, config.extra_bind_retry);
 
     let grace = config.shutdown_grace;
     let state = AppState::init(config).await?;
@@ -215,6 +217,28 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     let tray = tray.and_then(|launch| launch(desktop::TrayContext::new(&state, addr)));
 
     let stopping = state.stopping.clone();
+    // The other addresses, served as soon as they exist, until pley stops.
+    let extras = tokio_util::task::TaskTracker::new();
+    for extra in extra_binds {
+        let (app, state, stopping) = (app.clone(), state.clone(), stopping.clone());
+        extras.spawn(listen_when_possible(extra, "pley", retry, stopping.clone(), move |listener| async move {
+            if discovery_on && let Some(socket) = discovery::bind(extra).await {
+                tokio::spawn(discovery::serve(state, socket, extra.port(), stopping.clone()));
+            }
+            http::serve(listener, app, stopping.cancelled_owned()).await;
+        }));
+    }
+    for extra in plex_extra_binds {
+        let (state, stopping) = (state.clone(), stopping.clone());
+        extras.spawn(listen_when_possible(
+            extra,
+            "the Plex-compatible API",
+            retry,
+            stopping.clone(),
+            move |listener| plex::serve(state, listener, stopping.cancelled_owned()),
+        ));
+    }
+    extras.close();
     let web = http::serve(listener, app, stopping.clone().cancelled_owned());
     let plex = plex.map(|listener| plex::serve(state.clone(), listener, stopping.clone().cancelled_owned()));
     if let Some(socket) = discovery {
@@ -226,7 +250,7 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
                 plex.await;
             }
         };
-        tokio::join!(web, plex);
+        tokio::join!(web, plex, extras.wait());
     };
     tokio::pin!(serving);
     let stopped = tokio::select! {
@@ -249,6 +273,41 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     set_stopped(true);
     drop(tray);
     Ok(())
+}
+
+/// Listens on `addr` as soon as it can, trying every `retry`, and hands the
+/// listener to `serve`: a network adapter's address may come after pley
+/// (Wi-Fi, a VPN like Tailscale). Gives up when pley stops.
+async fn listen_when_possible<F, Fut>(
+    addr: SocketAddr,
+    what: &'static str,
+    retry: Duration,
+    stopping: CancellationToken,
+    serve: F,
+) where
+    F: FnOnce(tokio::net::TcpListener) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let mut told = false;
+    loop {
+        match tokio::net::TcpListener::bind(addr).await {
+            Ok(listener) => {
+                // Not "pley … listening on", which marks a start in the log.
+                tracing::info!("listening on http://{addr} too ({what})");
+                return serve(listener).await;
+            }
+            Err(err) => {
+                if !told {
+                    tracing::warn!("{what} can't listen on {addr} yet ({err}): trying every {}s", retry.as_secs_f32());
+                    told = true;
+                }
+                tokio::select! {
+                    () = stopping.cancelled() => return,
+                    () = tokio::time::sleep(retry) => {}
+                }
+            }
+        }
+    }
 }
 
 /// `pley reset-password <user> <password>`: recovery path for a lost admin password.

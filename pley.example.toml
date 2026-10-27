@@ -4,11 +4,16 @@
 # acceleration, tone mapping, transcode limits, ...) live in the web UI under
 # Settings → Server instead.
 
-# Address to listen on. Use 127.0.0.1:7539 to stay local-only.
+# Address to listen on. Use 127.0.0.1:7539 to stay local-only. Several,
+# separated by commas, listen on chosen networks only: pley must be able to
+# listen on the first as it starts, and tries the others until it can (a
+# Wi-Fi or VPN address may come later).
 # bind = "0.0.0.0:7539"
+# bind = "127.0.0.1:7539, 192.168.1.10:7539, 100.64.0.7:7539"
 
 # Plex-compatible API for Plex tools (docs/COMPATIBILITY.md). "off" disables it; if the
 # port is taken (a real Plex server), pley logs a warning and runs without it.
+# Several addresses, as with bind.
 # plex_bind = "0.0.0.0:32400"
 
 # Answer the pley apps looking for servers on the local network (UDP, on the

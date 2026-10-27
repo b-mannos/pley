@@ -60,6 +60,39 @@ async fn stopped(server: JoinHandle<anyhow::Result<()>>, within: Duration) -> an
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn more_addresses_are_served_and_one_taken_is_tried_until_free() {
+    let data = tempfile::tempdir().unwrap();
+    let mut config = config(data.path());
+    let second = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+    // Like an adapter's address that comes after pley (Wi-Fi, a VPN).
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let later = taken.local_addr().unwrap();
+    config.extra_binds = vec![second, later];
+    config.extra_bind_retry = Duration::from_millis(100);
+    let (_first, ctx, server) = start(config).await;
+
+    let http = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(5)).build().unwrap();
+    let answers = |addr: std::net::SocketAddr| {
+        let http = http.clone();
+        async move { http.get(format!("http://{addr}/api/health")).send().await.is_ok_and(|r| r.status().is_success()) }
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !answers(second).await {
+        assert!(Instant::now() < deadline, "pley never listened on {second}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    drop(taken);
+    while !answers(later).await {
+        assert!(Instant::now() < deadline, "pley never listened on {later} once it was free");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    ctx.send(Command::Quit);
+    stopped(server, Duration::from_secs(10)).await.unwrap();
+    assert!(!answers(second).await, "{second} closed with pley");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn one_server_per_data_directory() {
     let data = tempfile::tempdir().unwrap();
     let (_, ctx, server) = start(config(data.path())).await;

@@ -35,15 +35,22 @@ Run the setup. Its pages:
    until now (its accounts, libraries, watch history and artwork): that pley
    must be stopped, and nothing is copied over existing data. When the data
    folder changes from one install to the next, Setup offers to copy it.
-4. **Network**
-   - **Only this computer**: pley listens on `127.0.0.1`, for a reverse proxy
-     on this computer that serves it with HTTPS (Caddy, nginx, IIS).
-   - **Devices on my network too**: pley listens on every network, and
-     Setup lets it through Windows Firewall on networks Windows treats as
-     private.
-   - The port (7539), the Plex-compatible API (port 32400, for Plex apps) and
-     whether the pley apps find the server on the local network.
-   Setup says when another program has the port.
+4. **Network**: where pley listens.
+   - **Only this computer** (the default): on `127.0.0.1`, for a reverse
+     proxy on this computer that serves it with HTTPS (Caddy, nginx, IIS).
+   - **This computer and these networks**: the computer's network adapters
+     are listed with their addresses and the kind of network Windows takes
+     each for; pley listens on those ticked (and 127.0.0.1). An adapter
+     that isn't up yet as pley starts (Wi-Fi, a VPN such as Tailscale) is
+     tried again every 30 s.
+   - **Every network**, those that come later too.
+   - The port (7539) and the Plex-compatible API (port 32400, for Plex apps),
+     on the same networks. Setup says when another program has a port.
+5. **Windows Firewall**, when other devices may reach pley: which kinds of
+   network to let it through on (private and domain, not public, unless you
+   say otherwise), from devices on those networks only or from any address
+   (through a VPN too), and whether the pley apps on the network find the
+   server. The rule covers the networks chosen only.
 
 FFmpeg comes with the installer and goes next to pley: a release's carries
 gyan.dev's full build (NVENC, Quick Sync, AMF and Vulkan tone mapping), and
@@ -64,7 +71,7 @@ background, without an icon in the notification area: the Start menu's
 | Options | `pley.toml` in the data folder: the address, the Plex-compatible API, discovery and FFmpeg |
 | The service | `pley` ("pley-server" in Services): starts with Windows (delayed), restarts when it stops on its own, has 30 s to stop as Windows shuts down, and keeps its temporary files in the data folder's `tmp` |
 | The data folder | Owned by the administrators; only SYSTEM, the administrators, the service (and its user) and you may open it |
-| The firewall | A rule named `pley` for its port, on private networks, when it listens on the network |
+| The firewall | A rule named `pley` for its ports, on the kinds of network and from the devices chosen, when others may reach it |
 | The notification area | pley starts when you sign in (Start pley at login, in its menu) |
 | Start menu | `pley-server` (pley's page, or pley itself) and `pley-server logs` |
 
@@ -83,7 +90,7 @@ too (no, unless you say so).
 ## Installing without the wizard
 
 ```
-pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=service /LAN=yes
+pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=service /LISTEN=192.168.1.10
 ```
 
 | Option | Values | Default |
@@ -95,9 +102,12 @@ pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=s
 | `/AUTOSTART=` | `yes` or `no`: start at sign-in, with `tray` | `yes` |
 | `/DATADIR=` | The data folder | as above |
 | `/COPYDATA=` | A data folder to copy first | none |
-| `/LAN=` | `yes` or `no`: listen on the network | `no` |
+| `/LISTEN=` | `local`, `all`, or the addresses of the networks to listen on, separated by commas | `local` |
 | `/PORT=` | The port | `7539` |
-| `/PLEX=`, `/DISCOVERY=` | `yes` or `no` (discovery with `/LAN=yes`) | `no`, `yes` |
+| `/PLEX=` | `yes` or `no`: the Plex-compatible API | `no` |
+| `/FIREWALL=` | The kinds of network to let pley through on: `private`, `domain`, `public` (separated by commas), or `none` | `private,domain` |
+| `/FROM=` | `subnet` (devices on those networks) or `any` (a VPN too) | `subnet` |
+| `/DISCOVERY=` | `yes` or `no`: found by the pley apps, when others may reach it | `yes` |
 
 Setup's own options work too, such as `/DIR=` (where pley goes) and
 `/LOG=<file>`. An update keeps the last choices for the options not given. A

@@ -163,8 +163,8 @@ Options come from command-line flags, `PLEY_*` environment variables or
 
 | Flag | Default | |
 |---|---|---|
-| `--bind` | `0.0.0.0:7539` | Listen address (7539 spells PLEY on a keypad) |
-| `--plex-bind` | `0.0.0.0:32400` | Compatibility API; `off` turns it off |
+| `--bind` | `0.0.0.0:7539` | Listen address (7539 spells PLEY on a keypad); several separated by commas |
+| `--plex-bind` | `0.0.0.0:32400` | Compatibility API; `off` turns it off; several as with `--bind` |
 | `--data-dir` | `%LOCALAPPDATA%\pley`, `~/.local/share/pley` | Database, caches and artwork |
 | `--ffmpeg`, `--ffprobe` | from `PATH` | Passed to the transcoder |
 | `--transcoder-url` | | Use a transcoder running elsewhere instead of starting one |
