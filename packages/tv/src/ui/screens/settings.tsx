@@ -653,7 +653,7 @@ export function HistoryScreen(p: { entry: Entry }) {
         {error ? <div class="t-label c-danger one-line">{sentence(errorMessage(error))}</div> : null}
       </div>
       <div class="history-viewport">
-        <div ref={listRef} style={`transform:translateY(${-shift}px)`}>
+        <div ref={listRef} class="scroll-y" style={`transform:translateY(${-shift}px)`}>
           <G kind="col">
             {entries.map((e, i) => (
               <G key={e.id} kind="row" class="history-line">

@@ -434,6 +434,9 @@ body {
 .reduced .side-panel,
 .reduced .scrim { transition: none; }
 .panel-scroll { position: relative; will-change: transform; transition: transform 200ms var(--focus-ease); }
+/* A list a page scrolls to keep focus in view (an album's tracks, the servers, History): it slides there, as a panel's does. */
+.scroll-y { will-change: transform; transition: transform 200ms var(--focus-ease); }
+.reduced .scroll-y { transition: none; }
 .panel-title { padding: 8px 0 8px 16px; }
 .panel-heading { padding: 16px 0 8px 16px; }
 .panel-row {

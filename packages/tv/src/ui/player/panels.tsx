@@ -225,7 +225,7 @@ function InfoPanel(p: { state: PlayerState; controller: PlaybackController; onCl
           return key === "left" || key === "right";
         }}
       >
-        <div ref={box} style={`transform:translateY(${-scroll}px)`}>
+        <div ref={box} class="scroll-y" style={`transform:translateY(${-scroll}px)`}>
           <PanelTitle>Playback info</PanelTitle>
           {!sections.length ? <div class="t-body c-muted panel-note">Asking the server…</div> : sections.map((s) => <Facts key={s.title} block={s} />)}
           <div style="height:24px" />

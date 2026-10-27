@@ -714,7 +714,7 @@ export function LibrariesScreen(p: { entry: Entry }) {
         Libraries
       </div>
       <div class="libraries-viewport">
-        <div style={`transform:translateY(${-shift}px)`}>
+        <div class="scroll-y" style={`transform:translateY(${-shift}px)`}>
           <G kind="grid" columns={3} restore class="libraries-grid">
             {libraries.map((l, i) => (
               <F

@@ -244,7 +244,7 @@ export function ServersScreen() {
         </div>
         {rows.length > 0 && (
           <div class="server-list" style={`height:${listHeight}px`}>
-            <div ref={listRef} style={`transform:translateY(${-shift}px)`}>
+            <div ref={listRef} class="scroll-y" style={`transform:translateY(${-shift}px)`}>
               <G kind="col">
                 {rows.map((r, i) => {
                   const lookalike = r.found && !r.saved && savedNames.indexOf(r.name.trim().toLowerCase()) >= 0;
