@@ -7,13 +7,25 @@ import { thumbCandidates } from "@/lib/images";
 
 const COUNTDOWN = 10;
 
-export function UpNext({ next, onPlay, onCancel }: { next: ItemSummary; onPlay: () => void; onCancel: () => void }) {
+/** `paused`: the viewer paused during the credits, and the countdown waits too. */
+export function UpNext({
+  next,
+  paused,
+  onPlay,
+  onCancel,
+}: {
+  next: ItemSummary;
+  paused: boolean;
+  onPlay: () => void;
+  onCancel: () => void;
+}) {
   const [left, setLeft] = useState(COUNTDOWN);
 
   useEffect(() => {
+    if (paused) return;
     const timer = window.setInterval(() => setLeft((l) => Math.max(0, l - 1)), 1000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [paused]);
 
   useEffect(() => {
     if (left <= 0) onPlay();

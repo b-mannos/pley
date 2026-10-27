@@ -283,7 +283,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const sleep = useSleepTimer({
     initial: carriedSleep,
     mediaLeft: duration > 0 ? duration - current : Number.POSITIVE_INFINITY,
-    onSleep: () => videoRef.current?.pause(),
+    onSleep: () => {
+      videoRef.current?.pause();
+      // Asleep: the next episode doesn't start on its own either.
+      setUpNext(null);
+    },
   });
   const sleepEndLabel = isEpisode
     ? "End of this episode"
@@ -1535,6 +1539,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       {upNext ? (
         <UpNext
           next={upNext}
+          paused={!playing && !ended}
           onPlay={() => void playNext()}
           onCancel={() => {
             setUpNext(null);
