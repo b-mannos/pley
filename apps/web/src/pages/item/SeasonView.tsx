@@ -10,7 +10,7 @@ import { prefetchPlay } from "@/lib/prefetchPlay";
 import { usePlayItem } from "@/lib/usePlayItem";
 import { playIntent } from "@/player/preload";
 import { MoreActions } from "./ItemActions";
-import { ItemArt, ItemPageShell, MetaLine, Summary, WatchedButton } from "./shared";
+import { ItemArt, ItemPageShell, MetaLine, SectionError, Summary, WatchedButton } from "./shared";
 import { CastRow } from "./Credits";
 import { itemUrl } from "@/lib/urls";
 
@@ -122,6 +122,11 @@ export function SeasonView({ item }: { item: ItemDetail }) {
               ))
             : episodes.data?.map((e) => <EpisodeRow key={e.id} ep={e} />)}
           {episodes.data && episodes.data.length === 0 ? <p className="px-2 text-sm text-muted">No episodes found.</p> : null}
+          {episodes.isError && !episodes.data ? (
+            <div className="px-2">
+              <SectionError what="the episodes" error={episodes.error} retry={() => void episodes.refetch()} />
+            </div>
+          ) : null}
         </div>
       </section>
       <CastRow title="Cast" credits={item.cast} />

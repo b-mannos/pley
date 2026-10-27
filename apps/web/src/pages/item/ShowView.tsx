@@ -21,6 +21,7 @@ import {
   MetaLine,
   MyListButton,
   RatingBadge,
+  SectionError,
   Summary,
   WatchedButton,
 } from "./shared";
@@ -97,6 +98,9 @@ export function ShowView({ item }: { item: ItemDetail }) {
             : seasons.data?.map((s) => <MediaCard key={s.id} item={s} aspect="poster" width={colWidth} />)}
         </div>
         {seasons.data && seasons.data.length === 0 ? <p className="text-sm text-muted">No seasons found.</p> : null}
+        {seasons.isError && !seasons.data ? (
+          <SectionError what="the seasons" error={seasons.error} retry={() => void seasons.refetch()} />
+        ) : null}
       </section>
       <ExtrasRow extras={item.extras} />
       <CastRow title="Cast" credits={item.cast} />

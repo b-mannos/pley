@@ -12,7 +12,7 @@ import { formatClock, formatDuration, pluralize } from "@/lib/format";
 import { useElementWidth } from "@/lib/hooks";
 import { usePlayItem } from "@/lib/usePlayItem";
 import { MoreActions } from "./ItemActions";
-import { Genres, ItemArt, MetaLine, Summary } from "./shared";
+import { Genres, ItemArt, MetaLine, SectionError, Summary } from "./shared";
 import { itemUrl } from "@/lib/urls";
 
 function MusicHeader({ item, kindLabel, meta, actions }: { item: ItemDetail; kindLabel: string; meta: React.ReactNode; actions: React.ReactNode }) {
@@ -73,6 +73,9 @@ export function ArtistView({ item }: { item: ItemDetail }) {
               ))}
         </div>
         {albums.data && albums.data.length === 0 ? <p className="text-sm text-muted">No albums found.</p> : null}
+        {albums.isError && !albums.data ? (
+          <SectionError what="the albums" error={albums.error} retry={() => void albums.refetch()} />
+        ) : null}
       </section>
     </div>
   );
@@ -145,6 +148,8 @@ export function AlbumView({ item, highlightId }: { item: ItemDetail; highlightId
               <Skeleton key={i} className="h-10" />
             ))}
           </div>
+        ) : tracks.isError && !tracks.data ? (
+          <SectionError what="the tracks" error={tracks.error} retry={() => void tracks.refetch()} />
         ) : (
           <div role="table" aria-label="Tracks" className="text-sm">
             <div role="row" className="grid grid-cols-[2.5rem_1fr_4rem] gap-3 border-b border-border px-3 pb-2 text-xs font-medium text-subtle">

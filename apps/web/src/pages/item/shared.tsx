@@ -11,6 +11,20 @@ import { cn } from "@/lib/cn";
 import { dynamicRangeBadge, formatRemaining, progressFraction } from "@/lib/format";
 import { backdropCandidates, posterCandidates, thumbCandidates } from "@/lib/images";
 
+/** A section of an item's page (its seasons, episodes, albums, tracks) that couldn't load, with Retry. */
+export function SectionError({ what, error, retry }: { what: string; error: unknown; retry: () => void }) {
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
+      <span className="text-danger">
+        Couldn't load {what}: {errorMessage(error)}
+      </span>
+      <Button size="sm" onClick={retry}>
+        Retry
+      </Button>
+    </div>
+  );
+}
+
 /** Full-bleed backdrop behind the item header. */
 export function Backdrop({ item }: { item: ItemSummary }) {
   return (
