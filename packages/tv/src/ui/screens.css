@@ -639,7 +639,15 @@
 .playlist-empty { position: absolute; left: 96px; top: 416px; width: 464px; }
 /* The entries' box spans them all, so that focus finds it below the top. */
 .playlist-entries { position: absolute; left: 0; width: 960px; }
-.entry-row { position: absolute; left: 80px; right: 48px; height: 106px; }
+/* An entry's place in the list: an entry moved, or the ones below one removed, slide to their new places. */
+.entry-slot { position: absolute; left: 0; top: 0; width: 960px; height: 106px; transition: transform 200ms var(--focus-ease); }
+.entry-slot.lifted { z-index: 2; }
+.holding .entry-slot,
+.reduced .entry-slot { transition: none !important; }
+.entry-row { position: absolute; left: 80px; right: 48px; top: 0; height: 106px; }
+/* While an entry is lifted, the pointer's places for it, a row each. */
+.entry-targets { position: absolute; left: 0; width: 960px; z-index: 3; }
+.entry-target { position: absolute; left: 80px; right: 48px; height: 106px; }
 .entry { position: absolute; left: 0; right: 52px; top: 0; height: 106px; box-sizing: border-box; padding: 8px 16px; border-radius: 8px; display: flex; align-items: center; color: var(--fg); }
 .entry-number { width: 28px; flex: none; text-align: right; color: var(--subtle); }
 .entry-still { position: relative; flex: none; width: 160px; height: 90px; margin: 0 20px 0 16px; border-radius: 4px; overflow: hidden; background: var(--surface2); }

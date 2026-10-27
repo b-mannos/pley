@@ -12,6 +12,7 @@ import { F, G, railOnLeft } from "../kit/focusable";
 import { PosterGrid } from "../kit/grid";
 import { Icon } from "../kit/icons";
 import { PanelHeading, PanelTitle, SidePanel } from "../kit/panel";
+import { useSlides } from "../kit/slides";
 import { describeSmartFilter } from "./library-data";
 import { memo } from "../kit/memo";
 import { ArtTile } from "../kit/tile";
@@ -105,8 +106,9 @@ type Overlay = null | { actions: PlaylistEntry } | "rename" | "delete";
  * its entries: number, still, title and length, and More. OK on an entry
  * plays from it; holding OK, Menu or More opens its actions: Play from
  * here, Go to it, Move, Remove. Move lifts the entry: Up and Down move
- * it, OK drops it there (and sends the order), Back puts it back. A smart
- * playlist fills itself: nothing in it is edited here.
+ * it, OK drops it there (and sends the order), Back puts it back; the
+ * pointer carries it to the row it points at, and a click drops it. A
+ * smart playlist fills itself: nothing in it is edited here.
  */
 export function PlaylistScreen(p: { entry: Entry; id: number }) {
   const ui = useUi();
@@ -141,6 +143,9 @@ function PlaylistPage(p: { entry: Entry; pl: Playlist & { entries: PlaylistEntry
   const [at, setAt] = useState<number>((p.entry.state.index as number | undefined) ?? -1);
   /** Where the pointer left the column, until a key moves focus in it. */
   const [held, setHeld] = useState<number | null>(null);
+  // Entries moved slide to their new places.
+  const listRef = useRef<HTMLElement | null>(null);
+  const snapshot = useSlides(listRef);
   // The server's answer holds the order sent: it shows as it is.
   useEffect(() => {
     if (moving === null) setOrder(null);
@@ -183,11 +188,30 @@ function PlaylistPage(p: { entry: Entry; pl: Playlist & { entries: PlaylistEntry
     const from = ids.indexOf(id);
     const to = from + by;
     if (from < 0 || to < 0 || to >= ids.length) return;
+    snapshot();
     ids.splice(to, 0, ids.splice(from, 1)[0]!);
     setOrder(ids);
     setAt(to);
     setHeld(null);
     p.entry.state.index = to;
+  };
+  // The pointer, with an entry lifted: the entry goes to the row it points at, the column staying under it.
+  const carryTo = (to: number) => {
+    if (moving === null || !ui.input.pointerMoved) return;
+    const ids = entries.map((e) => e.entry_id);
+    const from = ids.indexOf(moving);
+    if (from < 0 || to === from || to < 0 || to >= ids.length) return;
+    snapshot();
+    ids.splice(to, 0, ids.splice(from, 1)[0]!);
+    setOrder(ids);
+    setAt(to);
+    p.entry.state.index = to;
+    setHeld(nudge(shown.current, LIST_TOP + to * ROW_H, LIST_TOP + (to + 1) * ROW_H, 0, 540, 0, Math.max(0, LIST_TOP + (ids.length - 1) * ROW_H - ROW_ANCHOR)));
+  };
+  // Its click drops it, through Input, which tells a click from OK's own.
+  const dropByPointer = (e: MouseEvent) => {
+    const el = moving === null ? null : listRef.current?.querySelector<HTMLElement>(`[data-fid="entry/${moving}"]`);
+    if (el) ui.input.click(el, e);
   };
   const drop = () => {
     setMoving(null);
@@ -199,6 +223,7 @@ function PlaylistPage(p: { entry: Entry; pl: Playlist & { entries: PlaylistEntry
     });
   };
   const putBack = () => {
+    snapshot();
     setMoving(null);
     setOrder(null);
   };
@@ -272,6 +297,7 @@ function PlaylistPage(p: { entry: Entry; pl: Playlist & { entries: PlaylistEntry
     p.entry.state.index = -1;
     hold(buttonsTop, buttonsTop + 44);
   };
+  const lifting = moving !== null;
   const acting = overlay && typeof overlay === "object" ? overlay.actions : null;
   const actingTitles = acting ? entryTitles(acting.item) : null;
   return (
@@ -294,10 +320,10 @@ function PlaylistPage(p: { entry: Entry; pl: Playlist & { entries: PlaylistEntry
           </div>
         </div>
         <G kind="row" restore class="buttons playlist-buttons" style={`top:${buttonsTop}px`} onEdge={railOnLeft(ui.toRail)}>
-          <Pill label="Play" icon="play" fid="play" initial={canPlay} disabled={!canPlay} onFocus={topFocus} onSelect={() => play(0)} />
-          <Round label="Shuffle" icon="shuffle" fid="shuffle" disabled={entries.length < 2} onFocus={topFocus} onSelect={() => play(0, true)} />
-          {editable && <Round label="Rename" icon="pencil" fid="rename" initial={!canPlay} onFocus={topFocus} onSelect={() => setOverlay("rename")} />}
-          <Round label="Delete" icon="trash-2" fid="delete" initial={!canPlay && !editable} onFocus={topFocus} onSelect={() => setOverlay("delete")} />
+          <Pill label="Play" icon="play" fid="play" initial={canPlay} disabled={!canPlay || lifting} onFocus={topFocus} onSelect={() => play(0)} />
+          <Round label="Shuffle" icon="shuffle" fid="shuffle" disabled={entries.length < 2 || lifting} onFocus={topFocus} onSelect={() => play(0, true)} />
+          {editable && <Round label="Rename" icon="pencil" fid="rename" initial={!canPlay} disabled={lifting} onFocus={topFocus} onSelect={() => setOverlay("rename")} />}
+          <Round label="Delete" icon="trash-2" fid="delete" initial={!canPlay && !editable} disabled={lifting} onFocus={topFocus} onSelect={() => setOverlay("delete")} />
         </G>
         {!canPlay && (
           <div class="t-body c-muted playlist-empty">
@@ -308,9 +334,16 @@ function PlaylistPage(p: { entry: Entry; pl: Playlist & { entries: PlaylistEntry
                 : "This playlist is empty. Use “Add to playlist” on an artist or album, or hold OK on a cover."}
           </div>
         )}
-        <G kind="col" restore class="playlist-entries" style={`top:${LIST_TOP}px;height:${entries.length * ROW_H}px`}>
+        <G kind="col" restore class="playlist-entries" style={`top:${LIST_TOP}px;height:${entries.length * ROW_H}px`} elRef={(el) => (listRef.current = el)}>
           {rows}
         </G>
+        {lifting && (
+          <div class="entry-targets" style={`top:${LIST_TOP}px`}>
+            {rows.map((_, k) => (
+              <div key={first + k} class="entry-target" style={`top:${(first + k) * ROW_H}px`} onMouseMove={() => carryTo(first + k)} onClick={dropByPointer} />
+            ))}
+          </div>
+        )}
       </div>
       <div class="rail-fade" />
       {moving !== null && <div class="moving-hint t-label">Up and down to move it, OK to drop it here, Back to put it back</div>}
@@ -387,8 +420,9 @@ function PlaylistPage(p: { entry: Entry; pl: Playlist & { entries: PlaylistEntry
  * One entry (design spec §2.7: rows fill without scaling): its number,
  * 160 × 90 still (90 × 90 cover for music), its two lines and length;
  * focused, an accent fill. More sits at its end, a Right away. While
- * `moving` it is lifted (a ring, the arrows): Up and Down move it, OK
- * drops it, Back puts it back.
+ * `moving` it is lifted (a ring, the arrows): Up and Down move it, OK or
+ * a click drops it, Back puts it back, and so does focus going elsewhere
+ * (the rail). It sits in a slot that slides to its place.
  */
 function EntryRow(p: {
   e: PlaylistEntry;
@@ -407,53 +441,56 @@ function EntryRow(p: {
   const [title, subtitle] = entryTitles(item);
   const duration = formatDuration(item.duration_ms);
   return (
-    <G kind="row" class="entry-row" style={`top:${p.index * ROW_H}px`} onEdge={railOnLeft(p.toRail)}>
-      <F
-        class={`entry${p.moving ? " moving" : ""}`}
-        fid={`entry/${p.e.entry_id}`}
-        label={`${p.index + 1}. ${[title, subtitle, duration].filter(Boolean).join(", ")}`}
-        onFocus={p.onFocus}
-        onSelect={p.onPlay}
-        onLongSelect={p.onMore}
-        onMenu={p.onMore}
-        onKey={(key) => {
-          if (!p.moving) return false;
-          if (key === "up" || key === "down") {
-            p.onMove(key === "up" ? -1 : 1);
-            return true;
-          }
-          if (key === "ok:up") {
-            p.onDrop();
-            return true;
-          }
-          if (key === "back") {
-            p.onPutBack();
-            return true;
-          }
-          return key === "ok" || key === "left" || key === "right" || key.indexOf(":up") > 0;
-        }}
-      >
-        <div class="entry-number t-label">{p.index + 1}</div>
-        <div class={`entry-still${p.video ? "" : " square"}`}>
-          <Art candidates={artCandidates(item, p.video ? "thumb" : "poster")} width={p.video ? 160 : 90} title={item.title} class="tile-clip" />
-        </div>
-        <div class="entry-text">
-          <div class="t-title one-line">{title}</div>
-          {subtitle && <div class="t-caption one-line entry-sub">{subtitle}</div>}
-        </div>
-        {p.moving ? (
-          <div class="entry-arrows" aria-hidden="true">
-            <Icon name="chevron-up" size={22} />
-            <Icon name="chevron-down" size={22} />
+    <div class={`entry-slot${p.moving ? " lifted" : ""}`} data-key={p.e.entry_id} data-place={`translateY(${p.index * ROW_H}px)`} style={`transform:translateY(${p.index * ROW_H}px)`}>
+      <G kind="row" class="entry-row" onEdge={railOnLeft(p.toRail)}>
+        <F
+          class={`entry${p.moving ? " moving" : ""}`}
+          fid={`entry/${p.e.entry_id}`}
+          label={`${p.index + 1}. ${[title, subtitle, duration].filter(Boolean).join(", ")}`}
+          onFocus={p.onFocus}
+          onBlur={p.moving ? p.onPutBack : undefined}
+          onSelect={p.moving ? p.onDrop : p.onPlay}
+          onLongSelect={p.onMore}
+          onMenu={p.onMore}
+          onKey={(key) => {
+            if (!p.moving) return false;
+            if (key === "up" || key === "down") {
+              p.onMove(key === "up" ? -1 : 1);
+              return true;
+            }
+            if (key === "ok:up") {
+              p.onDrop();
+              return true;
+            }
+            if (key === "back") {
+              p.onPutBack();
+              return true;
+            }
+            return key === "ok" || key === "left" || key === "right" || key.indexOf(":up") > 0;
+          }}
+        >
+          <div class="entry-number t-label">{p.index + 1}</div>
+          <div class={`entry-still${p.video ? "" : " square"}`}>
+            <Art candidates={artCandidates(item, p.video ? "thumb" : "poster")} width={p.video ? 160 : 90} title={item.title} class="tile-clip" />
           </div>
-        ) : duration ? (
-          <div class="t-caption entry-sub entry-duration">{duration}</div>
-        ) : null}
-      </F>
-      <div class="entry-more">
-        <Round label="More" icon="ellipsis" fid={`more/${p.e.entry_id}`} offArt disabled={p.moving} onSelect={p.onMore} />
-      </div>
-    </G>
+          <div class="entry-text">
+            <div class="t-title one-line">{title}</div>
+            {subtitle && <div class="t-caption one-line entry-sub">{subtitle}</div>}
+          </div>
+          {p.moving ? (
+            <div class="entry-arrows" aria-hidden="true">
+              <Icon name="chevron-up" size={22} />
+              <Icon name="chevron-down" size={22} />
+            </div>
+          ) : duration ? (
+            <div class="t-caption entry-sub entry-duration">{duration}</div>
+          ) : null}
+        </F>
+        <div class="entry-more">
+          <Round label="More" icon="ellipsis" fid={`more/${p.e.entry_id}`} offArt disabled={p.moving} onSelect={p.onMore} />
+        </div>
+      </G>
+    </div>
   );
 }
 

@@ -12,6 +12,7 @@ import { F, G } from "../kit/focusable";
 import { gridColumns, PosterGrid } from "../kit/grid";
 import { Icon, type IconName } from "../kit/icons";
 import { useRested } from "../kit/backdrop";
+import { useSlides } from "../kit/slides";
 import { PanelTitle, SidePanel } from "../kit/panel";
 import { Row, rowHeight, SectionPage, type Section } from "../kit/row";
 import { ArtTile, SeeAllTile, SkeletonTile, Tile, TILES, type TileKind } from "../kit/tile";
@@ -784,50 +785,8 @@ export function LibrariesScreen(p: { entry: Entry; sort?: boolean }) {
     }
   }, [sortable, !libraries]);
 
-  // Cards slide to their new places, from where each shows now (in the middle of a slide too).
-  const slides = useRef<{ placed: Map<number, number>; from: Map<number, string> | null }>({ placed: new Map(), from: null });
-  const snapshot = () => {
-    const grid = gridRef.current;
-    if (!grid) return;
-    const from = new Map<number, string>();
-    for (let i = 0; i < grid.children.length; i++) {
-      const el = grid.children[i] as HTMLElement;
-      from.set(Number(el.getAttribute("data-id")), getComputedStyle(el).transform);
-    }
-    slides.current.from = from;
-  };
-  useLayoutEffect(() => {
-    const grid = gridRef.current;
-    const s = slides.current;
-    const from = s.from;
-    s.from = null;
-    if (!grid) return;
-    const moving: [HTMLElement, string, string][] = [];
-    const placed = new Map<number, number>();
-    for (let i = 0; i < grid.children.length; i++) {
-      const el = grid.children[i] as HTMLElement;
-      const id = Number(el.getAttribute("data-id"));
-      placed.set(id, i);
-      const was = s.placed.get(id);
-      if (was === undefined || was === i) continue;
-      const [x, y] = cardPlace(i);
-      const [wx, wy] = cardPlace(was);
-      moving.push([el, from?.get(id) ?? `translate(${wx}px,${wy}px)`, `translate(${x}px,${y}px)`]);
-    }
-    s.placed = placed;
-    if (!moving.length) return;
-    for (const [el, start] of moving) {
-      el.style.transition = "none";
-      el.style.transform = start;
-    }
-    void grid.offsetHeight;
-    for (const [el, , end] of moving) {
-      el.style.transition = "";
-      el.style.transform = end;
-    }
-    // A card the screen reader had keeps the browser's focus, moved in the page as it was.
-    ui.focus.syncDom();
-  });
+  // Cards slide to their new places.
+  const snapshot = useSlides(gridRef);
 
   useLayoutEffect(() => {
     const fid = refocus.current;
@@ -1076,8 +1035,9 @@ function LibraryCard(p: {
 }) {
   const l = p.library;
   const [x, y] = cardPlace(p.index);
+  const place = `translate(${x}px,${y}px)`;
   return (
-    <div class={`library-slot${p.lifted ? " lifted" : ""}`} data-id={l.id} style={`transform:translate(${x}px,${y}px)`}>
+    <div class={`library-slot${p.lifted ? " lifted" : ""}`} data-key={l.id} data-place={place} style={`transform:${place}`}>
       <F
         class={`library-card${p.lifted ? " lifted" : ""}`}
         fid={`library/${l.id}`}
