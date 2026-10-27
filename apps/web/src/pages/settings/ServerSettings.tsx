@@ -483,7 +483,8 @@ ${form.tvdb_pin}`}
         </Row>
       </Group>
 
-      <div className="sticky bottom-4 z-10 flex justify-end">
+      {/* Floats over the page only with something to save: at rest it would cover the rows on a phone. */}
+      <div className={cn("flex justify-end", (dirty || save.isPending) && "sticky bottom-4 z-10")}>
         <div className="flex items-center gap-3 rounded-lg border border-border bg-surface-2/95 px-3 py-2 shadow-xl backdrop-blur">
           {dirty ? <span className="text-xs text-muted">Unsaved changes</span> : null}
           <Button variant="ghost" size="sm" disabled={!dirty || save.isPending} onClick={() => settings.data && setForm(settings.data)}>

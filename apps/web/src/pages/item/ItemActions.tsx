@@ -59,7 +59,7 @@ export function MoreActions({ item, file = item.files[0] }: { item: ItemDetail; 
             aria-haspopup="menu"
             aria-expanded={open}
             active={open}
-            className="bg-surface-3/80 hover:bg-border"
+            className="bg-surface-3/80 hover:bg-border max-sm:size-11"
             onClick={toggle}
           >
             <Ellipsis className="size-5" />

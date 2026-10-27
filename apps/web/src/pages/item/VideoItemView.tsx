@@ -144,16 +144,18 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
           <Genres genres={item.genres} />
           <PartOfCollections item={item} />
 
-          <div className="flex flex-wrap items-center gap-2.5 pt-1">
+          {/* One line on a phone: the others are square there, and Play gives way first. */}
+          <div className="flex flex-wrap items-center gap-2 pt-1 max-sm:flex-nowrap sm:gap-2.5">
             {item.files.length ? (
               <Button
                 variant="primary"
                 size="lg"
-                icon={<Play className="size-5 fill-current" />}
+                icon={<Play className="size-5 shrink-0 fill-current" />}
                 onClick={() => onPlay(false)}
+                className="max-sm:min-w-0 max-sm:px-4"
                 {...playIntent(item.kind)}
               >
-                {resumable ? "Resume" : "Play"}
+                <span className="truncate">{resumable ? "Resume" : "Play"}</span>
               </Button>
             ) : (
               <Button variant="secondary" size="lg" disabled>
@@ -166,6 +168,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
                 size="lg"
                 icon={<RotateCcw className="size-4" />}
                 onClick={() => onPlay(true)}
+                className="max-sm:w-11 max-sm:px-0"
                 {...playIntent(item.kind)}
               >
                 <span className="hidden sm:inline">From start</span>
@@ -176,7 +179,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
             <MoreActions item={item} file={file} />
           </div>
 
-          {item.kind === "movie" && item.tmdb_id == null ? <MissingKeyNotice className="max-w-3xl" /> : null}
+          {item.kind === "movie" && item.tmdb_id == null && !item.summary ? <MissingKeyNotice className="max-w-3xl" /> : null}
           <EditDialogs item={item} dialog={edit} onClose={() => setEdit(null)} />
 
           <ResumeProgress item={item} />

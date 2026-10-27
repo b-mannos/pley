@@ -170,6 +170,7 @@ export function WatchedButton({ item, compact }: { item: ItemSummary; compact?: 
       loading={setWatched.isPending}
       icon={watched ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
       title={label}
+      className="max-sm:w-11 max-sm:px-0"
     >
       <span className="hidden sm:inline">{watched ? "Unwatched" : "Watched"}</span>
     </Button>
@@ -188,6 +189,7 @@ export function MyListButton({ item }: { item: ItemDetail }) {
       onClick={() => setInWatchlist.mutate({ item, on: !inList }, { onError: (e) => toast.error(errorMessage(e)) })}
       icon={inList ? <BookmarkCheck className="size-4 text-accent" /> : <BookmarkPlus className="size-4" />}
       title={inList ? "Remove from My List" : "Add to My List"}
+      className="max-sm:w-11 max-sm:px-0"
     >
       <span className="hidden sm:inline">{inList ? "In My List" : "Add to My List"}</span>
     </Button>
