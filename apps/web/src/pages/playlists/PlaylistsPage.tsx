@@ -4,7 +4,8 @@ import { ListMusic, ListPlus, Plus } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { usePlaylists, type Playlist } from "@/api/lists";
 import { PlaylistArt } from "@/components/lists/PlaylistArt";
-import { Button, EmptyState, Skeleton } from "@/components/ui";
+import { CardSkeleton } from "@/components/cards";
+import { Button, EmptyState } from "@/components/ui";
 import { formatDuration, pluralize } from "@/lib/format";
 import { useDocumentTitle, useElementWidth } from "@/lib/hooks";
 import { PlaylistFormModal } from "./PlaylistFormModal";
@@ -45,13 +46,12 @@ export function PlaylistsPage() {
 
       <div ref={ref}>
         {playlists.isPending ? (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-x-[18px] gap-y-[26px]">
-            {Array.from({ length: 6 }, (_, i) => (
-              <div key={i}>
-                <Skeleton className="aspect-square w-full" />
-                <Skeleton className="mt-2 h-3.5 w-3/4" />
-                <Skeleton className="mt-1.5 h-3 w-1/3" />
-              </div>
+          <div
+            className="grid"
+            style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, columnGap: gap, rowGap: gap < 18 ? 18 : 26 }}
+          >
+            {Array.from({ length: cols }, (_, i) => (
+              <CardSkeleton key={i} aspect="square" />
             ))}
           </div>
         ) : playlists.isError ? (
