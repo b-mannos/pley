@@ -1,6 +1,5 @@
 package app.pley.android.network
 
-import app.pley.android.common.DeviceProfile
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import okhttp3.ConnectionPool
@@ -43,13 +42,9 @@ object HttpRoot {
      * https or back on their own; a connection that failed is tried again
      * on another route. [localRoute], when given, sends connections to the
      * home network over Wi-Fi or Ethernet while mobile data is the default
-     * network (LocalRoute). [profile] is for limits by tier, none yet.
+     * network (LocalRoute).
      */
-    fun create(
-        userAgent: String,
-        @Suppress("UNUSED_PARAMETER") profile: DeviceProfile,
-        localRoute: LocalRoute? = null,
-    ): OkHttpClient = OkHttpClient.Builder()
+    fun create(userAgent: String, localRoute: LocalRoute? = null): OkHttpClient = OkHttpClient.Builder()
         .connectionPool(ConnectionPool(IDLE_CONNECTIONS, KEEP_ALIVE_SECONDS, TimeUnit.SECONDS))
         .dispatcher(
             Dispatcher().apply {

@@ -33,7 +33,7 @@ class ServerChecksTest {
     @get:Rule val folder = TemporaryFolder()
 
     private val servers = mutableListOf<MockWebServer>()
-    private val root = HttpRoot.create(TEST_AGENT, testProfile())
+    private val root = HttpRoot.create(TEST_AGENT)
 
     private fun server(dispatch: (String) -> MockResponse): MockWebServer = MockPley.server().also { s ->
         servers += s

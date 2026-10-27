@@ -5,7 +5,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import app.pley.android.common.Tier
-import app.pley.android.common.perf.PerfMonitor
 import app.pley.android.designsystem.image.LocalArtworkImageLoader
 import app.pley.android.screens.onboarding.Household
 import app.pley.android.ui.tv.shell.TvApp
@@ -29,7 +28,6 @@ import app.pley.android.ui.tv.shell.TvShellSource
 class TvActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        PerfMonitor.attach(this)
         val app = application as PleyApplication
         val device = app.graph.device
         val tier = debugTier() ?: device.tier

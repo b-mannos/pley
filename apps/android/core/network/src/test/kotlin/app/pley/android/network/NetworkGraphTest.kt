@@ -29,7 +29,7 @@ class NetworkGraphTest {
 
     @Test
     fun theRootKeepsConnectionsUnderTheServersIdleLimit() {
-        val root = HttpRoot.create(TEST_AGENT, testProfile())
+        val root = HttpRoot.create(TEST_AGENT)
         assertEquals(64, root.dispatcher.maxRequests)
         assertEquals(8, root.dispatcher.maxRequestsPerHost)
         assertFalse(root.followSslRedirects)
@@ -41,7 +41,7 @@ class NetworkGraphTest {
     fun aHomeAddressHasThreeSecondsToAnswer() {
         // What each request would connect with, read past the root's own interceptors.
         val seen = mutableMapOf<String, Int>()
-        val client = HttpRoot.create(TEST_AGENT, testProfile()).newBuilder()
+        val client = HttpRoot.create(TEST_AGENT).newBuilder()
             .addInterceptor(
                 Interceptor { chain ->
                     seen[chain.request().url.host] = chain.connectTimeoutMillis()
@@ -70,7 +70,7 @@ class NetworkGraphTest {
     fun theRootIntroducesItself() {
         MockPley.server().use { server ->
             server.enqueue(MockResponse.Builder().body("ok").build())
-            val root = HttpRoot.create(TEST_AGENT, testProfile())
+            val root = HttpRoot.create(TEST_AGENT)
             root.newCall(Request.Builder().url(MockPley.url(server, "/api/health")).header("User-Agent", "okhttp/5").build()).execute().close()
             assertEquals(TEST_AGENT, server.takeRequest().headers["User-Agent"])
         }

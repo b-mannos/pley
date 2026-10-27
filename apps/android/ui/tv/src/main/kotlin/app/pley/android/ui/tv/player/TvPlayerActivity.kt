@@ -13,7 +13,6 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import app.pley.android.common.perf.PerfMonitor
 import app.pley.android.player.PlaybackController
 import app.pley.android.player.PlayerEngine
 import app.pley.android.player.PlayerPhase
@@ -67,7 +66,6 @@ class TvPlayerActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        PerfMonitor.attach(this)
         key = savedInstanceState?.getString(STATE_KEY) ?: intent.getStringExtra(EXTRA_PLAYBACK)
         saved = SavedPlaybackState.fromBundle(savedInstanceState?.getBundle(STATE_SAVED))
         wasPlaying = savedInstanceState?.getBoolean(STATE_PLAYING, true) ?: true

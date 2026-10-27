@@ -12,7 +12,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
-import app.pley.android.common.perf.PerfMonitor
 import app.pley.android.common.perf.StartupSignals
 import app.pley.android.ui.phone.shell.PhoneApp
 import app.pley.android.ui.phone.shell.PhoneStart
@@ -47,7 +46,6 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
-        PerfMonitor.attach(this)
         val app = application as PleyApplication
         val startup = app.startup
         setContent {

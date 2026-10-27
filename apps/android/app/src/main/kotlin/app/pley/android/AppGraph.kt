@@ -36,7 +36,7 @@ class AppGraph(private val app: Application) : ScreensGraph {
         // run on the main thread as the app starts (the manifest leaves it out):
         // its Android platform, with the app's context, before the first client.
         OkHttp.initialize(app)
-        HttpRoot.create(userAgent, device)
+        HttpRoot.create(userAgent)
     }
     override val auth: AuthGraph by lazy { AuthGraph.create(app, root, userAgent) }
     override val network: NetworkGraph by lazy { NetworkGraph.create(app, root, auth, device, app.cacheDir) }

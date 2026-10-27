@@ -81,7 +81,7 @@ internal fun testGraph(
     cacheDir: File,
     tokens: (String) -> Tokens,
     profile: DeviceProfile = testProfile(),
-    root: OkHttpClient = HttpRoot.create(TEST_AGENT, profile),
+    root: OkHttpClient = HttpRoot.create(TEST_AGENT),
     lans: LanNetworks = NoLans,
 ) = HttpNetworkGraph(
     root = root,
