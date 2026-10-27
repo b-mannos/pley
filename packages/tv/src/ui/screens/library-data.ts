@@ -64,17 +64,21 @@ export function fitParams(p: Partial<LibraryParams> | null, kind: LibraryKind): 
 export class ParamsStore {
   private readonly store: KeyValue;
   private readonly server: string;
-  constructor(store: KeyValue, server: string) {
+  private readonly profile: number | null;
+  /** One view per server, profile and library; without a profile nothing is read or kept. */
+  constructor(store: KeyValue, server: string, profile: number | null) {
     this.store = store;
     this.server = server;
+    this.profile = profile;
   }
-  private key(id: number): string {
-    return `pley.library.${this.server}.${id}`;
+  private key(id: number): string | null {
+    return this.profile === null ? null : `pley.library.${this.server}.${this.profile}.${id}`;
   }
   get(id: number, kind: LibraryKind): LibraryParams {
+    const key = this.key(id);
     let saved: Partial<LibraryParams> | null = null;
     try {
-      const text = this.store.get(this.key(id));
+      const text = key === null ? null : this.store.get(key);
       saved = text ? (JSON.parse(text) as Partial<LibraryParams>) : null;
     } catch {
       saved = null;
@@ -82,14 +86,16 @@ export class ParamsStore {
     return fitParams(saved, kind);
   }
   set(id: number, p: LibraryParams): void {
-    this.store.set(this.key(id), JSON.stringify(p));
+    const key = this.key(id);
+    if (key !== null) this.store.set(key, JSON.stringify(p));
   }
 }
 
-/** "1,500 movies", "1 show", "12 artists". */
-export function countLabel(n: number, kind: LibraryKind): string {
-  const noun = kind === "movies" ? (n === 1 ? "movie" : "movies") : kind === "shows" ? (n === 1 ? "show" : "shows") : n === 1 ? "artist" : "artists";
-  return `${grouped(n)} ${noun}`;
+/** "1,500 movies", "1 show", "12 artists"; of a filtered listing, "23 of 1,500 movies". */
+export function countLabel(n: number, kind: LibraryKind, of: number | null = null): string {
+  const m = of ?? n;
+  const noun = kind === "movies" ? (m === 1 ? "movie" : "movies") : kind === "shows" ? (m === 1 ? "show" : "shows") : m === 1 ? "artist" : "artists";
+  return of === null ? `${grouped(n)} ${noun}` : `${grouped(n)} of ${grouped(of)} ${noun}`;
 }
 
 /** 1500 → "1,500". */

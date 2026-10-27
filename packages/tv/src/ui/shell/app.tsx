@@ -10,7 +10,7 @@ import { AppContext, Dialog } from "../screens/common";
 import { Screen } from "../screens/screens";
 import { Icon } from "../kit/icons";
 import { Navigator, type Entry, type PageKey } from "./navigator";
-import { currentEntry, OFFLINE_TEXT, Rail, type RailApi } from "./rail";
+import { currentEntry, OFFLINE_TEXT, Rail, railEntries, type RailApi } from "./rail";
 
 /** Pages without the rail: sign-in, "Who's watching?" and the player. */
 function railless(key: PageKey | undefined): boolean {
@@ -34,7 +34,7 @@ export function App(p: ShellProps) {
   const focus = useMemo(() => new FocusManager(), []);
   const input = useMemo(() => new Input(focus, (e) => state.platform.mapKey(e)), []);
   const nav = useMemo(() => new Navigator(), []);
-  useMemo(() => initMusic(state), []);
+  const music = useMemo(() => initMusic(state), []);
   const rail = useRef<RailApi | null>(null);
   const toast = useSignal<{ text: string; error: boolean; id: number } | null>(null);
   const curtain = useSignal(0);
@@ -213,6 +213,9 @@ export function App(p: ShellProps) {
   }, [toast.value?.id]);
 
   const showRail = !railless(stack[0]?.key) && top?.key.name !== "player" && !!api;
+  const libraries = state.libraries.value;
+  const playing = music.now.value !== null;
+  const entries = useMemo(() => railEntries(libraries, playing), [libraries, playing]);
   return (
     <AppContext.Provider value={state}>
       <UiContext.Provider value={ui}>
@@ -221,9 +224,9 @@ export function App(p: ShellProps) {
         </div>
         {showRail && (
           <Rail
-            libraries={state.libraries.value}
+            entries={entries}
             me={state.me.value}
-            current={currentEntry(stack[0]?.key ?? null, state.libraries.value)}
+            current={currentEntry(stack[0]?.key ?? null, entries)}
             offline={state.offline.value && !state.offlineNotice.value}
             railRef={(r) => (rail.current = r)}
           />

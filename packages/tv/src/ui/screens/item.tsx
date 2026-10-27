@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { errorMessage, isApiError, unreachable } from "../../api/client";
-import type { Credit, ItemDetail, ItemSummary, MediaFile, MediaStream } from "../../api/types";
+import type { Credit, CreditRole, ItemDetail, ItemSummary, MediaFile, MediaStream } from "../../api/types";
 import {
   codecLabel,
   episodeLabel,
@@ -92,6 +92,40 @@ export function versionShort(file: MediaFile, n: number): string {
 function isWatched(item: ItemSummary): boolean {
   if (item.kind === "show" || item.kind === "season") return (item.leaf_count ?? 0) > 0 && (item.viewed_leaf_count ?? 0) >= (item.leaf_count ?? 0);
   return item.user_state.watched;
+}
+
+/** The crew the page names, in this order, with what each is called on a tile. */
+const CREW_ROLES: { role: CreditRole; label: string }[] = [
+  { role: "creator", label: "Creator" },
+  { role: "director", label: "Director" },
+  { role: "writer", label: "Writer" },
+];
+/** At most this many people per crew role, then "and N more" (Credits.tsx). */
+const CREW_NAMES = 4;
+
+/** An item's people in `role`, each once. */
+function crewIn(item: ItemDetail, role: CreditRole): Credit[] {
+  const seen = new Set<number>();
+  return (item.crew ?? []).filter((c) => c.role === role && !seen.has(c.id) && !!seen.add(c.id));
+}
+
+/**
+ * The people row (the Android app's castAndCrew): the cast with their
+ * characters, then the first four creators, directors and writers under
+ * their role; nobody twice. Its title says which: Cast, Crew, Cast & Crew,
+ * and an episode's cast are its Guest Stars.
+ */
+export function castAndCrew(item: ItemDetail): { title: string; people: { credit: Credit; subtitle: string }[] } | null {
+  const cast = (item.cast ?? []).filter((c) => c.role === "actor");
+  const crew = CREW_ROLES.map((r) => ({ label: r.label, people: crewIn(item, r.role).slice(0, CREW_NAMES) })).filter((l) => l.people.length);
+  if (!cast.length && !crew.length) return null;
+  const seen = new Set<number>();
+  const people: { credit: Credit; subtitle: string }[] = [];
+  for (const c of cast) if (!seen.has(c.id) && seen.add(c.id)) people.push({ credit: c, subtitle: c.character ?? "" });
+  for (const line of crew) for (const c of line.people) if (!seen.has(c.id) && seen.add(c.id)) people.push({ credit: c, subtitle: line.label });
+  const castTitle = item.kind === "episode" ? "Guest Stars" : "Cast";
+  const title = !crew.length ? castTitle : !cast.length ? "Crew" : `${castTitle} & Crew`;
+  return { title, people };
 }
 
 /** Credits line: "Directed by A, B · Starring C, D, E". */
@@ -261,6 +295,7 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
   const [inList, setInList] = useState(listed);
   useEffect(() => setInList(listed), [listed]);
   const hasTracks = !!file && (item.files.length > 1 || audioStreams(file).length >= 2 || subtitleStreams(file).length > 0);
+  const trailer = (item.extras ?? []).find((x) => (x.extra_type ?? "").toLowerCase() === "trailer") ?? null;
 
   // ---- sections
   const sections: Section[] = [];
@@ -299,6 +334,7 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
             if (!ok) setInList(!next);
           });
         }}
+        onTrailer={trailer ? () => openPlayer(ui, { itemId: trailer.id, fromStart: true }) : null}
         onPlaylist={() => ui.nav.open({ name: "addToPlaylist", itemIds: [item.id], title: item.title })}
         onMore={() => setPanel("more")}
         onSummaryCut={setSummaryCut}
@@ -390,14 +426,14 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
       />
     )));
   }
-  const cast = (item.cast ?? []).filter((c) => c.role === "actor");
-  if (cast.length) {
+  const people = castAndCrew(item);
+  if (people) {
     sections.push(
-      rowSection(kind === "episode" ? "guests" : "cast", kind === "episode" ? "Guest Stars" : "Cast", "person", cast, (c: Credit, place) => (
+      rowSection("cast", people.title, "person", people.people, ({ credit: c, subtitle }, place) => (
         <ArtTile
           kind="person"
           title={c.name}
-          subtitle={c.character ?? ""}
+          subtitle={subtitle}
           candidates={c.photo_url ? [c.photo_url] : []}
           fid={`cast/${c.id}`}
           priority={place.priority}
@@ -642,6 +678,8 @@ function ItemHero(p: {
   onWatched: () => void;
   onTracks: () => void;
   onMyList: () => void;
+  /** The item's first trailer, from its start; `null` without one. */
+  onTrailer: (() => void) | null;
   onPlaylist: () => void;
   onMore: () => void;
   onSummaryCut: (cut: boolean) => void;
@@ -727,6 +765,7 @@ function ItemHero(p: {
         {listable && (
           <Round label={p.inList ? "In My List" : "Add to My List"} icon={p.inList ? "bookmark-check" : "bookmark-plus"} fid="myList" onFocus={focus} onSelect={p.onMyList} />
         )}
+        {p.onTrailer && <Round label="Trailer" icon="film" fid="trailer" onFocus={focus} onSelect={p.onTrailer} />}
         <Round label="Add to playlist" icon="list-plus" fid="playlist" onFocus={focus} onSelect={p.onPlaylist} />
         <Round label="More" icon="ellipsis" fid="more" onFocus={focus} onSelect={p.onMore} />
       </G>
@@ -779,14 +818,13 @@ function SeasonTabs(p: { seasons: ItemSummary[]; shown: number | null; onFocus: 
 function Details(p: { item: ItemDetail; file: MediaFile | null; onVersion: (f: MediaFile) => void }) {
   const item = p.item;
   const facts: { label: string; value: string }[] = [];
-  const crew = item.crew ?? [];
   const names = (list: Credit[]) => {
-    const shown = list.slice(0, 4).map((c) => c.name);
-    return list.length > 4 ? `${shown.join(", ")} and ${list.length - 4} more` : shown.join(", ");
+    const shown = list.slice(0, CREW_NAMES).map((c) => c.name);
+    return list.length > CREW_NAMES ? `${shown.join(", ")} and ${list.length - CREW_NAMES} more` : shown.join(", ");
   };
-  const creators = crew.filter((c) => c.role === "creator");
-  const directors = crew.filter((c) => c.role === "director");
-  const writers = crew.filter((c) => c.role === "writer");
+  const creators = crewIn(item, "creator");
+  const directors = crewIn(item, "director");
+  const writers = crewIn(item, "writer");
   if (creators.length) facts.push({ label: "Created by", value: names(creators) });
   if (directors.length) facts.push({ label: directors.length > 1 ? "Directors" : "Director", value: names(directors) });
   if (writers.length) facts.push({ label: writers.length > 1 ? "Writers" : "Writer", value: names(writers) });

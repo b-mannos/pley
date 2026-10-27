@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { Hub, ItemSummary } from "../../src/api/types";
+import type { Credit, Hub, ItemDetail, ItemSummary } from "../../src/api/types";
 import { check, connect, hostPort, subnetOf } from "../../src/auth/servers";
 import { TokenError, type OAuthError } from "../../src/auth/tokens";
 import type { HttpRequest, Transport } from "../../src/net/transport";
 import { NetworkError } from "../../src/net/transport";
 import { shuffled } from "../../src/player/music";
 import { heroOf, rowKind, seeAllOf } from "../../src/ui/screens/home";
-import { AlphaIndex, countLabel, defaultOrder, fitParams, letterOf, showsJump, sortsFor } from "../../src/ui/screens/library-data";
+import { castAndCrew } from "../../src/ui/screens/item";
+import { AlphaIndex, countLabel, defaultOrder, fitParams, letterOf, ParamsStore, showsJump, sortsFor } from "../../src/ui/screens/library-data";
 import { codeHalves, displayCode, typedAddress } from "../../src/ui/screens/onboarding/link";
 import { switchRefusal } from "../../src/ui/screens/onboarding/profiles";
 import { relativeTime } from "../../src/ui/screens/settings";
@@ -65,6 +66,22 @@ describe("a library's sort and filters", () => {
     expect(countLabel(1500, "movies")).toBe("1,500 movies");
     expect(countLabel(1, "shows")).toBe("1 show");
     expect(countLabel(12, "music")).toBe("12 artists");
+    // Filtered: the noun agrees with the whole library.
+    expect(countLabel(23, "movies", 1500)).toBe("23 of 1,500 movies");
+    expect(countLabel(1, "shows", 1)).toBe("1 of 1 show");
+  });
+
+  it("keeps each profile's view of a library apart", () => {
+    const kept = new Map<string, string>();
+    const kv = { get: (k: string) => kept.get(k) ?? null, set: (k: string, v: string) => void kept.set(k, v), remove: (k: string) => void kept.delete(k) };
+    const added = { ...fitParams(null, "movies"), sort: "added" as const, order: "desc" as const };
+    new ParamsStore(kv, "http://nas:7539", 1).set(3, added);
+    expect(new ParamsStore(kv, "http://nas:7539", 1).get(3, "movies").sort).toBe("added");
+    expect(new ParamsStore(kv, "http://nas:7539", 2).get(3, "movies").sort).toBe("title");
+    expect(new ParamsStore(kv, "http://other:7539", 1).get(3, "movies").sort).toBe("title");
+    // Without a profile nothing is read or kept.
+    new ParamsStore(kv, "http://nas:7539", null).set(4, added);
+    expect(kept.size).toBe(1);
   });
 });
 
@@ -164,5 +181,31 @@ describe("watch history", () => {
     expect(relativeTime(now / 1000 - 10, now)).toBe("now");
     expect(relativeTime(now / 1000 - 3 * 3600, now)).toBe("3 hours ago");
     expect(relativeTime(now / 1000 - 26 * 3600, now)).toBe("yesterday");
+  });
+});
+
+describe("the people row", () => {
+  const person = (id: number, role: Credit["role"], character?: string): Credit => ({ id, name: `P${id}`, role, character });
+  const detail = (kind: ItemDetail["kind"], cast: Credit[], crew: Credit[]) => ({ kind, cast, crew }) as ItemDetail;
+  const row = (d: ItemDetail) => {
+    const r = castAndCrew(d);
+    return r && { title: r.title, people: r.people.map((p) => `${p.credit.id}:${p.subtitle}`) };
+  };
+
+  it("follows the cast with each crew role's first four, nobody twice", () => {
+    const crew = [person(1, "director"), person(9, "writer"), person(9, "writer"), ...[10, 11, 12, 13, 14].map((id) => person(id, "writer")), person(20, "creator")];
+    expect(row(detail("movie", [person(1, "actor", "Ana"), person(2, "actor", "K")], crew))).toEqual({
+      title: "Cast & Crew",
+      people: ["1:Ana", "2:K", "20:Creator", "9:Writer", "10:Writer", "11:Writer", "12:Writer"],
+    });
+  });
+
+  it("is titled by what it holds", () => {
+    expect(row(detail("movie", [person(1, "actor")], []))!.title).toBe("Cast");
+    expect(row(detail("episode", [person(1, "actor")], []))!.title).toBe("Guest Stars");
+    expect(row(detail("episode", [person(1, "actor")], [person(2, "writer")]))!.title).toBe("Guest Stars & Crew");
+    expect(row(detail("movie", [], [person(2, "director")]))!.title).toBe("Crew");
+    // Producers aren't named.
+    expect(row(detail("movie", [], [person(2, "producer")]))).toBeNull();
   });
 });

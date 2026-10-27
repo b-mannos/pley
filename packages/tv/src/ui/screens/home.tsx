@@ -135,6 +135,9 @@ export function HomeScreen(p: { entry: Entry }) {
   return <HomeRows entry={p.entry} rows={rows} />;
 }
 
+/** After the rows' first frame and their first pictures, about. */
+const PROBE_AFTER_MS = 1_000;
+
 function HomeRows(p: { entry: Entry; rows: Hub[] }) {
   const app = useApp();
   const ui = useUi();
@@ -150,6 +153,12 @@ function HomeRows(p: { entry: Entry; rows: Hub[] }) {
   const restedDetail = useDetail(inRows && rested ? rested.id : null);
   const rowIndex = (entry.state.rowIndex as Record<string, number> | undefined) ?? {};
   entry.state.rowIndex = rowIndex;
+
+  // The TV's capabilities once the rows are drawn (as Android warms its probe then): a first Play has them.
+  useEffect(() => {
+    const t = setTimeout(() => void app.caps(), PROBE_AFTER_MS);
+    return () => clearTimeout(t);
+  }, []);
 
   // Details of the first three in Continue Watching, ahead of a press.
   useEffect(() => {

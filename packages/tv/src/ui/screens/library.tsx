@@ -62,9 +62,10 @@ export function LibraryScreen(p: { entry: Entry; id: number; tab?: LibraryTab })
   const libraries = app.libraries.value;
   const library = libraries?.filter((l) => l.id === p.id)[0] ?? null;
   const entry = p.entry;
-  const tabs = library ? tabsFor(library.kind) : ["recommended" as LibraryTab];
-  const wanted = (entry.state.tab as LibraryTab | undefined) ?? p.tab ?? "recommended";
-  const shown: LibraryTab = tabs.indexOf(wanted) >= 0 ? wanted : "recommended";
+  const tabs = library ? tabsFor(library.kind) : ["library" as LibraryTab];
+  // A library opens on the whole of it, as on Android; music's Collections is its Library.
+  const wanted = (entry.state.tab as LibraryTab | undefined) ?? p.tab ?? "library";
+  const shown: LibraryTab = tabs.indexOf(wanted) >= 0 ? wanted : "library";
   const opened = (entry.state.opened as LibraryTab | undefined) ?? shown;
   entry.state.opened = opened;
   const [, setTabState] = useState(0);
@@ -117,7 +118,8 @@ function LibraryGridTab(p: { entry: Entry; library: Library; initial: boolean; f
   const ui = useUi();
   const lib = p.library;
   const music = lib.kind === "music";
-  const store = useMemo(() => new ParamsStore(app.store, app.server.value ?? ""), [app.server.value]);
+  const profile = app.me.value?.id ?? null;
+  const store = useMemo(() => new ParamsStore(app.store, app.server.value ?? "", profile), [app.server.value, profile]);
   const [params, setParamsState] = useState<LibraryParams>(() => store.get(lib.id, lib.kind));
   const [version, setVersion] = useState(0);
   const listing = useMemo(
@@ -250,7 +252,7 @@ function LibraryGridTab(p: { entry: Entry; library: Library; initial: boolean; f
         {!music && (years.length > 0 || params.year) && (
           <Chip fid="chip/year" label={params.year ? String(params.year) : "Year"} selected={!!params.year} onSelect={() => openPanel({ kind: "year", from: "chip" }, "chip/year")} />
         )}
-        {total !== null && <div class="t-caption c-muted chips-count">{countLabel(total, lib.kind)}</div>}
+        {total !== null && <div class="t-caption c-muted chips-count">{countLabel(total, lib.kind, filterSet && lib.item_count >= total ? lib.item_count : null)}</div>}
       </G>
       {message ?? (
         <PosterGrid
