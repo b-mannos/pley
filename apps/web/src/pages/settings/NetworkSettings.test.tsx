@@ -8,6 +8,7 @@ import { movedPage, NetworkSettings, stillServes } from "./NetworkSettings";
 const NETWORK: Network = {
   web: ["127.0.0.1:7539"],
   plex: [],
+  plex_on_web: false,
   discovery: true,
   fixed: { web: false, plex: false, discovery: false },
   listeners: [{ kind: "web", address: "127.0.0.1:7539", error: null }],
@@ -51,6 +52,7 @@ describe("NetworkSettings", () => {
       expect(requests.find((r) => r.method === "PUT")?.body).toEqual({
         web: ["127.0.0.1:7539", "192.168.1.10:7539"],
         plex: [],
+        plex_on_web: false,
         discovery: true,
       }),
     );
@@ -58,7 +60,7 @@ describe("NetworkSettings", () => {
     expect(screen.getByText("192.168.1.10:7539")).toBeInTheDocument();
   });
 
-  it("turns the Plex-compatible API on where pley listens", async () => {
+  it("turns the Plex-compatible API on, on pley's port or its own", async () => {
     const user = userEvent.setup();
     const requests = mockApi({
       "GET /api/network": () => ({ ...NETWORK, web: ["0.0.0.0:7539"] }),
@@ -67,9 +69,26 @@ describe("NetworkSettings", () => {
     renderWithProviders(<NetworkSettings />);
     expect(await screen.findByRole("radio", { name: /Every network/ })).toHaveAttribute("aria-checked", "true");
     await user.click(screen.getByRole("switch", { name: "Plex-compatible API" }));
+    expect(screen.getByRole("radio", { name: "On pley's port (7539)" })).toHaveAttribute("aria-checked", "true");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() =>
-      expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ web: ["0.0.0.0:7539"], plex: ["0.0.0.0:32400"], discovery: true }),
+      expect(requests.filter((r) => r.method === "PUT").at(-1)?.body).toEqual({
+        web: ["0.0.0.0:7539"],
+        plex: [],
+        plex_on_web: true,
+        discovery: true,
+      }),
+    );
+
+    await user.click(screen.getByRole("radio", { name: "On port 32400" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(requests.filter((r) => r.method === "PUT").at(-1)?.body).toEqual({
+        web: ["0.0.0.0:7539"],
+        plex: ["0.0.0.0:32400"],
+        plex_on_web: false,
+        discovery: true,
+      }),
     );
   });
 

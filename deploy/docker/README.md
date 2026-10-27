@@ -43,7 +43,7 @@ it ([below](#behind-a-reverse-proxy)).
 | `compose.vaapi.yaml` | Add-on: Intel / AMD hardware transcoding |
 | `compose.nvidia.yaml` | Add-on: NVIDIA hardware transcoding |
 | `compose.proxy.yaml` | Add-on: a reverse proxy in Docker, no published port |
-| `compose.plex.yaml` | Add-on: the [compatibility API](../../docs/COMPATIBILITY.md) on port 32400 |
+| `compose.plex.yaml` | Add-on: the [compatibility API](../../docs/COMPATIBILITY.md) on port 32400 (else on pley's) |
 | `config/` | pley's database, artwork and caches (default `PLEY_CONFIG_DIR`) |
 | `media/` | An example media folder (default `PLEY_MEDIA_DIR`) |
 | `Dockerfile` | The image: pley, pley-transcoder, FFmpeg 7.1, GPU drivers |
@@ -203,9 +203,9 @@ to work:
 
 - **One port, on this computer only.** pley is published on `127.0.0.1`, so
   the reverse proxy is the only way in from other computers, with its TLS and
-  access rules. The compatibility API and network discovery are off, and
-  the transcoder listens inside the container only, so nothing else can be
-  reached.
+  access rules. The compatibility API answers on that port too, to its
+  clients only (with a token); network discovery is off, and the transcoder
+  listens inside the container only, so nothing else can be reached.
 - **Not root, no privileges.** pley runs as your user, with every Linux
   capability dropped and `no-new-privileges`; the image has no setuid
   programs and never runs `privileged`.
@@ -229,7 +229,9 @@ On pley's side ([SECURITY.md](../../SECURITY.md) has the details):
 - Turn on two-step sign-in for administrators (**Account → Two-step
   sign-in**).
 - Leave apps by other publishers off (**Settings → Server → Apps**) unless you
-  need one, and keep the compatibility API off the internet.
+  need one. Give tools that use the compatibility API (Tautulli, Kometa) a
+  sign-in of an account of their own, not an administrator's, unless they
+  must change things.
 - Keep pley up to date (below): `setup.sh` also fetches newer base images,
   which bring Debian's security fixes for FFmpeg and the rest of the image.
 

@@ -1,8 +1,9 @@
 //! Plex Media Server compatible API (docs/COMPATIBILITY.md).
 //!
-//! Served on its own listener (port 32400 by default) so tools written for
-//! Plex — python-plexapi, Tautulli, Overseerr, Kometa, direct-play clients —
-//! can browse the libraries, read and write watch state, stream files and
+//! Served on pley's own port by default ([`on_web_port`]), or on listeners
+//! of its own (port 32400, Plex's), so tools written for Plex —
+//! python-plexapi, Tautulli, Overseerr, Kometa, direct-play clients — can
+//! browse the libraries, read and write watch state, stream files and
 //! follow sessions. Responses are XML `MediaContainer`s like Plex's, or JSON
 //! with `Accept: application/json`. Everything goes through the same catalog,
 //! auth and playback code as pley's own API.
@@ -24,15 +25,15 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{FromRequestParts, Query, Request};
+use axum::extract::{FromRequestParts, Query, Request, State};
 use axum::http::request::Parts;
 use axum::http::uri::PathAndQuery;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, delete, get, post, put};
-use tower::Layer;
 use tower::util::{MapRequest, MapRequestLayer};
+use tower::{Layer, ServiceExt};
 use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
 use tower_http::compression::{CompressionLayer, CompressionLevel};
 
@@ -50,6 +51,117 @@ pub type Service = MapRequest<Router, fn(Request) -> Request>;
 pub fn service(state: AppState) -> Service {
     let info = Arc::new(PlexInfo::load(&state.config.data_dir));
     MapRequestLayer::new(normalize as fn(Request) -> Request).layer(router(state, info))
+}
+
+/// This API on pley's own port, in front of the web app and its API: see
+/// [`on_web_port`].
+#[derive(Clone)]
+pub struct OnWebPort {
+    state: AppState,
+    service: Service,
+}
+
+impl OnWebPort {
+    pub fn new(state: &AppState) -> Self {
+        Self { state: state.clone(), service: service(state.clone()) }
+    }
+}
+
+/// Paths only this API has. Its clients' requests for them come to it on
+/// pley's port even without its headers: a player fetching a stream's
+/// segments, a check of `/identity`. `/`, `/search`, `/playlists…` and
+/// `/library` are the web app's pages too: there, its headers decide.
+const ONLY_PLEX: [&str; 30] = [
+    "/identity",
+    "/:",
+    "/video/:",
+    "/audio/:",
+    "/photo/:",
+    "/library/sections",
+    "/library/metadata",
+    "/library/parts",
+    "/library/streams",
+    "/library/collections",
+    "/library/media",
+    "/library/all",
+    "/library/onDeck",
+    "/library/recentlyAdded",
+    "/hubs",
+    "/status",
+    "/transcode",
+    "/playQueues",
+    "/myplex",
+    "/servers",
+    "/system",
+    "/accounts",
+    "/clients",
+    "/devices",
+    "/activities",
+    "/butler",
+    "/updater",
+    "/prefs",
+    "/media/providers",
+    "/actions",
+];
+
+/// Whether `request`, on pley's port, is this API's: its clients name
+/// themselves (`X-Plex-…` headers, or `X-Plex-Token` in the query, which
+/// browsers asking for the web app never send), or it asks for a path only
+/// this API has. pley's own API and documents stay pley's.
+pub fn is_plex_request(request: &Request) -> bool {
+    let path = request.uri().path();
+    if path.starts_with("/api/") || path.starts_with("/.well-known/") {
+        return false;
+    }
+    request.headers().keys().any(|name| name.as_str().starts_with("x-plex-"))
+        || request.uri().query().is_some_and(|query| {
+            query.split('&').any(|pair| pair.get(..7).is_some_and(|key| key.eq_ignore_ascii_case("x-plex-")))
+        })
+        || only_plex(path)
+}
+
+fn only_plex(path: &str) -> bool {
+    ONLY_PLEX
+        .iter()
+        .any(|prefix| path.strip_prefix(prefix).is_some_and(|rest| rest.is_empty() || rest.starts_with('/')))
+}
+
+/// Paths both answer, this API and the web app, as its headers say.
+fn shared_path(path: &str) -> bool {
+    matches!(path, "/" | "/search" | "/library" | "/playlists") || path.starts_with("/playlists/")
+}
+
+/// pley's port answers this API's requests ([`is_plex_request`]) with this
+/// API, while it is on it (`plex_bind = "web"`, the default), and the rest
+/// with pley. Its answers keep pley's web app safe on the origin they now
+/// share: no page, script or frame may come of them, and no cache hands one
+/// side's answer to the other.
+pub async fn on_web_port(State(plex): State<OnWebPort>, request: Request, next: Next) -> Response {
+    if !plex.state.network.plex_on_web() {
+        return next.run(request).await;
+    }
+    let shared = shared_path(request.uri().path());
+    let mut response = if is_plex_request(&request) {
+        let Ok(mut response) = plex.service.oneshot(request).await;
+        let headers = response.headers_mut();
+        headers.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; sandbox"));
+        headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+        headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+        headers.entry(header::CACHE_CONTROL).or_insert(HeaderValue::from_static("private"));
+        response
+    } else {
+        next.run(request).await
+    };
+    if shared {
+        let headers = response.headers_mut();
+        let mut vary: Vec<String> =
+            headers.get_all(header::VARY).iter().filter_map(|v| v.to_str().ok()).map(str::to_owned).collect();
+        vary.push("X-Plex-Token, X-Plex-Client-Identifier".to_owned());
+        if let Ok(value) = HeaderValue::from_str(&vary.join(", ")) {
+            headers.insert(header::VARY, value);
+        }
+    }
+    response
 }
 
 /// Serve this API on `listener` until `shutdown` completes, then wait for the
@@ -536,6 +648,54 @@ impl<S: Send + Sync> FromRequestParts<S> for ClientInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn plex_request(uri: &str, headers: &[(&str, &str)]) -> bool {
+        let mut request = Request::builder().uri(uri);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        is_plex_request(&request.body(Body::empty()).unwrap())
+    }
+
+    #[test]
+    fn its_clients_are_told_from_the_web_apps() {
+        // The same paths: its clients name themselves, browsers don't.
+        for path in ["/", "/search?query=x", "/playlists", "/playlists/3", "/library"] {
+            assert!(!plex_request(path, &[]), "{path}: the web app's page");
+            assert!(plex_request(path, &[("X-Plex-Token", "t")]), "{path}");
+            assert!(plex_request(path, &[("X-Plex-Client-Identifier", "c")]), "{path}");
+        }
+        assert!(plex_request("/?X-Plex-Token=t", &[]));
+        assert!(plex_request("/search?query=x&x-plex-token=t", &[]));
+        // Its own paths without any of that: a player's segments, /identity.
+        assert!(plex_request("/identity", &[]));
+        assert!(plex_request("/video/:/transcode/universal/session/abc/base/00001.ts", &[]));
+        assert!(plex_request("/:/timeline?ratingKey=1", &[]));
+        assert!(plex_request("/library/metadata/12/thumb/3", &[]));
+        // The web app's pages and pley's API stay pley's.
+        for path in ["/library/12", "/account", "/settings/network", "/assets/index.js", "/status-page", "/api/health"]
+        {
+            assert!(!plex_request(path, &[]), "{path}");
+        }
+        assert!(!plex_request("/api/libraries", &[("X-Plex-Token", "t")]), "pley's API, whatever it carries");
+        assert!(!plex_request("/.well-known/oauth-authorization-server", &[("X-Plex-Token", "t")]));
+    }
+
+    #[test]
+    fn every_route_is_reached_on_pleys_port() {
+        // This module's routes, as clients write them (`/:/` for `/_/`):
+        // each is only this API's, or one its headers decide.
+        let source = include_str!("mod.rs");
+        let mut routes = 0;
+        for line in source.lines().map(str::trim).filter(|line| line.starts_with(".route(\"")) {
+            let path = line.trim_start_matches(".route(\"").split('"').next().unwrap();
+            let path = path.replace("/_/", "/:/").replace("{id}", "1").replace("{session}", "s");
+            let path = if path.starts_with("/:/transcode") { format!("/video{path}") } else { path };
+            assert!(only_plex(&path) || shared_path(&path), "{path} isn't reached on pley's port without its headers");
+            routes += 1;
+        }
+        assert!(routes > 80, "{routes} routes read");
+    }
 
     fn rewritten(uri: &str) -> String {
         let req = Request::builder().uri(uri).body(Body::empty()).unwrap();

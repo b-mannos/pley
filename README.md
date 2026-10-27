@@ -69,7 +69,7 @@ web app in React and TypeScript.
 - Settings with a Test button for each API key and service, a live dashboard
   (playback, transcoder, scans) and daily database backups.
 
-**Compatibility API** on port 32400, for `python-plexapi`, Tautulli and
+**Compatibility API** on pley's own port (or 32400), for `python-plexapi`, Tautulli and
 Kometa: browsing with their filters, editing, collections, playlists, play
 queues, sessions and notifications. See
 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
@@ -165,7 +165,7 @@ Options come from command-line flags, `PLEY_*` environment variables or
 | Flag | Default | |
 |---|---|---|
 | `--bind` | `0.0.0.0:7539` | Listen address (7539 spells PLEY on a keypad); several separated by commas |
-| `--plex-bind` | `0.0.0.0:32400` (`127.0.0.1:32400` when `--bind` is this computer's only) | Compatibility API; `off` turns it off; several as with `--bind` |
+| `--plex-bind` | `web` (pley's own port) | Compatibility API: `off` turns it off; addresses of its own (`0.0.0.0:32400`), several as with `--bind` |
 | `--data-dir` | `%LOCALAPPDATA%\pley`, `~/Library/Application Support/pley`, `~/.local/share/pley` | Database, caches and artwork |
 | `--ffmpeg`, `--ffprobe` | from `PATH` | Passed to the transcoder |
 | `--transcoder-url` | | Use a transcoder running elsewhere instead of starting one |

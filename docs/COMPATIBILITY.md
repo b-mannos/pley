@@ -3,8 +3,8 @@
 Besides its own API, pley speaks a widely used media-server API, so tools
 written against it work with pley: scripts using
 [`python-plexapi`](https://github.com/pushingkarmaorg/python-plexapi), and
-tools built the same way (Tautulli, Kometa, direct-play clients). It runs on
-its own port and uses the same libraries, users, watch state and playback
+tools built the same way (Tautulli, Kometa, direct-play clients). It answers on
+pley's own port and uses the same libraries, users, watch state and playback
 sessions as pley's own API, so anything done through it shows up in the web
 UI and the other way round.
 
@@ -13,21 +13,33 @@ there are out of scope: pley has no such service.
 
 ## Enabling and port
 
-The API listens on `0.0.0.0:32400`, its usual port, by default.
+By default the API answers on pley's own port (7539), wherever pley does,
+through its reverse proxy's HTTPS too: give tools pley's address,
+`http://pley.local:7539` or `https://media.example.com`. The two share the
+port this way:
+
+- a request carrying this API's headers (`X-Plex-Token`,
+  `X-Plex-Client-Identifier`, …) or `X-Plex-Token` in its query is this
+  API's: its clients send them, browsers never do;
+- so is a path only this API has (`/identity`, `/library/sections/…`,
+  `/:/timeline`, a stream's `/video/:/transcode/…` segments, which players
+  fetch without the headers);
+- the rest, `/`, `/search` and `/playlists` among them, is the web app's,
+  and `/api/…` is always pley's own API.
+
+Its answers there are sandboxed (`Content-Security-Policy: sandbox`), since
+they share the web app's origin, and vary with those headers for caches.
+Settings → Network turns it off, or gives it a port of its own:
 
 | Where | Setting |
 |---|---|
-| Command line | `--plex-bind 127.0.0.1:32400` or `--plex-bind off` |
+| Command line | `--plex-bind web` (the default), `--plex-bind 0.0.0.0:32400` or `--plex-bind off` |
 | Environment | `PLEY_PLEX_BIND` |
-| `pley.toml` | `plex_bind = "0.0.0.0:32400"` |
+| `pley.toml` | `plex_bind = "web"` |
 
-By default it listens on every address, or only on this computer's when
-pley's own address is (`--bind 127.0.0.1:7539` behind a proxy): its
-clients send their tokens in the clear.
-
-If the port is taken (another media server uses it on the same machine), pley logs a
-warning and keeps running without this API. Pick another port with
-`--plex-bind`.
+Its own port suits tools that only know Plex's, 32400. If that port is taken
+(another media server uses it on the same machine), pley logs a warning and
+keeps running without it there.
 
 ## Authentication
 
@@ -51,7 +63,7 @@ token except `/identity`.
 
 ```python
 from plexapi.server import PlexServer
-server = PlexServer('http://localhost:32400', '<token>')
+server = PlexServer('http://localhost:7539', '<token>')
 for movie in server.library.section('Movies').search(unwatched=True):
     print(movie.title, movie.media[0].videoResolution)
 ```

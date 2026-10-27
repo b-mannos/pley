@@ -35,8 +35,12 @@ const MAX_ADDRESSES: usize = 32;
 pub struct Listen {
     /// The web app and its API.
     pub web: Vec<SocketAddr>,
-    /// The Plex-compatible API: off when empty.
+    /// The Plex-compatible API: off when empty, unless on pley's own port.
     pub plex: Vec<SocketAddr>,
+    /// The Plex-compatible API answers on pley's own port, its clients'
+    /// requests told apart from the web app's (see [`crate::plex::on_web_port`]).
+    #[serde(default)]
+    pub plex_on_web: bool,
     /// Answer the pley apps looking for servers on the local network.
     pub discovery: bool,
 }
@@ -46,6 +50,7 @@ impl Listen {
         Self {
             web: std::iter::once(config.bind).chain(config.extra_binds.iter().copied()).collect(),
             plex: config.plex_bind.into_iter().chain(config.plex_extra_binds.iter().copied()).collect(),
+            plex_on_web: config.plex_on_web,
             discovery: config.discovery,
         }
     }
@@ -67,6 +72,9 @@ impl Listen {
     pub fn check(&self) -> Result<(), String> {
         if self.web.is_empty() {
             return Err("pley must listen on an address at least".into());
+        }
+        if self.plex_on_web && !self.plex.is_empty() {
+            return Err("the Plex-compatible API is on pley's port or on addresses of its own, not both".into());
         }
         if self.web.len() > MAX_ADDRESSES || self.plex.len() > MAX_ADDRESSES {
             return Err(format!("{MAX_ADDRESSES} addresses at most"));
@@ -166,6 +174,11 @@ impl Network {
 
     pub fn wanted(&self) -> Listen {
         self.wanted.borrow().1.clone()
+    }
+
+    /// Whether the Plex-compatible API answers on pley's own port now.
+    pub fn plex_on_web(&self) -> bool {
+        self.wanted.borrow().1.plex_on_web
     }
 
     /// The listeners, and how each is.
@@ -670,6 +683,7 @@ mod tests {
         Listen {
             web: web.iter().map(|a| a.parse().unwrap()).collect(),
             plex: plex.iter().map(|a| a.parse().unwrap()).collect(),
+            plex_on_web: false,
             discovery,
         }
     }

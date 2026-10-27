@@ -1712,7 +1712,8 @@ type ServerEvent =
 ```ts
 interface Network {
   web: string[];          // the web app and API: "127.0.0.1:7539", "192.168.1.10:7539", "0.0.0.0:7539"
-  plex: string[];         // the Plex-compatible API; [] = off
+  plex: string[];         // the Plex-compatible API on addresses of its own (32400); [] = off or on pley's port
+  plex_on_web: boolean;   // the Plex-compatible API answers on pley's port, to its clients
   discovery: boolean;     // answer the pley apps on the networks (never on loopback addresses)
   fixed: { web: boolean; plex: boolean; discovery: boolean }; // set by --bind/PLEY_BIND, --plex-bind/PLEY_PLEX_BIND, --no-discovery
   listeners: { kind: "web" | "plex" | "discovery"; address: string; error: string | null }[]; // error: why not (yet); tried again every 30 s

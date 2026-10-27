@@ -47,6 +47,8 @@ interface Form {
   ips: string[];
   port: number;
   plex: boolean;
+  /** On pley's port rather than one of its own. */
+  plexOnWeb: boolean;
   plexPort: number;
   discovery: boolean;
 }
@@ -69,7 +71,8 @@ function formOf(choice: ListenChoice): Form {
     mode,
     ips: web.filter((a) => !isLoopback(a.ip) && !isAny(a.ip)).map((a) => a.ip),
     port: web[0]?.port ?? DEFAULT_PORT,
-    plex: plex.length > 0,
+    plex: plex.length > 0 || choice.plex_on_web,
+    plexOnWeb: plex.length === 0,
     plexPort: plex[0]?.port ?? PLEX_PORT,
     discovery: choice.discovery,
   };
@@ -80,19 +83,20 @@ function choiceOf(form: Form, network: Network): ListenChoice {
   const ips = form.mode === "all" ? ["0.0.0.0"] : form.mode === "local" ? ["127.0.0.1"] : ["127.0.0.1", ...form.ips];
   return {
     web: network.fixed.web ? network.web : ips.map((ip) => joinAddress(ip, form.port)),
-    plex: network.fixed.plex ? network.plex : form.plex ? ips.map((ip) => joinAddress(ip, form.plexPort)) : [],
+    plex: network.fixed.plex ? network.plex : form.plex && !form.plexOnWeb ? ips.map((ip) => joinAddress(ip, form.plexPort)) : [],
+    plex_on_web: network.fixed.plex ? network.plex_on_web : form.plex && form.plexOnWeb,
     discovery: network.fixed.discovery ? network.discovery : form.discovery,
   };
 }
 
 const sameChoice = (a: ListenChoice, b: ListenChoice) =>
-  a.discovery === b.discovery && a.web.join() === b.web.join() && a.plex.join() === b.plex.join();
+  a.discovery === b.discovery && a.plex_on_web === b.plex_on_web && a.web.join() === b.web.join() && a.plex.join() === b.plex.join();
 
 /** Why `form` can't be saved, if it can't. */
 function problemOf(form: Form): string | null {
   const port = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535;
   if (!port(form.port)) return "The port is a number from 1 to 65535.";
-  if (form.plex && form.plexPort === form.port) return "pley and the Plex-compatible API need ports of their own.";
+  if (form.plex && !form.plexOnWeb && form.plexPort === form.port) return "pley and the Plex-compatible API need ports of their own.";
   if (form.mode === "networks" && form.ips.length === 0) return "Choose a network, or Only this computer.";
   return null;
 }
@@ -231,7 +235,7 @@ export function NetworkSettings() {
   // The form starts from where pley listens, and again when that changes
   // (not when only how its listeners are does).
   const [form, setForm] = useState<Form | null>(() => (data ? formOf(data) : null));
-  useOnChange(data ? JSON.stringify([data.web, data.plex, data.discovery]) : "", () => {
+  useOnChange(data ? JSON.stringify([data.web, data.plex, data.plex_on_web, data.discovery]) : "", () => {
     if (data) setForm(formOf(data));
   });
 
@@ -347,11 +351,36 @@ export function NetworkSettings() {
           hint={
             data.fixed.plex
               ? "Set by --plex-bind or PLEY_PLEX_BIND, on the command line or in the environment."
-              : `For Plex apps and tools, on port ${form.plexPort}, where pley listens. A Plex server on this computer keeps its port.`
+              : form.plexOnWeb
+                ? "For Plex apps and tools, on pley's own port and addresses (through your reverse proxy too): pley tells their requests from browsers'."
+                : `For Plex apps and tools, on port ${form.plexPort}, where pley listens. A Plex server on this computer keeps its port.`
           }
         >
           <Toggle checked={form.plex} disabled={data.fixed.plex} onChange={(v) => set({ plex: v })} label="Plex-compatible API" />
         </Row>
+        {form.plex ? (
+          <div className="grid grid-cols-2 gap-1 rounded-md bg-surface-2 p-1 text-sm" role="radiogroup" aria-label="Plex-compatible API's port">
+            {[
+              { onWeb: true, label: `On pley's port (${Number.isNaN(form.port) ? DEFAULT_PORT : form.port})` },
+              { onWeb: false, label: `On port ${form.plexPort}` },
+            ].map((o) => (
+              <button
+                key={o.label}
+                type="button"
+                role="radio"
+                aria-checked={form.plexOnWeb === o.onWeb}
+                disabled={data.fixed.plex}
+                onClick={() => set({ plexOnWeb: o.onWeb })}
+                className={cn(
+                  "h-8 rounded font-medium transition-colors disabled:opacity-60",
+                  form.plexOnWeb === o.onWeb ? "bg-surface-3 text-fg shadow-sm" : "text-muted hover:text-fg",
+                )}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <Row
           label="Found by the pley apps"
           hint={
@@ -379,6 +408,12 @@ export function NetworkSettings() {
           <p className="mt-0.5 text-sm text-muted">An address pley can't listen on yet (an adapter that comes later) is tried again every 30 seconds.</p>
         </div>
         <ul className="space-y-1.5 text-sm">
+          {data.plex_on_web ? (
+            <li className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <CircleCheck className="size-3.5 shrink-0 text-success" />
+              <span className="text-muted">{LISTENER.plex}, on pley's port</span>
+            </li>
+          ) : null}
           {data.listeners.map((l) => (
             <li key={`${l.kind} ${l.address}`} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
               {l.error ? <CircleAlert className="size-3.5 shrink-0 text-danger" /> : <CircleCheck className="size-3.5 shrink-0 text-success" />}

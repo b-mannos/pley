@@ -45,8 +45,9 @@ Run the setup. Its pages:
      that isn't up yet as pley starts (Wi-Fi, a VPN such as Tailscale) is
      tried again every 30 s.
    - **Every network**, those that come later too.
-   - The port (7539) and the Plex-compatible API (port 32400, for Plex apps),
-     on the same networks. Setup says when another program has a port.
+   - The port (7539), which another program mustn't have (Setup says when
+     one does), and the Plex-compatible API for Plex tools, on by default on
+     pley's port too.
    - All of it changes later in pley, while it runs: **Settings → Network**.
 5. **Windows Firewall**: which kinds of network to let pley through on
    (private and domain, not public, unless you say otherwise), from devices
@@ -133,7 +134,7 @@ pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=s
 | `/COPYDATA=` | A data folder to copy first | none |
 | `/LISTEN=` | `local`, `all`, or the addresses of the networks to listen on, separated by commas | `local` |
 | `/PORT=` | The port | `7539` |
-| `/PLEX=` | `yes` or `no`: the Plex-compatible API | `no` |
+| `/PLEX=` | `yes` or `no`: the Plex-compatible API, on pley's port | `yes` |
 | `/FIREWALL=` | The kinds of network to let pley through on, wherever it listens: `private`, `domain`, `public` (separated by commas), or `none` | `private,domain` |
 | `/FROM=` | `subnet` (devices on those networks) or `any` (a VPN too) | `subnet` |
 | `/DISCOVERY=` | `yes` or `no`: found by the pley apps, when others may reach it | `yes` |
@@ -158,7 +159,7 @@ silent install stops when the port is taken. A silent uninstall
 What Setup runs, from an administrator's terminal:
 
 ```
-pley --data-dir C:\ProgramData\pley --bind 127.0.0.1:7539 --plex-bind off ^
+pley --data-dir C:\ProgramData\pley --bind 127.0.0.1:7539 --plex-bind web ^
   --ffmpeg "C:\Program Files\pley-server\ffmpeg\ffmpeg.exe" ^
   --ffprobe "C:\Program Files\pley-server\ffmpeg\ffprobe.exe" service install
 ```

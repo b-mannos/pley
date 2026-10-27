@@ -88,8 +88,12 @@ async fn server_endpoints() {
     let servers = app.plex(Method::GET, "/servers", &admin, &[("host", "media.lan:32401")]).await;
     let server = &servers.body["MediaContainer"]["Server"][0];
     assert_eq!((server["host"].clone(), server["port"].clone()), (json!("media.lan"), json!(32401)));
+    // No port: the scheme's (a reverse proxy in front of pley's port).
     let servers = app.plex(Method::GET, "/servers", &admin, &[("host", "media.lan")]).await;
-    assert_eq!(servers.body["MediaContainer"]["Server"][0]["port"], json!(32400));
+    assert_eq!(servers.body["MediaContainer"]["Server"][0]["port"], json!(80));
+    let proxied = [("host", "media.example.com"), ("x-forwarded-proto", "https")];
+    let servers = app.plex(Method::GET, "/servers", &admin, &proxied).await;
+    assert_eq!(servers.body["MediaContainer"]["Server"][0]["port"], json!(443));
 
     // Errors are Plex-style HTML pages.
     let missing = app.plex(Method::GET, "/library/metadata/999999", &admin, &[]).await;

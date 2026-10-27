@@ -234,7 +234,7 @@ end;
 function PlexBind: String;
 begin
   if PlexCheck.Checked then
-    Result := AddressesWith('32400')
+    Result := 'web'
   else
     Result := 'off';
 end;
@@ -565,7 +565,7 @@ begin
   PortEdit.Width := ScaleX(60);
   PortLabel.FocusControl := PortEdit;
   Top := Top + PortEdit.Height + ScaleY(14);
-  PlexCheck := AddCheck(NetworkPage, Top, 'Plex-compatible API on port 32400, for Plex apps', '');
+  PlexCheck := AddCheck(NetworkPage, Top, 'Plex-compatible API, for Plex tools (on pley''s port)', '');
 
   FirewallPage := CreateCustomPage(NetworkPage.ID, 'Windows Firewall', 'Which devices may reach pley');
   Top := 0;
@@ -653,7 +653,7 @@ begin
   if AdaptersRadio.Checked then
     CheckAdapters(Ips);
   PortEdit.Text := CmdParam('PORT', GetPreviousData('Port', '7539'));
-  PlexCheck.Checked := Flag('PLEX', GetPreviousData('Plex', 'no') = 'yes');
+  PlexCheck.Checked := Flag('PLEX', GetPreviousData('Plex', 'yes') = 'yes');
 
   // Private and domain networks, from devices on them, unless told otherwise.
   Firewall := Lowercase(CmdParam('FIREWALL', GetPreviousData('Firewall', 'private,domain')));
@@ -808,11 +808,6 @@ begin
   Result := True;
   Owner := PortOwner(Port);
   Taken := Port;
-  if (Owner = '') and PlexCheck.Checked then
-  begin
-    Owner := PortOwner('32400');
-    Taken := '32400';
-  end;
   if Owner <> '' then
     Result := SuppressibleMsgBox('Port ' + Taken + ' is taken by ' + Owner + '. pley can''t listen there while it is: ' +
       'stop that program, or choose another port.' + #13#10#13#10 + 'Go on anyway?', mbError, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES;
@@ -929,7 +924,7 @@ begin
   else
     S := S + 'This computer only (127.0.0.1:' + Port + ')';
   if PlexCheck.Checked then
-    S := S + NewLine + Space + 'Plex-compatible API on port 32400';
+    S := S + NewLine + Space + 'Plex-compatible API, on pley''s port';
   if Profiles = '' then
     S := S + NewLine + Space + 'Not let through Windows Firewall'
   else if AnyRadio.Checked then

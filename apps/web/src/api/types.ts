@@ -701,8 +701,10 @@ export interface TranscoderStatus {
 export interface ListenChoice {
   /** The web app and its API. */
   web: string[];
-  /** The Plex-compatible API: off when empty. */
+  /** The Plex-compatible API on addresses of its own (port 32400): none when off or on pley's port. */
   plex: string[];
+  /** The Plex-compatible API answers on pley's own port, to its clients. */
+  plex_on_web: boolean;
   /** Whether the pley apps on the networks find the server. */
   discovery: boolean;
 }

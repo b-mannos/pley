@@ -158,17 +158,22 @@ pub async fn system(PlexUser(_user): PlexUser) -> Node {
     Node::container().attr("size", 0).attr("identifier", "com.plexapp.system")
 }
 
-/// `/servers`: this server, at the address the client used.
+/// `/servers`: this server, at the address the client used (with its
+/// scheme's port when it named none: through a reverse proxy on pley's
+/// port, say).
 pub async fn servers(
     State(state): State<AppState>,
     PlexUser(_user): PlexUser,
     Extension(info): Extension<Arc<PlexInfo>>,
     headers: HeaderMap,
 ) -> Node {
-    let host_header = headers.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("127.0.0.1:32400");
+    let host_header = headers.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("127.0.0.1");
+    let scheme_port = if crate::auth::forwarded_https(&headers) { 443 } else { 80 };
     let (host, port) = match host_header.rsplit_once(':') {
-        Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) => (h.to_owned(), p.parse().unwrap_or(32400)),
-        _ => (host_header.to_owned(), 32400),
+        Some((h, p)) if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) => {
+            (h.to_owned(), p.parse().unwrap_or(scheme_port))
+        }
+        _ => (host_header.to_owned(), scheme_port),
     };
     Node::container().attr("size", 1).child(
         Node::new("Server")

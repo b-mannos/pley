@@ -143,7 +143,8 @@ impl TestApp {
         for (k, v) in extra {
             req = req.header(*k, *v);
         }
-        reply(self.plex.clone().oneshot(req.body(Body::empty()).unwrap()).await.unwrap()).await
+        // On pley's port, as by default: `plex` is the API on its own.
+        reply(self.api.clone().oneshot(req.body(Body::empty()).unwrap()).await.unwrap()).await
     }
 
     /// A Plex-compatible API request with `body` (an upload).
@@ -155,7 +156,7 @@ impl TestApp {
             .header(header::ACCEPT, "application/json")
             .body(Body::from(body))
             .unwrap();
-        reply(self.plex.clone().oneshot(req).await.unwrap()).await
+        reply(self.api.clone().oneshot(req).await.unwrap()).await
     }
 
     /// `MediaContainer` of a successful Plex request.

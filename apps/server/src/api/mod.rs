@@ -193,6 +193,8 @@ pub fn router(state: AppState) -> Router {
             axum::http::StatusCode::REQUEST_TIMEOUT,
             Duration::from_secs(60 * 30),
         ))
+        // The Plex-compatible API's clients, before anything of pley's.
+        .layer(axum::middleware::from_fn_with_state(crate::plex::OnWebPort::new(&state), crate::plex::on_web_port))
         .with_state(state)
 }
 

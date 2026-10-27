@@ -216,6 +216,9 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     state.start_background_tasks();
     let app = api::router(state.clone());
     tracing::info!("pley {VERSION_AND_COMMIT} listening on http://{}", display_addr(addr));
+    if state.network.plex_on_web() {
+        tracing::info!("the Plex-compatible API answers on pley's port, to its clients");
+    }
     LISTENING.store(true, std::sync::atomic::Ordering::SeqCst);
     if let Some(code) = state.auth.setup.shown() {
         tracing::warn!(

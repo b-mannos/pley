@@ -18,9 +18,12 @@ Only the latest release gets fixes.
   internet, and the Android app refuses one.
 - **Set it up before exposing it.** A new server is set up with the one-time
   code pley prints in its log (the tray icon's "Open pley" fills it in).
-- **Keep what doesn't need to be public off the internet:** the
-  compatibility API on port 32400 (turn it off with `plex_bind = "off"` if
-  no tool needs it), and any transcoder on another machine.
+- **Keep what doesn't need to be public off the internet:** any
+  transcoder on another machine, and the compatibility API's own port 32400
+  if you gave it one. By default that API answers on pley's port, to its
+  clients only, with a token; give the tools that use it an account of
+  their own rather than an administrator's, and turn it off
+  (`plex_bind = "off"`) if no tool needs it.
 - **Mount media read-only**, run pley as an unprivileged user, and don't let
   untrusted people write to library folders. The Docker setup does the
   first two and more: a read-only image, no capabilities, the port on

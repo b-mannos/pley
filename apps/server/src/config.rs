@@ -45,8 +45,8 @@ pub struct Cli {
     #[arg(long, env = "PLEY_BIND", global = true)]
     pub bind: Option<String>,
 
-    /// Address of the Plex-compatible API (default `0.0.0.0:32400`, `off` to disable); several
-    /// separated by commas, as with --bind
+    /// Where the Plex-compatible API listens: `web` (default) answers on pley's own port, `off`
+    /// turns it off, or addresses of its own (`0.0.0.0:32400`), several separated by commas
     #[arg(long, env = "PLEY_PLEX_BIND", global = true)]
     pub plex_bind: Option<String>,
 
@@ -143,6 +143,9 @@ pub struct Config {
     pub plex_bind: Option<SocketAddr>,
     /// Where that API listens too, as [`Config::extra_binds`].
     pub plex_extra_binds: Vec<SocketAddr>,
+    /// That API answers on pley's own port instead (`plex_bind = "web"`, see
+    /// [`crate::plex::on_web_port`]).
+    pub plex_on_web: bool,
     pub data_dir: PathBuf,
     /// Work directory handed to the managed transcoder (segments, caches).
     pub transcode_dir: PathBuf,
@@ -197,13 +200,13 @@ impl Config {
             None => vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_PORT)],
             Some(value) => parse_binds(&value)?,
         };
-        let plex_binds = match cli.plex_bind.clone().or(file.plex_bind) {
-            // Kept to this computer when pley is (behind a proxy, say): the
-            // compatibility API's tokens travel in the clear.
-            None if binds.iter().all(|bind| bind.ip().is_loopback()) => vec![SocketAddr::new(binds[0].ip(), PLEX_PORT)],
-            None => vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), PLEX_PORT)],
-            Some(value) if is_off(&value) => Vec::new(),
-            Some(value) => parse_binds(&value)?,
+        let plex_bind = cli.plex_bind.clone().or(file.plex_bind);
+        // By default on pley's own port: wherever pley is reached, through
+        // its reverse proxy's HTTPS too.
+        let plex_on_web = plex_bind.as_deref().is_none_or(is_web);
+        let plex_binds = match plex_bind {
+            Some(value) if !is_off(&value) && !is_web(&value) => parse_binds(&value)?,
+            _ => Vec::new(),
         };
         let transcode_dir = file.transcode_dir.map(|p| absolutize(&p)).unwrap_or_else(|| data_dir.join("transcode"));
 
@@ -212,6 +215,7 @@ impl Config {
             extra_binds: binds[1..].to_vec(),
             plex_bind: plex_binds.first().copied(),
             plex_extra_binds: plex_binds.iter().skip(1).copied().collect(),
+            plex_on_web,
             ffmpeg: cli.ffmpeg.clone().or(file.ffmpeg).unwrap_or_else(|| PathBuf::from("ffmpeg")),
             ffprobe: cli.ffprobe.clone().or(file.ffprobe).unwrap_or_else(|| PathBuf::from("ffprobe")),
             web_dir: cli.web_dir.clone().or(file.web_dir),
@@ -244,6 +248,7 @@ impl Config {
             extra_binds: Vec::new(),
             plex_bind: None,
             plex_extra_binds: Vec::new(),
+            plex_on_web: true,
             data_dir: data_dir.to_path_buf(),
             transcode_dir: data_dir.join("transcode"),
             ffmpeg: PathBuf::from("ffmpeg"),
@@ -313,7 +318,7 @@ pub fn save_config(cli: &Cli, path: &Path, discovery: Option<bool>) -> anyhow::R
         values.push(("bind", bind.trim().into()));
     }
     if let Some(plex_bind) = &cli.plex_bind {
-        if !is_off(plex_bind) {
+        if !is_off(plex_bind) && !is_web(plex_bind) {
             parse_binds(plex_bind)?;
         }
         values.push(("plex_bind", plex_bind.trim().into()));
@@ -339,7 +344,13 @@ pub fn save_listen(path: &Path, listen: &crate::network::Listen, fixed: crate::n
         values.push(("bind", list(&listen.web).into()));
     }
     if !fixed.plex {
-        let plex = if listen.plex.is_empty() { "off".to_owned() } else { list(&listen.plex) };
+        let plex = if listen.plex_on_web {
+            "web".to_owned()
+        } else if listen.plex.is_empty() {
+            "off".to_owned()
+        } else {
+            list(&listen.plex)
+        };
         values.push(("plex_bind", plex.into()));
     }
     if !fixed.discovery {
@@ -403,6 +414,11 @@ fn defines(line: &str, key: &str) -> bool {
 /// A Plex-compatible API address that turns it off.
 fn is_off(value: &str) -> bool {
     matches!(value.trim(), "" | "off" | "none" | "false" | "0")
+}
+
+/// A Plex-compatible API address that puts it on pley's own port.
+fn is_web(value: &str) -> bool {
+    value.trim().eq_ignore_ascii_case("web")
 }
 
 fn default_data_dir() -> PathBuf {
@@ -477,15 +493,22 @@ mod tests {
     }
 
     #[test]
-    fn pley_kept_to_this_computer_keeps_the_plex_api_there_too() {
+    fn the_plex_api_is_on_pleys_port_unless_given_its_own() {
         let dir = tempfile::tempdir().unwrap();
         let mut args = cli(dir.path());
-        args.bind = Some("127.0.0.1:7539".into());
         let config = Config::load(&args).unwrap();
-        assert_eq!(config.plex_bind, Some("127.0.0.1:32400".parse().unwrap()));
-        args.bind = Some("127.0.0.1:7539,192.168.1.20:7539".into());
-        let config = Config::load(&args).unwrap();
-        assert_eq!(config.plex_bind, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), PLEX_PORT)));
+        assert!(config.plex_on_web, "on by default, on pley's port");
+        assert_eq!(config.plex_bind, None);
+        for (value, on_web, bind) in [
+            ("web", true, None),
+            (" Web ", true, None),
+            ("off", false, None),
+            ("0.0.0.0:32400", false, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), PLEX_PORT))),
+        ] {
+            args.plex_bind = Some(value.into());
+            let config = Config::load(&args).unwrap();
+            assert_eq!((config.plex_on_web, config.plex_bind), (on_web, bind), "{value}");
+        }
     }
 
     /// Command line options as if none were given (built directly, so the
@@ -514,7 +537,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::load(&cli(dir.path())).unwrap();
         assert_eq!(config.bind, SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_PORT));
-        assert_eq!(config.plex_bind, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), PLEX_PORT)));
+        assert_eq!((config.plex_bind, config.plex_on_web), (None, true));
         assert_eq!(config.data_dir, dir.path());
         assert_eq!(config.transcode_dir, dir.path().join("transcode"));
         assert_eq!(config.db_path(), dir.path().join("pley.db"));
@@ -614,6 +637,7 @@ mod tests {
         let listen = crate::network::Listen {
             web: vec!["127.0.0.1:7540".parse().unwrap(), "192.168.1.10:7540".parse().unwrap()],
             plex: Vec::new(),
+            plex_on_web: false,
             discovery: false,
         };
         save_listen(&config.config_file, &listen, config.network_fixed).unwrap();

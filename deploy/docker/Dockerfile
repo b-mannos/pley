@@ -80,8 +80,8 @@ ENV PLEY_DATA_DIR=/config \
     HOME=/config \
     NVIDIA_DRIVER_CAPABILITIES=compute,video,utility,graphics
 VOLUME ["/config"]
-# The web app and its API; the Plex-compatible API.
-EXPOSE 7539 32400
+# The web app, its API and the Plex-compatible API.
+EXPOSE 7539
 USER pley
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --start-interval=2s \
     CMD ["pley", "health"]
