@@ -717,6 +717,26 @@ async fn setting_up_takes_the_code_in_the_log_from_anywhere() {
 }
 
 #[tokio::test]
+async fn setup_ends_when_an_account_is_made_elsewhere() {
+    let app = TestApp::new().await;
+    let code = app.state.auth.setup.shown().unwrap();
+    // `pley reset-password admin … --admin` beside the running server.
+    sqlx::query(
+        "INSERT INTO users (id, username, password_hash, is_admin, created_at)
+         VALUES ((SELECT last + 1 FROM user_ids), 'admin', 'x', 1, 0)",
+    )
+    .execute(&app.state.db.write)
+    .await
+    .unwrap();
+    let server = app.call(Method::GET, "/api/server", None, None, &[]).await;
+    assert_eq!(server.body["setup_required"], json!(false));
+    assert_eq!(app.state.auth.setup.shown(), None, "the code is done with");
+    let body = json!({"username": "owner", "password": "correct horse", "setup_code": code});
+    let late = app.call(Method::POST, "/api/setup", None, Some(body), &[]).await;
+    assert_eq!(late.status, StatusCode::CONFLICT, "{:?}", late.body);
+}
+
+#[tokio::test]
 async fn setup_codes_cant_be_guessed_and_guessing_locks_nobody_else_out() {
     let app = TestApp::new().await;
     let guess = || {

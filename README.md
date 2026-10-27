@@ -143,7 +143,7 @@ cargo build                                      # build pley and pley-transcode
 ```
 
 pley prints a link with a one-time setup code when it starts
-(`http://localhost:7539/setup#code=…`; on a desktop the tray icon opens it).
+(`http://localhost:7539/setup?code=…`; on a desktop the tray icon opens it).
 Open it, create the administrator account and add a library. Nobody without
 the code can claim a new server.
 

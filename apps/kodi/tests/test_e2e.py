@@ -98,7 +98,7 @@ class EndToEndTest(unittest.TestCase):
     @classmethod
     def setup_code(cls):
         for line in cls.log:
-            found = re.search(r"setup#code=([A-Za-z0-9_-]+)", line)
+            found = re.search(r"setup[?#]code=([A-Za-z0-9_-]+)", line)
             if found:
                 return found.group(1)
         return None

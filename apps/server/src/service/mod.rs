@@ -423,7 +423,7 @@ fn report(data_dir: &Path, since: i64) -> anyhow::Result<()> {
     if get(addr, "/api/server").is_some_and(|body| body.contains(r#""setup_required":false"#)) {
         println!("accounts: yes");
     }
-    let link = |code: &str| format!("http://{addr}/setup#code={code}");
+    let link = |code: &str| format!("http://{addr}/setup?code={code}");
     // The setup code is logged as pley starts; what FFmpeg can do comes
     // once the transcoder has tried it (seconds, with a GPU).
     let deadline = Instant::now() + Duration::from_secs(45);
@@ -508,10 +508,10 @@ fn listening_on(run: &str) -> Option<SocketAddr> {
 }
 
 /// The setup code in the log, which `crate::run_with_tray` logs while the
-/// server has no account.
+/// server has no account (`setup?code=`, or `setup#code=` before 0.2).
 fn setup_code(log: &str) -> Option<String> {
     log.lines().rev().find_map(|line| {
-        let code = line.split("setup#code=").nth(1)?;
+        let code = line.split("setup?code=").nth(1).or_else(|| line.split("setup#code=").nth(1))?;
         let code: String = code.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
         (!code.is_empty()).then_some(code)
     })
@@ -652,7 +652,7 @@ mod tests {
 
     #[test]
     fn the_report_finds_the_setup_code_and_what_ffmpeg_can_do() {
-        let log = "2026-10-26T10:00:00Z  WARN pley isn't set up yet: open http://127.0.0.1:7539/setup#code=AB12-CD34 to \
+        let log = "2026-10-26T10:00:00Z  WARN pley isn't set up yet: open http://127.0.0.1:7539/setup?code=AB12-CD34 to \
                    create the administrator account (the setup code is AB12-CD34)\n\
                    2026-10-26T10:00:03Z  INFO [transcoder] ffmpeg 7.1 detected in 2.9s: encoders [hevc_nvenc], tone \
                    mapping [libplacebo], dolby vision: true\n";
@@ -660,6 +660,10 @@ mod tests {
         assert_eq!(
             ffmpeg_line(log).as_deref(),
             Some("ffmpeg 7.1 detected in 2.9s: encoders [hevc_nvenc], tone mapping [libplacebo], dolby vision: true")
+        );
+        assert_eq!(
+            setup_code("WARN … open http://localhost:7539/setup#code=EF56-GH78 to …\n").as_deref(),
+            Some("EF56-GH78")
         );
         assert_eq!(setup_code("INFO pley 1.0 listening on http://127.0.0.1:7539\n"), None);
     }

@@ -26,7 +26,7 @@ const setupPosts = (requests: ReturnType<typeof renderSetup>) => requests.filter
 describe("SetupPage", () => {
   it("takes the code from the link the server printed, and checks the password", async () => {
     const user = userEvent.setup();
-    const requests = renderSetup({ setup_code_required: true }, "/setup#code=ABCD-EFGH");
+    const requests = renderSetup({ setup_code_required: true }, "/setup?code=ABCD-EFGH");
     expect(await screen.findByLabelText("Setup code")).toHaveValue("ABCD-EFGH");
     await user.type(screen.getByLabelText("Username"), "owner");
     expect(screen.queryByLabelText(/Confirm/)).not.toBeInTheDocument();
@@ -49,7 +49,7 @@ describe("SetupPage", () => {
 
   it("asks for the code in the log, also from older links", async () => {
     const user = userEvent.setup();
-    const requests = renderSetup({ setup_code_required: true }, "/setup?code=ABCD-EFGH");
+    const requests = renderSetup({ setup_code_required: true }, "/setup#code=ABCD-EFGH");
     expect(await screen.findByLabelText("Setup code")).toHaveValue("ABCD-EFGH");
     await user.type(screen.getByLabelText("Username"), "owner");
     await user.type(screen.getByLabelText("Password"), "correct horse");

@@ -158,14 +158,14 @@ case $addr in
 esac
 started=$(docker inspect --format '{{.State.StartedAt}}' "$cid")
 code=$(docker logs --since "$started" "$cid" 2>&1 |
-    sed -n 's/.*setup#code=\([A-Z0-9-]*\).*/\1/p' | tail -n 1)
+    sed -n 's/.*setup[?#]code=\([A-Z0-9-]*\).*/\1/p' | tail -n 1)
 
 say ""
 if [ -n "$code" ]; then
     say "pley is running. Create the administrator account with setup code $code"
     say "(a new code is made each time pley starts until then):"
-    [ -z "$addr" ] || say "  http://$addr/setup#code=$code"
-    say "  https://<your domain>/setup#code=$code   through your reverse proxy"
+    [ -z "$addr" ] || say "  http://$addr/setup?code=$code"
+    say "  https://<your domain>/setup?code=$code   through your reverse proxy"
     say ""
     say "Then add libraries from folders under /media, such as /media/Movies."
 else

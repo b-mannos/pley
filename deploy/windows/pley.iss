@@ -901,7 +901,7 @@ begin
     else if HasAccounts then
       Text := Text + #13#10#13#10 + 'Sign in with your pley account: this pley is set up already.'
     else
-      Text := Text + #13#10#13#10 + 'Its setup code is in its log: ' + DataDir('') + '\logs\pley.log ("setup#code=").';
+      Text := Text + #13#10#13#10 + 'Its setup code is in its log: ' + DataDir('') + '\logs\pley.log ("setup?code=").';
     if FfmpegSummary <> '' then
       Text := Text + #13#10#13#10 + FfmpegSummary;
     if LocalRadio.Checked then

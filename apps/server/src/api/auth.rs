@@ -35,6 +35,12 @@ pub struct Credentials {
 
 pub async fn server_status(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
     let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&state.db.read).await?;
+    if users > 0 {
+        // Set up, by the setup page or elsewhere (`pley reset-password
+        // --admin` beside the running server): the code is done with, and
+        // the tray no longer opens the setup page.
+        state.auth.setup.clear();
+    }
     let settings = state.settings.get();
     Ok(Json(serde_json::json!({
         "name": settings.server_name,
@@ -83,6 +89,8 @@ pub async fn setup(
 ) -> ApiResult<Response> {
     let set_up: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users)").fetch_one(&state.db.read).await?;
     if set_up {
+        // An account made elsewhere (`pley reset-password --admin`, say).
+        state.auth.setup.clear();
         return Err(AppError::conflict("pley is already set up"));
     }
     // 5 tries every 15 minutes from each address: someone guessing doesn't

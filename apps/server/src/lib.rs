@@ -207,7 +207,7 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     LISTENING.store(true, std::sync::atomic::Ordering::SeqCst);
     if let Some(code) = state.auth.setup.shown() {
         tracing::warn!(
-            "pley isn't set up yet: open http://{}/setup#code={code} to create the administrator account \
+            "pley isn't set up yet: open http://{}/setup?code={code} to create the administrator account \
              (the setup code is {code})",
             display_addr(addr)
         );

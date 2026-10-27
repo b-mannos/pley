@@ -9,7 +9,7 @@ import { useDocumentTitle } from "@/lib/hooks";
 import { MIN_PASSWORD_LENGTH, passwordProblem } from "@/lib/passwords";
 import { AuthLayout } from "./AuthLayout";
 
-/** The setup code in `#code=ABCD-EFGH`. */
+/** The setup code in `#code=ABCD-EFGH`, as links had it before 0.2. */
 export function codeFromHash(hash: string): string | null {
   return new URLSearchParams(hash.replace(/^#/, "")).get("code");
 }
@@ -22,10 +22,11 @@ export function SetupPage() {
   const setup = useSetup();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  // The links the server prints (and its tray icon opens) carry the code:
-  // after `#`, which browsers don't send anywhere.
+  // The links the server prints (and its tray icon and installer open)
+  // carry the code in `?code=`, which Windows keeps when it opens a link in
+  // the browser (it can drop a `#`); the server leaves it out of its log.
   const { hash } = useLocation();
-  const [code, setCode] = useState(() => codeFromHash(hash) ?? params.get("code") ?? "");
+  const [code, setCode] = useState(() => params.get("code") ?? codeFromHash(hash) ?? "");
   const [localError, setLocalError] = useState<string | null>(null);
 
   if (server.isPending) return <Splash />;

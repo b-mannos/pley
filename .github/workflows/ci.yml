@@ -375,7 +375,7 @@ jobs:
           # grep reads all of its input: with pipefail, -q could fail the writer.
           docker compose port pley 7539 | grep -x '127.0.0.1:7539' >/dev/null || fail "not published on 127.0.0.1 only"
           curl -fsS http://127.0.0.1:7539/api/health
-          docker compose logs pley | grep 'setup#code=' >/dev/null || fail "no setup link in the log"
+          docker compose logs pley | grep 'setup?code=' >/dev/null || fail "no setup link in the log"
           test "$(in_pley id -u)" = "$(id -u)" || fail "not running as the user setup.sh chose"
           in_pley grep -q '^CapBnd:[[:space:]]*0*$' /proc/1/status || fail "capabilities left"
           in_pley grep -q '^NoNewPrivs:[[:space:]]*1$' /proc/1/status || fail "no-new-privileges is off"

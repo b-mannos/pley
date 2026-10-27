@@ -119,7 +119,7 @@ impl TrayContext {
     /// code filled in, while the server has no account.
     pub(crate) fn open_web_ui(&self) {
         match self.state.auth.setup.shown() {
-            Some(code) => open(format!("{}/setup#code={code}", self.url)),
+            Some(code) => open(format!("{}/setup?code={code}", self.url)),
             None => open(&self.url),
         }
     }
