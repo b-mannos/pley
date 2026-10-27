@@ -157,13 +157,14 @@ export function App(p: ShellProps) {
     document.getElementById("app")?.classList.toggle("reduced", reduced);
   }, [reduced]);
 
-  // Page focus memory: what the page focused last, so Back lands on it.
+  // Page focus memory: what the page focused last, so Back lands on it. A panel's or a dialog's rows
+  // leave it on what opened them: an action that leaves the page (Play from here, Go to) comes back there.
   useEffect(
     () =>
       focus.onChange((el) => {
         const entry = nav.top;
         const root = pageRoot.current;
-        if (!entry || !el || !root || !root.contains(el)) return;
+        if (!entry || !el || !root || !root.contains(el) || focus.root !== root) return;
         entry.memory = el.getAttribute("data-fid");
       }),
     [],
