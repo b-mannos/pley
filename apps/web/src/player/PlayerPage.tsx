@@ -62,14 +62,18 @@ export function PlayerPage() {
   // (`?web=1`: it couldn't, the web player plays).
   const native = useMemo(() => androidPlayer(), []);
   const data = item.data;
+  /** Back where the player was opened from; opened straight (a bookmark, a new tab), to `fallback`. */
+  const back = (fallback: string) => {
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) void navigate(-1);
+    else void navigate(fallback, { replace: true });
+  };
   const handOff = !!native && !params.has("web") && !!data && PLAYABLE.has(data.kind) && data.files.length > 0;
   useEffect(() => {
     if (!handOff || !native || !data) return;
     const title = data.kind === "episode" && data.grandparent_title ? `${data.grandparent_title} · ${data.title}` : data.title;
     if (native({ item_id: data.id, start_ms: startMs, file_id: fileId, audio, sub, title })) {
-      const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
-      if (idx > 0) void navigate(-1);
-      else void navigate(itemUrl(data.kind === "extra" && data.parent_id ? data.parent_id : data.id), { replace: true });
+      back(itemUrl(data.kind === "extra" && data.parent_id ? data.parent_id : data.id));
     } else {
       const web = new URLSearchParams(params);
       web.set("web", "1");
@@ -84,11 +88,13 @@ export function PlayerPage() {
   // A failed background refetch (e.g. after watch state changed) keeps the
   // previous data: don't tear down a playing video because of it.
   if (!data) {
-    return <PlayerMessage title="Can't play this item" message={errorMessage(item.error)} onBack={() => void navigate(-1)} />;
+    return <PlayerMessage title="Can't play this item" message={errorMessage(item.error)} onBack={() => back("/")} />;
   }
   if (!PLAYABLE.has(data.kind)) return <Navigate to={itemUrl(data.id)} replace />;
   if (!data.files.length) {
-    return <PlayerMessage title="Nothing to play" message="This item has no media files." onBack={() => void navigate(-1)} />;
+    return (
+      <PlayerMessage title="Nothing to play" message="This item has no media files." onBack={() => back(itemUrl(data.id))} />
+    );
   }
 
   return (

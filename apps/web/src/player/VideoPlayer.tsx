@@ -1256,6 +1256,10 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       onPointerMove={(e) => {
         if (e.pointerType === "mouse") poke();
       }}
+      // Tabbing to a control, or a key pressed on one, shows them: hidden
+      // controls can still be focused and pressed.
+      onFocusCapture={poke}
+      onKeyDownCapture={poke}
     >
       <video
         ref={videoRef}
