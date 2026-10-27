@@ -259,6 +259,9 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
   const [panel, setPanel] = useState<PanelKind>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [section, setSection] = useState<string>((entry.state.section as string | undefined) ?? "hero");
+  // Each row's tile focused last: a row drawn again (the page draws only what is near) comes back to it.
+  const rowIndex = (entry.state.rowIndex as Record<string, number> | undefined) ?? {};
+  entry.state.rowIndex = rowIndex;
   // The episode focus is on: only the info block reads it, so a move along the episodes draws nothing else again.
   const focusedEpisode = useSignal<ItemSummary | null>(null);
   const [readOn, setReadOn] = useState(0);
@@ -392,9 +395,10 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
             kind="episode"
             items={eps}
             keyOf={(e) => e.id}
-            enterAt={epIndex}
+            enterAt={rowIndex[`season-${seasonId}`] ?? epIndex}
             onLeftEdge={ui.toRail}
             onFocusIndex={(i) => {
+              rowIndex[`season-${seasonId}`] = i;
               onFocus();
               setSection("episodes");
               entry.state.section = "episodes";
@@ -492,8 +496,10 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
           kind={k}
           items={items}
           keyOf={(x, i) => ((x as { id?: number }).id ?? i)}
+          enterAt={rowIndex[key]}
           onLeftEdge={ui.toRail}
-          onFocusIndex={() => {
+          onFocusIndex={(i) => {
+            rowIndex[key] = i;
             onFocus();
             setSection(key);
             entry.state.section = key;

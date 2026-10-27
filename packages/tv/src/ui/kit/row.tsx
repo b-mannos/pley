@@ -15,6 +15,8 @@ export const HEADER_TO_TILES = 14;
 export const TILES_TO_CAPTION = 14;
 export const CAPTION = 34;
 export const ROW_GAP = 28;
+/** The canvas's height: a page draws its sections within one of it above and below what shows. */
+const SCREEN = 540;
 
 /** A row's height: header, tiles and caption. */
 export function rowHeight(kind: TileKind, titled = true): number {
@@ -159,7 +161,9 @@ export interface Section {
  * A page of sections, 28 apart (the Android app's TvRowColumn): the
  * focused section comes up so its header sits at its anchor (172 for
  * rows), a hero section brings the page back to its top, and once
- * scrolled nothing draws above the anchor line − 12.
+ * scrolled nothing draws above the anchor line − 12. As the Android app's
+ * lazy column, only the sections within a screen of what shows are drawn;
+ * a row drawn again comes back to its tile by its `enterAt`.
  */
 export function SectionPage(p: {
   sections: Section[];
@@ -184,10 +188,11 @@ export function SectionPage(p: {
   if (at && at.section.anchor !== null) shift = Math.max(0, at.y - at.section.anchor);
   shift += p.extraShift ?? 0;
   const clip = shift > 0 && p.clipAbove !== undefined ? `clip-path:inset(${p.clipAbove}px 0 0 0);-webkit-clip-path:inset(${p.clipAbove}px 0 0 0)` : "";
+  const near = positions.filter(({ section, y: sy }) => sy + section.height >= shift - SCREEN && sy <= shift + 2 * SCREEN);
   return (
     <div class={p.class} style={`position:absolute;left:0;top:0;right:0;bottom:0;${clip}`}>
       <G kind="col" class="page-scroll" style={`transform:translateY(${-shift}px)`}>
-        {positions.map(({ section, y: sy }) => (
+        {near.map(({ section, y: sy }) => (
           <div key={section.key} style={`position:absolute;left:0;right:0;top:${sy}px;height:${section.height}px`}>
             {section.render(() => {
               setFocusedKey(section.key);
