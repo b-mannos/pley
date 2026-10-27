@@ -5,7 +5,8 @@
 # sudo), with hardware transcoding on the GPUs Docker can use. Then it checks
 # the config and media folders, builds and starts the container, waits until
 # pley answers and prints the link that creates the administrator account.
-# Run it again after `git pull` to update pley; .env is kept.
+# Run it again after `git pull` to update pley; .env is kept, and a GPU it
+# doesn't use yet is pointed out.
 set -eu
 
 cd "$(dirname "$0")"
@@ -43,6 +44,34 @@ esac
 rootless=
 if docker info --format '{{.SecurityOptions}}' | grep -q rootless; then rootless=1; fi
 
+# ---- GPUs ------------------------------------------------------------------
+# On an engine that runs on this computer (not in Docker Desktop's VM): the
+# first render node of an Intel or AMD GPU (not NVIDIA's, nor WSL's Direct3D
+# bridge). One in group 0 would make pley a member of root's group, and
+# rootless Docker can't hand the host's render group over (README.md).
+render_node='' render_driver='' render_skipped=''
+if [ "$os" = linux ] && ! docker info --format '{{.OperatingSystem}}' | grep -q 'Docker Desktop'; then
+    for node in /dev/dri/renderD*; do
+        [ -c "$node" ] || continue
+        driver=$(basename "$(readlink -f "/sys/class/drm/${node##*/}/device/driver" 2>/dev/null)")
+        case $driver in
+            i915 | xe | amdgpu | radeon)
+                render_node=$node render_driver=$driver
+                break
+                ;;
+        esac
+    done
+fi
+if [ -n "$render_node" ]; then
+    if [ -n "$rootless" ]; then
+        render_skipped="rootless Docker can't give pley the host's render group"
+    elif [ "$(stat -c %g "$render_node")" = 0 ]; then
+        render_skipped="$render_node belongs to root's group"
+    fi
+fi
+nvidia=
+if docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"'; then nvidia=1; fi
+
 # ---- .env, on the first run ------------------------------------------------
 if [ ! -f .env ]; then
     # Docker Desktop (macOS, Windows) maps file owners by itself; on Linux pley
@@ -56,32 +85,17 @@ if [ ! -f .env ]; then
     fi
     set -- -e "s|^PLEY_UID=.*|PLEY_UID=$uid|" -e "s|^PLEY_GID=.*|PLEY_GID=$gid|"
 
-    # GPUs, on an engine that runs on this computer (not in Docker Desktop's
-    # VM): the first render node of an Intel or AMD GPU (not NVIDIA's, nor
-    # WSL's Direct3D bridge). One in group 0 would make pley a member of
-    # root's group.
     files=compose.yaml
-    render_node=
-    if [ "$os" = linux ] && ! docker info --format '{{.OperatingSystem}}' | grep -q 'Docker Desktop'; then
-        for node in /dev/dri/renderD*; do
-            [ -c "$node" ] || continue
-            driver=$(basename "$(readlink -f "/sys/class/drm/${node##*/}/device/driver" 2>/dev/null)")
-            case $driver in
-                i915 | xe | amdgpu | radeon)
-                    render_node=$node
-                    break
-                    ;;
-            esac
-        done
-    fi
-    if [ -n "$render_node" ] && [ "$(stat -c %g "$render_node")" != 0 ]; then
+    if [ -n "$render_node" ] && [ -z "$render_skipped" ]; then
         files="$files${sep}compose.vaapi.yaml"
         set -- "$@" -e "s|^# PLEY_RENDER_GID=.*|PLEY_RENDER_GID=$(stat -c %g "$render_node")|"
         [ "$render_node" = /dev/dri/renderD128 ] ||
             set -- "$@" -e "s|^# PLEY_RENDER_DEVICE=.*|PLEY_RENDER_DEVICE=$render_node|"
-        say "Found an Intel or AMD GPU ($driver, $render_node): hardware transcoding is on (compose.vaapi.yaml)."
+        say "Found an Intel or AMD GPU ($render_driver, $render_node): hardware transcoding is on (compose.vaapi.yaml)."
+    elif [ -n "$render_node" ]; then
+        say "Found an Intel or AMD GPU ($render_driver, $render_node), left off: $render_skipped (README.md, Hardware transcoding)."
     fi
-    if docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"'; then
+    if [ -n "$nvidia" ]; then
         files="$files${sep}compose.nvidia.yaml"
         say "Found the NVIDIA Container Toolkit: NVIDIA hardware transcoding is on (compose.nvidia.yaml)."
     fi
@@ -91,6 +105,20 @@ if [ ! -f .env ]; then
     mv .env.new .env
     [ -z "${SUDO_UID-}" ] || chown "$SUDO_UID:$SUDO_GID" .env
     say "Wrote .env (pley runs as user $uid, group $gid); edit it to change folders or ports."
+else
+    # A GPU added since: say how to use it, but leave .env as its owner made it.
+    files=$(setting COMPOSE_FILE compose.yaml)
+    case $files in
+        *compose.vaapi.yaml*) ;;
+        *)
+            [ -z "$render_node" ] || [ -n "$render_skipped" ] ||
+                say "pley doesn't use the Intel or AMD GPU ($render_driver, $render_node): add compose.vaapi.yaml to COMPOSE_FILE and PLEY_RENDER_GID=$(stat -c %g "$render_node") to .env."
+            ;;
+    esac
+    case $files in
+        *compose.nvidia.yaml*) ;;
+        *) [ -z "$nvidia" ] || say "Docker has the NVIDIA Container Toolkit, which pley doesn't use: add compose.nvidia.yaml to COMPOSE_FILE in .env." ;;
+    esac
 fi
 
 # ---- folders ---------------------------------------------------------------
@@ -110,6 +138,11 @@ if [ "$os" = linux ]; then
     host_uid=$run_uid host_gid=$run_gid
     [ -z "$rootless" ] || host_uid=$(id -u) host_gid=$(id -g)
     owner=$(ls -nd "$config_dir" | awk '{print $3}')
+    # Run as root on a new checkout, the folder is git's, empty: pley's now.
+    if [ "$owner" != "$host_uid" ] && [ "$(id -u)" = 0 ] &&
+        [ -z "$(find "$config_dir" -mindepth 1 -maxdepth 1 ! -name .gitignore | head -n 1)" ]; then
+        chown "$host_uid:$host_gid" "$config_dir" && owner=$host_uid
+    fi
     if [ "$owner" = "$host_uid" ]; then
         # The database and the key in it are for pley alone.
         chmod 700 "$config_dir" 2>/dev/null || true

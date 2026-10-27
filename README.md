@@ -120,7 +120,7 @@ HTTP, so the two can have different licenses
 | `apps/tizen`, `apps/webos` | pley for Samsung TV and pley for LG TV |
 | `packages/tv` | The TV app both share (TypeScript, Preact) |
 | `packages/transcoder-api` | Protocol types shared by server and transcoder |
-| `deploy/` | Docker, systemd and launchd setups ([guide](deploy/README.md)) |
+| `deploy/` | Docker, systemd and launchd setups, and the Windows installer ([guide](deploy/README.md)) |
 | `docs/` | [HTTP API](docs/API.md), [compatibility API](docs/COMPATIBILITY.md), [transcoder](docs/TRANSCODER.md), [storage](docs/STORAGE.md), [Samsung and LG TVs](docs/TV_PLATFORMS.md) |
 | `scripts/` | Release build, transcoder source package, license check, the web and desktop icons (`render-icons.mjs`) |
 
@@ -132,7 +132,8 @@ HTTP, so the two can have different licenses
 - FFmpeg and ffprobe on `PATH` or configured; 6.1 or newer throttles
   transcodes. For hardware transcoding and GPU tone mapping, use a build with
   NVENC, QSV, AMF or VAAPI and libplacebo, such as gyan.dev's "full" build on
-  Windows or jellyfin-ffmpeg on Linux.
+  Windows, Debian 13's or jellyfin-ffmpeg on Linux, and Homebrew's
+  `ffmpeg-full` on macOS ([deploy/README.md](deploy/README.md)).
 
 ## Quick start
 
@@ -164,8 +165,8 @@ Options come from command-line flags, `PLEY_*` environment variables or
 | Flag | Default | |
 |---|---|---|
 | `--bind` | `0.0.0.0:7539` | Listen address (7539 spells PLEY on a keypad); several separated by commas |
-| `--plex-bind` | `0.0.0.0:32400` | Compatibility API; `off` turns it off; several as with `--bind` |
-| `--data-dir` | `%LOCALAPPDATA%\pley`, `~/.local/share/pley` | Database, caches and artwork |
+| `--plex-bind` | `0.0.0.0:32400` (`127.0.0.1:32400` when `--bind` is this computer's only) | Compatibility API; `off` turns it off; several as with `--bind` |
+| `--data-dir` | `%LOCALAPPDATA%\pley`, `~/Library/Application Support/pley`, `~/.local/share/pley` | Database, caches and artwork |
 | `--ffmpeg`, `--ffprobe` | from `PATH` | Passed to the transcoder |
 | `--transcoder-url` | | Use a transcoder running elsewhere instead of starting one |
 | `--web-dir` | | Serve the web app from a folder instead of the embedded copy |

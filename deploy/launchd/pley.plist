@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   launchd agent for pley on macOS (runs at login as the current user, so it can
-  read media in your home folder and on mounted volumes).
-    cp pley pley-transcoder /usr/local/bin/
+  read media in your home folder and on mounted volumes). deploy/README.md:
+    brew install ffmpeg-full
+    sudo mkdir -p /usr/local/bin && sudo cp pley pley-transcoder /usr/local/bin/
     cp pley.plist ~/Library/LaunchAgents/pley.server.plist
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/pley.server.plist
   Stop with: launchctl bootout gui/$(id -u)/pley.server
@@ -19,7 +20,8 @@
     </array>
     <key>EnvironmentVariables</key>
     <dict>
-        <!-- Finds Homebrew's ffmpeg (Apple silicon and Intel locations). -->
+        <!-- Homebrew's programs (Apple silicon and Intel locations); pley
+             finds Homebrew's ffmpeg-full by itself. -->
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>

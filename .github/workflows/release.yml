@@ -91,7 +91,8 @@ jobs:
       - name: Every manifest and the tag agree
         env:
           TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
-        run: node scripts/version.mjs check $TAG
+        # No argument at all off a tag.
+        run: node scripts/version.mjs check ${TAG:+"$TAG"}
 
   # The Android app for phones, tablets, Android TV and Fire TV: the APK to
   # sideload and the bundle for Google Play, signed with the release key from

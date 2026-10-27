@@ -51,6 +51,11 @@ rm -rf "$out" && mkdir -p "$out"
 cp "$bin/pley" "$bin/pley-transcoder" "$out/"
 cp "$root/apps/server/LICENSE" "$out/LICENSE.txt"
 cp "$root/LICENSING.md" "$root/README.md" "$root/pley.example.toml" "$out/"
+# Running it as a service (deploy/README.md).
+case "$os" in
+    linux) cp "$root/deploy/systemd/pley.service" "$out/" ;;
+    macos) cp "$root/deploy/launchd/pley.plist" "$out/" ;;
+esac
 
 if [ "$archive" = 1 ]; then
     tar -C "$root/dist" -czf "$root/dist/$name.tar.gz" "$name"

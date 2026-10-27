@@ -40,8 +40,9 @@ services:
     tmpfs:
       # The transcoder's self-tests; SQLite keeps its temporary data in memory.
       - /tmp:size=256m,mode=1777,noexec,nosuid,nodev
-      # Optional: transcode segments in RAM (about 2 GB per stream).
-      # - /config/transcode:size=4g,uid=${PLEY_UID:-1000},gid=${PLEY_GID:-1000},mode=0700,noexec,nosuid,nodev
+      # Optional: the segments of the streams being transcoded in RAM, up to
+      # about 2 GB each (the transcoder's caches stay on disk).
+      # - /config/transcode/jobs:size=4g,uid=${PLEY_UID:-1000},gid=${PLEY_GID:-1000},mode=0700,noexec,nosuid,nodev
     security_opt:
       - no-new-privileges:true
     cap_drop:

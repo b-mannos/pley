@@ -352,6 +352,22 @@ jobs:
           tags: pley:local
           cache-from: type=gha
           cache-to: ${{ github.ref == 'refs/heads/master' && 'type=gha,mode=max' || '' }}
+      # What the transcoder's hardware paths use (apps/transcoder/src/ffmpeg.rs):
+      # an FFmpeg update that drops one would quietly leave pley on the CPU.
+      - name: Check the image's FFmpeg
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          ff() { docker run --rm --entrypoint ffmpeg pley:local -hide_banner "$@"; }
+          hwaccels=$(ff -hwaccels) filters=$(ff -filters) encoders=$(ff -encoders)
+          for name in cuda vaapi qsv vulkan opencl; do
+            grep -qx "$name" <<<"$hwaccels" || fail "FFmpeg has no $name hardware acceleration"
+          done
+          for name in scale_cuda scale_vaapi vpp_qsv libplacebo tonemap_opencl zscale; do
+            grep -qw "$name" <<<"$filters" || fail "FFmpeg has no $name filter"
+          done
+          for name in h264_nvenc hevc_nvenc h264_vaapi hevc_vaapi h264_qsv hevc_qsv libx264 libx265; do
+            grep -qw "$name" <<<"$encoders" || fail "FFmpeg has no $name encoder"
+          done
       - name: Check the compose add-ons
         working-directory: deploy/docker
         env:

@@ -46,7 +46,7 @@ it ([below](#behind-a-reverse-proxy)).
 | `compose.plex.yaml` | Add-on: the [compatibility API](../../docs/COMPATIBILITY.md) on port 32400 |
 | `config/` | pley's database, artwork and caches (default `PLEY_CONFIG_DIR`) |
 | `media/` | An example media folder (default `PLEY_MEDIA_DIR`) |
-| `Dockerfile` | The image: pley, pley-transcoder, FFmpeg 7, GPU drivers |
+| `Dockerfile` | The image: pley, pley-transcoder, FFmpeg 7.1, GPU drivers |
 
 Add-ons are turned on in `.env`, with `COMPOSE_FILE` (setup.sh does it for
 GPUs it finds):
@@ -79,9 +79,9 @@ All in `.env` ([.env.example](.env.example) explains each one):
 
 Settings that change at runtime (TMDB key, hardware acceleration, tone
 mapping, transcode limits) are in pley's web UI, in **Settings → Server**.
-**Settings → Network** shows where pley listens, which the compose file
-sets here (`PLEY_BIND`, `PLEY_PLEX_BIND`, `PLEY_NO_DISCOVERY`): change it
-there.
+**Settings → Network** only shows where pley listens inside its container,
+which the image and `compose.yaml` fix: where it can be reached from is
+`PLEY_LISTEN` (and `PLEY_PLEX_LISTEN`) in `.env`.
 
 ### More media folders
 
@@ -171,18 +171,30 @@ from the internet.
 
 ## Hardware transcoding
 
-- **Intel and AMD** (VAAPI, Quick Sync, Vulkan tone mapping): `setup.sh`
-  turns on `compose.vaapi.yaml` when `/dev/dri/renderD128` exists. By hand:
-  add it to `COMPOSE_FILE` and set `PLEY_RENDER_GID` to
-  `stat -c %g /dev/dri/renderD128`. With several GPUs, `PLEY_RENDER_DEVICE`
-  picks one (`ls -l /dev/dri/by-path`). Intel drivers are in the amd64 image.
-- **NVIDIA** (NVENC, NVDEC, Vulkan tone mapping): install the driver and the
+- **Intel and AMD** (VAAPI, Quick Sync, Vulkan tone mapping):
+  `compose.vaapi.yaml` hands pley one GPU's render node. `setup.sh` turns it
+  on, on its first run, for the first Intel or AMD GPU it finds, and on later
+  runs says when there is one pley doesn't use. By hand: add it to
+  `COMPOSE_FILE` and set `PLEY_RENDER_GID` to the node's group
+  (`stat -c %g /dev/dri/renderD128`). With several GPUs, `PLEY_RENDER_DEVICE`
+  picks one (`ls -l /dev/dri/by-path` names them). Quick Sync needs an 11th
+  generation (Tiger Lake) or newer Intel GPU; older ones encode through
+  VAAPI. Intel's drivers are in the amd64 image only.
+- **NVIDIA** (NVENC, NVDEC, CUDA scaling, Vulkan tone mapping): install the
+  driver and the
   [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html),
   then turn on `compose.nvidia.yaml` (`setup.sh` does when Docker has the
   toolkit).
+- **HDR** is tone mapped on the GPU (libplacebo, through Vulkan) when the GPU
+  has Vulkan, else on the CPU (zscale).
+- **arm64** boards such as the Raspberry Pi have no encoder pley uses: they
+  transcode on the CPU.
 
-Then pick the encoder in **Settings → Server** (Automatic finds it), and
-**Settings → Dashboard** shows each stream as GPU, hybrid or CPU.
+pley's log names the encoders it found as it starts
+(`docker compose logs pley | grep detected`), and looks again when the GPUs
+the container sees change. **Settings → Server** picks the encoder
+(Automatic takes the GPU's), and **Settings → Dashboard** shows each stream
+as GPU, hybrid or CPU.
 
 ## Security
 
@@ -206,7 +218,7 @@ to work:
 - **Bounded.** Processes are capped (`pids_limit`) and Docker's log is rotated
   (3 × 10 MB), so a fault can't exhaust the host. On a machine that does
   other work, cap memory and CPU too in `compose.override.yaml`
-  (`mem_limit: 8g`, `cpus: 6`; each transcode takes about 1 GB).
+  (`mem_limit: 8g`, `cpus: 6`; each transcode takes about 1 GB of memory).
 - **Nothing private in the image.** The build context leaves out `config/`,
   `media/` and `.env`.
 
@@ -260,8 +272,12 @@ update with `docker compose pull && docker compose up -d`.
   Compose doesn't create it for you (it would belong to root).
 - **`port is already allocated`:** something else uses 7539; change the port
   in `PLEY_LISTEN` (`127.0.0.1:7600`) and in your proxy.
-- **Transcodes stay on the CPU:** `docker compose exec pley ls -l /dev/dri`
-  should list `renderD128` (Intel/AMD); check `PLEY_RENDER_GID`. For NVIDIA,
+- **Transcodes stay on the CPU:** the log's `detected` line lists the
+  encoders pley found (`h264_vaapi`, `h264_qsv`, `h264_nvenc`...). For Intel
+  and AMD, `docker compose exec pley ls -l /dev/dri` should list
+  `renderD128`, with `PLEY_RENDER_GID` its group on the host. For NVIDIA,
   `docker compose exec pley nvidia-smi` should list the GPU.
 - **Rootless Docker:** `PLEY_UID=0` and `PLEY_GID=0` (what `setup.sh` picks):
-  root in a rootless container is your own user outside it.
+  root in a rootless container is your own user outside it. The host's
+  render group doesn't carry over into it, so `setup.sh` leaves Intel and
+  AMD transcoding off there.

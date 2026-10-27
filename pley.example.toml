@@ -22,7 +22,8 @@
 # web port). Servers bound to 127.0.0.1 never answer.
 # discovery = true
 
-# Database, caches and artwork (default: %LOCALAPPDATA%\pley, ~/.local/share/pley).
+# Database, caches and artwork (default: %LOCALAPPDATA%\pley on Windows,
+# ~/Library/Application Support/pley on macOS, ~/.local/share/pley on Linux).
 # data_dir = "D:/Pley"
 
 # Where the transcoder writes HLS segments. Put it on a fast local disk.

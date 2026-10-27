@@ -5,8 +5,8 @@ the server as a Windows service or in the notification area, with FFmpeg,
 its data folder, the firewall and an uninstaller. It needs Windows 10 1809
 or newer and an administrator.
 
-The release archives (`pley-server-<version>-windows-<arch>.zip`) still run as they
-are: [../README.md](../README.md#windows).
+The release archives (`pley-server-<version>-windows-<arch>.zip`) also run
+without installing: [../README.md](../README.md#windows).
 
 ## Installing
 
@@ -59,6 +59,8 @@ FFmpeg comes with the installer and goes next to pley: a release's carries
 gyan.dev's full build (NVENC, Quick Sync, AMF and Vulkan tone mapping), and
 an installer built with another one carries that one, such as an FFmpeg built
 for Dolby Vision FEL (see Building the installer). Each install replaces it.
+The ARM64 installer carries the same x64 build, which Windows runs
+emulated: on Windows on Arm, pley transcodes on the CPU.
 
 The last page gives pley's address and the link that creates the
 administrator account (or, with an earlier pley's data, says to sign in as
@@ -161,8 +163,8 @@ pley --data-dir C:\ProgramData\pley --bind 127.0.0.1:7539 --plex-bind off ^
   --ffprobe "C:\Program Files\pley-server\ffmpeg\ffprobe.exe" service install
 ```
 
-saves the options in `pley.toml`, installs or updates the service, locks the
-data folder down, starts pley and prints its address and setup link.
+It saves the options in `pley.toml`, installs or updates the service, locks
+the data folder down, starts pley and prints its address and setup link.
 `pley service install --help` lists the rest (`--account user`,
 `--unrestricted`, `--grant`, `--share`, `--copy-data-from`, `--dry-run`…);
 `pley service start`, `stop` and `uninstall` do what they say. `pley
