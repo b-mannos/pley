@@ -5,8 +5,9 @@ servers on the local network (or takes an address), signs in with a code
 shown on the TV and approved on the server's `/link` page (or a QR code of
 it, which the server draws), and shows Home's rows, each library as a grid
 of posters, a show's seasons and episodes, a title's details with Resume and
-Play from start, Search with the on-screen keyboard, and Settings with Sort
-libraries, Switch server and Sign out. The player plays files as they are whenever the
+Play from start, Search with the on-screen keyboard, and Settings with the
+profile's audio and subtitle defaults, Sort libraries, Switch server and
+Sign out. The player plays files as they are whenever the
 Roku can (it reports what it decodes, from `roDeviceInfo`), HLS otherwise,
 reports progress, offers Skip Intro and Skip Credits as the web player does,
 the next episode at the credits of one, and subtitle sync (Down). Music isn't played yet: music
@@ -76,6 +77,30 @@ Rules the code keeps:
   remembered for each file of each server in the registry (section
   `subtitleSync`, the latest 50 files) and moves the file's subtitles from
   the start the next time.
+- Subtitles or audio picked in Roku's options while a title plays (captions
+  turned on or off, another subtitle track, another audio track of a file
+  played as it is) are saved as on Samsung and LG (`PUT
+  /api/items/{id}/streams`, the file, its audio and its subtitles or `null`
+  for off), so the next episode, or the movie next time, starts with
+  matching tracks. What shows until the stream has played two seconds is
+  pley's choice or the Roku's own, and so is what shows as subtitle sync
+  opens the stream again: neither is saved. A subtitle track is told by its
+  address (subtitle sync's `offset_ms` taken off); captions only on replay
+  or on mute, and captions in the video itself, are left alone. Roku's
+  audio tracks are taken for the file's audio streams in order, only when
+  Roku lists as many as the file has and their languages agree; a converted
+  stream has one. Text subtitles picked while the server draws picture ones
+  onto the video start a stream without them, where it was.
+- Audio and subtitle defaults (Settings), as on Samsung and LG: Audio
+  language (the file's default, or one of 34 languages), Subtitles (Off,
+  Only for foreign dialogue, When the audio is in another language,
+  Always, each with its hint), and Subtitle language (the audio's, or one
+  of the 34) for the last two. OK opens a row's choices in a panel at the
+  right; a choice shows at once and is saved with all three (`PUT
+  /api/me/track-defaults`), the server's answer becoming the profile. A
+  server or sign-in that doesn't let apps change them (403, 404, 405) puts
+  the choice back and says to change them on the web, at the server's
+  `/account`.
 - Sort libraries (Settings), as on Android TV: OK lifts a library, up and
   down move it, OK puts it there, Back puts it back; "Use the server's
   order" goes back to the order everyone sees. Each drop saves the order
@@ -146,8 +171,9 @@ session that comes after is closed), the player with picture subtitles to
 draw and its subtitle sync (shown, moved 0.3 s and remembered), Home
 asking again after it, a library's second page, a show, Search,
 Home not asking again after it, Settings, sorting the libraries (Movies put
-after TV Shows, then the server's order again, Home asking again), the
-server gone and Retry, then
+after TV Shows, then the server's order again, Home asking again),
+subtitles changed to Always (the languages sent as `null`), the server gone
+and Retry, then
 signing out and in again on a server without QR codes; then it starts the
 app again, signed in, in a second process (brs-node runs one app per
 process). It fails on any BrightScript error, on a request without the

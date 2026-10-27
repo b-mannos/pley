@@ -208,11 +208,13 @@ async function openFromMenu(index, pattern, what, then = async () => {}) {
   throw new Error(`couldn't open ${what} from the menu`);
 }
 
-// From Settings: Sign out, and Sign out again in the dialog.
+// From Settings: Sign out, and Sign out again in the dialog. Sign out is
+// the last of six buttons, Subtitle language showing once subtitles come on
+// always.
 async function signOut() {
   for (let attempt = 0; attempt < 3; attempt++) {
     const since = mark();
-    await press("down", 2);
+    await press("down", 5);
     await press("select");
     await sleep(800);
     await press("select");
@@ -303,7 +305,8 @@ async function walk() {
   // Sort libraries: Movies lifted and put after TV Shows, saved at once;
   // then the server's order again, which the rest of the walk expects.
   since = mark();
-  await press("select"); // Sort libraries, the first button
+  await press("down", 2);
+  await press("select"); // Sort libraries, after Audio language and Subtitles
   await waitFor(/^GET \/api\/libraries$/, since, "the libraries to sort");
   await press("select"); // lifts Movies
   await press("down");
@@ -319,6 +322,19 @@ async function walk() {
   await waitFor(/^GET \/api\/libraries$/, since, "Home's libraries after sorting");
   await press("right"); // the rows, where the next steps start
   await openFromMenu(4, /^GET \/api\/auth\/me$/, "Settings");
+  // Subtitles: from "Only for foreign dialogue" to "Always", saved at once
+  // with the languages left as they were; Subtitle language shows then.
+  await settle();
+  since = mark();
+  await press("down");
+  await press("select"); // Subtitles: its choices, Forced focused
+  await sleep(500);
+  await press("down", 2);
+  shoot("settings-subtitles");
+  await press("select"); // Always
+  await waitFor(/^PUT \/api\/me\/track-defaults$/, since, "the subtitle mode saved");
+  await settle();
+  shoot("settings-saved");
   // The server goes away: a library can't load, and says so.
   await press("back");
   await sleep(1500);
@@ -416,6 +432,10 @@ const checks = [
   ["showed subtitle sync", sync.label],
   ["saved Movies after TV Shows, every library in the order", fixture.orders.some((ids) => JSON.stringify(ids) === "[2,1,3]")],
   ["went back to the server's order", fixture.orders.includes(null) && fixture.libraryOrder.join() === "1,2,3"],
+  [
+    "saved subtitles always, the languages left to the file and the audio",
+    fixture.trackDefaultsSaved.some((d) => d.subtitle_mode === "always" && d.audio_language === null && d.subtitle_language === null),
+  ],
   ["remembered the subtitles 0.3 s later", registry !== null && /offsets.*\|\d+\\",300\]/.test(JSON.stringify([...registry]))],
   ["closed a session that came after Back", fixture.closed.includes("s1")],
   ["closed the session it played", fixture.closed.length > 1],

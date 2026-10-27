@@ -131,9 +131,10 @@ function apiForm(job as object, params as object) as object
     return job
 end function
 
-' A request of the screens: { method, path, query, json, auth, timeoutMs,
-' build, known }, to the current server, with the token unless auth is
-' false. build ("rows", "tiles", "seasons", "episodes") makes the
+' A request of the screens: { method, path, query, json, jsonText, auth,
+' timeoutMs, build, known }, to the current server, with the token unless
+' auth is false. jsonText is a body made into JSON on the render thread, for
+' one with nulls (a field's associative array may not keep invalid). build ("rows", "tiles", "seasons", "episodes") makes the
 ' answer's list into ContentNodes here, off the render thread (apiBuild);
 ' for "rows", known holds the signatures of the rows Home shows, which
 ' aren't built again.
@@ -153,6 +154,9 @@ sub apiCall(request as object, spec as object)
     if GetInterface(spec.auth, "ifBoolean") <> invalid then job.auth = spec.auth
     if spec.json <> invalid
         job.body = FormatJson(spec.json)
+        job.contentType = "application/json"
+    else if httpString(spec.jsonText) <> ""
+        job.body = spec.jsonText
         job.contentType = "application/json"
     end if
     timeout = httpNumber(spec.timeoutMs, 0)

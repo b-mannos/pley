@@ -267,7 +267,23 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
 
     const path = url.pathname;
     let match;
-    if (path === "/api/auth/me") return json(200, { id: 1, username: "anna", name: "Anna", scope: "library play" });
+    const me = () => ({ id: 1, username: "anna", name: "Anna", scope: "library play", ...fixture.trackDefaults });
+    if (path === "/api/auth/me") return json(200, me());
+    // The profile's track defaults (docs/API.md): all three at once.
+    if (path === "/api/me/track-defaults" && req.method === "PUT") {
+      const asked = JSON.parse(body);
+      fixture.trackDefaultsSaved.push(asked);
+      const keys = Object.keys(asked).sort().join();
+      if (keys !== "audio_language,subtitle_language,subtitle_mode") problems.push(`track defaults with ${keys}`);
+      if (!["off", "forced", "foreign", "always"].includes(asked.subtitle_mode)) return json(400, { code: "bad_request", message: "no such mode" });
+      fixture.trackDefaults = { audio_language: asked.audio_language ?? null, subtitle_language: asked.subtitle_language ?? null, subtitle_mode: asked.subtitle_mode };
+      return json(200, me());
+    }
+    if ((match = path.match(/^\/api\/items\/(\d+)\/streams$/)) && req.method === "PUT") {
+      fixture.streams.push({ item: Number(match[1]), ...JSON.parse(body) });
+      res.writeHead(204);
+      return res.end();
+    }
     const libraries = [
       { id: 1, name: "Movies", kind: "movies", paths: [], item_count: movies.length, created_at: 0, scanned_at: 0, scanning: false },
       { id: 2, name: "TV Shows", kind: "shows", paths: [], item_count: 1, created_at: 0, scanned_at: 0, scanning: false },
@@ -367,7 +383,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     return json(404, { code: "not_found", message: `nothing at ${path}` });
   });
 
-  const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], problems, requests, progress, closed, close: () => server.close() };
+  const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], problems, requests, progress, closed, close: () => server.close() };
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       issuer = `http://127.0.0.1:${server.address().port}`;

@@ -6,7 +6,9 @@
 ' current token (a token that ran out answers 401 to the Video node).
 ' Skip Intro and Skip Credits follow the web player: an episode's credits
 ' bring up Up Next instead. Down brings up subtitle sync for a file with
-' text subtitles (SubtitleSync.brs).
+' text subtitles (SubtitleSync.brs). Subtitles (or audio) the person picks
+' in Roku's options are remembered on the server for the show or the movie
+' (Tracks.brs), so the next episode starts with matching ones.
 
 sub init()
     m.video = m.top.findNode("video")
@@ -64,11 +66,21 @@ sub init()
     m.syncKey = ""
     m.syncWas = 0
     m.textTracks = 0
+    ' The tracks shown (stream indexes; -1 none, -2 not known yet), the
+    ' audio played, and from when (clock ms) a change is the person's: -1
+    ' until the stream played.
+    m.subtitleShown = -1
+    m.audioShown = -2
+    m.audioPlaying = -1
+    m.tracksFrom = -1
     m.syncButtons.buttons = ["Done", "Reset"]
     m.syncButtons.observeField("buttonSelected", "onSyncButton")
     m.video.notificationInterval = 1
     m.video.observeField("state", "onState")
     m.video.observeField("position", "onPosition")
+    for each field in ["currentSubtitleTrack", "globalCaptionMode", "currentAudioTrack", "availableAudioTracks"]
+        m.video.observeField(field, "onTracks")
+    end for
     m.skip.observeField("pressed", "onSkip")
     m.skip.observeField("playKey", "onSkipKey")
     m.nextButtons.buttons = ["Play now", "Cancel"]
@@ -120,6 +132,7 @@ sub open(itemId as dynamic, startMs as integer, item as dynamic, mode as string)
     m.skipKey = ""
     m.skipDismissed = false
     m.textTracks = 0
+    m.tracksFrom = -1
     m.sync.visible = false
     hideSkip()
     hideUpNext()
@@ -206,6 +219,11 @@ sub begin()
     m.syncMs = syncOffset(syncSection(), m.syncKey)
     stream = contentStream(m.info, m.item, m.global.session.server, m.startMs)
     m.textTracks = stream.subtitleTracks.Count()
+    ' What pley shows: what the Roku shows until the stream played.
+    m.subtitleShown = tracksSubtitleShown("On", stream.subtitle, m.info.subtitles, m.global.session.server)
+    m.audioShown = -2
+    m.audioPlaying = tracksAudioPlaying(m.info, contentFile(m.item, m.info.file_id))
+    m.tracksFrom = -1
     showStream(stream, syncTrackUrl(stream.subtitle, m.syncMs))
     if stream.subtitle <> ""
         captionsOn()
@@ -286,6 +304,8 @@ sub reopen()
     if showing = "" then showing = syncBaseUrl(httpString(m.video.subtitleTrack))
     m.positionMs = position
     m.loading.visible = true
+    ' The tracks as the stream opens again are pley's doing.
+    m.tracksFrom = -1
     showStream(contentStream(m.info, m.item, m.global.session.server, position), syncTrackUrl(showing, m.syncMs))
     m.video.control = "play"
 end sub
@@ -305,6 +325,51 @@ sub captionsBack()
     m.captionMode = invalid
 end sub
 
+' Captions turned on or off, or another subtitle or audio track, in Roku's
+' options: once the stream played, the person's pick, remembered on the
+' server for the show or the movie. Before, what shows is pley's choice or
+' the Roku's own, and only noted.
+sub onTracks()
+    if m.info = invalid or m.item = invalid then return
+    file = contentFile(m.item, m.info.file_id)
+    subtitle = tracksSubtitleShown(httpString(m.video.globalCaptionMode), httpString(m.video.currentSubtitleTrack), m.info.subtitles, m.global.session.server)
+    ' A converted stream has one audio track; a file played as it is, all.
+    audio = -2
+    if not httpTrue(m.info.hls) then audio = tracksAudioShown(m.video.availableAudioTracks, tracksTrackId(m.video.currentAudioTrack), file)
+    subtitlePicked = subtitle <> -2 and subtitle <> m.subtitleShown
+    if subtitlePicked then m.subtitleShown = subtitle
+    ' The first audio the Roku tells of is the one it started with.
+    audioPicked = audio <> -2 and m.audioShown <> -2 and audio <> m.audioShown
+    if audio <> -2
+        m.audioShown = audio
+        m.audioPlaying = audio
+    end if
+    if not subtitlePicked and not audioPicked then return
+    if m.tracksFrom < 0 or m.clock.TotalMilliseconds() < m.tracksFrom then return
+    saveTracks(file, subtitlePicked)
+end sub
+
+' PUT /api/items/{id}/streams with the tracks playing; kept in the file too,
+' so a stream started again shows them. Text subtitles picked over picture
+' ones the server draws need a stream without those.
+sub saveTracks(file as dynamic, subtitlePicked as boolean)
+    burned = -1
+    if httpTrue(m.info.burn_subtitles) then burned = Int(httpNumber(m.info.subtitle_index, -1))
+    subtitle = m.subtitleShown
+    if not subtitlePicked and subtitle < 0 then subtitle = burned
+    body = tracksStreamsBody(m.info.file_id, m.audioPlaying, subtitle)
+    uiRequest({ method: "PUT", path: "/api/items/" + urlValue(m.itemId) + "/streams", jsonText: FormatJson(body) }, "")
+    if file <> invalid
+        file.selected_audio = body.audio_index
+        file.selected_subtitle = body.subtitle_index
+    end if
+    if not subtitlePicked or not tracksNeedNewSession(burned, subtitle) then return
+    position = m.positionMs
+    seconds = m.video.position
+    if seconds <> invalid and seconds > 0 then position = Int(seconds * 1000)
+    open(m.itemId, position, m.item, m.mode)
+end sub
+
 ' A request before playback failed: the server doesn't answer (its own
 ' screen), the sign-in ended (the scene shows sign-in), or a refusal.
 sub failed(answer as object)
@@ -321,6 +386,7 @@ sub onState(event as object)
     if state = "playing"
         m.played = true
         m.loading.visible = false
+        if m.tracksFrom < 0 then m.tracksFrom = m.clock.TotalMilliseconds() + tracksSettleMs()
         if m.paused
             m.paused = false
             report("playing")
@@ -463,6 +529,7 @@ end sub
 sub finish()
     abandonPlayback()
     m.attempt = m.attempt + 1
+    m.tracksFrom = -1
     m.countdownTimer.control = "stop"
     if m.sessionId <> ""
         report("stopped")
@@ -479,6 +546,7 @@ end sub
 ' The server stopped the stream: the player leaves, and the scene says why
 ' over the screen before.
 sub stopped(data as dynamic)
+    m.tracksFrom = -1
     m.sessionId = ""
     m.video.control = "stop"
     lines = playerStoppedMessage(data).Split(Chr(10))
