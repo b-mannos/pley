@@ -154,9 +154,12 @@ own views instead (below), which skins' widgets and favourites always get.
   them, and Kodi remembers it for each file played as it is; it counts the
   other way from pley's other apps, +0.3 s showing them earlier.
 - **Audio and subtitles** (`tracks.py`) are the profile's, not Kodi's
-  language settings: what the server picked for the file
-  (`selected_audio`, `selected_subtitle`: the choice remembered for the
-  show or the movie, else the profile's defaults). The service switches
+  language settings. The audio is the server's choice for this Kodi: of
+  the profile's language (the choice remembered for the show or the
+  movie, else the profile's defaults), the track it plays best, by what
+  its audio settings pass through and its speakers' channels (the
+  playback's `audio_index`). The subtitles are the file's
+  `selected_subtitle`, by the same rule. The service switches
   Kodi to them once Kodi lists the streams, and turns subtitles off when
   the choice is none. pley names tracks by their index in the file, Kodi
   by its place in its lists: Kodi lists the subtitle files it was given
@@ -170,7 +173,8 @@ own views instead (below), which skins' widgets and favourites always get.
   subtitles changed in Kodi's player (subtitles turned off too) are saved
   once the change has held 2 seconds, or as playback ends
   (`PUT /api/items/{id}/streams`), so the next episode starts with
-  matching tracks on every device. The defaults themselves (Audio
+  matching tracks on every device; subtitles changed alone leave the
+  audio picked before as it was. The defaults themselves (Audio
   language, Subtitles: Off, Only for foreign dialogue, When the audio is
   in another language or Always, and the subtitle language for the last
   two) are Audio and subtitles in the profile's menu and in the add-on's

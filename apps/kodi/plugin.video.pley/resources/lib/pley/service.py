@@ -276,7 +276,7 @@ class Player(xbmc.Player):
         show or the movie (from the worker)."""
         response = self.call("PUT", "/api/items/%d/streams" % playing["item_id"], body)
         if response is not None and response.status < 300:
-            kodi.log("tracks of %d saved: audio %s, subtitles %s" % (playing["item_id"], body["audio_index"], body["subtitle_index"]))
+            kodi.log("tracks of %d saved: audio %s, subtitles %s" % (playing["item_id"], body.get("audio_index", "as before"), body["subtitle_index"]))
 
     def find_next(self, reports: Reports, moments: prompts.Moments) -> None:
         """The episode after the one playing, for Up Next (from the worker)."""

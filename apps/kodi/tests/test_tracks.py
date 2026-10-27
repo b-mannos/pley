@@ -236,13 +236,14 @@ class FollowerTest(unittest.TestCase):
         f.turn()
         clock.now += tracks.SETTLE
         f.turn()
-        self.assertEqual(saved[-1], {"file_id": 7, "audio_index": 2, "subtitle_index": 1000})
+        # Subtitles alone: the audio picked stays as it was.
+        self.assertEqual(saved[-1], {"file_id": 7, "subtitle_index": 1000})
         # Off again.
         player.enabled = False
         f.turn()
         clock.now += tracks.SETTLE
         f.turn()
-        self.assertEqual(saved[-1], {"file_id": 7, "audio_index": 2, "subtitle_index": None})
+        self.assertEqual(saved[-1], {"file_id": 7, "subtitle_index": None})
         self.assertEqual(len(saved), 3)
         # Changed and changed back before it held: nothing.
         player.audio = 0
@@ -271,7 +272,12 @@ class FollowerTest(unittest.TestCase):
         clock.now += tracks.SETTLE
         f.turn()
         f.finish()
-        self.assertEqual(saved, [{"file_id": 7, "audio_index": 1, "subtitle_index": 3}])
+        self.assertEqual(saved, [{"file_id": 7, "subtitle_index": 3}])
+        # Audio and subtitles changed together: both.
+        player.audio, player.subtitle = 1, 0
+        f.turn()
+        f.finish()
+        self.assertEqual(saved[-1], {"file_id": 7, "audio_index": 2, "subtitle_index": 1000})
 
     def test_a_converted_streams_audio_is_the_servers(self):
         clock = Clock()
@@ -283,7 +289,7 @@ class FollowerTest(unittest.TestCase):
         player.subtitle, player.enabled = 1, True
         f.turn()
         f.finish()
-        self.assertEqual(saved, [{"file_id": 7, "audio_index": 2, "subtitle_index": 5}])
+        self.assertEqual(saved, [{"file_id": 7, "subtitle_index": 5}])
 
 
 class Server:
@@ -391,7 +397,7 @@ class ServiceTest(unittest.TestCase):
             service.file = ""
             service.onPlayBackStopped()
             streams = [r for r in service.requests if r[1].endswith("/streams")]
-            self.assertEqual(streams, [("PUT", "/api/items/9/streams", {"file_id": 7, "audio_index": 2, "subtitle_index": None})])
+            self.assertEqual(streams, [("PUT", "/api/items/9/streams", {"file_id": 7, "subtitle_index": None})])
             # Saved before the last report.
             self.assertEqual(service.requests[-3][1], "/api/items/9/streams")
             self.assertIsNone(service.tracks)

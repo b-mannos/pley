@@ -124,7 +124,9 @@ def layout(info: dict, file) -> dict:
     """What the service needs to show the account's choice in Kodi and to
     save a change: the tracks in Kodi's order, and the choice (`file`, the
     file's details, None when they couldn't be had: Kodi's own choice
-    then stays)."""
+    then stays). The audio is the server's choice for this Kodi (of the
+    profile's language, the track it plays best), the details' only from
+    a server too old to say."""
     hls = bool(info.get("hls"))
     subtitles = beside_tracks(info)
     if not hls:
@@ -322,20 +324,24 @@ class Follower:
 
     def body(self, state: tuple, props: dict):
         """PUT /api/items/{id}/streams's body for what Kodi plays (None for a
-        subtitle pley doesn't know, which isn't saved)."""
+        subtitle pley doesn't know, which isn't saved). The audio goes only
+        when it was changed: the track playing was the server's choice for
+        this Kodi, and another device may play another of that language
+        better, so subtitles changed alone keep the audio picked before."""
         lay = self.layout
         audio_at, subtitle_at = state
-        audio = None
-        if lay["audio"]:
-            audio = from_kodi(lay["audio"], audio_at, props.get("audiostreams") or [])
-        if audio is None:
-            audio = lay["audio_index"]
         subtitle = None
         if subtitle_at is not None:
             subtitle = from_kodi(lay["subtitles"], subtitle_at, props.get("subtitles") or [])
             if subtitle is None:
                 return None
-        return {"file_id": lay["file_id"], "audio_index": audio, "subtitle_index": subtitle}
+        body = {"file_id": lay["file_id"], "subtitle_index": subtitle}
+        if self.baseline is None or audio_at != self.baseline[0]:
+            audio = None
+            if lay["audio"]:
+                audio = from_kodi(lay["audio"], audio_at, props.get("audiostreams") or [])
+            body["audio_index"] = lay["audio_index"] if audio is None else audio
+        return body
 
 
 # ----------------------------------------------------------- the defaults
