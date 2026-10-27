@@ -1,0 +1,293 @@
+"""What pley's screens say of a title, as the Android TV app says it
+(apps/android/core/model/.../format: Durations.kt, Labels.kt, Media.kt),
+which says it as the web does: runtimes, time left, card lines, episode
+numbers and quality badges."""
+
+from __future__ import annotations
+
+MINUTE_MS = 60_000
+
+
+def whole_minutes(ms: float) -> int:
+    """Whole minutes, half a minute rounded up (the web's Math.round)."""
+    return int(ms / MINUTE_MS + 0.5)
+
+
+def duration(ms) -> str:
+    """6720000 → "1h 52m", 2700000 → "45m", 29000 → "29s"."""
+    if not ms or ms <= 0:
+        return ""
+    minutes = whole_minutes(ms)
+    if minutes < 1:
+        return "%ds" % max(1, int(ms / 1000 + 0.5))
+    h, m = divmod(minutes, 60)
+    if h == 0:
+        return "%dm" % m
+    return "%dh %dm" % (h, m) if m else "%dh" % h
+
+
+def runtime(ms) -> str:
+    """"58 min" under an hour, "1h 52m" from one, "29s" under half a minute."""
+    if not ms or ms <= 0:
+        return ""
+    minutes = whole_minutes(ms)
+    return "%d min" % minutes if 1 <= minutes <= 59 else duration(ms)
+
+
+def time_left(position_ms, duration_ms) -> str:
+    """"26 min left"; "" without a duration or once nothing is left."""
+    if not duration_ms or duration_ms <= 0:
+        return ""
+    left = runtime(max(0, duration_ms - (position_ms or 0)))
+    return left + " left" if left else ""
+
+
+def plural(n: int, one: str, many: str = "") -> str:
+    """"1 movie", "12,345 movies"."""
+    return "{:,} {}".format(n, one if n == 1 else (many or one + "s"))
+
+
+def episode_label(season, episode) -> str:
+    """"S1 · E3", "E3", or ""."""
+    parts = []
+    if season is not None:
+        parts.append("S%d" % season)
+    if episode is not None:
+        parts.append("E%d" % episode)
+    return " · ".join(parts)
+
+
+def episode_long_label(season, episode) -> str:
+    """"Season 2 · Episode 5", for an episode's line on its show's page."""
+    parts = []
+    if season is not None:
+        parts.append("Specials" if season == 0 else "Season %d" % season)
+    if episode is not None:
+        parts.append("Episode %d" % episode)
+    return " · ".join(parts)
+
+
+def season_title(title, index) -> str:
+    if title:
+        return title
+    if index == 0:
+        return "Specials"
+    return "Season %d" % index if index is not None else "Season"
+
+
+def card_subtitle(item: dict) -> str:
+    """The line under a tile, by kind: a year, "3 seasons", "S2 · E5"…"""
+    kind = item.get("kind")
+    year = str(item["year"]) if item.get("year") else ""
+    if kind == "movie":
+        return year
+    if kind == "show":
+        if item.get("child_count"):
+            return plural(item["child_count"], "season")
+        if item.get("leaf_count") is not None:
+            return plural(item["leaf_count"], "episode")
+        return year
+    if kind == "season":
+        return plural(item["leaf_count"], "episode") if item.get("leaf_count") is not None else ""
+    if kind == "episode":
+        return episode_label(item.get("parent_index"), item.get("index"))
+    if kind == "artist":
+        return plural(item["child_count"], "album") if item.get("child_count") is not None else ""
+    if kind == "album":
+        return " · ".join(p for p in (item.get("parent_title") or "", year) if p)
+    if kind == "track":
+        return " · ".join(p for p in (item.get("grandparent_title") or "", item.get("parent_title") or "") if p)
+    return ""
+
+
+def state(item: dict) -> dict:
+    return item.get("user_state") or {}
+
+
+def in_progress(item: dict) -> bool:
+    """Started, not finished, not marked watched."""
+    length = item.get("duration_ms")
+    position = state(item).get("position_ms") or 0
+    return bool(length) and not state(item).get("watched") and 0 < position < length
+
+
+def progress(item: dict) -> float:
+    """Played so far, 0 to 1."""
+    length = item.get("duration_ms") or 0
+    position = state(item).get("position_ms") or 0
+    if position <= 0 or length <= 0:
+        return 0.0
+    return min(max(position / length, 0.0), 1.0)
+
+
+def unwatched(item: dict) -> int:
+    """Episodes of a show or season not watched yet."""
+    if item.get("kind") not in ("show", "season") or item.get("leaf_count") is None:
+        return 0
+    return max(0, item["leaf_count"] - (item.get("viewed_leaf_count") or 0))
+
+
+def resolution_badge(width, height):
+    """"4K", "1080p", "720p", "SD", or None."""
+    w, h = width or 0, height or 0
+    if w >= 3800 or h >= 2100:
+        return "4K"
+    if w >= 1800 or h >= 1000:
+        return "1080p"
+    if w >= 1200 or h >= 700:
+        return "720p"
+    return "SD" if h > 0 else None
+
+
+def dynamic_range_short(stream: dict):
+    """"DV P8.1", "DV", "HDR10+", "HDR10", "HLG", "HDR", or None (SDR)."""
+    kind = stream.get("dynamic_range")
+    if kind == "dolby_vision":
+        profile = stream.get("dv_profile")
+        if profile is None:
+            return "DV"
+        compat = stream.get("dv_bl_compat")
+        return "DV P%d" % profile + (".%d" % compat if compat else "")
+    if kind == "hdr10plus":
+        return "HDR10+"
+    if kind == "hdr10":
+        return "HDR10"
+    if kind == "hlg":
+        return "HLG"
+    if kind == "sdr":
+        return None
+    return "HDR" if stream.get("hdr") else None
+
+
+def is_atmos(stream) -> bool:
+    if not stream or stream.get("kind") != "audio":
+        return False
+    return "atmos" in (stream.get("profile") or "").lower() or "atmos" in (stream.get("title") or "").lower()
+
+
+def quality_badges(file) -> list:
+    """A file's badges, in the web's order: resolution, dynamic range,
+    then "Atmos", else "7.1" or "5.1"."""
+    if not file:
+        return []
+    streams = file.get("streams") or []
+    video = next((s for s in streams if s.get("kind") == "video"), None)
+    audio = next((s for s in streams if s.get("kind") == "audio" and s.get("default")), None) or next(
+        (s for s in streams if s.get("kind") == "audio"), None
+    )
+    channels = (audio or {}).get("channels") or 0
+    badges = [
+        resolution_badge(file.get("width") or (video or {}).get("width"), file.get("height") or (video or {}).get("height")),
+        dynamic_range_short(video) if video else None,
+    ]
+    if is_atmos(audio):
+        badges.append("Atmos")
+    elif channels >= 8:
+        badges.append("7.1")
+    elif channels >= 6:
+        badges.append("5.1")
+    return [b for b in badges if b]
+
+
+def rating(value) -> str:
+    """The critics' rating, "7.4"; "" without one."""
+    return "%.1f" % value if value else ""
+
+
+def hue(seed: str) -> int:
+    """The web's placeholder hue: h = h * 31 + code over UTF-16 units,
+    unsigned 32-bit, mod 360."""
+    h = 0
+    data = seed.encode("utf-16-le")
+    for i in range(0, len(data), 2):
+        h = (h * 31 + (data[i] | data[i + 1] << 8)) & 0xFFFFFFFF
+    return h % 360
+
+
+def placeholder(seed: str) -> str:
+    """The placeholder picture nearest the web's gradient for `seed`."""
+    return "ph-%02d.png" % (int(hue(seed) / 15 + 0.5) % 24)
+
+
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def date(text) -> str:
+    """"2024-03-05" → "Mar 5, 2024" (an episode's air date); as given when
+    it isn't a date."""
+    try:
+        year, month, day = (int(part) for part in (text or "").split("-"))
+        return "%s %d, %d" % (MONTHS[month - 1], day, year)
+    except (ValueError, IndexError):
+        return text or ""
+
+
+def year_range(year, seasons=None) -> str:
+    """"2021-2025" from a show's seasons, or its own year."""
+    years = [s["year"] for s in seasons or [] if s.get("year")] + ([year] if year else [])
+    if not years:
+        return ""
+    first, last = min(years), max(years)
+    return "%d-%d" % (first, last) if last > first else str(first)
+
+
+def item_meta(detail: dict, seasons=None) -> list:
+    """An item page's metadata line (ItemPages.kt): a show's seasons and
+    years, a season's year and episodes, an episode's air date and
+    runtime, others' year and runtime; then the content rating, the rating
+    and the quality badges. As (kind, text) pieces: text, badge (the
+    content rating), rating, quality."""
+    parts = []
+
+    def text(value):
+        if value:
+            parts.append(("text", value))
+
+    kind = detail.get("kind")
+    files = detail.get("files") or []
+    edition = (files[0].get("edition") if files else None) or ""
+    if kind == "show":
+        count = detail.get("child_count") or len([s for s in seasons or [] if (s.get("index") or 1) > 0]) or None
+        if count:
+            text(plural(count, "season"))
+        text(year_range(detail.get("year"), seasons))
+    elif kind == "season":
+        text(str(detail["year"]) if detail.get("year") else "")
+        if detail.get("leaf_count"):
+            text(plural(detail["leaf_count"], "episode"))
+    elif kind == "episode":
+        text(date(detail.get("release_date")))
+        text(edition)
+        text(runtime(detail.get("duration_ms")))
+    else:
+        text(str(detail["year"]) if detail.get("year") else "")
+        text(edition)
+        text(runtime(detail.get("duration_ms")))
+    if (detail.get("content_rating") or "").strip():
+        parts.append(("badge", detail["content_rating"].strip()))
+    if detail.get("rating"):
+        parts.append(("rating", rating(detail["rating"])))
+    parts += [("quality", b) for b in quality_badges(files[0] if files else None)]
+    return parts
+
+
+def meta(item: dict, detail=None) -> dict:
+    """The metadata line's parts (HomeMeta): year, content rating, runtime
+    (shows: their seasons), rating, badges; those known."""
+    detail = detail if detail and detail.get("id") == item.get("id") else None
+    kind = item.get("kind")
+    if kind in ("show", "season", "artist", "album"):
+        length = card_subtitle(item)
+    else:
+        length = runtime(item.get("duration_ms") or (detail or {}).get("duration_ms"))
+    year = item.get("year") or (detail or {}).get("year")
+    if kind == "show" and length == str(year or ""):
+        length = ""
+    files = (detail or {}).get("files") or []
+    return {
+        "year": str(year) if year else "",
+        "content_rating": ((detail or {}).get("content_rating") or "").strip() or None,
+        "runtime": length,
+        "rating": rating(item.get("rating") or (detail or {}).get("rating")),
+        "badges": quality_badges(files[0]) if files else [],
+    }

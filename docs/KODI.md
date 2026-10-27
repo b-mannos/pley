@@ -2,10 +2,11 @@
 
 A Kodi add-on, `plugin.video.pley`, for Kodi 20 (Nexus) and newer on any
 platform Kodi runs on: Windows, macOS, Linux, LibreELEC and CoreELEC,
-Android TV boxes. It shows a pley server's Home rows (Continue Watching,
-My List, Recently Added), every library, collections, playlists and
-search, and plays with Kodi's own player: files as they are whenever Kodi
-can, which is nearly always, and the server's conversion otherwise.
+Android TV boxes. It shows a pley server in pley's own screens, drawn as
+the Android TV app draws them: the rail, Home's hero and rows, a title's
+page, every library, collections, playlists and search. It plays with
+Kodi's own player: files as they are whenever Kodi can, which is nearly
+always, and the server's conversion otherwise.
 
 It is free software under the GPL (version 2 or later, as Kodi), since it
 runs inside Kodi; it talks to the server only over HTTP, like the other
@@ -37,9 +38,10 @@ Open the add-on and choose a server: pley servers on the local network
 answer a broadcast (docs/API.md; `pley?` on UDP port 7539), and any other
 is typed in (`192.168.1.5`, `nas.local:7539`, `https://pley.example.com`).
 Kodi then shows a code, typed on the server's `/link` page from a phone
-or computer where someone is signed in, as on pley's Android TV app, and
-the same as a QR code the server draws (`signin.py`,
-`resources/skins/default/1080i/pley-signin.xml`). The link page names
+or computer where someone is signed in, and the same as a QR code the
+server draws, on the Android TV app's link screen (`signin.py`,
+`resources/skins/default/1080i/pley-signin.xml`), whose Change server
+goes back to the servers. The link page names
 this Kodi by what its User-Agent says (`pleyKodi/0.1.0 (Kodi 21.3;
 Windows)`), so two of them can be told apart. The
 add-on is one of pley's own apps (`https://hhaidar.github.io/pley/oauth/kodi.json`):
@@ -49,6 +51,61 @@ the sign-in there until the new one is made, then ends it on its server.
 The same server at another address is signed in to again: anything on the
 network can answer the broadcast with a server's id, and the tokens would
 go to it.
+
+## pley's look
+
+Opened from Kodi's add-ons (or a favourite), pley shows its own screens
+over Kodi, as its Android TV app does (apps/android/ui/tv, its screenshots
+side by side with Kodi's were the reference):
+
+- **The rail** on the left: the profile, Search, Home, each library,
+  Playlists, Collections and Settings (the add-on's). Collapsed it shows
+  icons, the current page's marked; Left opens it over the page with each
+  entry's name.
+- **Home**: the hero for what to watch next (the first of Continue
+  Watching, else the newest) over its backdrop, with Resume or Play, From
+  start, Info and Watched; under it the server's rows. Down goes into the
+  rows: the hero gives way to an info block about the tile focus rests on
+  (its title, its line of year, rating, runtime and quality badges, and
+  two lines of summary), and the backdrop follows the tile too, once focus
+  has rested 0.4 s. Rows keep the focused tile at the page's edge, the one
+  before peeking out under the rail; a library's rows end with See all.
+- **A title's page**: its backdrop, title, line (a show's seasons and
+  years, a film's year and runtime, the content rating and quality
+  badges), what is left, genres, summary and credits, then Resume (a
+  show's "Resume S1 · E3"), From start, Watched, My List, Trailer and More
+  (the full summary, the show or season of an episode). Then a show's
+  seasons as tabs and their episodes, Extras, Cast & Crew and More Like
+  This; the info block says which episode focus is on.
+- **A library**: Recommended (its rows), Library (every title in a grid,
+  sorted and filtered by unwatched, genre and year, more loading as focus
+  nears the end) and Collections. **Search** shows what it found by kind:
+  movies, shows, episodes, people and music. Playlists, collections and a
+  person's titles are grids.
+- Kodi plays, with the service's Skip Intro and Up Next; back from playing,
+  the page shows what changed (where the title got to, the next episode).
+  Changes from other devices show as they happen: the service tells the
+  window (`NotifyAll`) as it refreshes listings. A tile's menu (the
+  remote's menu key) marks it watched, adds it to My List, takes it out of
+  Continue Watching or goes to its show.
+
+How it is drawn: one window (`window.py`, `layout.WINDOW`) holds every
+screen, each a group shown alone under the one rail and backdrop, so going
+from a page to another moves no window; Back goes to the pages under it as
+they were. `apps/kodi/skin.py` writes the window's XML from
+`resources/lib/pley/layout.py`, which the window code reads too (sizes are
+the Android app's dp doubled: it lays out 960 by 540, Kodi's skins 1920 by
+1080): `python apps/kodi/skin.py` after changing them, and the tests fail
+when the XML is behind. The pictures (`resources/skins/default/media`)
+are rendered by `node scripts/render-kodi-skin.mjs`: the Android app's own
+Lucide icons (read from its `PleyIcons.kt`), its buttons, tile masks and
+focus ring, the backdrop's gradients and the artwork placeholders, which
+pick their colour from the title as the web's do. Text is in Estuary's
+fonts (Kodi lends an add-on's windows the skin's fonts, by name): with
+another skin, pley's screens use its default font.
+
+Settings → Screens → Kodi's lists shows the add-on as folders in the skin's
+own views instead (below), which skins' widgets and favourites always get.
 
 ## How it works
 
@@ -66,7 +123,9 @@ go to it.
   playlists and segments through. The secret keeps other programs and web
   pages on the device out; the port and secret are kept, so artwork stays
   cached across restarts.
-- **The plugin** (`default.py`) lists pley's screens and asks to play
+- **The plugin** (`default.py`) opens pley's window, lists pley's
+  screens as folders (for Kodi's lists, widgets and favourites) and asks
+  to play
   (`POST /api/playback`) with a report of what this Kodi plays
   (`resources/lib/pley/caps.py`): every container and codec, audio tracks
   switched by Kodi, every kind of subtitle, the receiver formats Kodi's
@@ -90,8 +149,8 @@ go to it.
   marks and the server's dashboard follow Kodi.
 - **Other devices**: the service keeps the server's event stream open
   (`events.py`, `GET /api/events`). When the watch state, My List or a
-  library changes, here or on another device, the pley listing on screen
-  is refreshed once: 0.3 s after the first event of a burst, at most every
+  library changes, here or on another device, the pley window or listing
+  on screen is refreshed once: 0.3 s after the first event of a burst, at most every
   2 seconds, and never behind a playing video, whose end refreshes it. A
   stream stopped from elsewhere (an administrator, or another of the
   person's devices) ends at once with what they wrote; without the stream,
@@ -115,6 +174,11 @@ go to it.
 
 Measured on Kodi 21.3 for Windows, against a server on the same computer:
 
+- pley's window is up 0.2 s after the add-on is opened: Kodi reads the
+  window's XML (1.3 MB, about 150 ms), and Home's rows, the profile and
+  the libraries are asked for together (30 to 40 ms). A title's page
+  opens with its details, seasons, episodes and More Like This asked for
+  at once. Play is ready in 16 to 26 ms, from Kodi's own player.
 - A listing takes 5 to 60 ms asked through Kodi's JSON-RPC, 17 to 34 ms
   at the median (Home, whose rows are asked for together, the longest):
   Kodi keeps the plugin's Python between calls (`reuselanguageinvoker`),
@@ -154,7 +218,9 @@ python -m unittest discover -s . -p "test_*.py"
 
 runs with any Python 3.8 or newer and nothing installed: Kodi's modules are
 stood in for (`tests/stubs`). The proxy, the token rules, the sign-in, the
-capability report, discovery and the listings are tested there.
+capability report, discovery, the listings, pley's window (its tiles,
+wording, rows and lines) and its XML (as `skin.py` writes it, with every
+control the code moves) are tested there.
 `test_e2e.py` runs the add-on's code against a real server (sign-in with a
 code approved through the server's own endpoints, browsing, a file played
 by ranges, a converted HLS stream, progress, a renewed token and signing
@@ -172,14 +238,20 @@ on this system) can be driven over TCP port 9090: `Files.GetDirectory` on
 plays. Kodi 21.3 on Windows has been through sign-in, every listing, direct
 play with seeking, pause and resume, a converted stream, restarts, Skip
 Intro, Up Next to the next episode, and the server going away and coming
-back.
+back; pley's window through every screen, playing from it and coming back.
+Kodi only draws what changed: its screenshot of a still screen can show an
+earlier frame, so a portable Kodi taking them wants
+`<advancedsettings><gui><algorithmdirtyregions>0</algorithmdirtyregions></gui></advancedsettings>`
+in `portable_data/userdata/advancedsettings.xml`.
 
 ## Not yet
 
 - "Who's watching?" and switching profiles (the `profiles` scope).
-- A title's information page shows its synopsis, not its cast, genres or
-  crew: lists don't carry them (the playing title has them, from its
-  details).
-- Making and editing playlists; people's pages.
+- What the Android app's pages have below their rows: a title's Details
+  (plays, versions, media info) and the library's letter bar; a person's
+  page with their photo (theirs is a grid of titles); music's own pages.
+- In Kodi's lists, a title's information page shows its synopsis, not its
+  cast, genres or crew: lists don't carry them.
+- Making and editing playlists.
 - Picture subtitles (PGS, VobSub) with a converted stream: only text
   subtitles come beside it. Files played as they are show every kind.

@@ -235,3 +235,27 @@ def subtitle_name(url: str, language, forced: bool) -> str:
     if not parts or not url.endswith(".vtt"):
         return url
     return url[: -len(".vtt")] + "." + ".".join(parts) + ".vtt"
+
+
+def together(*calls):
+    """The answers of `calls` (functions), asked at once: a slow server's
+    round trips overlap. The first refusal is raised."""
+    import threading
+
+    answers = [None] * len(calls)
+    refusals = []
+
+    def ask(at, call):
+        try:
+            answers[at] = call()
+        except ApiError as e:
+            refusals.append(e)
+
+    threads = [threading.Thread(target=ask, args=(at, call), daemon=True) for at, call in enumerate(calls)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(70)
+    if refusals:
+        raise refusals[0]
+    return answers

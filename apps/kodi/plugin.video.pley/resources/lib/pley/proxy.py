@@ -258,6 +258,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if upstream:
                 upstream.close()
 
+    def location(self, location):
+        """Where the server sends Kodi (a collection's picture falling back to
+        its titles'), as an address of the proxy's; None for elsewhere."""
+        if not location:
+            return None
+        server = (self.proxy.tokens.server() or "").rstrip("/")
+        if server and location.startswith(server + "/"):
+            location = location[len(server) :]
+        if not location.startswith("/api/"):
+            return None
+        return "/" + self.proxy.secret + location
+
     def relay(self, response: http.client.HTTPResponse) -> None:
         try:
             if response.status == 410 and self.proxy.on_stopped:
@@ -279,6 +291,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 value = response.getheader(name)
                 if value is not None:
                     self.send_header(name, value)
+            location = self.location(response.getheader("Location"))
+            if location:
+                self.send_header("Location", location)
             if length is None and self.command != "HEAD" and response.status not in (204, 304):
                 # Without a length the answer ends when the connection does.
                 self.send_header("Connection", "close")

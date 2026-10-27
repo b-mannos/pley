@@ -1,0 +1,98 @@
+import collections
+import os
+import sys
+import unittest
+import xml.etree.ElementTree as ET
+
+import support  # noqa: F401
+from pley import layout as L
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, ".."))
+import skin  # noqa: E402
+
+MEDIA = os.path.join(HERE, "..", "plugin.video.pley", "resources", "skins", "default", "media")
+# Estuary's fonts (Kodi's default skin, LibreELEC's and CoreELEC's).
+ESTUARY_FONTS = {
+    "font10", "font12", "font13", "font14", "font27", "font32", "font37", "font45", "font60",
+    "font20_title", "font25_title", "font30_title", "font32_title", "font36_title", "font40_title",
+    "font45_title", "font52_title", "font_MainMenu", "Mono26",
+}
+
+
+def parse(name):
+    return ET.parse(os.path.join(skin.SKIN, name)).getroot()
+
+
+class SkinTest(unittest.TestCase):
+    def test_the_windows_are_what_skin_py_writes(self):
+        for path, text in skin.windows().items():
+            with open(path, encoding="utf-8") as f:
+                self.assertEqual(f.read(), text, "%s is out of date: python apps/kodi/skin.py" % path)
+
+    def test_each_id_once(self):
+        for name in (L.WINDOW, L.SIGNIN_WINDOW):
+            ids = [c.get("id") for c in parse(name).iter("control") if c.get("id")]
+            self.assertEqual([i for i, n in collections.Counter(ids).items() if n > 1], [], name)
+
+    def test_the_window_has_every_control_it_moves_and_fills(self):
+        ids = {int(c.get("id")) for c in parse(L.WINDOW).iter("control") if c.get("id")}
+        wanted = set(L.RAIL_ENTRIES) | set(L.SCREENS.values())
+        for entry in L.RAIL_ENTRIES[1:]:
+            wanted |= {L.rail_group(entry)} | set(L.rail_icons(entry)) | set(L.rail_labels(entry))
+        wanted |= {
+            L.BACKDROP, L.HOME_HERO, L.HOME_TITLE, L.HOME_CONTEXT, L.HOME_LEFT, L.HOME_SUMMARY, L.HOME_BUTTONS_BOX,
+            L.HOME_PLAY, L.HOME_INFO_BLOCK, L.HOME_INFO_TITLE, L.HOME_INFO_SUMMARY,
+            L.ITEM_HERO, L.ITEM_TITLE, L.ITEM_CONTEXT, L.ITEM_LEFT, L.ITEM_GENRES, L.ITEM_SUMMARY, L.ITEM_CREDITS,
+            L.ITEM_BUTTONS_BOX, L.ITEM_PLAY, L.ITEM_INFO_BLOCK, L.ITEM_INFO_TITLE, L.ITEM_INFO_EPISODE,
+            L.ITEM_INFO_LINE, L.ITEM_INFO_SUMMARY, L.ITEM_SEASONS,
+            L.LIBRARY_TITLE, L.LIBRARY_SORT, L.LIBRARY_SORT_DOWN, L.LIBRARY_UNWATCHED, L.LIBRARY_GENRE, L.LIBRARY_YEAR,
+            L.LIBRARY_COUNT, L.LIBRARY_EMPTY, L.SEARCH_FIELD, L.SEARCH_EMPTY_TITLE, L.SEARCH_EMPTY_BODY,
+            L.GRID_TITLE, L.GRID_SUBTITLE, L.GRID_EMPTY, L.NOTICE_TITLE, L.NOTICE_BODY, L.NOTICE_FIRST, L.NOTICE_SECOND,
+            L.TOAST_LABEL,
+        }
+        for button in (L.HOME_FROM_START, L.HOME_INFO, L.HOME_WATCHED, L.HOME_UNWATCHED, L.ITEM_FROM_START,
+                       L.ITEM_WATCHED, L.ITEM_UNWATCHED, L.ITEM_ADD_TO_LIST, L.ITEM_IN_LIST, L.ITEM_TRAILER, L.ITEM_MORE):
+            wanted |= {button, L.button_box(button)}
+        for tab in (L.LIBRARY_RECOMMENDED, L.LIBRARY_ALL, L.LIBRARY_COLLECTIONS):
+            wanted |= {tab, tab + 100}
+        for line in (L.HOME_META, L.HOME_INFO_META, L.ITEM_META, L.ITEM_INFO_META):
+            wanted.add(line)
+            for i in range(L.META_PIECES):
+                wanted |= set(L.meta_piece(line, i))
+        for rows, slots, shapes in (
+            (L.HOME_ROWS, L.HOME_SLOTS, ("poster", "landscape", "square")),
+            (L.ITEM_ROWS, L.ITEM_SLOTS, ("poster", "landscape", "episode", "person")),
+            (L.LIBRARY_ROWS, L.LIBRARY_SLOTS, ("poster", "landscape", "square")),
+            (L.SEARCH_ROWS, L.SEARCH_SLOTS, ("poster", "episode", "person", "square")),
+        ):
+            for i in range(slots):
+                wanted |= {L.slot(rows, i), L.slot_header(rows, i)} | {L.slot_list(rows, i, s) for s in shapes}
+        for grid in (L.LIBRARY_GRID, L.GRID_LISTS):
+            wanted |= {L.grid_list(grid, s) for s in L.GRID_SHAPES}
+        self.assertEqual(sorted(wanted - ids), [])
+
+    def test_the_sign_in_has_what_signin_py_fills(self):
+        ids = {int(c.get("id")) for c in parse(L.SIGNIN_WINDOW).iter("control") if c.get("id")}
+        wanted = {
+            L.SIGNIN_CHANGE, L.SIGNIN_ADDRESS, L.SIGNIN_STATUS, L.SIGNIN_SCAN, L.SIGNIN_QR, L.SIGNIN_CODE_A,
+            L.SIGNIN_CODE_B, L.SIGNIN_STEP_SCAN, L.SIGNIN_STEP_GO, L.SIGNIN_STEP_ENTER, L.SIGNIN_NUMBER_GO,
+            L.SIGNIN_NUMBER_ENTER, L.SIGNIN_QR_CARD,
+        }
+        self.assertEqual(sorted(wanted - ids), [])
+
+    def test_fonts_are_estuarys_and_pictures_are_there(self):
+        media = set(os.listdir(MEDIA))
+        for name in (L.WINDOW, L.SIGNIN_WINDOW, "pley-overlay.xml"):
+            root = parse(name)
+            for font in root.iter("font"):
+                self.assertIn(font.text, ESTUARY_FONTS, name)
+            for tag in ("texture", "texturefocus", "texturenofocus", "texturebg", "midtexture"):
+                for texture in root.iter(tag):
+                    for picture in (texture.text, texture.get("diffuse")):
+                        if picture and not picture.startswith("$"):
+                            self.assertIn(picture, media, "%s in %s" % (picture, name))
+
+
+if __name__ == "__main__":
+    unittest.main()

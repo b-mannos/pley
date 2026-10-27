@@ -1,51 +1,72 @@
-"""The sign-in window: where to go, the code to type there, and the same
-as a QR code the server draws, while the plugin asks the server for the
-answer."""
+"""The sign-in window, as the Android TV app's link screen: where to go,
+the code to type there, and the same as a QR code the server draws, while
+the plugin asks the server for the answer."""
 
 from __future__ import annotations
 
 import xbmcgui
 
-CANCEL = 3101
-TITLE = 3103
-ADDRESS = 3104
-CODE = 3105
-STATUS = 3106
-SCAN = 3107
-QR = 3108
+from . import layout as L
+from .kodi import text
+
 # Back and Menu cancel.
 DISMISS = (9, 10, 92)
+
+
+def halves(code: str) -> tuple:
+    """"BCDF-GHJK" as its two fields' text, letters spaced as on a code pad."""
+    first, _, second = code.partition("-")
+    return " ".join(first), " ".join(second)
+
+
+def shown(address: str) -> str:
+    """The address as people type it: without "http://"."""
+    return address.split("://", 1)[-1].rstrip("/")
 
 
 class SignIn(xbmcgui.WindowXMLDialog):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.texts = {}
+        self.address = ""
+        self.code = ""
+        self.status = ""
         self.qr = ""
         self.cancelled = False
+        # Change server was chosen: the plugin offers the servers after.
+        self.change = False
         self.ready = False
 
-    def fill(self, title: str, address: str, code: str, status: str, qr: str = "") -> None:
-        self.texts = {TITLE: title, ADDRESS: address, CODE: code, STATUS: status}
-        self.qr = qr
+    def fill(self, address: str, code: str, status: str, qr: str = "") -> None:
+        self.address, self.code, self.status, self.qr = address, code, status, qr
 
     def set_status(self, status: str) -> None:
-        self.texts[STATUS] = status
+        self.status = status
         if self.ready:
-            self.getControl(STATUS).setLabel(status)
+            self.getControl(L.SIGNIN_STATUS).setLabel(status)
 
     def onInit(self) -> None:
         self.ready = True
-        for control, text in self.texts.items():
-            self.getControl(control).setLabel(text)
-        self.getControl(SCAN).setVisible(bool(self.qr))
-        self.getControl(QR).setVisible(bool(self.qr))
-        if self.qr:
-            self.getControl(QR).setImage(self.qr, False)
-        self.setFocusId(CANCEL)
+        first, second = halves(self.code)
+        self.getControl(L.SIGNIN_CODE_A).setLabel(first)
+        self.getControl(L.SIGNIN_CODE_B).setLabel(second)
+        self.getControl(L.SIGNIN_STATUS).setLabel(self.status)
+        # Without a QR code (an older server) the steps are two, and "Go to".
+        qr = bool(self.qr)
+        self.getControl(L.SIGNIN_ADDRESS).setLabel(text("or_go_to" if qr else "go_to") % shown(self.address))
+        self.getControl(L.SIGNIN_STEP_SCAN).setVisible(qr)
+        self.getControl(L.SIGNIN_QR_CARD).setVisible(qr)
+        if qr:
+            self.getControl(L.SIGNIN_QR).setImage(self.qr, False)
+        else:
+            self.getControl(L.SIGNIN_NUMBER_GO).setLabel("1")
+            self.getControl(L.SIGNIN_NUMBER_ENTER).setLabel("2")
+            self.getControl(L.SIGNIN_STEP_GO).setPosition(L.GUTTER, 352)
+            self.getControl(L.SIGNIN_STEP_ENTER).setPosition(L.GUTTER, 432)
+        self.setFocusId(L.SIGNIN_CHANGE)
 
     def onClick(self, control_id: int) -> None:
-        if control_id == CANCEL:
+        if control_id == L.SIGNIN_CHANGE:
+            self.change = True
             self.cancel()
 
     def onAction(self, action) -> None:

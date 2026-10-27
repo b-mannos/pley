@@ -234,3 +234,323 @@ msgstr ""
 msgctxt "#30052"
 msgid "2 Mbps 480p"
 msgstr ""
+
+msgctxt "#30100"
+msgid "Home"
+msgstr ""
+
+msgctxt "#30101"
+msgid "From start"
+msgstr ""
+
+msgctxt "#30102"
+msgid "Info"
+msgstr ""
+
+msgctxt "#30103"
+msgid "In My List"
+msgstr ""
+
+msgctxt "#30104"
+msgid "Trailer"
+msgstr ""
+
+msgctxt "#30105"
+msgid "More"
+msgstr ""
+
+msgctxt "#30106"
+msgid "Recommended"
+msgstr ""
+
+msgctxt "#30107"
+msgid "Library"
+msgstr ""
+
+msgctxt "#30108"
+msgid "Filter"
+msgstr ""
+
+msgctxt "#30109"
+msgid "Unwatched"
+msgstr ""
+
+msgctxt "#30110"
+msgid "Genre"
+msgstr ""
+
+msgctxt "#30111"
+msgid "Year"
+msgstr ""
+
+msgctxt "#30112"
+msgid "Resume"
+msgstr ""
+
+msgctxt "#30113"
+msgid "Play"
+msgstr ""
+
+msgctxt "#30114"
+msgid "Resume %s"
+msgstr ""
+
+msgctxt "#30115"
+msgid "Play %s"
+msgstr ""
+
+msgctxt "#30116"
+msgid "See all"
+msgstr ""
+
+msgctxt "#30117"
+msgid "Unavailable"
+msgstr ""
+
+msgctxt "#30118"
+msgid "Search movies, shows, people…"
+msgstr ""
+
+msgctxt "#30119"
+msgid "Search your libraries"
+msgstr ""
+
+msgctxt "#30120"
+msgid "Find movies, shows, episodes, people, artists, albums and tracks. Press OK on the field to type."
+msgstr ""
+
+msgctxt "#30121"
+msgid "Nothing found for “%s”"
+msgstr ""
+
+msgctxt "#30122"
+msgid "Movies"
+msgstr ""
+
+msgctxt "#30123"
+msgid "Shows"
+msgstr ""
+
+msgctxt "#30124"
+msgid "Episodes"
+msgstr ""
+
+msgctxt "#30125"
+msgid "People"
+msgstr ""
+
+msgctxt "#30126"
+msgid "Music"
+msgstr ""
+
+msgctxt "#30127"
+msgid "Cast"
+msgstr ""
+
+msgctxt "#30128"
+msgid "Cast & Crew"
+msgstr ""
+
+msgctxt "#30129"
+msgid "Crew"
+msgstr ""
+
+msgctxt "#30130"
+msgid "Guest Stars"
+msgstr ""
+
+msgctxt "#30131"
+msgid "More Like This"
+msgstr ""
+
+msgctxt "#30132"
+msgid "Extras"
+msgstr ""
+
+msgctxt "#30133"
+msgid "Couldn't load your home screen"
+msgstr ""
+
+msgctxt "#30134"
+msgid "Couldn't load this page"
+msgstr ""
+
+msgctxt "#30135"
+msgid "No libraries yet"
+msgstr ""
+
+msgctxt "#30136"
+msgid "Ask whoever runs this pley server to share a library with you."
+msgstr ""
+
+msgctxt "#30137"
+msgid "Nothing here yet"
+msgstr ""
+
+msgctxt "#30138"
+msgid "Add movies, shows or music to a library on the server, and they show here."
+msgstr ""
+
+msgctxt "#30139"
+msgid "Scanning your libraries…"
+msgstr ""
+
+msgctxt "#30140"
+msgid "Directed by"
+msgstr ""
+
+msgctxt "#30141"
+msgid "Created by"
+msgstr ""
+
+msgctxt "#30142"
+msgid "Starring"
+msgstr ""
+
+msgctxt "#30143"
+msgid "Sort by"
+msgstr ""
+
+msgctxt "#30144"
+msgid "Title"
+msgstr ""
+
+msgctxt "#30145"
+msgid "Year"
+msgstr ""
+
+msgctxt "#30146"
+msgid "Date added"
+msgstr ""
+
+msgctxt "#30147"
+msgid "Rating"
+msgstr ""
+
+msgctxt "#30148"
+msgid "Release date"
+msgstr ""
+
+msgctxt "#30149"
+msgid "Duration"
+msgstr ""
+
+msgctxt "#30150"
+msgid "Last played"
+msgstr ""
+
+msgctxt "#30151"
+msgid "Any genre"
+msgstr ""
+
+msgctxt "#30152"
+msgid "Any year"
+msgstr ""
+
+msgctxt "#30153"
+msgid "Clear filters"
+msgstr ""
+
+msgctxt "#30154"
+msgid "Remove from Continue Watching"
+msgstr ""
+
+msgctxt "#30155"
+msgid "Go to show"
+msgstr ""
+
+msgctxt "#30156"
+msgid "Go to season"
+msgstr ""
+
+msgctxt "#30157"
+msgid "Full summary"
+msgstr ""
+
+msgctxt "#30158"
+msgid "No playlists yet. Make them on pley's web app or phone app."
+msgstr ""
+
+msgctxt "#30159"
+msgid "No collections yet."
+msgstr ""
+
+msgctxt "#30160"
+msgid "Nothing matches these filters."
+msgstr ""
+
+msgctxt "#30161"
+msgid "Screens"
+msgstr ""
+
+msgctxt "#30162"
+msgid "pley's look, as on its TV apps"
+msgstr ""
+
+msgctxt "#30163"
+msgid "Kodi's lists, in this skin's views"
+msgstr ""
+
+msgctxt "#30164"
+msgid "Part of %s"
+msgstr ""
+
+msgctxt "#30165"
+msgid "Account"
+msgstr ""
+
+msgctxt "#30166"
+msgid "Unwatched only"
+msgstr ""
+
+msgctxt "#30167"
+msgid "Watched"
+msgstr ""
+
+msgctxt "#30168"
+msgid "Known for"
+msgstr ""
+
+msgctxt "#30169"
+msgid "Up next"
+msgstr ""
+
+msgctxt "#30170"
+msgid "%d items"
+msgstr ""
+
+msgctxt "#30171"
+msgid "Sign in to pley"
+msgstr ""
+
+msgctxt "#30172"
+msgid "Scan the code with your phone"
+msgstr ""
+
+msgctxt "#30173"
+msgid "or go to [B]%s[/B]"
+msgstr ""
+
+msgctxt "#30174"
+msgid "and enter this code"
+msgstr ""
+
+msgctxt "#30175"
+msgid "Your phone must be on the same Wi-Fi as this TV."
+msgstr ""
+
+msgctxt "#30176"
+msgid "Or open pley on a signed-in device: Link a device."
+msgstr ""
+
+msgctxt "#30177"
+msgid "Scan with your phone camera"
+msgstr ""
+
+msgctxt "#30178"
+msgid "Change server"
+msgstr ""
+
+msgctxt "#30179"
+msgid "Go to [B]%s[/B]"
+msgstr ""

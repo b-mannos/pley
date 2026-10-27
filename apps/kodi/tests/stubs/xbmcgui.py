@@ -1,4 +1,9 @@
 NOTIFICATION_INFO, NOTIFICATION_WARNING, NOTIFICATION_ERROR = "info", "warning", "error"
+current_window = 10000
+
+
+def getCurrentWindowId():
+    return current_window
 
 
 class Tag:
@@ -20,6 +25,8 @@ class Tag:
 class ListItem:
     def __init__(self, label="", label2="", path="", offscreen=False):
         self.label = label
+        self.label2 = label2
+        self.selected = False
         self.path = path
         self.art = {}
         self.properties = {}
@@ -56,6 +63,9 @@ class ListItem:
     def setSubtitles(self, subtitles):
         self.subtitles = subtitles
 
+    def select(self, selected):
+        self.selected = selected
+
 
 class Window:
     properties = {}
@@ -71,6 +81,14 @@ class Window:
 
     def clearProperty(self, key):
         Window.properties.pop(key, None)
+
+
+class WindowXML:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def close(self):
+        pass
 
 
 class WindowXMLDialog:

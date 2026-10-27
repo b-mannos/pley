@@ -70,6 +70,11 @@ class ProxyTest(unittest.TestCase):
             return 200, {"Content-Type": "video/x-matroska", "Accept-Ranges": "bytes"}, MOVIE
         if request.path == "/api/playback/s1/12.ts":
             return support.answer(410, {"code": "session_stopped", "message": "Maintenance tonight"})
+        if request.path == "/api/collections/4/images/poster":
+            # A collection without a poster sends to its first title's.
+            return 307, {"Location": "/api/items/9/images/poster?v=3"}, b""
+        if request.path == "/api/collections/5/images/poster":
+            return 307, {"Location": self.server.url + "/api/items/10/images/poster"}, b""
         if request.path.startswith("/api/progress"):
             return 200, {"Content-Type": "application/json"}, request.body
         return support.answer(200, {"path": request.path, "agent": request.headers.get("user-agent")})
@@ -202,6 +207,13 @@ class ProxyTest(unittest.TestCase):
         self.assertEqual(api.subtitle_name("/api/files/7/subtitles/3.vtt", "x-1", False), "/api/files/7/subtitles/3.vtt")
         response, data = self.ask("GET", "/%s/api/files/7/subtitles/1003.fre.forced.vtt" % SECRET)
         self.assertEqual(json.loads(data)["path"], "/api/files/7/subtitles/1003.vtt", "the server's own name")
+
+    def test_the_servers_redirects_stay_behind_the_proxy(self):
+        response, _ = self.ask("GET", "/%s/api/collections/4/images/poster" % SECRET)
+        self.assertEqual(response.status, 307)
+        self.assertEqual(response.getheader("Location"), "/%s/api/items/9/images/poster?v=3" % SECRET)
+        response, _ = self.ask("GET", "/%s/api/collections/5/images/poster" % SECRET)
+        self.assertEqual(response.getheader("Location"), "/%s/api/items/10/images/poster" % SECRET)
 
     def test_addresses_the_server_gives_become_the_proxys(self):
         base = "http://127.0.0.1:5000/s3cret"

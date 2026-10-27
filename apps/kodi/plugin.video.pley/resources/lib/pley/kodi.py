@@ -19,6 +19,8 @@ ADDON_ID = "plugin.video.pley"
 HOME = 10000
 PROXY = "pley.proxy"
 PLAYING = "pley.playing"
+# Set while pley's own window is open: the service tells it of changes.
+WINDOW_OPEN = "pley.ui"
 
 # strings.po ids, by name.
 TEXT = {
@@ -62,6 +64,79 @@ TEXT = {
     "retrying": 30077,
     "stopped_by_admin": 30078,
     "stopped_elsewhere": 30079,
+    "home": 30100,
+    "from_start": 30101,
+    "info": 30102,
+    "in_my_list": 30103,
+    "trailer": 30104,
+    "more": 30105,
+    "recommended": 30106,
+    "library": 30107,
+    "filter": 30108,
+    "unwatched": 30109,
+    "genre": 30110,
+    "year": 30111,
+    "resume": 30112,
+    "play": 30113,
+    "resume_episode": 30114,
+    "play_episode": 30115,
+    "see_all": 30116,
+    "unavailable": 30117,
+    "search_hint": 30118,
+    "search_empty": 30119,
+    "search_empty_body": 30120,
+    "nothing_found_for": 30121,
+    "movies": 30122,
+    "shows": 30123,
+    "episodes": 30124,
+    "people": 30125,
+    "music": 30126,
+    "cast": 30127,
+    "cast_and_crew": 30128,
+    "crew": 30129,
+    "guest_stars": 30130,
+    "more_like_this": 30131,
+    "extras": 30132,
+    "home_failed": 30133,
+    "page_failed": 30134,
+    "no_libraries": 30135,
+    "no_libraries_body": 30136,
+    "nothing_yet": 30137,
+    "nothing_yet_body": 30138,
+    "scanning": 30139,
+    "directed_by": 30140,
+    "created_by": 30141,
+    "starring": 30142,
+    "sort_by": 30143,
+    "sort_title": 30144,
+    "sort_year": 30145,
+    "sort_added": 30146,
+    "sort_rating": 30147,
+    "sort_release": 30148,
+    "sort_duration": 30149,
+    "sort_last_played": 30150,
+    "any_genre": 30151,
+    "any_year": 30152,
+    "clear_filters": 30153,
+    "remove_from_continue": 30154,
+    "go_to_show": 30155,
+    "go_to_season": 30156,
+    "full_summary": 30157,
+    "no_playlists": 30158,
+    "no_collections": 30159,
+    "empty_library": 30160,
+    "look": 30161,
+    "look_pley": 30162,
+    "look_kodi": 30163,
+    "part_of": 30164,
+    "account": 30165,
+    "unwatched_only": 30166,
+    "mark_watched_short": 30167,
+    "known_for": 30168,
+    "up_next_episode": 30169,
+    "playlist_items": 30170,
+    "or_go_to": 30173,
+    "go_to": 30179,
 }
 
 
@@ -119,10 +194,12 @@ def log(message: str, level: int = xbmc.LOGINFO) -> None:
 
 
 def refresh_listing() -> None:
-    """Refreshes the listing on screen if it is pley's; others aren't
-    touched."""
+    """Refreshes the listing on screen if it is pley's, and pley's window if
+    it is open (window.py hears it); others aren't touched."""
     if xbmc.getInfoLabel("Container.FolderPath").startswith("plugin://%s/" % ADDON_ID):
         xbmc.executebuiltin("Container.Refresh")
+    if get_property(WINDOW_OPEN):
+        xbmc.executebuiltin("NotifyAll(%s,changed)" % ADDON_ID)
 
 
 def notify(message: str, error: bool = False) -> None:
