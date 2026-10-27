@@ -114,10 +114,19 @@ clients send rather than adding to it (RFC 9700 §4.13). Caddy does both by
 default. With nginx:
 
 ```nginx
-proxy_set_header Host $host;
+proxy_set_header Host $http_host;
 proxy_set_header X-Forwarded-Proto $scheme;
 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 ```
+
+`$http_host` is the address as the browser or app sent it, with its port;
+nginx's `$host` leaves the port out. A proxy that does that (Nginx Proxy
+Manager does by default) works when the address is reached at its scheme's
+own port (`https://media.example.com`). At another
+(`https://media.example.com:9999`), pley would name itself without the
+port, and apps would refuse it: add the address in **Settings → Network →
+Reached through a reverse proxy** (the page offers it when opened there),
+and pley puts the port back.
 
 TVs signing in with a code are limited per address. Behind a proxy on the
 same computer or network, pley counts the address the proxy adds last to

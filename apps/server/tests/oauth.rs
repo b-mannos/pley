@@ -1067,3 +1067,35 @@ async fn a_code_exchanged_twice_at_once_leaves_no_access() {
         sqlx::query_scalar("SELECT COUNT(*) FROM app_grants").fetch_one(&app.state.db.read).await.unwrap();
     assert_eq!(grants, 0, "{} / {}", a.text(), b.text());
 }
+
+// ------------------------------------------------------------------ proxies
+
+#[tokio::test]
+async fn behind_a_proxy_that_leaves_the_port_out_pley_names_the_address_apps_used() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    // nginx's `$host`: the port the browser or app used is gone.
+    let proxied = [("host", "media.example.com"), ("x-forwarded-proto", "https")];
+    assert_eq!(metadata(&app, &proxied).await.body["issuer"], "https://media.example.com");
+
+    let saved = app.put("/api/settings", &admin, json!({"proxy_addresses": ["https://Media.example.com:9999/"]})).await;
+    assert_eq!(saved.status, StatusCode::OK, "{}", saved.text());
+    assert_eq!(saved.body["proxy_addresses"], json!(["https://media.example.com:9999"]));
+    let found = metadata(&app, &proxied).await;
+    assert_eq!(found.body["issuer"], "https://media.example.com:9999");
+    assert_eq!(found.body["token_endpoint"], "https://media.example.com:9999/api/oauth/token");
+    // Other addresses, and a Host with a port, stay as they came.
+    assert_eq!(metadata(&app, &[("host", "pley.local:7539")]).await.body["issuer"], "http://pley.local:7539");
+
+    // An address without a port of its own needs no setting.
+    let refused = app.put("/api/settings", &admin, json!({"proxy_addresses": ["https://media.example.com"]})).await;
+    assert_eq!(refused.status, StatusCode::BAD_REQUEST, "{}", refused.text());
+    let refused = app
+        .put(
+            "/api/settings",
+            &admin,
+            json!({"proxy_addresses": ["https://media.example.com:1", "https://media.example.com:2"]}),
+        )
+        .await;
+    assert_eq!(refused.status, StatusCode::BAD_REQUEST, "{}", refused.text());
+}

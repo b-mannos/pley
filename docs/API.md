@@ -426,7 +426,10 @@ The issuer is the address the request came to: `https` when the first
 with a lower-case host, no default port and no trailing slash. A server
 reached at its home and its public address has a different issuer at each.
 Apps check that the issuer is the address they used (RFC 8414 §3.3), so a
-reverse proxy must pass the original `Host` (deploy/README.md). A missing
+reverse proxy must pass the original `Host` (deploy/README.md). One that
+leaves its port out gets it back for the addresses in the settings'
+`proxy_addresses` (`https://media.example.com:9999`): a `Host` without a
+port, for that scheme and host name, takes that port. A missing
 `Host`, or one with a path or a user name, answers `400`.
 `client_id_metadata_document_supported` is the setting for apps by other
 publishers. Every other `/.well-known/` path answers `404`.

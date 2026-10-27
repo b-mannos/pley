@@ -600,6 +600,12 @@ export interface Settings {
   previews_in_background: boolean;
   /** Apps by other publishers may sign in (pley's own apps always can); turning it off signs them out. */
   third_party_apps: boolean;
+  /**
+   * Addresses with a port pley is reached at through a reverse proxy that
+   * leaves the port out of `Host` (`https://media.example.com:9999`).
+   * Absent from servers before it.
+   */
+  proxy_addresses?: string[];
 }
 
 /** A service the settings can test (`POST /api/settings/test`). */

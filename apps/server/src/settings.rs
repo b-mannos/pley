@@ -55,6 +55,12 @@ pub struct Settings {
     /// are read from the internet: see [`crate::oauth`]). pley's own apps
     /// always may. Off by default; turning it off signs them out.
     pub third_party_apps: bool,
+    /// Addresses with a port that pley is reached at through a reverse
+    /// proxy which leaves the port out of `Host` (nginx's `$host`, Nginx
+    /// Proxy Manager's default): `https://media.example.com:9999`. A request
+    /// whose `Host` has no port gets the port of the one with its scheme
+    /// and host name back, so pley names itself as apps reached it.
+    pub proxy_addresses: Vec<String>,
 }
 
 impl Default for Settings {
@@ -81,8 +87,36 @@ impl Default for Settings {
             seek_previews: true,
             previews_in_background: true,
             third_party_apps: false,
+            proxy_addresses: Vec::new(),
         }
     }
+}
+
+/// Proxy addresses kept at most.
+const MAX_PROXY_ADDRESSES: usize = 16;
+
+/// A proxy address as kept (`https://media.example.com:9999`): http or
+/// https, a host and a port that isn't the scheme's own (without one,
+/// `Host` names it right already), nothing else.
+fn proxy_address(value: &str) -> Result<String, AppError> {
+    let wrong = || AppError::bad_request(format!("{value} isn't an address like https://media.example.com:9999"));
+    let url = url::Url::parse(value.trim()).map_err(|_| wrong())?;
+    let plain = matches!(url.scheme(), "http" | "https")
+        && url.host().is_some()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.path() == "/"
+        && url.query().is_none()
+        && url.fragment().is_none();
+    if !plain {
+        return Err(wrong());
+    }
+    if url.port().is_none() {
+        return Err(AppError::bad_request(format!(
+            "{value} has no port of its own: pley needs nothing to be reached there"
+        )));
+    }
+    Ok(url.origin().ascii_serialization())
 }
 
 impl Settings {
@@ -118,6 +152,7 @@ pub struct SettingsPatch {
     pub seek_previews: Option<bool>,
     pub previews_in_background: Option<bool>,
     pub third_party_apps: Option<bool>,
+    pub proxy_addresses: Option<Vec<String>>,
 }
 
 pub struct SettingsStore {
@@ -217,6 +252,27 @@ impl SettingsStore {
         }
         if let Some(v) = patch.third_party_apps {
             next.third_party_apps = v;
+        }
+        if let Some(v) = patch.proxy_addresses {
+            let mut addresses: Vec<String> = Vec::new();
+            for value in v.iter().filter(|value| !value.trim().is_empty()) {
+                let address = proxy_address(value)?;
+                // One port per scheme and host: which one a request came to
+                // couldn't be told otherwise.
+                let site =
+                    |a: &str| url::Url::parse(a).map(|u| (u.scheme().to_owned(), u.host_str().map(str::to_owned)));
+                if let Some(same) = addresses.iter().find(|a| site(a).ok() == site(&address).ok()) {
+                    if *same != address {
+                        return Err(AppError::bad_request(format!("{same} and {address} name the same host")));
+                    }
+                    continue;
+                }
+                addresses.push(address);
+            }
+            if addresses.len() > MAX_PROXY_ADDRESSES {
+                return Err(AppError::bad_request(format!("at most {MAX_PROXY_ADDRESSES} proxy addresses")));
+            }
+            next.proxy_addresses = addresses;
         }
         let json = serde_json::to_string(&next).map_err(|e| AppError::Internal(e.into()))?;
         sqlx::query(

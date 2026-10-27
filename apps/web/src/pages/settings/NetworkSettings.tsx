@@ -7,6 +7,7 @@ import { useToast } from "@/components/Toast";
 import { Badge, Button, Card, EmptyState, PageSpinner, TextInput, Toggle } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useDocumentTitle, useOnChange } from "@/lib/hooks";
+import { ProxyAddresses } from "./ProxyAddresses";
 
 type Mode = "local" | "networks" | "all";
 
@@ -363,6 +364,8 @@ export function NetworkSettings() {
           />
         </Row>
       </Card>
+
+      <ProxyAddresses />
 
       <Card className="space-y-3">
         <div>

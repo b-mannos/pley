@@ -171,6 +171,7 @@ pub fn router(state: AppState) -> Router {
         .route("/.well-known/{*rest}", any(oauth::no_document))
         .fallback(crate::web::static_handler)
         .layer(axum::middleware::from_fn(tv_app_cors))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), proxy_port))
         .layer(SetResponseHeaderLayer::if_not_present(
             header::CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(CONTENT_SECURITY_POLICY),
@@ -196,6 +197,46 @@ pub fn router(state: AppState) -> Router {
 /// The largest body of the authorization server's endpoints (forms, and
 /// the requests of the consent and `/link` pages).
 const FORM_MAX: usize = 16 * 1024;
+
+/// Puts back the port a reverse proxy left out of `Host` (nginx's `$host`,
+/// Nginx Proxy Manager's default) for the addresses set in Settings →
+/// Network (`proxy_addresses`): pley names itself by `Host`, and apps
+/// reaching `https://media.example.com:9999` refuse a server calling itself
+/// `https://media.example.com`.
+async fn proxy_port(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    mut request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let settings = state.settings.get();
+    if let Some(host) = with_proxy_port(request.headers(), &settings.proxy_addresses) {
+        request.headers_mut().insert(header::HOST, host);
+    }
+    next.run(request).await
+}
+
+/// `Host` with the port of the proxy address of its scheme and host name,
+/// when it has no port of its own.
+fn with_proxy_port(headers: &axum::http::HeaderMap, addresses: &[String]) -> Option<HeaderValue> {
+    if addresses.is_empty() {
+        return None;
+    }
+    let host = headers.get(header::HOST)?.to_str().ok()?.trim();
+    // A port after the name, or after an IPv6 address's brackets.
+    let named = host.rsplit_once(']').map_or(host, |(_, after)| after);
+    if named.contains(':') {
+        return None;
+    }
+    let scheme = if crate::auth::forwarded_https(headers) { "https" } else { "http" };
+    let asked = url::Url::parse(&format!("{scheme}://{host}")).ok()?;
+    addresses.iter().find_map(|address| {
+        let address = url::Url::parse(address).ok()?;
+        let port = address.port()?;
+        (address.scheme() == scheme && address.host() == asked.host())
+            .then(|| HeaderValue::from_str(&format!("{host}:{port}")).ok())
+            .flatten()
+    })
+}
 
 /// Whether a request comes from one of pley's packaged TV apps: Samsung's
 /// and LG's web runtimes load them from the TV (`file://`), so their
@@ -315,6 +356,28 @@ pub(crate) fn loggable_uri(uri: &axum::http::Uri) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_proxy_that_left_the_port_out_gets_it_back() {
+        let addresses = ["https://tokyo.example.com:9999".to_owned(), "http://[fd00::5]:8096".to_owned()];
+        let host = |pairs: &[(&'static str, &str)]| {
+            let mut headers = axum::http::HeaderMap::new();
+            for (name, value) in pairs {
+                headers.insert(*name, value.parse().unwrap());
+            }
+            with_proxy_port(&headers, &addresses).map(|h| h.to_str().unwrap().to_owned())
+        };
+        let https = ("x-forwarded-proto", "https");
+        assert_eq!(host(&[("host", "tokyo.example.com"), https]).as_deref(), Some("tokyo.example.com:9999"));
+        assert_eq!(host(&[("host", "Tokyo.Example.com"), https]).as_deref(), Some("Tokyo.Example.com:9999"));
+        assert_eq!(host(&[("host", "[fd00::5]")]).as_deref(), Some("[fd00::5]:8096"));
+        // A port of its own, another scheme or another host stays as it came.
+        assert_eq!(host(&[("host", "tokyo.example.com:443"), https]), None);
+        assert_eq!(host(&[("host", "tokyo.example.com")]), None, "came over http");
+        assert_eq!(host(&[("host", "osaka.example.com"), https]), None);
+        assert_eq!(host(&[("host", "[fd00::5]:7539")]), None);
+        assert_eq!(host(&[https]), None, "no Host");
+    }
 
     #[test]
     fn the_policy_is_one_header_line() {
