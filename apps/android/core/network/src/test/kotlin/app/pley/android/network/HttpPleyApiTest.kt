@@ -4,6 +4,7 @@ import app.pley.android.model.ConversionState
 import app.pley.android.model.EntryIds
 import app.pley.android.model.ImageKind
 import app.pley.android.model.ItemIds
+import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
 import app.pley.android.model.NewPlaylist
 import app.pley.android.model.PlaybackRequest
@@ -85,6 +86,13 @@ class HttpPleyApiTest {
             Golden("me", json("me/app_token.json"), "GET /api/auth/me") { me() },
             Golden("libraries", json("libraries/list.json"), "GET /api/libraries") { libraries() },
             Golden("library", json("libraries/library.json"), "GET /api/libraries/2") { library(2) },
+            Golden(
+                "sortLibraries",
+                json("libraries/list.json"),
+                "PUT /api/me/libraries/order",
+                body = """{"ids":[3,1,2]}""",
+            ) { sortLibraries(LibraryIds(listOf(3, 1, 2))) },
+            Golden("forgetLibraryOrder", json("libraries/list.json"), "DELETE /api/me/libraries/order") { forgetLibraryOrder() },
             Golden("libraryItems (defaults)", json("libraries/items.json"), "GET /api/libraries/1/items?sort=title&offset=0") {
                 libraryItems(1)
             },

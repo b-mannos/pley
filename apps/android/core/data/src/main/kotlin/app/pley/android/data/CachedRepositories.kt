@@ -13,6 +13,7 @@ import app.pley.android.model.ItemList
 import app.pley.android.model.ItemSummary
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
+import app.pley.android.model.LibraryIds
 import app.pley.android.model.MaybeItem
 import app.pley.android.model.PersonDetail
 import app.pley.android.model.PleyJson
@@ -61,6 +62,17 @@ internal class CachedLibraries(
     override fun libraries(): Flow<Loadable<List<Library>>> = cache.observe(resource)
 
     override suspend fun refresh() = cache.refreshQuietly(resource)
+
+    override suspend fun sort(ids: List<Long>) = holds(cache.api(cache.profile()).sortLibraries(LibraryIds(ids)))
+
+    override suspend fun forgetOrder() = holds(cache.api(cache.profile()).forgetLibraryOrder())
+
+    /** The server's answer to a change is the list now; Home's rows of each library follow its order. */
+    private fun holds(answer: List<Library>) {
+        heard(answer)
+        cache.put(resource, answer)
+        cache.revalidate { key, _ -> key == SnapshotKeys.HOME }
+    }
 }
 
 internal class CachedHubs(private val cache: ResourceCache) : HubsRepository {

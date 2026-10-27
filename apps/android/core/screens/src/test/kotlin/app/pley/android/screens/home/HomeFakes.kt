@@ -26,6 +26,7 @@ import java.util.Collections
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 
 /** Home's sources, every one a fake the test drives and reads. */
 class FakeHomeSources : HomeSources {
@@ -40,6 +41,9 @@ class FakeHomeSources : HomeSources {
     val hidden: MutableList<Long> = Collections.synchronizedList(mutableListOf())
     var hubRefreshes = 0
     var libraryRefreshes = 0
+    val sorts: MutableList<List<Long>> = Collections.synchronizedList(mutableListOf())
+    var sortFailure: Exception? = null
+    var orderForgotten = 0
 
     /** What pressing play on an item resolves to: by default a video from its resume point. */
     var resolve: (ItemSummary, Boolean) -> PlayTarget = { item, fromStart ->
@@ -60,6 +64,19 @@ class FakeHomeSources : HomeSources {
         override fun libraries(): Flow<Loadable<List<Library>>> = libraryList
         override suspend fun refresh() {
             libraryRefreshes++
+        }
+
+        override suspend fun sort(ids: List<Long>) {
+            sortFailure?.let { throw it }
+            sorts += ids
+            libraryList.update { load ->
+                val list = (load as? Loadable.Ready)?.value ?: return@update load
+                Loadable.Ready(ids.mapNotNull { id -> list.firstOrNull { it.id == id } } + list.filter { it.id !in ids }, fresh = true)
+            }
+        }
+
+        override suspend fun forgetOrder() {
+            orderForgotten++
         }
     }
 

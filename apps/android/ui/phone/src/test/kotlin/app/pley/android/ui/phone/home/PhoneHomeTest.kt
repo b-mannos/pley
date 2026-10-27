@@ -4,12 +4,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
@@ -152,5 +155,41 @@ class PhoneHomeTest {
         compose.onNodeWithText("300 shows").assertExists()
         compose.onNodeWithText("TV Shows").performClick()
         assertEquals(PleyKey.Library(2), opened.last())
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun sortingTheLibrariesSavesEachMoveForTheProfile() {
+        sources.libraryList.value = Loadable.Ready(
+            listOf(
+                Library(1, "Movies", LibraryKind.Movies, itemCount = 1500),
+                Library(2, "TV Shows", LibraryKind.Shows, itemCount = 300),
+                Library(3, "Music", LibraryKind.Music, itemCount = 80),
+            ),
+            fresh = true,
+        )
+        val vm = LibrariesViewModel({ sources.libraries }, { sources.scans }, Dispatchers.Unconfined)
+        compose.setContent { Page { PhoneLibrariesScreen(vm) } }
+        compose.waitForIdle()
+
+        compose.onNodeWithContentDescription("Sort libraries").performClick()
+        compose.onNodeWithText("Sort libraries").assertExists()
+        compose.onNodeWithText("Drag a library by its handle to move it. The order is yours alone, on all your devices.").assertExists()
+        compose.onNodeWithTag(LIBRARY_HANDLE + 1, useUnmergedTree = true).assertExists()
+        // A row doesn't open its library while sorting; TalkBack moves it.
+        compose.onNodeWithText("Movies").performClick()
+        assertTrue(opened.isEmpty())
+        compose.onNodeWithTag(LIBRARY_SORT_ROW + 1).performCustomAccessibilityActionWithLabel("Move down")
+        assertEquals(listOf(listOf(2L, 1L, 3L)), sources.sorts)
+        compose.onNodeWithTag(LIBRARY_SORT_ROW + 3).performCustomAccessibilityActionWithLabel("Move up")
+        assertEquals(listOf(2L, 3L, 1L), sources.sorts.last())
+        compose.onNodeWithText("Use the server's order").performClick()
+        assertEquals(1, sources.orderForgotten)
+
+        compose.onNodeWithText("Done").performClick()
+        compose.onNodeWithText("Libraries").assertExists()
+        compose.onNodeWithTag(LIBRARY_HANDLE + 1, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("Movies").performClick()
+        assertEquals(PleyKey.Library(1), opened.last())
     }
 }

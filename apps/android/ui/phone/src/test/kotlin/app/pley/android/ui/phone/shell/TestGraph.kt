@@ -127,6 +127,8 @@ class TestGraph(server: String? = SERVER) : ScreensGraph {
         override val libraries = object : LibrariesRepository {
             override fun libraries(): Flow<Loadable<List<Library>>> = flowOf(Loadable.Ready(listOf(FILMS), fresh = true))
             override suspend fun refresh() = Unit
+            override suspend fun sort(ids: List<Long>) = Unit
+            override suspend fun forgetOrder() = Unit
         }
         override val hubs = object : HubsRepository {
             override fun home(): Flow<Loadable<Hubs>> = flowOf(Loadable.Ready(Hubs(), fresh = true))

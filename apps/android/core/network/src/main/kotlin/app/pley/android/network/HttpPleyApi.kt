@@ -17,6 +17,7 @@ import app.pley.android.model.ItemList
 import app.pley.android.model.ItemsPage
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
+import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
 import app.pley.android.model.ConversionInfo
 import app.pley.android.model.MaybeItem
@@ -100,6 +101,14 @@ class HttpPleyApi(
     override suspend fun libraries(): List<Library> = get(ListSerializer(Library.serializer()), "api", "libraries")
 
     override suspend fun library(id: Long): Library = get(Library.serializer(), "api", "libraries", id)
+
+    override suspend fun sortLibraries(order: LibraryIds): List<Library> =
+        send("PUT", ListSerializer(Library.serializer()), json(LibraryIds.serializer(), order), "api", "me", "libraries", "order")
+
+    override suspend fun forgetLibraryOrder(): List<Library> =
+        http().fetch(jsonRequest(address(listOf("api", "me", "libraries", "order"))).delete().build()) {
+            it.decode(ListSerializer(Library.serializer()))
+        }
 
     override suspend fun libraryItems(
         libraryId: Long,

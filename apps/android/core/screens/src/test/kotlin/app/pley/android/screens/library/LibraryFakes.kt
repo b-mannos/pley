@@ -46,6 +46,10 @@ class FakeLibraries(vararg libraries: Library) : LibrariesRepository {
     override suspend fun refresh() {
         refreshes++
     }
+
+    override suspend fun sort(ids: List<Long>) = Unit
+
+    override suspend fun forgetOrder() = Unit
 }
 
 /** Listings by query; [showings] records what the grid said it shows. */

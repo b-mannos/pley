@@ -15,9 +15,9 @@ enum class LibraryKind(override val wire: String) : WireEnum {
 }
 
 /**
- * A library: GET /api/libraries (in the order administrators chose) and
- * GET /api/libraries/{id} (apps/server/src/api/libraries.rs, `LibraryDto`).
- * Times are unix seconds.
+ * A library: GET /api/libraries (in the profile's own order, else the one
+ * administrators chose) and GET /api/libraries/{id}
+ * (apps/server/src/api/libraries.rs, `LibraryDto`). Times are unix seconds.
  */
 @Serializable
 data class Library(
@@ -32,6 +32,12 @@ data class Library(
     val scannedAt: Long? = null,
     /** A scan is queued or running right now. */
     val scanning: Boolean = false,
+)
+
+/** `{ ids }`: the body of PUT /api/me/libraries/order, every library the profile may open once, in its order. */
+@Serializable
+data class LibraryIds(
+    val ids: List<Long>,
 )
 
 /**

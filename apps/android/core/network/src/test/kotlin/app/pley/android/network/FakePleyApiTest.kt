@@ -4,6 +4,7 @@ import app.pley.android.model.ConversionState
 import app.pley.android.model.EntryIds
 import app.pley.android.model.ImageKind
 import app.pley.android.model.ItemIds
+import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
 import app.pley.android.model.NewPlaylist
 import app.pley.android.model.PlaybackMethod
@@ -31,6 +32,8 @@ class FakePleyApiTest {
         assertEquals(2L, api.me().id)
         assertEquals(3, api.libraries().size)
         assertEquals("Movies", api.library(1).name)
+        assertEquals(listOf(3L, 1L, 2L), api.sortLibraries(LibraryIds(listOf(3, 1, 2))).map { it.id })
+        assertEquals(listOf(1L, 2L, 3L), api.forgetLibraryOrder().map { it.id })
         assertEquals(2, api.libraryItems(1, offset = 0, limit = 2).items.size)
         assertNotNull(api.libraryItems(1, sort = LibrarySort.Bitrate).items.first().media)
         api.libraryFilters(1)

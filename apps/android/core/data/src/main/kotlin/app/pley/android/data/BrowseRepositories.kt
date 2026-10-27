@@ -14,11 +14,21 @@ import app.pley.android.model.SearchResults
 import app.pley.android.model.SortOrder
 import kotlinx.coroutines.flow.Flow
 
-/** The libraries this profile may see, in the server's order. */
+/** The libraries this profile may see, in the server's order (the profile's own, once it chose one). */
 interface LibrariesRepository {
     fun libraries(): Flow<Loadable<List<Library>>>
 
     suspend fun refresh()
+
+    /**
+     * Lists the libraries in the order of [ids], every one of them once,
+     * for this profile alone: on every list of them, on every device.
+     * Throws when the server refuses (`409`: libraries came or went).
+     */
+    suspend fun sort(ids: List<Long>)
+
+    /** Lists the libraries in the order everyone sees again. */
+    suspend fun forgetOrder()
 }
 
 /** The rows of Home, and of each library's Recommended tab. */

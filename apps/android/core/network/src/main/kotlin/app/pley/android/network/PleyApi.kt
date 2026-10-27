@@ -15,6 +15,7 @@ import app.pley.android.model.ItemList
 import app.pley.android.model.ItemsPage
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
+import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
 import app.pley.android.model.ConversionInfo
 import app.pley.android.model.MaybeItem
@@ -102,6 +103,16 @@ interface PleyApi {
 
     /** GET /api/libraries/{id}. */
     suspend fun library(id: Long): Library
+
+    /**
+     * PUT /api/me/libraries/order (scope play): the profile's own order of
+     * its libraries, [order] naming every one of them once; the libraries
+     * in it.
+     */
+    suspend fun sortLibraries(order: LibraryIds): List<Library>
+
+    /** DELETE /api/me/libraries/order (scope play): the order everyone sees, again; the libraries in it. */
+    suspend fun forgetLibraryOrder(): List<Library>
 
     /**
      * GET /api/libraries/{id}/items: a page of the library's top-level

@@ -5,7 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,16 +38,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -103,15 +99,13 @@ import app.pley.android.ui.phone.kit.ErrorState
 import app.pley.android.ui.phone.kit.PleyIconButton
 import app.pley.android.ui.phone.kit.PleyTopAppBar
 import app.pley.android.ui.phone.kit.PrimaryButton
+import app.pley.android.ui.phone.kit.RowDrag
 import app.pley.android.ui.phone.kit.TonalButton
 import app.pley.android.ui.phone.library.PhoneTiles
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.shell.LocalPhoneShell
 import app.pley.android.ui.phone.shell.ReportLoad
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 
 /**
  * A playlist's page on the phone (design spec §4.9; the web's
@@ -499,90 +493,6 @@ private fun EntryRow(
             }
         },
     ) { content() }
-}
-
-/**
- * Dragging an entry by its handle: the row follows the finger
- * ([offset], read while drawing) and takes the place of the row it
- * passes the middle of ([onMove], in lazy positions). The list scrolls
- * when the row is held near its top or bottom. [onDrop] gets the entry
- * at the end.
- */
-@Stable
-private class RowDrag(private val list: LazyListState, private val scope: kotlinx.coroutines.CoroutineScope) {
-    var key by mutableStateOf<Long?>(null)
-        private set
-    var offset by mutableFloatStateOf(0f)
-        private set
-    var onMove: (from: Int, to: Int) -> Unit = { _, _ -> }
-    var onDrop: (Long) -> Unit = {}
-
-    /** After a move, the lazy position the row is waiting to be laid out at. */
-    private var awaiting = -1
-    private var scroller: Job? = null
-
-    fun start(key: Long) {
-        this.key = key
-        offset = 0f
-        awaiting = -1
-        scroller = scope.launch {
-            while (isActive) {
-                val speed = edgeSpeed()
-                if (speed != 0f) {
-                    val moved = list.scrollBy(speed)
-                    offset += moved
-                    swap()
-                }
-                withFrameNanos { }
-            }
-        }
-    }
-
-    fun by(dy: Float) {
-        offset += dy
-        swap()
-    }
-
-    fun end() {
-        val dropped = key
-        scroller?.cancel()
-        key = null
-        offset = 0f
-        if (dropped != null) onDrop(dropped)
-    }
-
-    private fun swap() {
-        val k = key ?: return
-        val items = list.layoutInfo.visibleItemsInfo
-        val current = items.firstOrNull { it.key == k } ?: return
-        if (awaiting >= 0 && current.index != awaiting) return
-        awaiting = -1
-        val middle = current.offset + offset + current.size / 2f
-        val target = items.firstOrNull { it.key is Long && it.key != k && middle >= it.offset && middle <= it.offset + it.size } ?: return
-        onMove(current.index, target.index)
-        offset += current.offset - target.offset
-        awaiting = target.index
-    }
-
-    /** Pixels a frame to scroll while the row is held within 64 dp of the list's ends. */
-    private fun edgeSpeed(): Float {
-        val k = key ?: return 0f
-        val info = list.layoutInfo
-        val current = info.visibleItemsInfo.firstOrNull { it.key == k } ?: return 0f
-        val top = current.offset + offset
-        val bottom = top + current.size
-        val zone = EDGE_PX
-        return when {
-            top < info.viewportStartOffset + zone && list.canScrollBackward -> -SCROLL_PX
-            bottom > info.viewportEndOffset - zone && list.canScrollForward -> SCROLL_PX
-            else -> 0f
-        }
-    }
-
-    companion object {
-        const val EDGE_PX = 160f
-        const val SCROLL_PX = 18f
-    }
 }
 
 /** "Rename playlist": the title as it is, Save once it will do. */

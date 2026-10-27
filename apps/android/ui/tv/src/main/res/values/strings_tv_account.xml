@@ -30,6 +30,8 @@
     <string name="tv_account_subtitles_always">Always</string>
     <string name="tv_account_subtitles_always_hint">Subtitles in your language come on whenever there are some.</string>
     <string name="tv_account_history">Watch history</string>
+    <string name="tv_account_sort_libraries">Sort libraries</string>
+    <string name="tv_account_sort_libraries_value">Your order, on all your devices</string>
     <string name="tv_account_always_start_as">Always start as</string>
     <string name="tv_account_ask_who">Ask who\'s watching</string>
     <string name="tv_account_manage_web">Manage your account on the web</string>

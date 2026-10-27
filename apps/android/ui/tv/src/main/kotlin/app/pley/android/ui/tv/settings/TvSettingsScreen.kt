@@ -367,6 +367,17 @@ private fun LazyListScope.pane(
             item(key = "row-history") {
                 TvSettingRow(stringResource(R.string.tv_account_history), onClick = { onOpen(PleyKey.History) }, icon = PleyIcons.History, chevron = true, modifier = keyed("row-history"))
             }
+            // The Libraries page sorts them; with three or fewer, the rail lists them and has no way there.
+            item(key = "row-sort-libraries") {
+                TvSettingRow(
+                    stringResource(R.string.tv_account_sort_libraries),
+                    value = stringResource(R.string.tv_account_sort_libraries_value),
+                    onClick = { onOpen(PleyKey.Libraries) },
+                    icon = PleyIcons.ArrowUpDown,
+                    chevron = true,
+                    modifier = keyed("row-sort-libraries"),
+                )
+            }
             if (ui.profiles.size > 1) {
                 item(key = "row-start-as") {
                     val chosen = ui.profiles.firstOrNull { it.id == s.alwaysStartAs }?.name

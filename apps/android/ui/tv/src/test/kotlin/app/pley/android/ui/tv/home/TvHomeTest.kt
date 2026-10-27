@@ -254,4 +254,59 @@ class TvHomeTest {
         press(Key.DirectionCenter)
         assertEquals(PleyKey.Library(2), backStack.last())
     }
+
+    @Test
+    fun sortingLiftsACardTheArrowsMoveThroughTheGrid() {
+        sources.libraryList.value = Loadable.Ready(
+            listOf(
+                Library(1, "Movies", LibraryKind.Movies, itemCount = 412),
+                Library(2, "Shows", LibraryKind.Shows, itemCount = 38),
+                Library(3, "Music", LibraryKind.Music, itemCount = 120),
+                Library(4, "Concerts", LibraryKind.Movies, itemCount = 12),
+            ),
+            fresh = true,
+        )
+        val vm = LibrariesViewModel({ sources.libraries }, { sources.scans }, Dispatchers.Unconfined)
+        compose.setContent {
+            TvTheme {
+                val navigator = remember { TvNavigator(backStack, RailState(), exit = {}) }
+                CompositionLocalProvider(LocalTvNavigator provides navigator) { TvLibrariesScreen(vm) }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Movies").assertIsFocused()
+
+        // Sort, by the title: the first card takes the focus, and Select lifts it.
+        press(Key.DirectionUp)
+        compose.onNodeWithTag(TV_LIBRARIES_SORT).assertIsFocused()
+        press(Key.DirectionCenter)
+        compose.onNodeWithText("Select a library to move it. The order is yours alone, on all your devices.").assertExists()
+        compose.onNodeWithText("Movies").assertIsFocused()
+        press(Key.DirectionCenter)
+        compose.onNodeWithText("Arrows to move it, OK to drop it here, Back to put it back").assertExists()
+
+        // Right a place, down a row: it moves, and keeps the focus; nothing is saved yet.
+        press(Key.DirectionRight)
+        press(Key.DirectionDown)
+        compose.waitForIdle()
+        compose.onNodeWithText("Movies").assertIsFocused()
+        assertTrue(sources.sorts.isEmpty())
+        // Down again is past the end: it stays.
+        press(Key.DirectionDown)
+        press(Key.DirectionCenter)
+        assertEquals(listOf(listOf(2L, 3L, 4L, 1L)), sources.sorts)
+
+        // Back puts a lifted card back where it was, then ends sorting.
+        press(Key.DirectionCenter)
+        press(Key.DirectionLeft)
+        compose.onNodeWithTag(TV_LIBRARY_CARD + 1).assertIsFocused()
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
+        assertEquals(1, sources.sorts.size)
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
+        compose.onNodeWithText("Libraries").assertExists()
+        press(Key.DirectionCenter)
+        assertEquals(PleyKey.Library(1), backStack.last())
+    }
 }

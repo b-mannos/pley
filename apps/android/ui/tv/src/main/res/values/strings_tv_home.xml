@@ -26,4 +26,12 @@
     <string name="tv_libraries_title">Libraries</string>
     <string name="tv_libraries_failed">Couldn\'t load your libraries</string>
     <string name="tv_libraries_scanning">Scanning…</string>
+    <string name="tv_libraries_sort">Sort libraries</string>
+    <string name="tv_libraries_sort_done">Done</string>
+    <string name="tv_libraries_server_order">Use the server\'s order</string>
+    <string name="tv_libraries_open">Open</string>
+    <string name="tv_libraries_move">Move</string>
+    <string name="tv_libraries_sorting">Select a library to move it. The order is yours alone, on all your devices.</string>
+    <string name="tv_libraries_sort_needs_newer_server">Sorting libraries needs a newer pley on the server.</string>
+    <string name="tv_libraries_moving">Arrows to move it, OK to drop it here, Back to put it back</string>
 </resources>

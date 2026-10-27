@@ -15,6 +15,7 @@ import app.pley.android.model.ItemList
 import app.pley.android.model.ItemsPage
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
+import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
 import app.pley.android.model.ConversionInfo
 import app.pley.android.model.ConversionState
@@ -124,6 +125,13 @@ class FakePleyApi(val issuer: String = "http://127.0.0.1:7539") : PleyApi {
     override suspend fun library(id: Long): Library = respond("library", id) {
         fixture<List<Library>>("libraries/list.json").firstOrNull { it.id == id } ?: fixture<Library>("libraries/library.json").copy(id = id)
     }
+
+    override suspend fun sortLibraries(order: LibraryIds): List<Library> = respond("sortLibraries", order) {
+        val all = fixture<List<Library>>("libraries/list.json")
+        order.ids.mapNotNull { id -> all.firstOrNull { it.id == id } } + all.filter { it.id !in order.ids }
+    }
+
+    override suspend fun forgetLibraryOrder(): List<Library> = respond("forgetLibraryOrder") { fixture("libraries/list.json") }
 
     override suspend fun libraryItems(
         libraryId: Long,
