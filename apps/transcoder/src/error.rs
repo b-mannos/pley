@@ -72,7 +72,8 @@ impl IntoResponse for ApiError {
             ApiError::Failed(m) => (StatusCode::INTERNAL_SERVER_ERROR, "ffmpeg_failed", m),
             ApiError::Internal(e) => {
                 tracing::error!(error = ?e, "internal error");
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string())
+                // With its causes: "probe failed: ffprobe: Access is denied".
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal", format!("{e:#}"))
             }
         };
         (status, Json(ErrorBody { code: code.into(), message })).into_response()
@@ -97,8 +98,8 @@ mod tests {
         for (err, status, code) in [
             (ApiError::BadRequest("bad".into()), 400, "bad_request"),
             (ApiError::Unauthorized, 401, "unauthorized"),
-            (ApiError::NotFound("missing".into()), 404, "not_found"),
             (ApiError::Forbidden("elsewhere".into()), 403, "forbidden"),
+            (ApiError::NotFound("missing".into()), 404, "not_found"),
             (ApiError::JobNotFound("gone".into()), 404, "job_not_found"),
             (ApiError::Busy("full".into()), 503, "busy"),
             (ApiError::Timeout("slow".into()), 504, "timeout"),
@@ -116,6 +117,10 @@ mod tests {
             answer(ApiError::NotFound("segment 9 out of range".into())).await.1.message,
             "segment 9 out of range"
         );
+        // An internal error says why, not only what was being done.
+        let denied = anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        let message = answer(ApiError::Internal(denied.context("couldn't keep the file"))).await.1.message;
+        assert!(message.starts_with("couldn't keep the file: ") && message.len() > 24, "{message}");
     }
 
     #[test]
