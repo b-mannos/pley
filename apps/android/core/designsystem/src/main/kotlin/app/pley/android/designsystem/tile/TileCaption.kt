@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyType
+import app.pley.android.designsystem.text.WholeWordsText
 
 /**
  * The two lines under a tile (design spec §2.3, §3.2): the title in [fg][PleyColors.Fg]
@@ -35,13 +36,18 @@ fun TileCaption(
     modifier: Modifier = Modifier,
     emphasized: Boolean = false,
 ) {
+    val titleLines = if (style == TileStyle.Phone && LocalDensity.current.fontScale > 1.3f) 2 else 1
     val titleStyle = remember(style, emphasized) {
         style.captionTitle.copy(color = PleyColors.Fg, fontWeight = if (emphasized) PleyType.Bold else style.captionTitle.fontWeight)
     }
     val subtitleStyle = remember(style) { style.captionSubtitle.copy(color = PleyColors.Muted) }
-    val titleLines = if (style == TileStyle.Phone && LocalDensity.current.fontScale > 1.3f) 2 else 1
     Column(modifier.clearAndSetSemantics {}) {
-        BasicText(title, style = titleStyle, maxLines = titleLines, overflow = TextOverflow.Ellipsis)
+        if (titleLines > 1) {
+            // On two lines, a word too wide for the tile makes the title smaller rather than break in two.
+            WholeWordsText(title, titleStyle, maxLines = titleLines)
+        } else {
+            BasicText(title, style = titleStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
         if (subtitle.isNotEmpty()) {
             BasicText(subtitle, style = subtitleStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }

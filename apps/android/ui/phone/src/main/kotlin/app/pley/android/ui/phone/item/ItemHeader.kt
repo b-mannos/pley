@@ -342,7 +342,9 @@ private fun ActionRow(page: ItemPage, actions: PageActions) {
                     label = action.label,
                     onClick = action.onClick,
                     selected = action.selected,
+                    // The whole slot: a large font's label has the room before it shrinks.
                     modifier = Modifier
+                        .fillMaxWidth()
                         .then(action.state?.let { s -> Modifier.semantics { stateDescription = s } } ?: Modifier)
                         .then(action.tag?.let { Modifier.testTag(it) } ?: Modifier),
                 )

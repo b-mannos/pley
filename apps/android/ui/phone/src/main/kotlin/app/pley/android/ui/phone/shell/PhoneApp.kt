@@ -28,7 +28,6 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.ShortNavigationBarItemDefaults
-import androidx.compose.material3.Text
 import androidx.compose.material3.WideNavigationRailDefaults
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteDefaults
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteItem
@@ -83,6 +82,7 @@ import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.account.accountEntries
 import app.pley.android.ui.phone.home.homeEntries
 import app.pley.android.ui.phone.item.itemEntries
+import app.pley.android.ui.phone.kit.FittedLabel
 import app.pley.android.ui.phone.kit.LocalOffline
 import app.pley.android.ui.phone.kit.LocalOfflineAction
 import app.pley.android.ui.phone.kit.LocalPhoneDeviceTier
@@ -276,7 +276,7 @@ private fun Tabs(navigation: PhoneNavigation, shell: PhoneShellState, entries: (
                     selected = item == tab,
                     onClick = { navigation.select(item) },
                     icon = { Icon(item.icon, contentDescription = null, tint = LocalContentColor.current) },
-                    label = { Text(stringResource(item.label)) },
+                    label = { FittedLabel(stringResource(item.label)) },
                     colors = itemColors,
                     modifier = Modifier.testTag(TAB_TAG + item.name),
                 )

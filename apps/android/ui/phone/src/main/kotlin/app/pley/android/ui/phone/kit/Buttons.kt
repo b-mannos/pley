@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -30,7 +31,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.pley.android.designsystem.PleyColors
@@ -129,9 +129,10 @@ fun PleyIconButton(
 
 /**
  * One of the item page's actions (design spec §3.3): From start, Watched,
- * Playlist, Trailer. A 72 dp wide column, a 24 dp [icon] over a
- * labelMedium [label], no container; pressed, a [surface3][PleyColors.Surface3]
- * circle shows behind the icon. The touch target is 72 by 56. [selected]
+ * Playlist, Trailer. A column 72 dp wide at least (the page gives it its
+ * slot), a 24 dp [icon] over a labelMedium [label] that shrinks rather than
+ * break a word ([FittedLabel]), no container; pressed, a [surface3][PleyColors.Surface3]
+ * circle shows behind the icon. The touch target is 72 by 56 at least. [selected]
  * draws the icon in [accentBright][PleyColors.AccentBright] (watched).
  */
 @Composable
@@ -147,7 +148,7 @@ fun ActionButton(
     val pressed by interactions.collectIsPressedAsState()
     Column(
         modifier
-            .width(72.dp)
+            .widthIn(min = 72.dp)
             .defaultMinSize(minHeight = 56.dp)
             .clickable(interactionSource = interactions, indication = null, enabled = enabled, role = Role.Button, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -167,13 +168,10 @@ fun ActionButton(
             Icon(icon, contentDescription = null, size = 24.dp, tint = tint)
         }
         Spacer(Modifier.height(2.dp))
-        Text(
+        FittedLabel(
             label,
             style = MaterialTheme.typography.labelMedium,
             color = if (enabled) PleyColors.Fg else PleyColors.Disabled,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
         )
     }
 }
