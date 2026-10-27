@@ -7,6 +7,8 @@
         <field id="launched" type="boolean" />
         <!-- Playbacks so far: Home asks for its rows again after one. -->
         <field id="played" type="integer" />
+        <!-- The libraries' order saved so far: Home asks again after one. -->
+        <field id="librariesMoved" type="integer" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />

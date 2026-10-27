@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Settings: the server and the profile this TV uses; switch server or
-     sign out. -->
+<!-- Settings: the server and the profile this TV uses; sort the
+     libraries, switch server or sign out. -->
 <component name="SettingsScreen" extends="Group">
     <interface>
         <field id="route" type="string" />

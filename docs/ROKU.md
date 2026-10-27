@@ -5,8 +5,8 @@ servers on the local network (or takes an address), signs in with a code
 shown on the TV and approved on the server's `/link` page (or a QR code of
 it, which the server draws), and shows Home's rows, each library as a grid
 of posters, a show's seasons and episodes, a title's details with Resume and
-Play from start, Search with the on-screen keyboard, and Settings with
-Switch server and Sign out. The player plays files as they are whenever the
+Play from start, Search with the on-screen keyboard, and Settings with Sort
+libraries, Switch server and Sign out. The player plays files as they are whenever the
 Roku can (it reports what it decodes, from `roDeviceInfo`), HLS otherwise,
 reports progress, offers Skip Intro and Skip Credits as the web player does,
 the next episode at the credits of one, and subtitle sync (Down). Music isn't played yet: music
@@ -76,6 +76,14 @@ Rules the code keeps:
   remembered for each file of each server in the registry (section
   `subtitleSync`, the latest 50 files) and moves the file's subtitles from
   the start the next time.
+- Sort libraries (Settings), as on Android TV: OK lifts a library, up and
+  down move it, OK puts it there, Back puts it back; "Use the server's
+  order" goes back to the order everyone sees. Each drop saves the order
+  at once (`PUT /api/me/libraries/order`, every library the profile may
+  open, so music ones are listed too though Roku shows none), and the
+  server's answer becomes the list; Home asks for its menu and rows again
+  when it shows next. A server from before says sorting needs a newer
+  pley, and nothing moves.
 - Every request says `pleyRoku/<version> (Roku OS <version>; <model>)`, the
   model being `roDeviceInfo`'s display name: the server's `/link` page shows
   that part to whoever types the code.
@@ -137,7 +145,9 @@ title's details after a refused token, Back while the player starts (the
 session that comes after is closed), the player with picture subtitles to
 draw and its subtitle sync (shown, moved 0.3 s and remembered), Home
 asking again after it, a library's second page, a show, Search,
-Home not asking again after it, Settings, the server gone and Retry, then
+Home not asking again after it, Settings, sorting the libraries (Movies put
+after TV Shows, then the server's order again, Home asking again), the
+server gone and Retry, then
 signing out and in again on a server without QR codes; then it starts the
 app again, signed in, in a second process (brs-node runs one app per
 process). It fails on any BrightScript error, on a request without the

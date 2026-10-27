@@ -268,12 +268,25 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     const path = url.pathname;
     let match;
     if (path === "/api/auth/me") return json(200, { id: 1, username: "anna", name: "Anna", scope: "library play" });
-    if (path === "/api/libraries") {
-      return json(200, [
-        { id: 1, name: "Movies", kind: "movies", paths: [], item_count: movies.length, created_at: 0, scanned_at: 0, scanning: false },
-        { id: 2, name: "TV Shows", kind: "shows", paths: [], item_count: 1, created_at: 0, scanned_at: 0, scanning: false },
-        { id: 3, name: "Music", kind: "music", paths: [], item_count: 12, created_at: 0, scanned_at: 0, scanning: false },
-      ]);
+    const libraries = [
+      { id: 1, name: "Movies", kind: "movies", paths: [], item_count: movies.length, created_at: 0, scanned_at: 0, scanning: false },
+      { id: 2, name: "TV Shows", kind: "shows", paths: [], item_count: 1, created_at: 0, scanned_at: 0, scanning: false },
+      { id: 3, name: "Music", kind: "music", paths: [], item_count: 12, created_at: 0, scanned_at: 0, scanning: false },
+    ];
+    // The profile's own order (docs/API.md): every library, once.
+    const ordered = () => fixture.libraryOrder.map((id) => libraries.find((l) => l.id === id));
+    if (path === "/api/libraries") return json(200, ordered());
+    if (path === "/api/me/libraries/order" && req.method === "PUT") {
+      const ids = JSON.parse(body).ids;
+      fixture.orders.push(ids);
+      if (!Array.isArray(ids) || [...ids].sort().join() !== "1,2,3") return json(409, { code: "conflict", message: "these aren't your libraries" });
+      fixture.libraryOrder = ids;
+      return json(200, ordered());
+    }
+    if (path === "/api/me/libraries/order" && req.method === "DELETE") {
+      fixture.orders.push(null);
+      fixture.libraryOrder = [1, 2, 3];
+      return json(200, ordered());
     }
     if (path === "/api/hubs/home") {
       return json(200, {
@@ -354,7 +367,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     return json(404, { code: "not_found", message: `nothing at ${path}` });
   });
 
-  const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], problems, requests, progress, closed, close: () => server.close() };
+  const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], problems, requests, progress, closed, close: () => server.close() };
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       issuer = `http://127.0.0.1:${server.address().port}`;

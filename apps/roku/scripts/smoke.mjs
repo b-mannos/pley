@@ -300,6 +300,25 @@ async function walk() {
   home.kept = age < 55000 ? !asked : age > 65000 ? asked : true;
   await openFromMenu(4, /^GET \/api\/auth\/me$/, "Settings");
   shoot("settings");
+  // Sort libraries: Movies lifted and put after TV Shows, saved at once;
+  // then the server's order again, which the rest of the walk expects.
+  since = mark();
+  await press("select"); // Sort libraries, the first button
+  await waitFor(/^GET \/api\/libraries$/, since, "the libraries to sort");
+  await press("select"); // lifts Movies
+  await press("down");
+  await press("select"); // puts it after TV Shows
+  await waitFor(/^PUT \/api\/me\/libraries\/order$/, since, "the new order saved");
+  shoot("sort-libraries");
+  await press("right");
+  await press("select"); // Use the server's order
+  await waitFor(/^DELETE \/api\/me\/libraries\/order$/, since, "the server's order again");
+  await press("back"); // Settings
+  since = mark();
+  await press("back"); // Home, which asks for its libraries again
+  await waitFor(/^GET \/api\/libraries$/, since, "Home's libraries after sorting");
+  await press("right"); // the rows, where the next steps start
+  await openFromMenu(4, /^GET \/api\/auth\/me$/, "Settings");
   // The server goes away: a library can't load, and says so.
   await press("back");
   await sleep(1500);
@@ -395,6 +414,8 @@ const checks = [
   ["asked to play with its capabilities", asked(/^POST \/api\/playback$/)],
   ["asked for the picture subtitles to be drawn", fixture.playbacks.some((p) => p.item === 103 && p.subtitle_index === 4)],
   ["showed subtitle sync", sync.label],
+  ["saved Movies after TV Shows, every library in the order", fixture.orders.some((ids) => JSON.stringify(ids) === "[2,1,3]")],
+  ["went back to the server's order", fixture.orders.includes(null) && fixture.libraryOrder.join() === "1,2,3"],
   ["remembered the subtitles 0.3 s later", registry !== null && /offsets.*\|\d+\\",300\]/.test(JSON.stringify([...registry]))],
   ["closed a session that came after Back", fixture.closed.includes("s1")],
   ["closed the session it played", fixture.closed.length > 1],

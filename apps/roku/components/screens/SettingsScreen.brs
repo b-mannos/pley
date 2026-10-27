@@ -5,7 +5,7 @@ sub init()
     m.version = m.top.findNode("version")
     m.buttons = m.top.findNode("buttons")
     m.dialog = invalid
-    m.buttons.buttons = ["Switch server", "Sign out"]
+    m.buttons.buttons = ["Sort libraries", "Switch server", "Sign out"]
     m.buttons.observeField("buttonSelected", "onButton")
     m.top.observeField("active", "onActive")
 end sub
@@ -32,7 +32,12 @@ sub onMe(event as object)
 end sub
 
 sub onButton(event as object)
-    if event.getData() = 0
+    chosen = m.buttons.buttons[event.getData()]
+    if chosen = "Sort libraries"
+        uiNavigate({ to: "sortLibraries" })
+        return
+    end if
+    if chosen = "Switch server"
         uiNavigate({ to: "servers", reset: true })
         return
     end if

@@ -16,6 +16,8 @@ sub init()
     ' how long ago it was.
     m.playedSeen = 0
     m.loadedAgo = CreateObject("roTimespan")
+    ' Orders saved at the last load: the menu and the rows follow a new one.
+    m.movedSeen = 0
     m.lastFocus = m.menu
     m.menu.observeField("itemSelected", "onMenu")
     m.rows.observeField("rowItemSelected", "onTile")
@@ -42,14 +44,17 @@ sub onActive()
         m.menu.setFocus(true)
     end if
     ' Back from playing, Continue Watching and the watched marks moved on;
-    ' a minute on, other devices may have moved them.
-    if contentHomeStale(m.top.getScene().played, m.playedSeen, m.loadedAgo.TotalSeconds()) then load()
+    ' a minute on, other devices may have moved them; sorted, the libraries
+    ' and their rows come in their new order.
+    scene = m.top.getScene()
+    if contentHomeStale(scene.played, m.playedSeen, m.loadedAgo.TotalSeconds()) or scene.librariesMoved <> m.movedSeen then load()
 end sub
 
 ' The libraries (the menu) and the rows, asked for together; the task
 ' makes the ContentNodes of the rows that changed.
 sub load()
     m.playedSeen = m.top.getScene().played
+    m.movedSeen = m.top.getScene().librariesMoved
     m.loadedAgo.Mark()
     if m.rowKeys.Count() = 0 then showMessage("Loading…")
     uiGet("/api/libraries", "onLibraries")

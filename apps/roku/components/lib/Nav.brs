@@ -12,6 +12,7 @@ function navScreen(name as string) as string
         player: "PlayerScreen",
         search: "SearchScreen",
         settings: "SettingsScreen",
+        sortLibraries: "SortLibrariesScreen",
         unreachable: "UnreachableScreen"
     }
     if not screens.DoesExist(name) then return ""

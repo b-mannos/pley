@@ -2,6 +2,7 @@ sub test_nav_names_screens()
     tkEqual(navScreen("home"), "HomeScreen")
     tkEqual(navScreen("player"), "PlayerScreen")
     tkEqual(navScreen("unreachable"), "UnreachableScreen")
+    tkEqual(navScreen("sortLibraries"), "SortLibrariesScreen")
     tkEqual(navScreen("nowhere"), "")
 end sub
 
