@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ImageUp, Lock, LockOpen, Pencil, RotateCcw, Search } from "lucide-react";
-import { api, errorMessage } from "@/api/client";
+import { api, errorMessage, request } from "@/api/client";
 import type { ItemDetail } from "@/api/types";
 import { useAuth } from "@/auth";
 import { Modal } from "@/components/Modal";
@@ -329,19 +329,8 @@ function ArtworkDialog({ item, kind, onClose }: { item: ItemDetail; kind: Artwor
     onError: (e) => toast.error(errorMessage(e)),
   });
   const upload = useMutation({
-    mutationFn: async (file: File) => {
-      const resp = await fetch(`/api/items/${item.id}/artwork/${kind}/upload`, {
-        method: "POST",
-        body: file,
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-        credentials: "same-origin",
-      });
-      if (!resp.ok) {
-        const body = (await resp.json().catch(() => null)) as { message?: string } | null;
-        throw new Error(body?.message ?? `upload failed (${resp.status})`);
-      }
-      return (await resp.json()) as ItemDetail;
-    },
+    mutationFn: (file: File) =>
+      request<ItemDetail>(`/api/items/${item.id}/artwork/${kind}/upload`, { method: "POST", rawBody: file }),
     onSuccess: (detail) => done(detail),
     onError: (e) => toast.error(errorMessage(e)),
   });
