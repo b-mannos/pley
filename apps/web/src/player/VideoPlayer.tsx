@@ -1405,7 +1405,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           >
             <RotateCw className="size-5" />
           </button>
-          <div className="group/vol flex items-center">
+          {/* A phone's own buttons set the volume: the row keeps its room for the rest. */}
+          <div className="group/vol hidden items-center sm:flex">
             <button
               type="button"
               aria-label={muted ? "Unmute" : "Mute"}
@@ -1427,8 +1428,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
               />
             </div>
           </div>
-          <div className="ml-2 text-sm tabular-nums text-white/85">
-            {formatClock(current)} <span className="text-white/45">/ {formatClock(duration)}</span>
+          <div className="ml-1 shrink-0 whitespace-nowrap text-sm tabular-nums text-white/85 sm:ml-2">
+            {formatClock(current)} <span className="hidden text-white/45 sm:inline">/ {formatClock(duration)}</span>
           </div>
 
           <div className="flex-1" />
