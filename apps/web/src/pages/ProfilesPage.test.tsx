@@ -145,6 +145,18 @@ describe("ProfilesPage", () => {
     await user.click(await screen.findByRole("button", { name: "Continue as Sam" }));
     expect(await screen.findByTestId("location")).toHaveTextContent("/library/2");
   });
+
+  it("says when the profiles can't be loaded, and tries again", async () => {
+    const user = userEvent.setup();
+    let fail = true;
+    mockApi({ "GET /api/auth/profiles": () => (fail ? apiError(500, "internal", "the server is busy") : [me, kid]) });
+    renderProfiles();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load the profilesThe server is busy");
+    fail = false;
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("button", { name: "Kid" })).toBeInTheDocument();
+  });
 });
 
 describe("challenge", () => {

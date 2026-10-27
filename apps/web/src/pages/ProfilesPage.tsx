@@ -299,6 +299,15 @@ export function ProfilesPage() {
             <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Who's watching?</h1>
             {profiles.isPending ? (
               <Spinner className="mt-12 size-8" />
+            ) : profiles.isError ? (
+              <div role="alert" className="mt-10 flex flex-col items-center text-center">
+                <p className="font-semibold text-fg">Couldn't load the profiles</p>
+                <p className="mt-1.5 max-w-md text-sm text-muted">{errorMessage(profiles.error)}</p>
+                <Button
+                  className="mt-5" onClick={() => void profiles.refetch()} loading={profiles.isFetching}>
+                  Retry
+                </Button>
+              </div>
             ) : (
               <ul className="mt-10 flex flex-wrap justify-center gap-6 sm:gap-10">
                 {list.map((p) => (
