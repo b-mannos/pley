@@ -26,8 +26,8 @@ use crate::error::{ApiResult, AppError};
 use crate::events::ServerEvent;
 use crate::library::sidecar::EXTERNAL_INDEX_BASE;
 use crate::playback::{
-    Method, PlaybackInfo, PlaybackRequest, Session, SessionStatus, TranscodeSpec, decide, new_media_key, sentence,
-    subtitle_tracks, transcode_info,
+    Delivery, Method, PlaybackInfo, PlaybackRequest, Session, SessionStatus, TranscodeSpec, decide, new_media_key,
+    sentence, subtitle_tracks, transcode_info, video_range_shown,
 };
 use crate::state::AppState;
 use crate::streams;
@@ -99,6 +99,7 @@ pub async fn start(
     }
     let decision = decide(&file, info.as_ref(), &streams, &req);
     let mut reasons = decision.reasons.clone();
+    let video_stream = info.as_ref().and_then(|i| i.video()).cloned();
     let subtitles = subtitle_tracks(file.id, &streams);
     let start_ms = req.start_ms.unwrap_or(0).max(0);
     let client_id = req.client_id.clone().filter(|c| !c.is_empty() && c.len() <= 128);
@@ -159,6 +160,7 @@ pub async fn start(
             reasons: Vec::new(),
             reason: None,
             auto_quality: None,
+            video_range: video_stream.and_then(|v| video_range_shown(&v, &req.caps, Delivery::Direct)),
         }));
     }
 
@@ -241,6 +243,9 @@ pub async fn start(
         // Only when the video really is converted (a remux the transcoder
         // turned into a transcode keeps its own default).
         auto_quality: decision.quality.filter(|_| method == Method::Transcode).map(str::to_owned),
+        video_range: video_stream
+            .zip(created.video.as_ref())
+            .and_then(|(v, plan)| video_range_shown(&v, &req.caps, Delivery::of_plan(plan))),
     }))
 }
 

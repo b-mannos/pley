@@ -22,10 +22,11 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use parking_lot::Mutex;
 use pley::catalog::FileRow;
-use pley::playback::{Decision, Method, PlaybackRequest, decide};
+use pley::playback::{Decision, Delivery, Method, PlaybackRequest, decide, video_range_shown};
 use pley_transcoder_api::{
-    API_VERSION, Capabilities, DolbyVisionMode, DynamicRange, ErrorBody, JobCreated, JobRequest, JobStatus, Limits,
-    MediaInfo, MediaStream, OutputRange, StreamKind, TranscoderInfo, VideoCodec, VideoMode, VideoPlan,
+    API_VERSION, Capabilities, DolbyVisionLayer, DolbyVisionMode, DynamicRange, ErrorBody, JobCreated, JobRequest,
+    JobStatus, Limits, MediaInfo, MediaStream, OutputRange, StreamKind, TranscoderInfo, VideoCodec, VideoMode,
+    VideoPlan,
 };
 use serde_json::{Value, json};
 
@@ -204,18 +205,224 @@ fn why_dolby_vision_is_repackaged() {
     assert_eq!(
         reasons(fire_tv_4k_max(), "P8.1+"),
         [
-            "Dolby Vision P8.1 plays without its HDR10+ metadata, which this player's Dolby Vision decoder can't take with it."
+            "Dolby Vision P8.1 + HDR10+ plays as Dolby Vision without its HDR10+: this player's Dolby Vision decoder can't take both."
         ]
     );
+    // The 4K Max shows HDR10+: the base layer keeps it.
     assert_eq!(
         reasons(without_master(fire_tv_4k_max()), "P8.1+"),
         [
-            "Dolby Vision P8.1 with HDR10+ plays as its base layer, repackaged: this player's Dolby Vision decoder can't take both."
+            "Dolby Vision P8.1 + HDR10+ plays as its HDR10+ base layer, repackaged: this player's Dolby Vision decoder can't take both."
         ]
     );
     assert_eq!(
         reasons(without_master(fire_tv_4k_max()), "P7"),
         ["Dolby Vision P7 plays as its HDR10 base layer, repackaged."]
+    );
+    assert_eq!(
+        reasons(fire_tv_4k_max(), "P7+"),
+        ["Dolby Vision P7 + HDR10+ is converted to profile 8.1 for this player, without its HDR10+."]
+    );
+}
+
+/// What profile 7's enhancement layer holds is said where it matters: a
+/// full one is left out when the stream is made profile 8.1.
+#[test]
+fn profile_7_says_which_layer() {
+    let p7 = |el| {
+        let mut info = source("P7");
+        info.streams[0].dv_el = Some(el);
+        info
+    };
+    let reasons = |caps: Value, info: &MediaInfo| play_in(caps, "mkv", info).reasons;
+    assert_eq!(
+        reasons(fire_tv_4k_max(), &p7(DolbyVisionLayer::Fel)),
+        ["Dolby Vision P7 FEL is converted to profile 8.1 for this player, without its enhancement layer."]
+    );
+    assert_eq!(
+        reasons(fire_tv_4k_max(), &p7(DolbyVisionLayer::Mel)),
+        ["Dolby Vision P7 MEL is converted to profile 8.1 for this player."]
+    );
+    assert_eq!(
+        reasons(google_tv_streamer(), &p7(DolbyVisionLayer::Fel)),
+        ["Dolby Vision P7 FEL plays as its HDR10 base layer, repackaged."]
+    );
+}
+
+/// Profile 5 on a Dolby Vision screen whose player doesn't list it: the
+/// screen isn't what's missing.
+#[test]
+fn profile_5_on_a_dolby_vision_screen_without_its_decoder() {
+    let mut caps = fire_tv_4k_max();
+    caps["dolby_vision_profiles"] = json!([{"profile": 8, "max_level": 9}]);
+    let d = play_in(caps, "mkv", &source("P5"));
+    assert_eq!(outcome(&d), "T");
+    // (A transcoder that doesn't keep HDR: SDR.)
+    assert_eq!(d.reasons, ["This player doesn't decode Dolby Vision P5: it's converted to SDR."]);
+    let d = play_in(google_tv_streamer(), "mkv", &source("P5"));
+    assert_eq!(d.reasons, ["Dolby Vision P5 needs a Dolby Vision screen: it's converted to SDR."]);
+}
+
+/// Safari decodes Dolby Vision but opens no Matroska: profile 5 repackaged
+/// would be named plain HEVC and show the wrong colours, so it's converted;
+/// profiles 7 and 8 are repackaged as their base layer.
+#[test]
+fn version_1_profile_5_is_never_repackaged() {
+    let safari = json!({
+        "containers": ["mp4", "m4v", "mov"],
+        "video_codecs": ["h264", "hevc"],
+        "audio_codecs": ["aac", "mp3", "ac3", "eac3"],
+        "hdr": true,
+        "dolby_vision": true
+    });
+    let d = play_in(safari.clone(), "mkv", &source("P5"));
+    assert_eq!(outcome(&d), "T");
+    assert_eq!(
+        d.reasons,
+        [
+            "This player can't open MKV files.",
+            "Dolby Vision P5 can't be repackaged for this player without losing its colours: it's converted to SDR."
+        ]
+    );
+    assert_eq!(outcome(&play_in(safari.clone(), "mp4", &source("P5"))), "D");
+    for row in ["P7", "P8.1", "P8.4"] {
+        assert_eq!(outcome(&play_in(safari.clone(), "mkv", &source(row))), "R", "{row}");
+    }
+}
+
+/// What each player's screen gets, as the player's details say it.
+#[test]
+fn what_the_screen_gets() {
+    let shown = |caps: Value, row: &str| {
+        let info = source(row);
+        // A transcoder that keeps HDR.
+        let mut req = request(caps.clone());
+        req.hdr_transcodes = true;
+        let d = decide(&file("mkv"), Some(&info), &info.streams, &req);
+        let delivery = match (d.method, d.video.as_ref()) {
+            (Method::Direct, _) => Delivery::Direct,
+            (_, Some(v)) if v.mode == VideoMode::Copy => {
+                Delivery::Copy { dolby_vision: v.dolby_vision, hdr10plus_stripped: v.strip_hdr10plus }
+            }
+            (_, Some(v)) => Delivery::Converted(v.dynamic_range.dynamic_range()),
+            _ => unreachable!(),
+        };
+        video_range_shown(&info.streams[0], &request(caps).caps, delivery).unwrap()
+    };
+    #[rustfmt::skip]
+    let hdr10plus_screen = |mut caps: Value| {
+        caps["hdr_types"] = json!(["hdr10", "hdr10plus", "hlg"]);
+        caps
+    };
+    let table: [(&str, Value, [&str; 6]); 5] = [
+        (
+            "Fire TV Stick 4K Max",
+            fire_tv_4k_max(),
+            [
+                "Dolby Vision P5",
+                "Dolby Vision P8.1 (converted from P7)",
+                "Dolby Vision P8.1",
+                "Dolby Vision P8.4",
+                "Dolby Vision P8.1 (HDR10+ left out)",
+                "Dolby Vision P8.1 (converted from P7, HDR10+ left out)",
+            ],
+        ),
+        (
+            "Google TV Streamer",
+            google_tv_streamer(),
+            [
+                "HDR10 (converted from Dolby Vision P5)",
+                "HDR10 (Dolby Vision base layer)",
+                "HDR10 (Dolby Vision base layer)",
+                "HDR10 (converted from Dolby Vision P8.4)",
+                "HDR10 (Dolby Vision base layer)",
+                "HDR10 (Dolby Vision base layer)",
+            ],
+        ),
+        // HDR10 and HLG, no HDR10+.
+        (
+            "Fire TV Stick Lite",
+            fire_tv_lite(),
+            [
+                "HDR10 (converted from Dolby Vision P5)",
+                "HDR10 (Dolby Vision base layer)",
+                "HDR10 (Dolby Vision base layer)",
+                "HLG (Dolby Vision base layer)",
+                "HDR10 (Dolby Vision base layer)",
+                "HDR10 (Dolby Vision base layer)",
+            ],
+        ),
+        // Its screen shows HDR10+.
+        (
+            "Fire TV Stick Lite, HDR10+",
+            hdr10plus_screen(fire_tv_lite()),
+            [
+                "HDR10 (converted from Dolby Vision P5)",
+                "HDR10 (Dolby Vision base layer)",
+                "HDR10 (Dolby Vision base layer)",
+                "HLG (Dolby Vision base layer)",
+                "HDR10+ (Dolby Vision base layer)",
+                "HDR10+ (Dolby Vision base layer)",
+            ],
+        ),
+        (
+            "Chrome",
+            chrome(),
+            [
+                "SDR (tone-mapped)",
+                "HDR10 (Dolby Vision base layer)",
+                "HDR10 (Dolby Vision base layer)",
+                "HLG (Dolby Vision base layer)",
+                "HDR10+ (Dolby Vision base layer)",
+                "HDR10+ (Dolby Vision base layer)",
+            ],
+        ),
+    ];
+    let rows = ["P5", "P7", "P8.1", "P8.4", "P8.1+", "P7+"];
+    for (device, caps, expected) in table {
+        for (row, want) in rows.iter().zip(expected) {
+            assert_eq!(shown(caps.clone(), row), want, "{device}, {row}");
+        }
+    }
+    // HDR10+ and the rest, without Dolby Vision.
+    let plain = |range: DynamicRange| {
+        let mut info = source("P8.1");
+        let v = &mut info.streams[0];
+        (v.dynamic_range, v.dv_profile, v.dv_bl_compat, v.dv_level) = (Some(range), None, None, None);
+        v.hdr10plus = (range == DynamicRange::Hdr10plus).then_some(true);
+        info.streams.remove(0)
+    };
+    let hdr10plus = plain(DynamicRange::Hdr10plus);
+    let caps = |c: Value| request(c).caps;
+    assert_eq!(video_range_shown(&hdr10plus, &caps(fire_tv_4k_max()), Delivery::Direct).unwrap(), "HDR10+");
+    assert_eq!(
+        video_range_shown(&hdr10plus, &caps(google_tv_streamer()), Delivery::Direct).unwrap(),
+        "HDR10 (this screen doesn't show HDR10+)"
+    );
+    // A browser doesn't say: HDR10+ as it is.
+    assert_eq!(video_range_shown(&hdr10plus, &caps(chrome()), Delivery::Direct).unwrap(), "HDR10+");
+    assert_eq!(
+        video_range_shown(&hdr10plus, &caps(fire_tv_lite()), Delivery::Converted(DynamicRange::Hdr10)).unwrap(),
+        "HDR10 (HDR10+ left out)"
+    );
+    assert_eq!(
+        video_range_shown(
+            &plain(DynamicRange::Hlg),
+            &caps(google_tv_streamer()),
+            Delivery::Converted(DynamicRange::Hdr10)
+        )
+        .unwrap(),
+        "HDR10 (converted from HLG)"
+    );
+    assert_eq!(video_range_shown(&plain(DynamicRange::Sdr), &caps(chrome()), Delivery::Direct), None);
+    // Profile 7's layer, where it's kept or converted.
+    let mut fel = source("P7").streams.remove(0);
+    fel.dv_el = Some(DolbyVisionLayer::Fel);
+    assert_eq!(video_range_shown(&fel, &caps(shield()), Delivery::Direct).unwrap(), "Dolby Vision P7 FEL");
+    let to81 = Delivery::Copy { dolby_vision: DolbyVisionMode::To81, hdr10plus_stripped: false };
+    assert_eq!(
+        video_range_shown(&fel, &caps(fire_tv_4k_max()), to81).unwrap(),
+        "Dolby Vision P8.1 (converted from P7 FEL)"
     );
 }
 

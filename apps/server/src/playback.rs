@@ -12,9 +12,9 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use pley_transcoder_api::{
-    AudioCodec, AudioMode, AudioRequest, DolbyVisionMode, DynamicRange, FileContainer, JobRequest, JobStatus,
-    MediaInfo, MediaStream, OutputRange, StreamKind, SubtitleBurnRequest, VideoCodec, VideoMode, VideoRequest,
-    dynamic_range_label,
+    AudioCodec, AudioMode, AudioRequest, DolbyVisionLayer, DolbyVisionMode, DynamicRange, FileContainer, JobRequest,
+    JobStatus, MediaInfo, MediaStream, OutputRange, StreamKind, SubtitleBurnRequest, VideoCodec, VideoMode, VideoPlan,
+    VideoRequest, video_range_label,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
@@ -304,6 +304,10 @@ pub struct PlaybackInfo {
     /// ("30m"…, see [`QUALITIES`]): `None` when a quality was asked for or the
     /// video isn't converted.
     pub auto_quality: Option<String>,
+    /// What the screen gets of HDR video, by name ([`video_range_shown`]):
+    /// "Dolby Vision P8.1", "HDR10 (Dolby Vision base layer)", "SDR
+    /// (tone-mapped)"… `None` for SDR video.
+    pub video_range: Option<String>,
 }
 
 /// The qualities players offer (apps/web/src/player/quality.ts), highest
@@ -488,13 +492,23 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange) -> VideoVerdic
             let hybrid = v.hdr10plus == Some(true);
             // What plays when Dolby Vision itself doesn't: the base layer.
             let compat = v.dv_bl_compat.or((profile == 8).then_some(DV_BL_HDR10));
+            let base_layer = base_layer_name(v, caps);
+            // No base layer to fall back on: a Dolby Vision screen whose
+            // player doesn't decode the profile is told apart from the rest.
+            let needs_dolby_vision = || {
+                if caps.shows("dolby_vision") {
+                    format!("This player doesn't decode {}: it's converted to {out}.", v.dolby_vision_label())
+                } else {
+                    format!("{label} needs a Dolby Vision screen: it's converted to {out}.")
+                }
+            };
             let base = match (profile, compat) {
-                (5, _) => VideoVerdict::no(format!("{label} needs a Dolby Vision screen: it's converted to {out}.")),
+                (5, _) => VideoVerdict::no(needs_dolby_vision()),
                 (7, _) if caps.shows("hdr10") => {
                     let mut base = fits(v, caps);
                     if base.copy {
                         base.direct = false;
-                        base.reasons.push(format!("{label} plays as its HDR10 base layer, repackaged."));
+                        base.reasons.push(format!("{label} plays as its {base_layer} base layer, repackaged."));
                     }
                     base
                 }
@@ -503,7 +517,7 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange) -> VideoVerdic
                 (_, Some(DV_BL_HLG)) if caps.shows("hlg") => fits(v, caps),
                 (_, Some(DV_BL_SDR)) => fits(v, caps),
                 (_, Some(DV_BL_HDR10 | DV_BL_HLG)) => VideoVerdict::no(elsewhere()),
-                _ => VideoVerdict::no(format!("{label} needs a Dolby Vision screen: it's converted to {out}.")),
+                _ => VideoVerdict::no(needs_dolby_vision()),
             };
             match decoder {
                 // Dolby Vision decoders show black, or freeze, when HDR10+
@@ -516,8 +530,8 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange) -> VideoVerdic
                             dolby_vision: DolbyVisionMode::Signal,
                             strip_hdr10plus: true,
                             reasons: vec![format!(
-                                "{label} plays without its HDR10+ metadata, which this player's Dolby Vision \
-                                 decoder can't take with it."
+                                "{label} plays as Dolby Vision without its HDR10+: this player's Dolby Vision \
+                                 decoder can't take both."
                             )],
                         };
                     }
@@ -525,7 +539,7 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange) -> VideoVerdic
                     if base.direct {
                         base.direct = false;
                         base.reasons.push(format!(
-                            "{label} with HDR10+ plays as its base layer, repackaged: this player's Dolby Vision \
+                            "{label} plays as its {base_layer} base layer, repackaged: this player's Dolby Vision \
                              decoder can't take both."
                         ));
                     }
@@ -548,17 +562,140 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange) -> VideoVerdic
                 }
                 // Profile 7 for a player that decodes 8.1: converted while
                 // repackaged (rather than its base layer alone).
-                _ if profile == 7 && signal && decoder_of(8).is_some_and(takes_level) => VideoVerdict {
-                    direct: false,
-                    copy: true,
-                    dolby_vision: DolbyVisionMode::To81,
-                    strip_hdr10plus: hybrid,
-                    reasons: vec![format!("{label} is converted to profile 8.1 for this player.")],
-                },
+                _ if profile == 7 && signal && decoder_of(8).is_some_and(takes_level) => {
+                    // What profile 8.1 can't carry.
+                    let left_out = match (v.dv_el == Some(DolbyVisionLayer::Fel), hybrid) {
+                        (true, true) => ", without its enhancement layer and HDR10+",
+                        (true, false) => ", without its enhancement layer",
+                        (false, true) => ", without its HDR10+",
+                        (false, false) => "",
+                    };
+                    VideoVerdict {
+                        direct: false,
+                        copy: true,
+                        dolby_vision: DolbyVisionMode::To81,
+                        strip_hdr10plus: hybrid,
+                        reasons: vec![format!("{label} is converted to profile 8.1 for this player{left_out}.")],
+                    }
+                }
                 _ => base,
             }
         }
     }
+}
+
+/// What a Dolby Vision stream's base layer shows as on its own: HDR10 (with
+/// its HDR10+, on a screen that shows HDR10+), HLG or SDR.
+fn base_layer_name(v: &MediaStream, caps: &Caps) -> &'static str {
+    match v.dv_bl_compat {
+        Some(DV_BL_HLG) => "HLG",
+        Some(DV_BL_SDR) => "SDR",
+        _ if v.hdr10plus == Some(true) && (caps.shows("hdr10plus") || !caps.is_v2()) => "HDR10+",
+        _ => "HDR10",
+    }
+}
+
+/// How a video reaches the player: as it is, copied into HLS (with what
+/// the remux does with Dolby Vision, and whether it leaves HDR10+ out), or
+/// converted to a dynamic range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delivery {
+    Direct,
+    Copy { dolby_vision: DolbyVisionMode, hdr10plus_stripped: bool },
+    Converted(DynamicRange),
+}
+
+impl Delivery {
+    /// From what the transcoder made of the job's video.
+    pub fn of_plan(plan: &VideoPlan) -> Delivery {
+        if plan.mode == VideoMode::Copy {
+            Delivery::Copy {
+                dolby_vision: plan.dolby_vision.unwrap_or_default(),
+                hdr10plus_stripped: plan.hdr10plus_stripped,
+            }
+        } else {
+            // Transcoders that don't say tone-map HDR to SDR.
+            Delivery::Converted(plan.dynamic_range_out.unwrap_or(DynamicRange::Sdr))
+        }
+    }
+}
+
+/// The player decodes this Dolby Vision stream as Dolby Vision when it
+/// gets it as it is: a version 2 player that lists the profile, at the
+/// stream's level, with a Dolby Vision screen; a version 1 player that
+/// decodes Dolby Vision (single-layer profiles only: none decodes 7's two).
+fn decodes_dolby_vision(v: &MediaStream, caps: &Caps) -> bool {
+    if !caps.is_v2() {
+        return caps.dolby_vision && v.dv_profile != Some(7);
+    }
+    let profile = v.dv_profile.unwrap_or(0);
+    caps.shows("dolby_vision")
+        && caps
+            .dolby_vision_profiles
+            .iter()
+            .flatten()
+            .any(|d| d.profile == profile && v.dv_level.zip(d.max_level).is_none_or(|(level, max)| level <= max))
+}
+
+/// What the screen gets of an HDR video, by name, for the player's details
+/// (`PlaybackInfo::video_range`): "Dolby Vision P8.1", "HDR10 (Dolby Vision
+/// base layer)", "Dolby Vision P8.1 (converted from P7 FEL)", "HDR10 (this
+/// screen doesn't show HDR10+)", "SDR (tone-mapped)"… `None` for SDR video.
+/// Version 1 players don't say which HDR formats their screen shows: their
+/// HDR10+ is named as it is.
+pub fn video_range_shown(v: &MediaStream, caps: &Caps, delivery: Delivery) -> Option<String> {
+    let range = v.dynamic_range();
+    if !range.is_hdr() {
+        return None;
+    }
+    let shows_hdr10plus = caps.shows("hdr10plus") || !caps.is_v2();
+    let dolby_vision = v.dolby_vision_label();
+    let shown = match delivery {
+        Delivery::Converted(DynamicRange::Sdr) => "SDR (tone-mapped)".to_owned(),
+        Delivery::Converted(out) => {
+            let base = range == DynamicRange::DolbyVision
+                && match out {
+                    DynamicRange::Hlg => v.dv_bl_compat == Some(DV_BL_HLG),
+                    _ => !v.is_dolby_vision_only() && !matches!(v.dv_bl_compat, Some(DV_BL_HLG | DV_BL_SDR)),
+                };
+            match (range, out) {
+                (DynamicRange::Hdr10plus, DynamicRange::Hdr10) => "HDR10 (HDR10+ left out)".to_owned(),
+                _ if base => format!("{} (Dolby Vision base layer)", out.label()),
+                (DynamicRange::Hdr10, DynamicRange::Hdr10) | (DynamicRange::Hlg, DynamicRange::Hlg) => {
+                    out.label().to_owned()
+                }
+                _ => format!("{} (converted from {})", out.label(), v.dynamic_range_label()),
+            }
+        }
+        Delivery::Direct | Delivery::Copy { .. } if range != DynamicRange::DolbyVision => match range {
+            DynamicRange::Hdr10plus if !shows_hdr10plus => "HDR10 (this screen doesn't show HDR10+)".to_owned(),
+            other => other.label().to_owned(),
+        },
+        Delivery::Direct if decodes_dolby_vision(v, caps) => {
+            video_range_label(range, v.dv_profile, v.dv_bl_compat, v.dv_el, false)
+        }
+        Delivery::Copy { dolby_vision: DolbyVisionMode::To81, hdr10plus_stripped } => {
+            let from = video_range_label(range, v.dv_profile, v.dv_bl_compat, v.dv_el, false);
+            let from = from.trim_start_matches("Dolby Vision ");
+            let stripped = if hdr10plus_stripped { ", HDR10+ left out" } else { "" };
+            format!("Dolby Vision P8.1 (converted from {from}{stripped})")
+        }
+        Delivery::Copy { dolby_vision: DolbyVisionMode::Signal, hdr10plus_stripped } => {
+            let kept = video_range_label(range, v.dv_profile, v.dv_bl_compat, v.dv_el, false);
+            if hdr10plus_stripped { format!("{kept} (HDR10+ left out)") } else { kept }
+        }
+        // Dolby Vision unnamed, or not decoded: the base layer.
+        Delivery::Direct | Delivery::Copy { .. } => {
+            if v.is_dolby_vision_only() {
+                // No base layer of its own: only a direct play the player
+                // insisted on gets here.
+                format!("{dolby_vision} not decoded (wrong colours)")
+            } else {
+                format!("{} (Dolby Vision base layer)", base_layer_name(v, caps))
+            }
+        }
+    };
+    Some(shown)
 }
 
 /// What a version 2 player gets when its HDR video is converted (docs/API.md,
@@ -853,6 +990,16 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
                 ok = false;
             }
             video_copy_ok = ok;
+            // Version 1 remuxes never name Dolby Vision, and a stream with
+            // no base layer of its own shows the wrong colours unnamed: it
+            // plays only as it is, else converted.
+            if ok && v.is_dolby_vision_only() {
+                video_copy_ok = false;
+                reasons.push(format!(
+                    "{} can't be repackaged for this player without losing its colours: it's converted to SDR.",
+                    v.dynamic_range_label()
+                ));
+            }
             ok
         }
     };
@@ -1678,7 +1825,7 @@ pub fn transcode_info(job: &JobStatus) -> TranscodeInfo {
         let mut s = format!("{} {}×{}", codec_label(&v.codec_in), v.width_in.unwrap_or(0), v.height_in.unwrap_or(0));
         if v.dynamic_range_in.is_hdr() {
             s.push(' ');
-            s.push_str(&dynamic_range_label(v.dynamic_range_in, v.dv_profile, v.dv_bl_compat));
+            s.push_str(&v.range_in_label());
         }
         s
     });
@@ -1726,7 +1873,12 @@ pub fn transcode_info(job: &JobStatus) -> TranscodeInfo {
         preset: process.and_then(|p| p.preset.clone()),
         decoder: video.and_then(|v| v.decoder.clone()),
         pipeline: video.and_then(|v| v.pipeline.clone()),
-        tonemap: video.and_then(|v| v.tonemap).map(|t| t.as_str().to_owned()),
+        // Only for SDR out: libplacebo also converts between HDR formats
+        // (HLG to HDR10), which keeps the video HDR.
+        tonemap: video
+            .filter(|v| !v.dynamic_range_out.is_some_and(|r| r.is_hdr()))
+            .and_then(|v| v.tonemap)
+            .map(|t| t.as_str().to_owned()),
         dolby_vision: video.and_then(|v| v.dolby_vision).and_then(|m| match m {
             DolbyVisionMode::Copy => None,
             DolbyVisionMode::Signal => Some("kept"),
@@ -2329,6 +2481,18 @@ mod tests {
         let running =
             JobStatus { process: Some(ProcessStatus { out_time_ms: 30_500, ..Default::default() }), ..job.clone() };
         assert_eq!(transcode_info(&running).transcoded_ms, 30_500);
+        // Profile 7's layer and HDR10+ are named; the tone mapper only when
+        // the video comes out SDR (libplacebo also turns HLG into HDR10).
+        let mut plan = job.video.clone().unwrap();
+        (plan.dv_profile, plan.dv_bl_compat, plan.dv_el, plan.hdr10plus) =
+            (Some(7), Some(6), Some(pley_transcoder_api::DolbyVisionLayer::Fel), true);
+        plan.tonemap = Some(pley_transcoder_api::Tonemapper::Libplacebo);
+        let with = |plan: VideoPlan| transcode_info(&JobStatus { video: Some(plan), ..job.clone() });
+        let p7 = with(plan.clone());
+        assert_eq!(p7.video_in.as_deref(), Some("HEVC 3840×2160 Dolby Vision P7 FEL + HDR10+"));
+        assert_eq!(p7.tonemap.as_deref(), Some("libplacebo"));
+        plan.dynamic_range_out = Some(DynamicRange::Hdr10);
+        assert_eq!(with(plan).tonemap, None);
         assert_eq!(transcode_info(&JobStatus { video: None, audio: None, ..job }).video, "none");
         assert_eq!(channel_label(6), "5.1");
         assert_eq!(channel_label(4), "4ch");

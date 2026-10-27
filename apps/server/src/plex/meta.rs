@@ -784,9 +784,18 @@ fn stream_node(file: &FileRow, s: &MediaStream, default_audio: Option<i64>) -> N
             let range = s.dynamic_range();
             let range_label = match range {
                 DynamicRange::Sdr => None,
-                DynamicRange::DolbyVision => {
-                    Some(format!("DoVi/{}", if s.is_dolby_vision_only() { "None" } else { "HDR10" }))
-                }
+                // What the base layer shows without Dolby Vision, as Plex
+                // names it.
+                DynamicRange::DolbyVision => Some(format!(
+                    "DoVi/{}",
+                    match s.dv_bl_compat {
+                        _ if s.is_dolby_vision_only() => "None",
+                        Some(4) => "HLG",
+                        Some(2) => "SDR",
+                        _ if s.hdr10plus == Some(true) => "HDR10+",
+                        _ => "HDR10",
+                    }
+                )),
                 other => Some(other.label().to_owned()),
             };
             let mut display = res.clone().unwrap_or_default();
@@ -814,6 +823,7 @@ fn stream_node(file: &FileRow, s: &MediaStream, default_audio: Option<i64>) -> N
                     .opt("DOVILevel", s.dv_level)
                     .opt("DOVIBLCompatID", s.dv_bl_compat)
                     .attr("DOVIBLPresent", true)
+                    .attr("DOVIELPresent", s.dv_profile == Some(7))
                     .attr("DOVIRPUPresent", true);
             }
         }

@@ -253,12 +253,18 @@ interface MediaStream {
   frame_rate?: number;
   bit_depth?: number;
   hdr?: boolean;
-  dynamic_range?: "sdr" | "hdr10" | "hdr10plus" | "hlg" | "dolby_vision";
+  dynamic_range?: "sdr" | "hdr10" | "hdr10plus" | "hlg" | "dolby_vision"; // "hdr10plus": PQ with HDR10+ in its frames
   dv_profile?: number;              // Dolby Vision profile (5, 7, 8, …)
-  dv_bl_compat?: number;            // DV base-layer compatibility id (1 = HDR10, 4 = HLG, 0 = none)
+  dv_bl_compat?: number;            // DV base-layer compatibility id (1 = HDR10, 2 = SDR, 4 = HLG, 6 = Blu-ray HDR10
+                                    // (profile 7), 0 = none)
+  dv_el?: "fel" | "mel";            // profile 7's enhancement layer: full (picture data) or minimal (absent: not known)
   decode_order_times?: boolean;     // frames timed as they're decoded, not as they're shown: the video is converted
   dv_level?: number;                // Dolby Vision level
-  hdr10plus?: boolean;              // Dolby Vision streams: HDR10+ in the first frames too (absent: not looked for)
+  hdr10plus?: boolean;              // Dolby Vision and PQ streams: HDR10+ in the first frames (absent: not looked for).
+                                    // On Dolby Vision, true is Dolby Vision + HDR10+
+  // How clients name the format, the same everywhere: "Dolby Vision P8.1", "Dolby Vision P8.4", "Dolby Vision P5",
+  // "Dolby Vision P7 FEL" (or MEL; "P7" when not known: never "P7.6"), "Dolby Vision P8.1 + HDR10+", "HDR10+",
+  // "HDR10", "HLG"; badges shorten "Dolby Vision" to "DV".
   profile?: string;
   // audio
   channels?: number;
@@ -305,6 +311,13 @@ interface PlaybackInfo {
   reason: string | null;            // the same in one line
   auto_quality: string | null;      // the original converted: the closest quality players offer ("30m" = 30 Mbps 4K,
                                     // "20m", "15m" = 15 Mbps 4K, "12m", "8m", "4m", "2m"); null when a quality was asked for
+  video_range: string | null;       // what the screen gets of HDR video, for the player's details (null for SDR):
+                                    // "Dolby Vision P8.1", "Dolby Vision P7 FEL", "HDR10+", "HLG",
+                                    // "HDR10 (Dolby Vision base layer)", "HDR10+ (Dolby Vision base layer)",
+                                    // "Dolby Vision P8.1 (converted from P7 FEL)", "Dolby Vision P8.1 (HDR10+ left out)",
+                                    // "HDR10 (this screen doesn't show HDR10+)", "HDR10 (converted from HLG)",
+                                    // "SDR (tone-mapped)". Version 1 players don't say which HDR formats their
+                                    // screen shows: their HDR10+ is named as it is
 }
 ```
 
@@ -1199,7 +1212,9 @@ stream copied) or **transcode** (HLS, H.264/AAC).
 - HDR10 and HLG need `caps.hdr`. Dolby Vision profile 5 needs
   `caps.dolby_vision`; profiles 7 and 8 play directly with either, because their
   base layer is HDR10 (8.1) or HLG (8.4). Otherwise the video is tone-mapped to
-  SDR. (This is version 1. Media3, which the Android app plays with, has no
+  SDR. Profile 5 plays only as it is: version 1 remuxes never name Dolby
+  Vision, and unnamed it shows the wrong colours, so a profile 5 file that
+  needs repackaging (Safari and Matroska) is converted instead. (This is version 1. Media3, which the Android app plays with, has no
   fallback for profile 7: version 2 below decides it differently.)
 - Converted audio is stereo AAC; AAC and MP3 the player decodes are copied.
 - `mode: "direct"` always returns the original file (useful when a browser plays
@@ -1392,15 +1407,17 @@ For those players, the Dolby Vision rules of version 2 become:
   layer is left out and each RPU rewritten (no residual, no enhancement
   layer resampling, P8.1 colour coefficients; a full enhancement layer's
   curves become no-ops), as `dovi_tool`'s mode 2 does. The reason says
-  "Dolby Vision P7 is converted to profile 8.1 for this player." Profile 8
-  must take the stream's level; otherwise the HDR10 base layer, as before.
+  "Dolby Vision P7 is converted to profile 8.1 for this player.", with
+  ", without its enhancement layer" for a full one (`dv_el: "fel"`, whose
+  12-bit detail is lost). Profile 8 must take the stream's level; otherwise
+  the HDR10 base layer, as before.
 - **Dolby Vision + HDR10+** (`hdr10plus: true` on the stream, found when the
   file is analysed) never plays as it is for a player that would decode it
   as Dolby Vision, on any model: Dolby Vision decoders show black or freeze
   with HDR10+ in the stream (androidx/media#1895). It is repackaged with the
-  HDR10+ messages taken out and Dolby Vision kept ("…plays without its
-  HDR10+ metadata…"); without a master playlist, as its base layer with
-  HDR10+ ("…plays as its base layer, repackaged…"). Players without Dolby
+  HDR10+ messages taken out and Dolby Vision kept ("…plays as Dolby Vision
+  without its HDR10+…"); without a master playlist, as its base layer with
+  HDR10+ ("…plays as its HDR10+ base layer, repackaged…"). Players without Dolby
   Vision play these files as before. Files analysed by older servers don't
   say: they play as before until a forced scan of their library analyses
   them again.
@@ -1615,7 +1632,7 @@ interface TranscodeInfo {
   state: "starting" | "running" | "idle" | "finished" | "failed";
   video: "copy" | "transcode" | "none";
   audio: "copy" | "transcode" | "none";
-  video_in: string | null;      // e.g. "HEVC 3840×2160 Dolby Vision P8.1"
+  video_in: string | null;      // e.g. "HEVC 3840×2160 Dolby Vision P8.1", "… Dolby Vision P7 FEL", "… HDR10+"
   video_out: string | null;     // e.g. "H.264 1920×1080"; "HEVC 3840×2160 HDR10" when HDR is kept
   audio_in: string | null;      // e.g. "EAC3 5.1"
   audio_out: string | null;     // e.g. "AAC 2.0"
