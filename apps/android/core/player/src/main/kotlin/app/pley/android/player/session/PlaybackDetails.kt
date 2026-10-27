@@ -1,6 +1,5 @@
 package app.pley.android.player.session
 
-import app.pley.android.model.DynamicRange
 import app.pley.android.model.MediaFile
 import app.pley.android.model.MediaStream
 import app.pley.android.model.PlaybackInfo
@@ -9,6 +8,7 @@ import app.pley.android.model.StreamAction
 import app.pley.android.model.StreamKind
 import app.pley.android.model.TranscodeInfo
 import app.pley.android.model.format.codecLabel
+import app.pley.android.model.format.dynamicRangeLabel
 import app.pley.android.model.format.formatBitrate
 import app.pley.android.model.format.resolutionLabel
 import app.pley.android.player.DetailRow
@@ -35,22 +35,20 @@ object PlaybackDetails {
 
     private val PIPELINE = mapOf("gpu" to "GPU", "hybrid" to "GPU and CPU", "cpu" to "CPU", "copy" to "copy")
 
-    private val RANGE = mapOf(
-        DynamicRange.DolbyVision to "Dolby Vision",
-        DynamicRange.Hdr10Plus to "HDR10+",
-        DynamicRange.Hdr10 to "HDR10",
-        DynamicRange.Hlg to "HLG",
-    )
-
-    /** A video stream as "HEVC 4K Dolby Vision P8.1". */
+    /** A video stream as "HEVC 4K Dolby Vision P8.1", "HEVC 4K Dolby Vision P7 FEL". */
     fun videoLabel(v: MediaStream?): String {
         if (v == null) return ""
-        var range = v.dynamicRange?.let { RANGE[it] }.orEmpty()
-        if (v.dynamicRange == DynamicRange.DolbyVision && v.dvProfile != null) {
-            range += " P${v.dvProfile}" + (v.dvBlCompat?.takeIf { it != 0 }?.let { ".$it" } ?: "")
-        }
+        val range = dynamicRangeLabel(v).orEmpty()
         return listOf(codecLabel(v.codec), resolutionLabel(v.width, v.height).orEmpty(), range).filter { it.isNotEmpty() }.joinToString(" ")
     }
+
+    /**
+     * What the screen gets of HDR video: the live transcode's tone mapping
+     * when there is one, else what the server said ("HDR10 (Dolby Vision
+     * base layer)"), else `null` (SDR video, or an older server).
+     */
+    fun shownAs(texts: PlayerTexts, info: PlaybackInfo, live: TranscodeInfo?): String? =
+        live?.tonemap?.let { texts.toneMapped(it) } ?: info.videoRange
 
     /** An audio stream as "TrueHD 7.1". */
     fun audioLabel(a: MediaStream?): String {
@@ -122,7 +120,7 @@ object PlaybackDetails {
             if (audio != null) add(DetailRow(texts.rowAudio, audioRow))
             if (bitrateRow.isNotEmpty()) add(DetailRow(texts.rowBitrate, bitrateRow))
             if (transcode?.video == StreamAction.Transcode && transcode.encoder != null) add(DetailRow(texts.rowEncoder, encoderLabel(transcode)))
-            transcode?.tonemap?.let { add(DetailRow(texts.rowHdr, texts.toneMapped(it))) }
+            if (video != null) shownAs(texts, info, transcode)?.let { add(DetailRow(texts.rowHdr, it)) }
             if (transcode?.subtitleBurn == true) add(DetailRow(texts.rowSubtitles, texts.burnedIn))
             transcode?.speed?.takeIf { it > 0 }?.let { add(DetailRow(texts.rowSpeed, texts.speed(String.format(Locale.ROOT, "%.1f", it), ahead))) }
         }

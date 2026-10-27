@@ -8,6 +8,7 @@ import app.pley.android.model.PlaybackMethod
 import app.pley.android.model.StreamAction
 import app.pley.android.model.StreamKind
 import app.pley.android.model.TranscodeInfo
+import app.pley.android.player.DetailRow
 import app.pley.android.player.PlaybackDetailsUi
 import app.pley.android.player.SubtitleDelivery
 import app.pley.android.player.engine.PlaybackStats
@@ -100,6 +101,28 @@ class TvReadoutTest {
         assertEquals("Off, Dolby Vision shown as SDR", TvReadout.hdrOutput(r, stats, sdrScreen))
         assertEquals("Off, the video is SDR", TvReadout.hdrOutput(r, stats.copy(dynamicRange = "SDR"), sdrScreen))
         assertEquals("On (HLG)", TvReadout.hdrOutput(r, stats.copy(dynamicRange = "HLG"), sdrScreen.copy(hdrTypes = listOf(Display.HdrCapabilities.HDR_TYPE_HLG))))
+    }
+
+    @Test
+    fun `HDR output names HDR10+ where the screen takes it`() {
+        val pq = stats.copy(dynamicRange = "HDR10")
+        val hdr10plusScreen = DisplayNow(3840, 2160, 23.976f, listOf(Display.HdrCapabilities.HDR_TYPE_HDR10, Display.HdrCapabilities.HDR_TYPE_HDR10_PLUS))
+        val hdr10Screen = hdr10plusScreen.copy(hdrTypes = listOf(Display.HdrCapabilities.HDR_TYPE_HDR10))
+        // The decoder says HDR10 for both: the stream tells HDR10+ apart.
+        assertEquals("On (HDR10+)", TvReadout.hdrOutput(r, pq, hdr10plusScreen, hdr10plus = true))
+        assertEquals("On (HDR10)", TvReadout.hdrOutput(r, pq, hdr10Screen, hdr10plus = true))
+        assertEquals("On (HDR10)", TvReadout.hdrOutput(r, pq, hdr10plusScreen))
+    }
+
+    @Test
+    fun `the panel names profile 7's layer, HDR10+ with Dolby Vision, and what the screen gets`() {
+        val p7 = video.copy(dvProfile = 7, dvBlCompat = 6, dvEl = "fel", hdr10plus = true)
+        val d = details().copy(video = p7, file = file.copy(streams = listOf(p7, audio, srt)), rows = listOf(DetailRow("Shown as", "HDR10+ (Dolby Vision base layer)")))
+        val s = facts(ReadoutInput(d, stats))
+        val v = s.getValue("Video")
+        assertEquals("Dolby Vision P7 FEL + HDR10+", v["HDR"])
+        assertEquals("Profile 7 · Level 6 · Blu-ray HDR10-compatible base layer · full enhancement layer", v["Dolby Vision"])
+        assertEquals("HDR10+ (Dolby Vision base layer)", s.getValue("How it plays")["Shown as"])
     }
 
     @Test

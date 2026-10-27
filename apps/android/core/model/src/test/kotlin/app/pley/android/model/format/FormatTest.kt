@@ -261,12 +261,27 @@ class FormatTest {
         assertEquals("HDR", dynamicRangeLabel(null, hdr = true))
         assertNull(dynamicRangeLabel(null, hdr = false))
         assertNull(dynamicRangeLabel(null as MediaStream?))
-        assertEquals("Dolby Vision P7", dynamicRangeBadge(DynamicRange.DolbyVision, 7))
-        assertEquals("Dolby Vision", dynamicRangeBadge(DynamicRange.DolbyVision))
-        assertEquals("HDR", dynamicRangeBadge(null, hdr = true))
-        assertNull(dynamicRangeBadge(DynamicRange.Sdr))
+        // Profile 7's base layer (Blu-ray, compatibility 6) isn't named: never "P7.6".
+        assertEquals("Dolby Vision P7", dynamicRangeLabel(DynamicRange.DolbyVision, 7, 6))
+        assertEquals("Dolby Vision P7 FEL", dynamicRangeLabel(DynamicRange.DolbyVision, 7, 6, dvEl = "fel"))
+        assertEquals("Dolby Vision P7 MEL", dynamicRangeLabel(DynamicRange.DolbyVision, 7, 6, dvEl = "mel"))
+        assertEquals("Dolby Vision P8.1 + HDR10+", dynamicRangeLabel(DynamicRange.DolbyVision, 8, 1, hdr10plus = true))
         assertEquals("DV P8.1", dynamicRangeShort(DynamicRange.DolbyVision, 8, 1))
+        assertEquals("DV P7", dynamicRangeShort(DynamicRange.DolbyVision, 7, 6))
+        assertEquals("DV P7 FEL", dynamicRangeShort(DynamicRange.DolbyVision, 7, 6, dvEl = "fel"))
         assertEquals("DV", dynamicRangeShort(DynamicRange.DolbyVision))
+        assertEquals("HDR", dynamicRangeShort(null, hdr = true))
+        assertNull(dynamicRangeShort(DynamicRange.Sdr))
+    }
+
+    @Test
+    fun dolbyVisionWithHdr10PlusTakesBothBadges() {
+        val hybrid = stream(range = DynamicRange.DolbyVision, dvProfile = 8, dvBlCompat = 1).copy(hdr10plus = true)
+        assertEquals(listOf("DV P8.1", "HDR10+"), dynamicRangeBadges(hybrid))
+        assertEquals("Dolby Vision P8.1 + HDR10+", dynamicRangeLabel(hybrid))
+        assertEquals(listOf("DV P8.1"), dynamicRangeBadges(hybrid.copy(hdr10plus = false)))
+        assertEquals(listOf("HDR10+"), dynamicRangeBadges(stream(range = DynamicRange.Hdr10Plus).copy(hdr10plus = true)))
+        assertEquals(emptyList<String>(), dynamicRangeBadges(null))
     }
 
     @Test

@@ -150,6 +150,12 @@ data class PlaybackInfo(
      * "2m"); `null` when a quality was asked for.
      */
     val autoQuality: String? = null,
+    /**
+     * What the screen gets of HDR video, by name: "Dolby Vision P8.1",
+     * "HDR10 (Dolby Vision base layer)", "Dolby Vision P8.1 (converted from
+     * P7 FEL)", "SDR (tone-mapped)"… `null` for SDR video and older servers.
+     */
+    val videoRange: String? = null,
 )
 
 /** A transcode job's state (packages/transcoder-api, `JobState`). */

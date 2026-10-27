@@ -21,6 +21,7 @@ import app.pley.android.player.PlayRequest
 import app.pley.android.player.SubtitleDelivery
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -109,6 +110,29 @@ class PiecesTest {
         val fallback = PlaybackDetails.build(texts, info.copy(method = PlaybackMethod.Transcode, audioConverted = false), file, null, "The original didn't play smoothly on this device.", 0, null, emptyList())
         assertEquals("The original didn't play smoothly on this device.", fallback.why)
         assertEquals("HEVC 4K Dolby Vision P8.1 → …", fallback.rows.first().value)
+    }
+
+    @Test
+    fun `the details name Dolby Vision as the server does, and say what the screen gets`() {
+        val p7 = MediaStream(0, StreamKind.Video, "hevc", width = 3840, height = 2160, dynamicRange = DynamicRange.DolbyVision, dvProfile = 7, dvBlCompat = 6)
+        // Profile 7's base layer isn't named: never "P7.6".
+        assertEquals("HEVC 4K Dolby Vision P7", PlaybackDetails.videoLabel(p7))
+        assertEquals("HEVC 4K Dolby Vision P7 FEL", PlaybackDetails.videoLabel(p7.copy(dvEl = "fel")))
+        assertEquals("HEVC 4K Dolby Vision P8.1 + HDR10+", PlaybackDetails.videoLabel(p7.copy(dvProfile = 8, dvBlCompat = 1, hdr10plus = true)))
+
+        val file = MediaFile(id = 1, path = "a.mkv", streams = listOf(p7))
+        val info = PlaybackInfo("s", PlaybackMethod.Direct, "/x", false, 1, videoRange = "HDR10 (Dolby Vision base layer)")
+        val direct = PlaybackDetails.build(texts, info, file, null, null, 0, null, emptyList())
+        assertEquals("HDR10 (Dolby Vision base layer)", direct.rows.first { it.label == "Shown as" }.value)
+        // A live transcode that tone-maps says with what.
+        val transcode = info.copy(method = PlaybackMethod.Transcode, hls = true, videoRange = "SDR (tone-mapped)")
+        val live = TranscodeInfo("j", video = StreamAction.Transcode, videoOut = "H.264 1920×1080", tonemap = "libplacebo")
+        val converted = PlaybackDetails.build(texts, transcode, file, null, null, 0, live, emptyList())
+        assertEquals("SDR (tone-mapped with libplacebo)", converted.rows.first { it.label == "Shown as" }.value)
+        assertEquals("HEVC 4K Dolby Vision P7 → H.264 1080p SDR", converted.rows.first().value)
+        // SDR video: no such row.
+        val sdr = PlaybackDetails.build(texts, info.copy(videoRange = null), file.copy(streams = listOf(p7.copy(dynamicRange = DynamicRange.Sdr))), null, null, 0, null, emptyList())
+        assertTrue(sdr.rows.none { it.label == "Shown as" })
     }
 
     @Test

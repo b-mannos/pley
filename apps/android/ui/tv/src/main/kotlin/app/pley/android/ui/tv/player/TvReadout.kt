@@ -175,7 +175,7 @@ internal object TvReadout {
             }
             if (stats != null) {
                 stats.videoDecoder?.let { add(MediaFact(r.getString(R.string.tv_readout_decoder), it + hardware(r, stats.videoDecoderHardware))) }
-                input.display?.let { add(MediaFact(r.getString(R.string.tv_player_info_display), displayMode(r, it) + " · " + (hdrShown(stats, it) ?: "SDR"))) }
+                input.display?.let { add(MediaFact(r.getString(R.string.tv_player_info_display), displayMode(r, it) + " · " + (hdrShown(stats, it, carriesHdr10Plus(input)) ?: "SDR"))) }
                 add(MediaFact(r.getString(R.string.tv_readout_dropped_short), r.getString(R.string.tv_player_info_dropped_value, stats.droppedFrames, stats.renderedFrames + stats.droppedFrames)))
                 val buffer = r.getString(R.string.tv_readout_buffer_compact, (input.bufferedMs / 1000).toInt())
                 add(MediaFact(r.getString(R.string.tv_readout_buffer_short), buffer + (stats.bandwidth?.let { " · " + formatBitrate(it) } ?: "")))
@@ -218,7 +218,7 @@ internal object TvReadout {
         input.display?.let { display ->
             val mode = displayMode(r, display) + " · " + r.getString(if (stats.displayModeId != null) R.string.tv_player_info_display_switched else R.string.tv_player_info_display_kept)
             add(MediaFact(r.getString(R.string.tv_player_info_display), mode))
-            add(MediaFact(r.getString(R.string.tv_readout_hdr_output), hdrOutput(r, stats, display)))
+            add(MediaFact(r.getString(R.string.tv_readout_hdr_output), hdrOutput(r, stats, display, carriesHdr10Plus(input))))
         }
         stats.audioDecoder?.takeIf { !stats.passthrough }?.let { add(MediaFact(r.getString(R.string.tv_player_info_audio_decoder), it)) }
         add(MediaFact(r.getString(R.string.tv_player_info_dropped), r.getString(R.string.tv_player_info_dropped_value, stats.droppedFrames, stats.renderedFrames + stats.droppedFrames)))
@@ -264,23 +264,35 @@ internal object TvReadout {
      * "Off, Dolby Vision shown as SDR", "Off, the video is SDR". Dolby
      * Vision with a base layer falls back to HDR10 where the display takes that.
      */
-    fun hdrOutput(r: Resources, stats: PlaybackStats, d: DisplayNow): String {
+    fun hdrOutput(r: Resources, stats: PlaybackStats, d: DisplayNow, hdr10plus: Boolean = false): String {
         val range = stats.dynamicRange?.takeIf { it in HDR_RANGES } ?: return r.getString(R.string.tv_readout_hdr_sdr)
-        val shown = hdrShown(stats, d)
+        val shown = hdrShown(stats, d, hdr10plus)
         return if (shown != null) r.getString(R.string.tv_readout_hdr_on, shown) else r.getString(R.string.tv_readout_hdr_unsupported, range)
     }
 
-    /** The HDR the display shows the video in: its own, HDR10 for Dolby Vision's base layer, or `null` (SDR). */
-    private fun hdrShown(stats: PlaybackStats, d: DisplayNow): String? = when (val range = stats.dynamicRange) {
+    /**
+     * The HDR the display shows the video in: its own, HDR10 for Dolby
+     * Vision's base layer, HDR10+ for PQ video that carries it ([hdr10plus]:
+     * the decoder says HDR10 either way) on a display that takes HDR10+, or
+     * `null` (SDR).
+     */
+    private fun hdrShown(stats: PlaybackStats, d: DisplayNow, hdr10plus: Boolean = false): String? = when (val range = stats.dynamicRange) {
         "Dolby Vision" -> when {
             Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION in d.hdrTypes -> range
             Display.HdrCapabilities.HDR_TYPE_HDR10 in d.hdrTypes -> "HDR10"
             else -> null
         }
-        "HDR10" -> range.takeIf { Display.HdrCapabilities.HDR_TYPE_HDR10 in d.hdrTypes || Display.HdrCapabilities.HDR_TYPE_HDR10_PLUS in d.hdrTypes }
+        "HDR10" -> when {
+            hdr10plus && Display.HdrCapabilities.HDR_TYPE_HDR10_PLUS in d.hdrTypes -> "HDR10+"
+            Display.HdrCapabilities.HDR_TYPE_HDR10 in d.hdrTypes || Display.HdrCapabilities.HDR_TYPE_HDR10_PLUS in d.hdrTypes -> range
+            else -> null
+        }
         "HLG" -> range.takeIf { Display.HdrCapabilities.HDR_TYPE_HLG in d.hdrTypes }
         else -> null
     }
+
+    /** The stream playing carries HDR10+ (alone, or with Dolby Vision). */
+    private fun carriesHdr10Plus(input: ReadoutInput): Boolean = input.details?.video?.hdr10plus == true
 
     private val HDR_RANGES = setOf("Dolby Vision", "HDR10", "HLG")
 

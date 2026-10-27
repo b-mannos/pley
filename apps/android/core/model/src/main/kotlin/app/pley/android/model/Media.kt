@@ -80,12 +80,14 @@ data class MediaStream(
     /** Dolby Vision profile: 5, 7, 8… */
     val dvProfile: Int? = null,
     val dvLevel: Int? = null,
-    /** Dolby Vision base-layer compatibility: 0 none, 1 HDR10, 2 SDR, 4 HLG. */
+    /** Dolby Vision base-layer compatibility: 0 none, 1 HDR10, 2 SDR, 4 HLG, 6 Blu-ray HDR10 (profile 7). */
     val dvBlCompat: Int? = null,
+    /** Profile 7's enhancement layer: "fel" (full) or "mel" (minimal); `null` when not known. */
+    val dvEl: String? = null,
     /**
-     * HDR10+ metadata in a Dolby Vision stream's first frames: `true` is a
-     * Dolby Vision + HDR10+ stream; `null` when not looked for (other
-     * streams, or an older server).
+     * HDR10+ metadata in a Dolby Vision or PQ stream's first frames: `true`
+     * on a Dolby Vision stream is Dolby Vision + HDR10+; `null` when not
+     * looked for (other streams, or an older server).
      */
     val hdr10plus: Boolean? = null,
     /** "smpte2084", "arib-std-b67", "bt709"… */

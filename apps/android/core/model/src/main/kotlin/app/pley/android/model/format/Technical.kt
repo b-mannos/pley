@@ -109,17 +109,20 @@ fun dolbyVisionDetails(s: MediaStream): String? {
         compat == 0 -> "no compatible base layer"
         else -> dvCompatLabel(compat)?.let { "$it-compatible base layer" }
     }
-    return listOfNotNull(profile, s.dvLevel?.takeIf { it > 0 }?.let { "Level $it" }, base).joinToString(" · ").ifEmpty { null }
+    val layer = when (s.dvEl?.takeIf { s.dvProfile == 7 }) {
+        "fel" -> "full enhancement layer"
+        "mel" -> "minimal enhancement layer"
+        else -> null
+    }
+    return listOfNotNull(profile, s.dvLevel?.takeIf { it > 0 }?.let { "Level $it" }, base, layer)
+        .joinToString(" · ").ifEmpty { null }
 }
 
 /**
- * The HDR format of a video stream: "Dolby Vision P8.1 + HDR10+",
- * "HDR10+", "HDR10", "HLG", or "SDR".
+ * The HDR format of a video stream: "Dolby Vision P8.1 + HDR10+", "Dolby
+ * Vision P7 FEL", "HDR10+", "HDR10", "HLG", or "SDR".
  */
-fun hdrFormatLabel(s: MediaStream): String {
-    val range = dynamicRangeLabel(s) ?: return "SDR"
-    return if (s.hdr10plus == true && s.dynamicRange == DynamicRange.DolbyVision) "$range + HDR10+" else range
-}
+fun hdrFormatLabel(s: MediaStream): String = dynamicRangeLabel(s) ?: "SDR"
 
 /** "3840×2160 (4K)"; `null` without a size. */
 fun dimensionsLabel(width: Int?, height: Int?): String? {

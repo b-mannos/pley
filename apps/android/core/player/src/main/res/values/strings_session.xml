@@ -51,11 +51,11 @@
     <string name="session_row_audio">Audio</string>
     <string name="session_row_bitrate">Bitrate</string>
     <string name="session_row_encoder">Encoder</string>
-    <string name="session_row_hdr">HDR</string>
+    <string name="session_row_hdr">Shown as</string>
     <string name="session_row_subtitles">Subtitles</string>
     <string name="session_row_speed">Speed</string>
     <!-- "Tone mapped to SDR (libplacebo)". -->
-    <string name="session_tone_mapped">Tone mapped to SDR (%1$s)</string>
+    <string name="session_tone_mapped">SDR (tone-mapped with %1$s)</string>
     <string name="session_burned_in">Drawn onto the video</string>
     <!-- "2.5× real time". -->
     <string name="session_speed">%1$s× real time</string>

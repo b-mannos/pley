@@ -78,15 +78,24 @@ fun resolutionBadge(width: Int?, height: Int?): String? {
 }
 
 /**
- * "Dolby Vision P8.1" (the profile, and its base layer when it has one),
- * "HDR10+", "HDR10", "HLG", "HDR" (an older server's flag), or `null` for SDR.
+ * "Dolby Vision P8.1" (the profile, and its base layer's compatibility from
+ * profile 8 on: profile 7's is always Blu-ray HDR10, never "P7.6"), "Dolby
+ * Vision P7 FEL" (or MEL) with [dvEl], "+ HDR10+" with [hdr10plus], "HDR10+",
+ * "HDR10", "HLG", "HDR" (an older server's flag), or `null` for SDR: the
+ * server's names (docs/API.md, MediaStream), as the web and the TV apps say.
  */
-fun dynamicRangeLabel(range: DynamicRange?, dvProfile: Int? = null, dvBlCompat: Int? = null, hdr: Boolean? = null): String? =
+fun dynamicRangeLabel(
+    range: DynamicRange?,
+    dvProfile: Int? = null,
+    dvBlCompat: Int? = null,
+    hdr: Boolean? = null,
+    dvEl: String? = null,
+    hdr10plus: Boolean? = null,
+): String? =
     when (range) {
-        DynamicRange.DolbyVision -> when (dvProfile) {
-            null -> "Dolby Vision"
-            else -> "Dolby Vision P$dvProfile" + (dvBlCompat?.takeIf { it > 0 }?.let { ".$it" } ?: "")
-        }
+        DynamicRange.DolbyVision ->
+            "Dolby Vision" + (dolbyVisionProfile(dvProfile, dvBlCompat, dvEl)?.let { " $it" } ?: "") +
+                (if (hdr10plus == true) " + HDR10+" else "")
         DynamicRange.Hdr10Plus -> "HDR10+"
         DynamicRange.Hdr10 -> "HDR10"
         DynamicRange.Hlg -> "HLG"
@@ -94,19 +103,40 @@ fun dynamicRangeLabel(range: DynamicRange?, dvProfile: Int? = null, dvBlCompat: 
         else -> if (hdr == true) "HDR" else null
     }
 
-/** [dynamicRangeLabel] of a video stream. */
-fun dynamicRangeLabel(stream: MediaStream?): String? =
-    stream?.let { dynamicRangeLabel(it.dynamicRange, it.dvProfile, it.dvBlCompat, it.hdr) }
-
-/** The web's badge: "Dolby Vision P7" (no base layer), "HDR10+", "HDR10", "HLG", "HDR", or `null`. */
-fun dynamicRangeBadge(range: DynamicRange?, dvProfile: Int? = null, hdr: Boolean? = null): String? = when (range) {
-    DynamicRange.DolbyVision -> if (dvProfile != null) "Dolby Vision P$dvProfile" else "Dolby Vision"
-    else -> dynamicRangeLabel(range, hdr = hdr)
+/** "P8.1", "P8.4", "P5", "P7 FEL": a Dolby Vision profile as the server names it. */
+private fun dolbyVisionProfile(dvProfile: Int?, dvBlCompat: Int?, dvEl: String?): String? {
+    if (dvProfile == null) return null
+    val compat = dvBlCompat?.takeIf { dvProfile >= 8 && it in setOf(1, 2, 4) }?.let { ".$it" } ?: ""
+    val layer = dvEl?.takeIf { dvProfile == 7 && it.isNotEmpty() }?.let { " ${it.uppercase()}" } ?: ""
+    return "P$dvProfile$compat$layer"
 }
 
-/** The short form for tiles and metadata lines: "DV P8.1", "DV", "HDR10+", "HDR10", "HLG", "HDR", or `null`. */
-fun dynamicRangeShort(range: DynamicRange?, dvProfile: Int? = null, dvBlCompat: Int? = null, hdr: Boolean? = null): String? =
-    dynamicRangeLabel(range, dvProfile, dvBlCompat, hdr)?.replace("Dolby Vision", "DV")
+/** [dynamicRangeLabel] of a video stream: "Dolby Vision P8.1 + HDR10+" for a hybrid. */
+fun dynamicRangeLabel(stream: MediaStream?): String? =
+    stream?.let { dynamicRangeLabel(it.dynamicRange, it.dvProfile, it.dvBlCompat, it.hdr, it.dvEl, it.hdr10plus) }
+
+/**
+ * The short form for badges, tiles and metadata lines: "DV P8.1", "DV P7
+ * FEL", "DV", "HDR10+", "HDR10", "HLG", "HDR", or `null`. HDR10+ with Dolby
+ * Vision is a badge of its own ([dynamicRangeBadges]).
+ */
+fun dynamicRangeShort(
+    range: DynamicRange?,
+    dvProfile: Int? = null,
+    dvBlCompat: Int? = null,
+    hdr: Boolean? = null,
+    dvEl: String? = null,
+): String? =
+    dynamicRangeLabel(range, dvProfile, dvBlCompat, hdr, dvEl)?.replace("Dolby Vision", "DV")
+
+/** A video stream's dynamic range badges: "DV P8.1", and "HDR10+" too for Dolby Vision + HDR10+. */
+fun dynamicRangeBadges(stream: MediaStream?): List<String> {
+    if (stream == null) return emptyList()
+    val badge = dynamicRangeShort(stream.dynamicRange, stream.dvProfile, stream.dvBlCompat, stream.hdr, stream.dvEl)
+        ?: return emptyList()
+    val hybrid = stream.dynamicRange == DynamicRange.DolbyVision && stream.hdr10plus == true
+    return if (hybrid) listOf(badge, "HDR10+") else listOf(badge)
+}
 
 /** Dolby Atmos, as ffprobe names it in the stream's profile ("Dolby TrueHD + Dolby Atmos") or a title says. */
 fun isAtmos(stream: MediaStream?): Boolean {
@@ -199,16 +229,16 @@ fun qualityBadges(file: MediaFile?): List<String> {
     val audio = file.streams.firstOrNull { it.kind == StreamKind.Audio && it.default }
         ?: file.streams.firstOrNull { it.kind == StreamKind.Audio }
     val channels = audio?.channels ?: 0
-    return listOfNotNull(
-        resolutionBadge(file.width ?: video?.width, file.height ?: video?.height),
-        video?.let { dynamicRangeShort(it.dynamicRange, it.dvProfile, it.dvBlCompat, it.hdr) },
-        when {
-            isAtmos(audio) -> "Atmos"
-            channels >= 8 -> "7.1"
-            channels >= 6 -> "5.1"
-            else -> null
-        },
-    )
+    return listOfNotNull(resolutionBadge(file.width ?: video?.width, file.height ?: video?.height)) +
+        dynamicRangeBadges(video) +
+        listOfNotNull(
+            when {
+                isAtmos(audio) -> "Atmos"
+                channels >= 8 -> "7.1"
+                channels >= 6 -> "5.1"
+                else -> null
+            },
+        )
 }
 
 /** [qualityBadges] of an item's first file. */
