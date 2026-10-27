@@ -49,6 +49,11 @@ pub struct Extractor {
     /// The latest text tracks the Cues couldn't give (by file version and
     /// index): FFmpeg extracts them without another try.
     unreadable: Mutex<VecDeque<String>>,
+    /// The latest tracks whose pass over the whole file failed (by file
+    /// version and index), when, and why: for a while, their requests hear
+    /// why rather than start another pass each (players ask every few
+    /// seconds, a pass on a slow share takes hours).
+    failed_passes: Mutex<VecDeque<(String, Instant, Arc<ApiError>)>>,
     /// How often a pass marks its outputs as being written.
     keep_fresh: Duration,
     /// How long a pass over a file may take.
@@ -60,6 +65,10 @@ pub struct Extractor {
 const PASSES: usize = 2;
 /// How many text tracks the Cues couldn't give are remembered.
 const UNREADABLE_KEPT: usize = 1_000;
+/// How long a track whose pass failed answers with that failure.
+const FAILED_PASS_KEPT: Duration = Duration::from_secs(30 * 60);
+/// How many failed passes are remembered.
+const FAILED_PASSES_KEPT: usize = 1_000;
 
 pub struct Image {
     pub bytes: Vec<u8>,
@@ -87,6 +96,7 @@ impl Extractor {
             next_extraction: AtomicU64::new(0),
             file_locks: Mutex::default(),
             unreadable: Mutex::default(),
+            failed_passes: Mutex::default(),
             keep_fresh: KEEP_FRESH,
             pass_time: whole_file_timeout,
         }
@@ -325,12 +335,17 @@ impl Extractor {
 
     /// The extraction of text track `index` of a file version (`key`) under
     /// way, or one started now. It runs on its own, to the cache: requests
-    /// waiting for it may go away.
+    /// waiting for it may go away. A track whose pass over the file failed
+    /// lately has that failure for an answer.
     fn extraction(self: &Arc<Self>, path: &Path, key: &str, index: i64) -> Extraction {
         let track = format!("{key}_{index}");
         let mut extractions = self.extractions.lock();
         if let Some(running) = extractions.get(&track) {
             return running.clone();
+        }
+        if let Some(err) = self.failed_pass(&track) {
+            let failed = async move { Err(err) };
+            return Extraction { id: u64::MAX, by_ffmpeg: Arc::default(), result: failed.boxed().shared() };
         }
         Metrics::inc(&self.metrics.subtitle_extractions);
         let id = self.next_extraction.fetch_add(1, Ordering::Relaxed);
@@ -338,13 +353,39 @@ impl Extractor {
         let (this, path, key, entry) = (self.clone(), path.to_owned(), key.to_owned(), track.clone());
         let passing = by_ffmpeg.clone();
         let task = tokio::spawn(async move {
-            let _over = Forget { extractor: this.clone(), track: entry, id };
-            this.extract(&path, &key, index, &passing).await.map(Arc::new).map_err(Arc::new)
+            let over = Forget { extractor: this.clone(), track: entry, id };
+            let result = this.extract(&path, &key, index, &passing).await.map(Arc::new).map_err(Arc::new);
+            // Before the extraction is over: no request in between starts
+            // another pass.
+            if let Err(err) = &result
+                && passing.load(Ordering::Relaxed)
+            {
+                this.remember_failed_pass(&over.track, err.clone());
+            }
+            result
         });
         let result = async move { task.await.unwrap_or_else(|err| Err(Arc::new(ApiError::Internal(err.into())))) };
         let extraction = Extraction { id, by_ffmpeg, result: result.boxed().shared() };
         extractions.insert(track, extraction.clone());
         extraction
+    }
+
+    /// Why the latest pass over a whole file for `track` failed, when it did
+    /// within [`FAILED_PASS_KEPT`].
+    fn failed_pass(&self, track: &str) -> Option<Arc<ApiError>> {
+        let failed = self.failed_passes.lock();
+        let (_, at, err) = failed.iter().rev().find(|(t, ..)| t == track)?;
+        (at.elapsed() < FAILED_PASS_KEPT).then(|| err.clone())
+    }
+
+    fn remember_failed_pass(&self, track: &str, err: Arc<ApiError>) {
+        tracing::debug!("subtitle track {track}: its pass failed, said for {} min", FAILED_PASS_KEPT.as_secs() / 60);
+        let mut failed = self.failed_passes.lock();
+        failed.retain(|(t, at, _)| t != track && at.elapsed() < FAILED_PASS_KEPT);
+        if failed.len() >= FAILED_PASSES_KEPT {
+            failed.pop_front();
+        }
+        failed.push_back((track.to_owned(), Instant::now(), err));
     }
 
     /// Text track `index` of a file, cached: read through its Cues when they
@@ -1199,6 +1240,35 @@ mod tests {
         let (name, _) = movie_in(&slow, dir.path(), &unplaced_movie());
         assert!(matches!(slow.subtitle(&name, Some(2)).await, Err(ApiError::Timeout(_))));
         assert_eq!(ffmpeg_runs(dir.path()), [vec![2, 4]]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_pass_is_told_rather_than_run_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let extractor = Arc::new(extractor_with(dir.path(), stand_in_ffmpeg(dir.path(), false)));
+        let (name, key) = movie_in(&extractor, dir.path(), &unplaced_movie());
+        let wait = Duration::from_millis(100);
+        // A player's first look starts the pass (which fails here, run
+        // again for the track alone)...
+        let _ = extractor.subtitle_so_far(&name, 2, wait).await;
+        eventually(|| extractor.extractions.lock().is_empty()).await;
+        assert_eq!(ffmpeg_runs(dir.path()), [vec![2, 4], vec![2]]);
+        // ...and the next ones hear why, rather than read the file again.
+        for _ in 0..3 {
+            assert!(matches!(extractor.subtitle_so_far(&name, 2, wait).await, Err(ApiError::Failed(_))));
+        }
+        assert!(matches!(extractor.subtitle(&name, Some(2)).await, Err(ApiError::Failed(_))));
+        assert_eq!(ffmpeg_runs(dir.path()).len(), 2);
+        // Another track's failure isn't this one's.
+        let track = format!("{key}_2");
+        assert!(extractor.failed_pass(&track).is_some() && extractor.failed_pass(&format!("{key}_4")).is_none());
+        // For a while: then a pass is tried again.
+        let Some(long_ago) = Instant::now().checked_sub(FAILED_PASS_KEPT) else { return };
+        extractor.failed_passes.lock()[0].1 = long_ago;
+        assert!(extractor.failed_pass(&track).is_none());
+        assert!(extractor.subtitle(&name, Some(2)).await.is_err());
+        assert_eq!(ffmpeg_runs(dir.path()).len(), 4);
+        assert!(extractor.failed_pass(&track).is_some());
     }
 
     #[tokio::test]

@@ -468,7 +468,10 @@ half-made ones are deleted.
     passes run at once, apart from the quick FFmpeg runs (thumbnails,
     cover art, subtitle files), which never wait for them. When a pass
     fails, one more reads the track asked for alone (another track may be
-    what FFmpeg couldn't convert), unless it ran out of time.
+    what FFmpeg couldn't convert), unless it ran out of time. A track whose
+    pass failed answers with that error for 30 minutes (the last thousand
+    such tracks are remembered): a player asking every few seconds hears
+    why, rather than each request reading the whole file again.
   - External files are converted with charset detection (UTF-8, UTF-16 BOM,
     or Windows-1252 as a fallback), told from their first megabyte. A file
     over 64 MB is no text subtitle file (a `.sup`, say): it is refused
