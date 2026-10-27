@@ -53,8 +53,8 @@ describe("request", () => {
     expect(isApiError(explained, 403)).toBe(true);
     expect(explained).toMatchObject({ code: "forbidden", message: "this account is disabled" });
 
-    await expect(request("/api/plain")).rejects.toMatchObject({ status: 503, code: "unavailable", message: "Service Unavailable" });
-    await expect(request("/api/bare")).rejects.toMatchObject({ status: 500, code: "internal", message: "Request failed (500)" });
+    await expect(request("/api/plain")).rejects.toMatchObject({ status: 503, code: "unavailable", message: "the server isn't answering right now" });
+    await expect(request("/api/bare")).rejects.toMatchObject({ status: 500, code: "internal", message: "the server couldn't answer (error 500)" });
   });
 
   it("reports expired sessions, except for probes", async () => {
