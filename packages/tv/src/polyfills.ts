@@ -69,6 +69,17 @@ if (!pp.finally) {
   };
 }
 
+// Focus, rows and grids ask whether an element is still on the page (Chromium 54).
+if (!("isConnected" in Node.prototype)) {
+  Object.defineProperty(Node.prototype, "isConnected", {
+    configurable: true,
+    get(this: Node): boolean {
+      const doc = this.ownerDocument;
+      return !doc || !(doc.compareDocumentPosition(this) & Node.DOCUMENT_POSITION_DISCONNECTED);
+    },
+  });
+}
+
 // Preact schedules its renders with it (Chromium 71).
 const g = window as unknown as Record<string, unknown>;
 if (!g.queueMicrotask) {

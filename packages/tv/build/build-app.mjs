@@ -12,6 +12,17 @@ import { commit } from "../../../scripts/commit.mjs";
 const require = createRequire(import.meta.url);
 
 /**
+ * Ahead of everything in the script: esbuild's helpers for object spread
+ * read Object.getOwnPropertyDescriptors once, when the script starts, which
+ * is before the app's own polyfills (src/polyfills.ts) run, and Chromium 53
+ * (webOS 4) has no such function. Strict, as the bundle is.
+ */
+const PRELUDE = [
+  '"use strict";',
+  "if (!Object.getOwnPropertyDescriptors) Object.getOwnPropertyDescriptors = function (o) { var d = {}; Reflect.ownKeys(o).forEach(function (k) { d[k] = Object.getOwnPropertyDescriptor(o, k); }); return d; };",
+].join("\n");
+
+/**
  * @param {{
  *   entry: string,
  *   outdir: string,
@@ -41,6 +52,7 @@ export async function buildApp(o) {
     // The fonts are copied next to the stylesheet as they are.
     external: ["*.woff2"],
     define: { __PLEY_VERSION__: JSON.stringify(o.version), __PLEY_COMMIT__: JSON.stringify(commit()) },
+    banner: { js: PRELUDE },
     logLevel: "warning",
     metafile: true,
   });
