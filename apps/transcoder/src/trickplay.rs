@@ -18,6 +18,7 @@ use tokio::sync::Semaphore;
 
 use crate::background::Background;
 use crate::error::{ApiError, ApiResult};
+use crate::extract::{Lock, Locks};
 use crate::ffmpeg::Ffmpeg;
 use crate::plan::{ZSCALE_TONEMAP, untagged_hdr_fix};
 use crate::probe::Prober;
@@ -37,7 +38,8 @@ pub struct Trickplay {
     dir: PathBuf,
     /// One generation at a time: it is background work.
     limiter: Semaphore,
-    locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// One generation per set, the lock forgotten however it ends.
+    locks: Locks,
     /// Sheets fetched so far, per set.
     served: Mutex<HashMap<String, HashSet<u32>>>,
 }
@@ -115,8 +117,8 @@ impl Trickplay {
             touch(&dir.join("index.json"));
             return Ok(info);
         }
-        let lock = self.locks.lock().entry(id.clone()).or_default().clone();
-        let _guard = lock.lock().await;
+        let entry = Lock::acquire(&self.locks, &id);
+        let _guard = entry.lock.lock().await;
         if let Some(info) = read_index(&dir) {
             touch(&dir.join("index.json"));
             return Ok(info);
@@ -180,7 +182,6 @@ impl Trickplay {
         tokio::fs::write(part.join("index.json"), serde_json::to_vec(&info).map_err(anyhow::Error::from)?).await?;
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::rename(&part, &dir).await?;
-        self.locks.lock().remove(&id);
         tracing::info!(
             "seek previews for {} ({} thumbnails) made in {:.1}s",
             path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
@@ -214,5 +215,27 @@ mod tests {
         assert_eq!(default_interval_ms(45 * 60_000), 7_000);
         assert_eq!(default_interval_ms(20 * 60_000), 3_000);
         assert_eq!(default_interval_ms(60_000), 2_000);
+    }
+
+    #[tokio::test]
+    async fn failed_generations_leave_no_lock_behind() {
+        use pley_transcoder_api::{MediaInfo, StreamKind};
+        let dir = tempfile::tempdir().unwrap();
+        let ff = Arc::new(Ffmpeg {
+            ffmpeg: dir.path().join("no-ffmpeg"),
+            ffprobe: dir.path().join("no-ffprobe"),
+            caps: Default::default(),
+            segment_times_relative: true,
+        });
+        let prober = Arc::new(Prober::new(ff.clone(), Arc::new(crate::metrics::Metrics::default()), 1));
+        let trickplay = Trickplay::new(ff, prober.clone(), Background::new(), dir.path().join("trickplay"));
+        let movie = dir.path().join("movie.mkv");
+        std::fs::write(&movie, b"not really a movie").unwrap();
+        let video = crate::matroska::tests::stream(0, StreamKind::Video, "h264");
+        prober.remember(&movie, MediaInfo { duration_ms: Some(60_000), streams: vec![video], ..Default::default() });
+        let req = TrickplayRequest { path: movie.to_string_lossy().into_owned(), ..Default::default() };
+        // FFmpeg isn't there: the set isn't made, and its lock goes.
+        assert!(trickplay.generate(&req).await.is_err());
+        assert!(trickplay.locks.lock().is_empty());
     }
 }

@@ -772,18 +772,18 @@ fn guess_charset(raw: &[u8]) -> Option<&'static str> {
     }
 }
 
-type Locks = Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>;
+pub(crate) type Locks = Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>;
 
-/// An extraction lock by key (a file), forgotten again once no extraction
-/// uses it (on every path, including errors).
-struct Lock<'a> {
+/// A lock by key (a file's extractions, a set of seek previews), forgotten
+/// again once nobody uses it (on every path, including errors).
+pub(crate) struct Lock<'a> {
     locks: &'a Locks,
     key: String,
-    lock: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl<'a> Lock<'a> {
-    fn acquire(locks: &'a Locks, key: &str) -> Self {
+    pub(crate) fn acquire(locks: &'a Locks, key: &str) -> Self {
         let lock = locks.lock().entry(key.to_owned()).or_default().clone();
         Self { locks, key: key.to_owned(), lock }
     }
