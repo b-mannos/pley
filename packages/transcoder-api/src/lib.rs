@@ -114,6 +114,28 @@ impl DynamicRange {
     }
 }
 
+/// What a Dolby Vision profile 7 stream's enhancement layer carries, as
+/// the RPUs of its first frames say.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum DolbyVisionLayer {
+    /// A minimal enhancement layer: no picture of its own (its residual is
+    /// zero), so the base layer with the RPU shows all of it.
+    Mel,
+    /// A full enhancement layer: picture data (12-bit detail) that only
+    /// players decoding profile 7 add to the base layer.
+    Fel,
+}
+
+impl DolbyVisionLayer {
+    pub fn label(self) -> &'static str {
+        match self {
+            DolbyVisionLayer::Mel => "MEL",
+            DolbyVisionLayer::Fel => "FEL",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct MediaStream {
     /// FFmpeg stream index inside the file. External subtitle files get 1000+.
@@ -170,11 +192,17 @@ pub struct MediaStream {
     /// Dolby Vision base-layer signal compatibility id (0 none, 1 HDR10, 2 SDR, 4 HLG).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dv_bl_compat: Option<i64>,
+    /// Dolby Vision profile 7's enhancement layer: full (`fel`) or minimal
+    /// (`mel`). `None`: another profile, or not known (probed by an older
+    /// transcoder, or frames that couldn't be read).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dv_el: Option<DolbyVisionLayer>,
     /// HDR10+ dynamic metadata (SMPTE ST 2094-40) in the video's first
-    /// frames. Looked for in Dolby Vision streams only: `true` is a Dolby
-    /// Vision + HDR10+ stream, which some Dolby Vision decoders fail on.
-    /// `None`: not looked for (other streams, or probed by an older
-    /// transcoder).
+    /// frames, looked for in Dolby Vision and PQ (HDR10) streams. `true` on
+    /// a Dolby Vision stream is Dolby Vision + HDR10+, which some Dolby
+    /// Vision decoders fail on; on a PQ stream it comes with the dynamic
+    /// range `hdr10plus`. `None`: not looked for (other streams, or probed
+    /// by an older transcoder).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hdr10plus: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -200,7 +228,9 @@ pub struct MediaStream {
     pub external: bool,
 }
 
-/// "Dolby Vision P8.1", "HDR10", … for display.
+/// "Dolby Vision P8.1", "HDR10", … for display: the profile with its base
+/// layer's compatibility (profile 8 and up; profile 7's is always Blu-ray
+/// HDR10, and profile 5 has none).
 pub fn dynamic_range_label(range: DynamicRange, dv_profile: Option<i64>, dv_bl_compat: Option<i64>) -> String {
     match (range, dv_profile) {
         (DynamicRange::DolbyVision, Some(p)) => match dv_bl_compat {
@@ -211,12 +241,47 @@ pub fn dynamic_range_label(range: DynamicRange, dv_profile: Option<i64>, dv_bl_c
     }
 }
 
+/// The whole name of a video's format, as every client shows it: "Dolby
+/// Vision P7 FEL", "Dolby Vision P8.1 + HDR10+", "HDR10+", "HDR10"…
+pub fn video_range_label(
+    range: DynamicRange,
+    dv_profile: Option<i64>,
+    dv_bl_compat: Option<i64>,
+    dv_el: Option<DolbyVisionLayer>,
+    hdr10plus: bool,
+) -> String {
+    let mut label = dynamic_range_label(range, dv_profile, dv_bl_compat);
+    if range == DynamicRange::DolbyVision {
+        if let Some(el) = dv_el.filter(|_| dv_profile == Some(7)) {
+            label.push(' ');
+            label.push_str(el.label());
+        }
+        if hdr10plus {
+            label.push_str(" + HDR10+");
+        }
+    }
+    label
+}
+
 impl MediaStream {
     pub fn dynamic_range(&self) -> DynamicRange {
         self.dynamic_range.unwrap_or_default()
     }
 
+    /// The format's whole name ([`video_range_label`]).
     pub fn dynamic_range_label(&self) -> String {
+        video_range_label(
+            self.dynamic_range(),
+            self.dv_profile,
+            self.dv_bl_compat,
+            self.dv_el,
+            self.hdr10plus == Some(true),
+        )
+    }
+
+    /// The Dolby Vision profile alone: "Dolby Vision P7", "Dolby Vision
+    /// P8.1" (no layer, no HDR10+).
+    pub fn dolby_vision_label(&self) -> String {
         dynamic_range_label(self.dynamic_range(), self.dv_profile, self.dv_bl_compat)
     }
 
@@ -756,6 +821,20 @@ pub struct VideoPlan {
     /// The remux leaves out the stream's HDR10+ metadata.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hdr10plus_stripped: bool,
+    /// Profile 7's enhancement layer, full or minimal, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dv_el: Option<DolbyVisionLayer>,
+    /// The stream carries HDR10+ (with Dolby Vision, when
+    /// `dynamic_range_in` says Dolby Vision).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hdr10plus: bool,
+}
+
+impl VideoPlan {
+    /// The input's format by name, as [`MediaStream::dynamic_range_label`].
+    pub fn range_in_label(&self) -> String {
+        video_range_label(self.dynamic_range_in, self.dv_profile, self.dv_bl_compat, self.dv_el, self.hdr10plus)
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -1144,6 +1223,24 @@ mod tests {
         assert_eq!(dynamic_range_label(DynamicRange::DolbyVision, Some(8), Some(4)), "Dolby Vision P8.4");
         assert_eq!(dynamic_range_label(DynamicRange::DolbyVision, Some(5), Some(0)), "Dolby Vision P5");
         assert_eq!(dynamic_range_label(DynamicRange::Hdr10, None, None), "HDR10");
+        // Profile 7's base layer is Blu-ray HDR10 (compatibility 6): no ".6".
+        assert_eq!(dynamic_range_label(DynamicRange::DolbyVision, Some(7), Some(6)), "Dolby Vision P7");
+        let dv = |profile, compat, el, hdr10plus| MediaStream {
+            dynamic_range: Some(DynamicRange::DolbyVision),
+            dv_profile: Some(profile),
+            dv_bl_compat: Some(compat),
+            dv_el: el,
+            hdr10plus,
+            ..Default::default()
+        };
+        assert_eq!(dv(7, 6, Some(DolbyVisionLayer::Fel), None).dynamic_range_label(), "Dolby Vision P7 FEL");
+        assert_eq!(dv(7, 6, Some(DolbyVisionLayer::Mel), Some(false)).dynamic_range_label(), "Dolby Vision P7 MEL");
+        assert_eq!(dv(7, 6, None, None).dynamic_range_label(), "Dolby Vision P7");
+        assert_eq!(dv(8, 1, None, Some(true)).dynamic_range_label(), "Dolby Vision P8.1 + HDR10+");
+        assert_eq!(dv(8, 1, None, Some(true)).dolby_vision_label(), "Dolby Vision P8.1");
+        let hdr10plus =
+            MediaStream { dynamic_range: Some(DynamicRange::Hdr10plus), hdr10plus: Some(true), ..Default::default() };
+        assert_eq!(hdr10plus.dynamic_range_label(), "HDR10+");
         let p5 =
             MediaStream { dynamic_range: Some(DynamicRange::DolbyVision), dv_profile: Some(5), ..Default::default() };
         assert!(p5.is_dolby_vision_only());

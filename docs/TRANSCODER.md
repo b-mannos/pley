@@ -420,12 +420,18 @@ half-made ones are deleted.
   PES come right after it). A 2 s segment of 4K takes milliseconds. The
   job's video plan reports `dolby_vision` (`copy`, `signal`, `to81`) and
   `hdr10plus_stripped`.
-- **HDR10+ in Dolby Vision streams.** Only a stream's frames say whether it
-  carries HDR10+ (ffprobe's stream side data doesn't in Matroska or MP4), so
-  the probe of a Dolby Vision stream decodes its first frames (a fraction of
-  a second; `-read_intervals %+#12 -show_entries frame_side_data`) and
-  records `MediaStream.hdr10plus`. It is left out (unknown) when that fails,
-  and for other streams.
+- **HDR10+, and profile 7's enhancement layer.** Only a stream's frames say
+  whether it carries HDR10+ (ffprobe's stream side data doesn't in Matroska
+  or MP4), so the probe of a Dolby Vision or PQ stream decodes its first
+  frames (a fraction of a second; `-read_intervals %+#12 -show_entries
+  frame_side_data`) and records `MediaStream.hdr10plus`; a PQ stream with
+  HDR10+ becomes `dynamic_range: hdr10plus`. For profile 7 the same frames'
+  Dolby Vision metadata says what the enhancement layer holds
+  (`MediaStream.dv_el`): minimal (`mel`) when its residual is zero in every
+  component (no NLQ offset, an input maximum of one, no dead zone), full
+  (`fel`) otherwise, as `dovi_tool` tells them apart. Both are left out
+  (unknown) when the frames can't be read, and for other streams. The job's
+  video plan repeats them (`dv_el`, `hdr10plus`) for the input's name.
 - **Subtitle extraction.** Text tracks (SubRip, ASS/SSA, plain text and
   WebVTT) become WebVTT, cached per file version.
   - Matroska: mkvmerge and FFmpeg list every subtitle block in the Cues, with

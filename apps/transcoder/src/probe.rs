@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
 use parking_lot::Mutex;
-use pley_transcoder_api::{Chapter, DynamicRange, MediaInfo, MediaStream, StreamKind, is_text_subtitle_codec};
+use pley_transcoder_api::{
+    Chapter, DolbyVisionLayer, DynamicRange, MediaInfo, MediaStream, StreamKind, is_text_subtitle_codec,
+};
 use serde::Deserialize;
 use tokio::sync::Semaphore;
 
@@ -125,28 +127,39 @@ impl Prober {
                 );
             }
         }
-        self.find_hdr10plus(path, &mut info).await;
+        self.read_first_frames(path, &mut info).await;
         Ok(info)
     }
 
-    /// Whether a Dolby Vision stream carries HDR10+ too: only its frames
-    /// say, so the first few are decoded (a fraction of a second). Left
-    /// unknown when that fails.
-    async fn find_hdr10plus(&self, path: &Path, info: &mut MediaInfo) {
-        let Some(video) = info
-            .streams
-            .iter_mut()
-            .find(|s| s.kind == StreamKind::Video && s.dynamic_range == Some(DynamicRange::DolbyVision))
-        else {
+    /// What only a video's frames say, so the first few are decoded (a
+    /// fraction of a second): whether a Dolby Vision or PQ stream carries
+    /// HDR10+ (a PQ one is then HDR10+, not HDR10), and what a profile 7
+    /// stream's enhancement layer holds. Left unknown when that fails.
+    async fn read_first_frames(&self, path: &Path, info: &mut MediaInfo) {
+        let Some(video) = info.streams.iter_mut().find(|s| s.kind == StreamKind::Video) else {
             return;
         };
-        if video.hdr10plus.is_some() {
+        let range = video.dynamic_range();
+        let profile_7 = range == DynamicRange::DolbyVision && video.dv_profile == Some(7);
+        let wanted = match range {
+            DynamicRange::DolbyVision => video.hdr10plus.is_none() || (profile_7 && video.dv_el.is_none()),
+            DynamicRange::Hdr10 => video.hdr10plus.is_none(),
+            _ => false,
+        };
+        if !wanted {
             return;
         }
+        // The enhancement layer takes the whole Dolby Vision metadata; the
+        // rest only which side data there is.
+        let entries = if profile_7 {
+            "frame=key_frame:frame_side_data"
+        } else {
+            "frame=key_frame:frame_side_data=side_data_type"
+        };
         let mut cmd = self.ff.probe_command();
         cmd.args(["-v", "error", "-select_streams"])
             .arg(video.index.to_string())
-            .args(["-read_intervals", "%+#12", "-show_entries", "frame=key_frame:frame_side_data=side_data_type"])
+            .args(["-read_intervals", "%+#12", "-show_entries", entries])
             .args(["-of", "json"])
             .args(MEDIA_INPUT_OPTIONS)
             .arg(input_arg(path))
@@ -154,9 +167,21 @@ impl Prober {
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
         let Ok(child) = cmd.spawn() else { return };
-        match tokio::time::timeout(Duration::from_secs(30), child.wait_with_output()).await {
-            Ok(Ok(output)) if output.status.success() => video.hdr10plus = hdr10plus_in_frames(&output.stdout),
-            _ => tracing::debug!("{}: frames not read for HDR10+", path.display()),
+        let output = match tokio::time::timeout(Duration::from_secs(30), child.wait_with_output()).await {
+            Ok(Ok(output)) if output.status.success() => output.stdout,
+            _ => {
+                tracing::debug!("{}: the first frames were not read", path.display());
+                return;
+            }
+        };
+        if video.hdr10plus.is_none() {
+            video.hdr10plus = hdr10plus_in_frames(&output);
+        }
+        if range == DynamicRange::Hdr10 && video.hdr10plus == Some(true) {
+            video.dynamic_range = Some(DynamicRange::Hdr10plus);
+        }
+        if profile_7 && video.dv_el.is_none() {
+            video.dv_el = dolby_vision_layer_in_frames(&output);
         }
     }
 
@@ -216,6 +241,54 @@ pub fn hdr10plus_in_frames(json: &[u8]) -> Option<bool> {
                 .any(|sd| sd.get("side_data_type").and_then(|t| t.as_str()).is_some_and(|t| t.contains("2094-40")))
         })
     }))
+}
+
+/// What a profile 7 stream's enhancement layer holds, from the Dolby
+/// Vision metadata of frames ffprobe showed (`-show_entries
+/// frame_side_data`): minimal (MEL) when its residual is zero in every
+/// component (no offset, an input maximum of one, no dead zone), as
+/// `dovi_tool` tells them apart, else full (FEL). `None` without that
+/// metadata.
+pub fn dolby_vision_layer_in_frames(json: &[u8]) -> Option<DolbyVisionLayer> {
+    let value: serde_json::Value = serde_json::from_slice(json).ok()?;
+    let mut found = None;
+    for frame in value.get("frames")?.as_array()? {
+        let metadata = frame.get("side_data_list").and_then(|l| l.as_array()).into_iter().flatten().filter(|sd| {
+            sd.get("side_data_type").and_then(|t| t.as_str()).is_some_and(|t| t == "Dolby Vision Metadata")
+        });
+        for sd in metadata {
+            match enhancement_layer(sd) {
+                Some(DolbyVisionLayer::Fel) => return Some(DolbyVisionLayer::Fel),
+                layer => found = found.or(layer),
+            }
+        }
+    }
+    found
+}
+
+fn enhancement_layer(metadata: &serde_json::Value) -> Option<DolbyVisionLayer> {
+    let int = |v: &serde_json::Value, key: &str| v.get(key).and_then(|n| n.as_i64());
+    // No residual at all: the layer adds nothing to the picture.
+    if int(metadata, "disable_residual_flag") == Some(1) {
+        return Some(DolbyVisionLayer::Mel);
+    }
+    // One, in the coefficients' fixed point (or a 32-bit float's bits).
+    let one = match int(metadata, "coef_data_type") {
+        Some(0) => 1i64.checked_shl(u32::try_from(int(metadata, "coef_log2_denom")?).ok()?)?,
+        _ => i64::from(1.0f32.to_bits()),
+    };
+    let residual: Vec<&serde_json::Value> =
+        metadata.get("components")?.as_array()?.iter().filter(|c| c.get("nlq_offset").is_some()).collect();
+    if residual.is_empty() {
+        return None;
+    }
+    let minimal = residual.iter().all(|c| {
+        int(c, "nlq_offset") == Some(0)
+            && int(c, "vdr_in_max") == Some(one)
+            && int(c, "linear_deadzone_slope").unwrap_or(0) == 0
+            && int(c, "linear_deadzone_threshold").unwrap_or(0) == 0
+    });
+    Some(if minimal { DolbyVisionLayer::Mel } else { DolbyVisionLayer::Fel })
 }
 
 /// ffprobe ran and could not read the file, as opposed to a timeout or a
@@ -381,6 +454,7 @@ pub fn parse_ffprobe_json(json: &[u8], path: &Path) -> anyhow::Result<MediaInfo>
                     match s.color_transfer.as_deref() {
                         Some("smpte2084") => {
                             if hdr10plus {
+                                stream.hdr10plus = Some(true);
                                 DynamicRange::Hdr10plus
                             } else {
                                 DynamicRange::Hdr10
@@ -727,6 +801,51 @@ mod tests {
         assert_eq!((video.dynamic_range, video.hdr10plus), (Some(DynamicRange::DolbyVision), Some(true)));
         let info = parse_ffprobe_json(SAMPLE.as_bytes(), Path::new("/m/Movie.mkv")).unwrap();
         assert_eq!(info.video().unwrap().hdr10plus, None, "not known before frames are read");
+    }
+
+    /// The Dolby Vision metadata ffprobe shows for a profile 7 frame, with
+    /// the residual data of each component as given.
+    fn profile_7_frame(residual: [(i64, i64, i64, i64); 3]) -> String {
+        let components: Vec<String> = residual
+            .iter()
+            .map(|(offset, max, slope, threshold)| {
+                format!(
+                    r#"{{"pivots":"0 1023","nlq_offset":{offset},"vdr_in_max":{max},"linear_deadzone_slope":{slope},
+                    "linear_deadzone_threshold":{threshold}}}"#
+                )
+            })
+            .collect();
+        format!(
+            r#"{{"frames":[{{"key_frame":1,"side_data_list":[{{"side_data_type":"Dolby Vision RPU Data"}},
+            {{"side_data_type":"Dolby Vision Metadata","rpu_type":2,"coef_data_type":0,"coef_log2_denom":23,
+            "disable_residual_flag":0,"nlq_method_idc":0,"components":[{}]}}]}}]}}"#,
+            components.join(",")
+        )
+    }
+
+    #[test]
+    fn profile_7_layers_are_told_apart() {
+        // What the test clips made with dovi_tool show (`ffprobe -show_entries frame_side_data`).
+        let mel = profile_7_frame([(0, 8_388_608, 0, 0); 3]);
+        assert_eq!(dolby_vision_layer_in_frames(mel.as_bytes()), Some(DolbyVisionLayer::Mel));
+        let fel = profile_7_frame([
+            (512, 8_392_704, 16_777_249, 2048),
+            (511, 8_392_703, 8_388_640, 2048),
+            (510, 8_392_702, 8_388_639, 2048),
+        ]);
+        assert_eq!(dolby_vision_layer_in_frames(fel.as_bytes()), Some(DolbyVisionLayer::Fel));
+        // One component with residual data is enough.
+        let partly = profile_7_frame([(0, 8_388_608, 0, 0), (0, 8_388_608, 0, 0), (0, 8_388_608, 0, 2048)]);
+        assert_eq!(dolby_vision_layer_in_frames(partly.as_bytes()), Some(DolbyVisionLayer::Fel));
+        // Residual turned off: nothing comes from the layer.
+        let off = r#"{"frames":[{"side_data_list":[{"side_data_type":"Dolby Vision Metadata","coef_data_type":0,
+            "coef_log2_denom":23,"disable_residual_flag":1,"components":[{"pivots":"0 1023"}]}]}]}"#;
+        assert_eq!(dolby_vision_layer_in_frames(off.as_bytes()), Some(DolbyVisionLayer::Mel));
+        // No Dolby Vision metadata (an RPU FFmpeg didn't read), no frames.
+        let none = r#"{"frames":[{"side_data_list":[{"side_data_type":"Dolby Vision RPU Data"}]}]}"#;
+        assert_eq!(dolby_vision_layer_in_frames(none.as_bytes()), None);
+        assert_eq!(dolby_vision_layer_in_frames(br#"{"frames":[]}"#), None);
+        assert_eq!(dolby_vision_layer_in_frames(b"not json"), None);
     }
 
     #[test]

@@ -546,6 +546,8 @@ impl Plan {
             subtitle_burn: self.burn.as_ref().map(|b| b.label().to_owned()),
             dolby_vision: v.dolby_vision,
             hdr10plus_stripped: v.strip_hdr10plus,
+            dv_el: src.and_then(|s| s.dv_el),
+            hdr10plus: src.is_some_and(|s| s.hdr10plus == Some(true)),
         })
     }
 

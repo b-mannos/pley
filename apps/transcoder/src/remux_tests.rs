@@ -165,6 +165,45 @@ fn hdr10_source(dir: &Path) -> Option<(PathBuf, bool)> {
     None
 }
 
+/// HDR10+ shows only in the frames (an HEVC SEI message, not the
+/// container): the prober reads the first ones and calls the video HDR10+
+/// (see `hybrids_are_found_at_probe_time`), and plain HDR10 stays HDR10.
+#[tokio::test]
+async fn plain_hdr10_stays_hdr10() {
+    if !has_ffmpeg() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let x265 = "log-level=error:hdr10=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc";
+    let made = ffmpeg(
+        dir.path(),
+        &[
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=s=320x180:r=24:d=1",
+            "-c:v",
+            "libx265",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p10le",
+            "-x265-params",
+            x265,
+            "hdr10.mkv",
+        ],
+    );
+    if !made {
+        eprintln!("libx265 can't make HDR10 HEVC: skipped");
+        return;
+    }
+    let prober = crate::probe::Prober::new(Arc::new(ff()), Arc::default(), 1);
+    let info = prober.probe(&dir.path().join("hdr10.mkv")).await.unwrap();
+    let video = info.video().unwrap();
+    assert_eq!((video.dynamic_range, video.hdr10plus), (Some(DynamicRange::Hdr10), Some(false)));
+    assert_eq!(video.dynamic_range_label(), "HDR10");
+}
+
 /// `source` as MPEG-TS with Dolby Vision profile 7 put into every access
 /// unit: enhancement-layer NAL units and an RPU with a full layer's
 /// residual data.
@@ -526,9 +565,10 @@ async fn hybrids_are_found_at_probe_time() {
     }
     assert!(hls::master_playlist(&plan, &info).contains("SUPPLEMENTAL-CODECS=\"dvh1.08.01/db1p\""));
 
-    // The plain HDR10 file: no Dolby Vision, nothing looked for.
+    // The file without Dolby Vision: HDR10+, found the same way.
     let plain = prober.probe(&dir.path().join("hdr10plus.mkv")).await.unwrap();
-    assert_eq!(plain.video().unwrap().hdr10plus, None);
+    let video = plain.video().unwrap();
+    assert_eq!((video.dynamic_range, video.hdr10plus), (Some(DynamicRange::Hdr10plus), Some(true)));
 }
 
 /// Files of one's own (see the module's notes).
