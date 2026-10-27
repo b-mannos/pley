@@ -1,5 +1,5 @@
 import type { ComponentChildren } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { errorMessage, isApiError } from "../../api/client";
 import type { HistoryEntry, SubtitleMode } from "../../api/types";
 import { displayAddress } from "../../auth/addresses";
@@ -734,18 +734,32 @@ function deviceFacts(app: AppState): [string, string][] {
  * Diagnostics (TvDiagnosticsScreen): the app and the TV, then what the
  * TV told the server it plays, one line each. Every line takes focus, so
  * the remote scrolls through them; nothing acts but Check again, after a
- * check that failed.
+ * check that failed: it keeps focus while it checks, and a check that
+ * works hands focus to the first line it found.
  */
 export function DiagnosticsScreen() {
   const app = useApp();
+  const ui = useUi();
   const [lines, setLines] = useState<string[] | null | "failed">(null);
+  const [checking, setChecking] = useState(true);
+  const again = useRef(false);
   const check = (fresh: boolean) => {
-    setLines(null);
-    void app.caps(fresh).then((r) => setLines(r ? r.lines : "failed"));
+    setChecking(true);
+    again.current = fresh;
+    void app.caps(fresh).then((r) => {
+      setLines(r ? r.lines : "failed");
+      setChecking(false);
+    });
   };
   useEffect(() => check(false), []);
   const column = useRef<HTMLDivElement>(null);
   const shift = useScrollToFocus(column, 540 - 27);
+  useLayoutEffect(() => {
+    if (!again.current || !Array.isArray(lines)) return;
+    again.current = false;
+    const first = column.current?.querySelector<HTMLElement>('[data-fid="plays/0"]');
+    if (first && !ui.focus.current?.isConnected) ui.focus.focus(first);
+  }, [lines]);
   const facts: [string, string][] = [["App", `${app.platform.appName} ${buildLabel(app.platform.version)}`] as [string, string]].concat(deviceFacts(app));
   return (
     <div class="diagnostics-page">
@@ -754,7 +768,7 @@ export function DiagnosticsScreen() {
         <G kind="col" class="diagnostics-lines">
           <div class="t-section c-fg diagnostics-heading">This TV</div>
           {facts.map(([label, value], i) => (
-            <F key={label} class="diagnostics-line" initial={i === 0} label={`${label}: ${value}`}>
+            <F key={label} class="diagnostics-line" fid={`fact/${i}`} initial={i === 0} label={`${label}: ${value}`}>
               <span class="t-body diagnostics-label">{label}</span>
               <span class="t-body diagnostics-value">{value}</span>
             </F>
@@ -763,15 +777,19 @@ export function DiagnosticsScreen() {
           {lines === null && <div class="t-body c-muted diagnostics-note">Checking what this TV plays…</div>}
           {lines === "failed" && (
             <>
-              <div class="t-body c-danger diagnostics-note">The check of this TV failed.</div>
+              {checking ? (
+                <div class="t-body c-muted diagnostics-note">Checking what this TV plays…</div>
+              ) : (
+                <div class="t-body c-danger diagnostics-note">The check of this TV failed.</div>
+              )}
               <G kind="row" class="diagnostics-again">
-                <Pill label="Check again" icon="refresh-cw" fid="again" onSelect={() => check(true)} />
+                <Pill label="Check again" icon="refresh-cw" fid="again" onSelect={() => !checking && check(true)} />
               </G>
             </>
           )}
           {Array.isArray(lines) &&
             lines.map((line, i) => (
-              <F key={i} class="diagnostics-line" label={line}>
+              <F key={i} class="diagnostics-line" fid={`plays/${i}`} label={line}>
                 <span class="t-body diagnostics-value">{line}</span>
               </F>
             ))}
