@@ -291,7 +291,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const home = itemUrl(item.kind === "extra" && item.parent_id ? item.parent_id : item.id);
   const endUrl = queue?.queue.returnTo ?? home;
   const title = isEpisode ? (item.grandparent_title ?? item.title) : item.year ? `${item.title} (${item.year})` : item.title;
-  const subtitle = isEpisode ? [episodeLabel(item), item.title].filter(Boolean).join(" — ") : null;
+  const subtitle = isEpisode ? [episodeLabel(item), item.title].filter(Boolean).join(" · ") : null;
   useDocumentTitle(isEpisode ? `${title} ${episodeLabel(item)}` : item.title);
 
   // The sleep timer starts off, but goes on to the next episode while it runs.
