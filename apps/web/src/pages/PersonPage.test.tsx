@@ -1,5 +1,6 @@
 import { Route, Routes } from "react-router";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { PersonDetail } from "@/api/types";
 import { makeItem } from "@/test/fixtures";
@@ -52,5 +53,19 @@ describe("PersonPage", () => {
     renderPerson(9);
     expect(await screen.findByRole("heading", { name: "Person not found" })).toBeInTheDocument();
     expect(screen.getByText("No such person")).toBeInTheDocument();
+  });
+
+  it("offers Retry when the server couldn't answer, rather than saying there is no such person", async () => {
+    let fail = true;
+    mockApi({
+      "GET /api/people/5": () =>
+        fail ? apiError(500, "internal", "the server is busy") : { id: 5, name: "Keanu Reeves", credits: [] },
+    });
+    renderPerson(5);
+    expect(await screen.findByRole("heading", { name: "Couldn't load this person" })).toBeInTheDocument();
+    expect(screen.queryByText("Person not found")).not.toBeInTheDocument();
+    fail = false;
+    await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("heading", { name: "Keanu Reeves" })).toBeInTheDocument();
   });
 });

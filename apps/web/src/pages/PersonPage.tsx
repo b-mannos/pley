@@ -1,11 +1,11 @@
 import { useParams } from "react-router";
 import { UserRound } from "lucide-react";
-import { errorMessage } from "@/api/client";
+import { errorMessage, isApiError } from "@/api/client";
 import { usePerson } from "@/api/hooks";
 import type { CreditRole, PersonCredit, PersonRole } from "@/api/types";
 import { CardSkeleton, MediaCard } from "@/components/cards";
 import { PersonPhoto } from "@/components/PersonCard";
-import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
+import { Button, EmptyState, SectionTitle, Skeleton } from "@/components/ui";
 import { pluralize } from "@/lib/format";
 import { useDocumentTitle, useElementWidth } from "@/lib/hooks";
 import { idParam } from "@/lib/ids";
@@ -77,6 +77,16 @@ export function PersonPage() {
           ))}
         </div>
       </div>
+    );
+  }
+  if (person.isError && !isApiError(person.error, 404)) {
+    return (
+      <EmptyState
+        className="min-h-[60vh]"
+        title="Couldn't load this person"
+        description={errorMessage(person.error)}
+        action={<Button onClick={() => void person.refetch()}>Retry</Button>}
+      />
     );
   }
   if (person.isError || !person.data) {
