@@ -97,6 +97,7 @@ const ADMIN: &[(&str, &str)] = &[
     ("POST", "/api/invites"),
     ("DELETE", "/api/invites/{code}"),
     ("GET", "/api/system"),
+    ("GET", "/api/system/resources"),
     ("GET", "/api/system/storage"),
     ("GET", "/api/system/backups"),
     ("POST", "/api/system/backups"),

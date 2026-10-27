@@ -1692,6 +1692,7 @@ type ServerEvent =
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
 | GET | `/api/system` | – | `SystemInfo` (with `database: { ok, problem?, checked_at }`, the integrity check made at start) |
+| GET | `/api/system/resources` | `since` | `{ available, interval_ms, cpus, memory_total, samples: [{ at, cpu, pley_cpu, memory, pley_memory }] }`: the processors' and memory's use, sampled every 2 s for the last five minutes (only the samples after `since`, in Unix milliseconds, when given). `cpu` and `pley_cpu` are shares of all the processors' time, 0–100; `memory` and `pley_memory` bytes. pley is the server and every process it started: a managed transcoder and its FFmpegs. `available` is false where the system can't be sampled (Windows, Linux and macOS can) |
 | GET | `/api/system/storage` | – | `{ blobs, blob_bytes, media_folders, media_bytes, cache_bytes }`: space used by stored pictures, generated media files and the cache (docs/STORAGE.md) |
 | POST | `/api/system/storage/clean` | – | `{ blobs_removed, media_folders_removed, bytes_freed, cache_files_removed, cache_bytes_freed }`: removes what nothing uses any more, and old cache files |
 | GET | `/api/system/backups` | – | `{ health: { ok, problem?, checked_at }, backups: { name, path, bytes, created_at }[] }`, newest first |

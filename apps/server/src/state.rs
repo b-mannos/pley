@@ -47,6 +47,8 @@ pub struct Inner {
     pub oauth: crate::oauth::AuthorizationServer,
     /// Where the server listens, and wants to (see [`crate::network`]).
     pub network: crate::network::Network,
+    /// The processors' and memory's use, for the dashboard.
+    pub resources: Arc<crate::resources::Monitor>,
     pub started_at: Instant,
     /// Cancelled when the server starts shutting down (the tray's Quit
     /// cancels it to ask for that). Responses that never end on their own,
@@ -135,6 +137,7 @@ impl AppState {
         Ok(Self {
             inner: Arc::new(Inner {
                 network: crate::network::Network::new(&config),
+                resources: crate::resources::Monitor::new(),
                 auth,
                 sessions,
                 markers,
@@ -162,6 +165,7 @@ impl AppState {
         self.transcoder.start();
         self.sessions.spawn_reaper(self.transcoder.clone(), self.events.clone());
         self.markers.start();
+        self.resources.start(self.stopping.clone());
         let metadata = self.metadata.clone();
         tokio::spawn(async move {
             metadata.prune_people().await;

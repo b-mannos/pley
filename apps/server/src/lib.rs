@@ -35,6 +35,7 @@ pub mod plex;
 pub mod providers;
 pub mod ratings;
 pub mod related;
+pub mod resources;
 #[cfg(windows)]
 pub mod service;
 pub mod settings;

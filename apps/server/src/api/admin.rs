@@ -370,6 +370,22 @@ pub async fn create_backup(
     Ok(Json(state.backups.create().await.map_err(AppError::Internal)?))
 }
 
+#[derive(Deserialize)]
+pub struct ResourcesQuery {
+    /// Only the samples taken after this (Unix milliseconds).
+    since: Option<i64>,
+}
+
+/// How busy the machine's processors and memory are, and how much of them
+/// pley takes: the last five minutes, or what came after `since`.
+pub async fn resources(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Query(query): Query<ResourcesQuery>,
+) -> Json<crate::resources::Resources> {
+    Json(state.resources.resources(query.since))
+}
+
 /// Space used by stored pictures, generated media files and the cache.
 pub async fn storage(State(state): State<AppState>, _admin: AdminUser) -> ApiResult<Json<crate::store::Usage>> {
     Ok(Json(state.store.usage().await.map_err(AppError::Internal)?))

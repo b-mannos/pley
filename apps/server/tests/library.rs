@@ -932,6 +932,7 @@ async fn administration_endpoints() {
     let (bob, _) = app.user(&admin, "bob", json!({})).await;
     for (method, uri) in [
         (Method::GET, "/api/system"),
+        (Method::GET, "/api/system/resources"),
         (Method::GET, "/api/system/storage"),
         (Method::POST, "/api/system/storage/clean"),
         (Method::GET, "/api/system/backups"),
@@ -943,6 +944,16 @@ async fn administration_endpoints() {
     ] {
         let reply = app.call(method.clone(), uri, Some(&bob), Some(json!({})), &[]).await;
         assert_eq!(reply.status, StatusCode::FORBIDDEN, "{method} {uri}");
+    }
+
+    // The processors and memory: the machine's at once, samples as they come.
+    let resources = app.get("/api/system/resources?since=0", &admin).await;
+    assert_eq!(resources.status, StatusCode::OK);
+    assert_eq!(resources.body["interval_ms"], json!(2000));
+    assert!(resources.body["cpus"].as_u64().unwrap() >= 1, "{}", resources.body);
+    assert!(resources.body["samples"].is_array());
+    if resources.body["available"] == json!(true) {
+        assert!(resources.body["memory_total"].as_u64().unwrap() > 0);
     }
 
     let storage = app.get("/api/system/storage", &admin).await;
