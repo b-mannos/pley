@@ -105,6 +105,8 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
   const opener = useRef<HTMLElement | null>(null);
   /** A page chosen here takes focus from the rail as soon as it has something to focus (handOver). */
   const handing = useRef(false);
+  /** The pointer has been on the open rail: moving out of it closes it (a rail opened by keys stays). */
+  const pointedIn = useRef(false);
   const { top, settings } = p.entries;
 
   /**
@@ -123,6 +125,7 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
       return;
     }
     handing.current = false;
+    pointedIn.current = false;
     open.value = false;
   };
 
@@ -176,10 +179,14 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
       ui.focus.onChange((el) => {
         const r = root.current;
         // Moving along the rail: the person is choosing again, and a page that loads keeps its hands off.
-        if (r && el && r.contains(el)) handing.current = false;
+        if (r && el && r.contains(el)) {
+          handing.current = false;
+          if (ui.focus.byPointer) pointedIn.current = true;
+        }
         if (r && el && !r.contains(el) && open.value) {
           open.value = false;
           handing.current = false;
+          pointedIn.current = false;
           if (ui.focus.root === r) ui.focus.release(r, false);
         }
       }),
@@ -225,11 +232,11 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
   const color = profileColor(me?.avatar_color);
   return (
     <>
-      {/* The pointer moving out over the page, or clicking it, closes the rail: focus goes back to the page. */}
+      {/* The pointer moving out of the rail over the page, or clicking the page, closes it: focus goes back to the page. */}
       <div
         class={`rail-scrim${open.value ? " in" : ""}`}
         onMouseMove={() => {
-          if (open.value && ui.input.pointerMoved) leave(true);
+          if (open.value && pointedIn.current && ui.input.pointerMoved) leave(true);
         }}
         onClick={() => {
           if (open.value) leave(true);
