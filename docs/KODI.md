@@ -143,9 +143,15 @@ own views instead (below), which skins' widgets and favourites always get.
   audio settings pass through, HDR10 and HLG always (Kodi tone-maps them on
   SDR screens), and Dolby Vision where Kodi says the screen shows it
   (profiles 5 and 8; 7 as well on CoreELEC). The quality setting asks the
-  server for a lower one, converted. Subtitles beside a file are named as
-  Kodi names its own (`3.eng.forced.vtt`), so Kodi lists them by language
-  and picks a forced one as it picks those.
+  server for a lower one, converted. Text subtitles come beside what
+  plays: all of them beside a converted stream, which carries none, and
+  beside a file played as it is the files next to it (Kodi reads the
+  file's own tracks itself, and has no folder to look in for an address
+  over HTTP). They are named as Kodi names its own (`3.eng.forced.vtt`),
+  so Kodi lists them by language and picks a forced one as it picks those.
+  Kodi's own Subtitle offset (Subtitles in the player's controls) moves
+  them, and Kodi remembers it for each file played as it is; it counts the
+  other way from pley's other apps, +0.3 s showing them earlier.
 - **Listings** carry what Kodi shows of a title, since it asks the plugin
   for nothing more: synopses of every kind (`summaries=1`, docs/API.md),
   and artwork as Kodi's own library has it. An episode's still is its

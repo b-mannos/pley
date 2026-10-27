@@ -39,6 +39,19 @@ MIME = {
 }
 
 
+def beside(base: str, info: dict) -> list:
+    """The text subtitles Kodi is given beside what it plays, named so it
+    reads their language and whether they are forced: all of them beside a
+    converted stream, which carries none; beside a file played as it is,
+    the files next to it (Kodi reads the file's own tracks itself, and an
+    address over HTTP has no folder for it to look in)."""
+    return [
+        path_in(base, api.subtitle_name(s["url"], s.get("language"), s.get("forced")))
+        for s in info.get("subtitles") or []
+        if s.get("url") and (info.get("hls") or s.get("external"))
+    ]
+
+
 def prepare(client: api.Client, base: str, item_id: int, start_ms: int, detail=None) -> xbmcgui.ListItem:
     """Kodi's item for playing `item_id` from `start_ms`, its address set,
     once the server said how. The item's details (for Kodi's info) are
@@ -78,21 +91,15 @@ def prepare(client: api.Client, base: str, item_id: int, start_ms: int, detail=N
     if info.get("hls"):
         li.setMimeType("application/vnd.apple.mpegurl")
         li.setContentLookup(False)
-        # Text subtitles come beside a stream that carries none, named so
-        # Kodi reads their language and whether they are forced.
-        subtitles = [
-            path_in(base, api.subtitle_name(s["url"], s.get("language"), s.get("forced")))
-            for s in info.get("subtitles", [])
-            if s.get("url")
-        ]
-        if subtitles:
-            li.setSubtitles(subtitles)
     else:
         # Said here, Kodi needn't ask the server for the file's type first.
         mime = file_mime(detail, info.get("file_id"))
         if mime:
             li.setMimeType(mime)
             li.setContentLookup(False)
+    subtitles = beside(base, info)
+    if subtitles:
+        li.setSubtitles(subtitles)
     markers = [m for m in (detail or {}).get("markers") or [] if m.get("file_id") == info.get("file_id")]
     playing = {
         "item_id": item_id,
