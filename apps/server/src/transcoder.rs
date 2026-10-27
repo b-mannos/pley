@@ -114,7 +114,7 @@ impl Transcoder {
                 if token.is_empty() {
                     tracing::warn!(
                         "the transcoder at {url} is used without a token: anyone who can reach it can use it \
-                         (set transcoder_token here and --token there)"
+                         (set transcoder_token here and {TOKEN_ENV} there)"
                     );
                 }
                 (token, None, Some(url.trim_end_matches('/').to_owned()))

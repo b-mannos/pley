@@ -15,8 +15,9 @@ use serde::{Deserialize, Serialize};
 /// Protocol version spoken by this crate. Bumped on breaking changes.
 pub const API_VERSION: u32 = 1;
 
-/// Environment variable carrying the shared secret when the server spawns a
-/// managed transcoder.
+/// Environment variable carrying the shared secret: the server's managed
+/// transcoder gets it this way, and one started by hand should too (a
+/// command line is in the list of processes, for every account to read).
 pub const TOKEN_ENV: &str = "PLEY_TRANSCODER_TOKEN";
 
 /// Line printed on stdout by `pley-transcoder --announce` once it is listening.

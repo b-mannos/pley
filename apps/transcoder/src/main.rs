@@ -38,7 +38,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use clap::Parser;
+use clap::parser::ValueSource;
+use clap::{CommandFactory, FromArgMatches, Parser};
 use pley_transcoder_api::{API_VERSION, Announce, Limits, TOKEN_ENV, TranscoderInfo};
 use tokio::io::AsyncReadExt;
 
@@ -58,7 +59,8 @@ struct Args {
     #[arg(long, env = "PLEY_TRANSCODER_LISTEN", default_value = "127.0.0.1:7540")]
     listen: SocketAddr,
 
-    /// Shared secret; clients must send `Authorization: Bearer <token>`
+    /// Shared secret; clients must send `Authorization: Bearer <token>`. Set
+    /// it in the environment: the command line is in the list of processes
     #[arg(long, env = TOKEN_ENV, hide_env_values = true)]
     token: Option<String>,
 
@@ -108,7 +110,8 @@ struct Args {
 }
 
 fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
+    let matches = Args::command().get_matches();
+    let args = Args::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
     if args.license {
         println!("{LICENSE_NOTICE}");
         return Ok(());
@@ -121,24 +124,31 @@ fn main() -> anyhow::Result<()> {
         .with_writer(std::io::stderr)
         .compact()
         .init();
+    if matches.value_source("token") == Some(ValueSource::CommandLine) {
+        tracing::warn!(
+            "the token is on the command line, which every account of this computer can read in its list of \
+             processes: give it in {TOKEN_ENV} instead"
+        );
+    }
     tokio::runtime::Builder::new_multi_thread().enable_all().thread_name("transcoder").build()?.block_on(run(args))
 }
 
 /// Tokens from examples, which are no secret.
 const EXAMPLE_TOKENS: &[&str] = &["change-me", "changeme", "secret", "token", "password", "pley", "transcoder"];
-/// The shortest token the transcoder takes on the network.
+/// The shortest token the transcoder takes.
 const MIN_TOKEN_CHARS: usize = 16;
 
 /// Whether the transcoder may listen on `listen` with `token`: on the
-/// network it reads any file it is asked to, so it takes a real secret.
+/// network it reads any file it is asked to, so it takes a real secret. On
+/// this computer alone it may go without one (it then answers only requests
+/// addressed to this computer, see `http.rs`), but one it is given is a
+/// real secret there too.
 fn check_token(token: Option<&str>, listen: SocketAddr) -> anyhow::Result<()> {
-    if listen.ip().is_loopback() {
-        return Ok(());
-    }
     let suggestion = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
     match token {
+        None if listen.ip().is_loopback() => Ok(()),
         None => anyhow::bail!(
-            "listening on {listen} takes a token (--token or {TOKEN_ENV}, and the same in pley's transcoder_token): \
+            "listening on {listen} takes a token ({TOKEN_ENV}, and the same in pley's transcoder_token): \
              anyone who can reach this port could otherwise read any file it can. A random one: {suggestion}"
         ),
         Some(token)
@@ -368,16 +378,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn on_the_network_only_with_a_real_secret() {
+    fn a_token_is_a_real_secret_and_on_the_network_a_must() {
         let local: SocketAddr = "127.0.0.1:7540".parse().unwrap();
         let network: SocketAddr = "0.0.0.0:7540".parse().unwrap();
-        assert!(check_token(None, local).is_ok(), "pley's own, on this computer");
+        assert!(check_token(None, local).is_ok(), "on this computer alone");
         let refused = check_token(None, network).unwrap_err().to_string();
         assert!(refused.contains("A random one: "), "{refused}");
-        assert!(check_token(Some("change-me"), network).is_err());
-        assert!(check_token(Some("CHANGE-ME"), network).is_err());
-        assert!(check_token(Some("short"), network).is_err());
-        assert!(check_token(Some("9f2c5a7e1b3d4c6a8e0f1a2b3c4d5e6f"), network).is_ok());
+        for listen in [local, network] {
+            assert!(check_token(Some("change-me"), listen).is_err(), "{listen}");
+            assert!(check_token(Some("CHANGE-ME"), listen).is_err(), "{listen}");
+            assert!(check_token(Some("short"), listen).is_err(), "{listen}");
+            assert!(check_token(Some("9f2c5a7e1b3d4c6a8e0f1a2b3c4d5e6f"), listen).is_ok(), "{listen}");
+        }
     }
 
     #[test]

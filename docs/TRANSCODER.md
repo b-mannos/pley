@@ -20,7 +20,9 @@ live in the `pley-transcoder-api` crate.
 ```
 pley-transcoder [OPTIONS]
   --listen <ADDR>          default 127.0.0.1:7540 (port 0 = pick a free port)
-  --token <TOKEN>          shared secret, at least 16 characters; env PLEY_TRANSCODER_TOKEN.
+  --token <TOKEN>          shared secret, at least 16 characters; better given as
+                           PLEY_TRANSCODER_TOKEN in the environment (a command line is
+                           in the list of processes, for every account to read).
                            Required unless --listen is a loopback address
   --work-dir <DIR>         segments, caches (default: the user's cache folder,
                            e.g. ~/.cache/pley-transcoder); kept private to the user
@@ -42,9 +44,10 @@ environment, reads the announced address, and restarts the transcoder with
 backoff if it dies. The transcoder exits as soon as the server does.
 
 **External mode.** Start the transcoder yourself, for example on a machine with
-a GPU, then point the server at it with `--transcoder-url http://host:7540
---transcoder-token <secret>`. Media paths must be identical on both machines,
-for example through the same network mount.
+a GPU, with its token in `PLEY_TRANSCODER_TOKEN`, then point the server at it
+with `transcoder_url = "http://host:7540"` and the same `transcoder_token` (or
+`PLEY_TRANSCODER_TOKEN` in its environment). Media paths must be identical on
+both machines, for example through the same network mount.
 
 All endpoints except `GET /health` require `Authorization: Bearer <token>` when
 a token is configured. Without one (only on a loopback address), the

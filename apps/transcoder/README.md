@@ -14,9 +14,13 @@ It is a separate program. The pley server talks to
 it only over HTTP; see `../../LICENSING.md`.
 
 ```sh
-cargo run -p pley-transcoder -- --listen 127.0.0.1:7540 --token secret
-curl -H "Authorization: Bearer secret" http://127.0.0.1:7540/v1/info
+export PLEY_TRANSCODER_TOKEN=$(openssl rand -hex 16)
+cargo run -p pley-transcoder -- --listen 127.0.0.1:7540
+curl -H "Authorization: Bearer $PLEY_TRANSCODER_TOKEN" http://127.0.0.1:7540/v1/info
 ```
+
+The token goes in the environment rather than `--token`: every account of
+the computer can read a command line in its list of processes.
 
 The protocol, the HLS job model and the feature list are documented in
 [`docs/TRANSCODER.md`](../../docs/TRANSCODER.md).
