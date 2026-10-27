@@ -54,6 +54,16 @@ class WordsTest(unittest.TestCase):
         self.assertEqual(words.quality_badges(stereo), ["720p", "5.1"])
         self.assertEqual(words.quality_badges(None), [])
 
+    def test_dolby_vision_as_the_server_names_it(self):
+        dv = {"kind": "video", "dynamic_range": "dolby_vision"}
+        # Profile 7's base layer (Blu-ray, compatibility 6) isn't named: never "P7.6".
+        self.assertEqual(words.dynamic_range_short(dict(dv, dv_profile=7, dv_bl_compat=6)), "DV P7")
+        self.assertEqual(words.dynamic_range_short(dict(dv, dv_profile=7, dv_bl_compat=6, dv_el="fel")), "DV P7 FEL")
+        self.assertEqual(words.dynamic_range_short(dict(dv, dv_profile=8, dv_bl_compat=4)), "DV P8.4")
+        self.assertEqual(words.dynamic_range_short(dict(dv, dv_profile=5, dv_bl_compat=0)), "DV P5")
+        hybrid = {"width": 3840, "height": 2160, "streams": [dict(dv, dv_profile=8, dv_bl_compat=1, hdr10plus=True)]}
+        self.assertEqual(words.quality_badges(hybrid), ["4K", "DV P8.1", "HDR10+"])
+
     def test_an_items_line(self):
         movie = {"kind": "movie", "year": 2024, "duration_ms": 118 * 60_000, "content_rating": "PG-13", "rating": 7.44, "files": [FILE]}
         self.assertEqual(

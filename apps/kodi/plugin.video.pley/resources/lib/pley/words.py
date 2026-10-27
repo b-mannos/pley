@@ -140,14 +140,21 @@ def resolution_badge(width, height):
 
 
 def dynamic_range_short(stream: dict):
-    """"DV P8.1", "DV", "HDR10+", "HDR10", "HLG", "HDR", or None (SDR)."""
+    """"DV P8.1", "DV P7 FEL", "DV", "HDR10+", "HDR10", "HLG", "HDR", or None
+    (SDR), as the server names them: the base layer's compatibility from
+    profile 8 on only (profile 7's is always Blu-ray HDR10, never "P7.6")."""
     kind = stream.get("dynamic_range")
     if kind == "dolby_vision":
         profile = stream.get("dv_profile")
         if profile is None:
             return "DV"
         compat = stream.get("dv_bl_compat")
-        return "DV P%d" % profile + (".%d" % compat if compat else "")
+        layer = stream.get("dv_el") if profile == 7 else None
+        return (
+            "DV P%d" % profile
+            + (".%d" % compat if profile >= 8 and compat in (1, 2, 4) else "")
+            + (" " + layer.upper() if layer else "")
+        )
     if kind == "hdr10plus":
         return "HDR10+"
     if kind == "hdr10":
@@ -180,6 +187,9 @@ def quality_badges(file) -> list:
         resolution_badge(file.get("width") or (video or {}).get("width"), file.get("height") or (video or {}).get("height")),
         dynamic_range_short(video) if video else None,
     ]
+    # Dolby Vision + HDR10+: a badge for each.
+    if video and video.get("dynamic_range") == "dolby_vision" and video.get("hdr10plus"):
+        badges.append("HDR10+")
     if is_atmos(audio):
         badges.append("Atmos")
     elif channels >= 8:
