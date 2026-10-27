@@ -64,8 +64,9 @@ side by side with Kodi's were the reference):
 - **The rail** on the left: the profile, Search, Home, each library,
   Playlists, Collections and Settings (the add-on's). Collapsed it shows
   icons, the current page's marked; Left opens it over the page with each
-  entry's name. The libraries come in the profile's order: the profile's
-  menu has Sort libraries (a library, then where it goes), a library's
+  entry's name. The profile's menu has Audio and subtitles (below). The
+  libraries come in the profile's order: the profile's menu has Sort
+  libraries (a library, then where it goes), a library's
   menu key Move up, Move down and Use the server's order, each saved at
   once for every device of the profile's (`PUT /api/me/libraries/order`);
   sorted elsewhere, the rail follows.
@@ -148,10 +149,34 @@ own views instead (below), which skins' widgets and favourites always get.
   beside a file played as it is the files next to it (Kodi reads the
   file's own tracks itself, and has no folder to look in for an address
   over HTTP). They are named as Kodi names its own (`3.eng.forced.vtt`),
-  so Kodi lists them by language and picks a forced one as it picks those.
+  so Kodi lists them by language and says which are forced.
   Kodi's own Subtitle offset (Subtitles in the player's controls) moves
   them, and Kodi remembers it for each file played as it is; it counts the
   other way from pley's other apps, +0.3 s showing them earlier.
+- **Audio and subtitles** (`tracks.py`) are the profile's, not Kodi's
+  language settings: what the server picked for the file
+  (`selected_audio`, `selected_subtitle`: the choice remembered for the
+  show or the movie, else the profile's defaults). The service switches
+  Kodi to them once Kodi lists the streams, and turns subtitles off when
+  the choice is none. pley names tracks by their index in the file, Kodi
+  by its place in its lists: Kodi lists the subtitle files it was given
+  first, in that order, then the file's own (it adds the files as it opens
+  the address, before it reads the file), and a file's audio in its
+  order; a converted stream has only the audio the server put in. Should
+  Kodi list fewer than the file has, a track is found by its language
+  when only one is in it. Picture subtitles (PGS, VobSub) chosen for a
+  stream the server converts are drawn onto the video, as they are when
+  they are a file next to the media, which Kodi isn't given. Audio or
+  subtitles changed in Kodi's player (subtitles turned off too) are saved
+  once the change has held 2 seconds, or as playback ends
+  (`PUT /api/items/{id}/streams`), so the next episode starts with
+  matching tracks on every device. The defaults themselves (Audio
+  language, Subtitles: Off, Only for foreign dialogue, When the audio is
+  in another language or Always, and the subtitle language for the last
+  two) are Audio and subtitles in the profile's menu and in the add-on's
+  settings (Playback), saved at once (`PUT /api/me/track-defaults`); a
+  server that doesn't let apps change them says to change them on the
+  web.
 - **Listings** carry what Kodi shows of a title, since it asks the plugin
   for nothing more: synopses of every kind (`summaries=1`, docs/API.md),
   and artwork as Kodi's own library has it. An episode's still is its
@@ -271,5 +296,7 @@ in `portable_data/userdata/advancedsettings.xml`.
   cast, genres or crew: lists don't carry them.
 - Editing playlists (renaming, reordering, taking titles out): Add to
   playlist and Save as… make and fill them.
-- Picture subtitles (PGS, VobSub) with a converted stream: only text
-  subtitles come beside it. Files played as they are show every kind.
+- Picture subtitles (PGS, VobSub) picked in Kodi's player during a
+  converted stream: only text subtitles come beside it (the profile's
+  choice is drawn onto the video from the start). Files played as they
+  are show every kind.

@@ -614,3 +614,51 @@ msgstr ""
 msgctxt "#30194"
 msgid "Sorting libraries needs a newer pley on the server."
 msgstr ""
+
+msgctxt "#30195"
+msgid "Audio and subtitles"
+msgstr ""
+
+msgctxt "#30196"
+msgid "Audio language"
+msgstr ""
+
+msgctxt "#30197"
+msgid "Subtitles"
+msgstr ""
+
+msgctxt "#30198"
+msgid "Subtitle language"
+msgstr ""
+
+msgctxt "#30199"
+msgid "The file's default"
+msgstr ""
+
+msgctxt "#30200"
+msgid "Same as the audio language"
+msgstr ""
+
+msgctxt "#30201"
+msgid "Off"
+msgstr ""
+
+msgctxt "#30202"
+msgid "Only for foreign dialogue"
+msgstr ""
+
+msgctxt "#30203"
+msgid "When the audio is in another language"
+msgstr ""
+
+msgctxt "#30204"
+msgid "Always"
+msgstr ""
+
+msgctxt "#30205"
+msgid "This server doesn't let the app change these: change them on the web"
+msgstr ""
+
+msgctxt "#30206"
+msgid "Saved"
+msgstr ""

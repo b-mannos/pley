@@ -13,7 +13,7 @@ import time
 import xbmc
 import xbmcgui
 
-from . import api, kodi, listing
+from . import api, kodi, listing, tracks
 from .api import path_in
 
 # The quality setting's choices, as the web player's (apps/web/src/player/quality.ts).
@@ -44,11 +44,11 @@ def beside(base: str, info: dict) -> list:
     reads their language and whether they are forced: all of them beside a
     converted stream, which carries none; beside a file played as it is,
     the files next to it (Kodi reads the file's own tracks itself, and an
-    address over HTTP has no folder for it to look in)."""
+    address over HTTP has no folder for it to look in). Kodi lists them
+    first, in this order (tracks.py)."""
     return [
         path_in(base, api.subtitle_name(s["url"], s.get("language"), s.get("forced")))
-        for s in info.get("subtitles") or []
-        if s.get("url") and (info.get("hls") or s.get("external"))
+        for s in tracks.beside_tracks(info)
     ]
 
 
@@ -72,10 +72,21 @@ def prepare(client: api.Client, base: str, item_id: int, start_ms: int, detail=N
         "max_bitrate": max_bitrate,
         "max_height": max_height,
     }
+    # The account's subtitles, when they are pictures: drawn onto the video
+    # if the file is converted (the server draws nothing when Kodi shows
+    # them itself).
+    burn = tracks.burn_index(tracks.file_of(detail))
+    if burn is not None:
+        request.update(file_id=tracks.file_of(detail)["id"], subtitle_index=burn)
     info = client.post("/api/playback", request)
     if loader:
         loader.join(10)
     detail = details.get("item")
+    file = tracks.file_of(detail, info.get("file_id")) if detail else None
+    if file is not None and "subtitle_index" not in request and tracks.needs_burn(info, file):
+        # The details came with the answer: asked again, with them drawn on.
+        request.update(file_id=file["id"], subtitle_index=tracks.chosen_subtitle(file)["index"])
+        info = client.post("/api/playback", request)
     url = path_in(base, info["url"])
     duration_ms = info.get("duration_ms") or (detail or {}).get("duration_ms") or 0
     if detail:
@@ -111,6 +122,9 @@ def prepare(client: api.Client, base: str, item_id: int, start_ms: int, detail=N
         "kind": (detail or {}).get("kind"),
         "markers": markers,
     }
+    if (detail or {}).get("kind") not in listing.MUSIC:
+        # The account's audio and subtitles, which the service shows in Kodi.
+        playing["tracks"] = tracks.layout(info, file)
     kodi.set_property(kodi.PLAYING, json.dumps(playing))
     reason = info.get("reason")
     elapsed = (time.perf_counter() - started) * 1000

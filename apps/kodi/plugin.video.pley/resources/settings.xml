@@ -96,6 +96,15 @@
           </control>
         </setting>
       </group>
+      <group id="2">
+        <setting id="tracks" type="action" label="30195">
+          <level>0</level>
+          <data>RunPlugin(plugin://plugin.video.pley/?route=tracks)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
+      </group>
     </category>
   </section>
 </settings>

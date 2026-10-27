@@ -13,7 +13,7 @@ import time
 
 import xbmc
 
-from . import api, auth, kodi, overlay, prompts
+from . import api, auth, kodi, overlay, prompts, tracks
 from .events import CHANGES, Events, Refresher
 from .proxy import Proxy, new_secret
 
@@ -132,6 +132,8 @@ class Player(xbmc.Player):
         self.lock = threading.Lock()
         self.reports = None
         self.moments = None
+        # The playback's audio and subtitles (tracks.Follower).
+        self.tracks = None
         # Up Next after an episode that ended on its own.
         self.after_end = None
         self.overlay = None
@@ -250,14 +252,31 @@ class Player(xbmc.Player):
         )
         moments = prompts.Moments(playing.get("markers") or [])
         reports.credits_from = moments.credits_from()
+        follower = None
+        if playing.get("tracks"):
+            follower = tracks.Follower(
+                playing["tracks"], kodi.rpc, lambda body: self.worker.put(lambda: self.save_tracks(playing, body))
+            )
         with self.lock:
             self.after_end = None
             self.lost_since = None
             self.reports = reports
             self.moments = moments
+            self.tracks = follower
             reports.at(self.position())
         if playing.get("kind") == "episode":
             self.worker.put(lambda: self.find_next(reports, moments))
+        if follower is not None:
+            # The account's audio and subtitles, as soon as Kodi lists them
+            # (else on the loop's next turns).
+            follower.turn()
+
+    def save_tracks(self, playing: dict, body: dict) -> None:
+        """Audio or subtitles changed in Kodi's player: remembered for the
+        show or the movie (from the worker)."""
+        response = self.call("PUT", "/api/items/%d/streams" % playing["item_id"], body)
+        if response is not None and response.status < 300:
+            kodi.log("tracks of %d saved: audio %s, subtitles %s" % (playing["item_id"], body["audio_index"], body["subtitle_index"]))
 
     def find_next(self, reports: Reports, moments: prompts.Moments) -> None:
         """The episode after the one playing, for Up Next (from the worker)."""
@@ -311,7 +330,11 @@ class Player(xbmc.Player):
     def _finish_locked(self, ended: bool) -> None:
         reports, self.reports = self.reports, None
         moments, self.moments = self.moments, None
+        follower, self.tracks = self.tracks, None
         self.lost_since = None
+        if follower is not None:
+            # Before the last report, on the worker.
+            follower.finish()
         if ended and reports.near_end() and moments and moments.next_item and not moments.next_cancelled:
             if self.fullscreen:
                 self.after_end = moments
@@ -333,9 +356,11 @@ class Player(xbmc.Player):
         with self.lock:
             moments = None
             position = 0.0
+            follower = None
             if self.reports is not None:
                 if file == self.reports.playing["path"]:
                     self.lost_since = None
+                    follower = self.tracks
                     position = self.position()
                     if paused and not self.reports.paused:
                         self.reports.position_ms = position
@@ -360,6 +385,10 @@ class Player(xbmc.Player):
             if moments is None and self.reports is None:
                 moments = self.after_end
             playing = self.reports is not None
+        if follower is not None:
+            # The account's choice shown, and changes made in Kodi's player
+            # saved (Kodi asked outside the lock).
+            follower.turn()
         self.fullscreen = bool(playing) and xbmc.getCondVisibility(FULLSCREEN)
         with self.ui:
             self.offer(moments, playing, position)

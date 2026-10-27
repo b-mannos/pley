@@ -18,7 +18,7 @@ from urllib.parse import quote_plus
 import xbmc
 import xbmcgui
 
-from . import api, kodi, playback, tiles, words
+from . import api, kodi, playback, tiles, tracks, words
 from . import layout as L
 from .listing import image
 
@@ -464,12 +464,29 @@ class Window(xbmcgui.WindowXML):
 
     def account(self) -> None:
         actions = [(T("choose_server"), lambda: self.leave_for("choose_server"))]
+        actions.append((T("tracks"), self.track_defaults))
         if len(self.libraries) > 1:
             actions.append((T("sort_libraries"), self.sort_libraries))
         actions.append((T("sign_out"), lambda: self.leave_for("sign_out")))
         chosen = xbmcgui.Dialog().contextmenu([name for name, _ in actions])
         if chosen >= 0:
             actions[chosen][1]()
+
+    def track_defaults(self) -> None:
+        """Audio and subtitles: the profile's defaults for titles it hasn't
+        picked tracks for (the TV apps' rows in Settings)."""
+        try:
+            me = self.session.get("/api/auth/me")
+        except api.ApiError as e:
+            return self.toast(T("server_error") % e.message, 6)
+
+        def select(heading, labels, preselect):
+            return xbmcgui.Dialog().select(heading, labels, preselect=preselect)
+
+        def say(words, error):
+            self.toast(words, 6 if error else 3.5)
+
+        self.me = tracks.edit_defaults(self.session.client, me, select, say, T, api.ApiError)
 
     # ---------------------------------------------- the libraries' order
 

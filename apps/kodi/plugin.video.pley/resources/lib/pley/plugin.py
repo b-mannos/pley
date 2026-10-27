@@ -350,6 +350,23 @@ class Plugin:
     def route_settings(self) -> None:
         kodi.addon().openSettings()
 
+    def route_tracks(self) -> None:
+        """Audio and subtitles (from the add-on's settings): the profile's
+        defaults, in Kodi's dialogs."""
+        from . import tracks
+
+        client = self.client()
+        me = client.get("/api/auth/me")
+        dialog = xbmcgui.Dialog()
+        tracks.edit_defaults(
+            client,
+            me,
+            lambda heading, labels, preselect: dialog.select(heading, labels, preselect=preselect),
+            lambda words, error: kodi.notify(words, error=error),
+            kodi.text,
+            api.ApiError,
+        )
+
     def route_choose_server(self) -> None:
         dialog = xbmcgui.Dialog()
         progress = xbmcgui.DialogProgressBG()
@@ -486,7 +503,7 @@ class Plugin:
 
 
 # Routes that run as actions, with no listing to end.
-ACTIONS = ("play", "watched", "my_list", "settings", "choose_server", "sign_in", "sign_out", "retry")
+ACTIONS = ("play", "watched", "my_list", "settings", "tracks", "choose_server", "sign_in", "sign_out", "retry")
 
 
 def choose(server: str, name: str, server_id: str) -> None:

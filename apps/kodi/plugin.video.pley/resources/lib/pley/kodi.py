@@ -152,6 +152,18 @@ TEXT = {
     "first": 30192,
     "after": 30193,
     "sort_needs_newer_server": 30194,
+    "tracks": 30195,
+    "audio_language": 30196,
+    "subtitles": 30197,
+    "subtitle_language": 30198,
+    "files_default": 30199,
+    "same_as_audio": 30200,
+    "subtitles_off": 30201,
+    "subtitles_forced": 30202,
+    "subtitles_foreign": 30203,
+    "subtitles_always": 30204,
+    "tracks_on_web": 30205,
+    "saved": 30206,
 }
 
 
@@ -276,9 +288,17 @@ def user_agent() -> str:
 def setting_value(name: str):
     """One of Kodi's own settings, through JSON-RPC (None when it has no
     such setting)."""
-    request = {"jsonrpc": "2.0", "id": 1, "method": "Settings.GetSettingValue", "params": {"setting": name}}
+    return (rpc("Settings.GetSettingValue", {"setting": name}) or {}).get("value")
+
+
+def rpc(method: str, params: dict):
+    """A JSON-RPC call to Kodi: its result, None when refused."""
+    request = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
     try:
         answer = json.loads(xbmc.executeJSONRPC(json.dumps(request)))
     except ValueError:
         return None
-    return answer.get("result", {}).get("value")
+    if not isinstance(answer, dict) or "error" in answer:
+        log("%s: %s" % (method, (answer or {}).get("error") if isinstance(answer, dict) else answer), xbmc.LOGDEBUG)
+        return None
+    return answer.get("result")
