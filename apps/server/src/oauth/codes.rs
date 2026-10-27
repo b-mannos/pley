@@ -35,6 +35,11 @@ use crate::util::constant_time_eq;
 pub const CODE_LIFETIME: Duration = Duration::from_secs(60);
 /// Codes kept at most (each for a minute).
 pub const MAX_CODES: usize = 1_000;
+/// Codes one profile may have waiting to be exchanged: a new one drops its
+/// oldest, so nobody fills the server's room for everyone else's.
+const MAX_WAITING_PER_USER: usize = 10;
+/// Codes one profile may have within their lifetime, exchanged or not.
+const MAX_PER_USER: usize = 50;
 
 /// What a person allowed, carried from the consent page to the token
 /// endpoint by a code.
@@ -140,6 +145,18 @@ impl Codes {
     pub fn new_code(&self, grant: CodeGrant) -> Result<String, Full> {
         let now = Instant::now();
         let mut codes = self.codes.lock();
+        let theirs: Vec<(&String, &Entry)> =
+            codes.iter().filter(|(_, entry)| entry.grant.user_id == grant.user_id && entry.alive(now)).collect();
+        if theirs.len() >= MAX_PER_USER {
+            return Err(Full);
+        }
+        let waiting = theirs.iter().filter(|(_, entry)| matches!(entry.redeemed, Redeemed::No));
+        if waiting.clone().count() >= MAX_WAITING_PER_USER {
+            let oldest = waiting.min_by_key(|(_, entry)| entry.created).map(|(key, _)| (*key).clone());
+            if let Some(oldest) = oldest {
+                codes.remove(&oldest);
+            }
+        }
         if codes.len() >= MAX_CODES {
             codes.retain(|_, entry| entry.alive(now));
             if codes.len() >= MAX_CODES {
@@ -380,17 +397,42 @@ mod tests {
         assert!(codes.codes.lock().is_empty());
     }
 
+    fn grant_for(user_id: i64) -> CodeGrant {
+        CodeGrant { user_id, ..grant() }
+    }
+
     #[test]
     fn codes_are_capped() {
         let codes = Codes::default();
-        let first = codes.new_code(grant()).unwrap();
+        let first = codes.new_code(grant_for(0)).unwrap();
+        for n in 1..MAX_CODES {
+            codes.new_code(grant_for(n as i64 % 100)).unwrap();
+        }
+        assert_eq!(codes.new_code(grant_for(100)), Err(Full));
+        // Room comes back as they expire.
+        codes.age(&first, Duration::from_secs(61));
+        assert!(codes.new_code(grant_for(100)).is_ok());
+        assert_eq!(codes.new_code(grant_for(101)), Err(Full));
+    }
+
+    #[test]
+    fn one_profile_does_not_fill_the_room_for_everyone() {
+        let codes = Codes::default();
+        let oldest = codes.new_code(grant()).unwrap();
         for _ in 1..MAX_CODES {
             codes.new_code(grant()).unwrap();
         }
+        // Only its last few wait: older ones were dropped for them.
+        assert_eq!(codes.codes.lock().len(), MAX_WAITING_PER_USER);
+        assert!(matches!(codes.redeem(&oldest, APP, Some(BACK), VERIFIER), Redeem::Invalid(_)));
+        assert!(codes.new_code(grant_for(8)).is_ok());
+        // Exchanged codes count too, up to a limit of their own.
+        let codes = Codes::default();
+        for _ in 0..MAX_PER_USER {
+            let code = codes.new_code(grant()).unwrap();
+            assert!(matches!(codes.redeem(&code, APP, Some(BACK), VERIFIER), Redeem::First(_)));
+        }
         assert_eq!(codes.new_code(grant()), Err(Full));
-        // Room comes back as they expire.
-        codes.age(&first, Duration::from_secs(61));
-        assert!(codes.new_code(grant()).is_ok());
-        assert_eq!(codes.new_code(grant()), Err(Full));
+        assert!(codes.new_code(grant_for(8)).is_ok());
     }
 }
