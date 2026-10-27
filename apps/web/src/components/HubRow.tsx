@@ -167,11 +167,11 @@ export function HubRowSkeleton({ aspect = "poster" }: { aspect?: CardAspect }) {
   const { ref, width, perPage } = useFittedCards(aspect);
   return (
     <section>
-      <div className="mb-3 px-4 sm:px-8">
+      <div className="mb-2 flex h-8 items-center px-4 sm:px-8">
         <div className="skeleton h-5 w-48 rounded" />
       </div>
       <div className="px-4 sm:px-8">
-        <div ref={ref} className="-mx-1 flex gap-3.5 overflow-hidden px-1 pt-1 sm:gap-4">
+        <div ref={ref} className="-mx-1 flex gap-3.5 overflow-hidden px-1 pt-1 pb-2 sm:gap-4">
           {Array.from({ length: Math.max(perPage, 4) }, (_, i) => (
             <div key={i} className="shrink-0">
               <CardSkeleton aspect={aspect} width={width} fixed />

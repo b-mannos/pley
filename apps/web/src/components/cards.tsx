@@ -204,8 +204,15 @@ export function CardSkeleton({ aspect, width, fixed }: { aspect: CardAspect; wid
   return (
     <div className="min-w-0" style={fixed && width ? { width } : undefined}>
       <Skeleton className={cn(ASPECT_CLASS[aspect], "w-full rounded-md")} />
-      <Skeleton className="mt-2 h-3.5 w-3/4" />
-      <Skeleton className="mt-1.5 h-3 w-1/3" />
+      {/* As tall as a card's title and subtitle lines, so nothing moves when the cards arrive. */}
+      <div className="mt-2 px-0.5">
+        <div className="flex h-5 items-center">
+          <Skeleton className="h-3.5 w-3/4" />
+        </div>
+        <div className="flex h-4 items-center">
+          <Skeleton className="h-3 w-1/3" />
+        </div>
+      </div>
     </div>
   );
 }

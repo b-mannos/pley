@@ -29,14 +29,20 @@ export interface ItemGridProps {
   media?: boolean;
 }
 
-/** Window-scrolled, row-virtualized responsive grid of media cards. */
-export function ItemGrid({ items, total = items.length, aspect, cardWidth, jumpBar, stickyOffset = 136, media }: ItemGridProps) {
-  const [ref, width] = useElementWidth<HTMLDivElement>();
-  const [scrollMargin, setScrollMargin] = useState(0);
+/** Columns and gaps of a grid `width` px wide with cards of about `cardWidth` px: at least two columns. */
+function gridLayout(width: number, cardWidth: number) {
   const gap = width < 640 ? 12 : 18;
   const rowGap = width < 640 ? 18 : 26;
   const cols = width > 0 ? Math.max(2, Math.floor((width + gap) / (cardWidth + gap))) : 0;
   const colWidth = cols > 0 ? (width - gap * (cols - 1)) / cols : cardWidth;
+  return { gap, rowGap, cols, colWidth };
+}
+
+/** Window-scrolled, row-virtualized responsive grid of media cards. */
+export function ItemGrid({ items, total = items.length, aspect, cardWidth, jumpBar, stickyOffset = 136, media }: ItemGridProps) {
+  const [ref, width] = useElementWidth<HTMLDivElement>();
+  const [scrollMargin, setScrollMargin] = useState(0);
+  const { gap, rowGap, cols, colWidth } = gridLayout(width, cardWidth);
   const rowHeight = Math.round(aspectHeight(aspect, colWidth) + TEXT_HEIGHT + rowGap);
   const count = Math.max(total, items.length);
   const rowCount = cols > 0 ? Math.ceil(count / cols) : 0;
@@ -135,10 +141,18 @@ export function ItemGrid({ items, total = items.length, aspect, cardWidth, jumpB
   );
 }
 
+/** Placeholder cards laid out as the grid will lay out the real ones, so nothing moves when they arrive. */
 export function ItemGridSkeleton({ aspect, cardWidth }: { aspect: CardAspect; cardWidth: number }) {
+  const [ref, width] = useElementWidth<HTMLDivElement>();
+  const { gap, rowGap, cols } = gridLayout(width, cardWidth);
+  const count = cols > 0 ? cols * Math.ceil(18 / cols) : 0;
   return (
-    <div className="grid gap-x-[18px] gap-y-[26px]" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardWidth}px, 1fr))` }}>
-      {Array.from({ length: 18 }, (_, i) => (
+    <div
+      ref={ref}
+      className="grid w-full"
+      style={{ gridTemplateColumns: `repeat(${Math.max(cols, 1)}, minmax(0, 1fr))`, columnGap: gap, rowGap }}
+    >
+      {Array.from({ length: count }, (_, i) => (
         <CardSkeleton key={i} aspect={aspect} />
       ))}
     </div>

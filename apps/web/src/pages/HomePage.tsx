@@ -37,7 +37,7 @@ export function HomePage() {
 
   if (hubs.isPending) {
     return (
-      <div className="space-y-10 py-8">
+      <div className="space-y-9 py-7 sm:space-y-10 sm:py-8">
         <HubRowSkeleton aspect="thumb" />
         <HubRowSkeleton />
         <HubRowSkeleton />
