@@ -1,5 +1,5 @@
 import { useSignal } from "@preact/signals";
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import type { Library, User } from "../../api/types";
 import { useUi } from "../context";
 import { F, G } from "../kit/focusable";
@@ -103,14 +103,36 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
   const open = useSignal(false);
   const root = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+  /** A page chosen here takes focus from the rail as soon as it has something to focus (handOver). */
+  const handing = useRef(false);
   const { top, settings } = p.entries;
 
+  /**
+   * Focus back to the page: to where it was (Right), else to nothing in
+   * particular (a page chosen here takes it). Right with nothing to go back
+   * to goes into the page, and a page with nothing to focus leaves it here,
+   * the rail open, as Android's drawer does (backToContent).
+   */
   const leave = (restore: boolean) => {
     const el = root.current;
     if (!el) return;
     if (ui.focus.root === el) ui.focus.release(el, restore);
+    const still = ui.focus.current;
+    if (restore && still && el.contains(still) && !ui.focus.move("right")) {
+      ui.focus.trap(el);
+      return;
+    }
+    handing.current = false;
     open.value = false;
   };
+
+  // A rail that goes (onto a page without it) takes its hold on focus with it.
+  useLayoutEffect(() => {
+    const el = root.current;
+    return () => {
+      if (el && ui.focus.root === el) ui.focus.release(el, false);
+    };
+  }, []);
 
   useEffect(() => {
     const api: RailApi = {
@@ -130,6 +152,11 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
       },
       hasFocus: () => !!root.current && ui.focus.root === root.current,
       backToContent: () => leave(true),
+      handOver: () => {
+        if (!handing.current || !root.current || ui.focus.root !== root.current) return false;
+        leave(false);
+        return true;
+      },
     };
     p.railRef(api);
   });
@@ -138,8 +165,11 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
     () =>
       ui.focus.onChange((el) => {
         const r = root.current;
+        // Moving along the rail: the person is choosing again, and a page that loads keeps its hands off.
+        if (r && el && r.contains(el)) handing.current = false;
         if (r && el && !r.contains(el) && open.value) {
           open.value = false;
+          handing.current = false;
           if (ui.focus.root === r) ui.focus.release(r, false);
         }
       }),
@@ -147,14 +177,16 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
   );
 
   const select = (entry: RailEntry) => {
-    leave(false);
     const nav = ui.nav;
     const s = nav.stack.value;
     if (s.length === 1 && JSON.stringify(s[0]!.key) === JSON.stringify(entry.key)) {
       // The page shown already: back to where focus was on it.
+      leave(false);
       if (opener.current && opener.current.isConnected) ui.focus.focus(opener.current);
       return;
     }
+    // The rail keeps focus, open, until the new page has something to focus (handOver).
+    handing.current = true;
     nav.restart(entry.key);
   };
 
@@ -242,4 +274,6 @@ export interface RailApi {
   focusCurrent(): boolean;
   hasFocus(): boolean;
   backToContent(): void;
+  /** A page chosen in the rail has something to focus: the rail lets go, true when it held focus for it. */
+  handOver(): boolean;
 }

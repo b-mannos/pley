@@ -74,7 +74,10 @@ export function App(p: ShellProps) {
   const showToast = (text: string, error = false) => (toast.value = { text, error, id: Date.now() });
   const claim = (el: HTMLElement, fid: string | null, initial: boolean) => {
     const entry = nav.top;
-    if (!entry || !focus.inScope(el)) return;
+    if (!entry) return;
+    // A page chosen in the rail takes focus from it once it has something to focus; until then the rail keeps it, open.
+    if (initial && pageRoot.current && pageRoot.current.contains(el)) rail.current?.handOver();
+    if (!focus.inScope(el)) return;
     // The person moved to the rail while the page loaded: it keeps focus.
     if (rail.current?.hasFocus() && focus.root !== el.closest(".panel-root")) return;
     const current = focus.current;
@@ -197,8 +200,8 @@ export function App(p: ShellProps) {
     if (lastTop.current === id) return;
     shownAt.current = Date.now();
     restored.current.delete(id);
-    // Focus left over from the page before is no use here.
-    if (focus.current && !el.contains(focus.current)) focus.blur();
+    // Focus left over from the page before is no use here; the rail keeps its own while a page it chose loads.
+    if (focus.current && !el.contains(focus.current) && !rail.current?.hasFocus()) focus.blur();
   };
   useLayoutEffect(() => {
     if (!top) return;
