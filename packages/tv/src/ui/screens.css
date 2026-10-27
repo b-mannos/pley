@@ -630,13 +630,13 @@
 .scrub-played { position: absolute; left: 0; top: 0; bottom: 0; }
 .scrub-buffered { background: rgba(233, 235, 239, 0.45); }
 .scrub-played { background: var(--accent); }
-/* The video scrubber's thumb: 10 px, 12 with a 2 px ring 1 px clear of it while focused. */
+/* The music scrubber's thumb: 10 px, 12 with a 2 px ring 1 px clear of it while focused; it grows by a scale, so no frame lays it out. */
 .scrub-thumb { position: absolute; top: 12px; width: 0; height: 0; }
 .scrub-thumb::before,
 .scrub-thumb::after { content: ""; position: absolute; left: 0; top: 0; border-radius: 50%; transform: translate(-50%, -50%); }
-.scrub-thumb::before { width: 10px; height: 10px; background: var(--fg); transition: width 150ms var(--focus-ease), height 150ms var(--focus-ease); }
+.scrub-thumb::before { width: 12px; height: 12px; background: var(--fg); transform: translate(-50%, -50%) scale(0.8333); transition: transform 150ms var(--focus-ease); }
 .scrub-thumb::after { width: 18px; height: 18px; box-sizing: border-box; border: 2px solid var(--accent-bright); opacity: 0; transition: opacity 150ms var(--focus-ease); }
-.scrub-box[data-focused] .scrub-thumb::before { width: 12px; height: 12px; }
+.scrub-box[data-focused] .scrub-thumb::before { transform: translate(-50%, -50%); }
 .scrub-box[data-focused] .scrub-thumb::after { opacity: 1; }
 .scrub-times { display: flex; justify-content: space-between; margin-top: 4px; }
 .now-controls { display: flex; align-items: flex-start; margin-top: 16px; height: 88px; }
@@ -737,13 +737,13 @@ html.avplay .engine-host { background: transparent; }
 .bar-buffered { background: rgba(233, 235, 239, 0.45); }
 .bar-played { background: var(--accent); }
 .bar-gap { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #000; }
-/* The thumb, 10 px, grows to 12 with a 2 px ring 1 px clear of it (18 across) while focused; the ring fades with focus. */
+/* The thumb, 10 px, grows to 12 (by a scale) with a 2 px ring 1 px clear of it (18 across) while focused; the ring fades with focus. */
 .scrubber .thumb { position: absolute; top: 20px; width: 0; height: 0; }
 .scrubber .thumb::before,
 .scrubber .thumb::after { content: ""; position: absolute; left: 0; top: 0; border-radius: 50%; transform: translate(-50%, -50%); }
-.scrubber .thumb::before { width: 10px; height: 10px; background: var(--fg); transition: width 150ms var(--focus-ease), height 150ms var(--focus-ease); }
+.scrubber .thumb::before { width: 12px; height: 12px; background: var(--fg); transform: translate(-50%, -50%) scale(0.8333); transition: transform 150ms var(--focus-ease); }
 .scrubber .thumb::after { width: 18px; height: 18px; box-sizing: border-box; border: 2px solid var(--accent-bright); opacity: 0; transition: opacity 150ms var(--focus-ease); }
-.scrubber[data-focused] .thumb::before { width: 12px; height: 12px; }
+.scrubber[data-focused] .thumb::before { transform: translate(-50%, -50%); }
 .scrubber[data-focused] .thumb::after { opacity: 1; }
 .marker-label { position: absolute; top: 431px; transform: translateX(-50%); white-space: nowrap; }
 .player-row { position: absolute; left: 48px; right: 48px; top: 441px; height: 80px; }
