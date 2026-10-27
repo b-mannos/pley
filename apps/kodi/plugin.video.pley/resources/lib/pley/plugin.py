@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 import urllib.parse
@@ -567,8 +568,13 @@ def signed_in_text(server: str, access_token: str) -> str:
 
 def fetch_qr(server: str, user_code: str) -> str:
     """The server's QR code of where to type `user_code`, as a file for Kodi
-    to show; "" when the server draws none (it predates them)."""
+    to show; "" when the server draws none (it predates them). The code
+    names the file, so a code that isn't letters and digits (pley's are 8
+    letters) has none: a server's answer never leads outside Kodi's
+    temporary folder."""
     code = user_code.replace("-", "")
+    if not re.fullmatch(r"[A-Z0-9]{4,16}", code):
+        return ""
     try:
         answer = api.Client(server, kodi.user_agent()).request("GET", "/api/oauth/device/qr", query={"code": code})
     except api.ApiError:
