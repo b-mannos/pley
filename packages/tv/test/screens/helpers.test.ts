@@ -7,7 +7,7 @@ import { NetworkError } from "../../src/net/transport";
 import { shuffled } from "../../src/player/music";
 import { heroOf, rowKind, seeAllOf } from "../../src/ui/screens/home";
 import { castAndCrew } from "../../src/ui/screens/item";
-import { AlphaIndex, countLabel, defaultOrder, fitParams, letterOf, ParamsStore, showsJump, sortsFor } from "../../src/ui/screens/library-data";
+import { AlphaIndex, countLabel, defaultOrder, describeSmartFilter, fitParams, letterOf, ParamsStore, showsJump, smartFilterOf, sortsFor } from "../../src/ui/screens/library-data";
 import { codeHalves, displayCode, typedAddress } from "../../src/ui/screens/onboarding/link";
 import { switchRefusal } from "../../src/ui/screens/onboarding/profiles";
 import { relativeTime } from "../../src/ui/screens/settings";
@@ -207,5 +207,23 @@ describe("the people row", () => {
     expect(row(detail("movie", [], [person(2, "director")]))!.title).toBe("Crew");
     // Producers aren't named.
     expect(row(detail("movie", [], [person(2, "producer")]))).toBeNull();
+  });
+});
+
+describe("Save as… (smart playlists)", () => {
+  it("writes the library's filters and order in Plex's syntax, as the web and Android do", () => {
+    expect(smartFilterOf({ sort: "title", order: "asc", watched: false, genre: "Comedy", year: 1999 })).toBe("genre=Comedy&year=1999&unwatched=1&sort=titleSort");
+    expect(smartFilterOf({ sort: "year", order: "desc", watched: true, genre: null, year: null })).toBe("unwatched=0&sort=year%3Adesc");
+    expect(smartFilterOf({ sort: "added", order: "desc", watched: null, genre: "Science Fiction & Fantasy", year: null })).toBe("genre=Science+Fiction+%26+Fantasy&sort=addedAt%3Adesc");
+  });
+
+  it("says what a filter finds", () => {
+    expect(describeSmartFilter("genre=Comedy&year=1999&unwatched=1&sort=titleSort")).toEqual(["Genre: Comedy", "From 1999", "Unwatched", "By title"]);
+    expect(describeSmartFilter(smartFilterOf({ sort: "added", order: "desc", watched: true, genre: "Science Fiction & Fantasy", year: null }))).toEqual([
+      "Genre: Science Fiction & Fantasy",
+      "Watched",
+      "Recently added first",
+    ]);
+    expect(describeSmartFilter("type=1&sort=movie.year:desc&decade=1980")).toEqual(["Newest first", "The 1980s"]);
   });
 });

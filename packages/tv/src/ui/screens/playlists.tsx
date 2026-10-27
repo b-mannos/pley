@@ -5,10 +5,11 @@ import { episodeLabel, formatClock, formatDuration, pluralize } from "../../form
 import { useUi } from "../context";
 import { Pill, PanelRow, Round } from "../kit/buttons";
 import { TextField } from "../kit/field";
-import { F, G } from "../kit/focusable";
+import { F, G, railOnLeft } from "../kit/focusable";
 import { PosterGrid } from "../kit/grid";
 import { Icon } from "../kit/icons";
-import { SidePanel, useScrollToFocus } from "../kit/panel";
+import { PanelHeading, PanelTitle, SidePanel, useScrollToFocus } from "../kit/panel";
+import { describeSmartFilter } from "./library-data";
 import { ArtTile } from "../kit/tile";
 import type { Entry } from "../shell/navigator";
 import { ColumnMessage, failedTitle, problem, sentence, useApp, useLoad } from "./common";
@@ -20,7 +21,10 @@ export function playlistMeta(p: Playlist): string {
   return [pluralize(p.item_count, p.kind === "audio" ? "track" : "item"), p.duration_ms ? formatDuration(p.duration_ms) : ""].filter(Boolean).join(" · ");
 }
 
-/** Playlists (the rail's page): every playlist as a tile. */
+/**
+ * Playlists (the rail's page): New playlist at the title's right (with
+ * none yet, it takes focus), then every playlist as a tile.
+ */
 export function PlaylistsScreen(p: { entry: Entry }) {
   const ui = useUi();
   const loaded = useLoad((c) => ui.api.playlists(c), []);
@@ -34,8 +38,11 @@ export function PlaylistsScreen(p: { entry: Entry }) {
       <div class="t-page c-fg" style="position:absolute;left:96px;top:27px">
         Playlists
       </div>
+      <G kind="row" class="playlists-new" onEdge={railOnLeft(ui.toRail)}>
+        <Pill label="New playlist" icon="plus" fid="new" initial={!list.length} onSelect={() => ui.nav.open({ name: "newPlaylist" })} />
+      </G>
       {!list.length ? (
-        <ColumnMessage top={80} title="No playlists yet" body="Add a movie, an episode or a song to a playlist from its page, or make one on the web." />
+        <ColumnMessage top={80} title="No playlists yet" body="Make one here, or use “Add to playlist” on a movie, show, album or episode (also when holding OK on a poster)." />
       ) : (
         <PosterGrid
           kind="square"
@@ -166,6 +173,75 @@ export function TrackLine(p: {
       </div>
       <div class="t-caption track-sub">{p.duration}</div>
     </F>
+  );
+}
+
+/** A playlist's title is 1 to 200 characters (the Android app's Playlists.check). */
+const TITLE_MAX = 200;
+
+/**
+ * New playlist and Save these filters (TvNewPlaylistScreen): what it is on
+ * the left; a panel with the title (OK types it) and, for an empty
+ * playlist, what it plays. Create, or Save, makes it and opens it in this
+ * page's place.
+ */
+export function NewPlaylistScreen(p: { smart?: { libraryId: number; filter: string } }) {
+  const ui = useUi();
+  const smart = p.smart ?? null;
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState<"video" | "audio">("video");
+  const [busy, setBusy] = useState(false);
+  const heading = smart ? "Save these filters" : "New playlist";
+  const filters = smart ? describeSmartFilter(smart.filter) : [];
+  const body = !smart
+    ? "Name it, then add to it with “Add to playlist” on any title."
+    : filters.length
+      ? `${filters.join(" · ")}. It keeps up with the library by itself.`
+      : "It keeps up with the library by itself.";
+  const fits = (t: string) => t.length > 0 && t.length <= TITLE_MAX;
+  const create = (typed?: string) => {
+    const title = (typed ?? name).trim();
+    if (!fits(title) || busy) return;
+    setBusy(true);
+    const made = smart ? ui.api.createSmartPlaylist(title, smart.libraryId, smart.filter) : ui.api.createPlaylist(title, kind, []);
+    made.then(
+      (pl) => ui.nav.replace({ name: "playlist", id: pl.id }),
+      (e) => {
+        setBusy(false);
+        ui.toast(sentence(errorMessage(e)), true);
+      },
+    );
+  };
+  return (
+    <div class="sheet-page">
+      <div class="sheet-left">
+        <Icon name="list-plus" size={32} color="var(--muted)" />
+        <div class="t-page c-fg" style="margin-top:16px">
+          {heading}
+        </div>
+        <div class="t-body-large c-muted" style="margin-top:12px">
+          {body}
+        </div>
+      </div>
+      <SidePanel onClose={() => ui.nav.pop()} label={heading}>
+        <PanelTitle>{heading}</PanelTitle>
+        <div style="padding:6px 4px">
+          <TextField value={name} placeholder="Title" initial onInput={setName} onSubmit={(v) => create(v)} />
+        </div>
+        <div class="t-caption c-muted" style="padding:4px 0 0 8px">
+          Press OK on the title to type it.
+        </div>
+        {!smart && (
+          <>
+            <PanelHeading>For</PanelHeading>
+            <PanelRow label="Movies & TV" icon="list-video" checked={kind === "video"} onSelect={() => setKind("video")} />
+            <PanelRow label="Music" icon="list-music" checked={kind === "audio"} onSelect={() => setKind("audio")} />
+          </>
+        )}
+        <div style="height:16px" />
+        <PanelRow label={smart ? "Save" : "Create"} icon={smart ? "save" : "plus"} disabled={!fits(name.trim()) || busy} onSelect={() => create()} />
+      </SidePanel>
+    </div>
   );
 }
 

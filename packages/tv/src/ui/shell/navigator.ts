@@ -20,6 +20,8 @@ export type PageKey =
   | { name: "playlists" }
   | { name: "playlist"; id: number }
   | { name: "addToPlaylist"; itemIds: number[]; title: string }
+  /** New playlist; with `smart`, Save these filters (a library's listing). */
+  | { name: "newPlaylist"; smart?: { libraryId: number; filter: string } }
   | { name: "settings" }
   | { name: "history" }
   | { name: "nowPlaying" }

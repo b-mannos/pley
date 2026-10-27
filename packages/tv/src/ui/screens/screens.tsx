@@ -12,7 +12,7 @@ import { SearchScreen } from "./search";
 import { PersonScreen } from "./person";
 import { CollectionScreen, CollectionsScreen } from "./collections";
 import { AlbumScreen, ArtistScreen, NowPlayingScreen } from "./music";
-import { AddToPlaylistScreen, PlaylistScreen, PlaylistsScreen } from "./playlists";
+import { AddToPlaylistScreen, NewPlaylistScreen, PlaylistScreen, PlaylistsScreen } from "./playlists";
 import { HistoryScreen, SettingsScreen } from "./settings";
 import { PlayerScreen } from "../player/player";
 
@@ -71,6 +71,9 @@ export function Screen(p: { entry: Entry; state: AppState }) {
       break;
     case "addToPlaylist":
       page = <AddToPlaylistScreen itemIds={key.itemIds} title={key.title} />;
+      break;
+    case "newPlaylist":
+      page = <NewPlaylistScreen smart={key.smart} />;
       break;
     case "settings":
       page = <SettingsScreen entry={p.entry} />;

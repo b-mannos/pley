@@ -45,6 +45,128 @@ export function hasFilter(p: LibraryParams): boolean {
   return p.watched !== null || p.genre !== null || p.year !== null;
 }
 
+/** Plex's name for each sort, as smart filters write it (docs/COMPATIBILITY.md). */
+const PLEX_SORT: Record<LibrarySort, string> = {
+  title: "titleSort",
+  year: "year",
+  added: "addedAt",
+  rating: "rating",
+  user_rating: "userRating",
+  release: "originallyAvailableAt",
+  duration: "duration",
+  last_played: "lastViewedAt",
+  bitrate: "mediaBitrate",
+};
+
+/**
+ * The library page's filters and order as a smart filter, in Plex's syntax
+ * (`genre=Comedy&unwatched=1&sort=year:desc`): what "Save as…" saves (the
+ * web's smartFilterOf, the Android app's SmartFilter.of).
+ */
+export function smartFilterOf(p: LibraryParams): string {
+  const parts: [string, string][] = [];
+  if (p.genre) parts.push(["genre", p.genre]);
+  if (p.year !== null) parts.push(["year", String(p.year)]);
+  if (p.watched !== null) parts.push(["unwatched", p.watched ? "0" : "1"]);
+  const field = PLEX_SORT[p.sort];
+  parts.push(["sort", p.order === "desc" ? `${field}:desc` : field]);
+  return parts.map(([k, v]) => `${encodeForm(k)}=${encodeForm(v)}`).join("&");
+}
+
+/** A form value as URLSearchParams and Java's URLEncoder write it: spaces as "+". */
+function encodeForm(s: string): string {
+  return encodeURIComponent(s).replace(/%20/g, "+");
+}
+
+function decodeForm(s: string): string {
+  try {
+    return decodeURIComponent(s.replace(/\+/g, " "));
+  } catch {
+    return s;
+  }
+}
+
+const SORT_NOTES: Record<string, [string, string]> = {
+  titleSort: ["By title", "By title, Z to A"],
+  year: ["Oldest first", "Newest first"],
+  originallyAvailableAt: ["Earliest release first", "Latest release first"],
+  addedAt: ["First added first", "Recently added first"],
+  rating: ["Lowest rated first", "Best rated first"],
+  audienceRating: ["Lowest rated first", "Best rated first"],
+  userRating: ["Your lowest rated first", "Your best rated first"],
+  lastViewedAt: ["Least recently played first", "Recently played first"],
+  duration: ["Shortest first", "Longest first"],
+  viewCount: ["Least played first", "Most played first"],
+};
+
+function sortNote(value: string): string {
+  const first = value.split(",")[0] ?? "";
+  const at = first.indexOf(":");
+  const field = at < 0 ? first : first.slice(0, at);
+  const direction = at < 0 ? null : first.slice(at + 1);
+  // python-plexapi may name the kind first: `movie.year`.
+  const name = field.indexOf(".") >= 0 ? field.slice(field.indexOf(".") + 1) : field;
+  const notes = SORT_NOTES[name];
+  if (!notes) return `Sorted by ${name}`;
+  return direction === "desc" ? notes[1] : notes[0];
+}
+
+/** What a smart filter finds, in words: "Genre: Comedy", "Unwatched", "Newest first"… */
+export function describeSmartFilter(filter: string): string[] {
+  const out: string[] = [];
+  for (const part of filter.split("&")) {
+    if (!part) continue;
+    const at = part.indexOf("=");
+    const key = decodeForm(at < 0 ? part : part.slice(0, at));
+    const value = at < 0 ? "" : decodeForm(part.slice(at + 1));
+    switch (key) {
+      case "genre":
+        out.push(`Genre: ${value}`);
+        break;
+      case "label":
+        out.push(`Label: ${value}`);
+        break;
+      case "studio":
+        out.push(`Studio: ${value}`);
+        break;
+      case "contentRating":
+        out.push(`Rated ${value}`);
+        break;
+      case "unwatched":
+        out.push(value === "0" || value === "false" ? "Watched" : "Unwatched");
+        break;
+      case "inProgress":
+        out.push(value === "0" || value === "false" ? "Not in progress" : "In progress");
+        break;
+      case "year":
+        out.push(`From ${value}`);
+        break;
+      case "year>>":
+        out.push(`After ${value}`);
+        break;
+      case "year<<":
+        out.push(`Before ${value}`);
+        break;
+      case "decade":
+        out.push(`The ${value}s`);
+        break;
+      case "sort":
+        out.push(sortNote(value));
+        break;
+      case "limit":
+        out.push(`At most ${value}`);
+        break;
+      // Plumbing, not part of what is found.
+      case "type":
+      case "includeGuids":
+        break;
+      default:
+        out.push(`${key}: ${value}`);
+    }
+  }
+  return out;
+}
+
 /** Params as kept, made fit for the library: music has no filters; a sort the kind doesn't offer is Title. */
 export function fitParams(p: Partial<LibraryParams> | null, kind: LibraryKind): LibraryParams {
   const d = defaultParams();

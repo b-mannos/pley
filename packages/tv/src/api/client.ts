@@ -286,6 +286,11 @@ export class Api {
     return this.call("POST", "/api/playlists", { title, ...(kind ? { kind } : {}), item_ids: itemIds }) as Promise<Playlist>;
   }
 
+  /** A smart playlist: a library's listing by `filter` (Plex's syntax), which keeps up with the library by itself. */
+  createSmartPlaylist(title: string, libraryId: Id, filter: string): Promise<Playlist> {
+    return this.call("POST", "/api/playlists", { title, smart_filter: filter, library_id: libraryId }) as Promise<Playlist>;
+  }
+
   // ---- watching
 
   history(offset: number, limit: number, cancel?: Cancel): Promise<{ total: number; entries: HistoryEntry[] }> {

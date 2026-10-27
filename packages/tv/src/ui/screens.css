@@ -549,6 +549,8 @@
 .playlist-page,
 .sheet-page,
 .music-page { position: absolute; left: 0; top: 0; width: 960px; height: 540px; overflow: hidden; }
+/* New playlist at the page title's right, centred on its line. */
+.playlists-new { position: absolute; right: 48px; top: 24px; z-index: 2; }
 .search-rows { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
 .search-field { position: absolute; left: 96px; top: 27px; display: flex; align-items: center; z-index: 3; }
 .search-busy { margin-left: 20px; }

@@ -25,6 +25,7 @@ import {
   Listing,
   ParamsStore,
   showsJump,
+  smartFilterOf,
   SORT_LABELS,
   sortsFor,
   type LibraryParams,
@@ -316,6 +317,13 @@ function LibraryGridTab(p: { entry: Entry; library: Library; initial: boolean; f
             setParams({ ...params, watched: null, genre: null, year: null });
             closePanel();
           }}
+          onSaveAs={() => {
+            setPanel(null);
+            panelOpener.current = null;
+            // Back from it lands on the Filter chip.
+            p.entry.memory = "chip/filter";
+            ui.nav.open({ name: "newPlaylist", smart: { libraryId: lib.id, filter: smartFilterOf(params) } });
+          }}
         />
       )}
       {panel?.kind === "genre" && (
@@ -428,6 +436,8 @@ function FilterPanel(p: {
   onGenre: () => void;
   onYear: () => void;
   onClear: () => void;
+  /** Save these filters as a smart playlist (Save as…). */
+  onSaveAs: () => void;
 }) {
   const w = p.params.watched;
   const value = (text: string) => <span class="panel-value t-caption">{text}</span>;
@@ -446,6 +456,7 @@ function FilterPanel(p: {
         </>
       )}
       {hasFilter(p.params) && <PanelRow label="Clear filters" onSelect={p.onClear} />}
+      {hasFilter(p.params) && <PanelRow label="Save as…" icon="save" onSelect={p.onSaveAs} />}
     </SidePanel>
   );
 }
