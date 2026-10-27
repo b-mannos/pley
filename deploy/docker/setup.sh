@@ -121,11 +121,15 @@ fi
 [ -d "$media_dir" ] || die "$media_dir (PLEY_MEDIA_DIR in .env) isn't a folder"
 
 # ---- start -----------------------------------------------------------------
+# The commit the apps show beside the version, for the build below and the
+# one `up` runs (pull_policy "build"), which then finds every layer built.
+PLEY_COMMIT=$(git rev-parse --short=9 HEAD 2>/dev/null || echo unknown)
+export PLEY_COMMIT
 # Newer base images bring Debian's security fixes along with pley's changes.
 case $(setting PLEY_PULL_POLICY build) in
     build)
         say "Building pley (the first time takes several minutes)..."
-        PLEY_COMMIT=$(git rev-parse --short=9 HEAD 2>/dev/null || echo unknown) docker compose build --pull pley
+        docker compose build --pull pley
         ;;
     never) ;;
     *) docker compose pull pley ;;
