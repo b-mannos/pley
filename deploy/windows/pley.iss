@@ -632,7 +632,8 @@ begin
   UserPage.Values[0] := CmdParam('USER', GetPreviousData('User', 'pley'));
   UserPage.Values[1] := CmdParam('SHARE', GetPreviousData('Share', ''));
   UserPage.Values[2] := CmdParam('SHAREUSER', GetPreviousData('ShareUser', ''));
-  UserPage.Values[3] := CmdParam('SHAREPASSWORD', '');
+  // From the environment, as pley reads it: Setup's log keeps its command line.
+  UserPage.Values[3] := GetEnv('PLEY_SHARE_PASSWORD');
 
   DataPage.Values[0] := CmdParam('DATADIR', GetPreviousData('DataDir', ''));
   CopyEdit.Text := CmdParam('COPYDATA', '');
@@ -663,6 +664,16 @@ begin
   SubnetRadio.Checked := not AnyRadio.Checked;
   DiscoveryCheck.Checked := Flag('DISCOVERY', GetPreviousData('Discovery', 'yes') = 'yes');
   UpdateControls(nil);
+end;
+
+// The NAS password on Setup's command line would stay in its log.
+function InitializeSetup: Boolean;
+begin
+  Result := CmdParam('SHAREPASSWORD', '') = '';
+  if not Result then
+    SuppressibleMsgBox('Setup doesn''t take /SHAREPASSWORD=: its log would keep the password. Put it in the ' +
+      'environment variable PLEY_SHARE_PASSWORD instead, in the administrator''s terminal that runs Setup.',
+      mbError, MB_OK, IDOK);
 end;
 
 procedure InitializeWizard;

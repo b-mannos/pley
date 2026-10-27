@@ -122,7 +122,7 @@ pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=s
 |---|---|---|
 | `/MODE=` | `service`, `user` (a user of its own) or `tray` | `service` |
 | `/USER=` | The user's name, with `user` | `pley` |
-| `/SHARE=`, `/SHAREUSER=`, `/SHAREPASSWORD=` | The NAS and its sign-in, with `user` | none |
+| `/SHARE=`, `/SHAREUSER=` | The NAS and its user name, with `user` (the password: below) | none |
 | `/RESTRICT=` | `yes` or `no`: writes only in its data folder | `yes` |
 | `/AUTOSTART=` | `yes` or `no`: start at sign-in, with `tray` | `yes` |
 | `/DATADIR=` | The data folder | as above |
@@ -133,6 +133,16 @@ pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=s
 | `/FIREWALL=` | The kinds of network to let pley through on, wherever it listens: `private`, `domain`, `public` (separated by commas), or `none` | `private,domain` |
 | `/FROM=` | `subnet` (devices on those networks) or `any` (a VPN too) | `subnet` |
 | `/DISCOVERY=` | `yes` or `no`: found by the pley apps, when others may reach it | `yes` |
+
+The NAS's password comes from the environment variable
+`PLEY_SHARE_PASSWORD`, never the command line, which Setup writes in its
+log. Set it in an administrator's PowerShell and run Setup from there (a
+Setup that asks for administrator rights itself starts without it):
+
+```
+$env:PLEY_SHARE_PASSWORD = [Net.NetworkCredential]::new('', (Read-Host 'NAS password' -AsSecureString)).Password
+.\pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=user /SHARE=\\nas /SHAREUSER=media
+```
 
 Setup's own options work too, such as `/DIR=` (where pley goes) and
 `/LOG=<file>`. An update keeps the last choices for the options not given. A
