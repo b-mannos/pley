@@ -149,7 +149,7 @@ pub fn install(definition: &Definition) -> anyhow::Result<()> {
     let account = wide(&definition.account);
     let password = definition.password.as_deref().map(wide);
     let password = password.as_ref().map_or(null(), |p| p.as_ptr());
-    let display = wide("pley media server");
+    let display = wide("pley-server");
     let service = match open(&manager, SERVICE_ALL_ACCESS)? {
         Some(service) => {
             // SAFETY: valid handle and NUL-terminated strings; nulls leave the

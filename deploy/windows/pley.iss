@@ -28,13 +28,13 @@
 
 [Setup]
 AppId={{6D1B6F0C-3F1E-4C55-9A0D-2B7E3C5A9F41}
-; "pley server", apart from the desktop app (also "pley") in Programs, the
+; "pley-server", apart from the desktop app (also "pley") in Programs, the
 ; Start menu and a release's files.
-AppName=pley server
+AppName=pley-server
 AppVersion={#AppVersion}
-AppVerName=pley server {#AppVersion}
+AppVerName=pley-server {#AppVersion}
 AppPublisher=pley
-DefaultDirName={autopf}\pley server
+DefaultDirName={autopf}\pley-server
 DisableProgramGroupPage=yes
 #ifdef Test
 ; /DTest: a build that runs without administrator rights, to try the
@@ -52,7 +52,7 @@ WizardStyle=modern dynamic
 SetupIconFile=..\..\apps\server\assets\pley.ico
 WizardSmallImageFile=..\..\apps\web\public\icon-192.png
 UninstallDisplayIcon={app}\pley.exe
-UninstallDisplayName=pley server
+UninstallDisplayName=pley-server
 OutputDir={#OutputDir}
 OutputBaseFilename=pley-server-{#AppVersion}-windows-{#ArchName}-setup
 Compression=lzma2/max
@@ -78,9 +78,9 @@ Source: "{#SourceDir}\*"; Excludes: "pley.exe"; DestDir: "{app}"; Flags: ignorev
 
 #ifndef Test
 [Icons]
-Name: "{autoprograms}\pley server"; Filename: "{app}\pley.exe"; Parameters: "--data-dir ""{code:DataDir}"""; Check: IsTray
-Name: "{autoprograms}\pley server"; Filename: "{code:WebAddress}"; Check: not IsTray
-Name: "{autoprograms}\pley server logs"; Filename: "{code:DataDir}\logs"
+Name: "{autoprograms}\pley-server"; Filename: "{app}\pley.exe"; Parameters: "--data-dir ""{code:DataDir}"""; Check: IsTray
+Name: "{autoprograms}\pley-server"; Filename: "{code:WebAddress}"; Check: not IsTray
+Name: "{autoprograms}\pley-server logs"; Filename: "{code:DataDir}\logs"
 #endif
 
 [Run]
