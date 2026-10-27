@@ -11,8 +11,20 @@ The pictures and words the app stores ask for besides the app itself.
 | `feature-graphic-1024x500.png` | 1024 × 500 | Google Play's feature graphic |
 | `tv-banner-1280x720.png` | 1280 × 720 | Google Play's Android TV banner, the Amazon Appstore's Fire TV icon |
 
-Screenshots are taken from the apps: phones and tablets at 1080 × 1920 or
-larger, TVs at 1920 × 1080.
+`screenshots/` has the apps' screenshots, phones' at 1080 × 1920 (the
+player 1920 × 1080) and TVs' at 1920 × 1080, JPEGs as Google Play takes
+them. They show a made-up library, with no real title's artwork, which
+`scripts/store-library` makes again (its README says how).
+
+| Phone | TV |
+|---|---|
+| `phone-1-home` Home: Continue Watching, My List | `tv-1-home` Home |
+| `phone-2-movie` A film's page | `tv-2-library` The Movies library |
+| `phone-3-library` The Movies library | `tv-3-movie` A film's page |
+| `phone-4-show` A show's page | `tv-4-episodes` A season's episodes |
+| `phone-5-episodes` A season's episodes, with downloads | `tv-5-player` The player |
+| `phone-6-player` The player | |
+| `phone-7-downloads` Downloads, for watching offline | |
 
 ## The app
 
