@@ -13,6 +13,7 @@ from __future__ import annotations
 import threading
 import time
 import unicodedata
+from urllib.parse import quote_plus
 
 import xbmc
 import xbmcgui
@@ -48,6 +49,30 @@ SORT_NAMES = {
 }
 LIBRARY_ICONS = {"movies": "icon-clapperboard.png", "shows": "icon-tv.png", "music": "icon-music.png"}
 PAGE = 120
+# What a playlist takes (shows, seasons, artists and albums add their
+# episodes or tracks), and of which kind.
+PLAYLIST_KINDS = {"movie": "video", "show": "video", "season": "video", "episode": "video", "artist": "audio", "album": "audio", "track": "audio"}
+# A library's sort as a smart filter says it (SmartFilter.kt's, the web's).
+PLEX_SORTS = {
+    "title": "titleSort",
+    "year": "year",
+    "added": "addedAt",
+    "rating": "rating",
+    "release": "originallyAvailableAt",
+    "duration": "duration",
+    "last_played": "lastViewedAt",
+}
+HERO_BUTTONS = (
+    L.ITEM_PLAY,
+    L.ITEM_FROM_START,
+    L.ITEM_WATCHED,
+    L.ITEM_UNWATCHED,
+    L.ITEM_ADD_TO_LIST,
+    L.ITEM_IN_LIST,
+    L.ITEM_TRAILER,
+    L.ITEM_ADD_TO_PLAYLIST,
+    L.ITEM_MORE,
+)
 
 
 def color(text: str, argb: str) -> str:
@@ -587,6 +612,8 @@ class Window(xbmcgui.WindowXML):
             except api.ApiError:
                 listed = False
             actions.append((T("remove_from_list") if listed else T("add_to_list"), lambda: self.set_listed(item, not listed)))
+        if kind in PLAYLIST_KINDS:
+            actions.append((T("add_to_playlist"), lambda: self.add_to_playlist(item)))
         if continue_watching:
             actions.append((T("remove_from_continue"), lambda: self.forget_progress(item)))
         if kind == "episode" and item.get("grandparent_id"):
@@ -603,6 +630,30 @@ class Window(xbmcgui.WindowXML):
     def forget_progress(self, item: dict) -> None:
         self.session.client.delete("/api/continue-watching/%d" % item["id"])
         self.changed()
+
+    def add_to_playlist(self, item: dict) -> None:
+        """Add to playlist (TvAddToPlaylist): into a new playlist named
+        here, or one of the profile's of the item's kind (smart ones fill
+        themselves)."""
+        kind = PLAYLIST_KINDS.get(item.get("kind"), "video")
+        playlists = self.session.get("/api/playlists").get("playlists", [])
+        mine = [p for p in playlists if not p.get("smart_filter") and p.get("kind", kind) == kind]
+        new = T("new_music_playlist" if kind == "audio" else "new_video_playlist")
+        entries = [xbmcgui.ListItem(new, offscreen=True)]
+        entries += [xbmcgui.ListItem(p.get("title") or "", T("playlist_items") % p.get("item_count", 0), offscreen=True) for p in mine]
+        chosen = xbmcgui.Dialog().select(T("add_to_playlist"), entries)
+        if chosen < 0:
+            return
+        if chosen == 0:
+            title = xbmcgui.Dialog().input(new).strip()
+            if not title:
+                return
+            self.session.client.post("/api/playlists", {"title": title, "kind": kind, "item_ids": [item["id"]]})
+        else:
+            playlist = mine[chosen - 1]
+            title = playlist.get("title") or ""
+            self.session.client.post("/api/playlists/%d/items" % playlist["id"], {"item_ids": [item["id"]]})
+        self.toast(T("added_to") % title)
 
     def open_item(self, item: dict) -> None:
         """What a tile opens: the item's page; a person's, a library's."""
@@ -1206,6 +1257,7 @@ class Item(Screen):
         win.visible(L.button_box(L.ITEM_ADD_TO_LIST), listable and not d.get("in_watchlist"))
         win.visible(L.button_box(L.ITEM_IN_LIST), listable and bool(d.get("in_watchlist")))
         win.visible(L.button_box(L.ITEM_TRAILER), self.trailer() is not None)
+        win.visible(L.button_box(L.ITEM_ADD_TO_PLAYLIST), kind in PLAYLIST_KINDS)
         win.visible(L.button_box(L.ITEM_MORE), bool(self.more_actions()))
         # Season tabs, for a show of more than one season.
         tabs = win.c(L.ITEM_SEASONS)
@@ -1324,7 +1376,7 @@ class Item(Screen):
             if found[1]["key"] == "episodes":
                 self.win.rest(lambda: self.rested(control_id))
             return
-        if control_id in (L.ITEM_PLAY, L.ITEM_FROM_START, L.ITEM_WATCHED, L.ITEM_UNWATCHED, L.ITEM_ADD_TO_LIST, L.ITEM_IN_LIST, L.ITEM_TRAILER, L.ITEM_MORE):
+        if control_id in HERO_BUTTONS:
             if self.area != "hero":
                 self.hero_mode()
                 self.win.setFocusId(control_id)
@@ -1390,6 +1442,8 @@ class Item(Screen):
                 win.set_listed(d, control_id == L.ITEM_ADD_TO_LIST)
             elif control_id == L.ITEM_TRAILER and self.trailer():
                 win.play(self.trailer(), from_start=True)
+            elif control_id == L.ITEM_ADD_TO_PLAYLIST:
+                win.add_to_playlist(d)
             elif control_id == L.ITEM_MORE:
                 actions = self.more_actions()
                 chosen = xbmcgui.Dialog().contextmenu([name for name, _ in actions]) if actions else -1
@@ -1468,7 +1522,7 @@ class Library(Screen):
         self.tab = "all"
         self.sort = "title"
         self.descending = False
-        self.unwatched = False
+        self.watched = None  # all, False: unwatched, True: watched
         self.genre = None
         self.year = None
         self.items = []
@@ -1485,13 +1539,45 @@ class Library(Screen):
 
     def query(self, offset: int) -> dict:
         q = {"sort": self.sort, "order": "desc" if self.descending else "asc", "offset": offset, "limit": PAGE}
-        if self.unwatched:
-            q["watched"] = "false"
+        if self.watched is not None:
+            q["watched"] = "true" if self.watched else "false"
         if self.genre:
             q["genre"] = self.genre
         if self.year:
             q["year"] = self.year
         return q
+
+    @property
+    def filtered(self) -> bool:
+        return self.watched is not None or bool(self.genre) or bool(self.year)
+
+    def chips(self) -> list:
+        """(chip, whether it is on, its label when on) for Unwatched, Genre
+        and Year."""
+        return [
+            (L.LIBRARY_UNWATCHED, self.watched is False, T("unwatched")),
+            (L.LIBRARY_GENRE, bool(self.genre), self.genre or ""),
+            (L.LIBRARY_YEAR, bool(self.year), str(self.year or "")),
+        ]
+
+    def refocus(self, chip: int) -> None:
+        """Focus back on [chip], or its twin where that is the one shown."""
+        on = next(on for c, on, _ in self.chips() if c == chip)
+        self.win.setFocusId(chip + 100 if on else chip)
+
+    def smart_filter(self) -> str:
+        """The filters and sort as a smart playlist's filter, in Plex's
+        syntax (SmartFilter.of): what Save as… saves."""
+        parts = []
+        if self.genre:
+            parts.append(("genre", self.genre))
+        if self.year:
+            parts.append(("year", str(self.year)))
+        if self.watched is not None:
+            parts.append(("unwatched", "0" if self.watched else "1"))
+        field = PLEX_SORTS[self.sort]
+        parts.append(("sort", field + ":desc" if self.descending else field))
+        return "&".join("%s=%s" % (quote_plus(k), quote_plus(v)) for k, v in parts)
 
     def load(self) -> None:
         lib = self.library["id"]
@@ -1536,18 +1622,29 @@ class Library(Screen):
             win.visible(L.LIBRARY_SORT_DOWN, self.descending)
             for control in (L.LIBRARY_SORT, L.LIBRARY_SORT_DOWN):
                 win.put(control, ICON_ROOM + sort_name)
-            win.put(L.LIBRARY_UNWATCHED, color(T("unwatched_only"), L.ACCENT_BRIGHT) if self.unwatched else T("unwatched"))
-            win.put(L.LIBRARY_GENRE, self.genre or T("genre"))
-            win.put(L.LIBRARY_YEAR, str(self.year) if self.year else T("year"))
+            # Music only sorts (TvLibraryScreen's chips); a filter that is on
+            # shows its twin, with a check.
+            music = self.library.get("kind") == "music"
+            win.visible(L.LIBRARY_FILTER, not music)
+            win.put(L.LIBRARY_FILTER, ICON_ROOM + T("filter"))
+            for chip, on, text in self.chips():
+                win.visible(chip, not music and not on)
+                win.visible(chip + 100, not music and on)
+                win.put(chip + 100, ICON_ROOM + text)
             kind = self.library.get("kind")
             noun = {"movies": ("movie", "movies"), "shows": ("show", "shows"), "music": ("artist", "artists")}.get(kind, ("item", "items"))
-            win.put(L.LIBRARY_COUNT, words.plural(self.total, *noun))
+            every = self.library.get("item_count")
+            if self.filtered and every is not None and every >= self.total:
+                # "23 of 342 movies"
+                win.put(L.LIBRARY_COUNT, T("count_of") % ("{:,}".format(self.total), words.plural(every, *noun)))
+            else:
+                win.put(L.LIBRARY_COUNT, words.plural(self.total, *noun))
             grid = win.c(L.grid_list(L.LIBRARY_GRID, self.shape))
             grid.reset()
             grid.addItems([tiles.tile(self.session.base, item, self.shape) for item in self.items])
             win.visible(L.grid_list(L.LIBRARY_GRID, self.shape), bool(self.items))
             if not self.items:
-                win.put(L.LIBRARY_EMPTY, T("empty_library"))
+                win.put(L.LIBRARY_EMPTY, T("no_matches") if self.filtered else T("library_empty"))
         elif self.tab == "recommended":
             self.rows.fill(self.hubs or [])
             self.rows.place(None, 200)
@@ -1603,28 +1700,18 @@ class Library(Screen):
                 self.descending = self.sort not in ("title",)
             self.reload()
             return win.setFocusId(L.LIBRARY_SORT_DOWN if self.descending else L.LIBRARY_SORT)
-        if control_id == L.LIBRARY_UNWATCHED:
-            self.unwatched = not self.unwatched
-            return self.reload()
-        if control_id in (L.LIBRARY_GENRE, L.LIBRARY_YEAR):
-            if self.filters is None:
-                try:
-                    self.filters = self.session.get("/api/libraries/%d/filters" % self.library["id"])
-                except api.ApiError as e:
-                    return win.toast(T("server_error") % e.message, 6)
-            if control_id == L.LIBRARY_GENRE:
-                options = self.filters.get("genres") or []
-                chosen = xbmcgui.Dialog().select(T("genre"), [T("any_genre")] + options)
-                if chosen >= 0:
-                    self.genre = options[chosen - 1] if chosen else None
-                    self.reload()
-            else:
-                options = [str(y) for y in self.filters.get("years") or []]
-                chosen = xbmcgui.Dialog().select(T("year"), [T("any_year")] + options)
-                if chosen >= 0:
-                    self.year = int(options[chosen - 1]) if chosen else None
-                    self.reload()
-            return
+        if control_id == L.LIBRARY_FILTER:
+            return self.filter_menu()
+        if control_id in (L.LIBRARY_UNWATCHED, L.LIBRARY_UNWATCHED_ON):
+            self.watched = None if self.watched is False else False
+            self.reload()
+            return self.refocus(L.LIBRARY_UNWATCHED)
+        if control_id in (L.LIBRARY_GENRE, L.LIBRARY_GENRE_ON):
+            self.pick_genre()
+            return self.refocus(L.LIBRARY_GENRE)
+        if control_id in (L.LIBRARY_YEAR, L.LIBRARY_YEAR_ON):
+            self.pick_year()
+            return self.refocus(L.LIBRARY_YEAR)
         if self.tab == "recommended":
             found = self.rows.selected(control_id)
             if found is not None:
@@ -1638,6 +1725,77 @@ class Library(Screen):
             win.open_item(self.items[at])
         elif self.tab == "collections" and self.collections and 0 <= at < len(self.collections):
             win.open(Grid.collection(win, self.collections[at]))
+
+    def filter_menu(self) -> None:
+        """Filter (TvLibraryPanel's): which titles to show, the genre and
+        the year; then Clear filters and Save as…"""
+        shows = ((None, T("all")), (False, T("unwatched")), (True, T("mark_watched_short")))
+        entries = []
+        for watched, name in shows:
+            li = xbmcgui.ListItem(name, offscreen=True)
+            li.select(self.watched is watched)
+            entries.append(li)
+        # Kodi's select list draws one label: the value goes in it.
+        entries.append(xbmcgui.ListItem("%s: %s" % (T("genre"), self.genre or T("any_genre")), offscreen=True))
+        entries.append(xbmcgui.ListItem("%s: %s" % (T("year"), self.year or T("any_year")), offscreen=True))
+        if self.filtered:
+            entries.append(xbmcgui.ListItem(T("clear_filters"), offscreen=True))
+            entries.append(xbmcgui.ListItem(T("save_as"), offscreen=True))
+        current = next(i for i, (watched, _) in enumerate(shows) if self.watched is watched)
+        chosen = xbmcgui.Dialog().select(T("filter"), entries, preselect=current)
+        if chosen < 0:
+            return
+        if chosen < len(shows):
+            self.watched = shows[chosen][0]
+            return self.reload()
+        if chosen == len(shows):
+            return self.pick_genre()
+        if chosen == len(shows) + 1:
+            return self.pick_year()
+        if chosen == len(shows) + 2:
+            self.watched, self.genre, self.year = None, None, None
+            return self.reload()
+        self.save_as()
+
+    def filter_options(self) -> dict:
+        if self.filters is None:
+            self.filters = self.session.get("/api/libraries/%d/filters" % self.library["id"])
+        return self.filters
+
+    def pick_genre(self) -> None:
+        try:
+            options = self.filter_options().get("genres") or []
+        except api.ApiError as e:
+            return self.win.toast(T("server_error") % e.message, 6)
+        current = options.index(self.genre) + 1 if self.genre in options else 0
+        chosen = xbmcgui.Dialog().select(T("genre"), [T("any_genre")] + options, preselect=current)
+        if chosen >= 0:
+            self.genre = options[chosen - 1] if chosen else None
+            self.reload()
+
+    def pick_year(self) -> None:
+        try:
+            options = [str(y) for y in self.filter_options().get("years") or []]
+        except api.ApiError as e:
+            return self.win.toast(T("server_error") % e.message, 6)
+        current = options.index(str(self.year)) + 1 if str(self.year) in options else 0
+        chosen = xbmcgui.Dialog().select(T("year"), [T("any_year")] + options, preselect=current)
+        if chosen >= 0:
+            self.year = int(options[chosen - 1]) if chosen else None
+            self.reload()
+
+    def save_as(self) -> None:
+        """Save these filters: a smart playlist of this library that keeps
+        up with it by itself; it opens once made."""
+        title = xbmcgui.Dialog().input(T("save_filters")).strip()
+        if not title:
+            return
+        body = {"title": title, "smart_filter": self.smart_filter(), "library_id": self.library["id"]}
+        try:
+            made = self.session.client.post("/api/playlists", body)
+        except api.ApiError as e:
+            return self.win.toast(T("server_error") % e.message, 6)
+        self.win.open(Grid.playlist(self.win, made))
 
     def moved(self, control_id: int, action: int) -> None:
         if self.tab != "all" or control_id != L.grid_list(L.LIBRARY_GRID, self.shape) or self.loading:

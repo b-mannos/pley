@@ -110,6 +110,9 @@ for (const name of ["arrow-up-narrow-wide", "arrow-down-wide-narrow", "sliders-h
   add(`chip-${name}.png`, 160, 80, box(160, 80, 12, "#222731") + icon(name, 40, FG, 32, 20));
   add(`chip-${name}-focus.png`, 160, 80, box(160, 80, 12, ACCENT) + icon(name, 40, ON_ACCENT, 32, 20));
 }
+// A chip that is on (TvChip's selected) leads with a check, in the accent at rest.
+add("chip-check.png", 160, 80, box(160, 80, 12, "#222731") + icon("check", 40, ACCENT, 32, 20));
+add("chip-check-focus.png", 160, 80, box(160, 80, 12, ACCENT) + icon("check", 40, ON_ACCENT, 32, 20));
 
 // Plain shapes, white, to tint: corners of 4 (badges), 8 (tiles), 12
 // (controls); circles.

@@ -531,6 +531,9 @@
                 <textoffsetx>40</textoffsetx>
                 <label />
                 <width>80</width>
+                <onleft>2017</onleft>
+                <onright>2079</onright>
+                <ondown>2200</ondown>
               </control>
               <control type="label" id="2088">
                 <left>-110</left>
@@ -567,6 +570,9 @@
                 <textoffsetx>40</textoffsetx>
                 <label />
                 <width>80</width>
+                <onleft>2078</onleft>
+                <onright>2080</onright>
+                <ondown>2200</ondown>
               </control>
               <control type="label" id="2089">
                 <left>-110</left>
@@ -603,6 +609,9 @@
                 <textoffsetx>40</textoffsetx>
                 <label />
                 <width>80</width>
+                <onleft>2079</onleft>
+                <onright>2081</onright>
+                <ondown>2200</ondown>
               </control>
               <control type="label" id="2090">
                 <left>-110</left>
@@ -639,6 +648,8 @@
                 <textoffsetx>40</textoffsetx>
                 <label />
                 <width>80</width>
+                <onleft>2080</onleft>
+                <ondown>2200</ondown>
               </control>
               <control type="label" id="2091">
                 <left>-110</left>
@@ -11794,6 +11805,9 @@
                 <textoffsetx>40</textoffsetx>
                 <label />
                 <width>80</width>
+                <onleft>3019</onleft>
+                <onright>3081</onright>
+                <ondown>3060</ondown>
               </control>
               <control type="label" id="3090">
                 <left>-110</left>
@@ -11830,6 +11844,9 @@
                 <textoffsetx>40</textoffsetx>
                 <label />
                 <width>80</width>
+                <onleft>3080</onleft>
+                <onright>3082</onright>
+                <ondown>3060</ondown>
               </control>
               <control type="label" id="3091">
                 <left>-110</left>
@@ -11866,6 +11883,9 @@
                 <textoffsetx>40</textoffsetx>
                 <label />
                 <width>80</width>
+                <onleft>3081</onleft>
+                <onright>3083</onright>
+                <ondown>3060</ondown>
               </control>
               <control type="label" id="3092">
                 <left>-110</left>
@@ -11902,6 +11922,9 @@
                 <textoffsetx>40</textoffsetx>
                 <label />
                 <width>80</width>
+                <onleft>3082</onleft>
+                <onright>3084</onright>
+                <ondown>3060</ondown>
               </control>
               <control type="label" id="3093">
                 <left>-110</left>
@@ -11938,6 +11961,9 @@
                 <textoffsetx>40</textoffsetx>
                 <label />
                 <width>80</width>
+                <onleft>3083</onleft>
+                <onright>3085</onright>
+                <ondown>3060</ondown>
               </control>
               <control type="label" id="3094">
                 <left>-110</left>
@@ -11974,6 +12000,9 @@
                 <textoffsetx>40</textoffsetx>
                 <label />
                 <width>80</width>
+                <onleft>3084</onleft>
+                <onright>3087</onright>
+                <ondown>3060</ondown>
               </control>
               <control type="label" id="3095">
                 <left>-110</left>
@@ -11989,6 +12018,45 @@
                 <aligny>center</aligny>
                 <scroll>false</scroll>
                 <label>$ADDON[plugin.video.pley 30104]</label>
+              </control>
+            </control>
+            <control type="group" id="3087">
+              <width>80</width>
+              <height>128</height>
+              <control type="button" id="3027">
+                <left>0</left>
+                <top>0</top>
+                <height>80</height>
+                <animation effect="zoom" start="100" end="108" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
+                <texturefocus border="0">button-list-plus-focus.png</texturefocus>
+                <texturenofocus border="0">button-list-plus.png</texturenofocus>
+                <font>font27</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <focusedcolor>FF03131F</focusedcolor>
+                <disabledcolor>FFE9EBEF</disabledcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <textoffsetx>40</textoffsetx>
+                <label />
+                <width>80</width>
+                <onleft>3085</onleft>
+                <onright>3086</onright>
+                <ondown>3060</ondown>
+              </control>
+              <control type="label" id="3097">
+                <left>-110</left>
+                <top>92</top>
+                <width>300</width>
+                <height>34</height>
+                <visible>Control.HasFocus(3027)</visible>
+                <animation effect="fade" start="0" end="100" time="150">Visible</animation>
+                <animation effect="fade" start="100" end="0" time="150">Hidden</animation>
+                <font>font12</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$ADDON[plugin.video.pley 30180]</label>
               </control>
             </control>
             <control type="group" id="3086">
@@ -12010,6 +12078,8 @@
                 <textoffsetx>40</textoffsetx>
                 <label />
                 <width>80</width>
+                <onleft>3087</onleft>
+                <ondown>3060</ondown>
               </control>
               <control type="label" id="3096">
                 <left>-110</left>
@@ -16598,7 +16668,7 @@
       <control type="grouplist" id="4012">
         <left>1000</left>
         <top>58</top>
-        <width>856</width>
+        <width>824</width>
         <height>80</height>
         <orientation>horizontal</orientation>
         <itemgap>16</itemgap>
@@ -16764,6 +16834,22 @@
             <label />
             <width min="160" max="700">auto</width>
           </control>
+          <control type="button" id="4022">
+            <top>0</top>
+            <height>80</height>
+            <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
+            <texturefocus border="80,0,32,0">chip-sliders-horizontal-focus.png</texturefocus>
+            <texturenofocus border="80,0,32,0">chip-sliders-horizontal.png</texturenofocus>
+            <font>font27</font>
+            <textcolor>FFE9EBEF</textcolor>
+            <focusedcolor>FF03131F</focusedcolor>
+            <disabledcolor>FFE9EBEF</disabledcolor>
+            <align>left</align>
+            <aligny>center</aligny>
+            <textoffsetx>32</textoffsetx>
+            <label />
+            <width min="160" max="700">auto</width>
+          </control>
           <control type="button" id="4023">
             <top>0</top>
             <height>80</height>
@@ -16779,6 +16865,22 @@
             <textoffsetx>32</textoffsetx>
             <label>$ADDON[plugin.video.pley 30109]</label>
             <width min="80" max="700">auto</width>
+          </control>
+          <control type="button" id="4123">
+            <top>0</top>
+            <height>80</height>
+            <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
+            <texturefocus border="80,0,32,0">chip-check-focus.png</texturefocus>
+            <texturenofocus border="80,0,32,0">chip-check.png</texturenofocus>
+            <font>font27</font>
+            <textcolor>FFE9EBEF</textcolor>
+            <focusedcolor>FF03131F</focusedcolor>
+            <disabledcolor>FFE9EBEF</disabledcolor>
+            <align>left</align>
+            <aligny>center</aligny>
+            <textoffsetx>32</textoffsetx>
+            <label />
+            <width min="160" max="700">auto</width>
           </control>
           <control type="button" id="4024">
             <top>0</top>
@@ -16796,6 +16898,22 @@
             <label>$ADDON[plugin.video.pley 30110]</label>
             <width min="80" max="700">auto</width>
           </control>
+          <control type="button" id="4124">
+            <top>0</top>
+            <height>80</height>
+            <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
+            <texturefocus border="80,0,32,0">chip-check-focus.png</texturefocus>
+            <texturenofocus border="80,0,32,0">chip-check.png</texturenofocus>
+            <font>font27</font>
+            <textcolor>FFE9EBEF</textcolor>
+            <focusedcolor>FF03131F</focusedcolor>
+            <disabledcolor>FFE9EBEF</disabledcolor>
+            <align>left</align>
+            <aligny>center</aligny>
+            <textoffsetx>32</textoffsetx>
+            <label />
+            <width min="160" max="700">auto</width>
+          </control>
           <control type="button" id="4025">
             <top>0</top>
             <height>80</height>
@@ -16811,6 +16929,22 @@
             <textoffsetx>32</textoffsetx>
             <label>$ADDON[plugin.video.pley 30111]</label>
             <width min="80" max="700">auto</width>
+          </control>
+          <control type="button" id="4125">
+            <top>0</top>
+            <height>80</height>
+            <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
+            <texturefocus border="80,0,32,0">chip-check-focus.png</texturefocus>
+            <texturenofocus border="80,0,32,0">chip-check.png</texturenofocus>
+            <font>font27</font>
+            <textcolor>FFE9EBEF</textcolor>
+            <focusedcolor>FF03131F</focusedcolor>
+            <disabledcolor>FFE9EBEF</disabledcolor>
+            <align>left</align>
+            <aligny>center</aligny>
+            <textoffsetx>32</textoffsetx>
+            <label />
+            <width min="160" max="700">auto</width>
           </control>
           <control type="label" id="4026">
             <width>auto</width>

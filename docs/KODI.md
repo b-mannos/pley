@@ -45,7 +45,10 @@ goes back to the servers. The link page names
 this Kodi by what its User-Agent says (`pleyKodi/0.1.0 (Kodi 21.3;
 Windows)`), so two of them can be told apart. The
 add-on is one of pley's own apps (`https://hhaidar.github.io/pley/oauth/kodi.json`):
-it signs in only with a code and gets a viewer's rights, whoever allows it.
+it signs in only with a code and gets a viewer's rights, whoever allows it:
+`library play playlists` (browse, play, and make and change the profile's
+playlists). A Kodi signed in before it asked for `playlists` is told by the
+server to sign in again when it adds to a playlist.
 Settings has Sign out and Choose a server. Choosing another server keeps
 the sign-in there until the new one is made, then ends it on its server.
 The same server at another address is signed in to again: anything on the
@@ -73,21 +76,25 @@ side by side with Kodi's were the reference):
 - **A title's page**: its backdrop, title, line (a show's seasons and
   years, a film's year and runtime, the content rating and quality
   badges), what is left, genres, summary and credits, then Resume (a
-  show's "Resume S1 · E3"), From start, Watched, My List, Trailer and More
+  show's "Resume S1 · E3"), From start, Watched, My List, Trailer, Add to
+  playlist and More
   (the full summary, the show or season of an episode). Then a show's
   seasons as tabs and their episodes, Extras, Cast & Crew and More Like
   This; the info block says which episode focus is on.
 - **A library**: Recommended (its rows), Library (every title in a grid,
-  sorted and filtered by unwatched, genre and year, more loading as focus
-  nears the end) and Collections. **Search** shows what it found by kind:
+  more loading as focus nears the end) and Collections. Library's chips
+  sort it and filter it: Filter (all, unwatched or watched titles, the
+  genre, the year, Clear filters, and Save as…, which makes a smart
+  playlist of the filters), then Unwatched, Genre and Year, a check on
+  the ones on; the count says "9 of 12 movies" while filtered. **Search** shows what it found by kind:
   movies, shows, episodes, people and music. Playlists, collections and a
   person's titles are grids.
 - Kodi plays, with the service's Skip Intro and Up Next; back from playing,
   the page shows what changed (where the title got to, the next episode).
   Changes from other devices show as they happen: the service tells the
   window (`NotifyAll`) as it refreshes listings. A tile's menu (the
-  remote's menu key) marks it watched, adds it to My List, takes it out of
-  Continue Watching or goes to its show.
+  remote's menu key) marks it watched, adds it to My List or a playlist,
+  takes it out of Continue Watching or goes to its show.
 
 How it is drawn: one window (`window.py`, `layout.WINDOW`) holds every
 screen, each a group shown alone under the one rail and backdrop, so going
@@ -252,6 +259,7 @@ in `portable_data/userdata/advancedsettings.xml`.
   page with their photo (theirs is a grid of titles); music's own pages.
 - In Kodi's lists, a title's information page shows its synopsis, not its
   cast, genres or crew: lists don't carry them.
-- Making and editing playlists.
+- Editing playlists (renaming, reordering, taking titles out): Add to
+  playlist and Save as… make and fill them.
 - Picture subtitles (PGS, VobSub) with a converted stream: only text
   subtitles come beside it. Files played as they are show every kind.

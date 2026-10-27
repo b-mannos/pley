@@ -19,7 +19,9 @@ from .api import ApiError, Client
 
 CLIENT_ID = "https://hhaidar.github.io/pley/oauth/kodi.json"
 DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
-SCOPE = "library play"
+# What the add-on asks to do: browse, play, and make and change playlists
+# (Add to playlist, a library's Save as…).
+SCOPE = "library play playlists"
 # Access tokens are refreshed this long before they expire.
 REFRESH_MARGIN = 300
 

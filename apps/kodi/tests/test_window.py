@@ -53,9 +53,65 @@ class FakeWindow(window.Window):
         self.session = window.Session.__new__(window.Session)
         self.session.base = BASE
         self.made = {}
+        self.toasts = []
+        self.focused = None
+        self.opened = []
 
     def getControl(self, control_id):
         return self.made.setdefault(control_id, Control())
+
+    def toast(self, text, seconds=3.5):
+        self.toasts.append(text)
+
+    def setFocusId(self, control_id):
+        self.focused = control_id
+
+    def setProperty(self, name, value):
+        pass
+
+    def open(self, screen):
+        self.opened.append(screen)
+
+
+class Client:
+    """The server, as far as these tests ask it: posts are noted."""
+
+    def __init__(self, answers=None):
+        self.answers = answers or {}
+        self.posts = []
+
+    def get(self, path, **query):
+        return self.answers[path]
+
+    def post(self, path, body=None):
+        self.posts.append((path, body))
+        return {"id": 77, "title": (body or {}).get("title")}
+
+
+class Dialogs:
+    """xbmcgui.Dialog, answering as the test says: `picks` for select,
+    `typed` for input; what select offered is kept in `shown`."""
+
+    def __init__(self, picks=(), typed=()):
+        self.picks, self.typed, self.shown = list(picks), list(typed), []
+
+    def __enter__(self):
+        self.real = window.xbmcgui.Dialog
+        outer = self
+
+        class Dialog:
+            def select(self, heading, entries, preselect=-1):
+                outer.shown.append(([getattr(e, "label", e) for e in entries], preselect))
+                return outer.picks.pop(0)
+
+            def input(self, heading, *args, **kwargs):
+                return outer.typed.pop(0)
+
+        window.xbmcgui.Dialog = Dialog
+        return self
+
+    def __exit__(self, *exc):
+        window.xbmcgui.Dialog = self.real
 
 
 class WindowTest(unittest.TestCase):
@@ -110,6 +166,66 @@ class WindowTest(unittest.TestCase):
         line = window.credits_line(detail)
         self.assertIn("Lena Okafor", line)
         self.assertIn("Idris Vale, Maren Holt", line)
+
+    def test_adding_to_a_playlist(self):
+        win = FakeWindow()
+        playlists = [
+            {"id": 1, "title": "Road trip", "kind": "video", "item_count": 3},
+            {"id": 2, "title": "Comedies", "kind": "video", "smart_filter": "genre=Comedy"},
+            {"id": 3, "title": "Running", "kind": "audio", "item_count": 9},
+        ]
+        win.session.client = Client({"/api/playlists": {"playlists": playlists}})
+        win.session.get = win.session.client.get
+        with Dialogs(picks=[1]) as asked:
+            win.add_to_playlist({"id": 5, "kind": "movie"})
+        # A new one first, then the profile's own of the kind: smart ones fill themselves.
+        self.assertEqual(asked.shown[0][0], [window.T("new_video_playlist"), "Road trip"])
+        self.assertEqual(win.session.client.posts, [("/api/playlists/1/items", {"item_ids": [5]})])
+        self.assertEqual(win.toasts, [window.T("added_to") % "Road trip"])
+        with Dialogs(picks=[0], typed=[" Late albums "]) as asked:
+            win.add_to_playlist({"id": 9, "kind": "album"})
+        self.assertEqual(asked.shown[0][0], [window.T("new_music_playlist"), "Running"])
+        self.assertEqual(win.session.client.posts[-1], ("/api/playlists", {"title": "Late albums", "kind": "audio", "item_ids": [9]}))
+        # Backing out of naming it adds nothing.
+        with Dialogs(picks=[0], typed=[""]):
+            win.add_to_playlist({"id": 9, "kind": "album"})
+        self.assertEqual(len(win.session.client.posts), 2)
+
+    def test_library_filters(self):
+        win = FakeWindow()
+        win.libraries = [{"id": 4, "kind": "movies", "name": "Movies", "item_count": 342}]
+        library = window.Library(win, win.libraries[0], None)
+        library.items, library.total = [], 23
+        library.genre, library.watched = "Science Fiction", False
+        library.sort, library.descending = "year", True
+        self.assertEqual(library.query(0)["watched"], "false")
+        # Save as…: Plex's syntax, as SmartFilter.of writes it.
+        self.assertEqual(library.smart_filter(), "genre=Science+Fiction&unwatched=1&sort=year%3Adesc")
+        library.draw()
+        # A filter that is on shows its twin, which leads with a check.
+        self.assertFalse(win.made[L.LIBRARY_GENRE].visible)
+        self.assertTrue(win.made[L.LIBRARY_GENRE_ON].visible)
+        self.assertTrue(win.made[L.LIBRARY_GENRE_ON].label.endswith("Science Fiction"))
+        self.assertTrue(win.made[L.LIBRARY_YEAR].visible)
+        self.assertFalse(win.made[L.LIBRARY_YEAR_ON].visible)
+        self.assertEqual(win.made[L.LIBRARY_COUNT].label, window.T("count_of") % ("23", "342 movies"))
+        # Clear filters, from the Filter menu (All, Unwatched, Watched, Genre, Year, Clear, Save as).
+        library.reload = lambda: None
+        with Dialogs(picks=[5]) as asked:
+            library.filter_menu()
+        self.assertEqual(asked.shown[0][1], 1)
+        self.assertEqual(len(asked.shown[0][0]), 7)
+        self.assertFalse(library.filtered)
+        self.assertEqual(library.smart_filter(), "sort=year%3Adesc")
+        # Watched, then Save as… makes the smart playlist and opens it.
+        with Dialogs(picks=[2]):
+            library.filter_menu()
+        self.assertIs(library.watched, True)
+        win.session.client = Client()
+        with Dialogs(picks=[6], typed=["Seen"]):
+            library.filter_menu()
+        self.assertEqual(win.session.client.posts, [("/api/playlists", {"title": "Seen", "smart_filter": "unwatched=0&sort=year%3Adesc", "library_id": 4})])
+        self.assertEqual(len(win.opened), 1)
 
     def test_rows_fill_and_place(self):
         win = FakeWindow()

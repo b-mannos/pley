@@ -440,11 +440,11 @@ msgid "Last played"
 msgstr ""
 
 msgctxt "#30151"
-msgid "Any genre"
+msgid "All genres"
 msgstr ""
 
 msgctxt "#30152"
-msgid "Any year"
+msgid "All years"
 msgstr ""
 
 msgctxt "#30153"
@@ -468,7 +468,7 @@ msgid "Full summary"
 msgstr ""
 
 msgctxt "#30158"
-msgid "No playlists yet. Make them on pley's web app or phone app."
+msgid "No playlists yet. Use “Add to playlist” on a movie, show or episode, or press Menu on a poster."
 msgstr ""
 
 msgctxt "#30159"
@@ -500,7 +500,7 @@ msgid "Account"
 msgstr ""
 
 msgctxt "#30166"
-msgid "Unwatched only"
+msgid "This library is empty."
 msgstr ""
 
 msgctxt "#30167"
@@ -553,4 +553,36 @@ msgstr ""
 
 msgctxt "#30179"
 msgid "Go to [B]%s[/B]"
+msgstr ""
+
+msgctxt "#30180"
+msgid "Add to playlist"
+msgstr ""
+
+msgctxt "#30181"
+msgid "New video playlist"
+msgstr ""
+
+msgctxt "#30182"
+msgid "New music playlist"
+msgstr ""
+
+msgctxt "#30183"
+msgid "Added to %s"
+msgstr ""
+
+msgctxt "#30184"
+msgid "All"
+msgstr ""
+
+msgctxt "#30185"
+msgid "Save as…"
+msgstr ""
+
+msgctxt "#30186"
+msgid "Save these filters"
+msgstr ""
+
+msgctxt "#30187"
+msgid "%s of %s"
 msgstr ""

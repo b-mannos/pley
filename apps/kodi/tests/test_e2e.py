@@ -127,7 +127,7 @@ class EndToEndTest(unittest.TestCase):
         started = flow.start()
         shown = self.browser("POST", "/api/oauth/device/verify", {"user_code": started["user_code"]})
         self.assertEqual(shown["client"]["name"], "pley for Kodi")
-        self.assertEqual(shown["scopes"], ["library", "play"])
+        self.assertEqual(shown["scopes"], ["library", "play", "playlists"])
         self.assertEqual(self.browser("POST", "/api/oauth/requests/%s" % shown["id"], {"allow": True}), {"done": True})
         time.sleep(flow.interval)
         state, tokens = flow.poll(started["device_code"])
@@ -138,7 +138,7 @@ class EndToEndTest(unittest.TestCase):
     def test_the_add_on_against_a_real_server(self):
         store = auth.Store(os.path.join(self.dir, "tokens.json"))
         tokens = self.sign_in(store)
-        self.assertEqual(tokens["scope"], "library play")
+        self.assertEqual(tokens["scope"], "library play playlists")
         holder = auth.Tokens(store, AGENT)
         proxy = Proxy(holder, AGENT, "e2e-secret")
         proxy.start()

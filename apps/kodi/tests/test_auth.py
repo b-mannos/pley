@@ -158,7 +158,7 @@ class DeviceSignInTest(unittest.TestCase):
         if request.path == "/.well-known/oauth-authorization-server":
             return support.answer(200, self.meta or support.metadata(self.server.url))
         if request.path == "/api/oauth/device":
-            self.assertEqual(request.form(), {"client_id": auth.CLIENT_ID, "scope": "library play"})
+            self.assertEqual(request.form(), {"client_id": auth.CLIENT_ID, "scope": auth.SCOPE})
             self.assertTrue(request.headers["user-agent"].startswith("pleyKodi/"))
             return support.answer(
                 200,

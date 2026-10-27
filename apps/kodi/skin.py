@@ -171,6 +171,24 @@ def group(id_, left, top, width, height, children, visible=None, animations=()):
 
 
 def grouplist(id_, left, top, width, height, children, orientation="horizontal", gap=0, align=None, visible=None, navigation=None, animations=()):
+    # A round button is a group (the button and its label). Kodi moves focus
+    # by the focused control's own navigation, which a grouplist gives only
+    # its children: the button inside gets its group's, the neighbours by id
+    # (a hidden one passes focus on along the grouplist's chain).
+    ids = [child.get("id") for child in children if child is not None]
+    around = navigation or {}
+    before, after = ("onleft", "onright") if orientation == "horizontal" else ("onup", "ondown")
+    across = ("onup", "ondown") if orientation == "horizontal" else ("onleft", "onright")
+    for i, child in enumerate(c for c in children if c is not None):
+        inner = child.find("control[@type='button']") if child.get("type") == "group" else None
+        if inner is None:
+            continue
+        moves = {before: ids[i - 1] if i else around.get(before), after: ids[i + 1] if i + 1 < len(ids) else around.get(after)}
+        moves.update({tag: around.get(tag) for tag in across})
+        for tag, target in moves.items():
+            if target is not None and inner.find(tag) is None:
+                el_ = ET.SubElement(inner, tag)
+                el_.text = str(target)
     return control(
         "grouplist",
         id_,
@@ -635,6 +653,7 @@ def item() -> ET.Element:
             round_button(L.ITEM_ADD_TO_LIST, "bookmark-plus", "$ADDON[plugin.video.pley 30021]"),
             round_button(L.ITEM_IN_LIST, "bookmark-check", "$ADDON[plugin.video.pley 30103]"),
             round_button(L.ITEM_TRAILER, "film", "$ADDON[plugin.video.pley 30104]"),
+            round_button(L.ITEM_ADD_TO_PLAYLIST, "list-plus", "$ADDON[plugin.video.pley 30180]"),
             round_button(L.ITEM_MORE, "ellipsis", "$ADDON[plugin.video.pley 30105]"),
         ],
         gap=L.BUTTON_GAP,
@@ -749,9 +768,13 @@ def library() -> ET.Element:
         [
             chip(L.LIBRARY_SORT, "arrow-up-narrow-wide", ""),
             chip(L.LIBRARY_SORT_DOWN, "arrow-down-wide-narrow", ""),
+            chip(L.LIBRARY_FILTER, "sliders-horizontal", ""),
             chip(L.LIBRARY_UNWATCHED, None, "$ADDON[plugin.video.pley 30109]"),
+            chip(L.LIBRARY_UNWATCHED_ON, "check", ""),
             chip(L.LIBRARY_GENRE, None, "$ADDON[plugin.video.pley 30110]"),
+            chip(L.LIBRARY_GENRE_ON, "check", ""),
             chip(L.LIBRARY_YEAR, None, "$ADDON[plugin.video.pley 30111]"),
+            chip(L.LIBRARY_YEAR_ON, "check", ""),
             control("label", L.LIBRARY_COUNT, width="auto", height=80, font=L.FONT_LABEL, textcolor=L.MUTED, aligny="center", label=""),
         ],
         gap=20,
@@ -759,7 +782,7 @@ def library() -> ET.Element:
     )
     content = [
         label(L.GUTTER, 64, 900, 68, L.FONT_PAGE, L.FG, id_=L.LIBRARY_TITLE),
-        grouplist(L.LIBRARY_TABS, 1000, 58, 856, 80, tabs, gap=16, align="right", navigation=down),
+        grouplist(L.LIBRARY_TABS, 1000, 58, L.WIDTH - L.SAFE_X - 1000, 80, tabs, gap=16, align="right", navigation=down),
         group(None, 0, 0, L.WIDTH, L.HEIGHT, [controls], visible=is_("pley.library.tab", "all")),
         group(
             None,

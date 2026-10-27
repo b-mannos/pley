@@ -30,6 +30,22 @@ class SkinTest(unittest.TestCase):
             with open(path, encoding="utf-8") as f:
                 self.assertEqual(f.read(), text, "%s is out of date: python apps/kodi/skin.py" % path)
 
+    def test_round_buttons_pass_focus_on(self):
+        # Kodi moves focus by the focused control's own navigation: the button
+        # inside a round button's group has its neighbours', which a grouplist
+        # gives only the group.
+        controls = {c.get("id"): c for c in parse(L.WINDOW).iter("control") if c.get("id")}
+
+        def moves(control_id):
+            return {tag: controls[str(control_id)].findtext(tag) for tag in ("onleft", "onright", "ondown")}
+
+        self.assertEqual(moves(L.ITEM_WATCHED)["onleft"], str(L.button_box(L.ITEM_FROM_START)))
+        self.assertEqual(moves(L.ITEM_WATCHED)["onright"], str(L.button_box(L.ITEM_UNWATCHED)))
+        self.assertEqual(moves(L.ITEM_WATCHED)["ondown"], str(L.ITEM_SEASONS))
+        self.assertEqual(moves(L.ITEM_FROM_START)["onleft"], str(L.ITEM_PLAY))
+        self.assertIsNone(moves(L.ITEM_MORE)["onright"])
+        self.assertEqual(moves(L.HOME_INFO)["onright"], str(L.button_box(L.HOME_WATCHED)))
+
     def test_each_id_once(self):
         for name in (L.WINDOW, L.SIGNIN_WINDOW):
             ids = [c.get("id") for c in parse(name).iter("control") if c.get("id")]
@@ -46,13 +62,14 @@ class SkinTest(unittest.TestCase):
             L.ITEM_HERO, L.ITEM_TITLE, L.ITEM_CONTEXT, L.ITEM_LEFT, L.ITEM_GENRES, L.ITEM_SUMMARY, L.ITEM_CREDITS,
             L.ITEM_BUTTONS_BOX, L.ITEM_PLAY, L.ITEM_INFO_BLOCK, L.ITEM_INFO_TITLE, L.ITEM_INFO_EPISODE,
             L.ITEM_INFO_LINE, L.ITEM_INFO_SUMMARY, L.ITEM_SEASONS,
-            L.LIBRARY_TITLE, L.LIBRARY_SORT, L.LIBRARY_SORT_DOWN, L.LIBRARY_UNWATCHED, L.LIBRARY_GENRE, L.LIBRARY_YEAR,
-            L.LIBRARY_COUNT, L.LIBRARY_EMPTY, L.SEARCH_FIELD, L.SEARCH_EMPTY_TITLE, L.SEARCH_EMPTY_BODY,
+            L.LIBRARY_TITLE, L.LIBRARY_SORT, L.LIBRARY_SORT_DOWN, L.LIBRARY_FILTER, L.LIBRARY_UNWATCHED, L.LIBRARY_GENRE,
+            L.LIBRARY_YEAR, L.LIBRARY_UNWATCHED_ON, L.LIBRARY_GENRE_ON, L.LIBRARY_YEAR_ON, L.LIBRARY_COUNT, L.LIBRARY_EMPTY, L.SEARCH_FIELD, L.SEARCH_EMPTY_TITLE, L.SEARCH_EMPTY_BODY,
             L.GRID_TITLE, L.GRID_SUBTITLE, L.GRID_EMPTY, L.NOTICE_TITLE, L.NOTICE_BODY, L.NOTICE_FIRST, L.NOTICE_SECOND,
             L.TOAST_LABEL,
         }
         for button in (L.HOME_FROM_START, L.HOME_INFO, L.HOME_WATCHED, L.HOME_UNWATCHED, L.ITEM_FROM_START,
-                       L.ITEM_WATCHED, L.ITEM_UNWATCHED, L.ITEM_ADD_TO_LIST, L.ITEM_IN_LIST, L.ITEM_TRAILER, L.ITEM_MORE):
+                       L.ITEM_WATCHED, L.ITEM_UNWATCHED, L.ITEM_ADD_TO_LIST, L.ITEM_IN_LIST, L.ITEM_TRAILER,
+                       L.ITEM_ADD_TO_PLAYLIST, L.ITEM_MORE):
             wanted |= {button, L.button_box(button)}
         for tab in (L.LIBRARY_RECOMMENDED, L.LIBRARY_ALL, L.LIBRARY_COLLECTIONS):
             wanted |= {tab, tab + 100}
