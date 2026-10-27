@@ -3,10 +3,10 @@ package app.pley.android.screens.onboarding
 import android.content.Context
 import app.pley.android.auth.Needs
 import app.pley.android.auth.Profile
+import app.pley.android.common.sha1Hex
 import app.pley.android.screens.ScreensGraph
 import java.io.File
 import java.io.IOException
-import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -79,7 +79,7 @@ internal class FileHouseholdStore(
         Unit
     }
 
-    private fun fileOf(server: String): File = File(dir(), "household-${sha1(server.trimEnd('/'))}.json")
+    private fun fileOf(server: String): File = File(dir(), "household-${sha1Hex(server.trimEnd('/'))}.json")
 
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
@@ -88,9 +88,6 @@ internal class FileHouseholdStore(
             val app = context.applicationContext
             return FileHouseholdStore({ File(app.filesDir, "onboarding") })
         }
-
-        private fun sha1(text: String): String =
-            MessageDigest.getInstance("SHA-1").digest(text.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
     }
 }
 

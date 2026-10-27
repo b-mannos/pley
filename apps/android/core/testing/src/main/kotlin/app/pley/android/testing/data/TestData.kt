@@ -78,6 +78,9 @@ class TestData(
     /** The API each profile gets: [api] unless a test gives one. */
     val apiOf: MutableMap<Long, PleyApi> = ConcurrentHashMap()
 
+    /** The servers whose APIs the graph let go of (their HTTP caches deleted). */
+    val forgottenApis: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
+
     val dispatcher = StandardTestDispatcher(test.testScheduler)
 
     val graph: AppDataGraph = AppDataGraph(
@@ -89,6 +92,7 @@ class TestData(
                 apis += i to user
                 user?.let { apiOf[it] } ?: api
             },
+            forgetApis = { forgottenApis += it },
             events = { events },
             trackDefaults = trackDefaults,
             profile = profile,

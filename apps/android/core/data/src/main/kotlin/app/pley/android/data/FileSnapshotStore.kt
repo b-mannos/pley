@@ -1,5 +1,6 @@
 package app.pley.android.data
 
+import app.pley.android.common.sha1Hex
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
@@ -254,7 +255,7 @@ class FileSnapshotStore(
                     }
                 }
             }
-            return if (name.length <= MAX_NAME && !name.endsWith(TMP)) name else "~h" + ProfileScope.sha1(key)
+            return if (name.length <= MAX_NAME && !name.endsWith(TMP)) name else "~h" + sha1Hex(key)
         }
 
         private const val HEX = "0123456789abcdef"

@@ -68,6 +68,7 @@ interface DataGraph {
                     cacheDir = { app.cacheDir },
                     auth = auth,
                     api = network::api,
+                    forgetApis = network::forget,
                     events = network::events,
                     trackDefaults = HttpTrackDefaults { issuer -> network.media(issuer) },
                     profile = profile,
@@ -99,6 +100,8 @@ class DataEnvironment(
     val auth: AuthGraph,
     /** The API of a server as a profile (`null` until GET /api/auth/me says which: no HTTP cache). */
     val api: (issuer: String, userId: Long?) -> PleyApi,
+    /** Lets go of a server's APIs once its HTTP caches are deleted (NetworkGraph.forget). */
+    val forgetApis: (issuer: String) -> Unit = {},
     val events: (issuer: String) -> ServerEvents,
     val trackDefaults: TrackDefaultsRoute,
     val profile: DeviceProfile,
@@ -201,6 +204,8 @@ class AppDataGraph(private val env: DataEnvironment) : DataGraph {
         }
         snapshotStore.clear(issuer)
         withContext(env.io) { File(env.cacheDir(), "http/$server").deleteRecursively() }
+        // Their caches were in that folder: the next ones open theirs again.
+        env.forgetApis(issuer)
     }
 
     /**

@@ -1,5 +1,6 @@
 package app.pley.android.network
 
+import app.pley.android.common.sha1Hex
 import app.pley.android.testing.network.MockPley
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineStart
@@ -168,7 +169,7 @@ class HttpPleyApiErrorsTest {
     @Test
     fun eachServerAndProfileHasItsOwnCache() {
         val dir = graph.cacheDirOf(issuer, 2)
-        assertEquals(folder.root.resolve("http/${HttpNetworkGraph.sha1(issuer)}/2"), dir)
+        assertEquals(folder.root.resolve("http/${sha1Hex(issuer)}/2"), dir)
         assertEquals(dir, graph.cacheDirOf("$issuer/", 2))
         assertTrue(graph.cacheDirOf(issuer, 3) != dir)
         // One instance per server and profile, so one cache per folder.
@@ -176,6 +177,16 @@ class HttpPleyApiErrorsTest {
         assertTrue(graph.api(issuer, 2) !== graph.api(issuer, 3))
         assertNull(graph.apiClient(issuer, null).cache)
         assertEquals(dir, graph.apiClient(issuer, 2).cache?.directory)
+    }
+
+    @Test
+    fun aServerForgottenGetsNewClientsOthersKeepTheirs() {
+        val before = graph.api(issuer, 2)
+        val other = graph.api("http://10.0.0.9:7539", 2)
+        // Signing out deleted its cache folder: the next client opens a cache there again.
+        graph.forget("$issuer/")
+        assertTrue(graph.api(issuer, 2) !== before)
+        assertTrue(graph.api("http://10.0.0.9:7539", 2) === other)
     }
 
     @Test

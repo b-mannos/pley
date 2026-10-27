@@ -6,8 +6,8 @@ import app.pley.android.auth.Tokens
 import app.pley.android.common.Addresses
 import app.pley.android.common.DeviceProfile
 import app.pley.android.common.Tier
+import app.pley.android.common.sha1Hex
 import java.io.File
-import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import okhttp3.Cache
@@ -38,6 +38,13 @@ interface NetworkGraph {
 
     /** The event stream of [issuer]. */
     fun events(issuer: String): ServerEvents
+
+    /**
+     * Lets go of [issuer]'s API clients once its HTTP caches are deleted
+     * (signing out): the next ones open their caches again, where the old
+     * ones would cache nothing more.
+     */
+    fun forget(issuer: String) {}
 
     val discovery: Discovery
     val sweep: NetworkSweep
@@ -105,7 +112,13 @@ internal class HttpNetworkGraph(
         .build()
 
     /** Where the HTTP cache of [origin] as [userId] is: `http/<sha1 of the origin>/<user id>`. */
-    internal fun cacheDirOf(origin: String, userId: Long): File = File(cacheDir, "http/${sha1(originOf(origin))}/$userId")
+    internal fun cacheDirOf(origin: String, userId: Long): File = File(cacheDir, "http/${sha1Hex(originOf(origin))}/$userId")
+
+    // Their caches aren't closed: a request under way may still use one, and a closed cache throws.
+    override fun forget(issuer: String) {
+        val origin = originOf(issuer)
+        apis.keys.removeAll { it.first == origin }
+    }
 
     override val images: OkHttpClient by lazy {
         val auth = OriginAuth(tokens)
@@ -187,12 +200,5 @@ internal class HttpNetworkGraph(
         const val MEDIA_READ_SECONDS = 60L
         const val SUBTITLES_READ_SECONDS = 60L
         const val EVENTS_READ_SECONDS = 45L
-
-        internal fun sha1(text: String): String {
-            val digest = MessageDigest.getInstance("SHA-1").digest(text.toByteArray(Charsets.UTF_8))
-            return buildString { for (b in digest) append(HEX[(b.toInt() shr 4) and 0xf]).append(HEX[b.toInt() and 0xf]) }
-        }
-
-        private const val HEX = "0123456789abcdef"
     }
 }

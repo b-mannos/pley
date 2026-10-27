@@ -1,10 +1,10 @@
 package app.pley.android.downloads
 
+import app.pley.android.common.sha1Hex
 import app.pley.android.data.DownloadState
 import app.pley.android.model.ItemKind
 import java.io.File
 import java.io.IOException
-import java.security.MessageDigest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -203,8 +203,7 @@ internal class DownloadStore(private val root: File) {
         const val MISSING = "The downloaded file is gone"
 
         /** A folder name for [server]: its address could hold anything. */
-        fun hash(server: String): String =
-            MessageDigest.getInstance("SHA-1").digest(server.toByteArray()).joinToString("") { "%02x".format(it) }.take(16)
+        fun hash(server: String): String = sha1Hex(server).take(16)
     }
 }
 

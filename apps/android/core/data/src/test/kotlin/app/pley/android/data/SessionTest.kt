@@ -142,6 +142,8 @@ class SessionTest {
         assertFalse(home.exists())
         assertFalse(File(dir, "cache/http/${ProfileScope.serverKey(data.issuer)}").exists())
         assertFalse(File(dir, "files/${StartupFiles.HOME}").exists())
+        // The APIs whose caches were there go too: signing in again caches anew.
+        assertEquals(listOf(data.issuer), data.forgottenApis.toList())
     }
 
     @Test
