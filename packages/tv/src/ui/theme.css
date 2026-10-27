@@ -398,6 +398,8 @@ body {
   transform: scale(1);
 }
 [data-fdisabled] { opacity: 0.4; }
+/* The browser's focus follows the app's for a screen reader; the app draws focus itself. */
+[data-f]:focus { outline: none; }
 .buttons { display: flex; align-items: flex-start; }
 .buttons > * + * { margin-left: 10px; }
 

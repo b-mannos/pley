@@ -166,6 +166,26 @@ describe("focus traps", () => {
   });
 });
 
+describe("a TV's screen reader", () => {
+  it("has the browser's focus follow the app's while it is on, and only then", () => {
+    const a = item("a", "96,100,100,40");
+    const b = item("b", "210,100,100,40");
+    for (const x of [a, b]) x.tabIndex = -1;
+    const { focus } = page(group("row", [a, b]));
+    focus.focus(a);
+    expect(document.activeElement).toBe(document.body);
+    // Turned on: at once on what has focus, then on each move.
+    focus.dom = true;
+    expect(document.activeElement).toBe(a);
+    focus.move("right");
+    expect(document.activeElement).toBe(b);
+    focus.dom = false;
+    focus.move("left");
+    expect(fid(focus)).toBe("a");
+    expect(document.activeElement).toBe(b);
+  });
+});
+
 describe("the remote's keys", () => {
   function setup() {
     const a = item("a", "96,100,100,40");

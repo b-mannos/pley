@@ -159,6 +159,11 @@ export function App(p: ShellProps) {
     document.getElementById("app")?.classList.toggle("reduced", reduced);
   }, [reduced]);
 
+  // The TV's screen reader reads the element the browser has focused: while it is on, that follows the app's focus.
+  useEffect(() => {
+    state.platform.screenReader?.((on) => (focus.dom = on));
+  }, []);
+
   // Page focus memory: what the page focused last, so Back lands on it. A panel's or a dialog's rows
   // leave it on what opened them: an action that leaves the page (Play from here, Go to) comes back there.
   useEffect(

@@ -35,6 +35,7 @@ export function TextField(p: {
     setTyping(false);
     p.onTyping?.(false);
     if (moveTo) ui.focus.move(moveTo);
+    else ui.focus.syncDom();
   };
   const start = () => {
     const el = input.current;

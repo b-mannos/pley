@@ -72,6 +72,12 @@ interface Webapis {
     AppCommonScreenSaverState: { SCREEN_SAVER_OFF: number; SCREEN_SAVER_ON: number };
   };
   network?: { getIp(): string };
+  tvinfo?: {
+    TvInfoMenuKey: { VOICE_GUIDE_KEY: number };
+    TvInfoMenuValue: { OFF: number; ON: number };
+    getMenuValue(key: number): number | string | boolean;
+    addCaptionChangeListener(key: number, listener: () => void): number;
+  };
 }
 
 interface TizenKey {

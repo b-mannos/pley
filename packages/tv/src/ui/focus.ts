@@ -150,6 +150,23 @@ export class FocusManager {
    * pointer is on stays under it.
    */
   byPointer = false;
+  /**
+   * Whether the browser's focus follows the app's: while the TV's screen
+   * reader is on, which reads the element the browser has focused.
+   */
+  get dom(): boolean {
+    return this.domFocus;
+  }
+  set dom(on: boolean) {
+    this.domFocus = on;
+    this.syncDom();
+  }
+  private domFocus = false;
+
+  /** The browser's focus back on the app's (a field that typed let it go). */
+  syncDom(): void {
+    if (this.domFocus && this.current && this.current.isConnected) giveDomFocus(this.current);
+  }
   /** Focus traps, innermost last: the page, then panels and dialogs on top of it. */
   private traps: { root: HTMLElement; opener: HTMLElement | null }[] = [];
   private readonly listeners: ((el: HTMLElement | null) => void)[] = [];
@@ -203,6 +220,7 @@ export class FocusManager {
     }
     this.current = el;
     el.setAttribute("data-focused", "");
+    if (this.domFocus) giveDomFocus(el);
     // Every group above remembers it.
     let p = el.parentElement;
     while (p) {
@@ -349,6 +367,25 @@ export function nudge(shift: number, lo: number, hi: number, viewLo: number, vie
   if (hi - s > viewHi) s = hi - viewHi;
   if (lo - s < viewLo) s = lo - viewLo;
   return Math.max(min, Math.min(max, s));
+}
+
+/**
+ * The browser's focus to `el` (a screen reader reads it), without the
+ * scrolling it brings: engines before Chrome 64 have no preventScroll and
+ * scroll every box up to the page to show it, and nothing here scrolls
+ * but by transform, so each box goes back to its top.
+ */
+function giveDomFocus(el: HTMLElement): void {
+  if (document.activeElement === el) return;
+  try {
+    el.focus({ preventScroll: true });
+  } catch {
+    el.focus();
+  }
+  for (let n: Element | null = el.parentElement; n; n = n.parentElement) {
+    if (n.scrollTop) n.scrollTop = 0;
+    if (n.scrollLeft) n.scrollLeft = 0;
+  }
 }
 
 /** `el`'s top in `box`'s content, by layout (what slides `box` is left out); `box` is a positioned ancestor. */

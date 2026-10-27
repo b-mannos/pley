@@ -80,6 +80,13 @@ export interface Platform {
   asksBeforeExit?: boolean;
   /** Tells the app when the TV hides or shows it (Home key, another app, standby). */
   onVisibility(listener: (visible: boolean) => void): void;
+  /**
+   * Whether the TV's screen reader (Samsung's Voice Guide, LG's Audio
+   * Guidance) is on: told at once, when the TV says, and on each change.
+   * Both read the element with the browser's focus, which the app then
+   * moves along with its own.
+   */
+  screenReader?(listener: (on: boolean) => void): void;
   /** Whether the TV draws in 24-hour time. */
   clock24(): boolean;
 }

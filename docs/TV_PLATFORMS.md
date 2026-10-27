@@ -462,4 +462,6 @@ LG, on a webOS 4–6 set and a webOS 23 or later one:
    webOS 26.
 9. The Magic Remote: OK with the pointer showing selects once, the wheel
    moves a row a notch, and the pointer hides when webOS says it does.
+10. Audio Guidance speaking on each move; on Samsung,
+    Voice Guide the same.
 

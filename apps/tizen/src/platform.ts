@@ -158,5 +158,25 @@ export function tizenPlatform(): Platform {
         return false;
       }
     },
+    screenReader(listener) {
+      // Voice Guide (Settings › General › Accessibility), from Samsung's TV info API.
+      const info = typeof webapis !== "undefined" ? webapis.tvinfo : undefined;
+      if (!info) return;
+      const key = info.TvInfoMenuKey.VOICE_GUIDE_KEY;
+      const read = () => {
+        try {
+          const v = info.getMenuValue(key);
+          listener(v === info.TvInfoMenuValue.ON || String(v) === "true");
+        } catch {
+          // This TV doesn't say.
+        }
+      };
+      read();
+      try {
+        info.addCaptionChangeListener(key, read);
+      } catch {
+        // Read once.
+      }
+    },
   };
 }

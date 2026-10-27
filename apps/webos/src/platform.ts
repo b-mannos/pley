@@ -5,7 +5,7 @@ import { browserFacts, readFacts, type WebosFacts } from "./facts";
 import { browserCaps, tierOf, webosCaps } from "./caps";
 import { WebosEngine } from "./engine";
 import { VideoEngine } from "pley-tv/player/video-engine";
-import { hasLuna, luna } from "./luna";
+import { hasLuna, luna, lunaSubscribe } from "./luna";
 
 /** pley for LG TV's built-in OAuth client (apps/server/src/oauth/builtin/webos.json). */
 export const CLIENT_ID = "https://hhaidar.github.io/pley/oauth/webos.json";
@@ -77,6 +77,18 @@ export function webosPlatform(): Platform {
     },
     onVisibility(listener) {
       document.addEventListener("visibilitychange", () => listener(!document.hidden));
+    },
+    screenReader(listener) {
+      // Audio Guidance (Settings › Accessibility), from the TV's settings service (webOS 3 and later).
+      // In a desktop browser, `localStorage["pley.screenReader"] = "on"` stands in for it.
+      if (!onTv) {
+        if (localStore.get("pley.screenReader") === "on") listener(true);
+        return;
+      }
+      lunaSubscribe("luna://com.webos.settingsservice/getSystemSettings", { category: "option", keys: ["audioGuidance"] }, (a) => {
+        const settings = a.settings as { audioGuidance?: string } | undefined;
+        if (settings && typeof settings.audioGuidance === "string") listener(settings.audioGuidance === "on");
+      });
     },
     clock24() {
       try {
