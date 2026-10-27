@@ -69,7 +69,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
       <div className="mb-0.5 mt-5 flex h-7 items-center justify-between pl-3 pr-1 text-xs font-medium text-subtle">
         Libraries
         {(libs.data?.length ?? 0) > 1 ? (
-          <IconButton label="Sort libraries" className="size-7 text-subtle" onClick={() => setSorting(true)}>
+          <IconButton label="Sort libraries" size="xs" className="text-subtle" onClick={() => setSorting(true)}>
             <ArrowUpDown className="size-3.5" />
           </IconButton>
         ) : null}

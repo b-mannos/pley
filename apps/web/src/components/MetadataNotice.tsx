@@ -30,7 +30,7 @@ function Notice({ children, onDismiss, className }: { children: ReactNode; onDis
       <Info className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
       <div className="min-w-0 flex-1 leading-relaxed">{children}</div>
       {onDismiss ? (
-        <IconButton label="Dismiss" size="sm" className="-my-1 -mr-2 size-7" onClick={onDismiss}>
+        <IconButton label="Dismiss" size="xs" className="-my-1 -mr-2" onClick={onDismiss}>
           <X className="size-4" />
         </IconButton>
       ) : null}

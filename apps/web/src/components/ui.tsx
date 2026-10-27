@@ -56,7 +56,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 
 export interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   label: string;
-  size?: "sm" | "md" | "lg";
+  /** xs 28px, sm 32px, md 40px, lg 48px. A size class in `className` doesn't override it. */
+  size?: "xs" | "sm" | "md" | "lg";
   active?: boolean;
 }
 
@@ -72,6 +73,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       title={label}
       className={cn(
         "inline-flex shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-150 hover:bg-white/10 hover:text-fg disabled:opacity-40",
+        size === "xs" && "size-7",
         size === "sm" && "size-8",
         size === "md" && "size-10",
         size === "lg" && "size-12",
