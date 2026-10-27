@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Play, RotateCcw } from "lucide-react";
+import { keys } from "@/api/hooks";
 import type { ItemDetail, MediaFile } from "@/api/types";
 import { PartOfCollections } from "@/components/lists/PartOfCollections";
 import { MissingKeyNotice } from "@/components/MetadataNotice";
@@ -73,6 +74,18 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
   /** Remember a choice made here for the whole show (or this movie). */
   const remember = (nextAudio: number | null, nextSub: number | null) => {
     if (!file) return;
+    // This item's copy says so at once: the player starts from it, maybe
+    // before the choice is saved (and leaves out an Off or a default track).
+    qc.setQueryData<ItemDetail>(keys.item(item.id), (old) =>
+      old
+        ? {
+            ...old,
+            files: old.files.map((f) =>
+              f.id === file.id ? { ...f, selected_audio: nextAudio, selected_subtitle: nextSub } : f,
+            ),
+          }
+        : old,
+    );
     void saveStreamChoice(item.id, { file_id: file.id, audio_index: nextAudio, subtitle_index: nextSub }).then(() =>
       qc.invalidateQueries({ queryKey: ["item"], predicate: (q) => q.queryKey[1] !== item.id }),
     );
