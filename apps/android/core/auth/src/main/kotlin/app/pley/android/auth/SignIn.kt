@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import androidx.annotation.WorkerThread
 import androidx.browser.customtabs.CustomTabsClient
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.net.toUri
@@ -395,20 +396,23 @@ object Auth {
         SignIn.open(activity, url, privateTab)
     }
 
-    /** The browser came back with [uri] (see SignInRedirectActivity); `false` when it answers no waiting sign-in. */
-    internal fun callback(context: Context, uri: String, done: (PendingFlow) -> Unit): Boolean {
+    /**
+     * The browser came back with [callback] (see SignInRedirectActivity):
+     * the waiting sign-in it answers, `null` when none. Reads the disk and
+     * the Keystore, and may make the sign-in's client: never on the main
+     * thread.
+     */
+    @WorkerThread
+    internal fun callback(context: Context, callback: Callback): PendingFlow? {
         val signIn = parts(context).signIn
-        val callback = Callback.parse(uri) ?: return false
-        val outcome = signIn.handle(callback)
-        when (outcome) {
-            CallbackOutcome.Ignored -> return false
+        return when (val outcome = signIn.handle(callback)) {
+            CallbackOutcome.Ignored -> null
             is CallbackOutcome.Failed -> {
                 _state.value = SignInState.Failed(outcome.message)
-                done(outcome.flow)
+                outcome.flow
             }
             is CallbackOutcome.Exchange -> {
                 _state.value = SignInState.Finishing
-                done(outcome.flow)
                 scope.launch {
                     _state.value = try {
                         signIn.complete(outcome)
@@ -419,8 +423,8 @@ object Auth {
                         SignInState.Failed("the sign-in couldn't be finished: try again")
                     }
                 }
+                outcome.flow
             }
         }
-        return true
     }
 }
