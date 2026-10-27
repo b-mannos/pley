@@ -32,7 +32,15 @@ import { cn } from "@/lib/cn";
 import { episodeLabel, fileResolution, formatBitrate, formatClock, streamLabel } from "@/lib/format";
 import { loadHls } from "@/lib/hls";
 import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
-import { endSession, reportProgress, saveStreamChoice, startPlayback, stopSession } from "@/lib/progress";
+import {
+  endSession,
+  reportProgress,
+  saveStreamChoice,
+  startPlayback,
+  stopSession,
+  stoppedStream,
+  type StoppedBy,
+} from "@/lib/progress";
 import { playUrl } from "@/lib/usePlayItem";
 import { nextInQueue, queuePlayUrl, type QueuePosition } from "@/lib/videoQueue";
 import { modeFor, qualitiesFor, qualityById } from "./quality";
@@ -126,31 +134,6 @@ function movedCue(cue: VTTCue, shift: number): VTTCue {
   moved.snapToLines = cue.snapToLines;
   moved.vertical = cue.vertical;
   return moved;
-}
-
-/** Why playback was ended on the server (`DELETE /api/sessions/{id}`). */
-interface StoppedBy {
-  message: string | null;
-  /** `null`: not known (the stream only answered 410). */
-  byAdmin: boolean | null;
-}
-
-/**
- * Whether the server ended this stream (it answers `410` once a session is
- * stopped), with its message. `null`: it didn't, or it can't be asked.
- */
-async function stoppedStream(url: string): Promise<StoppedBy | null> {
-  try {
-    const res = await fetch(url, { credentials: "same-origin", headers: { Range: "bytes=0-0" } });
-    if (res.status !== 410) {
-      void res.body?.cancel().catch(() => undefined);
-      return null;
-    }
-    const body = (await res.json().catch(() => null)) as { message?: unknown } | null;
-    return { message: typeof body?.message === "string" && body.message ? body.message : null, byAdmin: null };
-  } catch {
-    return null;
-  }
 }
 
 /** The text track pley gives subtitle cues to, one per video element. */

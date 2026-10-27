@@ -2,13 +2,21 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useQueryClient } from "@tanstack/react-query";
 import type HlsType from "hls.js";
 import type { ErrorData } from "hls.js";
-import type { ItemSummary, PlaybackMethod, PlaybackMode } from "@/api/types";
+import type { ItemSummary, PlaybackMethod, PlaybackMode, ServerEvent } from "@/api/types";
 import { errorMessage } from "@/api/client";
+import { onServerEvent } from "@/api/events";
 import { invalidateWatchState } from "@/api/hooks";
 import { audioCaps, canPlayNativeHls } from "@/lib/caps";
 import { loadHls } from "@/lib/hls";
 import { getStored, writeStorage } from "@/lib/hooks";
-import { endSession, reportProgress, startPlayback, stopSession } from "@/lib/progress";
+import {
+  endSession,
+  reportProgress,
+  startPlayback,
+  stopSession,
+  stoppedStream,
+  type StoppedBy,
+} from "@/lib/progress";
 import { shuffled } from "@/lib/shuffle";
 import { useLatest } from "@/lib/hooks";
 
@@ -52,6 +60,8 @@ interface Session {
   itemId: number;
   durationMs: number;
   method: PlaybackMethod;
+  /** The stream, asked whether it was stopped on the server. */
+  url: string;
   /** Last known playhead (ms); the element reads 0 while it is reset. */
   positionMs: number;
 }
@@ -120,6 +130,59 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
     setPlayToken((t) => t + 1);
   }, []);
 
+  /**
+   * The server ended this session (an administrator, or the user elsewhere):
+   * let go of the stream without starting another, and say so.
+   */
+  const stopPlayback = useCallback(
+    (by: StoppedBy) => {
+      // Nothing to release: the server has ended it.
+      sessionRef.current = null;
+      hlsRef.current?.destroy();
+      hlsRef.current = null;
+      const audio = audioRef.current;
+      if (audio) {
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+      }
+      setPlaying(false);
+      setLoading(false);
+      const what =
+        by.byAdmin === false
+          ? "Playback was stopped from another device."
+          : "Playback was stopped by the server's administrator.";
+      setError(by.message ? `${what} ${by.message}` : what);
+      invalidateWatchState(qc);
+    },
+    [qc],
+  );
+
+  useEffect(
+    () =>
+      onServerEvent((ev: ServerEvent) => {
+        if (ev.type === "session_stopped" && ev.session_id === sessionRef.current?.sessionId) {
+          stopPlayback({ message: ev.message, byAdmin: ev.by_admin });
+        }
+      }),
+    [stopPlayback],
+  );
+
+  /** The stream failed: stopped on the server, or start a new session if not (up to 3 times). */
+  const recreateUnlessStopped = useCallback(
+    (s: Session) => {
+      void stoppedStream(s.url).then((by) => {
+        if (sessionRef.current !== s) return; // moved on meanwhile
+        if (by) stopPlayback(by);
+        else if (recoveries.current.recreate < 3) {
+          recoveries.current.recreate += 1;
+          restartAt(s.positionMs);
+        } else setError("Playback failed");
+      });
+    },
+    [restartAt, stopPlayback],
+  );
+
   // Start playback whenever the current track (or token) changes.
   useEffect(() => {
     const audio = audioRef.current;
@@ -159,6 +222,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
         itemId,
         durationMs: info.duration_ms,
         method: info.method,
+        url: info.url,
         positionMs: startMs,
       };
       return info;
@@ -186,11 +250,18 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
             const r = recoveries.current;
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
               const code = data.response?.code;
+              if (code === 410) {
+                // Stopped on the server: another session would only be stopped again.
+                void stoppedStream(info.url).then((by) => {
+                  if (!cancelled) stopPlayback(by ?? { message: null, byAdmin: null });
+                });
+                return;
+              }
               const playlist =
                 data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
                 data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT ||
                 data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR;
-              if (code === 404 || code === 410 || playlist) {
+              if (code === 404 || playlist) {
                 // The session expired (e.g. paused for a long time): start a new one here.
                 if (r.recreate < 3) {
                   r.recreate += 1;
@@ -301,9 +372,10 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
         restartAt(s.positionMs);
         return;
       }
-      if (s && code === MediaError.MEDIA_ERR_NETWORK && recoveries.current.recreate < 3) {
-        recoveries.current.recreate += 1;
-        restartAt(s.positionMs);
+      if (s && code === MediaError.MEDIA_ERR_NETWORK) {
+        // A stream stopped on the server answers 410 (the element doesn't say
+        // which status it got): ask before starting another session.
+        recreateUnlessStopped(s);
         return;
       }
       setError("Playback failed");
@@ -326,23 +398,32 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("error", onError);
     };
-  }, [qc, goTo, restartAt, indexRef, queueRef]);
+  }, [qc, goTo, restartAt, recreateUnlessStopped, indexRef, queueRef]);
 
-  // Periodic progress while playing.
+  // Periodic progress while playing. One answered 410 was stopped on the
+  // server, heard without the event stream (for a direct play, the only
+  // request that can tell).
   useEffect(() => {
     if (!playing) return;
     const timer = window.setInterval(() => {
       const s = sessionRef.current;
       if (!s) return;
-      void reportProgress(s.itemId, {
-        position_ms: s.positionMs,
-        duration_ms: s.durationMs || undefined,
-        state: "playing",
-        session_id: s.sessionId,
-      });
+      void reportProgress(
+        s.itemId,
+        {
+          position_ms: s.positionMs,
+          duration_ms: s.durationMs || undefined,
+          state: "playing",
+          session_id: s.sessionId,
+        },
+        false,
+        () => {
+          if (sessionRef.current === s) stopPlayback({ message: null, byAdmin: null });
+        },
+      );
     }, PROGRESS_INTERVAL);
     return () => window.clearInterval(timer);
-  }, [playing]);
+  }, [playing, stopPlayback]);
 
   // Volume.
   useEffect(() => {

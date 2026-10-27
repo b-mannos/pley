@@ -19,6 +19,31 @@ export function reportProgress(
     });
 }
 
+/** Why playback was ended on the server (`DELETE /api/sessions/{id}`). */
+export interface StoppedBy {
+  message: string | null;
+  /** `null`: not known (the stream only answered 410). */
+  byAdmin: boolean | null;
+}
+
+/**
+ * Whether the server ended this stream (it answers `410` once a session is
+ * stopped), with its message. `null`: it didn't, or it can't be asked.
+ */
+export async function stoppedStream(url: string): Promise<StoppedBy | null> {
+  try {
+    const res = await fetch(url, { credentials: "same-origin", headers: { Range: "bytes=0-0" } });
+    if (res.status !== 410) {
+      void res.body?.cancel().catch(() => undefined);
+      return null;
+    }
+    const body = (await res.json().catch(() => null)) as { message?: unknown } | null;
+    return { message: typeof body?.message === "string" && body.message ? body.message : null, byAdmin: null };
+  } catch {
+    return null;
+  }
+}
+
 /** Remember the chosen tracks for this show (or movie); `subtitle_index: null` = off. */
 export function saveStreamChoice(
   itemId: Id,
