@@ -3,6 +3,7 @@ import type { ItemSummary } from "@/api/types";
 import { MediaCard } from "@/components/cards";
 import { ArrowButton, useFittedRow } from "@/components/HubRow";
 import { SectionTitle } from "@/components/ui";
+import { smoothScroll } from "@/lib/hooks";
 import { formatDuration } from "@/lib/format";
 import { playUrl } from "@/lib/usePlayItem";
 
@@ -45,7 +46,7 @@ export function ExtrasRow({ extras }: { extras?: ItemSummary[] }) {
   }, [update, count, width]);
 
   if (!extras?.length) return null;
-  const scrollPage = (dir: 1 | -1) => ref.current?.scrollBy({ left: dir * perPage * (width + gap), behavior: "smooth" });
+  const scrollPage = (dir: 1 | -1) => ref.current?.scrollBy({ left: dir * perPage * (width + gap), behavior: smoothScroll() });
 
   return (
     <section className="mt-12">

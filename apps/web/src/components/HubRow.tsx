@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { Hub } from "@/api/types";
 import { cn } from "@/lib/cn";
-import { useMediaQuery } from "@/lib/hooks";
+import { smoothScroll, useMediaQuery } from "@/lib/hooks";
 import { aspectFor, CardSkeleton, MediaCard, type CardAspect } from "./cards";
 import { libraryUrl } from "@/lib/urls";
 
@@ -93,7 +93,7 @@ export function HubRow({ hub, inset }: { hub: Hub; inset?: boolean }) {
   }, [update, hub.items.length, width]);
 
   const scrollPage = (dir: 1 | -1) => {
-    scroller.current?.scrollBy({ left: dir * perPage * (width + gap), behavior: "smooth" });
+    scroller.current?.scrollBy({ left: dir * perPage * (width + gap), behavior: smoothScroll() });
   };
 
   if (!hub.items.length) return null;

@@ -4,6 +4,7 @@ import type { Credit, CreditRole } from "@/api/types";
 import { ArrowButton, useFittedRow } from "@/components/HubRow";
 import { PersonCard } from "@/components/PersonCard";
 import { SectionTitle } from "@/components/ui";
+import { smoothScroll } from "@/lib/hooks";
 import { personUrl } from "@/lib/urls";
 
 const CREW_LABELS: Record<Exclude<CreditRole, "actor">, [string, string]> = {
@@ -35,7 +36,7 @@ export function CastRow({ title, credits }: { title: string; credits?: Credit[] 
   }, [update, count, width]);
 
   if (!credits?.length) return null;
-  const scrollPage = (dir: 1 | -1) => ref.current?.scrollBy({ left: dir * perPage * (width + gap), behavior: "smooth" });
+  const scrollPage = (dir: 1 | -1) => ref.current?.scrollBy({ left: dir * perPage * (width + gap), behavior: smoothScroll() });
 
   return (
     <section className="mt-12">

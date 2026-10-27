@@ -140,7 +140,7 @@ export const MediaCard = memo(function MediaCard({
             alt=""
             title={t}
             className={cn(ASPECT_CLASS[aspect], "w-full")}
-            imgClassName="transition-transform duration-300 group-hover/card:scale-[1.04]"
+            imgClassName="transition-transform duration-300 motion-safe:group-hover/card:scale-[1.04]"
           />
           <div className="pointer-events-none absolute inset-0 bg-black/0 transition-colors duration-200 group-hover/card:bg-black/30" />
           {watchedLeaf || watchedContainer ? (

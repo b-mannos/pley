@@ -122,6 +122,11 @@ export function useDismiss(ref: RefObject<HTMLElement | null>, open: boolean, on
   }, [open, ref]);
 }
 
+/** "smooth", unless the system asks for less motion. */
+export function smoothScroll(): ScrollBehavior {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+}
+
 export function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
   useEffect(() => {

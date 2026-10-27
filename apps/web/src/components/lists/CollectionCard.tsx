@@ -38,7 +38,7 @@ export function CollectionCard({
           alt=""
           title={collection.title}
           className="aspect-[2/3] w-full"
-          imgClassName="transition-transform duration-300 group-hover/card:scale-[1.04]"
+          imgClassName="transition-transform duration-300 motion-safe:group-hover/card:scale-[1.04]"
         />
         <div className="pointer-events-none absolute inset-0 bg-black/0 transition-colors duration-200 group-hover/card:bg-black/30" />
         <span className="absolute right-1.5 top-1.5 min-w-6 rounded bg-black/75 px-1.5 py-0.5 text-center text-xs font-bold text-fg shadow">

@@ -119,6 +119,15 @@
   }
 }
 
+/* Asked for less motion: no shimmer, no sliding in, no zooming posters. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton,
+  .animate-pop-in,
+  .animate-fade-in {
+    animation: none;
+  }
+}
+
 @utility scrollbar-none {
   scrollbar-width: none;
   &::-webkit-scrollbar {
