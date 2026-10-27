@@ -34,7 +34,7 @@ export function Screen(p: { entry: Entry; state: AppState }) {
       page = <HomeScreen entry={p.entry} />;
       break;
     case "libraries":
-      page = <LibrariesScreen entry={p.entry} />;
+      page = <LibrariesScreen entry={p.entry} sort={key.sort} />;
       break;
     case "library":
       page = <LibraryScreen entry={p.entry} id={key.id} tab={key.tab} />;

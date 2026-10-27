@@ -17,6 +17,7 @@ import { PanelTitle, SidePanel, useScrollToFocus, useTrap } from "../kit/panel";
 import type { Entry } from "../shell/navigator";
 import { Dialog, failedTitle, problem, sentence, useApp } from "./common";
 import { pageOf } from "./item-actions";
+import { librarySorting, SORT_NEEDS_NEWER } from "./library";
 import { ProfileAvatar, QrCode } from "./onboarding/kit";
 
 type Category = "profile" | "playback" | "audio" | "display" | "server" | "diagnostics" | "about" | "signout";
@@ -92,6 +93,7 @@ export function SettingsScreen(p: { entry: Entry }) {
   const scopes = app.tokenStore?.scopes() ?? [];
   const canSwitch = scopes.indexOf("profiles") >= 0;
   const canDefaults = scopes.indexOf("play") >= 0 && !readOnly;
+  const librariesSort = librarySorting(app);
   const server = app.server.value;
   const household = app.profiles.value ?? app.savedHousehold();
   const show = (c: Category) => {
@@ -218,6 +220,22 @@ export function SettingsScreen(p: { entry: Entry }) {
         );
       }
       rows.push(<SettingRow key="history" fid="row-history" icon="history" label="Watch history" chevron onSelect={() => ui.nav.open({ name: "history" })} />);
+      // The Libraries page sorts them too, but with three or fewer the rail lists them and has no way there.
+      if (librariesSort !== "no") {
+        rows.push(
+          <SettingRow
+            key="sortLibraries"
+            fid="row-sort-libraries"
+            icon="arrow-up-down"
+            label="Sort libraries"
+            value={librariesSort === "older" ? "Needs a newer pley on the server" : `Your order, on all your devices${librariesSort === "refused" ? " · change on the web" : ""}`}
+            chevron={librariesSort === "yes"}
+            onSelect={() =>
+              librariesSort === "yes" ? ui.nav.open({ name: "libraries", sort: true }) : librariesSort === "refused" ? setWeb(true) : ui.toast(SORT_NEEDS_NEWER, true)
+            }
+          />,
+        );
+      }
       if (household.length > 1) {
         const always = app.alwaysStartAs();
         rows.push(

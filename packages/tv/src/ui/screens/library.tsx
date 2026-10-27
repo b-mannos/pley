@@ -1,11 +1,13 @@
 import { useSignal, type Signal } from "@preact/signals";
 import type { ComponentChildren } from "preact";
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import { errorMessage, isApiError } from "../../api/client";
 import type { Collection, Hub, ItemSummary, Library, LibraryKind, LibrarySort } from "../../api/types";
 import { formatBitrate, formatBytes, pluralize } from "../../format/format";
+import type { AppState } from "../../state";
 import { useUi } from "../context";
 import { nudge } from "../focus";
-import { Chip, PanelRow, Tab } from "../kit/buttons";
+import { Chip, PanelRow, Pill, Tab } from "../kit/buttons";
 import { F, G } from "../kit/focusable";
 import { gridColumns, PosterGrid } from "../kit/grid";
 import { Icon, type IconName } from "../kit/icons";
@@ -14,18 +16,22 @@ import { PanelTitle, SidePanel } from "../kit/panel";
 import { Row, rowHeight, SectionPage, type Section } from "../kit/row";
 import { ArtTile, SeeAllTile, SkeletonTile, Tile, TILES, type TileKind } from "../kit/tile";
 import type { Entry, LibraryTab } from "../shell/navigator";
-import { ColumnMessage, failedTitle, problem, useApp, useLoad } from "./common";
+import { ColumnMessage, failedTitle, problem, sentence, useApp, useLoad } from "./common";
 import { pageOf, prefetchPlayback } from "./item-actions";
 import {
   AlphaIndex,
   countLabel,
   defaultOrder,
   fitParams,
+  gridStep,
   grouped,
   hasFilter,
+  inOrder,
   LETTERS,
   Listing,
+  moved,
   ParamsStore,
+  sameOrder,
   showsJump,
   smartFilterOf,
   SORT_LABELS,
@@ -33,7 +39,6 @@ import {
   type LibraryParams,
 } from "./library-data";
 
-const HEADER_TOP = 27;
 const CHIPS_TOP = 80;
 /** The wells of a grid's focused row, below the chips. */
 const GRID_TOP = 136;
@@ -699,52 +704,418 @@ export function LibrariesFailed(p: { top?: number }) {
   );
 }
 
-export function LibrariesScreen(p: { entry: Entry }) {
+/** The cards: 3 across, 261 × 80 and 16 apart, from x 96 and y 8 of the view under the title (from y 81 down). */
+const CARD_COLUMNS = 3;
+const CARD_W = 261;
+const CARD_H = 80;
+const CARD_GAP = 16;
+const CARDS_VIEW = 540 - 81;
+/** While sorting, the hint at the bottom: the view ends above it. */
+const HINT_ROOM = 80;
+
+function cardPlace(i: number): [number, number] {
+  return [96 + (i % CARD_COLUMNS) * (CARD_W + CARD_GAP), 8 + Math.floor(i / CARD_COLUMNS) * (CARD_H + CARD_GAP)];
+}
+
+/** Servers that told this TV it can't sort the libraries: too old for a profile's own order, or not from this app. */
+const noSort = new Map<string, "older" | "refused">();
+
+/**
+ * Whether the libraries can be put in another order here: there are two
+ * or more, and the sign-in may (scope play); "older" or "refused" when
+ * the server said it can't.
+ */
+export function librarySorting(app: AppState): "yes" | "no" | "older" | "refused" {
+  if ((app.libraries.value?.length ?? 0) < 2) return "no";
+  if ((app.tokenStore?.scopes() ?? []).indexOf("play") < 0) return "refused";
+  return noSort.get(app.server.value ?? "") ?? "yes";
+}
+
+export const SORT_NEEDS_NEWER = "Sorting libraries needs a newer pley on the server.";
+
+/**
+ * Every library (TvLibrariesScreen): the rail lists three, and Libraries
+ * opens this page. A card a library, in the profile's order: its kind's
+ * icon, its name, how much it holds, and "Scanning…" while the server
+ * scans it.
+ *
+ * With two or more, the profile may put them in its own order, which
+ * every list of them follows on all its devices: Sort libraries by the
+ * title, Move in a card's actions (holding OK, or Menu), or Settings' Sort
+ * libraries, which opens the page sorting and goes back when it ends.
+ * While sorting, OK lifts a card: the arrows move it through the grid
+ * (the wheel a row, the pointer to where it points), OK drops it there and
+ * the order is saved, Back puts it back. Done or Back ends sorting; "Use
+ * the server's order" goes back to the order everyone sees.
+ */
+export function LibrariesScreen(p: { entry: Entry; sort?: boolean }) {
   const app = useApp();
   const ui = useUi();
   const libraries = app.libraries.value;
   useEffect(() => {
     if (!libraries) void app.loadAccount().catch(() => undefined);
   }, []);
+  const sortable = librarySorting(app) === "yes";
+  const [sorting, setSorting] = useState(!!p.sort);
+  const [lifted, setLifted] = useState<number | null>(null);
+  /** The libraries' ids as moved here, until the server's answer lists them so; `null`: as it lists them. */
+  const [order, setOrderState] = useState<number[] | null>(null);
+  const orderRef = useRef<number[] | null>(null);
+  /** The order before the lifted card was lifted: Back puts it back. */
+  const before = useRef<number[] | null>(null);
+  const [actionsFor, setActionsFor] = useState<Library | null>(null);
   const [shift, setShift] = useState(0);
+  const gridRef = useRef<HTMLElement | null>(null);
+  const headerRef = useRef<HTMLElement | null>(null);
+  const refocus = useRef<string | null>(null);
+  const setOrder = (ids: number[] | null) => {
+    orderRef.current = ids;
+    setOrderState(ids);
+  };
+  const shown = inOrder(libraries ?? [], order);
+  const inSort = sorting && sortable;
+  const liftedId = inSort && lifted !== null && shown.some((l) => l.id === lifted) ? lifted : null;
+
+  // Nothing left to sort (a library went, the server said no): the page as it is.
+  useEffect(() => {
+    if (libraries && !sortable && (sorting || lifted !== null)) {
+      setSorting(false);
+      setLifted(null);
+    }
+  }, [sortable, !libraries]);
+
+  // Cards slide to their new places, from where each shows now (in the middle of a slide too).
+  const slides = useRef<{ placed: Map<number, number>; from: Map<number, string> | null }>({ placed: new Map(), from: null });
+  const snapshot = () => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const from = new Map<number, string>();
+    for (let i = 0; i < grid.children.length; i++) {
+      const el = grid.children[i] as HTMLElement;
+      from.set(Number(el.getAttribute("data-id")), getComputedStyle(el).transform);
+    }
+    slides.current.from = from;
+  };
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    const s = slides.current;
+    const from = s.from;
+    s.from = null;
+    if (!grid) return;
+    const moving: [HTMLElement, string, string][] = [];
+    const placed = new Map<number, number>();
+    for (let i = 0; i < grid.children.length; i++) {
+      const el = grid.children[i] as HTMLElement;
+      const id = Number(el.getAttribute("data-id"));
+      placed.set(id, i);
+      const was = s.placed.get(id);
+      if (was === undefined || was === i) continue;
+      const [x, y] = cardPlace(i);
+      const [wx, wy] = cardPlace(was);
+      moving.push([el, from?.get(id) ?? `translate(${wx}px,${wy}px)`, `translate(${x}px,${y}px)`]);
+    }
+    s.placed = placed;
+    if (!moving.length) return;
+    for (const [el, start] of moving) {
+      el.style.transition = "none";
+      el.style.transform = start;
+    }
+    void grid.offsetHeight;
+    for (const [el, , end] of moving) {
+      el.style.transition = "";
+      el.style.transform = end;
+    }
+    // A card the screen reader had keeps the browser's focus, moved in the page as it was.
+    ui.focus.syncDom();
+  });
+
+  useLayoutEffect(() => {
+    const fid = refocus.current;
+    refocus.current = null;
+    const el = fid ? headerRef.current?.querySelector<HTMLElement>(`[data-fid="${fid}"]`) : null;
+    if (el) ui.focus.focus(el);
+  });
+
+  const rows = Math.ceil(shown.length / CARD_COLUMNS);
+  const height = 8 + rows * (CARD_H + CARD_GAP) - CARD_GAP + 27;
+  const view = CARDS_VIEW - (inSort ? HINT_ROOM : 0);
+  /** The view to the card at `i`: its row second from the top for the keys; for the pointer, only so far as shows it whole. */
+  const place = (i: number, byPointer: boolean) => {
+    const top = cardPlace(i)[1];
+    const max = Math.max(0, height - view);
+    setShift((s) => (byPointer ? nudge(s, top, top + CARD_H, 0, view, 0, max) : Math.min(max, Math.max(0, top - 8 - (CARD_H + CARD_GAP)))));
+  };
+  const idsNow = () => inOrder(app.libraries.value ?? [], orderRef.current).map((l) => l.id);
+  const cardEl = (id: number) => gridRef.current?.querySelector<HTMLElement>(`[data-fid="library/${id}"]`) ?? null;
+
+  const failed = (e: unknown) => {
+    const server = app.server.value ?? "";
+    if (isApiError(e, 404) || isApiError(e, 405)) {
+      noSort.set(server, "older");
+      ui.toast(SORT_NEEDS_NEWER, true);
+    } else if (isApiError(e, 403)) {
+      noSort.set(server, "refused");
+      ui.toast("This server doesn't let the app sort your libraries: sort them on the web", true);
+    } else if (isApiError(e, 409)) {
+      // A library came or went since they were listed.
+      void app.loadAccount().catch(() => undefined);
+      ui.toast("Your libraries changed meanwhile: try again", true);
+    } else ui.toast(sentence(errorMessage(e)), true);
+    if (noSort.has(server)) {
+      setSorting(false);
+      setLifted(null);
+    }
+  };
+  const save = (ids: number[] | null) => {
+    app.orderLibraries(ids).then(
+      // The server's answer lists them so now; a newer move keeps its own.
+      () => {
+        if (orderRef.current === ids) setOrder(null);
+      },
+      (e) => {
+        if (orderRef.current === ids) setOrder(null);
+        if (before.current === ids) before.current = null;
+        failed(e);
+      },
+    );
+  };
+
+  const startSorting = () => {
+    setSorting(true);
+    // Ready to lift: the first card.
+    const first = gridRef.current?.querySelector<HTMLElement>("[data-f]");
+    if (first) ui.focus.focus(first);
+  };
+  const endSorting = () => {
+    // Opened by Settings to sort: back there.
+    if (p.sort) {
+      ui.nav.pop();
+      return;
+    }
+    if (ui.focus.current?.getAttribute("data-fid") === "serverOrder") refocus.current = "sort";
+    setSorting(false);
+    setLifted(null);
+  };
+  const lift = (id: number) => {
+    before.current = orderRef.current;
+    setLifted(id);
+  };
+  const moveTo = (to: number, byPointer: boolean) => {
+    if (liftedId === null) return;
+    const ids = idsNow();
+    const from = ids.indexOf(liftedId);
+    if (from < 0 || to < 0 || to >= ids.length || to === from) return;
+    snapshot();
+    setOrder(moved(ids, from, to));
+    place(to, byPointer);
+  };
+  const drop = () => {
+    const was = before.current;
+    before.current = null;
+    setLifted(null);
+    const ids = orderRef.current;
+    if (!ids) return;
+    if (sameOrder(ids, inOrder(app.libraries.value ?? [], was).map((l) => l.id))) setOrder(was);
+    else save(ids);
+  };
+  const putBack = () => {
+    const was = before.current;
+    before.current = null;
+    setLifted(null);
+    snapshot();
+    setOrder(was);
+    if (liftedId !== null) place(Math.max(0, inOrder(app.libraries.value ?? [], was).map((l) => l.id).indexOf(liftedId)), false);
+  };
+  const serverOrder = () => {
+    setLifted(null);
+    before.current = null;
+    setOrder(null);
+    save(null);
+  };
+
+  // Back ends sorting (a lifted card's own Back puts it back first).
+  useEffect(() => {
+    if (!inSort || p.sort) return;
+    return ui.input.push((key, e) => {
+      if (key !== "back") return false;
+      if (e.type === "down" && !e.repeat) endSorting();
+      return true;
+    });
+  }, [inSort, p.sort]);
+
   if (!libraries) return <LibrariesFailed />;
   if (!libraries.length) return <ColumnMessage title="No libraries yet" body="Ask the server owner to add a library." />;
+  const toTarget = (i: number) => {
+    // The pointer, with a card lifted: the card goes where it points (past the last, to the end).
+    if (ui.input.pointerMoved) moveTo(Math.min(i, shown.length - 1), true);
+  };
+  const dropByPointer = (e: MouseEvent) => {
+    const el = liftedId === null ? null : cardEl(liftedId);
+    if (el) ui.input.click(el, e);
+  };
   return (
     <div class="libraries-page">
-      <div class="t-page c-fg" style={`position:absolute;left:96px;top:${HEADER_TOP}px`}>
-        Libraries
+      <div class="libraries-header">
+        <div class="t-page c-fg one-line" style="flex:1;min-width:0">
+          {inSort ? "Sort libraries" : "Libraries"}
+        </div>
+        {sortable && (
+          <G kind="row" class="libraries-buttons" elRef={(el) => (headerRef.current = el)}>
+            {inSort && <Pill key="server" fid="serverOrder" label="Use the server's order" icon="rotate-ccw" disabled={liftedId !== null} onSelect={serverOrder} />}
+            <Pill
+              key="sort"
+              fid="sort"
+              label={inSort ? "Done" : "Sort libraries"}
+              icon={inSort ? "check" : "arrow-up-down"}
+              disabled={liftedId !== null}
+              onSelect={inSort ? endSorting : startSorting}
+            />
+          </G>
+        )}
       </div>
       <div class="libraries-viewport">
         <div class="scroll-y" style={`transform:translateY(${-shift}px)`}>
-          <G kind="grid" columns={3} restore class="libraries-grid">
-            {libraries.map((l, i) => (
-              <F
+          <G kind="grid" columns={CARD_COLUMNS} restore class="libraries-grid" style={`height:${height}px`} elRef={(el) => (gridRef.current = el)}>
+            {shown.map((l, i) => (
+              <LibraryCard
                 key={l.id}
-                class="library-card"
-                fid={`library/${l.id}`}
-                initial={i === 0}
-                label={`${l.name}, ${libraryCountLine(l)}`}
+                library={l}
+                index={i}
+                count={shown.length}
+                sorting={inSort}
+                lifted={liftedId === l.id}
                 onFocus={() => {
-                  // Cards 80 high every 96 from 8 down, in a view from y 81 to the screen's bottom.
-                  const top = 8 + Math.floor(i / 3) * 96;
-                  if (ui.focus.byPointer) setShift((s) => nudge(s, top, top + 80, 0, 540 - 81));
-                  else setShift(Math.max(0, top - 8 - 96));
+                  place(i, ui.focus.byPointer);
                   p.entry.state.lib = l.id;
                 }}
-                onSelect={() => ui.nav.open({ name: "library", id: l.id })}
-              >
-                <div class="library-card-icon">
-                  <Icon name={kindIcon(l.kind)} size={20} />
-                </div>
-                <div style="flex:1;min-width:0;margin-left:14px">
-                  <div class="t-title one-line">{l.name}</div>
-                  <div class="t-caption one-line card-sub">{libraryCountLine(l)}</div>
-                </div>
-              </F>
+                onSelect={() => {
+                  if (liftedId !== null) drop();
+                  else if (inSort) lift(l.id);
+                  else ui.nav.open({ name: "library", id: l.id });
+                }}
+                onActions={sortable && liftedId === null ? () => setActionsFor(l) : undefined}
+                onMove={(by) => moveTo(gridStep(i, by, shown.length, CARD_COLUMNS), false)}
+                onDrop={drop}
+                onPutBack={putBack}
+                onLeave={putBack}
+              />
             ))}
           </G>
+          {liftedId !== null && (
+            <div class="library-targets">
+              {Array.from({ length: rows * CARD_COLUMNS }, (_, i) => {
+                const [x, y] = cardPlace(i);
+                return <div key={i} class="library-target" style={`left:${x - CARD_GAP / 2}px;top:${y - CARD_GAP / 2}px`} onMouseMove={() => toTarget(i)} onClick={dropByPointer} />;
+              })}
+            </div>
+          )}
         </div>
       </div>
+      {inSort && (
+        <div class="moving-hint t-label">
+          {liftedId !== null ? "Arrows to move it, OK to drop it here, Back to put it back" : "Press OK on a library to move it. The order is yours, on all your devices."}
+        </div>
+      )}
+      {actionsFor && (
+        <SidePanel onClose={() => setActionsFor(null)} label={actionsFor.name}>
+          <div class="panel-title">
+            <div class="t-title c-fg lines-2">{actionsFor.name}</div>
+            <div class="t-caption c-muted one-line">{libraryCountLine(actionsFor)}</div>
+          </div>
+          <PanelRow
+            label="Open"
+            icon="arrow-right"
+            initial
+            onSelect={() => {
+              setActionsFor(null);
+              ui.nav.open({ name: "library", id: actionsFor.id });
+            }}
+          />
+          <PanelRow
+            label="Move"
+            icon="arrow-up-down"
+            onSelect={() => {
+              setActionsFor(null);
+              setSorting(true);
+              lift(actionsFor.id);
+            }}
+          />
+          <PanelRow
+            label="Use the server's order"
+            icon="rotate-ccw"
+            onSelect={() => {
+              setActionsFor(null);
+              serverOrder();
+            }}
+          />
+        </SidePanel>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A library's card: Surface2; focused, the accent fill at 1.05. While
+ * sorting, a grip at its end; lifted, a ring and its own size, and the
+ * arrows move it a place along or a row up or down until OK drops it or
+ * Back puts it back. Focus going elsewhere (the rail) puts it back too.
+ */
+function LibraryCard(p: {
+  library: Library;
+  index: number;
+  count: number;
+  sorting: boolean;
+  lifted: boolean;
+  onFocus: () => void;
+  onSelect: () => void;
+  onActions?: () => void;
+  onMove: (by: number) => void;
+  onDrop: () => void;
+  onPutBack: () => void;
+  onLeave: () => void;
+}) {
+  const l = p.library;
+  const [x, y] = cardPlace(p.index);
+  return (
+    <div class={`library-slot${p.lifted ? " lifted" : ""}`} data-id={l.id} style={`transform:translate(${x}px,${y}px)`}>
+      <F
+        class={`library-card${p.lifted ? " lifted" : ""}`}
+        fid={`library/${l.id}`}
+        initial={p.index === 0}
+        label={`${l.name}, ${libraryCountLine(l)}${p.sorting ? `, ${p.index + 1} of ${p.count}` : ""}`}
+        onFocus={p.onFocus}
+        onBlur={p.lifted ? p.onLeave : undefined}
+        onSelect={p.onSelect}
+        onLongSelect={p.onActions}
+        onMenu={p.onActions}
+        onKey={(key) => {
+          if (!p.lifted) return false;
+          const by = key === "left" ? -1 : key === "right" ? 1 : key === "up" ? -CARD_COLUMNS : key === "down" ? CARD_COLUMNS : 0;
+          if (by) {
+            p.onMove(by);
+            return true;
+          }
+          if (key === "ok:up") {
+            p.onDrop();
+            return true;
+          }
+          if (key === "back") {
+            p.onPutBack();
+            return true;
+          }
+          // OK's press, Menu, and every key's release: nothing else while it is lifted.
+          return key === "ok" || key === "menu" || key.indexOf(":up") > 0;
+        }}
+      >
+        <div class="library-card-icon">
+          <Icon name={kindIcon(l.kind)} size={20} />
+        </div>
+        <div style="flex:1;min-width:0;margin-left:14px">
+          <div class="t-title one-line">{l.name}</div>
+          <div class="t-caption one-line card-sub">{libraryCountLine(l)}</div>
+        </div>
+        {p.sorting && <Icon name="grip-vertical" size={20} class="library-grip" />}
+      </F>
     </div>
   );
 }

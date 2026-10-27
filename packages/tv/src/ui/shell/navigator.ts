@@ -7,7 +7,8 @@ export type PageKey =
   | { name: "link"; server: string }
   | { name: "profiles" }
   | { name: "home" }
-  | { name: "libraries" }
+  /** Every library; `sort`: sorting them (Settings), and back when that ends. */
+  | { name: "libraries"; sort?: boolean }
   | { name: "library"; id: number; tab?: LibraryTab }
   | { name: "item"; id: number }
   | { name: "actions"; id: number; continueWatching?: boolean }

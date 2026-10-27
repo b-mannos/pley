@@ -213,6 +213,16 @@ export class Api {
     return this.get("/api/libraries", { cancel });
   }
 
+  /** The profile's own order of its libraries, `ids` naming each once (scope play); them in it. */
+  sortLibraries(ids: Id[]): Promise<Library[]> {
+    return this.call("PUT", "/api/me/libraries/order", { ids }) as Promise<Library[]>;
+  }
+
+  /** The order everyone sees, for this profile again (scope play); the libraries in it. */
+  forgetLibraryOrder(): Promise<Library[]> {
+    return this.call("DELETE", "/api/me/libraries/order") as Promise<Library[]>;
+  }
+
   libraryItems(
     id: Id,
     query: { sort?: LibrarySort; order?: "asc" | "desc"; watched?: boolean; genre?: string; year?: number; offset?: number; limit?: number },

@@ -3,7 +3,7 @@ import { Api, unreachable } from "./api/client";
 import { EventStream } from "./api/events";
 import type { Hub, HouseholdProfile, ItemDetail, Library, ServerEvent, User } from "./api/types";
 import { origin } from "./auth/addresses";
-import { Tokens, type KeyValue } from "./auth/tokens";
+import { SignedOutError, Tokens, type KeyValue } from "./auth/tokens";
 import { xhrTransport, type Transport } from "./net/transport";
 import type { Platform, Probe } from "./platform";
 import { Reporter } from "./player/reporter";
@@ -130,6 +130,8 @@ export class AppState {
   private readonly stateParents = new Set<number>();
   /** Playbacks on top: Home and the pages wait to ask again until they end (their own reports change the watch state too). */
   private holds = 0;
+  /** The libraries' order changes on their way to the server, one at a time. */
+  private orderQueue: Promise<unknown> = Promise.resolve();
   private noticeTimer: ReturnType<typeof setTimeout> | null = null;
   private awayTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly leavers: (() => void)[] = [];
@@ -345,13 +347,41 @@ export class AppState {
     }
     this.accountError.value = null;
     this.me.value = me;
-    this.libraries.value = libraries;
     this.store.set(ME_KEY, JSON.stringify(me));
-    this.store.set(LIBRARIES_KEY, JSON.stringify(libraries));
+    this.keepLibraries(libraries);
     api.profiles().then(
       (profiles) => this.keepHousehold(profiles),
       () => undefined,
     );
+  }
+
+  private keepLibraries(libraries: Library[]): void {
+    this.libraries.value = libraries;
+    this.store.set(LIBRARIES_KEY, JSON.stringify(libraries));
+  }
+
+  /**
+   * The profile's own order of its libraries (`ids`, each once), or the
+   * order everyone sees again (`null`), on every list of them on all its
+   * devices. Changes go one at a time, in the order they were made; the
+   * server's answer is the list from then on, and Home asks again, since
+   * its rows of each library follow the order.
+   */
+  orderLibraries(ids: number[] | null): Promise<Library[]> {
+    const run = this.orderQueue.then(async () => {
+      const api = this.api.value;
+      const who = this.me.value?.id;
+      if (!api) throw new SignedOutError();
+      const libraries = ids ? await api.sortLibraries(ids) : await api.forgetLibraryOrder();
+      // Another profile, sign-in or server since: the answer was the one before's.
+      if (this.api.value === api && this.me.value?.id === who) {
+        this.keepLibraries(libraries);
+        void this.loadHome();
+      }
+      return libraries;
+    });
+    this.orderQueue = run.catch(() => undefined);
+    return run;
   }
 
   async loadHome(): Promise<void> {
@@ -541,7 +571,7 @@ export class AppState {
         }, 1_500);
         break;
       case "libraries_changed":
-        void this.loadAccount();
+        void this.loadAccount().catch(() => undefined);
         this.refresh();
         break;
       case "watchlist_changed":

@@ -226,9 +226,45 @@ export function grouped(n: number): string {
   return s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
+// ---- the libraries' own order
+
+/** `list` in the order of `ids`; what they don't name comes after, as it came. */
+export function inOrder<T extends { id: number }>(list: T[], ids: number[] | null): T[] {
+  if (!ids) return list;
+  const at = new Map<number, number>();
+  ids.forEach((id, i) => at.set(id, i));
+  const rank = new Map<T, number>();
+  list.forEach((x, i) => rank.set(x, at.has(x.id) ? at.get(x.id)! : ids.length + i));
+  return list.slice().sort((a, b) => rank.get(a)! - rank.get(b)!);
+}
+
+/** `ids` with the one at `from` moved to `to`. */
+export function moved(ids: number[], from: number, to: number): number[] {
+  const next = ids.slice();
+  next.splice(to, 0, next.splice(from, 1)[0]!);
+  return next;
+}
+
+export function sameOrder(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i]);
+}
+
+/**
+ * Where a card at `at` of `count` lands moved `by` places through a grid
+ * of `columns`: a place along (on to the next row at a row's end), or a
+ * row up or down; down onto a shorter last row, at its end. -1 when it
+ * can't go that way.
+ */
+export function gridStep(at: number, by: number, count: number, columns: number): number {
+  const to = at + by;
+  if (to < 0) return -1;
+  if (to < count) return to;
+  return by > 1 && Math.floor(at / columns) < Math.floor((count - 1) / columns) ? count - 1 : -1;
+}
+
 // ---- A–Z
 
-export const LETTERS = ["#", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"];
+export const LETTERS =["#", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"];
 
 /** An item's letter: the first of its sort title, accents removed; "#" for anything that isn't A–Z. */
 export function letterOf(item: Pick<ItemSummary, "sort_title" | "title">): string {

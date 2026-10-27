@@ -378,12 +378,34 @@
 .panel-row[data-focused] .panel-value { color: var(--on-accent); }
 
 .libraries-page { position: absolute; left: 0; top: 0; width: 960px; height: 540px; overflow: hidden; }
+.libraries-header {
+  position: absolute;
+  left: 96px;
+  right: 48px;
+  top: 27px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+}
+.libraries-buttons { display: flex; flex: none; margin-left: 16px; }
+.libraries-buttons > * + * { margin-left: 12px; }
 .libraries-viewport { position: absolute; left: 0; right: 0; top: 81px; bottom: 0; overflow: hidden; }
-.libraries-grid { display: flex; flex-wrap: wrap; padding: 8px 48px 27px 96px; }
-.library-card {
+.libraries-grid { position: relative; }
+/* A card's place in the grid: a card moved while sorting slides from its old place to its new one. */
+.library-slot {
+  position: absolute;
+  left: 0;
+  top: 0;
   width: 261px;
   height: 80px;
-  margin: 0 16px 16px 0;
+  transition: transform 200ms var(--focus-ease);
+}
+.library-slot.lifted { z-index: 2; }
+.holding .library-slot,
+.reduced .library-slot { transition: none !important; }
+.library-card {
+  width: 100%;
+  height: 100%;
   padding: 0 18px;
   box-sizing: border-box;
   border-radius: 6px;
@@ -393,9 +415,16 @@
   align-items: center;
   transition: transform 120ms var(--unfocus-ease);
 }
-.library-card:nth-child(3n) { margin-right: 0; }
 .library-card[data-focused] { background: var(--accent); color: var(--on-accent); transform: scale(1.05); transition: transform 150ms var(--focus-ease); }
 .library-card[data-pressed] { background: var(--accent-bright); }
+/* Lifted: its own size, a ring, the grip lit. */
+.library-card.lifted,
+.library-card.lifted[data-focused] { background: var(--surface3); color: var(--fg); transform: none; box-shadow: inset 0 0 0 2.78px var(--accent-bright); }
+.library-grip { flex: none; margin-left: 12px; opacity: 0.6; }
+.library-card.lifted .library-grip { opacity: 1; color: var(--accent-bright); }
+/* While a card is lifted, the pointer's places for it: each card's place and half the gaps around it. */
+.library-targets { position: absolute; left: 0; top: 0; width: 960px; z-index: 3; }
+.library-target { position: absolute; width: 277px; height: 96px; }
 .library-card-icon {
   width: 40px;
   height: 40px;
@@ -407,6 +436,7 @@
   justify-content: center;
 }
 .library-card[data-focused] .library-card-icon { background: rgba(3, 19, 31, 0.12); }
+.library-card.lifted .library-card-icon { background: rgba(233, 235, 239, 0.12); }
 .card-sub { opacity: 0.75; margin-top: 2px; }
 
 /* ---------------------------------------------------------------- item */
