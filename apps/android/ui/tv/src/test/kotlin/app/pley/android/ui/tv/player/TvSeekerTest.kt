@@ -50,6 +50,32 @@ class TvSeekerTest {
     }
 
     @Test
+    fun `OK confirms a seek to come or one just made, once`() {
+        assertFalse("no seek: OK plays or pauses", seeker.confirm())
+        seeker.press(1)
+        assertTrue(seeker.confirm())
+        assertEquals(listOf(610_000L), seeks)
+        assertNull(seeker.target)
+        assertFalse("confirmed: the next OK pauses", seeker.confirm())
+
+        seeker.press(1)
+        seeker.settle(seeker.presses)
+        assertTrue("a seek just made", seeker.confirm())
+        assertFalse(seeker.confirm())
+
+        seeker.press(1)
+        seeker.settle(seeker.presses)
+        seeker.settled(seeker.seeks - 1)
+        assertTrue("an earlier seek's wait doesn't end this one's", seeker.confirm())
+
+        seeker.press(1)
+        seeker.settle(seeker.presses)
+        seeker.settled(seeker.seeks)
+        assertFalse("long after the seek", seeker.confirm())
+        assertEquals(4, seeks.size)
+    }
+
+    @Test
     fun `seeks stay inside the video`() {
         position = 5_000
         seeker.press(-1)

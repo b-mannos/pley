@@ -132,6 +132,29 @@ class TvPlayerScreenTest {
     }
 
     @Test
+    fun `Centre during or just after a seek goes there and plays on, instead of pausing`() {
+        val controller = playing()
+        show(controller)
+        // A seek still to come is made now.
+        press(Key.DirectionRight)
+        press(Key.DirectionCenter)
+        assertEquals(listOf("seekTo"), controller.calls.map { it.name })
+        assertEquals(610_000L, controller.calls("seekTo").single().args.single())
+        // A seek made a moment ago is confirmed, not paused.
+        press(Key.DirectionRight)
+        compose.mainClock.advanceTimeBy(TvSeeker.SETTLE_MS + 100)
+        compose.waitForIdle()
+        press(Key.DirectionCenter)
+        assertEquals(listOf("seekTo", "seekTo"), controller.calls.map { it.name })
+        // Long after the seek, Centre pauses again.
+        press(Key.DirectionRight)
+        compose.mainClock.advanceTimeBy(TvSeeker.SETTLE_MS + TvSeeker.CONFIRM_MS + 100)
+        compose.waitForIdle()
+        press(Key.DirectionCenter)
+        assertEquals("pause", controller.calls.last().name)
+    }
+
+    @Test
     fun `holding Right scrubs through the previews and seeks once on release`() {
         val controller = playing()
         show(controller)
@@ -309,6 +332,11 @@ class TvPlayerScreenTest {
         compose.mainClock.advanceTimeBy(TvSeeker.SETTLE_MS + 100)
         compose.waitForIdle()
         assertEquals(listOf(630_000L), controller.calls("seekTo").map { it.args.single() })
+        // Play/Pause straight after fast forward plays on from there; later, it pauses.
+        press(Key.MediaPlayPause)
+        assertEquals("seekTo", controller.calls.last().name)
+        compose.mainClock.advanceTimeBy(TvSeeker.CONFIRM_MS)
+        compose.waitForIdle()
         press(Key.MediaPlayPause)
         assertEquals("pause", controller.calls.last().name)
         // Next on an episode plays the next one; Previous goes to the chapter's start.

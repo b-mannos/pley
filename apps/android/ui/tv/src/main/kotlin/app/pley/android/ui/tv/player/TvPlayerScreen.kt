@@ -53,7 +53,8 @@ import kotlinx.coroutines.delay
  *   Next are all that appear unasked. Centre plays or pauses (a showing
  *   Skip button takes it), Left and Right seek 10 s (held: scrub, seeking
  *   once on release), Up shows the controls on the scrubber, Down on the
- *   track buttons.
+ *   track buttons. Centre during or just after a seek confirms it and
+ *   plays on ([TvSeeker.confirm]).
  * - **Controls shown.** Focus moves as usual; they hide after 5 s without
  *   a key unless paused or in a panel.
  * - **Back** walks out: panel, then Up Next, then the controls, then the
@@ -114,6 +115,11 @@ internal fun TvPlayerScreen(
     // ---------------------------------------------------------------- what the keys do
 
     fun playPause() {
+        if (seeker.confirm()) {
+            // OK after Left or Right goes there, playing: paused, it plays from there.
+            if (!state.value.phase.wantsToPlay()) controller.play()
+            return
+        }
         if (state.value.phase.wantsToPlay()) {
             controller.pause()
             if (!ui.controls) ui.showControls(PlayerFocus.Scrubber)
@@ -328,6 +334,12 @@ internal fun TvPlayerScreen(
         seeker.settle(press)
         delay(TvSeeker.BADGE_MS - TvSeeker.SETTLE_MS)
         seeker.hideBadge(press)
+    }
+    // A while after a seek, OK plays and pauses again.
+    LaunchedEffect(seeker.seeks) {
+        val seek = seeker.seeks
+        delay(TvSeeker.CONFIRM_MS)
+        seeker.settled(seek)
     }
     // The playback's messages, as toasts.
     val notice by remember(state) { derivedStateOf { state.value.notice } }

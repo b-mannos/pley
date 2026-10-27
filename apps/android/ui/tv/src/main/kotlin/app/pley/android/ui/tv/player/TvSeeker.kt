@@ -41,6 +41,11 @@ internal class TvSeeker(
     var presses: Int by mutableIntStateOf(0)
         private set
 
+    /** Changes with every seek made: OK confirms it for [CONFIRM_MS] after. */
+    var seeks: Int by mutableIntStateOf(0)
+        private set
+
+    private var confirmable = false
     private var asked = 0L
     private var holdStart = 0L
     private var lastEvent = 0L
@@ -90,17 +95,44 @@ internal class TvSeeker(
         if (press == presses) badgeMs = null
     }
 
+    /**
+     * OK pressed while a seek is coming, or just after one: as on most TV
+     * players, OK after Left and Right says "go there", not "pause". A
+     * coming seek is made now. Returns whether OK confirmed a seek; if not,
+     * it plays or pauses as usual.
+     */
+    fun confirm(): Boolean {
+        if (target != null) {
+            holding = false
+            commit()
+            // Confirmed: the next OK pauses.
+            confirmable = false
+            return true
+        }
+        val confirmed = confirmable
+        confirmable = false
+        return confirmed
+    }
+
+    /** [CONFIRM_MS] after seek number [seek]: OK plays and pauses again. */
+    fun settled(seek: Int) {
+        if (seek == seeks) confirmable = false
+    }
+
     /** Forgets a seek on its way (the playback changed under it). */
     fun cancel() {
         target = null
         holding = false
         badgeMs = null
+        confirmable = false
     }
 
     private fun commit() {
         val to = target ?: return
         target = null
         seek(to)
+        confirmable = true
+        seeks++
     }
 
     private fun clamp(ms: Long): Long {
@@ -124,6 +156,9 @@ internal class TvSeeker(
 
         /** The seek badge shows this long after the last press. */
         const val BADGE_MS = 600L
+
+        /** OK this soon after a seek confirms it instead of pausing: a seek far off takes a moment to show. */
+        const val CONFIRM_MS = 2_000L
 
         /** Seeks stop short of the end, so the end isn't reached by seeking. */
         const val END_MARGIN_MS = 1_000L
