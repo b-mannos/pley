@@ -33,6 +33,9 @@
     <string name="tv_item_details">Details</string>
     <string name="tv_item_versions">Versions</string>
     <string name="tv_item_media_info">Media info</string>
+    <string name="tv_item_media_info_hint">Each file\'s video, audio and subtitle streams</string>
+    <string name="tv_item_media_info_open">Open</string>
+    <string name="tv_item_media_info_closed">Closed</string>
     <string name="tv_item_no_episodes">No episodes found.</string>
     <string name="tv_item_close">Close</string>
     <string name="tv_item_back">Back</string>

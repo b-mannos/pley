@@ -1,7 +1,11 @@
 package app.pley.android.ui.tv.item
 
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.isFocusable
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -55,5 +59,18 @@ class TvMediaInfoTest {
         compose.onNodeWithText("Forced").assertExists()
         assertEquals(0, compose.onAllNodes(isFocusable()).fetchSemanticsNodes().size)
         assertEquals(2, compose.onAllNodesWithText("English").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun `the item page keeps media info closed until Select opens it`() {
+        compose.setContent { TvTheme { MediaInfoSection(listOf(FileInfo(1, null, emptyList(), emptyList(), file = file)), itemId = 7) } }
+        compose.onNodeWithText("Media info").assertExists()
+        compose.onNodeWithTag(TAG_MEDIA_INFO).assertDoesNotExist()
+        compose.onNodeWithTag(TAG_MEDIA_INFO_TOGGLE).assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Closed"))
+        compose.onNodeWithTag(TAG_MEDIA_INFO_TOGGLE).performClick()
+        compose.onNodeWithText("Film (2024).mkv").assertExists()
+        compose.onNodeWithTag(TAG_MEDIA_INFO_TOGGLE).assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Open"))
+        compose.onNodeWithTag(TAG_MEDIA_INFO_TOGGLE).performClick()
+        compose.onNodeWithTag(TAG_MEDIA_INFO).assertDoesNotExist()
     }
 }

@@ -9,17 +9,25 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
+import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.model.CreditRole
+import app.pley.android.screens.item.FileInfo
 import app.pley.android.screens.item.ItemPage
 import app.pley.android.ui.tv.R
 
@@ -27,8 +35,9 @@ import app.pley.android.ui.tv.R
  * Details at the end of the page (design spec §4.3): who made it and the
  * facts, one row per version in its long form ("4K · HEVC · Dolby Vision
  * P8.1 · TrueHD Atmos 7.1 · 62.0 GB", the one that plays ticked; Select
- * plays another), and the media info of each file. Only the version rows
- * take focus; the text is read by scrolling on with Down.
+ * plays another), and the media info of each file, closed until Select
+ * opens it. Only the version rows and Media info take focus; the text is
+ * read by scrolling on with Down.
  */
 @Composable
 internal fun TvDetails(page: ItemPage, onChooseVersion: (Long) -> Unit, modifier: Modifier = Modifier) {
@@ -65,8 +74,27 @@ internal fun TvDetails(page: ItemPage, onChooseVersion: (Long) -> Unit, modifier
         }
         if (page.mediaInfo.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
-            BasicText(stringResource(R.string.tv_item_media_info), style = PleyType.Tv.Title.copy(color = PleyColors.Fg), modifier = Modifier.padding(bottom = 8.dp))
-            TvMediaInfo(page.mediaInfo)
+            MediaInfoSection(page.mediaInfo, page.id)
+        }
+    }
+}
+
+/** Media info, closed until Select opens it, as on the web and phones: few want every stream. */
+@Composable
+internal fun MediaInfoSection(files: List<FileInfo>, itemId: Long) {
+    var open by rememberSaveable(itemId) { mutableStateOf(false) }
+    val state = stringResource(if (open) R.string.tv_item_media_info_open else R.string.tv_item_media_info_closed)
+    Column {
+        PanelRow(
+            stringResource(R.string.tv_item_media_info),
+            onClick = { open = !open },
+            icon = if (open) PleyIcons.ChevronUp else PleyIcons.ChevronDown,
+            supporting = stringResource(R.string.tv_item_media_info_hint),
+            modifier = Modifier.testTag(TAG_MEDIA_INFO_TOGGLE).semantics { stateDescription = state },
+        )
+        if (open) {
+            Spacer(Modifier.height(8.dp))
+            TvMediaInfo(files)
         }
     }
 }
@@ -94,3 +122,5 @@ private fun Fact(label: String, value: String) {
 private val DetailsEnd = 200.dp
 
 private val LabelWidth = 160.dp
+
+internal const val TAG_MEDIA_INFO_TOGGLE = "pley.tv.item.mediaInfoToggle"
