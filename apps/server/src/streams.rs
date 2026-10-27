@@ -153,7 +153,7 @@ pub fn from_selection(streams: &[MediaStream], audio: Option<i64>, subtitle: Opt
         subtitles: subtitle.is_some(),
         subtitle_language: subtitle.and_then(|s| s.language.clone()),
         subtitle_title: subtitle.and_then(|s| s.title.clone()),
-        subtitle_forced: subtitle.is_some_and(|s| s.forced),
+        subtitle_forced: subtitle.is_some_and(is_forced),
     }
 }
 
@@ -198,7 +198,7 @@ pub fn resolve(pref: Option<&StreamPreference>, defaults: &Defaults, streams: &[
             })
             .max_by_key(|s| {
                 (
-                    s.forced == pref.subtitle_forced,
+                    is_forced(s) == pref.subtitle_forced,
                     same_title(s.title.as_deref(), pref.subtitle_title.as_deref()),
                     is_sdh(s.title.as_deref()) == is_sdh(pref.subtitle_title.as_deref()),
                     // Text is shown by the player; images need a transcode.
@@ -241,7 +241,7 @@ fn by_default(
     let forced = || {
         subtitle_streams
             .iter()
-            .filter(|s| s.forced && heard.is_some() && same_language(s.language.as_deref(), heard))
+            .filter(|s| is_forced(s) && heard.is_some() && same_language(s.language.as_deref(), heard))
             .max_by_key(|s| s.text_based.unwrap_or(true))
             .map(|s| s.index)
     };
@@ -251,7 +251,7 @@ fn by_default(
             .filter(|s| same_language(s.language.as_deref(), Some(language)))
             .max_by_key(|s| {
                 (
-                    !s.forced,
+                    !is_forced(s),
                     !is_sdh(s.title.as_deref()),
                     // Text is shown by the player; images need a transcode.
                     s.text_based.unwrap_or(true),
@@ -321,6 +321,45 @@ fn normalize_language(code: &str) -> String {
         "th" => "tha",
         "uk" => "ukr",
         "vi" => "vie",
+        "sl" => "slv",
+        "et" => "est",
+        "lv" => "lav",
+        "lt" => "lit",
+        "is" | "isl" => "ice",
+        "ms" | "msa" => "may",
+        "sq" | "sqi" => "alb",
+        "hy" | "hye" => "arm",
+        "eu" | "eus" => "baq",
+        "my" | "mya" => "bur",
+        "ka" | "kat" => "geo",
+        "mk" | "mkd" => "mac",
+        "mi" | "mri" => "mao",
+        "bo" | "bod" => "tib",
+        "cy" | "cym" => "wel",
+        "af" => "afr",
+        "az" => "aze",
+        "be" => "bel",
+        "bn" => "ben",
+        "bs" => "bos",
+        "ga" => "gle",
+        "gl" => "glg",
+        "gu" => "guj",
+        "kk" => "kaz",
+        "km" => "khm",
+        "kn" => "kan",
+        "lb" => "ltz",
+        "ml" => "mal",
+        "mn" => "mon",
+        "mr" => "mar",
+        "ne" => "nep",
+        "pa" => "pan",
+        "si" => "sin",
+        "sw" => "swa",
+        "ta" => "tam",
+        "te" => "tel",
+        "tl" => "tgl",
+        "ur" => "urd",
+        "uz" => "uzb",
         other => other,
     }
     .to_owned()
@@ -336,6 +375,15 @@ fn is_sdh(title: Option<&str>) -> bool {
         let t = t.to_lowercase();
         t.contains("sdh") || t.contains("hearing") || t.split(|c: char| !c.is_alphanumeric()).any(|w| w == "cc")
     })
+}
+
+/// Forced subtitles: flagged so, or only named so (`English (Forced)`,
+/// `Signs & Songs`), as many files are.
+fn is_forced(s: &MediaStream) -> bool {
+    s.forced
+        || s.title.as_deref().is_some_and(|t| {
+            t.to_lowercase().split(|c: char| !c.is_alphanumeric()).any(|w| matches!(w, "forced" | "signs"))
+        })
 }
 
 fn is_commentary(title: Option<&str>) -> bool {
@@ -540,5 +588,33 @@ mod tests {
         assert!(valid_language("eng") && valid_language("fr") && !valid_language("English") && !valid_language("EN"));
         // Both ISO 639-2 forms and the two-letter code are one language.
         assert!(same_language(Some("ces"), Some("cze")) && same_language(Some("el"), Some("gre")));
+        for (a, b) in [("sl", "slv"), ("isl", "ice"), ("msa", "may"), ("hy", "arm"), ("cym", "wel"), ("ta", "tam")] {
+            assert!(same_language(Some(a), Some(b)), "{a} and {b}");
+        }
+        assert!(!same_language(Some("sl"), Some("slo")), "Slovenian isn't Slovak");
+    }
+
+    #[test]
+    fn subtitles_named_forced_count_as_forced() {
+        // Many files flag nothing and only name their forced tracks.
+        let film = vec![
+            audio(1, "eng", None, true),
+            sub(2, Some("eng"), Some("English (Forced)"), false, true),
+            sub(3, Some("eng"), Some("English"), false, true),
+            sub(4, Some("eng"), Some("SDH"), false, true),
+        ];
+        let with = |mode| Defaults { audio_language: None, subtitle_language: Some("eng".into()), subtitle_mode: mode };
+        assert_eq!(resolve(None, &with(SubtitleMode::Forced), &film).subtitle, Some(2), "forced, for English audio");
+        assert_eq!(resolve(None, &with(SubtitleMode::Always), &film).subtitle, Some(3), "full ones, not the forced");
+        // Picked, they are found again as forced in the next file.
+        let pref = from_selection(&film, None, Some(2));
+        assert!(pref.subtitle_forced);
+        let mut next = film.clone();
+        next.swap(1, 2);
+        (next[1].index, next[2].index) = (2, 3);
+        assert_eq!(resolve(Some(&pref), &NONE, &next).subtitle, Some(3));
+        // A word, not letters inside one; anime's "Signs & Songs" too.
+        assert!(!is_forced(&sub(5, None, Some("Unforced Errors"), false, true)));
+        assert!(is_forced(&sub(5, None, Some("Signs & Songs"), false, true)));
     }
 }

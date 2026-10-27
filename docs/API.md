@@ -390,6 +390,10 @@ dialogue; `foreign` full subtitles in `subtitle_language` (or the audio
 language) when the audio is tagged with another language; `always` in that
 language whenever the file has them. Every mode but `off` falls back to the
 forced ones. A choice made for a show or a movie wins over these.
+Subtitles count as forced when flagged so, or when only their title says
+so (the word "forced", or "signs" as in "Signs & Songs"), as many files
+have them. Languages match in any of their ISO 639 forms (`en`, `eng`;
+`fr`, `fre`, `fra`); an untagged or `und` track is in no language.
 
 Apps change these with `PUT /api/me/track-defaults`, never with `PATCH
 /api/me`, which also changes the name and picture: those stay in the web app.

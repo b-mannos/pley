@@ -785,6 +785,86 @@ async fn setup_checks_the_first_account_and_logout_clears_the_cookie() {
 }
 
 #[tokio::test]
+async fn each_profile_starts_episodes_with_its_own_tracks() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let season = "tv/Taxi/Season 01";
+    for episode in ["S01E01", "S01E02"] {
+        app.media_file(&format!("{season}/Taxi - {episode}.mkv"), 1024);
+        app.media_file(&format!("{season}/Taxi - {episode}.fr.srt"), 64);
+        // Two-letter and three-letter codes, in the other order the next time.
+        let english = if episode == "S01E01" { "en" } else { "eng" };
+        app.media_file(&format!("{season}/Taxi - {episode}.{english}.srt"), 64);
+        app.media_file(&format!("{season}/Taxi - {episode}.eng.forced.srt"), 64);
+    }
+    let lib = app.library(&admin, "Shows", "shows", "tv").await;
+    let show = app.ids(lib, &admin).await["Taxi"];
+    let seasons = app.children(show, &admin).await;
+    let episodes = app.children(seasons["Season 1"], &admin).await;
+    let (first, second) = (episodes["Episode 1"], episodes["Episode 2"]);
+    let kid_id =
+        app.post("/api/users", &admin, json!({"username": "kid", "managed": true})).await.body["id"].as_i64().unwrap();
+    let kid = switch(&app, &app.login("admin", "secret-one").await, json!({"user_id": kid_id})).await.body["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let admin = app.login("admin", "secret-one").await;
+    // The subtitles a profile starts an episode with, by language and forced.
+    let starts = |token: String, id: i64| {
+        let app = &app;
+        async move {
+            let detail = app.get(&format!("/api/items/{id}"), &token).await.body;
+            let file = &detail["files"][0];
+            let selected = file["selected_subtitle"].clone();
+            file["streams"].as_array().unwrap().iter().find(|s| s["index"] == selected).map(|s| {
+                format!(
+                    "{}{}",
+                    s["language"].as_str().unwrap(),
+                    if s["forced"] == json!(true) { " forced" } else { "" }
+                )
+            })
+        }
+    };
+
+    // The administrator reads French; the kid keeps the defaults, and an
+    // app of the kid's sets English, always.
+    app.patch("/api/me", &admin, json!({"subtitle_mode": "always", "subtitle_language": "fr"})).await;
+    assert_eq!(starts(admin.clone(), first).await.as_deref(), Some("fre"));
+    assert_eq!(starts(kid.clone(), first).await, None, "untagged audio: no forced ones either");
+    let (kid_app, _) = app.app_token(kid_id, "play").await;
+    let set = app
+        .app_call(
+            Method::PUT,
+            "/api/me/track-defaults",
+            &kid_app,
+            Some(json!({"subtitle_mode": "always", "subtitle_language": "en"})),
+        )
+        .await;
+    assert_eq!(set.status, StatusCode::OK, "{:?}", set.body);
+    assert_eq!(starts(kid.clone(), first).await.as_deref(), Some("eng"), "the full ones, not the forced");
+    assert_eq!(starts(admin.clone(), first).await.as_deref(), Some("fre"));
+
+    // The kid picks the forced English ones in episode 1: episode 2 starts
+    // with them, and the administrator's episodes don't change.
+    let detail = app.get(&format!("/api/items/{first}"), &kid).await.body;
+    let forced = detail["files"][0]["streams"].as_array().unwrap().iter().find(|s| s["forced"] == json!(true)).unwrap()
+        ["index"]
+        .clone();
+    let picked = app
+        .call(
+            Method::PUT,
+            &format!("/api/items/{first}/streams"),
+            Some(&kid),
+            Some(json!({"subtitle_index": forced})),
+            &[],
+        )
+        .await;
+    assert_eq!(picked.status, StatusCode::NO_CONTENT);
+    assert_eq!(starts(kid.clone(), second).await.as_deref(), Some("eng forced"));
+    assert_eq!(starts(admin.clone(), second).await.as_deref(), Some("fre"));
+}
+
+#[tokio::test]
 async fn titles_start_with_the_users_default_tracks() {
     let app = TestApp::new().await;
     let token = app.setup_admin().await;
