@@ -110,7 +110,9 @@ pley, replaces it and its FFmpeg, and starts it again.
 **Settings → Apps → pley-server → Uninstall**. The uninstaller removes the
 service, the user Setup made, the firewall rule, the start at sign-in, the
 programs and FFmpeg, and asks whether to delete the data folder
-too (no, unless you say so).
+too (no, unless you say so). A data folder with other files in it than
+pley's stays. Setup takes an empty or a new folder for pley's data, or one of
+pley's.
 
 ## Installing without the wizard
 

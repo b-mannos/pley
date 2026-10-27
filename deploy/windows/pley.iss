@@ -720,6 +720,49 @@ begin
   Result := (PageID = UserPage.ID) and not UserRadio.Checked;
 end;
 
+// Whether Name, at the top of a data folder, is what an install that
+// stopped short leaves there (logs, tmp) or, with All, anything pley keeps
+// there: its database and the files beside it, options, key, lock and the
+// folders it fills.
+function IsPleys(const Name: String; const All: Boolean): Boolean;
+var
+  N: String;
+begin
+  N := Lowercase(Name);
+  Result := (N = 'logs') or (N = 'tmp');
+  if All and not Result then
+    Result := (Copy(N, 1, 5) = 'pley.') or (N = 'secret.key') or (N = 'plex-machine-id') or (N = 'transcode') or
+      (N = 'cache') or (N = 'metadata') or (N = 'media') or (N = 'avatars') or (N = 'backups');
+end;
+
+// Whether Dir (missing, empty or not) holds nothing but IsPleys(All).
+function HoldsOnlyPleys(const Dir: String; const All: Boolean): Boolean;
+var
+  FindRec: TFindRec;
+begin
+  Result := True;
+  if FindFirst(AddBackslash(Dir) + '*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+          Result := IsPleys(FindRec.Name, All);
+      until not Result or not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+// A data folder as `pley service install` takes one, for every way pley
+// runs (the uninstaller may delete it): new or empty, pley's, or what an
+// install that stopped short left.
+function DataDirFree(const Dir: String): Boolean;
+begin
+  Result := FileExists(AddBackslash(Dir) + 'pley.db') or FileExists(AddBackslash(Dir) + 'pley.toml') or
+    FileExists(AddBackslash(Dir) + 'secret.key') or HoldsOnlyPleys(Dir, False);
+end;
+
 function DefaultDataDir: String;
 begin
   if TrayRadio.Checked then
@@ -808,6 +851,12 @@ begin
     if (Length(Dir) <= 3) then
     begin
       SuppressibleMsgBox('Choose a folder for pley''s data, not a whole drive.', mbError, MB_OK, IDOK);
+      Result := False;
+    end
+    else if not DataDirFree(Dir) then
+    begin
+      SuppressibleMsgBox(Dir + ' has other files in it than pley''s: choose an empty or a new folder for pley''s data.',
+        mbError, MB_OK, IDOK);
       Result := False;
     end
     else if CopyCheck.Checked and not FileExists(AddBackslash(Other) + 'pley.db') then
@@ -1192,9 +1241,15 @@ begin
         DeleteData := True;
   end
   else if (PrevDataDir <> '') and DirExists(PrevDataDir) then
-    DeleteData := MsgBox('Delete pley''s data too?' + #13#10#13#10 + PrevDataDir + ' holds its database (accounts, libraries, ' +
-      'watch history), artwork and settings. Choose No to keep it for a later install.',
-      mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+  begin
+    if HoldsOnlyPleys(PrevDataDir, True) then
+      DeleteData := MsgBox('Delete pley''s data too?' + #13#10#13#10 + PrevDataDir + ' holds its database (accounts, libraries, ' +
+        'watch history), artwork and settings. Choose No to keep it for a later install.',
+        mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES
+    else
+      MsgBox(PrevDataDir + ', pley''s data folder, holds other files too, so it stays as it is. Delete pley''s ' +
+        'files there (pley.db and the rest) yourself if you no longer need them.', mbInformation, MB_OK);
+  end;
   Result := True;
 end;
 
@@ -1218,8 +1273,14 @@ begin
   end
   else if CurUninstallStep = usPostUninstall then
   begin
+    // Never a folder with other things in it too (chosen before Setup refused those).
     if DeleteData and (Length(PrevDataDir) > 3) then
-      DelTree(PrevDataDir, True, True, True);
+    begin
+      if HoldsOnlyPleys(PrevDataDir, True) then
+        DelTree(PrevDataDir, True, True, True)
+      else
+        Log(PrevDataDir + ' holds other files than pley''s: it stays');
+    end;
     RegDeleteKeyIncludingSubkeys(HKA, StateKey);
     RegDeleteKeyIfEmpty(HKA, 'Software\pley');
   end;
