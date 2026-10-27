@@ -30,7 +30,7 @@ function QueuePopover() {
   useDismiss(ref, open, () => setOpen(false));
   return (
     <div ref={ref} className="relative">
-      <IconButton label="Queue" size="sm" active={open} onClick={() => setOpen((o) => !o)}>
+      <IconButton label="Queue" size="sm" active={open} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <ListMusic className="size-4" />
       </IconButton>
       {open ? (
@@ -40,6 +40,7 @@ function QueuePopover() {
             <button
               key={`${t.id}-${i}`}
               type="button"
+              aria-current={i === player.index ? "true" : undefined}
               onClick={() => player.jumpTo(i)}
               className={cn(
                 "flex w-full items-center gap-3 px-4 py-1.5 text-left text-sm transition-colors hover:bg-white/5",
