@@ -153,10 +153,22 @@ fun TvTextField(
  * D-pad rule 10: the remote's digit keys type into pads (PIN, address).
  * [onDigit] gets 0 to 9 from the number row and the number pad; [onDelete]
  * gets Delete and Clear; [onDot], when given (the address pad), gets the
- * period and the number pad's dot. Other keys pass on.
+ * period and the number pad's dot; [onText], when given, the other printable
+ * characters a keyboard types (a colon, a server's name), which a remote
+ * app's or a Bluetooth keyboard sends. Other keys pass on.
  */
-fun Modifier.digitKeys(onDigit: (Int) -> Unit, onDelete: () -> Unit = {}, onDot: (() -> Unit)? = null): Modifier = onKeyEvent { event ->
+fun Modifier.digitKeys(
+    onDigit: (Int) -> Unit,
+    onDelete: () -> Unit = {},
+    onDot: (() -> Unit)? = null,
+    onText: ((Char) -> Unit)? = null,
+): Modifier = onKeyEvent { event ->
     if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+    val typed = event.nativeKeyEvent.unicodeChar
+    if (onText != null && typed > ' '.code && !Character.isDigit(typed) && typed != '.'.code) {
+        onText(typed.toChar())
+        return@onKeyEvent true
+    }
     when (val code = event.nativeKeyEvent.keyCode) {
         AndroidKeyEvent.KEYCODE_PERIOD, AndroidKeyEvent.KEYCODE_NUMPAD_DOT -> {
             onDot?.invoke()

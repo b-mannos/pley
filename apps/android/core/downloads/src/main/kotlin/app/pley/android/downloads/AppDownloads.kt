@@ -33,16 +33,16 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -96,10 +96,14 @@ class AppDownloads internal constructor(
         all.filter { it.server == server && it.userId == userId }.sortedByDescending { it.addedAt }.map(::entryOf)
     }.flowOn(Dispatchers.Default).stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    @OptIn(FlowPreview::class)
+    // Measured at once, then at most once a [STORAGE_EVERY_MS] while the downloads change (the
+    // StateFlow keeps only the newest while it waits): a download's progress changes them
+    // several times a second, which a debounce never let settle.
     override val storage: StateFlow<DownloadStorage> = store.all
-        .debounce(STORAGE_DEBOUNCE_MS)
-        .map { DownloadStorage(usedBytes = store.usedBytes(), freeBytes = store.freeBytes()) }
+        .transform {
+            emit(DownloadStorage(usedBytes = store.usedBytes(), freeBytes = store.freeBytes()))
+            delay(STORAGE_EVERY_MS)
+        }
         .flowOn(io)
         .stateIn(scope, SharingStarted.Lazily, DownloadStorage())
 
@@ -425,7 +429,7 @@ class AppDownloads internal constructor(
         /** After a report couldn't go, the next ones wait this long before trying the network again. */
         const val OFFLINE_MS = 60_000L
 
-        const val STORAGE_DEBOUNCE_MS = 1_000L
+        const val STORAGE_EVERY_MS = 1_000L
 
         /**
          * The app's downloads: kept in the app's own storage (removed with

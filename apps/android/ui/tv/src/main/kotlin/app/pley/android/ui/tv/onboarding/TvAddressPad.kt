@@ -79,6 +79,10 @@ internal fun TvAddressPad(
                     flash.flash(PadKey.Symbol("."))
                     field.type(".")
                 },
+                onText = { c ->
+                    flash.flash(PadKey.Symbol(c.toString()))
+                    field.type(c.toString())
+                },
             )
             .testTag(ADDRESS_PAD_TAG),
     ) {

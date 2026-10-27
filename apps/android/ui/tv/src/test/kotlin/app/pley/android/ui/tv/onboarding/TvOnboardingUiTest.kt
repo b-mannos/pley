@@ -142,6 +142,28 @@ class TvOnboardingUiTest {
     }
 
     @Test
+    fun aKeyboardTypesAServersNameIntoThePad() {
+        val connected = mutableListOf<String>()
+        compose.setContent {
+            TvTheme(reducedMotion = true) {
+                TvAddressPad(ServersUiState(), onConnect = { connected += it }, onEdited = {})
+            }
+        }
+        compose.waitForIdle()
+        compose.press(Key.N)
+        compose.press(Key.A)
+        compose.press(Key.S)
+        compose.press(Key.DirectionDown, times = 2)
+        compose.press(Key.DirectionRight)
+        compose.press(Key.DirectionCenter)
+        compose.press(Key.Eight)
+        compose.press(Key.One)
+        compose.press(Key.DirectionDown)
+        compose.press(Key.DirectionCenter)
+        assertEquals(listOf("nas:81"), connected)
+    }
+
+    @Test
     fun theAddressPadSaysWhatWentWrong() {
         compose.setContent {
             TvTheme(reducedMotion = true) {
