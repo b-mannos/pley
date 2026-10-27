@@ -28,7 +28,7 @@ fn command() -> anyhow::Result<(PathBuf, Vec<OsString>)> {
 /// Quote one argument the way `CommandLineToArgvW` and the MSVC runtime
 /// parse it back.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn windows_quote(arg: &str) -> String {
+pub(crate) fn windows_quote(arg: &str) -> String {
     if !arg.is_empty() && !arg.contains([' ', '\t', '"']) {
         return arg.to_owned();
     }

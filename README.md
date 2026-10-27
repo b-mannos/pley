@@ -152,7 +152,9 @@ A lost password is reset with `pley reset-password <user> <new-password>
 
 To run it on a home server instead, `deploy/docker/setup.sh` builds and
 starts it in Docker, locked down, for a reverse proxy in front of it
-([guide](deploy/docker/README.md)).
+([guide](deploy/docker/README.md)). On Windows, the release's
+`pley-server-…-setup.exe` installs it as a locked-down Windows service
+([guide](deploy/windows/README.md)).
 
 ## Configuration
 
@@ -240,9 +242,10 @@ supported Rust, the license check and the Docker build. Pushing a tag such as
 Linux, Windows and macOS (x86_64 and arm64) with checksums and build
 provenance, a draft GitHub release, and the Docker image on GitHub Container
 Registry. `scripts/build.ps1` (or `build.sh`) builds an archive locally.
-The release also carries the Android app (an APK to sideload and a bundle
-for Google Play, signed with the key from the repository's secrets), the
-desktop app's installers, the LG TV app, the Kodi add-on and the Roku app.
+The release also carries the server's Windows installers, the Android app (an
+APK to sideload and a bundle for Google Play, signed with the key from the
+repository's secrets), the desktop app's installers, the LG TV app, the Kodi
+add-on and the Roku app.
 
 Every app has one version, pley's, in [`VERSION`](VERSION):
 `node scripts/version.mjs set 0.3.0` writes it into every manifest, and

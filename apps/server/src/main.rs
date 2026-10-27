@@ -11,6 +11,14 @@ fn main() -> anyhow::Result<ExitCode> {
     let cli = Cli::parse();
     let command = match &cli.command {
         None | Some(Command::Serve) => return Ok(serve(&cli)),
+        Some(Command::SaveConfig { discovery }) => {
+            let path = cli.config.clone().unwrap_or_else(|| cli.data_dir_or_default().join("pley.toml"));
+            pley::config::save_config(&cli, &path, *discovery)?;
+            println!("saved in {}", path.display());
+            return Ok(ExitCode::SUCCESS);
+        }
+        #[cfg(windows)]
+        Some(Command::Service(command)) => return pley::service::main(&cli, command),
         Some(command) => command,
     };
     // Commands run from a terminal: an error is printed there by `main`.
@@ -23,7 +31,9 @@ fn main() -> anyhow::Result<ExitCode> {
                 pley::reset_password(config, username, password, *admin).await
             }
             Command::Health => pley::health(&config).await,
-            Command::Serve => unreachable!(),
+            Command::Serve | Command::SaveConfig { .. } => unreachable!(),
+            #[cfg(windows)]
+            Command::Service(_) => unreachable!(),
         }
     })?;
     Ok(ExitCode::SUCCESS)

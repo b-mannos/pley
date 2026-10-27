@@ -10,7 +10,7 @@ By default pley listens on port 7539 on all interfaces and keeps its data in:
 |---|---|
 | Linux | `~/.local/share/pley` (`/var/lib/pley` with the systemd unit) |
 | macOS | `~/Library/Application Support/pley` |
-| Windows | `%LOCALAPPDATA%\pley` |
+| Windows | `%LOCALAPPDATA%\pley` (`%ProgramData%\pley` for the service) |
 
 Change it with `--data-dir` or `PLEY_DATA_DIR`. Every option is listed in
 `pley --help` and [`pley.example.toml`](../pley.example.toml).
@@ -73,9 +73,15 @@ automatically. Downloaded binaries may need
 
 ## Windows
 
-Install FFmpeg (for example `winget install Gyan.FFmpeg`), extract the archive
-and run `pley.exe`. NVENC, QSV, AMF and Vulkan tone mapping work with the
-gyan.dev "full" FFmpeg build.
+`pley-server-<version>-windows-<arch>-setup.exe` installs pley as a Windows
+service, locked down to its own account and data folder, or in the
+notification area, with FFmpeg, the firewall and an uninstaller:
+[windows/README.md](windows/README.md) is the whole guide (accounts, NAS
+sign-ins, silent installs, `pley service`).
+
+Or install FFmpeg (for example `winget install Gyan.FFmpeg`), extract the
+archive and run `pley.exe`. NVENC, QSV, AMF and Vulkan tone mapping work with
+the gyan.dev "full" FFmpeg build.
 
 ## The tray icon
 

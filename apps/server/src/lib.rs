@@ -34,6 +34,8 @@ pub mod plex;
 pub mod providers;
 pub mod ratings;
 pub mod related;
+#[cfg(windows)]
+pub mod service;
 pub mod settings;
 pub mod setup;
 pub mod state;
@@ -102,6 +104,16 @@ fn watch_shutdown() {
         tracing::error!("pley did not stop within {}s of being asked to: ending it", SHUTDOWN_DEADLINE.as_secs());
         std::process::exit(0);
     });
+}
+
+/// Whether the server listens, its database open, see [`listening`].
+static LISTENING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the server listens, its database open (and not shutting down):
+/// for the Windows service, which says it runs only then.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn listening() -> bool {
+    LISTENING.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Whether the server finished shutting down (its database is closed), see
@@ -192,6 +204,7 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     state.start_background_tasks();
     let app = api::router(state.clone());
     tracing::info!("pley {VERSION_AND_COMMIT} listening on http://{}", display_addr(addr));
+    LISTENING.store(true, std::sync::atomic::Ordering::SeqCst);
     if let Some(code) = state.auth.setup.shown() {
         tracing::warn!(
             "pley isn't set up yet: open http://{}/setup#code={code} to create the administrator account \
@@ -221,6 +234,7 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
         () = shutdown_signal(&stopping) => false,
     };
     tracing::info!("shutting down");
+    LISTENING.store(false, std::sync::atomic::Ordering::SeqCst);
     set_shutting_down(true);
     stopping.cancel();
     if !stopped && tokio::time::timeout(grace, serving).await.is_err() {

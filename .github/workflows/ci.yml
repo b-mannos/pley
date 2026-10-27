@@ -104,6 +104,24 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+  windows-installer:
+    name: Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Inno Setup
+        run: choco install innosetup --version=6.7.1 --no-progress -y
+      # The script compiles; releases build it around the real programs.
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $release = New-Item -ItemType Directory dist/pley-0.0.0-windows-x86_64
+          Set-Content -Path "$release/pley.exe", "$release/pley-transcoder.exe" -Value "stand-in"
+          ./scripts/build-installer.ps1 -Release $release
+
   msrv:
     name: Rust 1.95 (minimum supported)
     needs: web

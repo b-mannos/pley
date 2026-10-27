@@ -1,10 +1,12 @@
 # Release build: web UI + both binaries + licensing files, ready to ship.
-#   powershell -ExecutionPolicy Bypass -File scripts\build.ps1 [-SkipWeb] [-Target <rust target triple>] [-Archive]
-# Output: dist\pley-<version>-windows-<arch>\ (plus a .zip with -Archive)
+#   powershell -ExecutionPolicy Bypass -File scripts\build.ps1 [-SkipWeb] [-Target <rust target triple>] [-Archive] [-Installer]
+# Output: dist\pley-<version>-windows-<arch>\ (plus a .zip with -Archive, and
+# the installer pley-server-<version>-windows-<arch>-setup.exe with -Installer)
 param(
     [switch]$SkipWeb,
     [string]$Target,
-    [switch]$Archive
+    [switch]$Archive,
+    [switch]$Installer
 )
 
 $ErrorActionPreference = "Stop"
@@ -68,6 +70,10 @@ if ($Archive) {
         $zip.Dispose()
     }
     Write-Host "wrote $zipPath"
+}
+
+if ($Installer) {
+    & "$PSScriptRoot/build-installer.ps1" -Release $out
 }
 
 Write-Host "release ready in $out" -ForegroundColor Green

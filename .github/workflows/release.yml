@@ -1,10 +1,10 @@
 name: Release
 
 # Push a tag like v0.2.0 (the version in VERSION; scripts/version.mjs): CI
-# runs, every platform is built (the server, the Android, desktop, LG, Kodi and
-# Roku apps), a draft release collects them (with checksums and build
-# provenance) and the Docker image goes to GitHub Container Registry. Run by
-# hand, it builds everything and publishes nothing.
+# runs, every platform is built (the server and its Windows installers, the
+# Android, desktop, LG, Kodi and Roku apps), a draft release collects them
+# (with checksums and build provenance) and the Docker image goes to GitHub
+# Container Registry. Run by hand, it builds everything and publishes nothing.
 on:
   push:
     tags: ["v*"]
@@ -213,9 +213,40 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # The server's installers, built around the Windows archives on one runner
+  # for both architectures (deploy/windows).
+  installer:
+    name: Windows installers
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*-pc-windows-msvc
+          path: archives
+          merge-multiple: true
+      - name: Inno Setup
+        run: choco install innosetup --version=6.7.1 --no-progress -y
+      - name: Build the installers
+        shell: pwsh
+        run: |
+          foreach ($zip in Get-ChildItem archives/pley-*-windows-*.zip) {
+            Expand-Archive $zip -DestinationPath staging
+            ./scripts/build-installer.ps1 -Release "staging/$($zip.BaseName)"
+          }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-windows-installers
+          path: dist/*-setup.exe
+          if-no-files-found: error
+
   publish:
     name: Draft release
-    needs: [build, android, desktop, tv]
+    needs: [build, android, desktop, tv, installer]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15

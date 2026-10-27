@@ -96,6 +96,17 @@ pub enum Command {
     },
     /// Exit with status 0 when the server on this machine answers (for container health checks)
     Health,
+    /// Save the options given before it (--bind, --plex-bind, --ffmpeg, --ffprobe,
+    /// --no-discovery) in pley.toml in the data folder, for every later start
+    SaveConfig {
+        /// Whether to answer the pley apps looking for servers on the local network
+        #[arg(long, value_name = "true|false")]
+        discovery: Option<bool>,
+    },
+    /// Run pley as a Windows service: install, start, stop or remove it
+    #[cfg(windows)]
+    #[command(subcommand)]
+    Service(crate::service::ServiceCommand),
 }
 
 /// Shape of `pley.toml`. Every key is optional.
@@ -171,7 +182,7 @@ impl Config {
         let bind = cli.bind.clone().or(file.bind).map(|s| parse_bind(&s)).transpose()?;
         let plex_bind = match cli.plex_bind.clone().or(file.plex_bind) {
             None => Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), PLEX_PORT)),
-            Some(value) if matches!(value.trim(), "" | "off" | "none" | "false" | "0") => None,
+            Some(value) if is_off(&value) => None,
             Some(value) => Some(parse_bind(&value)?),
         };
         let transcode_dir = file.transcode_dir.map(|p| absolutize(&p)).unwrap_or_else(|| data_dir.join("transcode"));
@@ -249,6 +260,87 @@ impl Config {
     pub fn media_dir(&self) -> PathBuf {
         self.data_dir.join("media")
     }
+}
+
+impl Cli {
+    /// The data directory of the command line, or the default one.
+    pub fn data_dir_or_default(&self) -> PathBuf {
+        absolutize(&self.data_dir.clone().unwrap_or_else(default_data_dir))
+    }
+}
+
+/// `pley save-config`: the options given (on the command line or in the
+/// environment) written into the config file `path`, whose other lines and
+/// comments stay. `discovery` overrides `--no-discovery`.
+pub fn save_config(cli: &Cli, path: &Path, discovery: Option<bool>) -> anyhow::Result<()> {
+    let mut values: Vec<(&str, toml::Value)> = Vec::new();
+    if let Some(bind) = &cli.bind {
+        parse_bind(bind)?;
+        values.push(("bind", bind.trim().into()));
+    }
+    if let Some(plex_bind) = &cli.plex_bind {
+        if !is_off(plex_bind) {
+            parse_bind(plex_bind)?;
+        }
+        values.push(("plex_bind", plex_bind.trim().into()));
+    }
+    for (key, program) in [("ffmpeg", &cli.ffmpeg), ("ffprobe", &cli.ffprobe)] {
+        if let Some(program) = program {
+            values.push((key, program.to_string_lossy().into_owned().into()));
+        }
+    }
+    if let Some(discovery) = discovery.or(cli.no_discovery.then_some(false)) {
+        values.push(("discovery", discovery.into()));
+    }
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(err).with_context(|| format!("reading config file {}", path.display())),
+    };
+    let text = set_keys(&text, &values);
+    toml::from_str::<FileConfig>(&text).with_context(|| format!("checking the new {}", path.display()))?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    std::fs::write(path, text).with_context(|| format!("writing config file {}", path.display()))
+}
+
+/// `text` with each key of `values` set: on its line, or a new one at the
+/// end. pley.toml has top-level keys only, so the end is never in a table.
+fn set_keys(text: &str, values: &[(&str, toml::Value)]) -> String {
+    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    for (key, value) in values {
+        let line = format!("{key} = {value}");
+        let mut found = false;
+        // A second line for the key would make the file invalid.
+        lines.retain_mut(|existing| {
+            if !defines(existing, key) {
+                return true;
+            }
+            if found {
+                return false;
+            }
+            existing.clone_from(&line);
+            found = true;
+            true
+        });
+        if !found {
+            lines.push(line);
+        }
+    }
+    let mut text = lines.join("\n");
+    text.push('\n');
+    text
+}
+
+/// Whether `line` gives `key` a value (`key = …`, not `# key = …` nor `key2 = …`).
+fn defines(line: &str, key: &str) -> bool {
+    line.trim_start().strip_prefix(key).is_some_and(|rest| rest.trim_start().starts_with('='))
+}
+
+/// A Plex-compatible API address that turns it off.
+fn is_off(value: &str) -> bool {
+    matches!(value.trim(), "" | "off" | "none" | "false" | "0")
 }
 
 fn default_data_dir() -> PathBuf {
@@ -373,6 +465,43 @@ mod tests {
         let config = Config::load(&args).unwrap();
         assert_eq!(config.data_dir, data);
         assert_eq!(config.transcode_dir, data.join("transcode"));
+    }
+
+    #[test]
+    fn set_keys_replaces_lines_keeps_the_rest_and_appends_new_keys() {
+        let text = "# pley\nbind = \"0.0.0.0:7539\"\n# plex_bind = \"off\"\nbind_extra = 1\nbind=\"x\"\n";
+        let out = set_keys(text, &[("bind", "127.0.0.1:7539".into()), ("plex_bind", "off".into())]);
+        assert_eq!(
+            out,
+            "# pley\nbind = \"127.0.0.1:7539\"\n# plex_bind = \"off\"\nbind_extra = 1\nplex_bind = \"off\"\n"
+        );
+        assert_eq!(set_keys("", &[("discovery", false.into())]), "discovery = false\n");
+    }
+
+    #[test]
+    fn saved_options_are_read_back_and_other_lines_stay() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("pley.toml");
+        std::fs::write(&file, "# mine\ntranscoder_max_jobs = 3\nbind = \"9000\"\n").unwrap();
+        let mut args = cli(dir.path());
+        args.bind = Some("127.0.0.1:7540".into());
+        args.plex_bind = Some("off".into());
+        args.ffmpeg = Some(PathBuf::from(r"C:\Program Files\pley\ffmpeg\ffmpeg.exe"));
+        save_config(&args, &file, Some(false)).unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.starts_with("# mine\ntranscoder_max_jobs = 3\n"), "{text}");
+
+        let config = Config::load(&cli(dir.path())).unwrap();
+        assert_eq!(config.bind, "127.0.0.1:7540".parse().unwrap());
+        assert_eq!(config.plex_bind, None);
+        assert_eq!(config.ffmpeg, PathBuf::from(r"C:\Program Files\pley\ffmpeg\ffmpeg.exe"));
+        assert!(!config.discovery);
+        assert_eq!(config.transcoder_max_jobs, 3);
+
+        args = cli(dir.path());
+        args.bind = Some("nope".into());
+        assert!(save_config(&args, &file, None).is_err(), "an unreadable address isn't saved");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
     }
 
     #[test]
