@@ -86,12 +86,24 @@ class ServiceMusicControl(
 
     override fun keepListening() = onMain { playback.keepListening() }
 
-    /** Binds to the service, which then shows the session; once per run of music. */
+    /**
+     * Binds to the service, which then shows the session; once per run of
+     * music. Music stopped from the notification or a remote ends the
+     * service's session, and this connection with it: the next music
+     * connects again.
+     */
     private fun connect() {
-        if (controller != null || !playback.active) return
+        if (!playback.active) return
+        val current = controller
+        if (current != null && (!current.isDone || current.connected())) return
+        disconnect()
         val token = SessionToken(context, ComponentName(context, MusicService::class.java))
         controller = MediaController.Builder(context, token).buildAsync()
     }
+
+    /** Whether the connection made still holds the service (a failed one doesn't). */
+    private fun ListenableFuture<MediaController>.connected(): Boolean =
+        !isCancelled && runCatching { get().isConnected }.getOrDefault(false)
 
     private fun disconnect() {
         controller?.let(MediaController::releaseFuture)
