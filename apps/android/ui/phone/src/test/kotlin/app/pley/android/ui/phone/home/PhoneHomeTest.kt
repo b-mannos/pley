@@ -127,7 +127,7 @@ class PhoneHomeTest {
 
     @Test
     fun anErrorWithNothingSavedOffersRetry() {
-        sources.home.value = Loadable.Failed(java.io.IOException("nothing answers there"))
+        sources.home.value = Loadable.Failed(java.net.ConnectException("refused"))
         home()
         compose.onNodeWithText("Couldn't load your home screen").assertExists()
         compose.onNodeWithText("Nothing answers there.").assertExists()

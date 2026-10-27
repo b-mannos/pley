@@ -30,7 +30,7 @@ import app.pley.android.testing.caps.FakeDeviceCapabilities
 import app.pley.android.testing.caps.TestDevices
 import app.pley.android.testing.caps.capsOf
 import app.pley.android.testing.player.session.FakeEngineLink
-import java.io.IOException
+import java.net.ConnectException
 import java.util.Collections
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -69,7 +69,7 @@ class CountingApi(private val delegate: PleyApi) : PleyApi by delegate {
         inFlight.incrementAndGet()
         names += name
         try {
-            if (name in unreachable) throw OfflineException(IOException("$name: the server is away"))
+            if (name in unreachable) throw OfflineException(ConnectException("$name: the server is away"))
             return block()
         } catch (e: Exception) {
             synchronized(failures) { failures += name to e }

@@ -21,7 +21,11 @@ fun asSentence(text: String): String {
     return if (capital.isEmpty() || capital.last() in ".…!?") capital else "$capital."
 }
 
-/** Why a request failed, in a few words for people. */
+/**
+ * Why a request failed, in a few words for people. Any other network
+ * failure is one sentence: OkHttp's own words ("unexpected end of stream
+ * on http://…") stay in the error, for its details.
+ */
 fun describe(error: Throwable): String = when (error) {
     is java.net.ConnectException, is java.net.NoRouteToHostException -> "nothing answers there"
     is java.net.SocketTimeoutException -> "no answer in time"
@@ -29,5 +33,9 @@ fun describe(error: Throwable): String = when (error) {
     is javax.net.ssl.SSLException -> "its secure connection failed"
     is UserFacing -> error.message ?: error.javaClass.simpleName
     is org.json.JSONException -> "that isn't a pley server"
+    is java.io.IOException -> CONNECTION_FAILED
     else -> error.message ?: error.javaClass.simpleName
 }
+
+/** What [describe] says of a network failure it has no words of its own for. */
+const val CONNECTION_FAILED = "the connection to the server failed"

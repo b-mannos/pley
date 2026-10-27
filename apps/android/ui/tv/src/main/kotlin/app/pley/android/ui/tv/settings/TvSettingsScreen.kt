@@ -46,6 +46,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaLibraryInfo
 import androidx.media3.common.util.UnstableApi
 import app.pley.android.auth.Needs
+import app.pley.android.common.sentenceOf
 import app.pley.android.data.FrameRateMatching
 import app.pley.android.data.Passthrough
 import app.pley.android.data.Settings
@@ -147,7 +148,7 @@ internal fun TvSettingsScreen(start: Category = Category.Profile) {
             when (event) {
                 is MeEvent.Saved -> message = savedText
                 MeEvent.ReadOnly -> message = readOnlyText
-                is MeEvent.Failed -> message = event.error.message
+                is MeEvent.Failed -> message = sentenceOf(event.error)
                 is MeEvent.SignedOut -> navigator.restart(event.server?.let { PleyKey.Link(it) } ?: PleyKey.Servers)
             }
         }

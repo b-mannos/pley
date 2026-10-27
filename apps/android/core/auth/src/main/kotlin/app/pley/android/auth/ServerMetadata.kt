@@ -1,6 +1,7 @@
 package app.pley.android.auth
 
 import app.pley.android.common.Addresses
+import app.pley.android.common.UserFacing
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -10,8 +11,8 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 
-/** A sign-in problem, in a few words for people. */
-open class AuthException(message: String) : IOException(message)
+/** A sign-in problem, in a few words for people, shown as they are. */
+open class AuthException(message: String) : IOException(message), UserFacing
 
 /** What older servers answer: no app sign-in at all. */
 const val TOO_OLD = "this server is too old for this app"

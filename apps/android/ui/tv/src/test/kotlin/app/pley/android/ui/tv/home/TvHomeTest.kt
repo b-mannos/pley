@@ -217,7 +217,7 @@ class TvHomeTest {
 
     @Test
     fun anErrorWithNothingSavedOffersRetryWithFocus() {
-        sources.home.value = Loadable.Failed(java.io.IOException("nothing answers there"))
+        sources.home.value = Loadable.Failed(java.net.ConnectException("refused"))
         show()
         compose.waitForIdle()
         compose.onNodeWithText("Couldn't load your home screen").assertExists()

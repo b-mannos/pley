@@ -348,7 +348,7 @@ class RecoveryFlowTest {
         val phase = c.state.value.phase as PlayerPhase.Error
         assertTrue(phase.offline)
         assertTrue(phase.canRetry)
-        assertEquals("StartPlayback: the server is away. Check that the server is on and that this device is on its network.", phase.message)
+        assertEquals("Nothing answers there. Check that the server is on and that this device is on its network.", phase.message)
 
         h.api.unreachable -= "startPlayback"
         c.retry()
