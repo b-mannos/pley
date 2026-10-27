@@ -286,6 +286,24 @@ export class Api {
     return this.call("POST", "/api/playlists", { title, ...(kind ? { kind } : {}), item_ids: itemIds }) as Promise<Playlist>;
   }
 
+  renamePlaylist(id: Id, title: string): Promise<unknown> {
+    return this.call("PATCH", `/api/playlists/${id}`, { title });
+  }
+
+  deletePlaylist(id: Id): Promise<unknown> {
+    return this.call("DELETE", `/api/playlists/${id}`);
+  }
+
+  /** Takes one entry out (the item stays in its library). */
+  removeFromPlaylist(id: Id, entryId: Id): Promise<unknown> {
+    return this.call("DELETE", `/api/playlists/${id}/items/${entryId}`);
+  }
+
+  /** The entries in their new order, every one of them. */
+  reorderPlaylist(id: Id, entryIds: Id[]): Promise<unknown> {
+    return this.call("PUT", `/api/playlists/${id}/order`, { entry_ids: entryIds });
+  }
+
   /** A smart playlist: a library's listing by `filter` (Plex's syntax), which keeps up with the library by itself. */
   createSmartPlaylist(title: string, libraryId: Id, filter: string): Promise<Playlist> {
     return this.call("POST", "/api/playlists", { title, smart_filter: filter, library_id: libraryId }) as Promise<Playlist>;

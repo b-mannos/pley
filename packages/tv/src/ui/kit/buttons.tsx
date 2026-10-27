@@ -87,12 +87,14 @@ export function PanelRow(
     checked?: boolean;
     trailing?: ComponentChildren;
     class?: string;
+    /** In DangerText (Remove, Delete): what can't be undone. */
+    danger?: boolean;
     onKey?: (key: string, e: { repeat: boolean }) => boolean;
   },
 ) {
   return (
     <F
-      class={`panel-row ${p.class ?? ""}`}
+      class={`panel-row ${p.class ?? ""}${p.danger ? " danger" : ""}`}
       fid={p.fid}
       initial={p.initial}
       disabled={p.disabled}

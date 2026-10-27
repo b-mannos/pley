@@ -580,8 +580,40 @@
 
 /* ---------------------------------------------------------------- playlists, sheets */
 
-.playlist-header { position: absolute; left: 96px; right: 48px; top: 27px; }
-.playlist-list-clip { position: absolute; left: 96px; right: 48px; top: 150px; bottom: 0; overflow: hidden; }
+/* A playlist's page: the top and the entries scroll as one column; the backdrop darkens under the entries. */
+.playlist-content { position: absolute; left: 0; top: 0; width: 960px; will-change: transform; transition: transform 240ms cubic-bezier(0.2, 0, 0, 1); }
+.playlist-dim { position: absolute; left: 0; top: 0; width: 960px; height: 540px; background: rgba(11, 13, 16, 0.92); opacity: 0; will-change: opacity; transition: opacity 240ms cubic-bezier(0.2, 0, 0, 1); }
+.playlist-dim.in { opacity: 1; }
+.reduced .playlist-content,
+.reduced .playlist-dim { transition: none; }
+.playlist-hero { position: absolute; left: 96px; top: 58px; width: 464px; }
+.playlist-kind { display: flex; align-items: center; color: var(--muted); }
+.playlist-kind .icon { margin-right: 8px; }
+.playlist-facts { display: flex; align-items: center; }
+.playlist-facts .page-badge { margin-right: 8px; flex: none; }
+.playlist-buttons { position: absolute; left: 96px; }
+.playlist-empty { position: absolute; left: 96px; top: 416px; width: 464px; }
+/* The entries' box spans them all, so that focus finds it below the top. */
+.playlist-entries { position: absolute; left: 0; width: 960px; }
+.entry-row { position: absolute; left: 80px; right: 48px; height: 106px; }
+.entry { position: absolute; left: 0; right: 52px; top: 0; height: 106px; box-sizing: border-box; padding: 8px 16px; border-radius: 8px; display: flex; align-items: center; color: var(--fg); }
+.entry-number { width: 28px; flex: none; text-align: right; color: var(--subtle); }
+.entry-still { position: relative; flex: none; width: 160px; height: 90px; margin: 0 20px 0 16px; border-radius: 4px; overflow: hidden; background: var(--surface2); }
+.entry-still.square { width: 90px; }
+.entry-text { flex: 1; min-width: 0; }
+.entry-sub { color: var(--muted); }
+.entry-duration { flex: none; margin-left: 16px; }
+.entry-arrows { flex: none; display: flex; flex-direction: column; align-items: center; margin-left: 16px; color: var(--accent-bright); }
+.entry[data-focused] { background: var(--accent); color: var(--on-accent); }
+.entry[data-focused] .entry-number,
+.entry[data-focused] .entry-sub { color: var(--on-accent); }
+/* Lifted to move: surface3 with the focus ring's 3 px, its own colours kept. */
+.entry.moving,
+.entry.moving[data-focused] { background: var(--surface3); color: var(--fg); box-shadow: inset 0 0 0 2.78px var(--accent-bright); }
+.entry.moving .entry-number { color: var(--subtle); }
+.entry.moving .entry-sub { color: var(--muted); }
+.entry-more { position: absolute; right: 0; top: 33px; }
+.moving-hint { position: absolute; left: 480px; bottom: 27px; transform: translateX(-50%); padding: 12px 20px; border-radius: 999px; background: var(--surface3); color: var(--fg); white-space: nowrap; z-index: 5; }
 .track-line {
   position: relative;
   display: flex;

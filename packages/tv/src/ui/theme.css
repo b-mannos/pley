@@ -454,6 +454,8 @@ body {
 .panel-row[data-focused] .sub,
 .panel-row[data-focused] .icon.check { color: var(--on-accent); }
 .panel-row[data-pressed] { background: var(--accent-bright); }
+.panel-row.danger { color: var(--danger-text); }
+.panel-row.danger[data-focused] { color: var(--on-accent); }
 
 .toast {
   position: absolute;
