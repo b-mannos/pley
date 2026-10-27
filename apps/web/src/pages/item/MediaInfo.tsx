@@ -1,6 +1,7 @@
 import { useId, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import type { MediaFile, MediaStream } from "@/api/types";
+import { useAuth } from "@/auth";
 import { cn } from "@/lib/cn";
 import {
   channelsLabel,
@@ -111,14 +112,21 @@ function Disclosure({
   );
 }
 
+/** A path's last part: "Film (2024).mkv". */
+function fileName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
 function FileInfo({ file }: { file: MediaFile }) {
+  // Where the server keeps it is for its administrators; everyone else sees the file's name, as in the apps.
+  const admin = useAuth().is_admin;
   const order: Record<MediaFile["streams"][number]["kind"], number> = { video: 0, audio: 1, subtitle: 2 };
   const streams = [...file.streams].sort((a, b) => order[a.kind] - order[b.kind] || a.index - b.index);
   return (
     <div className="rounded-lg border border-border bg-surface/80 p-4 backdrop-blur">
       <dl>
         <Row label="File">
-          <span className="break-all font-mono text-xs text-fg/80">{file.path}</span>
+          <span className="break-all font-mono text-xs text-fg/80">{admin ? file.path : fileName(file.path)}</span>
         </Row>
         <Row label="Container">{file.container?.toUpperCase() ?? "—"}</Row>
         <Row label="Size">{formatBytes(file.size)}</Row>

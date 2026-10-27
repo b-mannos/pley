@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { MediaFile } from "@/api/types";
 import { makeStream } from "@/test/fixtures";
+import { renderWithProviders, testUser } from "@/test/render";
 import { MediaInfo } from "./MediaInfo";
 
 function makeFile(id: number, overrides: Partial<MediaFile> = {}): MediaFile {
@@ -29,7 +30,7 @@ function makeFile(id: number, overrides: Partial<MediaFile> = {}): MediaFile {
 describe("MediaInfo", () => {
   it("is closed until asked for, then opens and closes from the keyboard", async () => {
     const user = userEvent.setup();
-    render(<MediaInfo files={[makeFile(1)]} />);
+    renderWithProviders(<MediaInfo files={[makeFile(1)]} />);
 
     const toggle = screen.getByRole("button", { name: "Media info" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -53,7 +54,7 @@ describe("MediaInfo", () => {
 
   it("opens each version on its own", async () => {
     const user = userEvent.setup();
-    render(<MediaInfo files={[makeFile(1, { edition: "Director's Cut" }), makeFile(2)]} />);
+    renderWithProviders(<MediaInfo files={[makeFile(1, { edition: "Director's Cut" }), makeFile(2)]} />);
 
     await user.click(screen.getByRole("button", { name: "Media info (2 versions)" }));
     const cut = screen.getByRole("button", { name: "Director's Cut" });
@@ -65,6 +66,19 @@ describe("MediaInfo", () => {
     await user.click(second);
     expect(second).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("/media/movie-2.mkv")).toBeInTheDocument();
+    expect(screen.queryByText("/media/movie-1.mkv")).not.toBeInTheDocument();
+  });
+
+  it("shows administrators where the file is, and everyone else its name", async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderWithProviders(<MediaInfo files={[makeFile(1)]} />);
+    await user.click(screen.getByRole("button", { name: "Media info" }));
+    expect(screen.getByText("/media/movie-1.mkv")).toBeInTheDocument();
+    unmount();
+
+    renderWithProviders(<MediaInfo files={[makeFile(1)]} />, { user: { ...testUser, is_admin: false } });
+    await user.click(screen.getByRole("button", { name: "Media info" }));
+    expect(screen.getByText("movie-1.mkv")).toBeInTheDocument();
     expect(screen.queryByText("/media/movie-1.mkv")).not.toBeInTheDocument();
   });
 });
