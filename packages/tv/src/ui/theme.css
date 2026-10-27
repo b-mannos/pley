@@ -585,6 +585,11 @@ body {
   width: 72px;
   z-index: 20;
 }
+/*
+ * The open rail's panel, edge and the dimmed page fade in as an overlay
+ * (200 ms). Each is a layer of its own, there before it shows: opening the
+ * rail repaints nothing of the page, and the fades are the compositor's.
+ */
 .rail-panel {
   position: absolute;
   left: 0;
@@ -593,6 +598,8 @@ body {
   width: 272px;
   background: rgba(18, 21, 26, 0.96);
   opacity: 0;
+  transition: opacity 200ms var(--focus-ease);
+  will-change: opacity;
 }
 .rail-edge {
   position: absolute;
@@ -602,6 +609,8 @@ body {
   width: 64px;
   background: linear-gradient(to right, rgba(18, 21, 26, 0.85), rgba(18, 21, 26, 0));
   opacity: 0;
+  transition: opacity 200ms var(--focus-ease);
+  will-change: opacity;
 }
 .rail.open .rail-panel,
 .rail.open .rail-edge { opacity: 1; }
@@ -613,7 +622,16 @@ body {
   bottom: 0;
   background: rgba(11, 13, 16, 0.5);
   z-index: 19;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms var(--focus-ease);
+  will-change: opacity;
 }
+.rail-scrim.in { opacity: 1; pointer-events: auto; }
+.reduced .rail-panel,
+.reduced .rail-edge,
+.reduced .rail-scrim,
+.reduced .rail-pill > i { transition: none; }
 .rail-items {
   position: absolute;
   left: 8px;
@@ -622,27 +640,42 @@ body {
   display: flex;
   flex-direction: column;
 }
+/* An entry is 56 wide closed and 256 open, at once: its fill grows (.rail-pill), not its box. */
 .rail-item {
   position: relative;
   width: 56px;
   height: 48px;
   margin-bottom: 8px;
-  border-radius: 6px;
   display: flex;
   align-items: center;
   color: var(--muted);
-  transition: width 250ms cubic-bezier(0.2, 0, 0, 1), transform 300ms cubic-bezier(0, 0, 0.2, 1);
+  transition: transform 300ms cubic-bezier(0, 0, 0.2, 1);
 }
 .rail-item .icon { position: absolute; left: 18px; top: 14px; }
+/* As wide as on the open rail, so a closing rail's labels fade without being cut short. */
 .rail-item .label {
   position: absolute;
   left: 56px;
-  right: 12px;
+  width: 188px;
   opacity: 0;
   transition: opacity 200ms linear;
 }
 .rail.open .rail-item { width: 256px; }
 .rail.open .rail-item .label { opacity: 1; }
+/*
+ * An entry's fill (focus, or the current entry on the open rail) in three
+ * parts, rounded ends and a middle, which grow from 56 to 256 with the
+ * opening rail by transforms alone, so that no frame lays anything out. The
+ * parts overlap by a pixel; their colour is the pill's own (currentColor).
+ */
+.rail-pill { position: absolute; left: 0; top: 0; width: 256px; height: 100%; color: transparent; pointer-events: none; }
+.rail-pill > i { position: absolute; top: 0; bottom: 0; background: currentColor; transition: transform 250ms cubic-bezier(0.2, 0, 0, 1); }
+.rail-pill .l { left: 0; width: 7px; border-radius: 6px 0 0 6px; }
+/* 44 of its 244 px closed: 56 less the ends. */
+.rail-pill .m { left: 6px; width: 244px; transform-origin: 0 0; transform: scaleX(0.18033); }
+.rail-pill .r { left: 249px; width: 7px; border-radius: 0 6px 6px 0; transform: translateX(-200px); }
+.rail.open .rail-pill .m,
+.rail.open .rail-pill .r { transform: none; }
 .rail-item.current { color: var(--fg); }
 .rail-item.current::before {
   content: "";
@@ -654,15 +687,16 @@ body {
   border-radius: 2px;
   background: var(--accent);
 }
-.rail.open .rail-item.current { background: var(--surface3); }
+.rail.open .rail-item.current .rail-pill { color: var(--surface3); }
 .rail.open .rail-item.current::before { display: none; }
 /* Focus wins over the current entry's Surface3 once the rail is open (its own entry has focus first). */
-.rail-item[data-focused],
-.rail.open .rail-item[data-focused] {
-  background: var(--accent);
+.rail-item[data-focused] {
   color: var(--on-accent);
   transform: scale(1.05);
 }
+.rail-item[data-focused] .rail-pill,
+.rail.open .rail-item[data-focused] .rail-pill { color: var(--accent); }
+.rail.open .rail-item[data-pressed] .rail-pill { color: var(--accent-bright); }
 .rail-item[data-focused]::before { display: none; }
 .rail-item.avatar { height: 56px; margin-bottom: 4px; }
 .rail-avatar {

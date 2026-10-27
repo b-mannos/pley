@@ -3,6 +3,7 @@ import { cardSubtitle, episodeLabel, formatRuntime, formatTimeLeft, isInProgress
 import { Art, artCandidates, type ArtKind } from "./art";
 import { F } from "./focusable";
 import { Icon } from "./icons";
+import { memo } from "./memo";
 
 /** The Android app's TV tile kinds: well size, gap in a row, shape, picture. */
 export type TileKind = "poster" | "landscape" | "episode" | "grid" | "square" | "person" | "avatar";
@@ -71,8 +72,14 @@ export interface TileProps {
   priority?: number;
 }
 
-/** A tile: the well (picture, overlays, focus ring) and its two-line caption. */
-export function Tile(p: TileProps) {
+/**
+ * A tile: the well (picture, overlays, focus ring) and its two-line
+ * caption. Drawn again only when what it shows changes; its `priority`
+ * counts once, when its picture is first asked for.
+ */
+export const Tile = memo(TileView, ["priority"]);
+
+function TileView(p: TileProps) {
   const spec = TILES[p.kind];
   const m = tileModel(p.item, p.kind, { badges: p.badges, subtitle: p.subtitle });
   return (
@@ -137,7 +144,9 @@ export function TileCaption(p: { title: string; subtitle: string }) {
 }
 
 /** The last tile of a row that lists more: an arrow and "See all". */
-export function SeeAllTile(p: { kind: TileKind; fid?: string; onSelect: () => void; onFocus?: (el: HTMLElement) => void; style?: string }) {
+export const SeeAllTile = memo(SeeAllView);
+
+function SeeAllView(p: { kind: TileKind; fid?: string; onSelect: () => void; onFocus?: (el: HTMLElement) => void; style?: string }) {
   const spec = TILES[p.kind];
   return (
     <F class="tile" style={`width:${spec.w}px;${p.style ?? ""}`} fid={p.fid} label="See all" onSelect={p.onSelect} onFocus={p.onFocus}>
@@ -152,7 +161,9 @@ export function SeeAllTile(p: { kind: TileKind; fid?: string; onSelect: () => vo
 }
 
 /** A tile's place while its item loads: the well and two caption bars. */
-export function SkeletonTile(p: { kind: TileKind; fid?: string; style?: string; focusable?: boolean; onFocus?: (el: HTMLElement) => void }) {
+export const SkeletonTile = memo(SkeletonView);
+
+function SkeletonView(p: { kind: TileKind; fid?: string; style?: string; focusable?: boolean; onFocus?: (el: HTMLElement) => void }) {
   const spec = TILES[p.kind];
   const body = (
     <>
@@ -180,7 +191,9 @@ export function SkeletonTile(p: { kind: TileKind; fid?: string; style?: string; 
  * A tile for what isn't an item (a collection, a playlist, a person): its
  * pictures, its two caption lines, and a count badge at the top right.
  */
-export function ArtTile(p: {
+export const ArtTile = memo(ArtTileView, ["priority"]);
+
+function ArtTileView(p: {
   kind: TileKind;
   title: string;
   subtitle?: string;

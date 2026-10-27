@@ -173,6 +173,7 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
       }}
     >
       <span data-rail={entry.id} style="display:contents" />
+      <Pill />
       <Icon name={entry.icon} size={20} />
       <span class="label t-label one-line">{entry.label}</span>
     </F>
@@ -182,7 +183,7 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
   const color = profileColor(me?.avatar_color);
   return (
     <>
-      {open.value && <div class="rail-scrim" />}
+      <div class={`rail-scrim${open.value ? " in" : ""}`} />
       <div ref={root} class={`rail${open.value ? " open" : ""}`}>
         <div class="rail-panel" />
         <div class="rail-edge" />
@@ -200,6 +201,7 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
             }}
           >
             <span data-rail="profile" style="display:contents" />
+            <Pill />
             <div class="rail-avatar t-label" style={color ? `background:${color}` : undefined}>
               <span style="font-weight:700">{initial(me?.name ?? "")}</span>
             </div>
@@ -221,6 +223,17 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
         </G>
       </div>
     </>
+  );
+}
+
+/** An entry's fill, which grows with the opening rail (theme.css). */
+function Pill() {
+  return (
+    <span class="rail-pill" aria-hidden="true">
+      <i class="l" />
+      <i class="m" />
+      <i class="r" />
+    </span>
   );
 }
 
