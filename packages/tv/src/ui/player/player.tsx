@@ -324,7 +324,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
       ui.input.push((key, e) => {
         lastInput.current = Date.now();
         if (MEDIA_KEYS.indexOf(key) >= 0) {
-          if (e.type === "down" && !e.repeat) media(key);
+          if (e.type === "down" && !e.repeat) mediaRef.current(key);
           return true;
         }
         const st = c.state.value;
@@ -349,7 +349,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
         if (!controlsRef.current) {
           if (key === "ok") {
             if (focused === "skip" || focused === "keep") return false;
-            if (e.type === "down" && !e.repeat && !busy) playPause();
+            if (e.type === "down" && !e.repeat && !busy) playPauseRef.current();
             return true;
           }
           if (key === "left" || key === "right") {
@@ -405,7 +405,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
             return true;
           }
           if (key === "ok") {
-            if (e.type === "down" && !e.repeat && !busy) playPause();
+            if (e.type === "down" && !e.repeat && !busy) playPauseRef.current();
             return true;
           }
           if (key === "down") {
@@ -421,6 +421,11 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
       }),
     [c],
   );
+  // The handler above is pushed once: it reaches this render's media keys and state through these.
+  const mediaRef = useRef(media);
+  mediaRef.current = media;
+  const playPauseRef = useRef(playPause);
+  playPauseRef.current = playPause;
   const controlsRef = useRef(controls);
   controlsRef.current = controls;
   const panelRef = useRef(panel);
