@@ -9,7 +9,8 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rustc-env=PLEY_COMMIT={}", commit());
+    let commit = commit();
+    println!("cargo:rustc-env=PLEY_COMMIT={commit}");
     println!("cargo:rerun-if-changed=assets/pley.ico");
     println!("cargo:rerun-if-changed=assets/pley.exe.manifest");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
@@ -34,12 +35,14 @@ BEGIN
   BEGIN
     BLOCK "040904B0"
     BEGIN
+      VALUE "CompanyName", "the pley authors"
       VALUE "FileDescription", "pley media server"
       VALUE "FileVersion", "{version}"
       VALUE "InternalName", "pley"
+      VALUE "LegalCopyright", "Copyright (c) 2026 the pley authors"
       VALUE "OriginalFilename", "pley.exe"
       VALUE "ProductName", "pley"
-      VALUE "ProductVersion", "{version}"
+      VALUE "ProductVersion", "{version} ({commit})"
     END
   END
   BLOCK "VarFileInfo"

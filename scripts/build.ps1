@@ -1,6 +1,6 @@
 # Release build: web UI + both binaries + licensing files, ready to ship.
 #   powershell -ExecutionPolicy Bypass -File scripts\build.ps1 [-SkipWeb] [-Target <rust target triple>] [-Archive] [-Installer]
-# Output: dist\pley-<version>-windows-<arch>\ (plus a .zip with -Archive, and
+# Output: dist\pley-server-<version>-windows-<arch>\ (plus a .zip with -Archive, and
 # the installer pley-server-<version>-windows-<arch>-setup.exe with -Installer)
 param(
     [switch]$SkipWeb,
@@ -45,7 +45,7 @@ try {
     Pop-Location
 }
 
-$name = "pley-$version-windows-$arch"
+$name = "pley-server-$version-windows-$arch"
 $out = "$root/dist/$name"
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 New-Item -ItemType Directory -Force $out | Out-Null

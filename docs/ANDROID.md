@@ -224,6 +224,11 @@ base64 -w0 pley-release.keystore   # the ANDROID_KEYSTORE_BASE64 secret
 Apps installed from a build signed with another key (a debug build) must
 be uninstalled once before a release installs.
 
+Google Play keeps the key that signs the app on devices (Play App Signing):
+the key above is then the upload key, which Play can reset if it is lost.
+The store's icon, feature graphic, TV banner and words are in
+`deploy/stores`.
+
 Launchers, the same in every build: "pley" on phones and tablets
 (`MainActivity`, `LAUNCHER`) and on TV home screens (`TvActivity`,
 `LEANBACK_LAUNCHER`, with the 320×180 banner). Exported, beside these two,

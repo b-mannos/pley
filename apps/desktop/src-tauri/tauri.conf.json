@@ -18,6 +18,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "the pley authors",
+    "copyright": "Copyright (c) 2026 the pley authors",
+    "homepage": "https://github.com/hhaidar/pley",
     "category": "Video",
     "shortDescription": "pley for your desktop",
     "longDescription": "A window on your pley media server: browse your movies, shows and music and play them.",

@@ -5,7 +5,7 @@ the server as a Windows service or in the notification area, with FFmpeg,
 its data folder, the firewall and an uninstaller. It needs Windows 10 1809
 or newer and an administrator.
 
-The release archives (`pley-<version>-windows-<arch>.zip`) still run as they
+The release archives (`pley-server-<version>-windows-<arch>.zip`) still run as they
 are: [../README.md](../README.md#windows).
 
 ## Installing
@@ -209,7 +209,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Archive -Installer
 ```
 
 or, around a release folder already built,
-`scripts\build-installer.ps1 -Release dist\pley-<version>-windows-x86_64`.
+`scripts\build-installer.ps1 -Release dist\pley-server-<version>-windows-x86_64`.
 The installer carries the FFmpeg on PATH (where WinGet's link leads), or the
 one `-Ffmpeg <an FFmpeg build's bin folder>` names, with the DLLs next to it;
 `-Flavor fel` adds a name to the file:

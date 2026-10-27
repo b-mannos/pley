@@ -21,6 +21,6 @@
       <icon>resources/icon.png</icon>
       <fanart>resources/fanart.jpg</fanart>
     </assets>
-    <news>First version: sign-in with a code, Home, libraries, search, playlists, playback with progress.</news>
+    <news>0.2.0, the first release: sign-in with a code or QR code; Home, every library, search and playlists, with plots and episode stills; playback that resumes where it stopped, Skip Intro and Up Next.</news>
   </extension>
 </addon>

@@ -1,5 +1,5 @@
 # Windows installer from a release folder (Inno Setup 6.7 or newer):
-#   powershell -ExecutionPolicy Bypass -File scripts\build-installer.ps1 -Release dist\pley-<version>-windows-<arch>
+#   powershell -ExecutionPolicy Bypass -File scripts\build-installer.ps1 -Release dist\pley-server-<version>-windows-<arch>
 #     [-OutDir dist] [-Ffmpeg <an FFmpeg build's bin folder>] [-Flavor <name>]
 # Output: pley-server-<version>[-<flavor>]-windows-<arch>-setup.exe in -OutDir (default: dist).
 # scripts\build.ps1 -Installer runs it. What the installer does is in
@@ -18,8 +18,8 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 $Release = (Resolve-Path $Release).Path
 $name = Split-Path $Release -Leaf
-if ($name -notmatch '^pley-(.+)-windows-(x86_64|arm64)$') {
-    throw "$name isn't a Windows release folder (pley-<version>-windows-<x86_64|arm64>)"
+if ($name -notmatch '^pley-server-(.+)-windows-(x86_64|arm64)$') {
+    throw "$name isn't a Windows release folder (pley-server-<version>-windows-<x86_64|arm64>)"
 }
 $version, $archName = $Matches[1], $Matches[2]
 $arch = if ($archName -eq "arm64") { "arm64" } else { "x64" }

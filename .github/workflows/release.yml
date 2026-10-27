@@ -173,13 +173,24 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
       - run: npm ci --no-fund --no-audit
       - run: npm run build -w apps/desktop
+      # Named as the server's are: pley-desktop-<version>-<os>-<arch>, with
+      # the installer's own ending (Tauri's names differ by format).
       - name: Collect the installers
         shell: bash
         run: |
           mkdir -p dist
-          find apps/desktop/src-tauri/target/release/bundle -maxdepth 2 -type f \
-            \( -name '*.msi' -o -name '*-setup.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
-            -exec cp {} dist/ \;
+          version=$(cat VERSION)
+          case "$RUNNER_OS" in Windows) os=windows ;; macOS) os=macos ;; *) os=linux ;; esac
+          case "$RUNNER_ARCH" in ARM64) arch=arm64 ;; *) arch=x86_64 ;; esac
+          name="pley-desktop-$version-$os-$arch"
+          while IFS= read -r file; do
+            case "$file" in
+              *-setup.exe) ending=-setup.exe ;;
+              *) ending=".${file##*.}" ;;
+            esac
+            cp "$file" "dist/$name$ending"
+          done < <(find apps/desktop/src-tauri/target/release/bundle -maxdepth 2 -type f \
+            \( -name '*.msi' -o -name '*-setup.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \))
           ls -l dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

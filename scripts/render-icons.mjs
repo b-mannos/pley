@@ -27,6 +27,9 @@
 //                                           540×405 and 290×218, Roku's home screen
 //                                           tiles, as the Android TV app's banner
 //   apps/roku/images/splash_{fhd,hd,sd}.png the logo on the Roku app's background
+//   deploy/stores/                          the stores' listing pictures (README.md
+//                                           there): icons, Play's feature graphic,
+//                                           the TV banner
 //
 // Chrome comes from $CHROME, else the usual place on Windows, macOS or Linux.
 // The banner's wordmark is in the system's bold sans (Roboto, else Segoe UI).
@@ -160,8 +163,13 @@ async function renderer() {
     close() {
       socket.close();
       browser.kill();
-      // The browser lets go of its profile a moment after it stops.
-      setTimeout(() => rmSync(profile, { recursive: true, force: true }), 500);
+      // The browser lets go of its profile a moment after it stops; one it still holds stays
+      // in the temporary folder rather than failing the run.
+      setTimeout(() => {
+        try {
+          rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        } catch {}
+      }, 500);
     },
   };
 }
@@ -341,7 +349,14 @@ try {
   for (const [name, width, height] of [["splash_fhd.png", 1920, 1080], ["splash_hd.png", 1280, 720], ["splash_sd.png", 720, 480]]) {
     writeFileSync(join(roku, name), rgb72(await r.png(splash(width, height, "#16191e"), width, height)));
   }
-  console.log("rendered the web's maskable icon and PNG favicon, the desktop's .ico and .icns, the Samsung and LG apps' icons and LG's splash, Kodi's icon and fanart, and Roku's icons and splash screens");
+  // The stores': Google Play rounds the square icon's corners itself, so the P sits as on the
+  // Android app's adaptive icon; the feature graphic and TV banner are the banner, opaque.
+  const stores = join(root, "deploy/stores");
+  writeFileSync(join(stores, "icon-512.png"), await r.png(maskable(512, 7.449), 512));
+  writeFileSync(join(stores, "icon-114.png"), rgb72(await r.png(maskable(114, (114 / 512) * 7.449), 114)));
+  writeFileSync(join(stores, "feature-graphic-1024x500.png"), rgb72(await r.png(banner(1024, 500), 1024, 500)));
+  writeFileSync(join(stores, "tv-banner-1280x720.png"), rgb72(await r.png(banner(1280, 720), 1280, 720)));
+  console.log("rendered the web's maskable icon and PNG favicon, the desktop's .ico and .icns, the Samsung and LG apps' icons and LG's splash, Kodi's icon and fanart, Roku's icons and splash screens, and the stores' pictures");
 } finally {
   r.close();
 }

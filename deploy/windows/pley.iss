@@ -49,7 +49,11 @@ AppId={{6D1B6F0C-3F1E-4C55-9A0D-2B7E3C5A9F41}
 AppName=pley-server
 AppVersion={#AppVersion}
 AppVerName=pley-server {#AppVersion}
-AppPublisher=pley
+AppPublisher=the pley authors
+AppPublisherURL=https://github.com/hhaidar/pley
+AppSupportURL=https://github.com/hhaidar/pley/issues
+AppUpdatesURL=https://github.com/hhaidar/pley/releases
+AppCopyright=Copyright (c) 2026 the pley authors
 DefaultDirName={autopf}\pley-server
 DisableProgramGroupPage=yes
 #ifdef Test

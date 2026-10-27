@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Release build: web UI + both binaries + licensing files.
 #   ./scripts/build.sh [--skip-web] [--target <rust target triple>] [--archive]
-# Output: dist/pley-<version>-<os>-<arch>/ (plus a .tar.gz with --archive)
+# Output: dist/pley-server-<version>-<os>-<arch>/ (plus a .tar.gz with --archive)
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/apps/server/Cargo.toml" | head -n1)
@@ -45,7 +45,7 @@ case "$arch" in
     amd64) arch=x86_64 ;;
 esac
 
-name="pley-$version-$os-$arch"
+name="pley-server-$version-$os-$arch"
 out="$root/dist/$name"
 rm -rf "$out" && mkdir -p "$out"
 cp "$bin/pley" "$bin/pley-transcoder" "$out/"
