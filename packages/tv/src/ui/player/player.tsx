@@ -5,6 +5,7 @@ import { PlaybackController, type PlayerEnv, type SavedPlayback } from "../../pl
 import { T } from "../../player/details";
 import type { PlayRequest } from "../../player/plan";
 import { activeMarker } from "../../player/markers";
+import type { Marker } from "../../api/types";
 import { thumbnailAt, sheetPath } from "../../player/nextup";
 import { badgeText, MEDIA_STEP_MS, Seeker, STEP_MS } from "../../player/seeker";
 import { LEAVE_AFTER_MS } from "../../player/sleep";
@@ -108,7 +109,8 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
   const ui = useUi();
   const c = p.controller;
   const s = c.state.value;
-  const clock = c.clock.value;
+  // The clock ticks twice a second: what follows it (the times, the scrubber, Skip's bar) reads it itself, so the rest isn't drawn again.
+  const clockNow = () => c.clock.peek();
   const shown = c.subs.value;
   const settings = app.settings.value;
   const [controls, setControls] = useState(false);
@@ -225,11 +227,6 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
     } else c.play();
   };
   const skipShown = !!s.skipLabel && !s.upNext && !error && !(controls && seeker.target !== null);
-  // What's left of the intro or credits, in whole seconds: the skip button's bar shrinks with it, once a second.
-  const skipMarker = skipShown ? activeMarker(s.markers, clock.positionMs) : null;
-  const skipLeft = skipMarker
-    ? Math.ceil(Math.max(0, skipMarker.end_ms - clock.positionMs) / 1000) / Math.max(1, Math.ceil((skipMarker.end_ms - skipMarker.start_ms) / 1000))
-    : null;
   const sleepShown = s.sleep.secondsLeft !== null && !error;
 
   // A new Skip or sleep notice takes focus while nothing else is up; the hidden-controls focus holder otherwise.
@@ -246,13 +243,12 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
     if (error) focusFid(error.canRetry ? "retry" : "back");
   }, [!!error]);
 
-  const position = clock.positionMs;
-  const duration = clock.durationMs;
   const chapters = s.chapters;
   const episode = s.subtitle !== null;
   const hasPrevNext = episode || chapters.length > 1;
 
   const media = (key: Key) => {
+    const { positionMs: position, durationMs: duration } = clockNow();
     switch (key) {
       case "playPause":
         playPause();
@@ -439,9 +435,10 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
   };
 
   const target = seeker.target;
-  const thumbPos = target ?? position;
-  // When it ends, while paused, as the Android TV app says it.
-  const endsAt = s.phase.kind === "paused" && duration > 0 ? formatTimeOfDay(new Date(Date.now() + Math.max(0, duration - position)), app.platform.clock24()) : null;
+  const step = (dir: 1 | -1) => {
+    const { positionMs, durationMs } = clockNow();
+    seeker.press(dir, STEP_MS, positionMs, durationMs);
+  };
   const engineStats = () => c.engine?.stats() ?? null;
   const readoutShown = settings.playbackDetails && !controls && !panel && !s.upNext && !error;
   return (
@@ -466,17 +463,14 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
           <div class="player-clock">
             <div class="player-clock-row">
               {s.method && <span class={`method-badge t-caption ${methodClass(s.method)}`}>{s.method}</span>}
-              <span class="t-label c-muted">{formatTimeOfDay(new Date(), app.platform.clock24())}</span>
+              <TimeOfDay hours24={app.platform.clock24()} />
             </div>
-            {endsAt && <div class="t-label c-muted">{`Ends at ${endsAt}`}</div>}
+            {s.phase.kind === "paused" && <EndsAt controller={c} hours24={app.platform.clock24()} />}
           </div>
         </div>
-        {target !== null && controls && <SeekPreview state={s} targetMs={target} durationMs={duration} />}
-        <div class="player-times t-caption c-fg">
-          <span>{formatClock(position)}</span>
-          <span>{`−${formatClock(Math.max(0, duration - position))}`}</span>
-        </div>
-        <Scrubber positionMs={position} bufferedMs={clock.bufferedMs} durationMs={duration} targetMs={thumbPos} markers={s.markers} chapters={chapters.map((ch) => ch.startMs)} />
+        {target !== null && controls && <SeekPreview state={s} targetMs={target} durationMs={clockNow().durationMs} />}
+        <PlayerTimes controller={c} live={controls && s.phase.kind === "playing"} />
+        <Scrubber controller={c} targetMs={target} markers={s.markers} chapters={chapters.map((ch) => ch.startMs)} />
         <G kind="row" class="player-row">
           <div class="row-left">
             {chapters.length > 1 && <PlayerButton fid="chapters" icon="list-video" label="Chapters" onSelect={() => openPanel("chapters")} />}
@@ -484,9 +478,9 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
           </div>
           <div class="row-centre">
             {hasPrevNext && <PlayerButton fid="previous" icon="skip-back" iconSize={24} label="Previous" onSelect={() => media("previous")} />}
-            <PlayerButton fid="back10" icon="rotate-ccw" skipSeconds={STEP_MS / 1000} label="Back 10 seconds" onSelect={() => seeker.press(-1, STEP_MS, position, duration)} />
+            <PlayerButton fid="back10" icon="rotate-ccw" skipSeconds={STEP_MS / 1000} label="Back 10 seconds" onSelect={() => step(-1)} />
             <PlayerButton fid="playpause" icon={playing ? "pause" : "play"} label={playing ? "Pause" : "Play"} big onSelect={playPause} />
-            <PlayerButton fid="fwd10" icon="rotate-cw" skipSeconds={STEP_MS / 1000} label="Forward 10 seconds" onSelect={() => seeker.press(1, STEP_MS, position, duration)} />
+            <PlayerButton fid="fwd10" icon="rotate-cw" skipSeconds={STEP_MS / 1000} label="Forward 10 seconds" onSelect={() => step(1)} />
             {hasPrevNext && <PlayerButton fid="next" icon="skip-forward" iconSize={24} label="Next" onSelect={() => media("next")} />}
           </div>
           <div class="row-right">
@@ -503,7 +497,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
           <F class="skip-pill t-label" fid="skip" label={s.skipLabel!} onSelect={() => c.skip()}>
             <Icon name="chevrons-right" size={22} />
             <span style="margin-left:10px">{s.skipLabel}</span>
-            {skipLeft !== null && <div class="skip-bar" style={`transform:scaleX(${skipLeft})`} />}
+            <SkipBar controller={c} markers={s.markers} />
           </F>
         </G>
       )}
@@ -532,7 +526,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
           {T.reconnecting}
         </div>
       )}
-      {panel && <PlayerPanels panel={panel} state={s} controller={c} positionMs={position} onClose={closePanel} stats={engineStats} engineName={c.engine?.name ?? ""} />}
+      {panel && <PlayerPanels panel={panel} state={s} controller={c} positionMs={clockNow().positionMs} onClose={closePanel} stats={engineStats} engineName={c.engine?.name ?? ""} />}
       {error && (
         <div class="player-error">
           <div class="t-page c-fg" style="text-align:center">
@@ -591,18 +585,76 @@ function methodClass(method: string): string {
   return "transcode";
 }
 
-/** The scrubber: played, buffered, chapter gaps, the thumb at the seek target, the marker's name under it. */
-function Scrubber(p: { positionMs: number; bufferedMs: number; durationMs: number; targetMs: number; markers: { kind: string; start_ms: number; end_ms: number }[]; chapters: number[] }) {
-  const d = p.durationMs;
+/**
+ * The elapsed and remaining time over the scrubber. While the controls
+ * show a playing video they change on each whole second of it, as Media3's
+ * controls do: the engine is asked where it is then, between the clock's
+ * ticks, so no second shows for half a second or for one and a half.
+ */
+function PlayerTimes(p: { controller: PlaybackController; live: boolean }) {
+  const clock = p.controller.clock.value;
+  const [, setBeat] = useState(0);
+  const position = p.live ? p.controller.livePositionMs() : clock.positionMs;
+  useEffect(() => {
+    if (!p.live) return;
+    // Just past the next whole second; at least 200 ms on (Media3's least).
+    const t = setTimeout(() => setBeat((n) => n + 1), Math.max(200, 1005 - (position % 1000)));
+    return () => clearTimeout(t);
+  });
+  return (
+    <div class="player-times t-caption c-fg">
+      <span>{formatClock(position)}</span>
+      <span>{`−${formatClock(Math.max(0, clock.durationMs - position))}`}</span>
+    </div>
+  );
+}
+
+/** The time of day, as the clock on the wall has it: drawn again on the minute. */
+function TimeOfDay(p: { hours24: boolean }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setTimeout(() => setNow(new Date()), 60_000 - (Date.now() % 60_000) + 50);
+    return () => clearTimeout(t);
+  }, [now]);
+  return <span class="t-label c-muted">{formatTimeOfDay(now, p.hours24)}</span>;
+}
+
+/** When it ends, while paused, as the Android TV app says it; later by a minute for each minute it waits. */
+function EndsAt(p: { controller: PlaybackController; hours24: boolean }) {
+  const clock = p.controller.clock.value;
+  const [, setMinute] = useState(0);
+  useEffect(() => {
+    const t = setTimeout(() => setMinute((n) => n + 1), 60_000 - (Date.now() % 60_000) + 50);
+    return () => clearTimeout(t);
+  });
+  if (clock.durationMs <= 0) return null;
+  const end = new Date(Date.now() + Math.max(0, clock.durationMs - clock.positionMs));
+  return <div class="t-label c-muted">{`Ends at ${formatTimeOfDay(end, p.hours24)}`}</div>;
+}
+
+/** What's left of the intro or credits, in whole seconds: Skip's bar shrinks with it, once a second. */
+function SkipBar(p: { controller: PlaybackController; markers: Marker[] }) {
+  const pos = p.controller.clock.value.positionMs;
+  const m = activeMarker(p.markers, pos);
+  if (!m) return null;
+  const left = Math.ceil(Math.max(0, m.end_ms - pos) / 1000) / Math.max(1, Math.ceil((m.end_ms - m.start_ms) / 1000));
+  return <div class="skip-bar" style={`transform:scaleX(${left})`} />;
+}
+
+/** The scrubber: played, buffered, chapter gaps, the thumb at the seek target (else where it plays), the marker's name under it. */
+function Scrubber(p: { controller: PlaybackController; targetMs: number | null; markers: Marker[]; chapters: number[] }) {
+  const clock = p.controller.clock.value;
+  const d = clock.durationMs;
+  const thumbMs = p.targetMs ?? clock.positionMs;
   const frac = (ms: number) => (d > 0 ? Math.max(0, Math.min(1, ms / d)) : 0);
-  const marker = p.markers.filter((m) => p.targetMs >= m.start_ms && p.targetMs < m.end_ms)[0];
+  const marker = p.markers.filter((m) => thumbMs >= m.start_ms && thumbMs < m.end_ms)[0];
   const markerX = marker ? Math.max(BAR_LEFT, Math.min(BAR_LEFT + BAR_WIDTH, BAR_LEFT + BAR_WIDTH * frac((marker.start_ms + marker.end_ms) / 2))) : 0;
   return (
     <>
-      <F class="scrubber" fid="scrubber" label={`${formatClock(p.positionMs)} of ${formatClock(d)}`}>
+      <F class="scrubber" fid="scrubber" label={`${formatClock(clock.positionMs)} of ${formatClock(d)}`}>
         <div class="bar">
-          <div class="bar-buffered" style={`width:${frac(p.bufferedMs) * 100}%`} />
-          <div class="bar-played" style={`width:${frac(p.positionMs) * 100}%`} />
+          <div class="bar-buffered" style={`width:${frac(clock.bufferedMs) * 100}%`} />
+          <div class="bar-played" style={`width:${frac(clock.positionMs) * 100}%`} />
           {p.chapters
             .filter((ms) => ms > 0 && frac(ms) * BAR_WIDTH > 2 && frac(ms) * BAR_WIDTH < BAR_WIDTH - 2)
             .map((ms) => (
@@ -610,7 +662,7 @@ function Scrubber(p: { positionMs: number; bufferedMs: number; durationMs: numbe
             ))}
         </div>
         {/* Kept a radius in from either end, as the Android app draws it. */}
-        <div class="thumb" style={`left:${Math.max(6, Math.min(BAR_WIDTH - 6, frac(p.targetMs) * BAR_WIDTH))}px`} />
+        <div class="thumb" style={`left:${Math.max(6, Math.min(BAR_WIDTH - 6, frac(thumbMs) * BAR_WIDTH))}px`} />
       </F>
       {marker && (
         <div class="marker-label t-caption c-muted" style={`left:${markerX}px`}>

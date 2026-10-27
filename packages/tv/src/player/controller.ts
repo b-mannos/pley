@@ -328,6 +328,19 @@ export class PlaybackController {
     return this.engineRef;
   }
 
+  /**
+   * Where the video is now, asked of the engine between the clock's ticks
+   * (the controls' time, which changes on each whole second); the clock's
+   * position while the engine has nothing to say.
+   */
+  livePositionMs(): number {
+    const engine = this.engineRef;
+    const ticked = this.clock.value.positionMs;
+    if (!engine || !this.mediaShown || this.ended || this.closed) return ticked;
+    const pos = engine.positionMs();
+    return isFinite(pos) && pos >= 0 ? pos : ticked;
+  }
+
   // ---------------------------------------------------------------- start
 
   start(): void {
