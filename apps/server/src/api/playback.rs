@@ -268,11 +268,12 @@ pub async fn status(
 }
 
 /// What a viewer is told when the transcoder refused: its own sentence,
-/// which may name the media file's path, for pley's own sign-in; one of
-/// pley's for an app, since apps never see paths.
+/// which may name the media file's path, for an administrator (on pley's
+/// own sign-in, never an app's); one of pley's for anyone else, who never
+/// sees paths.
 fn for_viewer(user: &AuthUser, err: impl Into<AppError>) -> AppError {
     let err = err.into();
-    if user.app.is_none() {
+    if user.is_admin {
         return err;
     }
     match err {
