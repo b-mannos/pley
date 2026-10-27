@@ -470,7 +470,9 @@ half-made ones are deleted.
     fails, one more reads the track asked for alone (another track may be
     what FFmpeg couldn't convert), unless it ran out of time.
   - External files are converted with charset detection (UTF-8, UTF-16 BOM,
-    or Windows-1252 as a fallback).
+    or Windows-1252 as a fallback), told from their first megabyte. A file
+    over 64 MB is no text subtitle file (a `.sup`, say): it is refused
+    (`400`) before it is read.
 
 ## Audio fingerprints
 

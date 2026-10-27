@@ -259,14 +259,30 @@ impl Extractor {
     }
 
     async fn convert_file(&self, path: &Path) -> ApiResult<String> {
-        let raw = tokio::fs::read(path).await?;
-        let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-        if ext == "vtt"
-            && let Ok(text) = String::from_utf8(raw.clone())
-        {
-            let text = text.trim_start_matches('\u{feff}').to_owned();
-            return Ok(if text.starts_with("WEBVTT") { text } else { format!("WEBVTT\n\n{text}") });
+        let size = tokio::fs::metadata(path).await?.len();
+        if size > MAX_SUBTITLE_FILE {
+            return Err(ApiError::BadRequest(format!(
+                "the subtitle file is {} MB: text subtitles take {} MB at most",
+                size >> 20,
+                MAX_SUBTITLE_FILE >> 20
+            )));
         }
+        let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+        let head = if ext == "vtt" {
+            match String::from_utf8(tokio::fs::read(path).await?) {
+                Ok(text) => {
+                    let text = text.trim_start_matches('\u{feff}').to_owned();
+                    return Ok(if text.starts_with("WEBVTT") { text } else { format!("WEBVTT\n\n{text}") });
+                }
+                Err(err) => {
+                    let mut raw = err.into_bytes();
+                    raw.truncate(CHARSET_SAMPLE);
+                    raw
+                }
+            }
+        } else {
+            read_head(path, CHARSET_SAMPLE).await?
+        };
         let key = file_key(path)?;
         // Not `_file.vtt`: earlier versions wrote those in place, so a crash
         // or a full disk may have left them truncated.
@@ -276,7 +292,7 @@ impl Extractor {
         }
         let mut cmd = self.ff.command();
         cmd.args(["-loglevel", "error"]);
-        if let Some(charset) = guess_charset(&raw) {
+        if let Some(charset) = guess_charset(&head) {
             cmd.args(["-sub_charenc", charset]);
         }
         cmd.args(MEDIA_INPUT_OPTIONS)
@@ -455,8 +471,8 @@ impl Extractor {
                 cmd.args(MEDIA_INPUT_OPTIONS).arg("-i").arg(input_arg(input)).args(["-map", &format!("0:{index}")]);
             }
             TextSource::File(path) => {
-                if let Ok(raw) = tokio::fs::read(path).await
-                    && let Some(charset) = guess_charset(&raw)
+                if let Ok(head) = read_head(path, CHARSET_SAMPLE).await
+                    && let Some(charset) = guess_charset(&head)
                 {
                     cmd.args(["-sub_charenc", charset]);
                 }
@@ -762,14 +778,29 @@ fn sniff_image(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
+/// The largest subtitle file converted to WebVTT: a film's text track takes
+/// well under a megabyte, the most elaborate ASS tens of them. Anything
+/// bigger (a picture track's `.sup`, a file that isn't subtitles) is
+/// refused before it is read into memory.
+const MAX_SUBTITLE_FILE: u64 = 64 << 20;
+/// How much of a subtitle file its charset is told from.
+const CHARSET_SAMPLE: usize = 1 << 20;
+
+/// The first `limit` bytes of the file at `path` (all of a shorter one).
+async fn read_head(path: &Path, limit: usize) -> std::io::Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    let mut head = Vec::new();
+    tokio::fs::File::open(path).await?.take(limit as u64).read_to_end(&mut head).await?;
+    Ok(head)
+}
+
 /// Text subtitle files are frequently not UTF-8. UTF-16 with a BOM is handled by
 /// ffmpeg; anything else that is not valid UTF-8 is assumed to be Windows-1252.
+/// `raw` may be the start of the file only: a character cut off at its end
+/// is no sign of another charset.
 fn guess_charset(raw: &[u8]) -> Option<&'static str> {
-    if raw.starts_with(&[0xFF, 0xFE]) || raw.starts_with(&[0xFE, 0xFF]) || std::str::from_utf8(raw).is_ok() {
-        None
-    } else {
-        Some("CP1252")
-    }
+    let utf8 = std::str::from_utf8(raw).map_or_else(|err| err.error_len().is_none(), |_| true);
+    if raw.starts_with(&[0xFF, 0xFE]) || raw.starts_with(&[0xFE, 0xFF]) || utf8 { None } else { Some("CP1252") }
 }
 
 pub(crate) type Locks = Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>;
@@ -1363,5 +1394,25 @@ mod tests {
         assert_eq!(guess_charset("héllo".as_bytes()), None);
         assert_eq!(guess_charset(&[b'h', 0xE9, b'l']), Some("CP1252"));
         assert_eq!(guess_charset(&[0xFF, 0xFE, b'h', 0]), None);
+        // A first megabyte that cuts "é" in two.
+        assert_eq!(guess_charset(&"hé".as_bytes()[..2]), None);
+    }
+
+    #[tokio::test]
+    async fn subtitle_files_too_big_to_be_text_are_refused_unread() {
+        let dir = tempfile::tempdir().unwrap();
+        let extractor = extractor_without_ffmpeg(dir.path());
+        let sup = dir.path().join("movie.en.sup");
+        let name = sup.to_string_lossy().into_owned();
+        std::fs::File::create(&sup).unwrap().set_len(MAX_SUBTITLE_FILE + 1).unwrap();
+        // Refused as it is, neither read nor given to FFmpeg (not there).
+        match extractor.subtitle(&name, None).await {
+            Err(ApiError::BadRequest(message)) => assert!(message.contains("64 MB at most"), "{message}"),
+            other => panic!("{other:?}"),
+        }
+        // One just small enough goes to FFmpeg, its charset told from its start.
+        std::fs::File::options().write(true).open(&sup).unwrap().set_len(MAX_SUBTITLE_FILE).unwrap();
+        assert!(matches!(extractor.subtitle(&name, None).await, Err(ApiError::Internal(_))));
+        assert_eq!(read_head(&sup, CHARSET_SAMPLE).await.unwrap().len(), CHARSET_SAMPLE);
     }
 }
