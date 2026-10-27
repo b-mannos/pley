@@ -169,11 +169,13 @@ internal fun NavigationDrawerScope.TvRail(
         Modifier
             .fillMaxHeight()
             .drawBehind {
-                if (!open) return@drawBehind
-                val panel = size.width - RailShadow.toPx()
+                // Painted while the rail is wider than closed, closing too: the drawer narrows
+                // after focus has left it, and the page showed through it, over its entries.
+                if (!open && size.width <= ClosedWidth.toPx() + 1f) return@drawBehind
+                val panel = if (open) size.width - RailShadow.toPx() else size.width
                 drawRect(PleyColors.Surface.copy(alpha = 0.96f), size = Size(panel, size.height))
                 // A stretched picture rather than a gradient shader (GradientBitmaps): cheaper on TV GPUs.
-                drawStretched(RailEdge, Offset(panel, 0f), Size(size.width - panel, size.height))
+                drawStretched(RailEdge, Offset(panel, 0f), Size(RailShadow.toPx(), size.height))
             }
             .padding(end = if (open) RailShadow else 0.dp),
     ) {
@@ -361,6 +363,9 @@ private val ItemGap = 8.dp
 
 /** The open rail's soft right edge. */
 private val RailShadow = 64.dp
+
+/** The closed rail: 56 dp entries, 8 dp either side. */
+private val ClosedWidth = 72.dp
 
 /** That edge: surface at 85 % to clear. */
 private val RailEdge by lazy { GradientBitmaps.horizontal(0f to PleyColors.Surface.copy(alpha = 0.85f), 1f to PleyColors.Surface.copy(alpha = 0f)) }
