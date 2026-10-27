@@ -39,8 +39,9 @@ lets pages load only pley's own scripts and styles. Password checks queue
 
 pley's Samsung and LG TV apps are web apps their TVs load from the TV
 itself, and their web engines hold them to CORS: their requests come with
-`Origin: file://` (or `null`, or an `app://` address, which no website
-has). For those origins only, the API and
+`Origin: file://` (or `null`, or an `app://` address). A website's page
+in a sandboxed frame sends `null` too, but these answers only ever carry
+what a token in `Authorization` opens, never a cookie's. For those origins only, the API and
 `/.well-known/oauth-authorization-server` answer CORS: a preflight lets
 `Authorization`, `Content-Type`, `Accept` and `Range` through for 10
 minutes, and answers carry `Access-Control-Allow-Origin: *` and expose

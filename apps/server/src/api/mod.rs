@@ -200,7 +200,10 @@ const FORM_MAX: usize = 16 * 1024;
 /// Whether a request comes from one of pley's packaged TV apps: Samsung's
 /// and LG's web runtimes load them from the TV (`file://`), so their
 /// requests come with `Origin: file://`, `null`, or an `app://` address.
-/// No website has such an origin.
+/// A website's page in a sandboxed frame sends `null` too: what it gets is
+/// only what a token it holds opens (no cookie is let through, see
+/// [`tv_app_cors`]), and starting a TV sign-in still takes someone signed
+/// in to type its code and allow it.
 fn tv_app_origin(origin: &[u8]) -> bool {
     matches!(origin, b"null" | b"file://") || origin.starts_with(b"app://")
 }
