@@ -4,7 +4,7 @@ import type { ClientCaps, ItemDetail, MediaFile, MediaStream, PlaybackInfo, Play
 import type { KeyValue } from "../../src/auth/tokens";
 import { PlaybackController, type PlayerEnv } from "../../src/player/controller";
 import type { EngineListener, EngineSource, EngineStatus, PlayerEngine } from "../../src/player/engine";
-import { dvContainerMode, dvRetryMode, initialAudio, initialSubtitle, playbackRequest, withTracks, type Choices } from "../../src/player/plan";
+import { dvContainerMode, dvRetryMode, initialAudio, initialSubtitle, playbackRequest, playingAudio, withTracks, type Choices } from "../../src/player/plan";
 import { ORIGINAL } from "../../src/player/quality";
 import { Reporter } from "../../src/player/reporter";
 import { NetworkError } from "../../src/net/transport";
@@ -93,7 +93,7 @@ const LG: ClientCaps = {
 
 function choices(over: Partial<Choices> = {}): Choices {
   const f = file();
-  return { file: f, startMs: 600_000, audio: f.streams[1]!, subtitle: null, quality: ORIGINAL, mode: "auto", streaming: false, sideload: true, ...over };
+  return { file: f, startMs: 600_000, audio: null, subtitle: null, quality: ORIGINAL, mode: "auto", streaming: false, sideload: true, ...over };
 }
 
 function info(over: Partial<PlaybackInfo> = {}): PlaybackInfo {
@@ -129,23 +129,21 @@ describe("the audio to start with", () => {
     return f;
   }
 
-  it("is the E-AC-3 in the same language when the TrueHD first in the file doesn't play here, never the commentary", () => {
-    expect(initialAudio(remux(), null, LG)?.index).toBe(3);
+  it("is the track asked for; else none, for the server to choose the one this TV plays best", () => {
+    expect(initialAudio(remux(), 2)?.index).toBe(2);
+    expect(initialAudio(remux(), null)).toBeNull();
+    expect(initialAudio(remux(), 9)).toBeNull();
   });
 
-  it("stays the server's when it plays here, or when nothing better does", () => {
-    expect(initialAudio(remux(), null, { ...LG, audio_passthrough: ["ac3", "eac3", "truehd"] })?.index).toBe(1);
-    const lone = remux();
-    lone.streams = lone.streams.filter((s) => s.index !== 3);
-    expect(initialAudio(lone, null, LG)?.index).toBe(1);
-    expect(initialAudio(remux(), 2, LG)?.index).toBe(2);
-  });
-
-  it("is named in the request, since the server judges a file played as it is by its own pick", () => {
+  it("is named in the request only when there is one", () => {
     const f = remux();
-    const req = playbackRequest(70, choices({ file: f, audio: initialAudio(f, null, LG) }), "webos-abc", LG, true);
-    expect(req.audio_index).toBe(3);
-    expect(playbackRequest(70, choices(), "webos-abc", LG, true).audio_index).toBeUndefined();
+    expect(playbackRequest(70, choices({ file: f, audio: initialAudio(f, 3) }), "webos-abc", LG, true).audio_index).toBe(3);
+    expect(playbackRequest(70, choices({ file: f, audio: initialAudio(f, null) }), "webos-abc", LG, true).audio_index).toBeUndefined();
+  });
+
+  it("is, once the session starts, the one the server says plays", () => {
+    expect(playingAudio(remux(), info({ audio_index: 3 }))?.index).toBe(3);
+    expect(playingAudio(remux(), info({ audio_index: null }))?.index).toBe(1);
   });
 });
 
@@ -153,7 +151,8 @@ describe("tracks picked on the title's page", () => {
   it("are the ones a playback started from its details begins with, the other versions left alone", () => {
     const picked = withTracks(item(file()), 7, 2, 4);
     const f = picked.files[0]!;
-    expect([initialAudio(f, null, { ...LG, audio_passthrough: ["truehd"] })?.index, initialSubtitle(f, null)?.index]).toEqual([2, 4]);
+    // The subtitles from the details kept; the audio is the server's to choose, the pick saved with it.
+    expect([initialAudio(f, null), initialSubtitle(f, null)?.index]).toEqual([null, 4]);
     expect(initialSubtitle(withTracks(picked, 7, 2, null).files[0]!, null)).toBeNull();
     expect(withTracks(item(file()), 8, 2, 4).files[0]).toEqual(file());
   });
@@ -165,7 +164,7 @@ describe("the play request", () => {
     expect(req).toEqual({ item_id: 70, file_id: 7, start_ms: 600_000, mode: "auto", client_id: "webos-abc", caps: LG, keyed_urls: true });
   });
 
-  it("names the audio track when it doesn't play here, even in a direct play", () => {
+  it("names the audio track picked, even in a direct play", () => {
     const f = file();
     const req = playbackRequest(70, choices({ audio: f.streams[2]! }), "c", LG, true);
     expect(req.audio_index).toBe(2);
@@ -244,7 +243,10 @@ class FakeEngine implements PlayerEngine {
   audioTracks() {
     return [];
   }
-  selectAudio() {
+  /** The audio tracks switched to, by their place among the file's. */
+  switched: number[] = [];
+  selectAudio(position: number) {
+    this.switched.push(position);
     return true;
   }
   frameCounts() {
@@ -264,6 +266,8 @@ function world(detail: ItemDetail, answer: (req: PlaybackRequest) => PlaybackInf
   const calls: string[] = [];
   const requests: PlaybackRequest[] = [];
   const listeners: ((e: ServerEvent) => void)[] = [];
+  /** The tracks saved with PUT /api/items/{id}/streams: audio (undefined: left out), subtitles. */
+  const saved: [number | null | undefined, number | null][] = [];
   /** `down`: nothing answers (the Wi-Fi dropped, the server restarts). */
   const net = { down: false };
   const answered = <T>(value: () => T): Promise<T> => (net.down ? Promise.reject(new NetworkError("Can't reach the server")) : Promise.resolve(value()));
@@ -281,7 +285,9 @@ function world(detail: ItemDetail, answer: (req: PlaybackRequest) => PlaybackInf
     stopSession: async (id: string) => void calls.push(`delete ${id}`),
     sessionStatus: () => answered(() => ({ session_id: "s1", method: "direct", transcode: null })),
     reachable: () => answered(() => ({})),
-    setStreams: async () => undefined,
+    setStreams: async (_item: number, _file: number | null, audio: number | null | undefined, subtitle: number | null) => void saved.push([audio, subtitle]),
+    // Subtitle files: never answered here.
+    send: () => new Promise(() => undefined),
     trickplay: async () => {
       throw new Error("not ready");
     },
@@ -304,7 +310,7 @@ function world(detail: ItemDetail, answer: (req: PlaybackRequest) => PlaybackInf
       return () => undefined;
     },
   };
-  return { env, engine, calls, requests, net, send: (e: ServerEvent) => listeners.forEach((l) => l(e)) };
+  return { env, engine, calls, requests, saved, net, send: (e: ServerEvent) => listeners.forEach((l) => l(e)) };
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 20));
@@ -327,6 +333,37 @@ describe("a playback session", () => {
     await settle();
     expect(w.requests.map((r) => r.mode)).toEqual(["remux"]);
     expect(w.engine.prepared[0]).toMatchObject({ hls: true });
+    c.close();
+  });
+
+  it("plays the audio the server chose for this TV, and its menu says so", async () => {
+    // The server's pick: the TrueHD, second of the file's audio tracks (a receiver that takes it).
+    const w = world(item(file()), () => info({ audio_index: 2 }));
+    const c = new PlaybackController({ itemId: 70 }, w.env, 0);
+    c.start();
+    await settle();
+    expect(w.requests[0]!.audio_index).toBeUndefined();
+    expect(w.engine.switched).toEqual([1]);
+    expect(c.state.value.audio.filter((a) => a.selected).map((a) => a.index)).toEqual([2]);
+    c.close();
+  });
+
+  it("saves subtitles picked without the audio the server chose, and the audio once picked", async () => {
+    const w = world(item(file()), () => info());
+    const c = new PlaybackController({ itemId: 70 }, w.env, 0);
+    c.start();
+    await settle();
+    c.selectSubtitle(4);
+    c.selectAudio(2);
+    c.selectSubtitle(null);
+    await settle();
+    expect(w.saved).toEqual([
+      [undefined, 4],
+      [2, 4],
+      [2, null],
+    ]);
+    // And the request names it from then on.
+    expect(w.requests[w.requests.length - 1]!.audio_index).toBe(2);
     c.close();
   });
 

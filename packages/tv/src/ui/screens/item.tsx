@@ -947,10 +947,12 @@ function TracksPanel(p: { item: ItemDetail; file: MediaFile; files: MediaFile[];
   const subs = subtitleStreams(p.file);
   const [chosenAudio, setChosenAudio] = useState<number | null>(p.file.selected_audio ?? audio.filter((a) => a.default)[0]?.index ?? audio[0]?.index ?? null);
   const [chosenSub, setChosenSub] = useState<number | null>(p.file.selected_subtitle ?? null);
-  const save = (a: number | null, s: number | null) => {
+  // Subtitles picked alone leave the audio as it was picked before, or to the player.
+  const [audioPicked, setAudioPicked] = useState(false);
+  const save = (a: number | null | undefined, s: number | null) => {
     // Play, pressed at once, starts with these (the player starts from the
     // details kept); the show's other episodes are asked for again.
-    app.tracksChanged(withTracks(p.item, p.file.id, a, s));
+    app.tracksChanged(withTracks(p.item, p.file.id, a === undefined ? (p.file.selected_audio ?? null) : a, s));
     ui.api.setStreams(p.item.id, p.file.id, a, s).then(p.onSaved, (e) => ui.toast(sentence(errorMessage(e)), true));
   };
   const firstChecked = p.files.length > 1 ? "version" : audio.length >= 2 ? "audio" : "subs";
@@ -976,6 +978,7 @@ function TracksPanel(p: { item: ItemDetail; file: MediaFile; files: MediaFile[];
               initial={firstChecked === "audio" && s.index === chosenAudio}
               onSelect={() => {
                 setChosenAudio(s.index);
+                setAudioPicked(true);
                 save(s.index, chosenSub);
               }}
             />
@@ -991,7 +994,7 @@ function TracksPanel(p: { item: ItemDetail; file: MediaFile; files: MediaFile[];
             initial={firstChecked === "subs" && chosenSub === null}
             onSelect={() => {
               setChosenSub(null);
-              save(chosenAudio, null);
+              save(audioPicked ? chosenAudio : undefined, null);
             }}
           />
           {subs.map((s) => (
@@ -1002,7 +1005,7 @@ function TracksPanel(p: { item: ItemDetail; file: MediaFile; files: MediaFile[];
               initial={firstChecked === "subs" && s.index === chosenSub}
               onSelect={() => {
                 setChosenSub(s.index);
-                save(chosenAudio, s.index);
+                save(audioPicked ? chosenAudio : undefined, s.index);
               }}
             />
           ))}

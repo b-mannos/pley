@@ -358,7 +358,8 @@ export class Api {
     return this.call("POST", `/api/items/${id}/prefetch`);
   }
 
-  setStreams(itemId: Id, fileId: Id | null, audio: number | null, subtitle: number | null): Promise<unknown> {
+  /** The tracks picked for an item (the whole show for an episode); `audio` left out keeps the audio picked before. */
+  setStreams(itemId: Id, fileId: Id | null, audio: number | null | undefined, subtitle: number | null): Promise<unknown> {
     return this.call("PUT", `/api/items/${itemId}/streams`, { file_id: fileId ?? undefined, audio_index: audio, subtitle_index: subtitle });
   }
 

@@ -35,6 +35,7 @@ import {
   needsIndexes,
   picturePath,
   playbackRequest,
+  playingAudio,
   startMs as startOfPlay,
   subtitleStreams,
   willStream,
@@ -257,6 +258,8 @@ export class PlaybackController {
   private caps: ClientCaps | null = null;
   private file: MediaFile | null = null;
   private audio: MediaStream | null = null;
+  /** The audio was picked (asked for, or in the menu), not chosen for this TV by the server: it is saved for next time. */
+  private audioPicked = false;
   private subtitle: MediaStream | null = null;
   private quality: QualityPreset = ORIGINAL;
   private markers: Marker[] = [];
@@ -392,7 +395,8 @@ export class PlaybackController {
     this.current = req;
     const chosen = chooseFile(detail, req.fileId, this.caps);
     this.file = chosen;
-    this.audio = initialAudio(chosen, req.audioIndex, this.caps);
+    this.audio = initialAudio(chosen, req.audioIndex);
+    this.audioPicked = this.audio !== null;
     this.subtitle = initialSubtitle(chosen, req.subtitleIndex);
     this.quality = chooseQuality(this.env.quality.remembered(), qualitiesFor(chosen));
     this.offset = chosen ? this.env.offsets.get(this.env.api.server, chosen.id) : 0;
@@ -500,6 +504,8 @@ export class PlaybackController {
       return;
     }
     this.info = info;
+    // No track picked: the one the server chose for this TV plays, and the menu says so.
+    if (!this.audio) this.audio = playingAudio(chosen, info);
     this.sessionEnded = false;
     this.live = null;
     this.update({
@@ -969,6 +975,7 @@ export class PlaybackController {
     const chosen = audioStreams(this.file).filter((s) => s.index === index)[0];
     if (!chosen || chosen.index === this.audio?.index) return;
     this.audio = chosen;
+    this.audioPicked = true;
     this.saveStreams();
     this.publishChoices();
     const info = this.info;
@@ -1128,7 +1135,7 @@ export class PlaybackController {
         fileId: this.file?.id ?? this.current.fileId ?? null,
         startMs: this.livePosition(),
         fromStart: false,
-        audioIndex: this.audio?.index ?? null,
+        audioIndex: this.audioPicked ? this.audio?.index ?? null : null,
         subtitleIndex: this.subtitle?.index ?? null,
       },
       quality: this.quality.id,
@@ -1330,13 +1337,17 @@ export class PlaybackController {
     });
   }
 
-  /** PUT /api/items/{id}/streams: the next episode, or the next viewing, starts with the same tracks. */
+  /**
+   * PUT /api/items/{id}/streams: the next episode, or the next viewing,
+   * starts with the same tracks. Audio the server chose for this TV isn't
+   * saved: another device may play another track of that language better.
+   */
   private saveStreams(): void {
     const itemId = this.item?.id;
     if (itemId == null) return;
     const api = this.env.api;
     const fileId = this.file?.id ?? null;
-    const audio = this.audio?.index ?? null;
+    const audio = this.audioPicked ? this.audio?.index ?? null : undefined;
     const subtitle = this.subtitle?.index ?? null;
     this.env.reporter.send(() => api.setStreams(itemId, fileId, audio, subtitle));
     // The next episode's details, asked for before, name the tracks it

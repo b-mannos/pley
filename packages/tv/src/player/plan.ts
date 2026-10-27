@@ -6,9 +6,10 @@ import type { QualityPreset } from "./quality";
  * How a playback is asked for: which file, from where, with which tracks,
  * and what goes in the body of POST /api/playback (the Android app's
  * PlaybackPlan). Track indexes go to the server only when it has to act on
- * them: `audio_index` when the audio can't play here or the session
- * streams HLS, `subtitle_index` only to burn pictures into HLS, and never
- * when the TV draws them from the server's .mks.
+ * them: `audio_index` for a track picked (or the one playing, when a
+ * session starts again), else the server chooses the one this TV plays
+ * best; `subtitle_index` only to burn pictures into HLS, and never when
+ * the TV draws them from the server's .mks.
  */
 
 /** What starts a playback. */
@@ -47,34 +48,21 @@ export function startMs(item: ItemDetail, req: PlayRequest): number {
   return Math.max(0, item.user_state.position_ms);
 }
 
-/** The audio the server plays when a request names none: the profile's choice (`selected_audio`), else the file's default, else the first. */
-export function serverAudio(file: MediaFile | null): MediaStream | null {
-  const audio = audioStreams(file);
-  return audio.filter((s) => s.index === file?.selected_audio)[0] ?? audio.filter((s) => s.default)[0] ?? audio[0] ?? null;
-}
-
 /**
- * The audio to start with: as asked, else the server's. When that one
- * doesn't play here (TrueHD or DTS on a TV whose output takes neither) and
- * another track in its language does, that one, with the most channels:
- * the file then plays as it is (a remux's E-AC-3 keeps its Atmos) instead
- * of the server converting the first. Never a commentary (the Android
- * app's PlaybackPlan.initialAudio).
+ * The audio to start with: the track asked for; else none, and the server
+ * chooses, of the profile's language, the track this TV plays best (as it
+ * is rather than converted, its receiver's channels, lossless, Atmos
+ * passed through), which the session names (`playingAudio`).
  */
-export function initialAudio(file: MediaFile | null, requested: number | null | undefined, caps: ClientCaps | null = null): MediaStream | null {
-  const audio = audioStreams(file);
-  const asked = requested != null ? audio.filter((s) => s.index === requested)[0] : undefined;
-  if (asked) return asked;
-  const chosen = serverAudio(file);
-  if (!chosen || !caps || audioPlaysHere(chosen, caps)) return chosen;
-  const better = audio
-    .filter((s) => s !== chosen && s.language === chosen.language && !isCommentary(s) && audioPlaysHere(s, caps))
-    .sort((a, b) => (b.channels ?? 0) - (a.channels ?? 0) || Number(!!b.default) - Number(!!a.default) || a.index - b.index);
-  return better[0] ?? chosen;
+export function initialAudio(file: MediaFile | null, requested: number | null | undefined): MediaStream | null {
+  if (requested == null) return null;
+  return audioStreams(file).filter((s) => s.index === requested)[0] ?? null;
 }
 
-function isCommentary(s: MediaStream): boolean {
-  return /commentary/i.test(s.title ?? "");
+/** The audio a session plays: the server's `audio_index`, else the file's default, else the first. */
+export function playingAudio(file: MediaFile | null, info: PlaybackInfo): MediaStream | null {
+  const audio = audioStreams(file);
+  return audio.filter((s) => s.index === info.audio_index)[0] ?? audio.filter((s) => s.default)[0] ?? audio[0] ?? null;
 }
 
 /** The subtitles to start with: as asked, else the profile's choice; `null` is off, whatever the file flags. */
@@ -134,7 +122,6 @@ export interface Choices {
 
 /** The body of POST /api/playback for `choices`. */
 export function playbackRequest(itemId: number, c: Choices, clientId: string, caps: ClientCaps | null, keyed: boolean): PlaybackRequest {
-  const audioHere = audioPlaysHere(c.audio, caps);
   const req: PlaybackRequest = {
     item_id: itemId,
     file_id: c.file.id,
@@ -143,9 +130,7 @@ export function playbackRequest(itemId: number, c: Choices, clientId: string, ca
     client_id: clientId,
     caps: caps ?? emptyCaps(),
   };
-  // Named when the server must convert it, or when it isn't the one the server would play (it judges a file played as it is by that one).
-  const notTheServers = !!c.audio && c.audio.index !== serverAudio(c.file)?.index;
-  if (c.audio && (c.streaming || !audioHere || notTheServers)) req.audio_index = c.audio.index;
+  if (c.audio) req.audio_index = c.audio.index;
   if (c.subtitle && c.streaming && isPicture(c.subtitle) && !c.sideload) req.subtitle_index = c.subtitle.index;
   if (c.quality.maxBitrateKbps != null) req.max_bitrate = c.quality.maxBitrateKbps;
   if (c.quality.maxHeight != null) req.max_height = c.quality.maxHeight;
@@ -165,15 +150,12 @@ export function emptyCaps(): ClientCaps {
 }
 
 /**
- * Whether `info`'s session must be asked for again with the track
- * indexes: it streams, though it wasn't expected to, and its audio isn't
- * the one chosen, or the subtitles chosen are pictures to burn in.
+ * Whether `info`'s session must be asked for again with the subtitle
+ * index: it streams, though it wasn't expected to, and the subtitles
+ * chosen are pictures to burn in.
  */
 export function needsIndexes(info: PlaybackInfo, sent: PlaybackRequest, c: Choices): boolean {
-  if (!info.hls) return false;
-  const wrongAudio = !!c.audio && sent.audio_index == null && info.audio_index != null && info.audio_index !== c.audio.index;
-  const missingBurn = isPicture(c.subtitle) && sent.subtitle_index == null && !c.sideload;
-  return wrongAudio || missingBurn;
+  return info.hls && isPicture(c.subtitle) && sent.subtitle_index == null && !c.sideload;
 }
 
 /** The container's MIME type, for players that can't tell from the address. */
