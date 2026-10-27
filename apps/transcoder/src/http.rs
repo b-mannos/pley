@@ -16,8 +16,8 @@ use axum::{Json, Router};
 use pley_transcoder_api::{
     ConversionStatus, CoverRequest, FileContainer, Fingerprint, FingerprintRequest, Frames, FramesRequest, HoldRequest,
     JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo, PrefetchRequest, Prefetched, ProbeRequest,
-    SUBTITLES_COMPLETE_HEADER, SubtitleRequest, ThumbnailRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo,
-    TrickplayRequest,
+    SUBTITLES_COMPLETE_HEADER, SubtitleRequest, TOKEN_ENV, ThumbnailRequest, TranscoderInfo, TranscoderStatus,
+    TrickplayInfo, TrickplayRequest,
 };
 use tokio_util::io::ReaderStream;
 
@@ -153,20 +153,61 @@ pub fn router(state: Arc<AppState>) -> Router {
 }
 
 async fn auth(State(state): Shared, request: Request, next: Next) -> Response {
-    if let Some(expected) = &state.token
-        && request.uri().path() != "/health"
-    {
-        let presented = request
-            .headers()
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .unwrap_or_default();
-        if !constant_time_eq(presented.as_bytes(), expected.as_bytes()) {
-            return ApiError::Unauthorized.into_response();
+    if request.uri().path() == "/health" {
+        return next.run(request).await;
+    }
+    match &state.token {
+        Some(expected) => {
+            let presented = request
+                .headers()
+                .get(header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "))
+                .unwrap_or_default();
+            if !constant_time_eq(presented.as_bytes(), expected.as_bytes()) {
+                return ApiError::Unauthorized.into_response();
+            }
+        }
+        // Without a token (on this computer only, see `main.rs`), only what
+        // is addressed to this computer is answered: a web page whose own
+        // name a DNS server turned into 127.0.0.1 (DNS rebinding) still
+        // sends that name, and must not read files through the transcoder.
+        None => {
+            if let Some(host) = foreign_host(&request) {
+                return ApiError::Forbidden(format!(
+                    "without a token this transcoder only answers requests addressed to localhost, 127.0.0.1 \
+                     or [::1], not {host}: give it a token ({TOKEN_ENV}) to reach it by another name"
+                ))
+                .into_response();
+            }
         }
     }
     next.run(request).await
+}
+
+/// The host `request` is addressed to (its `Host`, and the authority of
+/// its target when it has one), said for an error, when that isn't this
+/// computer by its loopback name or address.
+fn foreign_host(request: &Request) -> Option<String> {
+    let host = request.headers().get(header::HOST).map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned());
+    let authority = request.uri().authority().map(|a| a.as_str().to_owned());
+    if host.is_none() && authority.is_none() {
+        return Some("one that names no host".into());
+    }
+    host.into_iter().chain(authority).find(|name| !is_loopback_host(name)).map(|name| format!("{name:?}"))
+}
+
+/// Whether `host` (`name`, `name:port`, `[v6]` or `[v6]:port`) is
+/// `localhost` or a loopback address.
+fn is_loopback_host(host: &str) -> bool {
+    let name = match host.strip_prefix('[') {
+        Some(bracketed) => match bracketed.split_once(']') {
+            Some((address, port)) if port.is_empty() || port.starts_with(':') => address,
+            _ => return false,
+        },
+        None => host.rsplit_once(':').map_or(host, |(name, _)| name),
+    };
+    name.eq_ignore_ascii_case("localhost") || name.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -513,7 +554,10 @@ mod tests {
     ) -> Answer {
         let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
         let body = json.unwrap_or_default();
-        let mut message = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n");
+        let mut message = format!("{method} {path} HTTP/1.1\r\nConnection: close\r\n");
+        if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("host")) {
+            message.push_str("Host: localhost\r\n");
+        }
         for (name, value) in headers {
             message.push_str(&format!("{name}: {value}\r\n"));
         }
@@ -607,6 +651,53 @@ mod tests {
         let info = request(addr, "GET", "/v1/info", Some("Bearer s3cret"), None).await;
         assert_eq!(info.status, 200);
         assert_eq!(serde_json::from_str::<TranscoderInfo>(&info.body).unwrap().version, "1.2.3");
+    }
+
+    #[tokio::test]
+    async fn without_a_token_only_requests_to_this_computer_are_answered() {
+        let dir = tempfile::tempdir().unwrap();
+        let addr = serve(dir.path(), None).await;
+        let at_addr = addr.to_string();
+        for host in ["localhost", "LocalHost:7540", "127.0.0.1", at_addr.as_str(), "[::1]", "[::1]:7540"] {
+            let answer = request_with(addr, "GET", "/v1/info", &[("Host", host)], None).await;
+            assert_eq!(answer.status, 200, "{host}");
+        }
+        // A web page whose own name was made 127.0.0.1 (DNS rebinding)
+        // still sends that name: it reads nothing, converts nothing.
+        let input = dir.path().join("movie.mkv");
+        std::fs::write(&input, b"x").unwrap();
+        let conversion = serde_json::json!({"input": input}).to_string();
+        let subtitles = serde_json::json!({"path": dir.path().join("movie.vtt")}).to_string();
+        for host in ["attacker.example", "attacker.example:7540", "localhost.attacker.example", "127.0.0.1.nip.io"] {
+            for (method, path, body) in [
+                ("GET", "/v1/status", None),
+                ("GET", "/metrics", None),
+                ("POST", "/v1/conversions", Some(conversion.clone())),
+                ("POST", "/v1/subtitles", Some(subtitles.clone())),
+            ] {
+                let answer = request_with(addr, method, path, &[("Host", host)], body).await;
+                assert_eq!((answer.status, answer.code()), (403, "forbidden".to_owned()), "{method} {path} to {host}");
+                assert!(answer.body.contains("PLEY_TRANSCODER_TOKEN"), "{}", answer.body);
+            }
+        }
+        let health = request_with(addr, "GET", "/health", &[("Host", "attacker.example")], None).await;
+        assert_eq!((health.status, health.body.as_str()), (200, "ok"), "nothing to read there");
+
+        // With a token, the token decides: other machines use its name.
+        let dir = tempfile::tempdir().unwrap();
+        let addr = serve(dir.path(), Some("s3cret")).await;
+        let headers = [("Host", "nas.lan:7540"), ("Authorization", "Bearer s3cret")];
+        assert_eq!(request_with(addr, "GET", "/v1/info", &headers, None).await.status, 200);
+    }
+
+    #[test]
+    fn loopback_hosts() {
+        for host in ["localhost", "localhost:80", "127.0.0.1", "127.3.2.1:7540", "[::1]", "[::1]:7540"] {
+            assert!(is_loopback_host(host), "{host}");
+        }
+        for host in ["", "nas.lan", "0.0.0.0:7540", "192.168.1.2", "localhost.example", "[::1]x", "[::2]:80", "::1"] {
+            assert!(!is_loopback_host(host), "{host}");
+        }
     }
 
     #[tokio::test]

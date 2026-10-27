@@ -47,13 +47,19 @@ a GPU, then point the server at it with `--transcoder-url http://host:7540
 for example through the same network mount.
 
 All endpoints except `GET /health` require `Authorization: Bearer <token>` when
-a token is configured. Errors are `{"code": "...", "message": "..."}` with the
-following status codes:
+a token is configured. Without one (only on a loopback address), the
+transcoder answers only requests addressed to this computer: a `Host` of
+`localhost`, `127.0.0.1` or `[::1]`, with any port. A web page whose own
+name was pointed at 127.0.0.1 (DNS rebinding) sends that name and is
+refused. Other accounts on the same computer can still reach it: where that
+matters, give it a token. Errors are `{"code": "...", "message": "..."}`
+with the following status codes:
 
 | Status | Code | Meaning |
 |---|---|---|
 | 400 | `bad_request` | invalid request |
 | 401 | `unauthorized` | missing or wrong token |
+| 403 | `forbidden` | no token, and the request is addressed to another host than this computer |
 | 404 | `job_not_found` | unknown job (expired, deleted, or the transcoder restarted) |
 | 404 | `not_found` | unknown file, or segment out of range |
 | 500 | `ffmpeg_failed` | ffmpeg or ffprobe could not process the file |

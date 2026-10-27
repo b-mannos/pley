@@ -8,6 +8,9 @@ use pley_transcoder_api::ErrorBody;
 pub enum ApiError {
     BadRequest(String),
     Unauthorized,
+    /// Refused whoever asks: a request to a transcoder without a token,
+    /// addressed to another host than this computer.
+    Forbidden(String),
     NotFound(String),
     /// The job does not exist (expired, deleted, transcoder restarted). Distinct
     /// from other 404s so clients only re-create jobs that are really gone.
@@ -29,6 +32,7 @@ impl ApiError {
         match self {
             Self::BadRequest(m) => Self::BadRequest(m.clone()),
             Self::Unauthorized => Self::Unauthorized,
+            Self::Forbidden(m) => Self::Forbidden(m.clone()),
             Self::NotFound(m) => Self::NotFound(m.clone()),
             Self::JobNotFound(m) => Self::JobNotFound(m.clone()),
             Self::Busy(m) => Self::Busy(m.clone()),
@@ -60,6 +64,7 @@ impl IntoResponse for ApiError {
         let (status, code, message) = match self {
             ApiError::BadRequest(m) => (StatusCode::BAD_REQUEST, "bad_request", m),
             ApiError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized", "missing or invalid token".into()),
+            ApiError::Forbidden(m) => (StatusCode::FORBIDDEN, "forbidden", m),
             ApiError::NotFound(m) => (StatusCode::NOT_FOUND, "not_found", m),
             ApiError::JobNotFound(m) => (StatusCode::NOT_FOUND, "job_not_found", m),
             ApiError::Busy(m) => (StatusCode::SERVICE_UNAVAILABLE, "busy", m),
@@ -93,6 +98,7 @@ mod tests {
             (ApiError::BadRequest("bad".into()), 400, "bad_request"),
             (ApiError::Unauthorized, 401, "unauthorized"),
             (ApiError::NotFound("missing".into()), 404, "not_found"),
+            (ApiError::Forbidden("elsewhere".into()), 403, "forbidden"),
             (ApiError::JobNotFound("gone".into()), 404, "job_not_found"),
             (ApiError::Busy("full".into()), 503, "busy"),
             (ApiError::Timeout("slow".into()), 504, "timeout"),
