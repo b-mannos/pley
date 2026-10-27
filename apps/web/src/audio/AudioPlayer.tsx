@@ -365,6 +365,13 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       if (hlsRef.current || !audio.getAttribute("src")) return;
       const s = sessionRef.current;
       const code = audio.error?.code;
+      if (audio.error?.message.includes("MediaSink")) {
+        // Firefox without a sound output (none there, or it went away)
+        // says it can't decode, and plays on in silence: another session
+        // or a transcode wouldn't help.
+        setError("No sound output: check the speakers or headphones");
+        return;
+      }
       const undecodable = code === MediaError.MEDIA_ERR_DECODE || code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
       if (s?.method === "direct" && undecodable && !fallbackRef.current) {
         // The browser claimed support but can't decode this file: transcode it instead.
