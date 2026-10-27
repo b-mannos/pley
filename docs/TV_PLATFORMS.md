@@ -321,7 +321,7 @@ counters aren't read on LG, so a struggling stream isn't judged by them.
 | `api/`, `net/`, `auth/` | The HTTP API, the event stream, finding a server, signing in with a code (QR and short link), profiles and their PINs |
 | `state.ts`, `platform.ts` | What the TV keeps (servers, sign-ins, settings, a per-install player id), and what a shell provides |
 | `ui/focus.ts`, `ui/input.ts`, `ui/keys.ts` | Focus moved by the app: rows, columns, grids and free groups, remembered places, panels that keep focus; the remote's keys, held keys at most every 100 ms, long OK |
-| `ui/shell/`, `ui/screens/`, `ui/kit/` | The rail, the back stack and the screens: Home (Continue Watching with remove, My List), libraries with A–Z, items, people, collections, playlists, search, music, Settings, history |
+| `ui/shell/`, `ui/screens/`, `ui/kit/` | The rail, the back stack and the screens: Home (Continue Watching with remove, My List), libraries with A–Z, items, people, collections, playlists (made here, smart ones from a library's filters, entries moved and removed), search, music, Settings, Diagnostics, history |
 | `player/` | The playback session: the play request, the recovery ladder, quality, Up Next, skip markers, seek previews, the sleep timer, reports, music in the background |
 | `subs/` | Subtitles drawn by the app: text as WebVTT from the server, pictures (PGS, VobSub, DVB) decoded from the server's `.mks` and drawn on a canvas, with the offset the person sets |
 | `caps/` | The server's direct-play rules, so the player knows what a play request will get, and Playback details can say why |
