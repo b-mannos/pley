@@ -46,7 +46,7 @@ export function CollectionCard({
         </span>
       </Link>
       <div className="mt-2 px-0.5">
-        <Link to={to} className="block truncate text-sm font-medium text-fg transition-colors hover:text-accent" title={collection.title}>
+        <Link to={to} tabIndex={-1} className="block truncate text-sm font-medium text-fg transition-colors hover:text-accent" title={collection.title}>
           {collection.title}
         </Link>
         <div className="truncate text-xs text-muted">{pluralize(collection.item_count, noun[0], noun[1])}</div>
