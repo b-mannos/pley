@@ -15,6 +15,8 @@ dependencies {
     api(project(":core:caps"))
     api(project(":core:auth"))
     api(libs.androidx.lifecycle.viewmodel.ktx)
+    // SavedStateHandle: what a screen keeps across the process's death (a sign-in in the browser).
+    api(libs.androidx.lifecycle.viewmodel.savedstate)
     api(libs.androidx.navigation3.runtime)
     implementation(libs.kotlinx.serialization.json)
 

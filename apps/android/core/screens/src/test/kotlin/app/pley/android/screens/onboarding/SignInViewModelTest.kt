@@ -1,5 +1,6 @@
 package app.pley.android.screens.onboarding
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import app.pley.android.auth.AuthException
 import app.pley.android.auth.SignInState
@@ -21,22 +22,38 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** A phone's sign-in in the browser: its states, its errors in the module's words, and a closed tab. */
+/**
+ * A phone's sign-in in the browser: its states, its errors in the module's
+ * words, a closed tab, and an answer that comes after Android ended the app.
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SignInViewModelTest {
     private val server = FakeOnboardingSource.SERVER
     private val source = FakeOnboardingSource()
-    private var vm: SignInViewModel? = null
+    private val made = mutableListOf<SignInViewModel>()
 
     @After
     fun tearDown() {
-        vm?.viewModelScope?.cancel()
+        made.forEach { it.viewModelScope.cancel() }
         Dispatchers.resetMain()
     }
 
-    private fun TestScope.signIn(): SignInViewModel {
+    private fun TestScope.signIn(saved: SavedStateHandle = SavedStateHandle()): SignInViewModel {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        return SignInViewModel(source).also { vm = it }
+        return SignInViewModel(source, saved).also { made += it }
+    }
+
+    /** [saved] as Android hands it back to a screen made again. */
+    private fun restored(saved: SavedStateHandle) = SavedStateHandle(saved.keys().associateWith { saved.get<Any>(it) })
+
+    /** What the screen saved once the browser showed the server's page. */
+    private fun TestScope.savedWhileInTheBrowser(): SavedStateHandle {
+        val saved = SavedStateHandle()
+        val before = signIn(saved)
+        before.signIn(null, server)
+        advanceUntilIdle()
+        before.paused()
+        return restored(saved)
     }
 
     @Test
@@ -106,6 +123,52 @@ class SignInViewModelTest {
         source.signInState.value = SignInState.Failed("you didn't allow the app")
         advanceUntilIdle()
         assertEquals(BrowserSignIn.Failed(server, SignInProblem.Refused, "you didn't allow the app"), vm.state.value)
+    }
+
+    @Test
+    fun aSignInFinishedAfterTheAppWasEndedStillSignsIn() = runTest {
+        val saved = savedWhileInTheBrowser()
+        // The app was ended; the browser's answer started a new one, and the sign-in finished there.
+        source.signInState.value = SignInState.SignedIn(server)
+        val vm = signIn(saved)
+        vm.resumed()
+        advanceUntilIdle()
+        assertEquals(BrowserSignIn.SignedIn, vm.state.value)
+        assertEquals(OnboardingMove.Restart(PleyKey.Home), vm.navigation.first())
+    }
+
+    @Test
+    fun aRefusalAfterTheAppWasEndedIsShown() = runTest {
+        val saved = savedWhileInTheBrowser()
+        source.signInState.value = SignInState.Finishing
+        val vm = signIn(saved)
+        advanceUntilIdle()
+        assertEquals(BrowserSignIn.Finishing, vm.state.value)
+        source.signInState.value = SignInState.Failed("you didn't allow the app")
+        advanceUntilIdle()
+        assertEquals(BrowserSignIn.Failed(server, SignInProblem.Refused, "you didn't allow the app"), vm.state.value)
+    }
+
+    @Test
+    fun theTabClosedAfterTheAppWasEndedCancelsWithoutAWord() = runTest {
+        val saved = savedWhileInTheBrowser()
+        val vm = signIn(saved)
+        vm.resumed()
+        advanceUntilIdle()
+        assertEquals(BrowserSignIn.Idle, vm.state.value)
+        // Nothing is under way anymore: an old answer doesn't sign in.
+        val again = signIn(restored(saved))
+        source.signInState.value = SignInState.SignedIn(server)
+        advanceUntilIdle()
+        assertEquals(BrowserSignIn.Idle, again.state.value)
+    }
+
+    @Test
+    fun anOldAnswerDoesntSignInAScreenThatStartedNothing() = runTest {
+        source.signInState.value = SignInState.SignedIn(server)
+        val vm = signIn()
+        advanceUntilIdle()
+        assertEquals(BrowserSignIn.Idle, vm.state.value)
     }
 
     @Test

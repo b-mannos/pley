@@ -64,6 +64,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
@@ -100,7 +101,7 @@ internal fun PhoneProfilesScreen() {
     val activity = LocalActivity.current
     val given = LocalOnboardingSource.current
     val vm = viewModel(key = "profiles") { ProfilesViewModel(given ?: onboardingSource(), tv = false, gate = false) }
-    val signIn = viewModel(key = "profiles-sign-in") { SignInViewModel(given ?: onboardingSource()) }
+    val signIn = viewModel(key = "profiles-sign-in") { SignInViewModel(given ?: onboardingSource(), createSavedStateHandle()) }
     LaunchedEffect(vm) { vm.navigation.collect { navigator.go(it) } }
     LaunchedEffect(signIn) { signIn.navigation.collect { navigator.go(it) } }
     val state by vm.state.collectAsStateWithLifecycle()

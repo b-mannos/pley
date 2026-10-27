@@ -60,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -103,7 +104,7 @@ internal fun PhoneSignInScreen(preselect: String?) {
     val context = LocalContext.current
     val given = LocalOnboardingSource.current
     val servers = viewModel(key = "servers:$preselect") { ServersViewModel(given ?: onboardingSource(), explainFirst = false, preselect = preselect) }
-    val signIn = viewModel(key = "sign-in") { SignInViewModel(given ?: onboardingSource()) }
+    val signIn = viewModel(key = "sign-in") { SignInViewModel(given ?: onboardingSource(), createSavedStateHandle()) }
     val state by servers.state.collectAsStateWithLifecycle()
     val signInState by signIn.state.collectAsStateWithLifecycle()
     val withoutBrowser = remember(state.selected) { noBrowserFor(context, state.selected) }
