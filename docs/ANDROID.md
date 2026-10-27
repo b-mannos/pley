@@ -178,9 +178,10 @@ Rules the build keeps:
 ## Builds
 
 Two flavors, `store` (Google Play and the Amazon Appstore, no self-updater)
-and `direct` (the download the pley server will offer, which may hand an
-update to the installer). Release builds are minified, and signed when the
-release key is given (below).
+and `direct` (the download the pley server will offer, which may later hand
+an update to the installer; it asks for that permission only once it does).
+Release builds are minified, and signed when the release key is given
+(below).
 
 The version is pley's, from `VERSION` at the repository's root, and the
 version code follows from it (1.2.3 is 1020300), so every release installs
