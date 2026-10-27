@@ -25,6 +25,7 @@ Run the setup. Its pages:
      their network paths, such as `\\nas\media\Movies`.
    - **In the notification area, as you**: it runs while you are signed in,
      with your account, network drives included, and starts when you sign in.
+     Opening it again (the Start menu's `pley-server`) opens its page.
    - **Let the service write only in its data folder** (on by default):
      Windows checks every change the service makes against its own SID,
      which only the data folder allows, and takes away the privileges it
@@ -74,6 +75,28 @@ background, without an icon in the notification area: the Start menu's
 | The firewall | A rule named `pley` for its ports, on the kinds of network and from the devices chosen, when others may reach it |
 | The notification area | pley starts when you sign in (Start pley at login, in its menu) |
 | Start menu | `pley-server` (pley's page, or pley itself) and `pley-server logs` |
+
+## Media folders
+
+pley only reads them, as its account: a service as `NT SERVICE\pley` (or
+the user of its own), in the notification area as you. A folder on another
+drive (`D:\Movies`) usually lets every user read it, services included; one
+in your user folder (`C:\Users\<you>\Videos`) doesn't. To let the service
+read one, from an administrator's terminal:
+
+```
+icacls "C:\Users\<you>\Videos" /grant "NT SERVICE\pley:(OI)(CI)RX"
+```
+
+(`(OI)(CI)` passes it on to the files and folders inside, `RX` is read
+only; for the user of its own, its name instead, `pley` unless you chose
+another.) Or in Explorer: the folder's **Properties → Security → Edit →
+Add**, **Locations**: this computer, `NT SERVICE\pley`, **Check Names**,
+**OK**, and **Read & execute**. It applies at once: scan the library again.
+**Let the service write only in its data folder** doesn't limit what it
+reads. A drive letter mapped to a NAS exists only for you: give libraries
+by their network paths (`\\nas\media\Movies`), with **As a service, as a
+user of its own**.
 
 ## Updating
 

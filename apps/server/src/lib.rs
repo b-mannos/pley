@@ -147,6 +147,15 @@ pub fn serve(config: Config, tray: bool) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().thread_name("pley-worker").build()?;
     watch_shutdown();
     let tray = tray && desktop::interactive_session();
+    if let Some(url) = runtime.block_on(pley_answering(config.bind)) {
+        // Opening pley again (from the Start menu, say) opens the one running.
+        if tray {
+            tracing::info!("pley already runs at {url}: opening it");
+            desktop::open(&url);
+            return Ok(());
+        }
+        anyhow::bail!("another pley already listens on {url}");
+    }
     #[cfg(all(feature = "tray", target_os = "macos"))]
     if tray {
         // AppKit owns the main thread; the server runs on a helper thread.
@@ -381,6 +390,24 @@ pub async fn health(config: &Config) -> anyhow::Result<()> {
         .await?;
     anyhow::ensure!(response.status().is_success(), "server answered {}", response.status());
     Ok(())
+}
+
+/// The web address of a pley already answering on `bind`'s port, if one is.
+/// A port taken stops the start anyway, but Windows lets a second server
+/// listen on 0.0.0.0 next to one on 127.0.0.1 (pley's service, say), and the
+/// two then share the port's connections.
+async fn pley_answering(bind: SocketAddr) -> Option<String> {
+    if bind.port() == 0 {
+        return None;
+    }
+    let mut addr = bind;
+    if addr.ip().is_unspecified() {
+        addr.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
+    }
+    let client = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(2)).build().ok()?;
+    let response = client.get(format!("http://{addr}/api/server")).send().await.ok()?;
+    let server: serde_json::Value = response.json().await.ok()?;
+    server.get("setup_required").is_some().then(|| desktop::web_url(addr))
 }
 
 fn display_addr(addr: SocketAddr) -> String {

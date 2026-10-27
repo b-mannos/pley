@@ -169,6 +169,32 @@ async fn why_the_server_could_not_start_is_in_its_log() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_second_pley_stops_when_one_answers_on_its_port() {
+    let data = tempfile::tempdir().unwrap();
+    let (addr, ctx, server) = start(config(data.path())).await;
+    let port = addr.rsplit(':').next().unwrap();
+
+    // Another data directory, and 0.0.0.0, which Windows would let it listen
+    // on next to the first's 127.0.0.1: the two would share the port.
+    let other = tempfile::tempdir().unwrap();
+    let run = pley_exe()
+        .args(["--no-tray", "--plex-bind", "off", "--bind"])
+        .arg(format!("0.0.0.0:{port}"))
+        .arg("--data-dir")
+        .arg(other.path())
+        .output();
+    let output = tokio::time::timeout(Duration::from_secs(60), run).await.expect("pley exits").unwrap();
+    assert!(!output.status.success());
+    let log = std::fs::read_to_string(other.path().join("logs").join("pley.log")).unwrap_or_default();
+    let expected = format!("ERROR pley could not start: another pley already listens on http://localhost:{port}");
+    assert!(log.contains(&expected), "{log}");
+    assert!(!other.path().join("pley.db").exists(), "it stopped before the database");
+
+    ctx.send(Command::Quit);
+    stopped(server, Duration::from_secs(5)).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn reset_password_works_next_to_a_running_server() {
     let data = tempfile::tempdir().unwrap();
     let (addr, ctx, server) = start(config(data.path())).await;

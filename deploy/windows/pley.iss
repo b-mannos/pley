@@ -102,6 +102,12 @@ Source: "{#FfmpegDir}\..\README.txt"; DestDir: "{app}\ffmpeg"; Flags: ignorevers
 Name: "{autoprograms}\pley-server"; Filename: "{app}\pley.exe"; Parameters: "--data-dir ""{code:DataDir}"""; Check: IsTray
 Name: "{autoprograms}\pley-server"; Filename: "{code:WebAddress}"; Check: not IsTray
 Name: "{autoprograms}\pley-server logs"; Filename: "{code:DataDir}\logs"
+
+; The other way's, when pley ran otherwise before: pley itself (a .lnk) in
+; the notification area, its page (a .url) for a service.
+[InstallDelete]
+Type: files; Name: "{autoprograms}\pley-server.url"; Check: IsTray
+Type: files; Name: "{autoprograms}\pley-server.lnk"; Check: not IsTray
 #endif
 
 [Run]

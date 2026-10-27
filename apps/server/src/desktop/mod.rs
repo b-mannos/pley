@@ -221,7 +221,7 @@ fn status_line(state: &AppState) -> String {
     if parts.is_empty() { "idle".to_owned() } else { parts.join(", ") }
 }
 
-fn web_url(bind: SocketAddr) -> String {
+pub(crate) fn web_url(bind: SocketAddr) -> String {
     let ip = bind.ip();
     let host = if ip.is_unspecified() || ip.is_loopback() {
         "localhost".to_owned()
@@ -233,8 +233,7 @@ fn web_url(bind: SocketAddr) -> String {
     format!("http://{host}:{}", bind.port())
 }
 
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-fn open(target: impl AsRef<std::ffi::OsStr>) {
+pub(crate) fn open(target: impl AsRef<std::ffi::OsStr>) {
     #[cfg(feature = "tray")]
     if let Err(err) = open::that_detached(target.as_ref()) {
         tracing::warn!("could not open {}: {err}", target.as_ref().to_string_lossy());
