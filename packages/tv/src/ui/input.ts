@@ -33,6 +33,10 @@ export class Input {
   lastKeyAt = 0;
   /** A direction nothing on the page took (Left with nothing further left goes to the rail). */
   onMoveFailed: ((dir: "left" | "right" | "up" | "down") => void) | null = null;
+  /** A held direction key began or ended: rows and tiles move without animating meanwhile. */
+  onHolding: ((holding: boolean) => void) | null = null;
+  private wasHolding = false;
+  private holdTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(focus: FocusManager, mapKey: (e: KeyboardEvent) => Key | null = standardKey, gate = new KeyRepeatGate()) {
     this.focus = focus;
@@ -75,7 +79,11 @@ export class Input {
   /** One key event, already mapped (tests call this). */
   dispatch(key: Key, type: "down" | "up", repeat: boolean): void {
     if (type === "down") this.lastKeyAt = Date.now();
-    if (isDirection(key) && !this.gate.admit(type, repeat)) return;
+    if (isDirection(key)) {
+      const admitted = this.gate.admit(type, repeat);
+      this.heldNow();
+      if (!admitted) return;
+    }
     const event = { repeat, type };
     // The focused element's own keys first (a field, the jump control, the sync row).
     const own = handlersOf(this.focus.current)?.onKey;
@@ -96,6 +104,28 @@ export class Input {
       return;
     }
     if (type === "down" && isDirection(key) && !this.focus.move(key)) this.onMoveFailed?.(key);
+  }
+
+  /**
+   * Tells `onHolding` when the gate's hold starts and ends, as keys come
+   * rather than on a timer; a key-up lost on its way ends it once no key
+   * has come for the gate's LOST_KEY_UP.
+   */
+  private heldNow(): void {
+    const holding = this.gate.holding;
+    if (this.holdTimer !== null) clearTimeout(this.holdTimer);
+    this.holdTimer = null;
+    if (holding) {
+      this.holdTimer = setTimeout(() => {
+        this.holdTimer = null;
+        this.gate.rested();
+        this.heldNow();
+      }, KeyRepeatGate.LOST_KEY_UP + 50);
+    }
+    if (holding !== this.wasHolding) {
+      this.wasHolding = holding;
+      this.onHolding?.(holding);
+    }
   }
 
   private ok(type: "down" | "up", repeat: boolean): void {

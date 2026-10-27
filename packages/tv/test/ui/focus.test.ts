@@ -193,6 +193,23 @@ describe("the remote's keys", () => {
     expect(selected).toBe(1);
   });
 
+  it("says when a hold starts and ends, and ends one whose key-up was lost", async () => {
+    const { input, tick } = setup();
+    const said: boolean[] = [];
+    input.onHolding = (h) => said.push(h);
+    input.dispatch("right", "down", false);
+    input.dispatch("right", "down", true);
+    input.dispatch("right", "down", true);
+    input.dispatch("right", "up", false);
+    expect(said).toEqual([true, false]);
+    input.dispatch("left", "down", false);
+    input.dispatch("left", "down", true);
+    // No key-up: once no key has come for the gate's 500 ms, the hold ends by itself.
+    tick(600);
+    await new Promise((r) => setTimeout(r, 600));
+    expect(said).toEqual([true, false, true, false]);
+  });
+
   it("lets a held direction move once per 100 ms", () => {
     const { focus, input, tick } = setup();
     input.dispatch("right", "down", false);

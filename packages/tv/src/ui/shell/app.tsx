@@ -145,14 +145,12 @@ export function App(p: ShellProps) {
     };
   }, []);
 
-  // A held direction key: rows and tiles move without animating.
+  // A held direction key: rows and tiles move without animating. Told as keys come, so an idle TV runs no timer.
   useEffect(() => {
-    const t = setInterval(() => {
-      const holding = input.gate.holding;
-      const root = document.getElementById("app");
-      if (root && root.classList.contains("holding") !== holding) root.classList.toggle("holding", holding);
-    }, 50);
-    return () => clearInterval(t);
+    input.onHolding = (holding) => document.getElementById("app")?.classList.toggle("holding", holding);
+    return () => {
+      input.onHolding = null;
+    };
   }, []);
 
   useEffect(() => {
