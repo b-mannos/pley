@@ -762,6 +762,27 @@ export interface SystemInfo {
   };
 }
 
+/** The machine and pley (the server, its transcoder and their FFmpegs) at one moment. */
+export interface ResourceSample {
+  /** Unix milliseconds. */
+  at: number;
+  /** Share of all the processors' time, 0–100. */
+  cpu: number;
+  pley_cpu: number;
+  /** Bytes in use. */
+  memory: number;
+  pley_memory: number;
+}
+
+export interface Resources {
+  available: boolean;
+  interval_ms: number;
+  cpus: number;
+  memory_total: number;
+  /** Oldest first, the last five minutes. */
+  samples: ResourceSample[];
+}
+
 export interface FsEntry {
   name: string;
   path: string;

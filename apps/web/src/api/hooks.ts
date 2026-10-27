@@ -26,6 +26,7 @@ import type {
   NetworkSettings,
   PersonDetail,
   RecoveryCodes,
+  Resources,
   ProfilePatch,
   SearchResults,
   ServerStatus,
@@ -73,6 +74,7 @@ export const keys = {
   twoStep: ["me", "two-step"] as const,
   system: ["system"] as const,
   storage: ["system", "storage"] as const,
+  resources: ["system", "resources"] as const,
   backups: ["system", "backups"] as const,
   transcoder: ["transcoder"] as const,
   fs: (path: string | null) => ["fs", path ?? ""] as const,
@@ -1132,6 +1134,30 @@ export function useTranscoderStatus(pollMs: number | false = 2_500) {
     refetchInterval: pollMs,
     refetchIntervalInBackground: false,
     staleTime: 1_000,
+    retry: 1,
+  });
+}
+
+/** Samples kept, as the server keeps them: five minutes of them. */
+const RESOURCE_SAMPLES = 150;
+
+/**
+ * The processors' and memory's use: the last five minutes at first, then
+ * every 2 s only the samples taken since the newest one here.
+ */
+export function useResources(pollMs = 2_000) {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: keys.resources,
+    queryFn: async () => {
+      const held = qc.getQueryData<Resources>(keys.resources);
+      const last = held?.samples.at(-1)?.at;
+      const fresh = await api.get<Resources>(`/api/system/resources${qs({ since: last })}`);
+      if (!held || last == null) return fresh;
+      return { ...fresh, samples: [...held.samples, ...fresh.samples].slice(-RESOURCE_SAMPLES) };
+    },
+    refetchInterval: pollMs,
+    refetchIntervalInBackground: false,
     retry: 1,
   });
 }

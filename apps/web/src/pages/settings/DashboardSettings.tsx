@@ -29,6 +29,7 @@ import { Artwork } from "@/components/Artwork";
 import { HistoryList } from "@/components/HistoryList";
 import { Modal } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
+import { ResourcesSection } from "./ResourcesSection";
 import { StorageSection } from "./StorageSection";
 import { Badge, Button, Card, EmptyState, Field, ProgressBar, SectionTitle, Skeleton } from "@/components/ui";
 import { versionLabel, WEB_COMMIT, WEB_VERSION } from "@/lib/build";
@@ -439,6 +440,8 @@ export function DashboardSettings() {
         {/* Keyed so the message starts blank for every session. */}
         <StopSessionModal key={stopping?.session_id ?? ""} session={stopping} onClose={() => setStopping(null)} />
       </section>
+
+      <ResourcesSection />
 
       <section>
         <SectionTitle>
