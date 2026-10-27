@@ -72,9 +72,13 @@ pub fn utc(secs: i64) -> [i64; 6] {
     [year, month, day, rem / 3600, rem % 3600 / 60, rem % 60]
 }
 
-/// Keeps the folder `dir` to the account pley runs as (on Unix, mode 0700
-/// whatever the umask): pley's data holds password hashes, sessions,
-/// backups and the log. On Windows, a user's own folders are private already.
+/// Keeps the folder `dir` to the account pley runs as: pley's data holds
+/// password hashes, sessions, backups and the log, and its settings name
+/// the programs pley starts. On Unix that is mode 0700 whatever the umask.
+/// On Windows, a user's own folders are private already, but one outside
+/// the profile (on D:\, say) lets every account on the computer in: then
+/// only this account, SYSTEM and the administrators keep it (a service's
+/// folder is kept so by `pley service install`).
 pub fn keep_private(dir: &Path) {
     #[cfg(unix)]
     {
@@ -89,8 +93,168 @@ pub fn keep_private(dir: &Path) {
             }
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    if let Err(err) = windows_acl::keep_private(dir) {
+        tracing::warn!("other users of this computer can reach {}, and pley can't change that: {err:#}", dir.display());
+    }
+    #[cfg(not(any(unix, windows)))]
     let _ = dir;
+}
+
+#[cfg(windows)]
+mod windows_acl {
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::Path;
+    use std::ptr::null_mut;
+
+    use anyhow::Context;
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HANDLE, LocalFree};
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertSidToStringSidW, GetNamedSecurityInfoW,
+        SDDL_REVISION_1, SE_FILE_OBJECT,
+    };
+    use windows_sys::Win32::Security::{
+        DACL_SECURITY_INFORMATION, GetTokenInformation, PSECURITY_DESCRIPTOR, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    /// Groups every account on the computer is in, as SDDL and as SIDs:
+    /// Everyone, Authenticated Users, Users, Interactive.
+    const EVERYONE: [(&str, &str); 4] =
+        [("WD", "S-1-1-0"), ("AU", "S-1-5-11"), ("BU", "S-1-5-32-545"), ("IU", "S-1-5-4")];
+
+    pub fn keep_private(dir: &Path) -> anyhow::Result<()> {
+        if !open_to_everyone(&dacl(dir)?) {
+            return Ok(());
+        }
+        let me = own_sid()?;
+        let grants =
+            [format!("*{me}:(OI)(CI)F"), "*S-1-5-18:(OI)(CI)F".to_owned(), "*S-1-5-32-544:(OI)(CI)F".to_owned()];
+        // What it allows is all there is: nothing inherited from the drive…
+        let mut args = vec!["/inheritance:r", "/grant:r"];
+        args.extend(grants.iter().map(String::as_str));
+        icacls(dir, &args)?;
+        // …and nothing given to everyone on the folder itself.
+        let everyone: Vec<String> = EVERYONE.iter().map(|(_, sid)| format!("*{sid}")).collect();
+        let mut args = vec!["/remove:g"];
+        args.extend(everyone.iter().map(String::as_str));
+        icacls(dir, &args)?;
+        tracing::info!("{} is now kept to the account pley runs as", dir.display());
+        Ok(())
+    }
+
+    /// Whether an entry of `sddl` (a folder's DACL) allows anything to
+    /// every account on the computer.
+    pub(super) fn open_to_everyone(sddl: &str) -> bool {
+        sddl.split(['(', ')']).filter(|ace| ace.starts_with("A;")).any(|ace| {
+            ace.rsplit(';')
+                .next()
+                .is_some_and(|trustee| EVERYONE.iter().any(|(name, sid)| trustee == *name || trustee == *sid))
+        })
+    }
+
+    fn icacls(dir: &Path, args: &[&str]) -> anyhow::Result<()> {
+        let system = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+        let output = std::process::Command::new(Path::new(&system).join("System32").join("icacls.exe"))
+            .arg(dir)
+            .args(args)
+            .arg("/Q")
+            .output()
+            .context("running icacls")?;
+        anyhow::ensure!(
+            output.status.success(),
+            "icacls {}: {}{}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stdout).trim(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        Ok(())
+    }
+
+    /// `dir`'s DACL, as SDDL.
+    pub(super) fn dacl(dir: &Path) -> anyhow::Result<String> {
+        let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
+        // SAFETY: a NUL-terminated path; Windows allocates the descriptor, freed below.
+        let status = unsafe {
+            GetNamedSecurityInfoW(
+                wide.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                &mut descriptor,
+            )
+        };
+        anyhow::ensure!(status == ERROR_SUCCESS, "reading who may use it: {}", os_error(status));
+        let mut text = null_mut();
+        // SAFETY: the descriptor read above; Windows allocates the string, freed below.
+        let ok = unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor,
+                SDDL_REVISION_1,
+                DACL_SECURITY_INFORMATION,
+                &mut text,
+                null_mut(),
+            )
+        };
+        let error = std::io::Error::last_os_error();
+        // SAFETY: a NUL-terminated string from Windows, when it gave one.
+        let sddl = (ok != 0).then(|| unsafe { wide_string(text) });
+        // SAFETY: both allocated by Windows with LocalAlloc (or null).
+        unsafe {
+            LocalFree(text.cast());
+            LocalFree(descriptor);
+        }
+        sddl.ok_or_else(|| anyhow::anyhow!("reading who may use it: {error}"))
+    }
+
+    /// The SID of the account pley runs as.
+    fn own_sid() -> anyhow::Result<String> {
+        let mut token: HANDLE = null_mut();
+        // SAFETY: this process's pseudo-handle; the token is closed below.
+        if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+            anyhow::bail!("opening this process's token: {}", std::io::Error::last_os_error());
+        }
+        // Aligned for TOKEN_USER, and large enough for any SID.
+        let mut buf = [0u64; 64];
+        let mut len = 0u32;
+        // SAFETY: a buffer of the size given.
+        let ok = unsafe {
+            GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), size_of_val(&buf) as u32, &mut len)
+        };
+        let error = std::io::Error::last_os_error();
+        // SAFETY: the token opened above.
+        unsafe { CloseHandle(token) };
+        anyhow::ensure!(ok != 0, "reading this process's account: {error}");
+        // SAFETY: GetTokenInformation wrote a TOKEN_USER at the start of `buf`.
+        let sid = unsafe { (*buf.as_ptr().cast::<TOKEN_USER>()).User.Sid };
+        let mut text = null_mut();
+        // SAFETY: a valid SID; Windows allocates the string, freed below.
+        if unsafe { ConvertSidToStringSidW(sid, &mut text) } == 0 {
+            anyhow::bail!("reading this process's account: {}", std::io::Error::last_os_error());
+        }
+        // SAFETY: a NUL-terminated string from Windows.
+        let result = unsafe { wide_string(text) };
+        // SAFETY: allocated by Windows with LocalAlloc.
+        unsafe { LocalFree(text.cast()) };
+        Ok(result)
+    }
+
+    fn os_error(code: u32) -> std::io::Error {
+        std::io::Error::from_raw_os_error(code as i32)
+    }
+
+    /// # Safety
+    /// `text` is a NUL-terminated UTF-16 string.
+    unsafe fn wide_string(text: *const u16) -> String {
+        // SAFETY: up to and without the NUL, which the caller promises.
+        let len = (0..).take_while(|&i| unsafe { *text.add(i) } != 0).count();
+        // SAFETY: the `len` units just read.
+        String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(text, len) })
+    }
 }
 
 /// Lossy UTF-8 string of a path (paths are stored as text in the database).
@@ -146,6 +310,28 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn the_data_folder_is_kept_private_on_windows_too() {
+        use windows_acl::{dacl, open_to_everyone};
+        assert!(open_to_everyone("D:PAI(A;OICI;FA;;;SY)(A;OICIID;0x1301bf;;;AU)"));
+        assert!(open_to_everyone("D:(A;OICI;0x1200a9;;;S-1-5-32-545)"));
+        assert!(!open_to_everyone("D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(D;OICI;FA;;;AU)"));
+
+        let dir = tempfile::tempdir().unwrap();
+        let icacls = |args: &[&str]| {
+            let status = std::process::Command::new("icacls").arg(dir.path()).args(args).arg("/Q").status().unwrap();
+            assert!(status.success());
+        };
+        icacls(&["/grant", "*S-1-5-32-545:(OI)(CI)RX"]);
+        assert!(open_to_everyone(&dacl(dir.path()).unwrap()));
+        keep_private(dir.path());
+        let after = dacl(dir.path()).unwrap();
+        assert!(!open_to_everyone(&after), "{after}");
+        // Still pley's own.
+        std::fs::write(dir.path().join("pley.toml"), "").unwrap();
+    }
 
     #[cfg(unix)]
     #[test]
