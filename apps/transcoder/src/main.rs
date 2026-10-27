@@ -178,8 +178,8 @@ fn default_work_dir() -> PathBuf {
     cache.unwrap_or_else(std::env::temp_dir).join("pley-transcoder")
 }
 
-/// Keeps the work folder (decoded video, subtitles) to this account: on
-/// Unix, a folder another user made first can't be taken over.
+/// Keeps a folder of the transcoder's (decoded video, subtitles) to this
+/// account: on Unix, a folder another user made first can't be taken over.
 fn keep_private(dir: &Path) -> anyhow::Result<()> {
     #[cfg(unix)]
     {
@@ -191,6 +191,32 @@ fn keep_private(dir: &Path) -> anyhow::Result<()> {
     #[cfg(not(unix))]
     let _ = dir;
     Ok(())
+}
+
+/// Makes the work folder ready, and says where the jobs go: the folders
+/// the transcoder keeps in it (`jobs`, emptied of an earlier run's
+/// segments, and the caches) are made and kept to this account. The work
+/// folder itself is made private only when the transcoder makes it or it
+/// is the default one, named for it: one given that is there already may
+/// be shared (`/tmp` on LibreELEC) and keeps its permissions.
+fn prepare_work_dir(work_dir: &Path, default: bool) -> anyhow::Result<PathBuf> {
+    let made = !work_dir.exists();
+    std::fs::create_dir_all(work_dir)?;
+    if made || default {
+        keep_private(work_dir)?;
+    }
+    let jobs_dir = work_dir.join("jobs");
+    let _ = std::fs::remove_dir_all(&jobs_dir);
+    std::fs::create_dir_all(&jobs_dir)?;
+    keep_private(&jobs_dir)?;
+    for (folder, _) in cache::policies(work_dir) {
+        // One that can't be made (a file in the way) goes without, as each
+        // cache does by itself.
+        if std::fs::create_dir_all(&folder).is_ok() {
+            keep_private(&folder)?;
+        }
+    }
+    Ok(jobs_dir)
 }
 
 /// The folder libplacebo keeps compiled shaders in. Its path is absolute:
@@ -211,11 +237,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
     util::kill_children_on_exit();
     check_token(args.token.as_deref(), args.listen)?;
     let work_dir = args.work_dir.clone().unwrap_or_else(default_work_dir);
-    std::fs::create_dir_all(&work_dir)?;
-    keep_private(&work_dir)?;
-    let jobs_dir = work_dir.join("jobs");
-    let _ = std::fs::remove_dir_all(&jobs_dir);
-    std::fs::create_dir_all(&jobs_dir)?;
+    let jobs_dir = prepare_work_dir(&work_dir, args.work_dir.is_none())?;
 
     let capabilities = work_dir.join("capabilities.json");
     let ff = Arc::new(ffmpeg::Ffmpeg::detect(&args.ffmpeg, &args.ffprobe, &capabilities, args.redetect).await);
@@ -400,6 +422,42 @@ mod tests {
         // Not where a file is in the way: tone mapping goes on without it.
         std::fs::write(dir.path().join("file"), b"").unwrap();
         assert_eq!(shader_cache(&dir.path().join("file")), None);
+    }
+
+    #[test]
+    fn the_work_folder_is_made_ready() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        std::fs::create_dir_all(work.join("jobs").join("0123")).unwrap();
+        std::fs::create_dir_all(work.join("subtitles")).unwrap();
+        std::fs::write(work.join("subtitles").join("k_2.vtt"), "WEBVTT\n").unwrap();
+        let jobs = prepare_work_dir(&work, false).unwrap();
+        assert!(jobs.is_dir() && !jobs.join("0123").exists(), "an earlier run's segments go");
+        assert!(work.join("subtitles").join("k_2.vtt").exists(), "caches stay");
+        for folder in ["keyframes", "trickplay", "libplacebo", "conversions"] {
+            assert!(work.join(folder).is_dir(), "{folder}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_work_folder_there_already_keeps_its_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o7777;
+        let dir = tempfile::tempdir().unwrap();
+        // A folder every account shares, as /tmp.
+        let shared = dir.path().join("tmp");
+        std::fs::create_dir(&shared).unwrap();
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o1777)).unwrap();
+        let jobs = prepare_work_dir(&shared, false).unwrap();
+        assert_eq!(mode(&shared), 0o1777);
+        assert_eq!((mode(&jobs), mode(&shared.join("subtitles"))), (0o700, 0o700), "what it keeps there is its own");
+        // One it makes is its own, as is the default one.
+        let made = dir.path().join("made");
+        prepare_work_dir(&made, false).unwrap();
+        assert_eq!(mode(&made), 0o700);
+        prepare_work_dir(&shared, true).unwrap();
+        assert_eq!(mode(&shared), 0o700);
     }
 
     #[test]

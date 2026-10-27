@@ -25,7 +25,12 @@ pley-transcoder [OPTIONS]
                            in the list of processes, for every account to read).
                            Required unless --listen is a loopback address
   --work-dir <DIR>         segments, caches (default: the user's cache folder,
-                           e.g. ~/.cache/pley-transcoder); kept private to the user
+                           e.g. ~/.cache/pley-transcoder). The folders the transcoder
+                           keeps in it (jobs, keyframes, subtitles, trickplay,
+                           libplacebo, conversions) are its own, private to the user;
+                           so is the folder itself when the transcoder makes it, or it
+                           is the default one. One given that is there already (/tmp)
+                           keeps its permissions
   --ffmpeg / --ffprobe     binaries (default: from PATH)
   --max-jobs <N>           concurrent ffmpeg transcodes (default 8)
   --max-hw-jobs <N>        concurrent hardware encoder sessions (default 8);
