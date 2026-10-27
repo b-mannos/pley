@@ -75,9 +75,15 @@ impl Slots {
         Self { used: Mutex::new((0, 0)), max: limits.max_jobs.max(1), max_hw: limits.max_hw_jobs }
     }
 
+    /// A process slot, with a hardware session when `want_hw` and one is
+    /// free; `None` when every slot is taken.
+    pub(crate) fn take(self: &Arc<Self>, want_hw: bool) -> Option<Slot> {
+        self.acquire(want_hw).map(|hw| Slot { slots: self.clone(), hw })
+    }
+
     /// Reserve a process slot. Returns whether a hardware session was granted,
     /// or `None` when every slot is taken.
-    pub(crate) fn acquire(&self, want_hw: bool) -> Option<bool> {
+    fn acquire(&self, want_hw: bool) -> Option<bool> {
         let mut used = self.used.lock();
         if used.0 >= self.max {
             return None;
@@ -90,7 +96,7 @@ impl Slots {
         Some(hw)
     }
 
-    pub(crate) fn release(&self, hw: bool) {
+    fn release(&self, hw: bool) {
         let mut used = self.used.lock();
         used.0 = used.0.saturating_sub(1);
         if hw {
@@ -100,6 +106,20 @@ impl Slots {
 
     pub fn counts(&self) -> (u32, u32) {
         *self.used.lock()
+    }
+}
+
+/// A transcode slot, given back however the process (or conversion)
+/// holding it ends.
+pub(crate) struct Slot {
+    slots: Arc<Slots>,
+    /// Whether it holds a hardware encoder session.
+    pub hw: bool,
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.slots.release(self.hw);
     }
 }
 
@@ -535,17 +555,15 @@ impl JobManager {
         // truncate and rewrite it while it may be being served.
         let limit = (start + PROCESS_WINDOW).min(plan.segment_count());
         let end = job.first_ready(start + 1, limit).unwrap_or(limit);
-        let planned = plan.video.as_ref().filter(|v| !v.copy).and_then(|v| v.encoder.as_ref());
+        let planned = plan.encoder();
         let want_hw = planned.is_some_and(|e| e.hardware);
-        let hw = self
+        let slot = self
             .slots
-            .acquire(want_hw)
+            .take(want_hw)
             .ok_or_else(|| ApiError::Busy(format!("all {} transcode slots are in use", self.limits.max_jobs)))?;
+        let hw = slot.hw;
         let fallback = if want_hw && !hw {
-            // HDR kept needs a software encoder that makes Main 10 too.
-            let main10 = plan.video.as_ref().is_some_and(|v| v.hdr.is_some());
-            let Some(software) = planned.and_then(|e| self.ff.software_encoder_for(e.codec, main10)) else {
-                self.slots.release(false);
+            let Some(software) = plan.software_stand_in(&self.ff) else {
                 return Err(ApiError::Busy(format!(
                     "all {} hardware encoder sessions are in use and no software encoder is available",
                     self.limits.max_hw_jobs
@@ -582,16 +600,10 @@ impl JobManager {
         cmd.args(&args).current_dir(&job.dir).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let starting = self.background.start();
         let spawned = Instant::now();
-        let mut child = match cmd.spawn() {
-            Ok(child) => child,
-            Err(err) => {
-                self.slots.release(hw);
-                return Err(ApiError::Internal(anyhow::anyhow!("failed to start ffmpeg: {err}")));
-            }
-        };
+        let mut child =
+            cmd.spawn().map_err(|err| ApiError::Internal(anyhow::anyhow!("failed to start ffmpeg: {err}")))?;
         Metrics::inc(&self.metrics.processes_started);
         let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
-            self.slots.release(hw);
             return Err(ApiError::Internal(anyhow::anyhow!("ffmpeg pipes unavailable")));
         };
 
@@ -625,7 +637,6 @@ impl JobManager {
 
         let (exit_tx, exit_rx) = watch::channel(false);
         let (kill_tx, kill_rx) = oneshot::channel::<()>();
-        let slots = self.slots.clone();
         let metrics = self.metrics.clone();
         let job_ref = job.clone();
         let next_ref = next.clone();
@@ -645,7 +656,7 @@ impl JobManager {
             // before the process counts as gone: a request coming then
             // must not start another one that writes them again.
             let _ = lister.await;
-            slots.release(hw);
+            drop(slot);
             job_ref.on_exit(end, next_ref.load(Relaxed), status, killed, &tail, &metrics);
             let _ = exit_tx.send(true);
             job_ref.notify.notify_waiters();
@@ -1303,6 +1314,18 @@ mod tests {
         // Not throttled at all.
         job.plan.throttle = false;
         assert_eq!(job.throttled_wait(&p, 42), None);
+    }
+
+    #[test]
+    fn slots_go_back_however_their_holder_ends() {
+        let slots = Arc::new(Slots::new(&Limits { max_jobs: 2, max_hw_jobs: 1 }));
+        let (hardware, software) = (slots.take(true).unwrap(), slots.take(true).unwrap());
+        assert_eq!((hardware.hw, software.hw), (true, false));
+        assert!(slots.take(false).is_none());
+        drop(hardware);
+        assert_eq!(slots.counts(), (1, 0));
+        drop(software);
+        assert_eq!(slots.counts(), (0, 0));
     }
 
     #[test]

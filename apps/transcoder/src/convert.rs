@@ -85,18 +85,6 @@ impl Conversion {
     }
 }
 
-/// Gives a transcode slot back however the conversion ends.
-struct Slot {
-    slots: Arc<Slots>,
-    hw: bool,
-}
-
-impl Drop for Slot {
-    fn drop(&mut self) {
-        self.slots.release(self.hw);
-    }
-}
-
 impl Conversions {
     pub fn new(
         ff: Arc<Ffmpeg>,
@@ -326,21 +314,18 @@ impl Conversions {
         });
 
         // A transcode slot, as a job's process takes: waited for while every one is in use.
-        let planned = plan.video.as_ref().filter(|v| !v.copy).and_then(|v| v.encoder.as_ref());
-        let want_hw = planned.is_some_and(|e| e.hardware);
-        let hw = loop {
-            if let Some(hw) = self.slots.acquire(want_hw) {
-                break hw;
+        let want_hw = plan.encoder().is_some_and(|e| e.hardware);
+        let slot = loop {
+            if let Some(slot) = self.slots.take(want_hw) {
+                break slot;
             }
             tokio::select! {
                 () = tokio::time::sleep(SLOT_WAIT) => {}
                 () = conversion.stopped() => bail!("removed"),
             }
         };
-        let _slot = Slot { slots: self.slots.clone(), hw };
-        let fallback = if want_hw && !hw {
-            let main10 = plan.video.as_ref().is_some_and(|v| v.hdr.is_some());
-            let software = planned.and_then(|e| self.ff.software_encoder_for(e.codec, main10));
+        let fallback = if want_hw && !slot.hw {
+            let software = plan.software_stand_in(&self.ff);
             Some(software.ok_or_else(|| anyhow!("no encoder is free: every hardware session is in use"))?)
         } else {
             None

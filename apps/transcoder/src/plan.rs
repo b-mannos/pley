@@ -548,6 +548,20 @@ impl Plan {
         })
     }
 
+    /// The encoder the video is made with: none for a copy, or no video.
+    pub fn encoder(&self) -> Option<&EncoderInfo> {
+        self.video.as_ref().filter(|v| !v.copy).and_then(|v| v.encoder.as_ref())
+    }
+
+    /// The software encoder that stands in for the planned hardware one
+    /// when hardware sessions run out: for HDR kept, one that makes Main 10
+    /// too.
+    pub fn software_stand_in<'a>(&self, ff: &'a Ffmpeg) -> Option<&'a EncoderInfo> {
+        let planned = self.encoder().filter(|e| e.hardware)?;
+        let main10 = self.video.as_ref().is_some_and(|v| v.hdr.is_some());
+        ff.software_encoder_for(planned.codec, main10)
+    }
+
     /// What finished segments need done to their video by the transcoder
     /// itself (see [`crate::tsedit`]), when anything.
     pub fn segment_edits(&self) -> Option<Edits> {
