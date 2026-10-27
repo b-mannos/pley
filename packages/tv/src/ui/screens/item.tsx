@@ -326,7 +326,8 @@ function ItemPage(p: { entry: Entry; item: ItemDetail; reload: () => void }) {
           setReadOn(0);
         }}
         onPlay={play}
-        onPlayActions={() => target && setPanel({ actions: target })}
+        // Holding OK on Play: the actions of what the page is (a show as a whole), as on Android TV.
+        onPlayActions={() => setPanel({ actions: item })}
         onWatched={() => void setWatched(app, ui, item, !watched).then((ok) => ok && p.reload())}
         onTracks={() => setPanel("tracks")}
         onMyList={() => {

@@ -165,6 +165,23 @@ function HomeRows(p: { entry: Entry; rows: Hub[] }) {
     for (const i of (cw?.items ?? []).slice(0, 3)) if (!app.cachedItem(i.id)) void app.item(i.id).catch(() => undefined);
   }, []);
 
+  // Back from the rows: the page goes back to its hero (focus on Play), then to the rail, as on Android TV.
+  useEffect(
+    () =>
+      ui.input.push((key, e) => {
+        if (key !== "back" || !inRows) return false;
+        const home = document.querySelector(".home");
+        const at = ui.focus.current;
+        if (!home || !at || !home.contains(at)) return false;
+        if (e.type !== "down" || e.repeat) return true;
+        const play = home.querySelector<HTMLElement>('[data-fid="hero/play"]');
+        if (play) ui.focus.focus(play);
+        ui.toRail();
+        return true;
+      }),
+    [inRows],
+  );
+
   // Back from a tile's actions that removed it: the tile now in its place.
   useLayoutEffect(() => {
     const memory = entry.memory;
