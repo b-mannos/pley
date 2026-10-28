@@ -137,24 +137,38 @@ describe("subtitle offset", () => {
   });
 
   it("is remembered for each file, and forgotten when reset", () => {
-    expect(storedSubtitleOffset(3)).toBe(0);
-    storeSubtitleOffset(3, 0.5);
-    storeSubtitleOffset(4, -1.5);
-    expect(storedSubtitleOffset(3)).toBe(0.5);
-    expect(storedSubtitleOffset(4)).toBe(-1.5);
-    storeSubtitleOffset(3, 0);
-    expect(storedSubtitleOffset(3)).toBe(0);
-    expect(JSON.parse(window.localStorage.getItem("pley.subtitleOffsets") ?? "")).toEqual({ f4: -1.5 });
-    expect(storedSubtitleOffset(null)).toBe(0);
+    expect(storedSubtitleOffset(1, 3)).toBe(0);
+    storeSubtitleOffset(1, 3, 0.5);
+    storeSubtitleOffset(1, 4, -1.5);
+    expect(storedSubtitleOffset(1, 3)).toBe(0.5);
+    expect(storedSubtitleOffset(1, 4)).toBe(-1.5);
+    storeSubtitleOffset(1, 3, 0);
+    expect(storedSubtitleOffset(1, 3)).toBe(0);
+    expect(JSON.parse(window.localStorage.getItem("pley.subtitleOffsets") ?? "")).toEqual({ "u1.f4": -1.5 });
+    expect(storedSubtitleOffset(1, null)).toBe(0);
+  });
+
+  it("is each profile's own", () => {
+    storeSubtitleOffset(1, 3, 2);
+    expect(storedSubtitleOffset(2, 3)).toBe(0);
+    storeSubtitleOffset(2, 3, -0.5);
+    expect([storedSubtitleOffset(1, 3), storedSubtitleOffset(2, 3)]).toEqual([2, -0.5]);
+  });
+
+  it("kept by file alone before, goes to the first profile that plays the file", () => {
+    window.localStorage.setItem("pley.subtitleOffsets", JSON.stringify({ f3: 1.5, f4: 0.2 }));
+    expect(storedSubtitleOffset(2, 3)).toBe(1.5);
+    expect(storedSubtitleOffset(1, 3)).toBe(0);
+    expect(JSON.parse(window.localStorage.getItem("pley.subtitleOffsets") ?? "")).toEqual({ f4: 0.2, "u2.f3": 1.5 });
   });
 
   it("keeps working without storage", () => {
     window.localStorage.setItem("pley.subtitleOffsets", "not json");
-    expect(storedSubtitleOffset(3)).toBe(0);
+    expect(storedSubtitleOffset(1, 3)).toBe(0);
     const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("full", "QuotaExceededError");
     });
-    expect(() => storeSubtitleOffset(3, 1)).not.toThrow();
+    expect(() => storeSubtitleOffset(1, 3, 1)).not.toThrow();
     setItem.mockRestore();
   });
 

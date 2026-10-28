@@ -140,7 +140,7 @@ export class AppState {
     this.platform = platform;
     this.http = http;
     this.store = platform.storage;
-    this.offsets = new OffsetStore(platform.storage);
+    this.offsets = new OffsetStore(platform.storage, () => this.me.value?.id ?? null);
     this.settings.value = { ...DEFAULT_SETTINGS, ...(readJson<Partial<Settings>>(this.store, SETTINGS_KEY) ?? {}) };
     const server = this.store.get(SERVER_KEY);
     if (server) this.use(server);

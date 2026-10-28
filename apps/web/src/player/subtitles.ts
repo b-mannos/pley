@@ -130,7 +130,12 @@ export function formatSubtitleOffset(offset: number): string {
   return `${sign}${Math.abs(value).toFixed(1)} s`;
 }
 
-/** Offsets by file, on this device: `{ "f12": 0.5 }`, the latest last. */
+/**
+ * Offsets by profile and file, on this device: `{ "u1.f12": 0.5 }`, the
+ * latest last. Each profile has its own, as subtitles one person finds late
+ * may suit another. Offsets kept before, by file alone (`"f12"`), go to the
+ * first profile that plays the file.
+ */
 const OFFSETS_KEY = "pley.subtitleOffsets";
 /** Files whose offsets are kept: the oldest go first. */
 const OFFSETS_KEPT = 300;
@@ -144,26 +149,40 @@ function readOffsets(): Record<string, unknown> {
   }
 }
 
-/** The subtitle offset remembered for a file (0 when none). */
-export function storedSubtitleOffset(fileId: number | null | undefined): number {
-  if (fileId == null) return 0;
-  const value = readOffsets()[`f${fileId}`];
-  return typeof value === "number" ? clampSubtitleOffset(value) : 0;
-}
-
-/** Remembers a file's subtitle offset on this device; 0 forgets it. */
-export function storeSubtitleOffset(fileId: number | null | undefined, offset: number): void {
-  if (fileId == null) return;
-  const key = `f${fileId}`;
-  const offsets = readOffsets();
-  delete offsets[key];
-  const value = clampSubtitleOffset(offset);
-  if (value !== 0) offsets[key] = value;
+function writeOffsets(offsets: Record<string, unknown>) {
   try {
     window.localStorage.setItem(OFFSETS_KEY, JSON.stringify(Object.fromEntries(Object.entries(offsets).slice(-OFFSETS_KEPT))));
   } catch {
     // storage full or unavailable: it lasts as long as the player
   }
+}
+
+/** The subtitle offset profile `userId` keeps for a file (0 when none). */
+export function storedSubtitleOffset(userId: number, fileId: number | null | undefined): number {
+  if (fileId == null) return 0;
+  const offsets = readOffsets();
+  const value = offsets[`u${userId}.f${fileId}`];
+  if (typeof value === "number") return clampSubtitleOffset(value);
+  const before = offsets[`f${fileId}`];
+  if (typeof before !== "number") return 0;
+  // Kept before offsets were per profile: this profile's from now on.
+  delete offsets[`f${fileId}`];
+  const moved = clampSubtitleOffset(before);
+  if (moved !== 0) offsets[`u${userId}.f${fileId}`] = moved;
+  writeOffsets(offsets);
+  return moved;
+}
+
+/** Remembers profile `userId`'s subtitle offset for a file on this device; 0 forgets it. */
+export function storeSubtitleOffset(userId: number, fileId: number | null | undefined, offset: number): void {
+  if (fileId == null) return;
+  const key = `u${userId}.f${fileId}`;
+  const offsets = readOffsets();
+  delete offsets[key];
+  delete offsets[`f${fileId}`];
+  const value = clampSubtitleOffset(offset);
+  if (value !== 0) offsets[key] = value;
+  writeOffsets(offsets);
 }
 
 /**

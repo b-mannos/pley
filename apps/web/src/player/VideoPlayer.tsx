@@ -25,6 +25,7 @@ import { onServerEvent } from "@/api/events";
 import { fetchNext, invalidateWatchState, keys, useTrickplay } from "@/api/hooks";
 import type { ItemDetail, ItemSummary, PlaybackInfo, PlaybackMode, PlaybackState, ServerEvent } from "@/api/types";
 import { useOptionalAudioPlayer } from "@/audio/AudioPlayer";
+import { useAuth } from "@/auth";
 import { Slider } from "@/components/Slider";
 import { useToast } from "@/components/Toast";
 import { canPlayNativeHls, videoCaps } from "@/lib/caps";
@@ -255,13 +256,14 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   /** Ended on the server: nothing plays any more, and it says why. */
   const [stopped, setStopped] = useState<StoppedBy | null>(null);
   const stoppedRef = useRef(false);
-  // Text subtitles moved earlier or later, remembered for each file on this device.
+  // Text subtitles moved earlier or later, remembered for each profile and file on this device.
+  const userId = useAuth().id;
   const [offsetChoice, setOffsetChoice] = useState(() => ({
     file: file?.id ?? null,
-    offset: storedSubtitleOffset(file?.id),
+    offset: storedSubtitleOffset(userId, file?.id),
   }));
   const subtitleOffset =
-    offsetChoice.file === (file?.id ?? null) ? offsetChoice.offset : storedSubtitleOffset(file?.id);
+    offsetChoice.file === (file?.id ?? null) ? offsetChoice.offset : storedSubtitleOffset(userId, file?.id);
 
   const duration = (info?.duration_ms ?? item.duration_ms ?? 0) / 1000 || mediaDuration;
   const isEpisode = item.kind === "episode";
@@ -988,7 +990,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const changeSubtitleOffset = (offset: number) => {
     const value = clampSubtitleOffset(offset);
     setOffsetChoice({ file: file?.id ?? null, offset: value });
-    storeSubtitleOffset(file?.id, value);
+    storeSubtitleOffset(userId, file?.id, value);
   };
   useEffect(() => {
     const v = videoRef.current;

@@ -315,7 +315,7 @@ function world(detail: ItemDetail, answer: (req: PlaybackRequest) => PlaybackInf
     keyedUrls: true,
     dvContainers: () => dvContainers,
     clientId: "webos-abc",
-    offsets: new OffsetStore(memory()),
+    offsets: new OffsetStore(memory(), () => 1),
     quality: { remembered: () => "original", remember: () => undefined },
     autoplayNext: () => true,
     events: (l) => {

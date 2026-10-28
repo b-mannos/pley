@@ -79,10 +79,14 @@ describe("subtitle sync", () => {
     expect(formatOffset(0)).toBe("0.0 s");
   });
 
-  it("remembers offsets per file, 0 forgetting", () => {
+  const memory = () => {
     const data = new Map<string, string>();
     const kv: KeyValue = { get: (k) => data.get(k) ?? null, set: (k, v) => void data.set(k, v), remove: (k) => void data.delete(k) };
-    const store = new OffsetStore(kv);
+    return { data, kv };
+  };
+
+  it("remembers offsets per file, 0 forgetting", () => {
+    const store = new OffsetStore(memory().kv, () => 1);
     store.set("http://nas:7539", 7, 1500);
     store.set("http://nas:7539", 8, -300);
     expect(store.get("http://nas:7539", 7)).toBe(1500);
@@ -90,5 +94,36 @@ describe("subtitle sync", () => {
     store.set("http://nas:7539", 7, 0);
     expect(store.get("http://nas:7539", 7)).toBe(0);
     expect(store.get("http://nas:7539", 8)).toBe(-300);
+  });
+
+  it("keeps each profile's own, and none without a profile", () => {
+    const { kv, data } = memory();
+    let profile: number | null = 1;
+    const store = new OffsetStore(kv, () => profile);
+    store.set("http://nas:7539", 7, 2000);
+    profile = 2;
+    expect(store.get("http://nas:7539", 7)).toBe(0);
+    store.set("http://nas:7539", 7, -500);
+    expect(store.get("http://nas:7539", 7)).toBe(-500);
+    profile = 1;
+    expect(store.get("http://nas:7539", 7)).toBe(2000);
+    profile = null;
+    expect(store.get("http://nas:7539", 7)).toBe(0);
+    store.set("http://nas:7539", 8, 100);
+    expect(JSON.parse(data.get("pley.subtitleOffsets")!)).toHaveLength(2);
+  });
+
+  it("gives an offset kept by file alone to the first profile that plays the file", () => {
+    const { kv, data } = memory();
+    data.set("pley.subtitleOffsets", JSON.stringify([["http://nas:7539/api/files/7", 1500], ["http://nas:7539/api/files/8", 300]]));
+    let profile = 2;
+    const store = new OffsetStore(kv, () => profile);
+    expect(store.get("http://nas:7539", 7)).toBe(1500);
+    profile = 1;
+    expect(store.get("http://nas:7539", 7)).toBe(0);
+    expect(JSON.parse(data.get("pley.subtitleOffsets")!)).toEqual([
+      ["http://nas:7539/api/files/8", 300],
+      ["http://nas:7539/api/files/7#u2", 1500],
+    ]);
   });
 });
