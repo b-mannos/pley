@@ -1,6 +1,6 @@
 import { useSignal, type Signal } from "@preact/signals";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import type { Hub, ItemDetail, ItemSummary } from "../../api/types";
+import type { Hub, ItemDetail, ItemSummary, LibrarySort } from "../../api/types";
 import { cardSubtitle, episodeLabel, formatRuntime, formatTimeLeft, isInProgress, isPlayableVideo } from "../../format/format";
 import { useUi } from "../context";
 import { artCandidates } from "../kit/art";
@@ -26,7 +26,15 @@ export function rowKind(hub: Hub, musicLibraries: number[]): TileKind {
 /** Whether a row offers "See all": the library's newest, newly released or top rated. */
 export function seeAllOf(hub: Hub): number | null {
   if (hub.library_id === null) return null;
-  return /^(recently_added|recently_released|top_rated)/.test(hub.key) ? hub.library_id : null;
+  return seeAllSort(hub) ? hub.library_id : null;
+}
+
+/** The sort "See all" shows a row's library in, as the row lists it (newest or highest first), as on the web. */
+export function seeAllSort(hub: Hub): LibrarySort | null {
+  if (hub.key.indexOf("recently_added") === 0) return "added";
+  if (hub.key.indexOf("recently_released") === 0) return "release";
+  if (hub.key.indexOf("top_rated") === 0) return "rating";
+  return null;
 }
 
 /** The hero: the first of Continue Watching, else the newest video, else the newest item. */
@@ -242,6 +250,7 @@ function HomeRows(p: { entry: Entry; rows: Hub[] }) {
   rows.forEach((hub, h) => {
     const kind = rowKind(hub, music);
     const library = seeAllOf(hub);
+    const sort = seeAllSort(hub) ?? undefined;
     sections.push({
       key: hub.key,
       height: rowHeight(kind),
@@ -277,7 +286,7 @@ function HomeRows(p: { entry: Entry; rows: Hub[] }) {
           )}
           seeAll={
             library !== null
-              ? (place) => <SeeAllTile kind={kind} fid={`${hub.key}/all`} onFocus={place.onFocus} onSelect={() => ui.nav.open({ name: "library", id: library, tab: "library" })} />
+              ? (place) => <SeeAllTile kind={kind} fid={`${hub.key}/all`} onFocus={place.onFocus} onSelect={() => ui.nav.open({ name: "library", id: library, tab: "library", sort })} />
               : undefined
           }
         />

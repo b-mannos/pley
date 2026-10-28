@@ -1,4 +1,5 @@
 import { signal } from "@preact/signals";
+import type { LibrarySort } from "../../api/types";
 import type { PlayRequest } from "../../player/plan";
 
 /** The app's pages (the Android app's PleyKeys). */
@@ -9,7 +10,8 @@ export type PageKey =
   | { name: "home" }
   /** Every library; `sort`: sorting them (Settings), and back when that ends. */
   | { name: "libraries"; sort?: boolean }
-  | { name: "library"; id: number; tab?: LibraryTab }
+  /** `sort`: a row's See all, which lists the library so (newest or highest first) until the view is changed. */
+  | { name: "library"; id: number; tab?: LibraryTab; sort?: LibrarySort }
   | { name: "item"; id: number }
   | { name: "actions"; id: number; continueWatching?: boolean }
   | { name: "search"; query?: string }

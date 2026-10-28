@@ -18,6 +18,7 @@ import { Row, rowHeight, SectionPage, type Section } from "../kit/row";
 import { ArtTile, SeeAllTile, SkeletonTile, Tile, TILES, type TileKind } from "../kit/tile";
 import type { Entry, LibraryTab } from "../shell/navigator";
 import { ColumnMessage, failedTitle, problem, sentence, useApp, useLoad } from "./common";
+import { seeAllSort } from "./home";
 import { pageOf, prefetchPlayback } from "./item-actions";
 import {
   AlphaIndex,
@@ -77,7 +78,7 @@ export function openingTab(tabs: LibraryTab[], before: LibraryTab | undefined, a
  * A library (TvLibraryScreen): Recommended rows, the whole library as a
  * grid with its sort, filters and A–Z, and its collections.
  */
-export function LibraryScreen(p: { entry: Entry; id: number; tab?: LibraryTab }) {
+export function LibraryScreen(p: { entry: Entry; id: number; tab?: LibraryTab; sort?: LibrarySort }) {
   const app = useApp();
   const ui = useUi();
   const libraries = app.libraries.value;
@@ -104,6 +105,13 @@ export function LibraryScreen(p: { entry: Entry; id: number; tab?: LibraryTab })
     entry.state.tab = t;
     setTabState((n) => n + 1);
   };
+  // A row's See all: the Library tab in that row's order, until the view is changed there.
+  const seeAll = (sort: LibrarySort) => {
+    entry.state.seeAll = sort;
+    entry.state.params = undefined;
+    showTab("library");
+  };
+  const asked = (entry.state.seeAll as LibrarySort | undefined) ?? p.sort;
   const focusShownTab = () => {
     const el = tabsRef.current?.querySelector<HTMLElement>(`[data-fid="tab/${shown}"]`);
     return !!el && ui.focus.focus(el);
@@ -126,9 +134,9 @@ export function LibraryScreen(p: { entry: Entry; id: number; tab?: LibraryTab })
           ))}
         </G>
       </div>
-      {shown === "library" && <LibraryGridTab key={`grid-${library.id}`} entry={entry} library={library} initial={initial} focusTab={focusShownTab} />}
+      {shown === "library" && <LibraryGridTab key={`grid-${library.id}`} entry={entry} library={library} asked={asked} initial={initial} focusTab={focusShownTab} />}
       {shown === "recommended" && (
-        <RecommendedTab key={`rec-${library.id}`} entry={entry} library={library} initial={initial} focusTab={focusShownTab} onCollections={() => showTab("collections")} />
+        <RecommendedTab key={`rec-${library.id}`} entry={entry} library={library} initial={initial} focusTab={focusShownTab} onCollections={() => showTab("collections")} onSeeAll={seeAll} />
       )}
       {shown === "collections" && <CollectionsTab key={`col-${library.id}`} entry={entry} library={library} initial={initial} focusTab={focusShownTab} />}
     </div>
@@ -139,14 +147,17 @@ export function LibraryScreen(p: { entry: Entry; id: number; tab?: LibraryTab })
 
 type Panel = null | { kind: "sort" } | { kind: "filter" } | { kind: "genre"; from: "filter" | "chip" } | { kind: "year"; from: "filter" | "chip" };
 
-function LibraryGridTab(p: { entry: Entry; library: Library; initial: boolean; focusTab: () => boolean }) {
+function LibraryGridTab(p: { entry: Entry; library: Library; asked?: LibrarySort; initial: boolean; focusTab: () => boolean }) {
   const app = useApp();
   const ui = useUi();
   const lib = p.library;
   const music = lib.kind === "music";
   const profile = app.me.value?.id ?? null;
   const store = useMemo(() => new ParamsStore(app.store, app.server.value ?? "", profile), [app.server.value, profile]);
-  const [params, setParamsState] = useState<LibraryParams>(() => store.get(lib.id, lib.kind));
+  // As it was left on this page, else in a See all's order (unfiltered, not kept), else as it was left on this TV.
+  const [params, setParamsState] = useState<LibraryParams>(
+    () => (p.entry.state.params as LibraryParams | undefined) ?? (p.asked ? fitParams({ sort: p.asked }, lib.kind) : store.get(lib.id, lib.kind)),
+  );
   const [version, setVersion] = useState(0);
   const listing = useMemo(
     () => new Listing(ui.api, lib.id, params, ui.tier === "low" ? 2000 : 5000, () => setVersion((v) => v + 1)),
@@ -173,6 +184,7 @@ function LibraryGridTab(p: { entry: Entry; library: Library; initial: boolean; f
   const setParams = (next: LibraryParams) => {
     const fitted = fitParams(next, lib.kind);
     store.set(lib.id, fitted);
+    p.entry.state.params = fitted;
     p.entry.state.gridIndex = 0;
     focusedIndex.value = 0;
     setParamsState(fitted);
@@ -518,7 +530,7 @@ function ChoicePanel(p: { title: string; all: string; choices: string[]; current
 
 // ---- Recommended
 
-function RecommendedTab(p: { entry: Entry; library: Library; initial: boolean; focusTab: () => boolean; onCollections: () => void }) {
+function RecommendedTab(p: { entry: Entry; library: Library; initial: boolean; focusTab: () => boolean; onCollections: () => void; onSeeAll: (sort: LibrarySort) => void }) {
   const ui = useUi();
   const lib = p.library;
   const music = lib.kind === "music";
@@ -545,6 +557,7 @@ function RecommendedTab(p: { entry: Entry; library: Library; initial: boolean; f
   }
   const sections: Section[] = rows.map((hub: Hub, h) => {
     const kind: TileKind = hub.key.indexOf("continue_watching") === 0 ? "landscape" : music ? "square" : "poster";
+    const sort = seeAllSort(hub);
     return {
       key: hub.key,
       height: rowHeight(kind),
@@ -573,6 +586,7 @@ function RecommendedTab(p: { entry: Entry; library: Library; initial: boolean; f
               onActions={() => ui.nav.open({ name: "actions", id: item.id, continueWatching: hub.key.indexOf("continue") === 0 })}
             />
           )}
+          seeAll={sort ? (place) => <SeeAllTile kind={kind} fid={`${hub.key}/all`} onFocus={place.onFocus} onSelect={() => p.onSeeAll(sort)} /> : undefined}
         />
       ),
     };

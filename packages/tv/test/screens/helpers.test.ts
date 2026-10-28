@@ -5,7 +5,7 @@ import { TokenError, type OAuthError } from "../../src/auth/tokens";
 import type { HttpRequest, Transport } from "../../src/net/transport";
 import { NetworkError } from "../../src/net/transport";
 import { shuffled } from "../../src/player/music";
-import { heroOf, rowKind, seeAllOf } from "../../src/ui/screens/home";
+import { heroOf, rowKind, seeAllOf, seeAllSort } from "../../src/ui/screens/home";
 import { castAndCrew } from "../../src/ui/screens/item";
 import { openingTab } from "../../src/ui/screens/library";
 import { AlphaIndex, countLabel, defaultOrder, describeSmartFilter, fitParams, letterOf, ParamsStore, showsJump, TabStore, smartFilterOf, sortsFor } from "../../src/ui/screens/library-data";
@@ -135,6 +135,13 @@ describe("Home", () => {
   it("offers See all for a library's newest only", () => {
     expect(seeAllOf(movies)).toBe(1);
     expect(seeAllOf(cw)).toBeNull();
+  });
+
+  it("lists a row's See all in the row's order", () => {
+    expect(seeAllSort(movies)).toBe("added");
+    expect(seeAllSort({ ...movies, key: "recently_released:1" })).toBe("release");
+    expect(seeAllSort({ ...movies, key: "top_rated:1" })).toBe("rating");
+    expect(seeAllSort(cw)).toBeNull();
   });
 
   it("puts Continue Watching's first in the hero, else the newest video", () => {

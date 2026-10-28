@@ -37,7 +37,7 @@ export function Screen(p: { entry: Entry; state: AppState }) {
       page = <LibrariesScreen entry={p.entry} sort={key.sort} />;
       break;
     case "library":
-      page = <LibraryScreen entry={p.entry} id={key.id} tab={key.tab} />;
+      page = <LibraryScreen entry={p.entry} id={key.id} tab={key.tab} sort={key.sort} />;
       break;
     case "item":
       page = <ItemScreen entry={p.entry} id={key.id} />;
