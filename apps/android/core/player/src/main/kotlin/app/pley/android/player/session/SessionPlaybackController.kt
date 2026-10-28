@@ -346,6 +346,10 @@ class SessionPlaybackController(
         lastAdvancePos = -1
         ui.update { it.copy(phase = PlayerPhase.Preparing, positionMs = atMs, skipLabel = null) }
 
+        // Automatic audio is chosen again for each session: a stream (a lower
+        // quality, say) has the track it copies rather than converting the
+        // one the file played as it is.
+        if (!audioPicked) audio = null
         val local = localFile(chosen.id)?.takeIf { recovery.fallbackMode == null && !streamingPicked }
         playingConverted = local?.converted == true
         if (local != null) return beginLocal(detail, chosen, local, atMs)

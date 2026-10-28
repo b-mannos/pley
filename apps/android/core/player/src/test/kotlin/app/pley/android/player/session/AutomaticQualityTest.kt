@@ -62,6 +62,8 @@ class AutomaticQualityTest {
         assertEquals(2_000, asked.maxBitrate)
         assertEquals(480, asked.maxHeight)
         assertTrue(asked.startMs!! in 19_000L..21_000L)
+        // The server picks the audio again, for a stream: one it copies.
+        assertNull(asked.audioIndex)
         val state = c.state.value
         assertEquals("Automatic · 2 Mbps 480p", state.quality)
         assertEquals("Playing at 2 Mbps 480p for a smoother picture", state.notice)

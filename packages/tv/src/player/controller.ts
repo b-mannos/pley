@@ -486,6 +486,10 @@ export class PlaybackController {
     if (original && !this.guardMode) this.guardMode = dvContainerMode(chosen, this.caps, this.env.dvContainers?.());
     const mode = original ? this.recovery.fallbackMode ?? this.guardMode ?? modeOf(playing) : modeOf(playing);
     const decision = this.caps ? decide(chosen, this.caps) : null;
+    // Automatic audio is chosen again for each session: a stream (a lower
+    // quality, say) has the track it copies rather than converting the one
+    // the file played as it is.
+    if (!this.audioPicked) this.audio = null;
     let choices: Choices = {
       file: chosen,
       startMs: atMs,

@@ -26,9 +26,11 @@ import app.pley.android.player.PlayRequest
  * ([PlaybackInfo.audioIndex]). Track indexes go to the server only when the
  * server has to act on them (PleyApi.kt:116-120 of the old player sent them
  * always, which forced remuxes and burn-ins of files that play as they are):
- * - `audio_index` for a track picked, or playing already, when it can't be
- *   played here (neither decoded nor passed through), the session streams
- *   HLS (one audio track), or it isn't the track the item's details give;
+ * - `audio_index` for a track picked, when it can't be played here
+ *   (neither decoded nor passed through), the session streams HLS (one
+ *   audio track), or it isn't the track the item's details give; the
+ *   server's own choice is asked for again with each session, so a stream
+ *   gets the track it copies;
  * - `subtitle_index` only to burn subtitles shown as pictures into HLS,
  *   and never when this player side-loads them (the server's .mks).
  * In direct play both are switched here, by the engine.

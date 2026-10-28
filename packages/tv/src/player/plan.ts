@@ -6,9 +6,9 @@ import type { QualityPreset } from "./quality";
  * How a playback is asked for: which file, from where, with which tracks,
  * and what goes in the body of POST /api/playback (the Android app's
  * PlaybackPlan). Track indexes go to the server only when it has to act on
- * them: `audio_index` for a track picked (or the one playing, when a
- * session starts again), else the server chooses the one this TV plays
- * best; `subtitle_index` only to burn pictures into HLS, and never when
+ * them: `audio_index` for a track picked, else the server chooses the one
+ * this TV plays best, again for each session (a stream has the one it
+ * copies); `subtitle_index` only to burn pictures into HLS, and never when
  * the TV draws them from the server's .mks.
  */
 

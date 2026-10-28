@@ -364,6 +364,21 @@ describe("a playback session", () => {
     c.close();
   });
 
+  it("lets the server choose the audio again for a lower quality, a stream that copies another track", async () => {
+    // The TrueHD as it is; converted at a lower quality, the server copies the first track instead.
+    const w = world(item(file()), (req) => info({ audio_index: req.max_bitrate ? 1 : 2 }));
+    const c = new PlaybackController({ itemId: 70 }, w.env, 0);
+    c.start();
+    await settle();
+    c.selectQuality("4m");
+    await settle();
+    expect(w.requests.length).toBe(2);
+    expect(w.requests[1]!.max_bitrate).toBeDefined();
+    expect(w.requests[1]!.audio_index).toBeUndefined();
+    expect(c.state.value.audio.filter((a) => a.selected).map((a) => a.index)).toEqual([1]);
+    c.close();
+  });
+
   it("saves subtitles picked without the audio the server chose, and the audio once picked", async () => {
     const w = world(item(file()), () => info());
     const c = new PlaybackController({ itemId: 70 }, w.env, 0);
