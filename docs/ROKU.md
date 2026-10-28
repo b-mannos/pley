@@ -331,25 +331,32 @@ from `brs-engine` to `brs-node`): each `sub test_…()` is a test.
 the app with the remote: sign-in with a code and its QR code, Home, a
 title's details after a refused token, Back while the player starts (the
 session that comes after is closed), the player with picture subtitles to
-draw and its subtitle sync (shown, moved 0.3 s and remembered), Home
-asking again after it, a library's second page, a show, Search,
-Home not asking again after it, Settings, sorting the libraries (Movies put
-after TV Shows, then the server's order again, Home asking again),
-subtitles changed to Always (the languages sent as `null`), the server gone
-and Retry, then
-signing out and in again on a server without QR codes; then it starts the
-app again, signed in, in a second process (brs-node runs one app per
-process). It fails on any BrightScript error, on a request without the
-User-Agent, a token in an address or sent for a QR code, a refresh token
-used twice or two refreshes at once, and saves each screen in `out/smoke/`.
+draw, its menu, subtitle sync (shown, moved 0.3 s and remembered), a
+chapter and the playback's details, Home asking again after it, the
+Options key's Mark as watched, a library's second page, a library's
+Recommended and Collections tabs and its sort, a show's page, its
+episodes and a person's page, music (an artist, an album, its tracks
+played and stopped), Search, Home not asking again after it, a playlist
+(an entry taken out, then played), Settings, the quality, sorting the
+libraries (Movies put after TV Shows, then the server's order again, Home
+asking again), subtitles changed to Always (the languages sent as
+`null`), "Who's watching?" and another profile, the server gone and
+Retry, then signing out and in again on a server without QR codes; then
+it starts the app again, signed in, in a second process (brs-node runs
+one app per process). It fails on any BrightScript error, on a request
+without the User-Agent, a token in an address or sent for a QR code, a
+refresh token used twice, two refreshes at once or a profile switch
+beside one, and saves each screen in `out/smoke/`.
 brs-node is a simulator: it draws with its own fonts, plays no video (so
 Skip Intro and Up Next have only their unit tests), fetches every address
 with a Node process of its own, one at a time, numbers transfers at random
 below 80 (the API task keeps those under way apart), drops a remote key now
 and then, and can't stand in for a Roku's speed.
 
-`bun run images` draws the watched mark again (`scripts/make_images.py`,
-Python's standard library only). The home screen icons (540 × 405 and
+`bun run images` draws the watched mark and the buttons' focus again
+(`scripts/make_images.py`, Python's standard library only): nine-patch
+pictures, so the app's buttons are focused in its accent, as its lists
+are, not in Roku's own grey. The home screen icons (540 × 405 and
 290 × 218, the P and the wordmark on pley's tile, as the Android TV app's
 banner) and the splash screens (the logo on the app's background) are
 rendered from pley's logo with the other apps' icons:
@@ -385,7 +392,8 @@ to the store.
 - Audio other than the file's default played as it is: reporting
   `audio_track_switching` and starting the Video node on the server's
   `audio_index`, once tried on a Roku.
-- The Show screen asks for its seasons again each time it shows; Home's row
-  fingerprints would spare that when nothing changed.
+- The Show screen asks for its season's episodes and its next episode
+  again each time it shows; Home's row fingerprints would spare that when
+  nothing changed.
 - Roku's channel store: a developer account, certification, SceneGraph 1.3
   and the launch beacons' order.

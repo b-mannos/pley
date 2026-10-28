@@ -39,7 +39,7 @@
             <Label id="nextTitle" translation="[540, 100]" width="880" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
             <Label id="nextLine" translation="[540, 156]" width="880" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
             <Label id="countdown" translation="[540, 214]" width="880" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
-            <ButtonGroup id="nextButtons" iconUri="" focusedIconUri="" translation="[1460, 60]" minWidth="360" />
+            <ButtonGroup id="nextButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[1460, 60]" minWidth="360" />
         </Group>
         <!-- At the top, clear of the subtitles it moves. -->
         <Group id="sync" translation="[560, 72]" visible="false">
@@ -47,7 +47,7 @@
             <Label translation="[48, 40]" text="Subtitle sync" color="0x38BDF8FF" font="font:SmallerBoldSystemFont" />
             <Label id="syncValue" translation="[48, 84]" width="340" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
             <Label translation="[48, 150]" width="360" wrap="true" maxLines="2" text="Left: earlier · Right: later" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
-            <ButtonGroup id="syncButtons" iconUri="" focusedIconUri="" translation="[440, 48]" minWidth="312" />
+            <ButtonGroup id="syncButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[440, 48]" minWidth="312" />
         </Group>
         <!-- pley's menu, at the right over the video: its entries, a
              quality's or a chapter's choices, or the playback's details. -->
@@ -63,7 +63,7 @@
             <Rectangle width="1920" height="1080" color="0x16191EF2" />
             <Label id="noticeTitle" translation="[96, 340]" width="1728" wrap="true" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
             <Label id="noticeText" translation="[96, 430]" width="1500" wrap="true" maxLines="6" color="0xA1A9B6FF" font="font:SmallSystemFont" />
-            <ButtonGroup id="noticeButtons" iconUri="" focusedIconUri="" translation="[96, 700]" minWidth="400" />
+            <ButtonGroup id="noticeButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 700]" minWidth="400" />
         </Group>
         <!-- Automatic saying it went down, briefly, at the top. -->
         <Group id="toast" visible="false">

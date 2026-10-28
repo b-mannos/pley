@@ -1,6 +1,10 @@
-"""Draws the watched mark of tiles into images/watched.png. The icons and
-splash screens are pley's logo, rendered with the other apps' icons by
-scripts/render-icons.mjs at the repository's root. Standard library only.
+"""Draws the watched mark of tiles into images/watched.png, and the focus
+of buttons (images/button-focus.9.png, and where it was as a button group
+lost it, images/button-footprint.9.png): nine-patch pictures, a rounded
+box in the app's accent or its raised surface, as its lists have. The
+icons and splash screens are pley's logo, rendered with the other apps'
+icons by scripts/render-icons.mjs at the repository's root. Standard
+library only.
 
     python scripts/make_images.py
 """
@@ -12,6 +16,11 @@ import zlib
 
 DARK = (0x16, 0x19, 0x1E)  # the app's background (components/shared/Ui.brs)
 ACCENT = (0x38, 0xBD, 0xF8)  # the app's accent
+SURFACE3 = (0x2E, 0x34, 0x40)  # its raised surface
+
+# A button's box: its size inside the nine-patch's border, and its corners.
+BOX = 32
+RADIUS = 8
 
 # The watched mark, drawn at this size on tiles (components/items/Tile.brs).
 MARK_SIZE = 40
@@ -51,6 +60,35 @@ def render_mark(size):
     return rows
 
 
+def render_box(color):
+    """RGBA rows of a nine-patch (Roku's .9.png): a rounded box of color,
+    in a border of one pixel whose black marks say what stretches (top
+    and left)."""
+    size = BOX + 2
+    samples = 4
+    rows = []
+    for row in range(size):
+        line = bytearray()
+        for col in range(size):
+            if row in (0, size - 1) or col in (0, size - 1):
+                marked = (row == 0 and RADIUS < col < size - 1 - RADIUS) or (col == 0 and RADIUS < row < size - 1 - RADIUS)
+                line.extend((0, 0, 0, 255) if marked else (0, 0, 0, 0))
+                continue
+            inside = 0
+            for sy in range(samples):
+                for sx in range(samples):
+                    x = col - 1 + (sx + 0.5) / samples
+                    y = row - 1 + (sy + 0.5) / samples
+                    dx = max(RADIUS - x, 0, x - (BOX - RADIUS))
+                    dy = max(RADIUS - y, 0, y - (BOX - RADIUS))
+                    if math.hypot(dx, dy) <= RADIUS:
+                        inside += 1
+            line.extend(color)
+            line.append(round(255 * inside / (samples * samples)))
+        rows.append(bytes(line))
+    return rows
+
+
 def write_png(path, width, height, rows):
     def chunk(kind, data):
         body = kind + data
@@ -70,6 +108,9 @@ def main():
     os.makedirs(folder, exist_ok=True)
     write_png(os.path.join(folder, "watched.png"), MARK_SIZE, MARK_SIZE, render_mark(MARK_SIZE))
     print("images/watched.png", MARK_SIZE, "x", MARK_SIZE)
+    for name, color in (("button-focus.9.png", ACCENT), ("button-footprint.9.png", SURFACE3)):
+        write_png(os.path.join(folder, name), BOX + 2, BOX + 2, render_box(color))
+        print("images/" + name, BOX + 2, "x", BOX + 2)
 
 
 if __name__ == "__main__":
