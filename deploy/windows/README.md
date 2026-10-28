@@ -227,10 +227,13 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Archive -Installer
 or, around a release folder already built,
 `scripts\build-installer.ps1 -Release dist\pley-server-<version>-windows-x86_64`.
 The installer carries the FFmpeg on PATH (where WinGet's link leads), or the
-one `-Ffmpeg <an FFmpeg build's bin folder>` names, with the DLLs next to it;
+one `-Ffmpeg <an FFmpeg build's bin folder>` names, with the DLLs next to it
+and, beside `bin`, the build's `LICENSE*`, `README.txt` and `source\` (a
+patched build's patch and script, which the GPL asks to go with it);
 `-Flavor fel` adds a name to the file:
-`pley-server-<version>-fel-windows-x86_64-setup.exe`. Releases carry
-gyan.dev's full build, at the version and checksum set in `release.yml`.
+`pley-server-<version>-fel-windows-x86_64-setup.exe`. `scripts\build.ps1
+-Installer` passes both on. Releases carry gyan.dev's full build, at the
+version and checksum set in `release.yml`.
 `ISCC /DTest …` builds one that installs in the notification area without
 administrator rights (no shortcuts nor start at sign-in), to try Setup's
 code on a development machine.

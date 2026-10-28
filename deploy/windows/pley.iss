@@ -94,12 +94,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Source: "{#SourceDir}\pley.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\*"; Excludes: "pley.exe"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; FFmpeg in a folder of its own, emptied first (CurStepChanged), with its
-; license when the build has one beside its bin folder.
+; license, README and source (a patched build's) when the build has them
+; beside its bin folder.
 Source: "{#FfmpegDir}\ffmpeg.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion
 Source: "{#FfmpegDir}\ffprobe.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion
 Source: "{#FfmpegDir}\*.dll"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#FfmpegDir}\..\LICENSE*"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#FfmpegDir}\..\README.txt"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#FfmpegDir}\..\source\*"; DestDir: "{app}\ffmpeg\source"; Flags: ignoreversion skipifsourcedoesntexist
 
 #ifndef Test
 [Icons]

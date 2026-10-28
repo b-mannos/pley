@@ -1,12 +1,16 @@
 # Release build: web UI + both binaries + licensing files, ready to ship.
 #   powershell -ExecutionPolicy Bypass -File scripts\build.ps1 [-SkipWeb] [-Target <rust target triple>] [-Archive] [-Installer]
+#     [-Ffmpeg <an FFmpeg build's bin folder>] [-Flavor <name>]
 # Output: dist\pley-server-<version>-windows-<arch>\ (plus a .zip with -Archive, and
 # the installer pley-server-<version>-windows-<arch>-setup.exe with -Installer)
 param(
     [switch]$SkipWeb,
     [string]$Target,
     [switch]$Archive,
-    [switch]$Installer
+    [switch]$Installer,
+    # For the installer: the FFmpeg it carries and a name for the build (see build-installer.ps1).
+    [string]$Ffmpeg,
+    [string]$Flavor
 )
 
 $ErrorActionPreference = "Stop"
@@ -73,7 +77,10 @@ if ($Archive) {
 }
 
 if ($Installer) {
-    & "$PSScriptRoot/build-installer.ps1" -Release $out
+    $carrying = @{}
+    if ($Ffmpeg) { $carrying.Ffmpeg = $Ffmpeg }
+    if ($Flavor) { $carrying.Flavor = $Flavor }
+    & "$PSScriptRoot/build-installer.ps1" -Release $out @carrying
 }
 
 Write-Host "release ready in $out" -ForegroundColor Green
