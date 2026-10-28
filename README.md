@@ -188,9 +188,9 @@ for one, is also `PLEY_PLEX_BIND` or `plex_bind`.
 | `--no-tray` | | Never show the tray icon |
 | `--no-discovery` | | Don't answer the apps looking for servers on the local network |
 
-Everything else (server name, metadata sources and keys, hardware
-acceleration, tone mapping, transcode limits, scanning) is set in the web app
-under **Settings → Server**. Where pley listens (the networks, the port, the
+Everything else is set in the web app: the server name, metadata sources and
+keys and scanning under **Settings → Server**, hardware acceleration, tone
+mapping and transcode limits under **Settings → Transcoder**. Where pley listens (the networks, the port, the
 Plex-compatible API and discovery) changes in **Settings → Network** too,
 while pley runs: it is saved in `pley.toml`, unless `--bind`, `--plex-bind`
 or `--no-discovery` (or their `PLEY_*` variables) set it.

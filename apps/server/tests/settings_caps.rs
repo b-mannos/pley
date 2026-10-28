@@ -1,4 +1,4 @@
-//! Settings → Server against what the transcoder found (docs/API.md,
+//! Settings → Transcoder against what the transcoder found (docs/API.md,
 //! "System"): `/api/system` says which choices can work, and
 //! `PUT /api/settings` refuses one that can't, while a choice saved before
 //! (another GPU, another FFmpeg) keeps loading.

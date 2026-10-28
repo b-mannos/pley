@@ -27,7 +27,7 @@ artwork, which pley never moves or changes.
                              delete, old files are removed (see Clean-up)
   transcode/                 the managed transcoder's work folder (stream
                              segments, its own caches, converted downloads;
-                             Settings → Server, `--transcode-dir` or
+                             Settings → Transcoder, `--transcode-dir` or
                              `transcode_dir` in pley.toml put it elsewhere,
                              and this one is used while that one can't be).
                              The transcoder prunes it: docs/TRANSCODER.md

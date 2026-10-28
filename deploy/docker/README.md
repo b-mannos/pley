@@ -77,8 +77,9 @@ All in `.env` ([.env.example](.env.example) explains each one):
 | `PLEY_PULL_POLICY` | `build` | `build` from this checkout, or `missing` for a release |
 | `PLEY_LOG` | `info` | Log detail (`debug` to look into a problem) |
 
-Settings that change at runtime (TMDB key, hardware acceleration, tone
-mapping, transcode limits) are in pley's web UI, in **Settings → Server**.
+Settings that change at runtime are in pley's web UI: the TMDB key in
+**Settings → Server**, hardware acceleration, tone mapping and transcode
+limits in **Settings → Transcoder**.
 **Settings → Network** only shows where pley listens inside its container,
 which the image and `compose.yaml` fix: where it can be reached from is
 `PLEY_LISTEN` (and `PLEY_PLEX_LISTEN`) in `.env`.
@@ -192,7 +193,7 @@ from the internet.
 
 pley's log names the encoders it found as it starts
 (`docker compose logs pley | grep detected`), and looks again when the GPUs
-the container sees change. **Settings → Server** picks the encoder
+the container sees change. **Settings → Transcoder** picks the encoder
 (Automatic takes the GPU's), and **Settings → Dashboard** shows each stream
 as GPU, hybrid or CPU.
 

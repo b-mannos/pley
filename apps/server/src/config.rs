@@ -408,7 +408,7 @@ pub fn save_listen(path: &Path, listen: &crate::network::Listen, fixed: crate::n
     write_keys(path, &values)
 }
 
-/// Saves the transcode folder chosen in Settings → Server in the config
+/// Saves the transcode folder chosen in Settings → Transcoder in the config
 /// file `path`, for pley's next start; `None` goes back to the default one.
 pub fn save_transcode_dir(path: &Path, dir: Option<&Path>) -> anyhow::Result<()> {
     match dir {

@@ -166,6 +166,14 @@ const router = createBrowserRouter([
                 ),
               },
               {
+                path: "transcoder",
+                ...onDemand(
+                  () => import("@/pages/settings/TranscoderSettings"),
+                  (m) => m.TranscoderSettings,
+                  (prefetch) => [prefetch(queries.settings()), prefetch(queries.system())],
+                ),
+              },
+              {
                 path: "network",
                 ...onDemand(
                   () => import("@/pages/settings/NetworkSettings"),

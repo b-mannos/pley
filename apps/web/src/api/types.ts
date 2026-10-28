@@ -757,7 +757,7 @@ export interface NetworkSettings extends ListenChoice {
   windows: boolean;
 }
 
-/** The managed transcoder's work folder (Settings → Server). */
+/** The managed transcoder's work folder (Settings → Transcoder). */
 export interface TranscodeDir {
   /** The folder it works in now. */
   in_use: string;

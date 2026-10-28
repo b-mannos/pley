@@ -258,7 +258,7 @@ pub async fn put_network(
 
 // ------------------------------------------------------------------ system
 
-/// The managed transcoder's work folder (Settings → Server).
+/// The managed transcoder's work folder (Settings → Transcoder).
 #[derive(Serialize)]
 pub struct TranscodeDir {
     /// The folder it works in now.

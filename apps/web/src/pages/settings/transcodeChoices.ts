@@ -1,7 +1,7 @@
 import type { HwAccel, SystemInfo, ToneMapping, TranscoderInfo } from "@/api/types";
 
 /**
- * What Settings → Server offers for transcoding on this server: each choice
+ * What Settings → Transcoder offers on this server: each choice
  * with why it can't work here, as the server judges when saving
  * (settings.rs, `hwaccel_problem` and `tonemap_problem`). A choice saved
  * before (another GPU, another FFmpeg) stays chosen and says what happens
