@@ -21,7 +21,7 @@ use crate::devices;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 7;
+const DETECTION_REVISION: u32 = 8;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -585,6 +585,8 @@ fn test_clip_specs(encoders: &HashSet<String>) -> Vec<(&'static str, Vec<&'stati
 /// for a codec if decoding, filtering and encoding all stay on the GPU; when
 /// the decoder cannot handle a codec, ffmpeg falls back to system-memory
 /// frames and the GPU-only filter fails, so the test is conservative.
+/// libplacebo takes frames from memory too: Vulkan decoding counts only when
+/// FFmpeg says the frames reached it in Vulkan's.
 async fn detect_gpu_pipelines(
     ffmpeg: &Path,
     encoders: &HashSet<String>,
@@ -671,17 +673,21 @@ async fn detect_gpu_pipelines(
         .flatten()
         .collect();
 
-    let run_test = |args: Vec<String>| {
+    let run_logged = |args: Vec<String>| {
         let limiter = limiter.clone();
         async move {
             let _permit = limiter.acquire().await.ok();
             let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-            matches!(run(ffmpeg, &refs, Duration::from_secs(30)).await, Some(Output { success: true, .. }))
+            run(ffmpeg, &refs, Duration::from_secs(30)).await
         }
     };
-    let base = |pre: &[&str], clip: &Path| -> Vec<String> {
+    let run_test = |args: Vec<String>| {
+        let output = run_logged(args);
+        async move { matches!(output.await, Some(Output { success: true, .. })) }
+    };
+    let base = |loglevel: &str, pre: &[&str], clip: &Path| -> Vec<String> {
         let mut v: Vec<String> =
-            ["-hide_banner", "-nostdin", "-loglevel", "error"].iter().map(|s| s.to_string()).collect();
+            ["-hide_banner", "-nostdin", "-loglevel", loglevel].iter().map(|s| s.to_string()).collect();
         v.extend(pre.iter().map(|s| s.to_string()));
         v.push("-i".into());
         v.push(clip.to_string_lossy().into_owned());
@@ -702,19 +708,22 @@ async fn detect_gpu_pipelines(
         "vulkan",
     ];
     let vulkan_tests = futures::future::join_all(clips.iter().filter(|_| vulkan).map(|(key, clip)| {
-        let mut args = base(&VK, clip);
+        let mut args = base("verbose", &VK, clip);
         args.extend(
             ["-vf", "libplacebo=w=160:h=120:format=nv12,hwdownload,format=nv12", "-f", "null", "-"].map(String::from),
         );
-        let test = run_test(args);
-        async move { (key.to_string(), test.await) }
+        let test = run_logged(args);
+        async move {
+            let ok = test.await.is_some_and(|o| o.success && frames_arrive_in(&o.text, "vulkan"));
+            (key.to_string(), ok)
+        }
     }));
     let vulkan_encode_test = async {
         let Some((_, clip)) = clips.iter().find(|(k, _)| *k == "hevc10").or(clips.first()) else { return false };
         if !(vulkan && encoders.contains("h264_vulkan")) {
             return false;
         }
-        let mut args = base(&VK, clip);
+        let mut args = base("error", &VK, clip);
         args.extend(
             [
                 "-vf",
@@ -737,7 +746,7 @@ async fn detect_gpu_pipelines(
     };
     let pipeline_tests = futures::future::join_all(candidates.iter().map(|(accel, pre, vf, enc)| {
         let tests = futures::future::join_all(clips.iter().map(|(key, clip)| {
-            let mut args = base(pre, clip);
+            let mut args = base("error", pre, clip);
             args.extend(["-vf".to_string(), vf.to_string()]);
             args.extend(enc.iter().map(|s| s.to_string()));
             args.extend(["-f", "null", "-"].map(String::from));
@@ -761,6 +770,26 @@ async fn detect_gpu_pipelines(
             .filter(|p| !p.codecs.is_empty())
             .collect(),
     }
+}
+
+/// Whether every frame came to the filters in `format`, by an FFmpeg log at
+/// `-loglevel verbose` (each filter graph input names its frames' format as
+/// it is set up). FFmpeg decodes in software when the hardware decoder asked
+/// for can't, saying so for one that fails to start ([`hardware_decoder_failed`])
+/// and nothing for a codec it has none for.
+fn frames_arrive_in(log: &str, format: &str) -> bool {
+    let formats: Vec<&str> = log
+        .lines()
+        .filter_map(|line| line.split_whitespace().find_map(|w| w.strip_prefix("pixfmt:")))
+        .filter(|f| !f.is_empty())
+        .collect();
+    !formats.is_empty() && formats.iter().all(|f| *f == format)
+}
+
+/// An FFmpeg error line saying a hardware decoder couldn't start: FFmpeg
+/// goes on, decoding in software.
+pub fn hardware_decoder_failed(line: &str) -> bool {
+    line.contains("Failed setup for format") || line.contains("Invalid setup for format")
 }
 
 /// Names in the second whitespace-separated column of `ffmpeg -encoders` /
@@ -787,6 +816,25 @@ mod tests {
         assert!(names.contains("libx264"));
         assert!(names.contains("h264_nvenc"));
         assert!(names.contains("aac"));
+    }
+
+    #[test]
+    fn vulkan_decoding_counts_only_with_frames_in_vulkan_memory() {
+        // FFmpeg 9's verbose log, cut down: the decoder's line, then the graph's.
+        let on_gpu = "[hevc @ 0000011743e6fe40] Chosen frame pixfmt: p010le (Vulkan ID: 1000156013)\n\
+            [graph -1 input from stream 0:0 @ 000001174404c480] w:320 h:240 pixfmt:vulkan tb:1/1000 fr:25/1 sar:1/1 csp:unknown\n";
+        assert!(frames_arrive_in(on_gpu, "vulkan"));
+        // A GPU without Vulkan video decoding.
+        let fell_back = "[hevc @ 000001c1] Failed setup for format vulkan: hwaccel initialisation returned error.\n\
+            [graph -1 input from stream 0:0 @ 000001c2] w:320 h:240 pixfmt:p010le tb:1/1000 fr:25/1 sar:1/1 csp:unknown\n";
+        assert!(!frames_arrive_in(fell_back, "vulkan"));
+        assert!(fell_back.lines().any(hardware_decoder_failed));
+        // A codec FFmpeg has no Vulkan decoder for: silently in software.
+        let none = "[graph -1 input from stream 0:0 @ 000001fc] w:320 h:240 pixfmt:yuv420p tb:1/1000 fr:25/1 sar:1/1\n";
+        assert!(!frames_arrive_in(none, "vulkan"));
+        assert!(!none.lines().any(hardware_decoder_failed));
+        // Nothing said: not counted.
+        assert!(!frames_arrive_in("", "vulkan"));
     }
 
     #[test]

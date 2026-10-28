@@ -277,7 +277,14 @@ half-made ones are deleted.
 - **Hardware decoding.** The decoder is paired with the encoder: `cuda` with
   NVENC, `d3d11va` with QSV/AMF on Windows, `vaapi`, or `videotoolbox`. Frames
   come back to system memory, and ffmpeg falls back to software decoding by
-  itself if the codec isn't supported.
+  itself if the codec isn't supported. Vulkan decoding (into libplacebo)
+  counts for a codec only when the start-up test's frames reach the filters
+  in Vulkan memory (`pixfmt:vulkan` in FFmpeg's verbose log): libplacebo
+  takes frames from memory too, so a driver without Vulkan video decoding
+  (AMD's for Vega graphics on Windows, say) would otherwise pass while the
+  CPU decodes. Those GPUs decode with the encoder's decoder instead. A job
+  whose FFmpeg says its hardware decoder failed to start ("Failed setup for
+  format …") shows `cpu` as its decoder, with a warning.
 - **Tone mapping** of HDR10, HLG and Dolby Vision to SDR BT.709, best available
   first:
   - `libplacebo` on the GPU through Vulkan. It also applies Dolby Vision RPU

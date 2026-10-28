@@ -19,8 +19,8 @@ use parking_lot::Mutex;
 use pley_transcoder_api::{
     EncoderInfo, JobCreated, JobRequest, JobState, JobStatus, Limits, MediaInfo, ProcessStatus, VideoCodec, VideoMode,
 };
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{ChildStderr, ChildStdout};
+use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
+use tokio::process::ChildStdout;
 use tokio::sync::{Notify, oneshot, watch};
 
 use crate::adaptive;
@@ -199,6 +199,9 @@ struct Runtime {
     /// The hardware encoder failed before its first segment: the software
     /// one takes over (see [`JobManager::spawn`]).
     hardware_failed: bool,
+    /// FFmpeg said the GPU couldn't decode the video, and decodes it on the
+    /// CPU instead.
+    decoded_in_software: bool,
     failures: HashMap<u32, u32>,
     /// The automatic preset of the running process (index in
     /// [`adaptive::LADDER`]), and when it started or moved.
@@ -983,6 +986,14 @@ impl Job {
         new
     }
 
+    /// The GPU couldn't decode the video: the CPU does, which the job says.
+    fn decoded_in_software(&self) {
+        self.runtime.lock().decoded_in_software = true;
+        if self.warn("the GPU couldn't decode this video: it is decoded on the CPU") {
+            tracing::warn!(job = %self.id, "hardware decoding failed: decoding on the CPU");
+        }
+    }
+
     pub fn record_served(&self, bytes: u64) {
         self.served_segments.fetch_add(1, Relaxed);
         self.served_bytes.fetch_add(bytes, Relaxed);
@@ -1115,7 +1126,10 @@ impl Job {
 
     pub fn status(&self) -> JobStatus {
         let rt = self.runtime.lock();
-        let video = self.plan.video_plan(&self.media, rt.encoder_override.as_ref());
+        let mut video = self.plan.video_plan(&self.media, rt.encoder_override.as_ref());
+        if let Some(v) = video.as_mut().filter(|_| rt.decoded_in_software) {
+            v.decoder = Some("cpu".into());
+        }
         let mut warnings = self.plan.warnings.clone();
         warnings.extend(rt.warnings.iter().cloned());
         JobStatus {
@@ -1209,7 +1223,7 @@ fn segment_written(job: &Job, next: &AtomicU32, n: u32) {
 
 async fn read_progress(
     job: Arc<Job>,
-    stderr: ChildStderr,
+    stderr: impl AsyncRead + Unpin,
     start_ms: i64,
     tail: Arc<Mutex<VecDeque<String>>>,
     pace: Arc<Mutex<Pace>>,
@@ -1248,6 +1262,9 @@ async fn read_progress(
             }
         }
         let line = line.trim();
+        if crate::ffmpeg::hardware_decoder_failed(line) {
+            job.decoded_in_software();
+        }
         if !line.is_empty() {
             let mut tail = tail.lock();
             tail.push_back(line.to_owned());
@@ -1997,6 +2014,25 @@ mod tests {
         let p = job.status().process.unwrap();
         assert_eq!((p.fps, p.speed, p.bitrate_kbps), (None, None, None));
         assert_eq!(p.out_time_ms, 17_000, "a negative time keeps the last one");
+    }
+
+    #[tokio::test]
+    async fn a_gpu_that_cant_decode_is_said_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let job = Arc::new(job(dir.path(), vec![0, 4_000]));
+        let tail = Arc::new(Mutex::new(VecDeque::new()));
+        let pace = Arc::new(Mutex::new(Pace::default()));
+        let stderr: &[u8] = b"frame=1\nprogress=continue\n\
+            [hevc @ 000001c1] Failed setup for format vulkan: hwaccel initialisation returned error.\n\
+            frame=2\nprogress=continue\n";
+        read_progress(job.clone(), stderr, 0, tail.clone(), pace).await;
+        assert!(job.runtime.lock().decoded_in_software);
+        assert_eq!(job.status().warnings, ["the GPU couldn't decode this video: it is decoded on the CPU"]);
+        assert_eq!(tail.lock().len(), 1, "the line is kept for a failure's message too");
+
+        let fine = Arc::new(self::job(dir.path(), vec![0, 4_000]));
+        read_progress(fine.clone(), &b"frame=1\nprogress=continue\n"[..], 0, tail, Arc::default()).await;
+        assert!(!fine.runtime.lock().decoded_in_software && fine.status().warnings.is_empty());
     }
 
     #[test]

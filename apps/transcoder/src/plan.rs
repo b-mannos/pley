@@ -1900,6 +1900,37 @@ mod tests {
         }
     }
 
+    /// AMD's Vega graphics on Windows (a Ryzen 5600U): AMF encodes and
+    /// libplacebo runs on Vulkan, but the driver has no Vulkan video decoding.
+    #[test]
+    fn libplacebo_without_vulkan_decoding_has_the_encoders_gpu_decode() {
+        let amf = EncoderInfo {
+            name: "h264_amf".into(),
+            codec: VideoCodec::H264,
+            hardware: true,
+            accel: HwAccel::Amf,
+            main10: false,
+        };
+        let mut ff = ffmpeg_with(vec![amf, x264()], vec![Tonemapper::Libplacebo, Tonemapper::Opencl]);
+        ff.caps.hwaccels = ["d3d11va", "vulkan"].map(String::from).to_vec();
+        let m = ten_bit(media(DynamicRange::DolbyVision, Some(7)));
+
+        let plan = Plan::build(&request(), &m, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!((v.pipeline, v.tonemap), (Pipeline::Software, Some(Tonemapper::Libplacebo)));
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains("-init_hw_device vulkan=vk -filter_hw_device vk"), "{args}");
+        assert!(!args.contains("-hwaccel vulkan"), "{args}");
+        assert!(args.contains("libplacebo=w=1920:h=1080:format=yuv420p"), "{args}");
+        assert!(args.contains("-c:v h264_amf"), "{args}");
+        let shown = plan.video_plan(&m, None).unwrap();
+        if cfg!(windows) {
+            // Decoded by the GPU's video engine, through memory to libplacebo.
+            assert!(args.contains("-hwaccel d3d11va"), "{args}");
+            assert_eq!((shown.decoder.as_deref(), shown.pipeline.as_deref()), (Some("d3d11va"), Some("hybrid")));
+        }
+    }
+
     #[test]
     fn dolby_vision_profile5_requires_libplacebo() {
         let ff = ffmpeg_with(vec![x264()], vec![Tonemapper::Zscale]);
