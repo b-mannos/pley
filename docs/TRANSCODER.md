@@ -348,6 +348,14 @@ half-made ones are deleted.
   - Bitmap subtitles (PGS, VobSub, DVB, `.sup` files) are overlaid on the
     scaled, tone-mapped frame, their canvas fitted to its width: for 4K to
     1080p, a quarter of the pixels to blend.
+  - They are blended on the CPU, after the one download in Vulkan pipelines
+    too: about three quarters of a Ryzen 9 5900X core for 4K, a quarter of
+    that for 1080p. FFmpeg's GPU ways don't do: libplacebo makes an output
+    frame of each frame of each of its inputs, and FFmpeg sends a subtitle
+    frame with every video frame (sub2video's heartbeat), doubling them;
+    `overlay_vulkan` takes its two inputs in one format only, and gave black
+    frames for `yuva420p` on NVIDIA. The integrated GPUs that would gain
+    most also have CPU to spare more than GPU.
   - Text subtitles (SRT, ASS) are rendered by libass from an `.ass` file
     extracted into the job folder while the job is created. An embedded
     track's extraction reads the whole file, so it gives up after 20

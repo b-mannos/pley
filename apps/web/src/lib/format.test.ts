@@ -387,6 +387,16 @@ describe("transcodeSummary", () => {
     ).toBe("Video (copy) · TrueHD 7.1 → AAC Stereo · burn-in subs");
   });
 
+  it("says the CPU decodes only when the GPU does the rest", () => {
+    expect(transcodeSummary({ ...base, decoder: "cpu", pipeline: "cpu", tonemap: null, speed: null })).toBe(
+      "HEVC 3840×2160 Dolby Vision P8.1 → H.264 1920×1080 · EAC3 5.1 (copy) · h264_nvenc",
+    );
+    // The GPU couldn't decode it: why the transcode is slow.
+    expect(transcodeSummary({ ...base, decoder: "cpu", pipeline: "hybrid", speed: null })).toBe(
+      "HEVC 3840×2160 Dolby Vision P8.1 → H.264 1920×1080 · EAC3 5.1 (copy) · h264_nvenc · cpu decode · libplacebo",
+    );
+  });
+
   it("names a video transcode without details", () => {
     expect(
       transcodeSummary({ ...base, video_in: null, video_out: null, audio: "none", decoder: null, tonemap: null, speed: 0 }),

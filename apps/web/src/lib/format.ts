@@ -402,7 +402,9 @@ export function transcodeSummary(t: TranscodeInfo): string {
     parts.push(`${t.audio_in} (copy)`);
   }
   if (t.encoder && t.video === "transcode") parts.push(t.encoder);
-  if (t.decoder && t.decoder !== "cpu" && t.video === "transcode") parts.push(`${t.decoder} decode`);
+  // The CPU decoding a job whose GPU does the rest: the GPU couldn't decode.
+  const decoded = t.decoder !== "cpu" || t.pipeline === "hybrid";
+  if (t.decoder && decoded && t.video === "transcode") parts.push(`${t.decoder} decode`);
   if (t.tonemap) parts.push(t.tonemap);
   if (t.subtitle_burn) parts.push("burn-in subs");
   if (t.speed != null && t.speed > 0) parts.push(`${t.speed.toFixed(1)}×`);

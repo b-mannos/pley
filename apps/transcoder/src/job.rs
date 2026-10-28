@@ -1129,6 +1129,9 @@ impl Job {
         let mut video = self.plan.video_plan(&self.media, rt.encoder_override.as_ref());
         if let Some(v) = video.as_mut().filter(|_| rt.decoded_in_software) {
             v.decoder = Some("cpu".into());
+            if v.pipeline.as_deref() == Some("gpu") {
+                v.pipeline = Some("hybrid".into());
+            }
         }
         let mut warnings = self.plan.warnings.clone();
         warnings.extend(rt.warnings.iter().cloned());
@@ -2033,6 +2036,48 @@ mod tests {
         let fine = Arc::new(self::job(dir.path(), vec![0, 4_000]));
         read_progress(fine.clone(), &b"frame=1\nprogress=continue\n"[..], 0, tail, Arc::default()).await;
         assert!(!fine.runtime.lock().decoded_in_software && fine.status().warnings.is_empty());
+    }
+
+    #[test]
+    fn a_gpu_that_cant_decode_shows_the_cpu_decoding() {
+        use pley_transcoder_api::{EncoderInfo, GpuPipeline, HwAccel, MediaStream, StreamKind, VideoRequest};
+        let dir = tempfile::tempdir().unwrap();
+        let nvenc = EncoderInfo {
+            name: "h264_nvenc".into(),
+            codec: VideoCodec::H264,
+            hardware: true,
+            accel: HwAccel::Nvenc,
+            main10: false,
+        };
+        let ff = Ffmpeg {
+            ffmpeg: "ffmpeg".into(),
+            ffprobe: "ffprobe".into(),
+            caps: pley_transcoder_api::Capabilities {
+                encoders: vec![nvenc],
+                hwaccels: vec!["cuda".into()],
+                gpu_pipelines: vec![GpuPipeline { accel: HwAccel::Nvenc, codecs: vec!["h264".into()] }],
+                ..Default::default()
+            },
+            segment_times_relative: true,
+        };
+        let video = MediaStream {
+            kind: StreamKind::Video,
+            codec: "h264".into(),
+            width: Some(1920),
+            height: Some(1080),
+            ..Default::default()
+        };
+        let media = MediaInfo { duration_ms: Some(8_000), streams: vec![video], ..Default::default() };
+        let req =
+            JobRequest { input: "/media/movie.mkv".into(), video: Some(VideoRequest::default()), ..Default::default() };
+        let mut job = job(dir.path(), vec![0, 4_000, 8_000]);
+        job.plan = Plan::build(&req, &media, &ff, None).unwrap();
+        job.media = Arc::new(media);
+        let shown = |job: &Job| job.status().video.map(|v| (v.decoder, v.pipeline)).unwrap();
+        assert_eq!(shown(&job), (Some("cuda".into()), Some("gpu".into())));
+
+        job.decoded_in_software();
+        assert_eq!(shown(&job), (Some("cpu".into()), Some("hybrid".into())));
     }
 
     #[test]
