@@ -46,6 +46,19 @@ export function languageName(code: string | null | undefined): string | null {
 }
 
 /**
+ * A language's two-letter code (ISO 639-1), as subtitle sites name them:
+ * "eng" → "en", "chi" → "zh"; a code without one comes back as it is.
+ */
+export function twoLetterCode(code: string): string {
+  const base = code.trim().toLowerCase();
+  if (base.length === 2) return base;
+  const name = NAMES[base];
+  if (!name) return base;
+  for (const [key, value] of Object.entries(NAMES)) if (key.length === 2 && value === name) return key;
+  return base;
+}
+
+/**
  * Languages offered as audio and subtitle defaults, by name. Codes are ISO
  * 639-2/B, the form ffprobe reports; the server matches the other forms too.
  */

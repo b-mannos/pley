@@ -402,6 +402,10 @@ export interface MediaStream {
   // subtitle
   external?: boolean;
   text_based?: boolean;
+  /** Added on the server (a file uploaded, or one found on OpenSubtitles), not in or beside the media file. */
+  added?: boolean;
+  /** Who added it, when the server says. */
+  added_by?: Id | null;
 }
 
 export interface Hub {
@@ -421,6 +425,25 @@ export interface SubtitleTrack {
   external: boolean;
   text_based: boolean;
   url: string | null;
+  /** Added on the server (a file uploaded, or one found on OpenSubtitles). */
+  added?: boolean;
+  /** Who added it, when the server says. */
+  added_by?: Id | null;
+}
+
+/** A subtitle file found for an item (GET /api/items/{id}/subtitles/search). */
+export interface SubtitleResult {
+  /** Opaque: passed back to add it. */
+  id: string;
+  provider: string;
+  language: string;
+  name: string;
+  format: string;
+  hearing_impaired: boolean;
+  forced: boolean;
+  downloads: number;
+  /** "hash": made for this very file; "title": for the title. */
+  matched: "hash" | "title";
 }
 
 export type PlaybackMethod = "direct" | "remux" | "transcode";

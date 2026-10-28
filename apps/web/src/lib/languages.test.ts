@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { languageName } from "./languages";
+import { languageName, LANGUAGES, twoLetterCode } from "./languages";
 
 describe("languageName", () => {
   it("names ISO 639-2 and 639-1 codes", () => {
@@ -24,5 +24,17 @@ describe("languageName", () => {
     expect(languageName(null)).toBeNull();
     expect(languageName("")).toBeNull();
     expect(languageName("   ")).toBeNull();
+  });
+});
+
+describe("twoLetterCode", () => {
+  it("is the two-letter code subtitle sites use", () => {
+    expect(twoLetterCode("eng")).toBe("en");
+    expect(twoLetterCode("chi")).toBe("zh");
+    expect(twoLetterCode("per")).toBe("fa");
+    expect(twoLetterCode("de")).toBe("de");
+    expect(twoLetterCode("xyz")).toBe("xyz");
+    // Every language offered has one.
+    for (const l of LANGUAGES) expect(twoLetterCode(l.code)).toHaveLength(2);
   });
 });

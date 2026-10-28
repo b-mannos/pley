@@ -23,7 +23,18 @@ import {
 import { errorMessage, isApiError } from "@/api/client";
 import { onServerEvent } from "@/api/events";
 import { fetchNext, invalidateWatchState, keys, useTrickplay } from "@/api/hooks";
-import type { ItemDetail, ItemSummary, MediaFile, PlaybackInfo, PlaybackMode, PlaybackState, ServerEvent } from "@/api/types";
+import { deleteSubtitle, trackStream } from "@/api/subtitles";
+import type {
+  ItemDetail,
+  ItemSummary,
+  MediaFile,
+  MediaStream,
+  PlaybackInfo,
+  PlaybackMode,
+  PlaybackState,
+  ServerEvent,
+  SubtitleTrack,
+} from "@/api/types";
 import { useOptionalAudioPlayer } from "@/audio/AudioPlayer";
 import { useAuth } from "@/auth";
 import { Slider } from "@/components/Slider";
@@ -49,6 +60,7 @@ import { AutoQuality, ORIGINAL_ID, storedMemory, type AutoMemory, type AutoStep,
 import { autoLadder, chooseQuality, modeFor, namedFor, qualitiesFor, qualityById } from "./quality";
 import { networkStart, reportCeiling } from "./network";
 import { ChaptersMenu } from "./ChaptersMenu";
+import type { SubtitleSources } from "./FindSubtitles";
 import { SeekBar } from "./SeekBar";
 import { methodLabel, PlaybackDetails } from "./PlaybackDetails";
 import { SettingsPopover } from "./SettingsPopover";
@@ -312,7 +324,16 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
   const file = item.files.find((f) => f.id === fileId) ?? item.files[0] ?? null;
   const audioStreams = useMemo(() => file?.streams.filter((s) => s.kind === "audio") ?? [], [file]);
-  const subStreams = useMemo(() => file?.streams.filter((s) => s.kind === "subtitle") ?? [], [file]);
+  // Subtitles added while it plays (found, or a file uploaded) are listed at
+  // once, and those deleted go, before the item says so.
+  const [addedTracks, setAddedTracks] = useState<SubtitleTrack[]>([]);
+  const [deletedTracks, setDeletedTracks] = useState<number[]>([]);
+  /** Tracks added from this player: whoever added them may delete them. */
+  const [addedHere, setAddedHere] = useState<number[]>([]);
+  const subStreams = useMemo(() => {
+    const own = file?.streams.filter((s) => s.kind === "subtitle" && !deletedTracks.includes(s.index)) ?? [];
+    return own.concat(addedTracks.filter((t) => !own.some((s) => s.index === t.index)).map(trackStream));
+  }, [file, addedTracks, deletedTracks]);
 
   // Explicit tracks from the URL win; otherwise the remembered choice for the show / movie.
   // The audio is left to the server unless picked: of the chosen language, it plays the
@@ -406,7 +427,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const [stopped, setStopped] = useState<StoppedBy | null>(null);
   const stoppedRef = useRef(false);
   // Text subtitles moved earlier or later, remembered for each profile and file on this device.
-  const userId = useAuth().id;
+  const me = useAuth();
+  const userId = me.id;
   const [offsetChoice, setOffsetChoice] = useState(() => ({
     file: file?.id ?? null,
     offset: storedSubtitleOffset(userId, file?.id),
@@ -1268,7 +1290,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   // (SubtitleOverlay), except in the iPhone's own fullscreen player, where
   // the browser has to. (A <track src> would hold playback until its file
   // arrives, and pulling subtitles out of a big file can take minutes.)
-  const shownTextUrl = (info?.subtitles ?? []).find((s) => s.index === shownTextIndex && s.text_based)?.url ?? null;
+  const shownTextUrl =
+    [...addedTracks, ...(info?.subtitles ?? [])].find((s) => s.index === shownTextIndex && s.text_based)?.url ?? null;
   const [loadedCues, setLoadedCues] = useState<{ url: string; cues: VTTCue[] } | null>(null);
   // Subtitles show up by themselves once loaded (nothing is said meanwhile).
   // Embedded ones come as far as the server has read them out of the file
@@ -1507,6 +1530,34 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     setSubIndex(index);
     rememberTracks(audioIndex ?? undefined, index);
   };
+  /** A track added on the server (found, or a file uploaded): listed, and shown. */
+  const subtitleAdded = (track: SubtitleTrack) => {
+    setAddedTracks((list) => [...list.filter((t) => t.index !== track.index), track]);
+    setDeletedTracks((list) => list.filter((i) => i !== track.index));
+    setAddedHere((list) => [...list, track.index]);
+    changeSubtitle(track.index);
+    toast.success(`Subtitles added: ${streamLabel(trackStream(track))}`);
+    // The item's page lists it the next time it shows.
+    void qc.invalidateQueries({ queryKey: keys.item(item.id), refetchType: "none" });
+  };
+  const canDeleteSubtitle = (s: MediaStream) =>
+    me.is_admin || (s.added_by != null ? s.added_by === me.id : addedHere.includes(s.index));
+  const removeSubtitle = (index: number) => {
+    deleteSubtitle(item.id, index).then(
+      () => {
+        setDeletedTracks((list) => [...list, index]);
+        setAddedTracks((list) => list.filter((t) => t.index !== index));
+        if (subIndex === index) changeSubtitle(null);
+        toast.info("Subtitles deleted");
+        void qc.invalidateQueries({ queryKey: keys.item(item.id), refetchType: "none" });
+      },
+      (err: unknown) => toast.error(`These subtitles couldn't be deleted. ${errorMessage(err)}`),
+    );
+  };
+  const subtitleSources: SubtitleSources | null = file
+    ? { itemId: item.id, fileId: file.id, language: me.subtitle_language, isAdmin: me.is_admin, onAdded: subtitleAdded }
+    : null;
+
   const cycleSubtitles = () => {
     const texts = subStreams.filter((s) => s.text_based !== false);
     if (!texts.length) return;
@@ -1943,6 +1994,10 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             onSubtitleStyle={setSubtitleStyle}
             subtitleOffset={subtitleOffset}
             onSubtitleOffset={changeSubtitleOffset}
+            subtitleSources={subtitleSources}
+            canDeleteSubtitle={canDeleteSubtitle}
+            onDeleteSubtitle={removeSubtitle}
+            onSubtitleFileRefused={(message) => toast.error(message)}
             speed={speed}
             onSpeed={setSpeed}
             sleep={sleepChoice(sleep.timer)}

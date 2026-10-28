@@ -15,12 +15,15 @@ export class ApiError extends Error {
   readonly status: number;
   /** One of `ApiErrorCode`, or a code this client doesn't know yet. */
   readonly code: ApiErrorCode | (string & {});
+  /** The answer's JSON, when it had some (fields past `code` and `message`, as `setup`). */
+  readonly body: unknown;
 
-  constructor(status: number, code: ApiErrorCode | (string & {}), message: string) {
+  constructor(status: number, code: ApiErrorCode | (string & {}), message: string, body?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.body = body;
   }
 }
 
@@ -46,6 +49,8 @@ export interface RequestOptions {
   body?: unknown;
   /** Sent as is (file uploads) instead of JSON-encoding `body`. */
   rawBody?: Blob;
+  /** Sent as multipart/form-data (a file with fields), the browser naming its boundary. */
+  form?: FormData;
   signal?: AbortSignal;
   keepalive?: boolean;
   /** Don't trigger the global 401 redirect (used by auth probes). */
@@ -53,17 +58,17 @@ export interface RequestOptions {
 }
 
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const { method = "GET", body, rawBody, signal, keepalive, noAuthRedirect } = opts;
+  const { method = "GET", body, rawBody, form, signal, keepalive, noAuthRedirect } = opts;
   const headers: Record<string, string> = { Accept: "application/json" };
   if (rawBody) headers["Content-Type"] = rawBody.type || "application/octet-stream";
-  else if (body !== undefined) headers["Content-Type"] = "application/json";
+  else if (body !== undefined && !form) headers["Content-Type"] = "application/json";
   let res: Response;
   try {
     res = await fetch(path, {
       method,
       credentials: "same-origin",
       headers,
-      body: rawBody ?? (body !== undefined ? JSON.stringify(body) : undefined),
+      body: rawBody ?? form ?? (body !== undefined ? JSON.stringify(body) : undefined),
       signal,
       keepalive,
     });
@@ -76,9 +81,11 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
     let code: string = statusCode(res.status);
     // Without pley's own words (a proxy's page, say), plain ones rather than "Bad Gateway".
     let message = res.status >= 502 && res.status <= 504 ? "the server isn't answering right now" : `the server couldn't answer (error ${res.status})`;
+    let answer: unknown;
     try {
       const data = (await res.json()) as { code?: string; message?: string };
       if (data && typeof data === "object") {
+        answer = data;
         if (data.code) code = data.code;
         if (data.message) message = data.message;
       }
@@ -87,7 +94,7 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
     }
     // A second step asked for is not an expired session.
     if (res.status === 401 && !noAuthRedirect && code !== "two_step") unauthorizedHandler?.();
-    throw new ApiError(res.status, code, message);
+    throw new ApiError(res.status, code, message, answer);
   }
 
   if (res.status === 204 || res.status === 202) {

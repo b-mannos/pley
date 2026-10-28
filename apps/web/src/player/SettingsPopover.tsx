@@ -1,9 +1,11 @@
 import { useRef, useState, type ReactNode } from "react";
-import { Check, ChevronLeft, ChevronRight, Minus, Plus, Settings2 } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Minus, Plus, Search, Settings2, Trash2, Upload } from "lucide-react";
+import { SUBTITLE_FILE_MAX, SUBTITLE_FILE_TYPES } from "@/api/subtitles";
 import type { MediaStream } from "@/api/types";
 import { cn } from "@/lib/cn";
 import { formatClock, streamLabel } from "@/lib/format";
 import { useDismiss } from "@/lib/hooks";
+import { AddSubtitleFile, FindSubtitles, subtitleSearchUnavailable, type SubtitleSources } from "./FindSubtitles";
 import { qualityById, type QualityOption } from "./quality";
 import { SLEEP_MINUTES, type SleepChoice } from "./sleepTimer";
 import { SPEEDS, speedLabel } from "./speed";
@@ -19,12 +21,14 @@ import {
   type SubtitleStyle,
 } from "./subtitles";
 
-type Panel = "root" | "quality" | "audio" | "subtitles" | "style" | "speed" | "sleep";
+type Panel = "root" | "quality" | "audio" | "subtitles" | "find" | "upload" | "style" | "speed" | "sleep";
 
 const PANEL_TITLE: Record<Exclude<Panel, "root">, string> = {
   quality: "Quality",
   audio: "Audio",
   subtitles: "Subtitles",
+  find: "Find subtitles",
+  upload: "Add subtitle file",
   style: "Subtitle style",
   speed: "Speed",
   sleep: "Sleep timer",
@@ -54,6 +58,24 @@ function Option({
       className="flex w-full items-center gap-2.5 px-4 py-2 text-left text-sm transition-colors hover:bg-white/10"
     >
       <Check className={cn("size-4 shrink-0 text-accent", !selected && "invisible")} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{children}</span>
+        {hint ? <span className="block truncate text-xs text-white/50">{hint}</span> : null}
+      </span>
+    </button>
+  );
+}
+
+/** A row that does something rather than choose: find subtitles, add a file. */
+function Action({ icon, hint, onClick, children }: { icon: ReactNode; hint?: string; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="flex w-full items-center gap-2.5 px-4 py-2 text-left text-sm transition-colors hover:bg-white/10"
+    >
+      <span className="flex size-4 shrink-0 items-center justify-center text-white/70">{icon}</span>
       <span className="min-w-0 flex-1">
         <span className="block truncate">{children}</span>
         {hint ? <span className="block truncate text-xs text-white/50">{hint}</span> : null}
@@ -154,6 +176,13 @@ export interface SettingsPopoverProps {
   /** Seconds text subtitles are moved by (positive: later), for this file. */
   subtitleOffset: number;
   onSubtitleOffset: (offset: number) => void;
+  /** Finding subtitles and adding files, when the player offers it. */
+  subtitleSources?: SubtitleSources | null;
+  /** Whether this profile may delete an added track (an administrator, or whoever added it). */
+  canDeleteSubtitle?: (stream: MediaStream) => boolean;
+  onDeleteSubtitle?: (index: number) => void;
+  /** Says why a subtitle file picked can't be added (too big). */
+  onSubtitleFileRefused?: (message: string) => void;
   /** How fast it plays (1: normal), for this title. */
   speed: number;
   onSpeed: (speed: number) => void;
@@ -170,7 +199,12 @@ export function SettingsPopover(props: SettingsPopoverProps) {
   const { audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle } = props;
   const { subtitleStyle, onSubtitleStyle, subtitleOffset, onSubtitleOffset, speed, onSpeed } = props;
   const { sleep, sleepLeft, sleepEndLabel, onSleep } = props;
+  const { subtitleSources: sources, canDeleteSubtitle, onDeleteSubtitle, onSubtitleFileRefused } = props;
   const [panel, setPanel] = useState<Panel>("root");
+  const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
+  /** The added track whose deletion is being confirmed. */
+  const [deleting, setDeleting] = useState<number | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(ref, open, () => {
     setOpen(false);
@@ -211,6 +245,19 @@ export function SettingsPopover(props: SettingsPopoverProps) {
   const close = () => {
     setOpen(false);
     setPanel("root");
+    setDeleting(null);
+  };
+  // Search the server can't do: not offered where it never will, said for an administrator who can set it up.
+  const searchUnavailable = subtitleSearchUnavailable();
+  const showFind = !!sources && searchUnavailable !== "older" && (searchUnavailable !== "setup" || sources.isAdmin);
+  const pickFile = (file: File | undefined) => {
+    if (!file) return;
+    if (file.size > SUBTITLE_FILE_MAX) {
+      onSubtitleFileRefused?.("Subtitle files can be up to 2 MB.");
+      return;
+    }
+    setSubtitleFile(file);
+    setPanel("upload");
   };
 
   return (
@@ -348,6 +395,8 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                   ))}
                 </>
               ) : null}
+              {panel === "find" && sources ? <FindSubtitles sources={sources} onDone={close} /> : null}
+              {panel === "upload" && sources && subtitleFile ? <AddSubtitleFile sources={sources} file={subtitleFile} onDone={close} /> : null}
               {panel === "speed"
                 ? SPEEDS.map((s) => (
                     <Option
@@ -373,19 +422,85 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                   >
                     Off
                   </Option>
-                  {subtitleStreams.map((s) => (
-                    <Option
-                      key={s.index}
-                      selected={s.index === subtitleIndex}
-                      onClick={() => {
-                        onSubtitle(s.index);
-                        close();
-                      }}
-                    >
-                      {streamLabel(s)}
-                      {s.text_based === false ? <span className="ml-1 text-xs text-white/50">(burn-in)</span> : null}
-                    </Option>
-                  ))}
+                  {subtitleStreams.map((s) => {
+                    const option = (
+                      <Option
+                        key={s.index}
+                        selected={s.index === subtitleIndex}
+                        hint={s.added ? "Added" : undefined}
+                        onClick={() => {
+                          onSubtitle(s.index);
+                          close();
+                        }}
+                      >
+                        {streamLabel(s)}
+                        {s.text_based === false ? <span className="ml-1 text-xs text-white/50">(burn-in)</span> : null}
+                      </Option>
+                    );
+                    if (!s.added || !onDeleteSubtitle || !canDeleteSubtitle?.(s)) return option;
+                    if (deleting === s.index) {
+                      return (
+                        <div key={s.index} className="flex items-center gap-2 px-4 py-2 text-sm" role="group" aria-label={`Delete ${streamLabel(s)}`}>
+                          <span className="min-w-0 flex-1 truncate">Delete for everyone?</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeleting(null);
+                              onDeleteSubtitle(s.index);
+                            }}
+                            className="h-7 rounded-md bg-danger px-2.5 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                          >
+                            Delete
+                          </button>
+                          <button type="button" onClick={() => setDeleting(null)} className="h-7 rounded-md px-2.5 text-xs font-semibold hover:bg-white/10">
+                            Keep
+                          </button>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div key={s.index} className="flex items-center pr-2">
+                        <div className="min-w-0 flex-1">{option}</div>
+                        <button
+                          type="button"
+                          aria-label={`Delete ${streamLabel(s)}`}
+                          title="Delete these subtitles"
+                          onClick={() => setDeleting(s.index)}
+                          className="flex size-8 shrink-0 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {sources ? (
+                    <>
+                      <div className="my-1 h-px bg-white/10" />
+                      {showFind ? (
+                        <Action
+                          icon={<Search className="size-4" />}
+                          hint={searchUnavailable === "setup" ? "Subtitle search isn't set up" : undefined}
+                          onClick={() => setPanel("find")}
+                        >
+                          Find subtitles…
+                        </Action>
+                      ) : null}
+                      <Action icon={<Upload className="size-4" />} onClick={() => fileInput.current?.click()}>
+                        Add subtitle file…
+                      </Action>
+                      <input
+                        ref={fileInput}
+                        type="file"
+                        accept={SUBTITLE_FILE_TYPES.join(",")}
+                        className="hidden"
+                        data-testid="subtitle-file"
+                        onChange={(e) => {
+                          pickFile(e.target.files?.[0]);
+                          e.target.value = "";
+                        }}
+                      />
+                    </>
+                  ) : null}
                   {textSub ? <SubtitleSync offset={subtitleOffset} onChange={onSubtitleOffset} /> : null}
                 </>
               ) : null}

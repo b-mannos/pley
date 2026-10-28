@@ -735,3 +735,61 @@ describe("VideoPlayer speed", () => {
     window.localStorage.removeItem("pley.quality");
   });
 });
+
+describe("VideoPlayer finding subtitles", () => {
+  beforeEach(() => vi.stubGlobal("VTTCue", FakeCue));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("shows subtitles found at once, chosen, and lets whoever added them delete them", async () => {
+    const user = userEvent.setup();
+    const track = {
+      index: 2000,
+      codec: "subrip",
+      language: "eng",
+      title: null,
+      default: false,
+      forced: false,
+      external: true,
+      text_based: true,
+      url: "/api/files/3/subtitles/2000.vtt",
+      added: true,
+    };
+    const requests = serve([session("s1")], {
+      "GET /api/items/7/subtitles/search": () => ({
+        results: [{ id: "opensubtitles:9", provider: "opensubtitles", language: "en", name: "Heat.1995", format: "srt", hearing_impaired: false, forced: false, downloads: 5, matched: "hash" }],
+      }),
+      "POST /api/items/7/subtitles": () => track,
+      "GET /api/files/3/subtitles/2000.vtt": () => new Response("WEBVTT\n\n00:00:01.000 --> 00:00:09.000\nFound it", { status: 200 }),
+      "PUT /api/items/7/streams": () => undefined,
+      "DELETE /api/items/7/subtitles/2000": () => undefined,
+    });
+    const { container } = renderPlayer(0);
+    const video = container.querySelector("video")!;
+    Object.defineProperty(video, "currentTime", { value: 2, configurable: true, writable: true });
+    await waitFor(() => expect(hlsInstances).toHaveLength(1));
+
+    await user.click(screen.getByRole("button", { name: "Playback settings" }));
+    await user.click(screen.getByRole("button", { name: /Subtitles\s*None/ }));
+    await user.click(screen.getByRole("menuitem", { name: "Find subtitles…" }));
+    await user.click(await screen.findByRole("menuitem", { name: /Heat\.1995/ }));
+
+    await waitFor(() => {
+      fireEvent.timeUpdate(video);
+      expect(screen.getByTestId("subtitles")).toHaveTextContent("Found it");
+    });
+    // Chosen for the show, as any track picked; the same session plays on.
+    expect(requests.find((r) => r.method === "PUT" && r.path === "/api/items/7/streams")?.body).toMatchObject({ subtitle_index: 2000 });
+    expect(requests.filter((r) => r.method === "POST" && r.path === "/api/playback")).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: "Playback settings" }));
+    await user.click(screen.getByRole("button", { name: /Subtitles\s*English/ }));
+    await user.click(screen.getByRole("button", { name: /^Delete English/ }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(requests.some((r) => r.method === "DELETE" && r.path === "/api/items/7/subtitles/2000")).toBe(true));
+    fireEvent.timeUpdate(video);
+    await waitFor(() => expect(screen.queryByTestId("subtitles")).not.toBeInTheDocument());
+    // Gone from the menu, which stays open, and turned off.
+    expect(screen.queryByRole("menuitemradio", { name: /English/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: "Off" })).toHaveAttribute("aria-checked", "true");
+  });
+});
