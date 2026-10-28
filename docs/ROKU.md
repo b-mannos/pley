@@ -90,7 +90,20 @@ Rules the code keeps:
   audio tracks are taken for the file's audio streams in order, only when
   Roku lists as many as the file has and their languages agree; a converted
   stream has one. Text subtitles picked while the server draws picture ones
-  onto the video start a stream without them, where it was.
+  onto the video start a stream without them, where it was. Subtitles
+  changed alone are saved without the audio (`audio_index` left out), so
+  turning captions on or off doesn't pin the track the server chose for
+  this Roku on every other device.
+- Audio: the play request names no audio track, so the server picks, of
+  the profile's language (the choice remembered for the show or the movie,
+  else the profile's defaults), the track this Roku plays best, and its
+  answer's `audio_index` is what the app counts as playing. Roku doesn't
+  report `audio_track_switching` and the app doesn't set the Video node's
+  `audioTrack`, so any audio but the file's default makes the file a
+  stream with its video copied.
+- Track names in Roku's options: a subtitle track's title, else its
+  language's name (its code for one not among the 34), "(Forced)" added
+  only when the title doesn't say it already.
 - Audio and subtitle defaults (Settings), as on Samsung and LG: Audio
   language (the file's default, or one of 34 languages), Subtitles (Off,
   Only for foreign dialogue, When the audio is in another language,
@@ -141,29 +154,32 @@ Rules the code keeps:
 
 ## Checking it on a computer
 
-In `apps/roku`, with Node 22 or newer:
+In `apps/roku`, with Bun and Node 22 or newer. Bun installs the packages
+and runs the scripts, but the tools they call (bsc, bslint) run on Node:
+apps/roku has no `bunfig.toml` making Bun their runtime, as bslint's
+plugin loader needs Node's `module.require`.
 
 ```powershell
-npm ci
-npm run check     # bsc's compile check, bslint, the unit tests
-npm run smoke     # the whole app in brs-node, against a fake server
-npm run bench     # the list work timed in brs-node
-npm run preview   # the app in a browser, the keyboard as its remote
+bun install
+bun run check     # bsc's compile check, bslint, the unit tests
+bun run smoke     # the whole app in brs-node, against a fake server
+bun run bench     # the list work timed in brs-node
+bun run preview   # the app in a browser, the keyboard as its remote
 ```
 
-`npm run preview` runs the app in brs-node and serves it on
+`bun run preview` runs the app in brs-node and serves it on
 http://127.0.0.1:8086/: the TV's picture as brs-node draws it, with the
 arrows, Enter (OK), Esc or Backspace (Back), Space (play/pause), `[` and `]`
 (rewind, fast forward) and `*` (options) as the remote, and letters typed
 on its keyboards. It runs against the smoke run's fake server, which allows
-the TV code by itself; `npm run preview -- --server http://<address>:7539`
+the TV code by itself; `bun run preview --server http://<address>:7539`
 runs it against a real one instead, whose `/link` page allows the code.
 `--port` chooses another port.
 
 The unit tests run `components/lib` and `tests/*.test.brs` in brs-node
 (lvcabral's BrightScript engine, whose command line and Node library moved
 from `brs-engine` to `brs-node`): each `sub test_…()` is a test.
-`npm run smoke` starts a fake pley server on 127.0.0.1
+`bun run smoke` starts a fake pley server on 127.0.0.1
 (`scripts/fixture-server.mjs`, answers written from docs/API.md) and walks
 the app with the remote: sign-in with a code and its QR code, Home, a
 title's details after a refused token, Back while the player starts (the
@@ -185,12 +201,12 @@ with a Node process of its own, one at a time, numbers transfers at random
 below 80 (the API task keeps those under way apart), drops a remote key now
 and then, and can't stand in for a Roku's speed.
 
-`npm run images` draws the watched mark again (`scripts/make_images.py`,
+`bun run images` draws the watched mark again (`scripts/make_images.py`,
 Python's standard library only). The home screen icons (540 × 405 and
 290 × 218, the P and the wordmark on pley's tile, as the Android TV app's
 banner) and the splash screens (the logo on the app's background) are
 rendered from pley's logo with the other apps' icons:
-`node scripts/render-icons.mjs` at the repository's root.
+`bun scripts/render-icons.mjs` at the repository's root.
 
 ## Installing on a Roku
 
@@ -199,14 +215,14 @@ There is no channel in Roku's store yet; the app is sideloaded:
 1. Turn on developer mode: with the Roku remote press Home three times, Up
    twice, then Right, Left, Right, Left, Right. Note the address shown,
    choose a password and let the Roku restart.
-2. `npm run package` writes `out/pley-roku.zip`. bsc adds BrighterScript's
+2. `bun run package` writes `out/pley-roku.zip`. bsc adds BrighterScript's
    runtime (`source/bslib.brs`, MIT) to every package and has no switch to
    leave it out; its notice goes along in `licenses/bslib.txt`.
 3. Open the Roku's address in a browser, sign in as `rokudev` with that
    password, upload the zip and press Install. pley appears on the Home
    screen as a developer app; installing again replaces it.
 
-`npx bsc --deploy --host <address> --password <password>` packages and
+`bunx bsc --deploy --host <address> --password <password>` packages and
 installs in one go. The Roku's debug console (`telnet <address> 8085`) shows
 what the app prints and its errors.
 
@@ -220,6 +236,9 @@ to the store.
 - Music libraries, "Who's watching?" and switching profiles.
 - Hearing what other devices change at once: Home asks again once its rows
   are a minute old.
+- Audio other than the file's default played as it is: reporting
+  `audio_track_switching` and starting the Video node on the server's
+  `audio_index`, once tried on a Roku.
 - The Show screen asks for its seasons again each time it shows; Home's row
   fingerprints would spare that when nothing changed.
 - Roku's channel store: a developer account, certification, SceneGraph 1.3
