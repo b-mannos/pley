@@ -16,6 +16,11 @@ sub init()
 
     m.api = CreateObject("roSGNode", "ApiTask")
     m.global.addFields({ api: m.api })
+
+    ' Music plays on while the screens change.
+    m.music = CreateObject("roSGNode", "MusicPlayer")
+    m.top.appendChild(m.music)
+    m.global.addFields({ music: m.music })
     m.api.observeField("ready", "onApiReady")
     m.api.control = "run"
 end sub
@@ -82,6 +87,8 @@ sub show(nav as object)
         if m.stack.Peek().subtype() = name then return
     end if
     if httpTrue(nav.reset)
+        ' Another profile, sign-in or server: what it played ends.
+        m.music.control = "stop"
         while m.stack.Count() > 0
             closeScreen(m.stack.Pop())
         end while

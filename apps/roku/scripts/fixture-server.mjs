@@ -115,7 +115,17 @@ const episodes = seasons.flatMap((season) => Array.from({ length: 9 }, (_, i) =>
   thumb_url: `/api/items/${season.id + i + 1}/images/thumb?v=1`, summary: `What happens in episode ${i + 1}.`,
   user_state: season.index === 1 && i < 2 ? state(0, true) : season.index === 1 && i === 2 ? state(900000) : state(),
 })));
-const items = new Map([...movies, show, ...seasons, ...episodes].map((item) => [item.id, item]));
+// Music: an artist, their album and its tracks.
+const artist = { id: 5000, library_id: 3, kind: "artist", title: "The Fixtures", sort_title: "Fixtures", added_at: 0, poster_url: "/api/items/5000/images/poster?v=1", user_state: state(), child_count: 1 };
+const album = {
+  id: 5100, library_id: 3, kind: "album", title: "Blue", sort_title: "Blue", year: 2001, parent_id: 5000, parent_title: "The Fixtures",
+  added_at: 0, poster_url: "/api/items/5100/images/poster?v=1", user_state: state(), leaf_count: 3,
+};
+const tracks = [1, 2, 3].map((n) => ({
+  id: 5200 + n, library_id: 3, kind: "track", title: `Song ${n}`, sort_title: `Song ${n}`, index: n, parent_id: 5100, parent_title: "Blue",
+  grandparent_id: 5000, grandparent_title: "The Fixtures", duration_ms: 200000, added_at: 0, user_state: state(),
+}));
+const items = new Map([...movies, show, ...seasons, ...episodes, artist, album, ...tracks].map((item) => [item.id, item]));
 
 // Every file has text and picture subtitles; the choices pick the picture
 // ones for episode 103 (the one the walk plays), which the app asks the
@@ -134,7 +144,12 @@ function detail(item, myList) {
     edition: null, selected_audio: 1, selected_subtitle: item.id === 103 ? PICTURE_SUBTITLES : 3,
     chapters: [{ start_ms: 0, end_ms: 600000, title: "Opening" }, { start_ms: 600000, end_ms: item.duration_ms ?? 1200000, title: null }],
   };
-  const playable = item.kind === "movie" || item.kind === "episode";
+  if (item.kind === "track") {
+    file.container = "mp3";
+    file.streams = [{ index: 0, kind: "audio", codec: "mp3", channels: 2 }];
+    file.chapters = [];
+  }
+  const playable = item.kind === "movie" || item.kind === "episode" || item.kind === "track";
   return {
     ...item, summary: item.summary ?? `About ${item.title}.`, original_title: null, tagline: item.kind === "movie" ? "A tagline." : null,
     genres: ["Drama", "Mystery"], studio: null, content_rating: "PG-13", tmdb_id: null, imdb_id: null,
@@ -338,7 +353,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
           ...(fixture.myList.length ? [{ key: "my_list", title: "My List", library_id: null, items: fixture.myList.map((id) => items.get(id)).filter(Boolean) }] : []),
           { key: "recently_added:1", title: "Recently Added in Movies", library_id: 1, items: movies.slice(0, 20) },
           { key: "recently_added:2", title: "Recently Added in TV Shows", library_id: 2, items: [show] },
-          { key: "recently_added:3", title: "Recently Added in Music", library_id: 3, items: [{ id: 5000, kind: "album", title: "Blue", sort_title: "Blue", added_at: 0, user_state: state() }] },
+          { key: "recently_added:3", title: "Recently Added in Music", library_id: 3, items: [album] },
         ],
       });
     }
@@ -370,7 +385,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     }
     if ((match = path.match(/^\/api\/libraries\/(\d+)\/filters$/))) return json(200, { genres: ["Drama", "Mystery"], years: [2022, 2019] });
     if ((match = path.match(/^\/api\/libraries\/(\d+)\/items$/))) {
-      const listed = match[1] === "1" ? movies : match[1] === "2" ? [show] : [];
+      const listed = match[1] === "1" ? movies : match[1] === "2" ? [show] : [artist];
       const offset = Number(url.searchParams.get("offset") ?? 0);
       const limit = Number(url.searchParams.get("limit") ?? 50);
       return json(200, { total: listed.length, items: listed.slice(offset, offset + limit) });
@@ -438,7 +453,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       if (ask.file_id != null && ask.file_id !== fileId) problems.push(`playback of file ${ask.file_id} for item ${ask.item_id}`);
       const burn = ask.subtitle_index ?? null;
       if (burn !== null && burn !== PICTURE_SUBTITLES) problems.push(`subtitles ${burn} to draw, which aren't pictures`);
-      fixture.playbacks.push({ item: ask.item_id, subtitle_index: burn, mode: ask.mode, max_bitrate: ask.max_bitrate ?? null });
+      fixture.playbacks.push({ item: ask.item_id, kind: item?.kind, subtitle_index: burn, mode: ask.mode, max_bitrate: ask.max_bitrate ?? null });
       sessions += 1;
       const session = `s${sessions}`;
       if (fixture.playbackDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, fixture.playbackDelayMs));

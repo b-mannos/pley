@@ -175,6 +175,8 @@ end function
 function pageTileOptions(tile as object, continueWatching as boolean, inList as dynamic) as object
     kind = httpString(tile.kind)
     options = []
+    ' Music has no watched marks or My List.
+    if contentMusic(kind) then return [{ label: "Add to playlist", action: "playlist" }]
     if kind <> "movie" and kind <> "show" and kind <> "season" and kind <> "episode" then return options
     if httpTrue(tile.watched)
         options.Push({ label: "Mark as unwatched", action: "unwatched" })

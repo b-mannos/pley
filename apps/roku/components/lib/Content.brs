@@ -1,9 +1,13 @@
 ' The server's JSON as the screens show it: plain fields, which become
-' ContentNodes (lib/Nodes.brs). This version shows movies and TV shows;
-' music libraries and their titles are left out.
+' ContentNodes (lib/Nodes.brs): movies, TV shows and music.
 
 function contentShown(kind as string) as boolean
-    return kind = "movie" or kind = "show" or kind = "season" or kind = "episode"
+    return kind = "movie" or kind = "show" or kind = "season" or kind = "episode" or contentMusic(kind)
+end function
+
+' Artists, albums and tracks: square pictures, played by the music player.
+function contentMusic(kind as string) as boolean
+    return kind = "artist" or kind = "album" or kind = "track"
 end function
 
 ' Movies, episodes and extras (trailers and the like) play in the player.
@@ -24,6 +28,11 @@ end function
 
 function contentEpisodeWidth() as integer
     return 300
+end function
+
+' Square tiles: an album's cover, an artist's picture.
+function contentSquareWidth() as integer
+    return 260
 end function
 
 ' Backdrops are drawn faint (15 % and 40 %) behind text: a third of the
@@ -48,6 +57,19 @@ function contentTile(item as object, server as string, wide as boolean) as objec
         if year > 0 then subtitle = Int(year).ToStr()
     else if kind = "season"
         subtitle = httpSentence(item.parent_title)
+    else if kind = "artist"
+        albums = httpNumber(item.child_count, 0)
+        if albums = 1
+            subtitle = "1 album"
+        else if albums > 1
+            subtitle = urlValue(albums) + " albums"
+        end if
+    else if kind = "album"
+        subtitle = httpSentence(item.parent_title)
+        year = httpNumber(item.year, 0)
+        if subtitle = "" and year > 0 then subtitle = urlValue(year)
+    else if kind = "track"
+        subtitle = httpSentence(item.grandparent_title)
     else if kind = "episode"
         show = httpSentence(item.grandparent_title)
         code = fmtEpisode(item.parent_index, item.index)
@@ -76,6 +98,7 @@ function contentTile(item as object, server as string, wide as boolean) as objec
         subtitle: subtitle,
         image: contentTileImage(item, server, wide, 0),
         wide: wide,
+        square: contentMusic(kind) and not wide,
         progress: progress,
         watched: watched,
         itemId: httpNumber(item.id, 0),
@@ -101,51 +124,62 @@ function contentTileImage(item as object, server as string, wide as boolean, wid
         end for
         return ""
     end if
-    if width = 0 then width = contentPosterWidth()
+    if width = 0
+        width = contentPosterWidth()
+        if contentMusic(kind) then width = contentSquareWidth()
+    end if
     url = urlImage(server, item.poster_url, width)
-    if url = "" and (kind = "season" or kind = "episode")
+    if url = "" and (kind = "season" or kind = "episode" or kind = "album" or kind = "track")
         url = urlImage(server, "/api/items/" + urlValue(item.id) + "/images/poster", width)
     end if
     return url
 end function
 
-' The libraries this version opens, in the server's order:
-' [{ id, name, kind, itemCount }]. (A key named count would hide the
-' array's Count().)
+' The libraries, in the profile's order: [{ id, name, kind, itemCount }].
+' (A key named count would hide the array's Count().)
 function contentLibraries(libraries as dynamic) as object
     out = []
     for each library in httpArray(libraries)
         kind = httpString(library.kind)
-        if kind = "movies" or kind = "shows"
+        if kind = "movies" or kind = "shows" or kind = "music"
             out.Push({ id: httpNumber(library.id, 0), name: httpSentence(library.name), kind: kind, itemCount: httpNumber(library.item_count, 0) })
         end if
     end for
     return out
 end function
 
-' Home's rows from GET /api/hubs/home: [{ key, title, wide, tiles }].
-' Titles of kinds this version doesn't show are left out, and rows left
-' empty with them (a music library's); libraries, when given, drop music
-' libraries' hubs outright.
-function contentHomeRows(hubs as dynamic, libraries as dynamic, server as string) as object
-    music = {}
-    for each library in httpArray(libraries)
-        if httpString(library.kind) = "music" then music[urlValue(library.id)] = true
-    end for
+' Home's rows from GET /api/hubs/home: [{ key, title, wide, square,
+' tiles }]. Titles of kinds this version doesn't show are left out, and
+' rows left empty with them.
+function contentHomeRows(hubs as dynamic, server as string) as object
     rows = []
     for each hub in httpArray(hubs)
-        libraryId = urlValue(hub.library_id)
-        if libraryId = "" or not music.DoesExist(libraryId)
-            key = httpString(hub.key)
-            wide = key = "continue_watching"
-            items = []
-            for each item in httpArray(hub.items)
-                if GetInterface(item, "ifAssociativeArray") <> invalid and contentShown(httpString(item.kind)) then items.Push(contentTile(item, server, wide))
-            end for
-            if items.Count() > 0 then rows.Push({ key: key, title: httpSentence(hub.title), wide: wide, tiles: items })
-        end if
+        key = httpString(hub.key)
+        wide = key = "continue_watching"
+        items = []
+        for each item in httpArray(hub.items)
+            if GetInterface(item, "ifAssociativeArray") <> invalid and contentShown(httpString(item.kind)) then items.Push(contentTile(item, server, wide))
+        end for
+        if items.Count() > 0 then rows.Push({ key: key, title: httpSentence(hub.title), wide: wide, square: contentRowSquare(hub), tiles: items })
     end for
     return rows
+end function
+
+' Whether a hub's row is of square tiles: a music library's, by its first
+' title.
+function contentRowSquare(hub as object) as boolean
+    if httpString(hub.key) = "continue_watching" then return false
+    items = httpArray(hub.items)
+    if items.Count() = 0 or GetInterface(items[0], "ifAssociativeArray") = invalid then return false
+    return contentMusic(httpString(items[0].kind))
+end function
+
+' The size of a row's tiles, and the row's height, for its shape: a 16:9
+' picture, a square or a poster, and two lines of text under it.
+function contentRowSize(wide as boolean, square as boolean) as object
+    if wide then return { size: [400, 300], height: 360 }
+    if square then return { size: [contentSquareWidth(), 340], height: 400 }
+    return { size: [220, 410], height: 470 }
 end function
 
 ' A short fingerprint of a hub as the server sent it.
@@ -167,9 +201,9 @@ end function
 ' Home's rows from GET /api/hubs/home (as contentHomeRows), made again only
 ' where they changed: known holds the fingerprint of each row Home shows
 ' ({ key: signature }), taken from the server's JSON, so a hub sent as
-' before isn't even read. { summary: [{ key, wide, sig, built }] for every
-' row in order, changed: the rows to build, in order }.
-function contentRowChanges(hubs as dynamic, libraries as dynamic, server as string, known as dynamic) as object
+' before isn't even read. { summary: [{ key, wide, square, sig, built }]
+' for every row in order, changed: the rows to build, in order }.
+function contentRowChanges(hubs as dynamic, server as string, known as dynamic) as object
     shown = httpObject(known)
     summary = []
     changed = []
@@ -178,10 +212,10 @@ function contentRowChanges(hubs as dynamic, libraries as dynamic, server as stri
             key = httpString(hub.key)
             sig = contentSignature(hub)
             if shown <> invalid and shown.DoesExist(key) and shown[key] = sig
-                summary.Push({ key: key, wide: key = "continue_watching", sig: sig, built: false })
+                summary.Push({ key: key, wide: key = "continue_watching", square: contentRowSquare(hub), sig: sig, built: false })
             else
-                for each row in contentHomeRows([hub], libraries, server)
-                    summary.Push({ key: row.key, wide: row.wide, sig: sig, built: true })
+                for each row in contentHomeRows([hub], server)
+                    summary.Push({ key: row.key, wide: row.wide, square: row.square, sig: sig, built: true })
                     changed.Push(row)
                 end for
             end if

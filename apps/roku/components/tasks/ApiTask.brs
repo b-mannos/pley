@@ -335,7 +335,7 @@ sub apiBuild(job as object, answer as object)
     server = job.server
     if job.build = "rows"
         ' Rows Home shows as they are aren't made again.
-        changes = contentRowChanges(data.hubs, invalid, server, job.known)
+        changes = contentRowChanges(data.hubs, server, job.known)
         job.request.content = nodesRows(changes.changed)
         ' What My List holds, for the Options key on other screens.
         listed = invalid
@@ -387,7 +387,25 @@ sub apiBuild(job as object, answer as object)
     else if job.build = "playlist"
         rows = pagePlaylistEntries(data.entries, server)
         job.request.content = nodesContent(rows)
-        answer.data = { title: httpSentence(data.title), line: pagePlaylistLine(data), kind: httpString(data.kind), smart: httpString(data.smart_filter) <> "", queue: pagePlaylistQueue(data.entries, server), shown: rows.Count() }
+        ' A music playlist's tracks go to the music player.
+        kind = httpString(data.kind)
+        queue = pagePlaylistQueue(data.entries, server)
+        if kind = "audio" then queue = musicTracks(data.entries, server)
+        answer.data = { title: httpSentence(data.title), line: pagePlaylistLine(data), kind: kind, smart: httpString(data.smart_filter) <> "", queue: queue, shown: rows.Count() }
+    else if job.build = "tracks"
+        tracks = musicTracks(data.items, server)
+        job.request.content = nodesContent(musicTrackRows(tracks, true))
+        answer.data = { queue: tracks, shown: tracks.Count() }
+    else if job.build = "albums"
+        tiles = contentTiles(data.items, server)
+        job.request.content = nodesContent(tiles)
+        line = ""
+        if tiles.Count() = 1
+            line = "1 album"
+        else if tiles.Count() > 1
+            line = urlValue(tiles.Count()) + " albums"
+        end if
+        answer.data = { title: "", image: "", line: line, summary: "", shown: tiles.Count() }
     else if job.build = "collection"
         tiles = contentTiles(data.items, server)
         job.request.content = nodesContent(tiles)

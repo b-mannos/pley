@@ -44,7 +44,7 @@ sub test_pages_person_credits_say_the_part()
     person = { id: 7, name: "Amy Adams", credits: [
         { item: { id: 12, kind: "movie", title: "Arrival", year: 2016, user_state: { position_ms: 0, watched: true } }, roles: [{ role: "actor", character: "Louise Banks" }] },
         { item: { id: 99, kind: "show", title: "Sharp Objects", year: 2018 }, roles: [{ role: "actor", character: "Camille", episodes: 8 }, { role: "producer" }] },
-        { item: { id: 5, kind: "album", title: "Blue" }, roles: [] }
+        { item: { id: 5, kind: "collection", title: "Odd" }, roles: [] }
     ] }
     tiles = pagePersonCredits(person, "http://nas:7539")
     tkEqual(tiles.Count(), 2, "titles this version shows")
@@ -81,6 +81,7 @@ sub test_pages_tile_options_by_kind()
     tkEqual(labels(pageTileOptions({ kind: "show", itemId: 99 }, false, invalid)), ["Mark as watched", "Add to playlist"], "My List not known")
     tkEqual(labels(pageTileOptions({ kind: "episode", itemId: 101, grandparentId: 99 }, true, false)), ["Mark as watched", "Add to playlist", "Remove from Continue Watching", "Go to show"])
     tkEqual(pageTileOptions({ kind: "person", itemId: 7 }, false, false).Count(), 0)
+    tkEqual(labels(pageTileOptions({ kind: "album", itemId: 5 }, false, false)), ["Add to playlist"], "music: playlists only")
 end sub
 
 sub test_pages_playlists()

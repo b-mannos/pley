@@ -74,6 +74,11 @@ sub onActive()
         m.viewKey = libViewKey(session.server, session.profileId, m.library.id)
         m.view = libLoadView(viewSection(), m.viewKey, m.library.kind)
         m.tabList = libTabs(m.library.kind)
+        ' A music library's artists are square.
+        if m.library.kind = "music"
+            m.grid.itemSize = [220, 300]
+            m.grid.numRows = 3
+        end if
         chips = []
         for each shownTab in m.tabList
             chips.Push({ label: libTabLabel(shownTab), width: 270 })
@@ -239,12 +244,9 @@ sub onRecommended(event as object)
     m.recommendedKeys = []
     for each row in answer.data.rows
         m.recommendedKeys.Push(row.key)
-        if row.wide
-            sizes.Push([400, 300])
-        else
-            sizes.Push([220, 410])
-        end if
-        heights.Push(sizes.Peek()[1] + 60)
+        shape = contentRowSize(row.wide, row.square)
+        sizes.Push(shape.size)
+        heights.Push(shape.height)
     end for
     m.recommended = content
     if sizes.Count() > 0

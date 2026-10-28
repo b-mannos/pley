@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The music player, the scene's, as m.global.music: it plays a queue of
+     tracks with its Audio node, one session each, while the screens go on
+     being used, and reports where each got to. Now Playing shows it. -->
+<component name="MusicPlayer" extends="Group">
+    <interface>
+        <!-- { queue: [tracks (lib/Music.brs)], at }: plays queue from at. -->
+        <field id="play" type="assocarray" alwaysNotify="true" />
+        <!-- "toggle", "pause", "resume", "next", "previous", "stop". -->
+        <field id="control" type="string" alwaysNotify="true" />
+        <!-- "stopped", "loading", "playing", "paused". -->
+        <field id="state" type="string" value="stopped" />
+        <!-- The track playing, its place in the queue, and how far along. -->
+        <field id="track" type="assocarray" />
+        <field id="at" type="integer" />
+        <field id="queueSize" type="integer" />
+        <field id="positionMs" type="integer" />
+        <field id="durationMs" type="integer" />
+        <!-- What went wrong with the track before, or "". -->
+        <field id="message" type="string" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/MusicPlayer.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Format.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Player.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Content.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Music.brs" />
+    <children>
+        <Audio id="audio" />
+    </children>
+</component>

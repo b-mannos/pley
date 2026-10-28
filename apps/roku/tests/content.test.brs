@@ -48,24 +48,29 @@ sub test_content_episode_tiles_name_the_show()
     tkEqual(poster.image, "http://nas:7539/api/items/101/images/poster?w=220", "the server falls back to the show's")
 end sub
 
-sub test_content_home_rows_leave_out_music()
+sub test_content_home_rows_of_every_kind()
     libraries = ParseJson("[{""id"":1,""name"":""Movies"",""kind"":""movies"",""paths"":[],""item_count"":245},{""id"":2,""name"":""TV Shows"",""kind"":""shows"",""paths"":[],""item_count"":31},{""id"":3,""name"":""Music"",""kind"":""music"",""paths"":[],""item_count"":120}]")
     hubs = [
         { key: "continue_watching", title: "Continue Watching", library_id: invalid, items: [contentTestEpisode(), contentTestMovie()] },
         { key: "my_list", title: "My List", library_id: invalid, items: [] },
         { key: "recently_added:1", title: "Recently Added in Movies", library_id: 1, items: [contentTestMovie()] },
         { key: "recently_added:3", title: "Recently Added in Music", library_id: 3, items: [{ id: 5, kind: "album", title: "Blue" }] },
-        { key: "odd", title: "Odd", library_id: invalid, items: [{ id: 6, kind: "track", title: "Song" }] }
+        { key: "odd", title: "Odd", library_id: invalid, items: [{ id: 6, kind: "person", title: "Someone" }] }
     ]
-    rows = contentHomeRows(hubs, libraries, contentTestServer())
-    tkEqual(rows.Count(), 2)
+    rows = contentHomeRows(hubs, contentTestServer())
+    tkEqual(rows.Count(), 3, "an empty hub, and one of kinds this version doesn't show, are left out")
     tkEqual(rows[0].title, "Continue Watching")
     tkTrue(rows[0].wide)
     tkEqual(rows[0].tiles.Count(), 2)
     tkEqual(rows[0].tiles[1].image, "http://nas:7539/api/items/12/images/backdrop?v=1729600000&w=400", "a movie's backdrop in a wide tile")
     tkEqual(rows[1].title, "Recently Added in Movies")
     tkFalse(rows[1].wide)
-    tkEqual(contentLibraries(libraries), [{ id: 1, name: "Movies", kind: "movies", itemCount: 245 }, { id: 2, name: "TV Shows", kind: "shows", itemCount: 31 }])
+    tkFalse(rows[1].square)
+    tkTrue(rows[2].square, "a music library's albums")
+    tkTrue(rows[2].tiles[0].square)
+    tkEqual(rows[2].tiles[0].image, "http://nas:7539/api/items/5/images/poster?w=260", "an album's cover, asked for square")
+    tkEqual(contentRowSize(false, true), { size: [260, 340], height: 400 })
+    tkEqual(contentLibraries(libraries), [{ id: 1, name: "Movies", kind: "movies", itemCount: 245 }, { id: 2, name: "TV Shows", kind: "shows", itemCount: 31 }, { id: 3, name: "Music", kind: "music", itemCount: 120 }])
 end sub
 
 sub test_content_seasons_and_episodes()
@@ -180,9 +185,9 @@ sub test_content_rebuilds_only_the_home_rows_that_changed()
         { key: "recently_added:1", title: "Recently Added in Movies", library_id: 1, items: [contentTestMovie()] }
     ]
     server = contentTestServer()
-    first = contentRowChanges(hubs, invalid, server, invalid)
+    first = contentRowChanges(hubs, server, invalid)
     tkEqual(first.changed.Count(), 2, "nothing shown yet: every row")
-    tkEqual(first.changed, contentHomeRows(hubs, invalid, server), "the same rows as built in one go")
+    tkEqual(first.changed, contentHomeRows(hubs, server), "the same rows as built in one go")
     tkEqual(first.summary[0].key, "continue_watching")
     tkTrue(first.summary[0].wide)
     tkTrue(first.summary[1].built)
@@ -190,12 +195,12 @@ sub test_content_rebuilds_only_the_home_rows_that_changed()
     for each row in first.summary
         known[row.key] = row.sig
     end for
-    tkEqual(contentRowChanges(hubs, invalid, server, known).changed.Count(), 0, "the same answer: nothing to build")
+    tkEqual(contentRowChanges(hubs, server, known).changed.Count(), 0, "the same answer: nothing to build")
 
     hubs[0].items[1].user_state.position_ms = 1200000
     hubs.Push({ key: "my_list", title: "My List", library_id: invalid, items: [contentTestMovie()] })
-    hubs.Push({ key: "music", title: "Music", library_id: invalid, items: [{ id: 5, kind: "album", title: "Blue" }] })
-    again = contentRowChanges(hubs, invalid, server, known)
+    hubs.Push({ key: "people", title: "People", library_id: invalid, items: [{ id: 5, kind: "person", title: "Someone" }] })
+    again = contentRowChanges(hubs, server, known)
     tkEqual(again.summary.Count(), 3, "a hub with nothing this version shows is left out")
     tkEqual(again.changed.Count(), 2, "a title further along, and a new row")
     tkTrue(again.summary[0].built)

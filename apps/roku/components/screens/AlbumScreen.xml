@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- An album: its cover, its artist, year and length, Play and Shuffle on
+     the left, its tracks on the right; OK on a track plays the album from
+     it with the music player. -->
+<component name="AlbumScreen" extends="Group">
+    <interface>
+        <field id="route" type="string" />
+        <field id="params" type="assocarray" />
+        <field id="navigate" type="assocarray" alwaysNotify="true" />
+        <field id="active" type="boolean" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/screens/AlbumScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Titles.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Nodes.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Format.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Player.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Content.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Pages.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Music.brs" />
+    <children>
+        <Poster id="backdrop" width="1920" height="1080" loadWidth="320" loadHeight="320" loadDisplayMode="scaleToZoom" opacity="0.12" />
+        <Rectangle translation="[96, 64]" width="420" height="420" color="0x262B35FF" />
+        <Poster id="cover" translation="[96, 64]" width="420" height="420" loadWidth="420" loadHeight="420" loadDisplayMode="scaleToZoom" />
+        <Label id="title" translation="[96, 508]" width="560" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+        <Label id="line" translation="[96, 640]" width="560" wrap="true" maxLines="2" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+        <ButtonGroup id="buttons" iconUri="" focusedIconUri="" translation="[96, 730]" minWidth="520" maxWidth="540" visible="false" />
+        <MarkupList id="tracks" translation="[700, 64]" itemComponentName="TrackRow" itemSize="[1124, 80]" itemSpacing="[0, 8]" numRows="11" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
+        <Label id="message" translation="[700, 400]" width="1124" wrap="true" horizAlign="center" color="0xA1A9B6FF" text="Loading…" font="font:SmallSystemFont" />
+    </children>
+</component>

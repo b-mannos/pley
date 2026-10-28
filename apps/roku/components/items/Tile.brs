@@ -8,6 +8,7 @@ sub init()
     m.title = m.top.findNode("title")
     m.subtitle = m.top.findNode("subtitle")
     m.wide = false
+    m.square = false
     m.progress = 0.0
 end sub
 
@@ -18,6 +19,8 @@ sub onContent()
     if item = invalid then return
     m.wide = false
     if item.hasField("wide") then m.wide = item.wide
+    m.square = false
+    if item.hasField("square") then m.square = item.square
     m.progress = 0.0
     if item.hasField("progress") then m.progress = item.progress
     m.watched.visible = item.hasField("watched") and item.watched = true
@@ -36,6 +39,7 @@ sub onLayout()
     if w <= 0 then return
     imageHeight = Int(w * 1.5)
     if m.wide then imageHeight = Int(w * 9 / 16)
+    if m.square then imageHeight = Int(w)
     m.frame.width = w
     m.frame.height = imageHeight
     m.poster.translation = [4, 4]

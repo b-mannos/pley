@@ -101,6 +101,12 @@ end sub
 sub play(at as integer, shuffled as boolean)
     queue = pageQueueFrom(m.playlist.queue, at, shuffled)
     if queue.Count() = 0 then return
+    if m.playlist.kind = "audio"
+        ' Tracks: the music player, and Now Playing.
+        m.global.music.play = { queue: queue, at: 0 }
+        uiNavigate({ to: "nowPlaying" })
+        return
+    end if
     uiNavigate({ to: "player", params: { itemId: queue[0].itemId, startMs: queue[0].startMs, queue: queue } })
 end sub
 

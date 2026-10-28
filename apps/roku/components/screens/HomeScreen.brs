@@ -42,6 +42,8 @@ sub onActive()
         load()
         return
     end if
+    ' Music started or ended meanwhile: Now Playing in the menu or not.
+    if m.musicShown <> (m.global.music.state <> "stopped") then buildMenu()
     if m.rows.visible
         m.lastFocus.setFocus(true)
     else
@@ -119,14 +121,24 @@ sub onRows(event as object)
     end if
 end sub
 
+' The menu: Home, the libraries, Playlists, Search, Settings, and Now
+' Playing while music plays.
 sub buildMenu()
     items = [{ title: "Home" }]
+    m.menuActions = ["home"]
     for each library in m.libraries
         items.Push({ title: library.name })
+        m.menuActions.Push("library")
     end for
-    items.Push({ title: "Playlists" })
-    items.Push({ title: "Search" })
-    items.Push({ title: "Settings" })
+    for each entry in [["Playlists", "playlists"], ["Search", "search"], ["Settings", "settings"]]
+        items.Push({ title: entry[0] })
+        m.menuActions.Push(entry[1])
+    end for
+    m.musicShown = m.global.music.state <> "stopped"
+    if m.musicShown
+        items.Push({ title: "Now playing" })
+        m.menuActions.Push("nowPlaying")
+    end if
     focused = m.menu.itemFocused
     m.menu.content = nodesContent(items)
     if focused > 0 and focused < items.Count() then m.menu.jumpToItem = focused
@@ -187,13 +199,9 @@ function place(rows as object, built as dynamic) as boolean
         sizes = []
         heights = []
         for each row in rows
-            ' A 16:9 picture or a poster, and two lines of text under it.
-            if row.wide
-                sizes.Push([400, 300])
-            else
-                sizes.Push([220, 410])
-            end if
-            heights.Push(sizes.Peek()[1] + 60)
+            shape = contentRowSize(row.wide, row.square)
+            sizes.Push(shape.size)
+            heights.Push(shape.height)
         end for
         content = CreateObject("roSGNode", "ContentNode")
         content.appendChildren(nodes)
@@ -255,17 +263,23 @@ end sub
 
 sub onMenu(event as object)
     index = event.getData()
-    if index = 0
+    action = m.menuActions[index]
+    if action = "home"
         load()
         if m.rows.visible then m.rows.setFocus(true)
-    else if index <= m.libraries.Count()
+    else if action = "library"
         uiNavigate({ to: "library", params: { library: m.libraries[index - 1] } })
-    else if index = m.libraries.Count() + 1
+    else if action = "playlists"
         uiNavigate({ to: "grid", params: { kind: "playlists", id: 0, title: "Playlists" } })
-    else if index = m.libraries.Count() + 2
+    else if action = "search"
         uiNavigate({ to: "search" })
-    else
+    else if action = "settings"
         uiNavigate({ to: "settings" })
+    else if m.global.music.state = "stopped"
+        ' The music ended meanwhile.
+        buildMenu()
+    else
+        uiNavigate({ to: "nowPlaying" })
     end if
 end sub
 

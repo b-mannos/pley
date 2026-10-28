@@ -83,12 +83,13 @@ function fmtMeta(item as object) as string
     return parts.Join(" · ")
 end function
 
-' "1 movie", "245 movies", "31 shows" for a library's kind.
+' "1 movie", "245 movies", "31 shows", "12 artists" for a library's kind.
 function fmtCount(count as dynamic, kind as string) as string
     n = Int(httpNumber(count, 0))
     noun = "title"
     if kind = "movies" then noun = "movie"
     if kind = "shows" then noun = "show"
+    if kind = "music" then noun = "artist"
     if n = 1 then return "1 " + noun
     return n.ToStr() + " " + noun + "s"
 end function

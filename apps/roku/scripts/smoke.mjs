@@ -361,7 +361,31 @@ async function walk() {
     await press("back");
     await settle();
   }
-  await openFromMenu(4, /^GET \/api\/search\?.*q=mo/, "Search", async () => {
+  // Music: the artist, their album, and its tracks played; Now Playing
+  // stopped, then Back to Home.
+  await openFromMenu(3, /^GET \/api\/libraries\/3\/items\?.*offset=0/, "Music");
+  shoot("music");
+  since = mark();
+  await press("select"); // the artist
+  await waitFor(/^GET \/api\/items\/5000\/children$/, since, "an artist's albums");
+  since = mark();
+  await press("select"); // the album
+  await waitFor(/^GET \/api\/items\/5100\/children$/, since, "an album's tracks");
+  shoot("album");
+  since = mark();
+  await press("select"); // Play
+  await waitFor(/^POST \/api\/playback$/, since, "a track played");
+  await sleep(1500);
+  shoot("now-playing");
+  since = mark();
+  await press("right", 2); // Stop
+  await press("select");
+  await waitFor(/^DELETE \/api\/playback\//, since, "the track's session closed");
+  for (let i = 0; i < 3; i++) {
+    await press("back"); // the artist, the library, Home
+    await settle();
+  }
+  await openFromMenu(5, /^GET \/api\/search\?.*q=mo/, "Search", async () => {
     await sleep(800);
     await press("lit_m");
     await press("lit_o");
@@ -379,7 +403,7 @@ async function walk() {
   home.kept = age < 55000 ? !asked : age > 65000 ? asked : true;
   // Playlists: one opened, its first entry taken out with the Options key,
   // then played from the top; Back to Home.
-  await openFromMenu(3, /^GET \/api\/playlists$/, "Playlists");
+  await openFromMenu(4, /^GET \/api\/playlists$/, "Playlists");
   shoot("playlists");
   since = mark();
   await press("select"); // the first playlist
@@ -402,7 +426,7 @@ async function walk() {
     await press("back"); // the playlists, Home
     await settle();
   }
-  await openFromMenu(5, /^GET \/api\/auth\/me$/, "Settings");
+  await openFromMenu(6, /^GET \/api\/auth\/me$/, "Settings");
   shoot("settings");
   // Quality, after Audio language and Subtitles: Automatic checked, then
   // 8 Mbps 1080p chosen, kept on the Roku.
@@ -433,7 +457,7 @@ async function walk() {
   await press("back"); // Home, which asks for its libraries again
   await waitFor(/^GET \/api\/libraries$/, since, "Home's libraries after sorting");
   await press("right"); // the rows, where the next steps start
-  await openFromMenu(5, /^GET \/api\/auth\/me$/, "Settings");
+  await openFromMenu(6, /^GET \/api\/auth\/me$/, "Settings");
   // Subtitles: from "Only for foreign dialogue" to "Always", saved at once
   // with the languages left as they were; Subtitle language shows then.
   await settle();
@@ -475,7 +499,7 @@ async function walk() {
   // Signed out, and in again with a server that has no QR codes yet: the
   // code shows on its own.
   await press("back");
-  await openFromMenu(5, /^GET \/api\/auth\/me$/, "Settings");
+  await openFromMenu(6, /^GET \/api\/auth\/me$/, "Settings");
   fixture.qr = false;
   since = mark();
   await signOut();
@@ -551,7 +575,7 @@ const checks = [
   ["loaded Home", asked(/^GET \/api\/hubs\/home$/)],
   ["asked to play with its capabilities", asked(/^POST \/api\/playback$/)],
   ["asked for the picture subtitles to be drawn", fixture.playbacks.some((p) => p.item === 103 && p.subtitle_index === 4)],
-  ["played the original in Automatic, the default", fixture.playbacks.length > 0 && fixture.playbacks.every((p) => p.mode === "auto" && p.max_bitrate === null)],
+  ["played the original in Automatic, the default", fixture.playbacks.length > 0 && fixture.playbacks.filter((p) => p.kind !== "track").every((p) => p.mode === "auto" && p.max_bitrate === null)],
   ["kept 8 Mbps 1080p chosen in Settings", registry !== null && /playback.quality","8m"/.test(JSON.stringify([...registry]))],
   ["showed subtitle sync", sync.label],
   ["showed the playback's details", asked(/^GET \/api\/playback\/s\d+$/)],
@@ -576,6 +600,7 @@ const checks = [
   ["opened a person's page", asked(/^GET \/api\/people\/7$/)],
   ["took an entry out of a playlist", fixture.playlistRemoved.length > 0],
   ["switched to another profile of the household", fixture.switched.includes(2)],
+  ["played an album's tracks with the music player", fixture.playbacks.some((p) => p.item === 5201) && fixture.progress.some((p) => p.item >= 5201 && p.item <= 5203)],
   ["played a playlist from its top, the next entry to come", fixture.playbacks.some((p) => p.item === 101)],
   ["searched", asked(/^GET \/api\/search\?/)],
   ["asked again with a new token after a 401", new Set(fixture.requests.filter((r) => r.path === "/api/items/103").map((r) => r.auth)).size > 1],

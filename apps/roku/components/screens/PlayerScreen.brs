@@ -130,6 +130,8 @@ sub onActive()
     end if
     if m.started then return
     m.started = true
+    ' A video takes over from the music.
+    m.global.music.control = "stop"
     ' Playlists and segments carry the token: a refreshed one goes to the
     ' Video node's agent at once.
     m.global.session.observeFieldScoped("accessToken", "onToken")

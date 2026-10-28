@@ -3,24 +3,30 @@
 A native SceneGraph app for Roku players and Roku TVs. It finds pley
 servers on the local network (or takes an address), signs in with a code
 shown on the TV and approved on the server's `/link` page (or a QR code of
-it, which the server draws), and shows Home's rows, each library with the
-web app's tabs (Recommended, Library sorted and filtered, Collections), a
-show's seasons and episodes, a title's page (Resume and Play
-from start, a show's next episode, Mark as watched, My List, Go to show,
-and rows of its seasons, cast and crew, extras, More Like This and the
-collections it is part of), people's and collections' pages, playlists
-(Play, Shuffle, Rename, Delete, an entry taken out), Search with the
-on-screen keyboard (titles and people), "Who's watching?" as it starts
-when the household has more than one profile, and Settings with the
-profile's audio and subtitle defaults, Switch profile, Sort libraries,
-Switch server and Sign out. The Options key (*) on a title offers Mark as watched or
-unwatched, Add to or Remove from My List, Add to playlist (a new one
-named on the keyboard too), Remove from Continue Watching and Go to show. The player plays files as they are whenever the
-Roku can (it reports what it decodes, from `roDeviceInfo`), HLS otherwise,
-reports progress, offers Skip Intro and Skip Credits as the web player does,
-the next episode at the credits of one, and pley's menu (Down): Quality,
-subtitle sync, the file's chapters and the playback's details. Music isn't played yet: music
-libraries and their titles are left out.
+it, which the server draws), asks "Who's watching?" as it starts when the
+household has more than one profile, and shows:
+
+- Home's rows, and each library with the web app's tabs (Recommended,
+  Library sorted and filtered, Collections);
+- a title's page: Resume and Play from start, a show's next episode and
+  its episodes, Mark as watched, My List, Go to show, and rows of its
+  seasons, cast and crew, extras, More Like This and the collections it
+  is part of; people's and collections' pages;
+- music: artists, albums and their tracks, played by a music player that
+  goes on while the app is used, with Now Playing;
+- playlists: Play, Shuffle, Rename, Delete, an entry taken out;
+- Search with the on-screen keyboard (titles and people);
+- Settings: the profile's audio and subtitle defaults, Quality, Switch
+  profile, Sort libraries, Switch server and Sign out.
+
+The Options key (*) on a title offers Mark as watched or unwatched, Add
+to or Remove from My List, Add to playlist (a new one named on the
+keyboard too), Remove from Continue Watching and Go to show. The player
+plays files as they are whenever the Roku can (it reports what it
+decodes, from `roDeviceInfo`), HLS otherwise, reports progress, offers
+Skip Intro and Skip Credits as the web player does, the next episode at
+the credits of one (a playlist's next entry), and pley's menu (Down):
+Quality, subtitle sync, the file's chapters and the playback's details.
 
 It talks to the pley server and nothing else, so it works on a home network
 without internet: pictures come from the server, the fonts are the Roku's
@@ -35,6 +41,7 @@ The app is in `apps/roku`; paths below are relative to it.
 |---|---|
 | `source/main.brs` | Starts the one scene |
 | `components/MainScene` | The stack of screens, the HTTP agent of pictures, sign-in when the server ends it |
+| `components/MusicPlayer` | The music player: a queue of tracks on the scene's Audio node, as `m.global.music` |
 | `components/screens/` | Servers, sign-in with a code, Home, Library, Show, Details (a title's page), Grid (a person's or a collection's titles, the playlists), Playlist, Player, Search, Settings, "Can't reach your server" |
 | `components/shared/` | The screens' helpers (`Ui.brs`), and what can be done with a title (`Titles.brs`) |
 | `components/items/` | The tiles and rows of lists and grids, the player's skip button |
@@ -235,6 +242,20 @@ Rules the code keeps:
   it, and requests meanwhile wait for the new pair. Switched, the app
   starts again at Home, everything as that profile sees it. A sign-in
   from before the app asked for `profiles` says to sign in again.
+- Music libraries list their artists (square tiles), an artist their
+  albums, an album its tracks. Play, Shuffle or OK on a track hand the
+  tracks to the music player (`components/MusicPlayer`, on the scene, as
+  `m.global.music`) and open Now Playing: the cover, the track, how far
+  along it is, and Previous, Pause, Next and Stop (the remote's play,
+  fast forward and rewind too). Each track gets a session of its own
+  (`POST /api/playback` with the Roku's capabilities), plays with the
+  Audio node (the token in its HTTP agent), reports progress as videos
+  do, and its session is closed when another starts; a track that
+  doesn't play as it is plays again converted, once, and one that
+  doesn't play at all is passed over, said on Now Playing. Back leaves
+  Now Playing and the music goes on; Home's menu has Now playing then. A
+  video, another profile, sign-in or server stops it. A music playlist
+  plays the same way.
 - Playlists (Home's menu) are the profile's own, as tiles of their first
   entry's picture. A playlist's page plays its entries one after the
   other from the top, shuffled, or from the entry OK is pressed on: the
@@ -346,7 +367,6 @@ to the store.
 
 ## Not yet
 
-- Music libraries.
 - Hearing what other devices change at once: Home asks again once its rows
   are a minute old.
 - Audio other than the file's default played as it is: reporting

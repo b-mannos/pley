@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Now Playing: the track the music player plays, its cover, how far
+     along it is, and Previous, Pause, Next and Stop. Back leaves it; the
+     music goes on, and Home's menu brings it back. -->
+<component name="NowPlayingScreen" extends="Group">
+    <interface>
+        <field id="route" type="string" />
+        <field id="params" type="assocarray" />
+        <field id="navigate" type="assocarray" alwaysNotify="true" />
+        <field id="active" type="boolean" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/screens/NowPlayingScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Format.brs" />
+    <children>
+        <Poster id="backdrop" width="1920" height="1080" loadWidth="320" loadHeight="320" loadDisplayMode="scaleToZoom" opacity="0.12" />
+        <Rectangle id="coverFrame" translation="[160, 240]" width="600" height="600" color="0x262B35FF" />
+        <Poster id="cover" translation="[160, 240]" width="600" height="600" loadWidth="600" loadHeight="600" loadDisplayMode="scaleToZoom" />
+        <Label translation="[860, 250]" text="Now playing" color="0x38BDF8FF" font="font:SmallerBoldSystemFont" />
+        <Label id="title" translation="[860, 296]" width="900" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="artist" translation="[860, 460]" width="900" color="0xEBEBEBFF" font="font:MediumSystemFont" />
+        <Label id="album" translation="[860, 510]" width="900" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+        <Rectangle id="track" translation="[860, 600]" width="900" height="8" color="0x2E3440FF" />
+        <Rectangle id="fill" translation="[860, 600]" width="0" height="8" color="0x38BDF8FF" />
+        <Label id="elapsed" translation="[860, 624]" width="300" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+        <Label id="left" translation="[1460, 624]" width="300" horizAlign="right" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+        <ChipRow id="buttons" translation="[860, 700]" />
+        <Label id="queue" translation="[860, 792]" width="900" color="0x8B95A5FF" font="font:SmallestSystemFont" />
+        <Label id="message" translation="[860, 836]" width="900" wrap="true" maxLines="2" color="0xEB6B70FF" font="font:SmallestSystemFont" />
+    </children>
+</component>

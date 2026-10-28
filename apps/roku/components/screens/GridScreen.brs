@@ -1,7 +1,8 @@
 ' A grid of titles under a heading: a person's movies and shows (GET
-' /api/people/{id}), a collection's titles (GET /api/collections/{id}), or
-' the profile's playlists (GET /api/playlists). params: { kind ("person",
-' "collection", "playlists"), id, title (shown until the server answers) }.
+' /api/people/{id}), a collection's titles (GET /api/collections/{id}), an
+' artist's albums (GET /api/items/{id}/children), or the profile's
+' playlists (GET /api/playlists). params: { kind ("person", "collection",
+' "artist", "playlists"), id, title (shown until the server answers) }.
 
 sub init()
     m.photoFrame = m.top.findNode("photoFrame")
@@ -40,6 +41,11 @@ sub load()
         uiRequest({ method: "GET", path: "/api/people/" + urlValue(params.id), build: "person" }, "onGrid")
     else if params.kind = "playlists"
         uiRequest({ method: "GET", path: "/api/playlists", build: "playlists" }, "onGrid")
+    else if params.kind = "artist"
+        ' Albums are square.
+        m.grid.itemSize = [220, 300]
+        m.grid.numRows = 3
+        uiRequest({ method: "GET", path: "/api/items/" + urlValue(params.id) + "/children", build: "albums" }, "onGrid")
     else
         uiRequest({ method: "GET", path: "/api/collections/" + urlValue(params.id), build: "collection" }, "onGrid")
     end if
@@ -52,7 +58,7 @@ sub onGrid(event as object)
         return
     end if
     page = answer.data
-    m.title.text = page.title
+    if page.title <> "" then m.title.text = page.title
     m.line.text = page.line
     m.summary.text = page.summary
     if page.image <> ""

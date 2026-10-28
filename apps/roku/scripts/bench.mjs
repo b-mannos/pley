@@ -44,12 +44,12 @@ sub Main()
     tiles = contentTiles(data.items, server)
     benchTime("build 300 ContentNodes", 5, function(input) : return nodesContent(input.tiles) : end function, { tiles: tiles })
     hubData = ParseJson(hubs)
-    benchTime("Home rows (6 x 20) mapped and built", 5, function(input) : return nodesRows(contentHomeRows(input.hubs, invalid, input.server)) : end function, { hubs: hubData.hubs, server: server })
+    benchTime("Home rows (6 x 20) mapped and built", 5, function(input) : return nodesRows(contentHomeRows(input.hubs, input.server)) : end function, { hubs: hubData.hubs, server: server })
     known = {}
-    for each row in contentRowChanges(hubData.hubs, invalid, server, invalid).summary
+    for each row in contentRowChanges(hubData.hubs, server, invalid).summary
         known[row.key] = row.sig
     end for
-    refresh = function(input) : return nodesRows(contentRowChanges(input.hubs, invalid, input.server, input.known).changed) : end function
+    refresh = function(input) : return nodesRows(contentRowChanges(input.hubs, input.server, input.known).changed) : end function
     benchTime("Home rows again: none changed", 5, refresh, { hubs: hubData.hubs, server: server, known: known })
     moved = ParseJson(hubs)
     moved.hubs[0].items[0].user_state.position_ms = 1200000

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A title in a RowList row or a MarkupGrid: its poster (or a 16:9 picture
-     for Continue Watching), how far along it is or a mark once watched, and
-     two lines under it. -->
+<!-- A title in a RowList row or a MarkupGrid: its poster (a 16:9 picture
+     for Continue Watching, a square for music), how far along it is or a
+     mark once watched, and two lines under it. -->
 <component name="Tile" extends="Group">
     <interface>
         <field id="itemContent" type="node" onChange="onContent" />

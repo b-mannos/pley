@@ -45,7 +45,8 @@ sub test_format_library_counts()
     tkEqual(fmtCount(245, "movies"), "245 movies")
     tkEqual(fmtCount(1, "shows"), "1 show")
     tkEqual(fmtCount(0, "shows"), "0 shows")
-    tkEqual(fmtCount(3, "music"), "3 titles")
+    tkEqual(fmtCount(3, "music"), "3 artists")
+    tkEqual(fmtCount(3, "other"), "3 titles")
 end sub
 
 sub test_format_meta_line()
