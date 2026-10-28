@@ -582,7 +582,11 @@ counts the time it ran. A playback starts:
   duplicated frames), restarts, bytes served, warnings and the last error
 
 `GET /metrics` exposes the same data for Prometheus (`pley_transcoder_*`). The
-pley web UI shows it under *Settings → Dashboard*.
+pley web UI shows it under *Settings → Dashboard*, next to the processors'
+and memory's use that the server samples itself every 2 s
+(`GET /api/system/resources`, docs/API.md): a managed transcoder and its
+FFmpeg processes count there as pley's (the server's process tree); an
+external one doesn't.
 
 ## License
 
