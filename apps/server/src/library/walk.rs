@@ -1021,7 +1021,7 @@ mod tests {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0)).ok()?;
+                std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o000)).ok()?;
             }
             #[cfg(windows)]
             {
@@ -1092,7 +1092,7 @@ mod tests {
         link("secrets.db", "Alien (1979).mkv");
         link("elsewhere.mkv", "Alien (1979) - Extended.mkv");
         link("passwd", "Alien (1979).en.srt");
-        let walked = walk(&[library.clone()], LibraryKind::Movies);
+        let walked = walk(std::slice::from_ref(&library), LibraryKind::Movies);
         let names: Vec<_> = walked.media.iter().map(|f| f.path.file_name().unwrap().to_owned()).collect();
         assert_eq!(names, ["Alien (1979) - Extended.mkv"]);
         assert!(walked.sidecars.values().all(|names| names.is_empty()), "{:?}", walked.sidecars);

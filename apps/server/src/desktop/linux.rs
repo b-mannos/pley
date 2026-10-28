@@ -121,7 +121,7 @@ fn icons() -> Vec<ksni::Icon> {
         .map(|(rgba, width, height)| ksni::Icon {
             width: width as i32,
             height: height as i32,
-            data: rgba.chunks_exact(4).flat_map(|p| [p[3], p[0], p[1], p[2]]).collect(),
+            data: rgba.as_chunks::<4>().0.iter().flat_map(|[r, g, b, a]| [*a, *r, *g, *b]).collect(),
         })
         .collect()
 }

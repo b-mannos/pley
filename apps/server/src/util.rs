@@ -84,13 +84,11 @@ pub fn keep_private(dir: &Path) {
     {
         use std::os::unix::fs::PermissionsExt;
         let open = std::fs::metadata(dir).is_ok_and(|meta| meta.permissions().mode() & 0o077 != 0);
-        if open {
-            if let Err(err) = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)) {
-                tracing::warn!(
-                    "other users of this computer can read {}, and pley can't change that: {err}",
-                    dir.display()
-                );
-            }
+        if open && let Err(err) = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)) {
+            tracing::warn!(
+                "other users of this computer can read {}, and pley can't change that: {err}",
+                dir.display()
+            );
         }
     }
     #[cfg(windows)]
