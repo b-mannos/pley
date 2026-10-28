@@ -200,6 +200,9 @@ export interface MediaStream {
   // subtitle
   external?: boolean;
   text_based?: boolean;
+  /** Added on the server (an uploaded file, or one found on OpenSubtitles). */
+  added?: boolean;
+  added_by?: Id | null;
 }
 
 export interface Hub {
@@ -244,6 +247,41 @@ export interface SubtitleTrack {
   external: boolean;
   text_based: boolean;
   url: string | null;
+  /** Added on the server (a file uploaded, or found on OpenSubtitles), not in or beside the media file. */
+  added?: boolean;
+  /** Who added it, when the server says. */
+  added_by?: Id | null;
+}
+
+/** What the server knows of the network a client plays on (GET/PUT /api/playback/network). */
+export interface NetworkAnswer {
+  /** The server's own network: never a speed test. */
+  local: boolean;
+  /** The most Automatic starts at there, kbps; `null`: no limit known. */
+  ceiling_kbps: number | null;
+  source: "playback" | "probe" | null;
+  /** When what set it happened, ms since 1970. */
+  since: number | null;
+  /** Run a speed test before starting Automatic. */
+  probe: boolean;
+}
+
+/** What a client tells the server of its network: a speed test's result, or Automatic's ceiling (`null`: forgotten). */
+export type NetworkReport = { probe_kbps: number; probe_complete: boolean } | { ceiling_kbps: number | null };
+
+/** A subtitle file found for an item (GET /api/items/{id}/subtitles/search). */
+export interface SubtitleResult {
+  /** Opaque: passed back to add it. */
+  id: string;
+  provider: string;
+  language: string;
+  name: string;
+  format: string;
+  hearing_impaired: boolean;
+  forced: boolean;
+  downloads: number;
+  /** "hash": made for this very file; "title": for the title. */
+  matched: "hash" | "title";
 }
 
 export type PlaybackMethod = "direct" | "remux" | "transcode";

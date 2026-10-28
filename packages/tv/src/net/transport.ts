@@ -13,6 +13,8 @@ export interface HttpRequest {
   responseType?: "text" | "json" | "blob" | "arraybuffer";
   timeoutMs?: number;
   cancel?: Cancel;
+  /** Hears how much of the body has arrived so far, as it arrives (a speed test). */
+  onProgress?: (loaded: number) => void;
 }
 
 export interface HttpResponse {
@@ -86,6 +88,8 @@ export const xhrTransport: Transport = (req) =>
       xhr.abort();
       reject(new NetworkError("cancelled", true));
     });
+    const progress = req.onProgress;
+    if (progress) xhr.onprogress = (e) => progress(e.loaded);
     xhr.onload = () => {
       forget?.();
       let body: unknown = xhr.response;

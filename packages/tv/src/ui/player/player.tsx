@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/ho
 import { formatClock, formatTimeOfDay } from "../../format/format";
 import { storedMemory } from "../../player/autoquality";
 import { initMusic } from "../../player/music";
+import { serverNetwork } from "../../player/network";
 import { PlaybackController, type PlayerEnv, type SavedPlayback } from "../../player/controller";
 import { T } from "../../player/details";
 import type { PlayRequest } from "../../player/plan";
@@ -65,6 +66,7 @@ export function PlayerScreen(p: { request: PlayRequest; pressedAt: number }) {
       offsets: app.offsets,
       quality: { remembered: () => saved?.quality ?? app.settings.value.quality, remember: (id) => app.updateSettings({ quality: id }) },
       autoMemory: storedMemory(app.store, `pley.autoQuality.${ui.api.server}`),
+      network: serverNetwork(ui.api, app.installId()),
       autoplayNext: () => app.settings.value.autoplayNext,
       events: (l) => app.onEvent(l),
       cachedItem: (id) => app.cachedItem(id),

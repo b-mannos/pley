@@ -10,6 +10,8 @@ import type {
   ItemDetail,
   ItemSummary,
   Library,
+  NetworkAnswer,
+  NetworkReport,
   LibrarySort,
   PersonDetail,
   PersonSummary,
@@ -120,6 +122,7 @@ interface CallOptions {
   timeoutMs?: number;
   responseType?: "json" | "blob" | "text" | "arraybuffer";
   headers?: Record<string, string>;
+  onProgress?: (loaded: number) => void;
 }
 
 /**
@@ -177,6 +180,7 @@ export class Api {
       responseType: opts.responseType ?? "json",
       timeoutMs: opts.timeoutMs,
       cancel: opts.cancel,
+      onProgress: opts.onProgress,
     };
     return this.homeNetwork ? watched(this.http, req, this.url("/api/server")) : this.http(req);
   }
@@ -394,6 +398,21 @@ export class Api {
   /** Whether the server answers at all (a player reconnecting without a session to ask about). */
   reachable(timeoutMs: number): Promise<unknown> {
     return this.get("/api/server", { timeoutMs });
+  }
+
+  /** What the server knows of the network this TV plays on, for Automatic's start (docs/QUALITY.md). */
+  network(clientId: string, timeoutMs: number, cancel?: Cancel): Promise<NetworkAnswer> {
+    return this.get("/api/playback/network", { query: { client_id: clientId }, timeoutMs, cancel });
+  }
+
+  /** Tells the server a speed test's result or Automatic's new ceiling; its answer as `network`'s. */
+  tellNetwork(clientId: string, report: NetworkReport, timeoutMs?: number): Promise<NetworkAnswer> {
+    return this.send("/api/playback/network", { method: "PUT", body: { client_id: clientId, ...report }, timeoutMs }).then((r) => r.body as NetworkAnswer);
+  }
+
+  /** The speed test's `bytes` of noise, `onProgress` hearing how much has arrived; `cancel` ends it. */
+  speedTest(bytes: number, onProgress: (loaded: number) => void, cancel: Cancel): Promise<unknown> {
+    return this.send("/api/playback/speedtest", { query: { bytes }, responseType: "arraybuffer", onProgress, cancel, timeoutMs: 10_000 });
   }
 
   stopSession(session: string): Promise<unknown> {

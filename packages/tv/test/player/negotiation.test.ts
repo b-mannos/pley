@@ -5,7 +5,8 @@ import type { KeyValue } from "../../src/auth/tokens";
 import { PlaybackController, type PlayerEnv } from "../../src/player/controller";
 import type { EngineListener, EngineSource, EngineStatus, PlayerEngine } from "../../src/player/engine";
 import { dvContainerMode, dvRetryMode, initialAudio, initialSubtitle, playbackRequest, playingAudio, withTracks, type Choices } from "../../src/player/plan";
-import { storedMemory } from "../../src/player/autoquality";
+import { storedMemory, type Remembered } from "../../src/player/autoquality";
+import type { NetworkMemory } from "../../src/player/network";
 import { ORIGINAL } from "../../src/player/quality";
 import { Reporter } from "../../src/player/reporter";
 import { NetworkError } from "../../src/net/transport";
@@ -665,13 +666,14 @@ describe("Automatic", () => {
     );
 
   /** A playback in Automatic that has shown its picture, on a clock the test moves; `kept` is the TV's storage. */
-  async function automatic(detail = item(file()), kept = memory(), dv: string[] | null = null) {
+  async function automatic(detail = item(file()), kept = memory(), dv: string[] | null = null, network: NetworkMemory | null = null) {
     vi.useFakeTimers();
     const w = world(detail, converted, dv);
     w.env.now = () => Date.now();
     const picked: string[] = [];
     w.env.quality = { remembered: () => "auto", remember: (id) => void picked.push(id) };
     w.env.autoMemory = storedMemory(kept, "pley.autoQuality.http://nas:7539");
+    w.env.network = network;
     const c = new PlaybackController({ itemId: 70 }, w.env, 0);
     c.start();
     await vi.advanceTimersByTimeAsync(50);
@@ -811,6 +813,70 @@ describe("Automatic", () => {
     expect(kept.get("pley.autoQuality.http://nas:7539")).toBeNull();
     expect(next.picked).toEqual(["auto"]);
     next.c.close();
+  });
+
+  /** The server's memory of networks: `known` where Automatic may start; what it was told. */
+  function serverMemory(known: Remembered | null | undefined) {
+    const told: (number | null)[] = [];
+    let asked = 0;
+    const network: NetworkMemory = {
+      start: () => {
+        asked++;
+        return Promise.resolve(known);
+      },
+      report: (kbps) => void told.push(kbps),
+    };
+    return { network, told, asked: () => asked };
+  }
+
+  it("starts where the server says this network allows, over the TV's own memory", async () => {
+    const kept = memory();
+    kept.set("pley.autoQuality.http://nas:7539", JSON.stringify({ kbps: 3_000, at: Date.now() - 60_000 }));
+    const server = serverMemory({ kbps: 16_000, at: Date.now() - 3_600_000 });
+    const { w, c } = await automatic(item(file()), kept, null, server.network);
+    expect(server.asked()).toBe(1);
+    expect(w.requests.map((r) => [r.mode, r.max_bitrate])).toEqual([["transcode", 15_000]]);
+    expect(c.state.value.note).toBe("Lowered for your connection");
+    c.close();
+    vi.useRealTimers();
+
+    const none = serverMemory(null);
+    const fresh = await automatic(item(file()), kept, null, none.network);
+    expect(fresh.w.requests.map((r) => [r.mode, r.max_bitrate])).toEqual([["auto", undefined]]);
+    fresh.c.close();
+  });
+
+  it("goes by the TV's own memory when the server can't say", async () => {
+    const kept = memory();
+    kept.set("pley.autoQuality.http://nas:7539", JSON.stringify({ kbps: 9_000, at: Date.now() - 60_000 }));
+    const { w, c } = await automatic(item(file()), kept, null, serverMemory(undefined).network);
+    expect(w.requests.map((r) => [r.mode, r.max_bitrate])).toEqual([["transcode", 8_000]]);
+    c.close();
+  });
+
+  it("asks nothing of the network for a quality picked", async () => {
+    vi.useFakeTimers();
+    const server = serverMemory({ kbps: 2_000, at: 0 });
+    const w = world(item(file()), converted);
+    w.env.network = server.network;
+    const c = new PlaybackController({ itemId: 70 }, w.env, 0);
+    c.start();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(server.asked()).toBe(0);
+    expect(w.requests.map((r) => r.mode)).toEqual(["auto"]);
+    c.close();
+  });
+
+  it("tells the server the ceiling of a step down, and to forget it when Automatic is picked again", async () => {
+    const server = serverMemory(null);
+    const { c, play, wait } = await automatic(item(file()), memory(), null, server.network);
+    await play(12, 0.5);
+    await wait(2_500);
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(server.told).toEqual([15_000]);
+    c.selectQuality("auto");
+    expect(server.told).toEqual([15_000, null]);
+    c.close();
   });
 
   it("doesn't start again when Original is picked while it plays the original", async () => {

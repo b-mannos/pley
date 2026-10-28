@@ -130,10 +130,12 @@ function memory(initial: Remembered | null = null): AutoMemory & { value: Rememb
 }
 
 /** Automatic for a 4K file of `mbps`, on a clock the test moves (`t`, ms; the wall clock is 1e12 + t). */
-function auto(mbps = 60, mem = memory(), f = file(3840, 2160, mbps)) {
+function auto(mbps = 60, mem = memory(), f = file(3840, 2160, mbps), known?: Remembered | null) {
+  /** The ceilings told to the server, in order. */
+  const told: (number | null)[] = [];
   const clock = { t: 0 };
-  const a = new AutoQuality({ ladder: autoLadder(f), originalKbps: f.bitrate ? f.bitrate / 1000 : null, memory: mem, wall: () => 1e12 + clock.t });
-  a.start(clock.t);
+  const a = new AutoQuality({ ladder: autoLadder(f), originalKbps: f.bitrate ? f.bitrate / 1000 : null, memory: mem, wall: () => 1e12 + clock.t, onCeiling: (k) => told.push(k) });
+  a.start(clock.t, known);
   /**
    * Plays `seconds` at `delivery` seconds of video a second, starting with
    * `ahead` seconds loaded ahead; checks each second and returns the first step.
@@ -175,7 +177,7 @@ function auto(mbps = 60, mem = memory(), f = file(3840, 2160, mbps)) {
     }
     return null;
   };
-  return { a, clock, mem, play, wait, network };
+  return { a, clock, mem, told, play, wait, network };
 }
 
 describe("Automatic", () => {
@@ -454,6 +456,50 @@ describe("Automatic", () => {
       expect(m.size).toBe(0);
       m.set("pley.autoQuality.x", "{broken");
       expect(storedMemory(store, "pley.autoQuality.x").get()).toBeNull();
+    });
+  });
+  describe("what the server knows of the network", () => {
+    it("takes the place of the device's memory: its ceiling, or none, whatever this device remembers", () => {
+      const kept = memory({ kbps: 2_000, at: 1e12 - 60_000 });
+      const server = auto(20, kept, file(1920, 1080, 20), { kbps: 9_000, at: 1e12 - 3_600_000 });
+      expect(server.a.playing).toBe("8m");
+      expect(server.a.lowered).toBe("network");
+      const none = auto(20, memory({ kbps: 2_000, at: 1e12 - 60_000 }), file(1920, 1080, 20), null);
+      expect(none.a.playing).toBe("original");
+      expect(none.a.lowered).toBeNull();
+      // Nothing is told back for what was only heard.
+      expect([server.told, none.told]).toEqual([[], []]);
+    });
+
+    it("keeps its own time: a ceiling from yesterday still holds, and the step back up isn't held 5 minutes", () => {
+      const { a, network } = auto(20, memory(), file(1920, 1080, 20), { kbps: 4_500, at: 1e12 - 86_000_000 });
+      expect(a.playing).toBe("4m");
+      expect(network(184, 50_000)?.to).toBe("8m");
+    });
+
+    it("plays the original when the file needs less, and never below 2 Mbps 480p", () => {
+      expect(auto(5, memory(), file(1920, 1080, 5), { kbps: 7_000, at: 1e12 }).a.playing).toBe("original");
+      expect(auto(20, memory(), file(1920, 1080, 20), { kbps: 300, at: 1e12 }).a.playing).toBe("2m");
+    });
+
+    it("hears each change of the ceiling: a step down, a step up to a quality, back to the original", () => {
+      const { a, mem, told, play, wait, network } = auto(20, memory(), file(1920, 1080, 20));
+      expect(a.started).toBe(true);
+      play(20, 0.5, 9);
+      expect(wait(2_000)?.to).toBe("4m");
+      expect(network(304, 50_000)?.to).toBe("8m");
+      // The step up remembers the quality it plays now.
+      expect(mem.value?.kbps).toBe(8_000);
+      expect(network(184, 50_000)?.to).toBe("12m");
+      expect(network(184, 50_000)?.to).toBe("original");
+      expect(told).toEqual([7_500, 8_000, 12_000, null]);
+    });
+
+    it("isn't told of a step down for the device, nor of a memory that ran out", () => {
+      const { a, told } = auto(20, memory({ kbps: 2_000, at: 1e12 - MEMORY_MS }), file(1920, 1080, 20));
+      a.decoding();
+      expect(a.check(30_000)?.why).toBe("device");
+      expect(told).toEqual([]);
     });
   });
 });

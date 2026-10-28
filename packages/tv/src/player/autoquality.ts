@@ -93,6 +93,11 @@ export interface AutoOptions {
   memory?: AutoMemory | null;
   /** The time the memory is kept in (ms since 1970); `Date.now` unless a test says. */
   wall?: () => number;
+  /**
+   * The remembered ceiling changed (kbps; `null`: forgotten), for the
+   * server to keep for this network too (docs/QUALITY.md).
+   */
+  onCeiling?: (kbps: number | null) => void;
 }
 
 /**
@@ -109,6 +114,8 @@ export class AutoQuality {
   private originalKbps: number | null;
   private readonly memory: AutoMemory | null;
   private readonly wall: () => number;
+  private readonly onCeiling: ((kbps: number | null) => void) | null;
+  private begun = false;
 
   private lastChange = -1e15;
   private lastDown = -1e15;
@@ -132,18 +139,28 @@ export class AutoQuality {
     this.originalKbps = o.originalKbps && o.originalKbps > 0 ? o.originalKbps : null;
     this.memory = o.memory ?? null;
     this.wall = o.wall ?? (() => Date.now());
+    this.onCeiling = o.onCeiling ?? null;
+  }
+
+  /** Whether `start` has said where it begins. */
+  get started(): boolean {
+    return this.begun;
   }
 
   /**
    * Where it starts: the original, or below it when a network too slow for
    * it was found in the last 30 minutes. `now` is the player's clock.
+   * `known`: what the server knows of this network instead (a ceiling, or
+   * `null` for none), which keeps its own time; left out when it can't say.
    */
-  start(now: number): string {
+  start(now: number, known?: Remembered | null): string {
+    this.begun = true;
     this.lastIssue = now;
-    const kept = this.memory ? this.memory.get() : null;
+    const fromServer = known !== undefined;
+    const kept = fromServer ? known : this.memory ? this.memory.get() : null;
     // A clock set back a little since doesn't make it older than now.
     const age = kept ? Math.max(0, this.wall() - kept.at) : 0;
-    if (kept && (age >= MEMORY_MS || kept.at - this.wall() >= MEMORY_MS)) this.memory!.set(null);
+    if (kept && !fromServer && (age >= MEMORY_MS || kept.at - this.wall() >= MEMORY_MS)) this.memory!.set(null);
     else if (kept && this.ladder.length && (this.originalKbps === null || kept.kbps < this.originalKbps)) {
       this.playing = this.highestAtMost(kept.kbps, null)!.id;
       this.lowered = "network";
@@ -342,7 +359,7 @@ export class AutoQuality {
     this.lastChange = now;
     this.lastDown = now;
     this.interrupted();
-    if (why === "network" && this.memory) this.memory.set({ kbps: ceiling !== null ? Math.max(ceiling, target.kbps) : target.kbps, at: this.wall() });
+    if (why === "network") this.remember(ceiling !== null ? Math.max(ceiling, target.kbps) : target.kbps);
     return { to: target.id, why };
   }
 
@@ -360,9 +377,18 @@ export class AutoQuality {
     this.interrupted();
     if (!next) {
       this.lowered = null;
-      if (this.memory) this.memory.set(null);
+      this.remember(null);
+    } else if (this.lowered === "network") {
+      // The network carries this one now: the next title starts here rather than lower.
+      this.remember(next.kbps);
     }
     return { to: this.playing, why: null };
+  }
+
+  /** Remembers `kbps` as the network's ceiling (`null`: forgets it), here and on the server. */
+  private remember(kbps: number | null): void {
+    this.memory?.set(kbps === null ? null : { kbps, at: this.wall() });
+    this.onCeiling?.(kbps);
   }
 
   /**

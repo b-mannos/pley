@@ -45,9 +45,10 @@ import {
   type Choices,
   type PlayRequest,
 } from "./plan";
-import { AutoQuality, type AutoMemory, type AutoStep } from "./autoquality";
+import { AutoQuality, type AutoMemory, type AutoStep, type Remembered } from "./autoquality";
+import type { NetworkMemory } from "./network";
 import { PREPARE_LEAD_MS, warmStream, type StreamFetch } from "./prepare";
-import { AUTO, autoLadder, chooseQuality, fileHint, modeOf, namedFor, ORIGINAL, presetById, qualitiesFor, type QualityPreset } from "./quality";
+import { AUTO, autoLadder, chooseQuality, fileHint, modeOf, namedFor, ORIGINAL, presetById, PRESETS, qualitiesFor, type QualityPreset } from "./quality";
 import { failureText, Recovery, StruggleMeter, type EngineError, type RecoveryAction } from "./recovery";
 import type { Reporter } from "./reporter";
 import { SLEEP_OFF, SleepTimer, type SleepChoice, type SleepState } from "./sleep";
@@ -191,6 +192,8 @@ export interface PlayerEnv {
   quality: { remembered(): string | null; remember(id: string): void };
   /** Where Automatic keeps a slow network for the next title (per TV and server). */
   autoMemory?: AutoMemory | null;
+  /** What the server knows of this TV's network, asked before Automatic starts and told of its ceilings. */
+  network?: NetworkMemory | null;
   autoplayNext: () => boolean;
   /** Subscribes to the server's events; returns the unsubscribe. */
   events: (listener: (e: ServerEvent) => void) => () => void;
@@ -397,9 +400,10 @@ export class PlaybackController {
     const generation = this.nextGeneration();
     try {
       const cached = this.env.cachedItem?.(this.current.itemId) ?? null;
-      const [detail, caps] = await Promise.all([
+      const [detail, caps, known] = await Promise.all([
         cached ? Promise.resolve(cached) : this.env.api.item(this.current.itemId),
         this.env.caps().catch(() => null),
+        this.networkStart(),
       ]);
       if (generation !== this.generation || this.closed) return;
       if (!this.engineRef) {
@@ -412,15 +416,26 @@ export class PlaybackController {
         });
       }
       this.caps = caps;
-      this.load(detail, this.current);
+      this.load(detail, this.current, known);
       await this.begin(startOfPlay(detail, this.current), generation);
     } catch (e) {
       if (generation === this.generation) this.failWith(e);
     }
   }
 
-  /** Takes `detail` as the item playing, with `req`'s choices. */
-  private load(detail: ItemDetail, req: PlayRequest): void {
+  /**
+   * What the server knows of this network, for Automatic: asked (and a
+   * speed test run, when it says) alongside the item's details, so the
+   * press of Play waits for both at once; nothing asked for a quality picked.
+   */
+  private networkStart(): Promise<Remembered | null | undefined> {
+    const network = this.env.network;
+    if (!network || chooseQuality(this.env.quality.remembered(), PRESETS).id !== AUTO.id) return Promise.resolve(undefined);
+    return network.start().catch(() => undefined);
+  }
+
+  /** Takes `detail` as the item playing, with `req`'s choices; `known`: where the server says Automatic may start. */
+  private load(detail: ItemDetail, req: PlayRequest, known?: Remembered | null): void {
     this.item = detail;
     this.current = req;
     const chosen = chooseFile(detail, req.fileId, this.caps);
@@ -429,7 +444,7 @@ export class PlaybackController {
     this.audioPicked = this.audio !== null;
     this.subtitle = initialSubtitle(chosen, req.subtitleIndex);
     this.quality = chooseQuality(this.env.quality.remembered(), qualitiesFor(chosen));
-    this.startAuto();
+    this.startAuto(known);
     this.offset = chosen ? this.env.offsets.get(this.env.api.server, chosen.id) : 0;
     this.markers = chosen ? markersOf(detail, chosen.id) : [];
     const episode = detail.kind === "episode";
@@ -1208,8 +1223,12 @@ export class PlaybackController {
     const fellBack = this.recovery.fallbackMode !== null;
     this.quality = chosen;
     this.recovery.qualityChanged();
-    if (chosen.id === AUTO.id) this.env.autoMemory?.set(null);
-    this.startAuto();
+    if (chosen.id === AUTO.id) {
+      this.env.autoMemory?.set(null);
+      this.env.network?.report(null);
+    }
+    // Automatic picked again starts afresh at the original, nothing asked.
+    this.startAuto(null);
     this.update({ suggestLowerQuality: false, note: this.noteText(), canPlayOriginal: false });
     this.env.quality.remember(chosen.id);
     this.publishChoices();
@@ -1451,11 +1470,13 @@ export class PlaybackController {
     this.setClock({ positionMs: req.startMs ?? 0, bufferedMs: 0 });
     const generation = this.nextGeneration();
     const prefetched = this.nextDetail?.id === target.id ? this.nextDetail : null;
+    const known = this.networkStart();
     (async () => {
       if (endedBefore) await this.env.reporter.flush(END_WAIT_MS);
       const detail = prefetched ?? (await this.env.api.item(target.id));
+      const ceiling = await known;
       if (generation !== this.generation || this.closed) return;
-      this.load(detail, req);
+      this.load(detail, req, ceiling);
       await this.begin(req.startMs ?? 0, generation);
     })().catch((e: unknown) => {
       if (generation === this.generation) this.failWith(e);
@@ -1491,17 +1512,23 @@ export class PlaybackController {
     return this.auto ? namedFor(this.file, presetById(this.auto.playing) ?? ORIGINAL) : this.quality;
   }
 
-  /** Automatic, when chosen: a new one for the title, starting where the network last allowed (Up Next too). */
-  private startAuto(): void {
+  /**
+   * Automatic, when chosen: a new one for the title, starting where the
+   * server says this network allows (`known`), else where the TV last found
+   * it did (Up Next too). Its ceilings are told to the server.
+   */
+  private startAuto(known?: Remembered | null): void {
     this.auto = null;
     if (this.quality.id !== AUTO.id) return;
     const file = this.file;
+    const network = this.env.network;
     this.auto = new AutoQuality({
       ladder: autoLadder(file),
       originalKbps: file?.bitrate ? file.bitrate / 1000 : null,
       memory: this.env.autoMemory ?? null,
+      onCeiling: network ? (kbps) => network.report(kbps) : undefined,
     });
-    this.auto.start(this.now());
+    this.auto.start(this.now(), known);
   }
 
   /**
