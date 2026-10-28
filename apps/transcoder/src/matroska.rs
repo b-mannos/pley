@@ -70,6 +70,11 @@ const TAG_TRACK_UID: u32 = 0x63C5;
 const SIMPLE_TAG: u32 = 0x67C8;
 const TAG_NAME: u32 = 0x45A3;
 const TAG_STRING: u32 = 0x4487;
+const ATTACHMENTS: u32 = 0x1941_A469;
+const ATTACHED_FILE: u32 = 0x61A7;
+const FILE_NAME: u32 = 0x466E;
+const FILE_MIME_TYPE: u32 = 0x4660;
+const FILE_DATA: u32 = 0x465C;
 
 const UNKNOWN_SIZE: u64 = u64::MAX;
 const MAX_ELEMENT_READ: u64 = 64 * 1024 * 1024;
@@ -150,6 +155,7 @@ struct Layout {
     tracks: Option<u64>,
     cues: Option<u64>,
     tags: Option<u64>,
+    attachments: Option<u64>,
 }
 
 impl Layout {
@@ -200,6 +206,7 @@ impl Layout {
                 TRACKS => self.tracks = self.tracks.or(Some(abs)),
                 CUES => self.cues = self.cues.or(Some(abs)),
                 TAGS => self.tags = self.tags.or(Some(abs)),
+                ATTACHMENTS => self.attachments = self.attachments.or(Some(abs)),
                 SEEK_HEAD if more.len() < MAX_SEEK_HEADS => more.push(abs),
                 _ => {}
             }
@@ -212,7 +219,7 @@ fn timestamp_scale(info: &[u8]) -> u64 {
     find_uint(info, TIMESTAMP_SCALE).filter(|&s| s > 0).unwrap_or(1_000_000)
 }
 
-/// The positions of the segment's info, tracks, cues and tags: from its seek
+/// The positions of the segment's info, tracks, cues, tags and attachments: from its seek
 /// heads (the first, and those it points to) and the elements before its
 /// first cluster. When `past_clusters`, from the elements after the clusters
 /// too if the Cues aren't found before them, which means going through the
@@ -236,7 +243,7 @@ fn layout<R: Read + Seek>(file: &mut R, past_clusters: bool, budget: Option<&Bud
     let segment = file.stream_position().map_err(io)?;
     let segment_end = if segment_size == UNKNOWN_SIZE { u64::MAX } else { segment.saturating_add(segment_size) };
 
-    let mut layout = Layout { segment, info: None, tracks: None, cues: None, tags: None };
+    let mut layout = Layout { segment, info: None, tracks: None, cues: None, tags: None, attachments: None };
     // Where the seek heads read are.
     let mut seek_heads = Vec::new();
     let mut pos = segment;
@@ -245,7 +252,7 @@ fn layout<R: Read + Seek>(file: &mut R, past_clusters: bool, budget: Option<&Bud
             budget.check()?;
         }
         let found = layout.info.is_some() && layout.tracks.is_some() && layout.cues.is_some();
-        if pos >= segment_end || (found && layout.tags.is_some()) {
+        if pos >= segment_end || (found && layout.tags.is_some() && layout.attachments.is_some()) {
             break;
         }
         file.seek(SeekFrom::Start(pos)).map_err(io)?;
@@ -267,6 +274,7 @@ fn layout<R: Read + Seek>(file: &mut R, past_clusters: bool, budget: Option<&Bud
             TRACKS => layout.tracks = Some(pos),
             CUES => layout.cues = Some(pos),
             TAGS => layout.tags = layout.tags.or(Some(pos)),
+            ATTACHMENTS => layout.attachments = layout.attachments.or(Some(pos)),
             CLUSTER if !past_clusters || (layout.cues.is_some() && layout.tracks.is_some()) => break,
             _ => {}
         }
@@ -276,6 +284,86 @@ fn layout<R: Read + Seek>(file: &mut R, past_clusters: bool, budget: Option<&Bud
         }
     }
     Ok(layout)
+}
+
+// ------------------------------------------------------------------ attached fonts
+
+/// A font attached to the file: ASS subtitles name the fonts they are drawn
+/// with, and muxers attach those that aren't common.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Font {
+    pub name: String,
+    pub data: Vec<u8>,
+}
+
+/// The fonts attached to a Matroska file, `max_bytes` of them at most (in
+/// the order they come): only the Attachments element is read, which the
+/// seek head points to, or which comes before the first cluster (mkvmerge
+/// and FFmpeg write it there). An empty list when there are none; an error
+/// when the file isn't Matroska or can't be read. Blocking.
+pub fn attached_fonts(path: &Path, max_bytes: u64) -> Result<Vec<Font>, String> {
+    let mut file = BufReader::with_capacity(64 * 1024, File::open(path).map_err(|e| e.to_string())?);
+    let layout = layout(&mut file, false, None)?;
+    let Some(at) = layout.attachments else { return Ok(Vec::new()) };
+    let io = |e: std::io::Error| e.to_string();
+    file.seek(SeekFrom::Start(at)).map_err(io)?;
+    match element_header(&mut file) {
+        Some((ATTACHMENTS, size)) if size != UNKNOWN_SIZE => {
+            let start = file.stream_position().map_err(io)?;
+            let end = start.saturating_add(size);
+            let mut fonts = Vec::new();
+            let mut total = 0u64;
+            let mut pos = start;
+            // Each attached file is read whole, one at a time.
+            while pos < end {
+                file.seek(SeekFrom::Start(pos)).map_err(io)?;
+                let Some((id, size)) = element_header(&mut file) else { break };
+                let data = file.stream_position().map_err(io)?;
+                if size == UNKNOWN_SIZE {
+                    break;
+                }
+                // One that can't fit isn't read (its data is a little smaller).
+                if id == ATTACHED_FILE
+                    && size <= max_bytes.saturating_sub(total).saturating_add(1024)
+                    && let Some(font) = read_payload(&mut file, size).and_then(|entry| font(&entry))
+                    && total + font.data.len() as u64 <= max_bytes
+                {
+                    total += font.data.len() as u64;
+                    fonts.push(font);
+                }
+                pos = data.saturating_add(size);
+            }
+            Ok(fonts)
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+/// The font an AttachedFile element holds, if it is one: by its MIME type,
+/// or its name's extension (some muxers say `application/octet-stream`).
+fn font(entry: &[u8]) -> Option<Font> {
+    let text = |id| {
+        children(entry).find(|(child, _)| *child == id).map(|(_, p)| String::from_utf8_lossy(trim_nul(p)).into_owned())
+    };
+    let name = text(FILE_NAME).unwrap_or_default();
+    let mime = text(FILE_MIME_TYPE).unwrap_or_default().to_ascii_lowercase();
+    let extension = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    let by_mime = mime.starts_with("font/")
+        || matches!(
+            mime.as_str(),
+            "application/x-truetype-font"
+                | "application/x-font-ttf"
+                | "application/x-font-otf"
+                | "application/x-font-opentype"
+                | "application/x-font"
+                | "application/font-sfnt"
+                | "application/vnd.ms-opentype"
+        );
+    if !by_mime && !matches!(extension.as_str(), "ttf" | "otf" | "ttc" | "otc") {
+        return None;
+    }
+    let data = children(entry).find(|(child, _)| *child == FILE_DATA)?.1.to_vec();
+    (!data.is_empty()).then_some(Font { name, data })
 }
 
 // ------------------------------------------------------------------ text subtitles
@@ -1497,6 +1585,64 @@ pub(crate) mod tests {
 
         std::fs::write(&path, b"not a matroska file").unwrap();
         assert_eq!(cue_keyframes(&path), None);
+    }
+
+    /// An AttachedFile element.
+    fn attached(name: &str, mime: &str, data: &[u8]) -> Vec<u8> {
+        let children =
+            [el(&[0x46, 0x6E], name.as_bytes()), el(&[0x46, 0x60], mime.as_bytes()), el(&[0x46, 0x5C], data)];
+        el(&[0x61, 0xA7], &children.concat())
+    }
+
+    /// A Matroska file with these files attached (name, MIME type, data)
+    /// and nothing else.
+    pub(crate) fn with_attachments(files: &[(&str, &str, &[u8])]) -> Vec<u8> {
+        let files: Vec<u8> = files.iter().flat_map(|(name, mime, data)| attached(name, mime, data)).collect();
+        let segment = el(&[0x18, 0x53, 0x80, 0x67], &el(&[0x19, 0x41, 0xA4, 0x69], &files));
+        [el(&[0x1A, 0x45, 0xDF, 0xA3], &[0x42, 0x86, 0x81, 0x01]), segment].concat()
+    }
+
+    #[test]
+    fn reads_the_attached_fonts() {
+        let info = el(&[0x15, 0x49, 0xA9, 0x66], &uint_el(&[0x2A, 0xD7, 0xB1], 1_000_000));
+        let files = [
+            attached("Font One.ttf", "application/x-truetype-font", b"font one"),
+            attached("cover.jpg", "image/jpeg", b"a picture"),
+            attached("two.OTF", "application/octet-stream", b"font two"),
+            attached("three", "font/sfnt", b"font three!"),
+        ];
+        let attachments = el(&[0x19, 0x41, 0xA4, 0x69], &files.concat());
+        let cluster = el(&[0x1F, 0x43, 0xB6, 0x75], &uint_el(&[0xE7], 0));
+        let ebml = el(&[0x1A, 0x45, 0xDF, 0xA3], &[0x42, 0x86, 0x81, 0x01]);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.mkv");
+        let names = |fonts: Vec<Font>| fonts.into_iter().map(|f| f.name).collect::<Vec<_>>();
+
+        // Before the first cluster, found by going through the elements.
+        let segment = el(&[0x18, 0x53, 0x80, 0x67], &[info.clone(), attachments.clone(), cluster.clone()].concat());
+        std::fs::write(&path, [ebml.clone(), segment].concat()).unwrap();
+        let fonts = attached_fonts(&path, u64::MAX).unwrap();
+        assert_eq!(names(fonts.clone()), ["Font One.ttf", "two.OTF", "three"]);
+        assert_eq!(fonts[0].data, b"font one");
+        // No more than the budget: the third doesn't fit after the first two.
+        assert_eq!(names(attached_fonts(&path, 20).unwrap()), ["Font One.ttf", "two.OTF"]);
+
+        // After the clusters, where the seek head says.
+        let seek =
+            |id: &[u8], pos: u64| el(&[0x4D, 0xBB], &[el(&[0x53, 0xAB], id), uint_el(&[0x53, 0xAC], pos)].concat());
+        let seek_head_len = el(&[0x11, 0x4D, 0x9B, 0x74], &seek(&[0x19, 0x41, 0xA4, 0x69], 0)).len();
+        let at = (seek_head_len + info.len() + cluster.len()) as u64;
+        let seek_head = el(&[0x11, 0x4D, 0x9B, 0x74], &seek(&[0x19, 0x41, 0xA4, 0x69], at));
+        let segment = el(&[0x18, 0x53, 0x80, 0x67], &[seek_head, info.clone(), cluster.clone(), attachments].concat());
+        std::fs::write(&path, [ebml.clone(), segment].concat()).unwrap();
+        assert_eq!(names(attached_fonts(&path, u64::MAX).unwrap()), ["Font One.ttf", "two.OTF", "three"]);
+
+        // None attached; not Matroska.
+        let segment = el(&[0x18, 0x53, 0x80, 0x67], &[info, cluster].concat());
+        std::fs::write(&path, [ebml, segment].concat()).unwrap();
+        assert_eq!(attached_fonts(&path, u64::MAX).unwrap(), Vec::new());
+        std::fs::write(&path, b"not a matroska file").unwrap();
+        assert!(attached_fonts(&path, u64::MAX).is_err());
     }
 
     // ------------------------------------------------------------ text tracks

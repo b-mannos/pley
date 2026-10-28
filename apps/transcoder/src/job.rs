@@ -532,7 +532,7 @@ impl JobManager {
         } else {
             None
         };
-        let plan = Plan::build(&req, &media, &self.ff, keyframes.as_deref().map(Vec::as_slice))
+        let mut plan = Plan::build(&req, &media, &self.ff, keyframes.as_deref().map(Vec::as_slice))
             .map_err(ApiError::BadRequest)?;
 
         let id = uuid::Uuid::new_v4().simple().to_string();
@@ -543,14 +543,23 @@ impl JobManager {
         let store = self.memory.get().filter(|_| req.options.in_memory && plan.throttle);
         let memory_dir = store.map(|store| store.root().join(&id));
         let unmade = Unmade(std::iter::once(dir.clone()).chain(memory_dir.clone()).collect());
+        let mut fonts = None;
         if let Some(Burn::Text { source, file_name, .. }) = &plan.burn {
-            self.extractor.extract_ass(&input, source, &dir.join(file_name)).await?;
+            // The file's fonts are read while the track is extracted, which
+            // takes longer: they cost the start nothing.
+            let ass = dir.join(file_name);
+            let extracted = self.extractor.extract_ass(&input, source, &ass);
+            let (extracted, found) = tokio::join!(extracted, self.extractor.attached_fonts(&input));
+            extracted?;
+            fonts = found;
         }
+        plan.use_fonts(fonts.clone());
 
         let start_segment = plan.segment_for(req.start_ms.unwrap_or(0));
         let mut variants = Vec::new();
-        for (k, (variant, plan)) in self.variant_plans(&req, &media, &plan).into_iter().enumerate() {
+        for (k, (variant, mut plan)) in self.variant_plans(&req, &media, &plan).into_iter().enumerate() {
             let k = k + 1;
+            plan.use_fonts(fonts.clone());
             let variant_dir = dir.join(format!("v{k}"));
             tokio::fs::create_dir_all(&variant_dir).await?;
             // Its subtitles are the job's: extracted once.

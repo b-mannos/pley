@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-Restricted
-//! One-shot extractions: video frame thumbnails, embedded cover art, and
+//! One-shot extractions: video frame thumbnails, embedded cover art,
 //! subtitles converted to WebVTT (read block by block through a Matroska
 //! file's Cues, or else all text tracks of a file in one FFmpeg pass, since
-//! extracting any track that way means reading the whole file).
+//! extracting any track that way means reading the whole file), and the
+//! fonts attached to a file, for burned-in ASS.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -530,6 +531,78 @@ impl Extractor {
         cmd.args(["-c:s", "ass", "-f", "ass"]).arg(out);
         run_capture(cmd, Duration::from_secs(20 * 60)).await.map(|_| ())
     }
+
+    /// The folder of the fonts attached to `input` (a Matroska file), for
+    /// libass to draw burned-in ASS subtitles with the fonts they name;
+    /// `None` when it has none. Read once per file version, from the
+    /// Attachments element alone (the seek head says where), into the
+    /// subtitle cache; whatever goes wrong only means the system's fonts.
+    pub async fn attached_fonts(&self, input: &Path) -> Option<PathBuf> {
+        let (input, subs_dir) = (input.to_owned(), self.subs_dir.clone());
+        let found = tokio::task::spawn_blocking(move || cached_fonts(&input, &subs_dir)).await;
+        match found {
+            Ok(Ok(dir)) => dir,
+            Ok(Err(err)) => {
+                tracing::debug!("no attached fonts: {err}");
+                None
+            }
+            Err(_) => None,
+        }
+    }
+}
+
+/// The most attached fonts kept for a file: CJK fonts take tens of
+/// megabytes each, and an anime series may attach a few of them.
+const MAX_FONT_BYTES: u64 = 256 << 20;
+
+/// [`Extractor::attached_fonts`]: `{key}.fonts/fonts` in `subs_dir` (libass
+/// takes every file of its folder for a font), beside an `index.json`
+/// listing them, which says the file was read (an empty list, that it has
+/// none) and which use refreshes for the cache's pruning. Blocking.
+fn cached_fonts(input: &Path, subs_dir: &Path) -> std::io::Result<Option<PathBuf>> {
+    let dir = subs_dir.join(format!("{}.fonts", file_key(input)?));
+    let index = dir.join("index.json");
+    if let Ok(listed) = std::fs::read(&index) {
+        touch(&index);
+        let names: Vec<String> = serde_json::from_slice(&listed).unwrap_or_default();
+        return Ok((!names.is_empty()).then(|| dir.join("fonts")));
+    }
+    let fonts = matroska::attached_fonts(input, MAX_FONT_BYTES).unwrap_or_default();
+    // Made whole beside it, then renamed into place: a reader never sees
+    // half of it, and of two made at once, one stays.
+    let part = subs_dir.join(format!(".{}.fonts.tmp", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(part.join("fonts"))?;
+    let made = (|| {
+        let mut names = Vec::new();
+        for (n, font) in fonts.iter().enumerate() {
+            // Numbered: libass knows a font by what's inside it, and the
+            // file's names may be anything.
+            let extension = font_extension(&font.name);
+            let name = format!("{n}.{extension}");
+            std::fs::write(part.join("fonts").join(&name), &font.data)?;
+            names.push(name);
+        }
+        std::fs::write(part.join("index.json"), serde_json::to_vec(&names).unwrap_or_default())?;
+        std::fs::rename(&part, &dir)
+    })();
+    if made.is_err() {
+        let _ = std::fs::remove_dir_all(&part);
+        if !index.exists() {
+            made?;
+        }
+    }
+    Ok((!fonts.is_empty()).then(|| dir.join("fonts")))
+}
+
+/// The extension a font is saved with: its own when it's a font's.
+fn font_extension(name: &str) -> &'static str {
+    let extension = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    match extension.as_str() {
+        "otf" => "otf",
+        "ttc" => "ttc",
+        "otc" => "otc",
+        _ => "ttf",
+    }
 }
 
 /// A text track's extraction under way, and which one it is.
@@ -938,6 +1011,32 @@ impl Drop for Lock<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attached_fonts_are_kept_once_per_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let subs = dir.path().join("subtitles");
+        std::fs::create_dir(&subs).unwrap();
+        let movie = dir.path().join("a.mkv");
+        let files: [(&str, &str, &[u8]); 3] =
+            [("A.OTF", "font/otf", b"one"), ("cover.jpg", "image/jpeg", b"picture"), ("b", "font/ttf", b"two")];
+        std::fs::write(&movie, matroska::tests::with_attachments(&files)).unwrap();
+        let fonts = cached_fonts(&movie, &subs).unwrap().unwrap();
+        assert_eq!(fonts, subs.join(format!("{}.fonts", file_key(&movie).unwrap())).join("fonts"));
+        assert_eq!(std::fs::read(fonts.join("0.otf")).unwrap(), b"one");
+        assert_eq!(std::fs::read(fonts.join("1.ttf")).unwrap(), b"two");
+        assert_eq!(std::fs::read_dir(&fonts).unwrap().count(), 2, "the fonts alone, for libass");
+        // Read once: the next job finds them, and nothing is left beside them.
+        assert_eq!(cached_fonts(&movie, &subs).unwrap(), Some(fonts));
+        assert_eq!(std::fs::read_dir(&subs).unwrap().count(), 1);
+
+        // None attached (not Matroska, here): nothing, which is remembered too.
+        let plain = dir.path().join("b.mp4");
+        std::fs::write(&plain, b"not matroska").unwrap();
+        assert_eq!(cached_fonts(&plain, &subs).unwrap(), None);
+        assert!(subs.join(format!("{}.fonts", file_key(&plain).unwrap())).join("index.json").exists());
+        assert_eq!(cached_fonts(&plain, &subs).unwrap(), None);
+    }
 
     #[test]
     fn sniffs_images() {

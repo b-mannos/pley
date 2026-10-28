@@ -248,7 +248,7 @@ half-made ones are deleted.
      | Folder | Holds | Age limit | Budget |
      |---|---|---|---|
      | `keyframes/` | keyframe indexes | 90 days | 256 MB |
-     | `subtitles/` | converted and extracted subtitles | 60 days | 512 MB |
+     | `subtitles/` | converted and extracted subtitles, the fonts attached to files | 60 days | 512 MB |
      | `trickplay/` | seek-preview sheets | 1 day | 1 GB |
      | `libplacebo/` | libplacebo's compiled shaders | 30 days | 128 MB |
 
@@ -438,6 +438,17 @@ half-made ones are deleted.
     track's extraction reads the whole file, so it gives up after 20
     minutes, inside the 25 the server waits for the job; a job folder whose
     job isn't made after all (an error, or the request gone) is removed.
+  - They are drawn with the fonts attached to the file (styled ASS, anime
+    above all, names fonts that only the file has; without them libass
+    falls back to a system font). The fonts are read from a Matroska file's
+    Attachments element alone, which its seek head points to, while the
+    track is extracted, so they cost the start nothing, and kept in
+    `subtitles/<file key>.fonts/` (256 MB of them at most per file) for
+    the next job of the same file version; the filter gets that folder as
+    `fontsdir`. Subtitle files next to the video are drawn with the
+    video's fonts too. Rendering from the source file with the filter's
+    `si=` instead would read the whole file in every FFmpeg process, at
+    each seek.
 - **Audio.** Copied (`audio.mode = copy`) when the source is AAC, MP3, AC-3
   or E-AC-3, which MPEG-TS carries; anything else asked to be copied is
   converted, with a warning. Converted audio is encoded to `audio.codec`:

@@ -257,8 +257,10 @@ pub enum Burn {
     Image { stream_index: i64, label: String },
     /// Bitmap subtitle file (`.sup`), added as a second input.
     ImageFile { path: PathBuf, label: String },
-    /// Text subtitles rendered by libass from `file_name` inside the job dir.
-    Text { source: TextSource, file_name: String, label: String },
+    /// Text subtitles rendered by libass from `file_name` inside the job dir,
+    /// with the fonts attached to the file in `fonts_dir` (set once they
+    /// are read, see [`Plan::use_fonts`]).
+    Text { source: TextSource, file_name: String, fonts_dir: Option<PathBuf>, label: String },
 }
 
 #[derive(Debug, Clone)]
@@ -300,6 +302,14 @@ pub struct Plan {
 impl Plan {
     pub fn segment_count(&self) -> u32 {
         (self.boundaries.len() - 1) as u32
+    }
+
+    /// Burned-in text subtitles are drawn with the fonts in `dir` (those
+    /// attached to the file) besides the system's.
+    pub fn use_fonts(&mut self, dir: Option<PathBuf>) {
+        if let Some(Burn::Text { fonts_dir, .. }) = &mut self.burn {
+            *fonts_dir = dir;
+        }
     }
 
     pub fn segment_for(&self, position_ms: i64) -> u32 {
@@ -965,12 +975,13 @@ impl Plan {
                 }
             }
         }
-        if let Some(Burn::Text { file_name, .. }) = &self.burn {
+        if let Some(Burn::Text { file_name, fonts_dir, .. }) = &self.burn {
             // libass works on absolute subtitle times; frames are on the local
             // (offset) timeline, so shift around the filter.
             let offset = secs(start_ms);
+            let fonts = fonts_dir.as_deref().map(|dir| format!(":fontsdir={}", filter_path(dir))).unwrap_or_default();
             post.push(format!(
-                "setpts=PTS+{offset}/TB,subtitles=filename={file_name}:original_size={}x{},setpts=PTS-{offset}/TB",
+                "setpts=PTS+{offset}/TB,subtitles=filename={file_name}{fonts}:original_size={}x{},setpts=PTS-{offset}/TB",
                 v.src_width, v.src_height
             ));
         }
@@ -1191,7 +1202,12 @@ fn resolve_burn(
                 if !ff.caps.subtitle_burn_text {
                     return Err("ffmpeg was built without libass (subtitles filter)".into());
                 }
-                Ok(Burn::Text { source: TextSource::File(path), file_name: "burn.ass".into(), label: name })
+                Ok(Burn::Text {
+                    source: TextSource::File(path),
+                    file_name: "burn.ass".into(),
+                    fonts_dir: None,
+                    label: name,
+                })
             }
             other => Err(format!("unsupported subtitle file type '.{other}'")),
         };
@@ -1206,7 +1222,7 @@ fn resolve_burn(
         if !ff.caps.subtitle_burn_text {
             return Err("ffmpeg was built without libass (subtitles filter)".into());
         }
-        Ok(Burn::Text { source: TextSource::Embedded(index), file_name: "burn.ass".into(), label })
+        Ok(Burn::Text { source: TextSource::Embedded(index), file_name: "burn.ass".into(), fonts_dir: None, label })
     } else {
         if !ff.caps.subtitle_burn_image {
             return Err("ffmpeg lacks the overlay filter".into());
@@ -1277,6 +1293,26 @@ pub fn shader_cache_option(dir: &Path) -> Option<String> {
     let drive = if drive.is_empty() { String::new() } else { format!("{drive}\\\\:") };
     let slash = if rest.ends_with('/') { "" } else { "/" };
     Some(format!("shader_cache={drive}{rest}{slash}"))
+}
+
+/// A path as a filter option's value in a filter graph: escaped once for
+/// the option (`\`, `'`, `:`), then again for the graph (`\`, `'`, `[`, `]`,
+/// `,`, `;`). With forward slashes on Windows, which takes them too.
+pub fn filter_path(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    let path = if cfg!(windows) { path.replace('\\', "/") } else { path.into_owned() };
+    let escape = |text: &str, special: &[char]| {
+        let mut out = String::with_capacity(text.len() + 8);
+        for c in text.chars() {
+            if special.contains(&c) {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+        out
+    };
+    let option = escape(&path, &['\\', '\'', ':']);
+    escape(&option, &['\\', '\'', '[', ']', ',', ';'])
 }
 
 fn trim_float(v: f64) -> String {
@@ -2320,8 +2356,68 @@ mod tests {
         let plan = Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, None).unwrap();
         assert!(matches!(plan.burn, Some(Burn::Text { .. })));
         let args = args_string(&plan, 5, 6);
-        assert!(args.contains("setpts=PTS+20.000/TB,subtitles=filename=burn.ass"), "{args}");
+        assert!(args.contains("setpts=PTS+20.000/TB,subtitles=filename=burn.ass:original_size="), "{args}");
         assert!(args.contains("-segment_time 999999"));
+    }
+
+    #[test]
+    fn text_subtitles_are_drawn_with_the_attached_fonts() {
+        let ff = ffmpeg_with(vec![x264()], vec![]);
+        let mut req = request();
+        req.subtitle = Some(SubtitleBurnRequest { stream_index: Some(3), external_path: None });
+        let mut plan = Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, None).unwrap();
+        plan.use_fonts(Some(PathBuf::from("/cache/subtitles/k.fonts")));
+        let args = args_string(&plan, 0, 2);
+        assert!(
+            args.contains("subtitles=filename=burn.ass:fontsdir=/cache/subtitles/k.fonts:original_size="),
+            "{args}"
+        );
+        // Picture subtitles have no fonts.
+        req.subtitle = Some(SubtitleBurnRequest { stream_index: Some(2), external_path: None });
+        let mut plan = Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, None).unwrap();
+        plan.use_fonts(Some(PathBuf::from("/cache/subtitles/k.fonts")));
+        assert!(!args_string(&plan, 0, 2).contains("fontsdir"));
+    }
+
+    #[test]
+    fn paths_in_filters_are_escaped_twice() {
+        assert_eq!(filter_path(Path::new("/var/cache/pley/k.fonts")), "/var/cache/pley/k.fonts");
+        // `'` and `\` are escaped for the option, then each backslash and the
+        // `'` again for the graph; `:` once, `,` and `[` for the graph only.
+        assert_eq!(filter_path(Path::new("/a'b/c:d/e,f[g]")), r"/a\\\'b/c\\:d/e\,f\[g\]");
+        if cfg!(windows) {
+            assert_eq!(filter_path(Path::new(r"C:\pley\cache\k.fonts")), r"C\\:/pley/cache/k.fonts");
+        }
+    }
+
+    /// FFmpeg finds the fonts in a folder whose name needs escaping.
+    #[test]
+    fn ffmpeg_reads_fonts_from_an_escaped_folder() {
+        if !real_ffmpeg() {
+            return;
+        }
+        let filters = std::process::Command::new("ffmpeg").args(["-hide_banner", "-filters"]).output().unwrap();
+        if !String::from_utf8_lossy(&filters.stdout).contains(" subtitles ") {
+            eprintln!("ffmpeg without libass: skipped");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let name = if cfg!(windows) { "it's [a], fonts; dir" } else { "it's [a], fonts; dir: x" };
+        let fonts = dir.path().join(name);
+        std::fs::create_dir(&fonts).unwrap();
+        std::fs::write(fonts.join("0.ttf"), b"not really a font").unwrap();
+        let ass = "[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Text\n";
+        std::fs::write(dir.path().join("burn.ass"), ass).unwrap();
+        let graph = format!("[0:v]subtitles=filename=burn.ass:fontsdir={}[vout]", filter_path(&fonts));
+        let ran = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "verbose", "-f", "lavfi", "-i", "color=s=64x64:d=0.1"])
+            .args(["-filter_complex", &graph, "-map", "[vout]", "-frames:v", "1", "-f", "null", "-"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        let log = String::from_utf8_lossy(&ran.stderr);
+        assert!(ran.status.success(), "{log}");
+        assert!(log.contains("Loading font file") && log.contains("0.ttf"), "{log}");
     }
 
     #[test]
