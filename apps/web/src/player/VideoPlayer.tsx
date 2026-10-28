@@ -128,6 +128,9 @@ export interface VideoPlayerProps {
  */
 const SPINNER_DELAY_MS = 400;
 
+/** Seconds kept of what is buffered when the player grows (`capToPlayer`): the bigger size starts meanwhile. */
+const UPSIZE_KEEP_S = 15;
+
 /** How long playback may stand still, wanting to play, before it counts as stalled. */
 const STALL_MS = 12_000;
 const STALL_CHECK_MS = 2_000;
@@ -497,6 +500,36 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     auto?.loaded(performance.now(), bytes, ms);
   });
 
+  /**
+   * Automatic plays no size bigger than the player shows. hls.js's own
+   * `capLevelToPlayerSize` empties all it buffered ahead when the player
+   * grows (going full screen), and the transcoder then starts the bigger
+   * size from cold, with a wait. Here what is buffered past the next
+   * `UPSIZE_KEEP_S` goes, fetched again at the bigger size while those
+   * seconds play.
+   */
+  const capToPlayer = useEffectEvent(() => {
+    const hls = hlsRef.current;
+    const v = videoRef.current;
+    if (!hls || !v || !hls.levels.length) return;
+    const cap = auto ? startSize(hls.levels, v, hls.levels.length - 1) : -1;
+    const before = hls.autoLevelCapping;
+    if (cap === before) return;
+    hls.autoLevelCapping = cap;
+    const bigger = before >= 0 && (cap < 0 || cap > before);
+    if (bigger && bufferedAhead(v) > UPSIZE_KEEP_S + 5) {
+      const Hls = hls.constructor as typeof HlsType;
+      hls.trigger(Hls.Events.BUFFER_FLUSHING, { startOffset: v.currentTime + UPSIZE_KEEP_S, endOffset: Number.POSITIVE_INFINITY, type: null });
+    }
+  });
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => capToPlayer());
+    observer.observe(v);
+    return () => observer.disconnect();
+  }, []);
+
   // ---------------------------------------------------------------------
   // Session lifecycle: (re)start whenever the stream parameters change.
 
@@ -611,9 +644,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                 // in, not once the element's MediaSource has opened (~0.1 s later).
                 startFragPrefetch: true,
                 // A stream in several sizes (`pinfo.adaptive`): Automatic
-                // takes none bigger than the player shows; a quality picked
-                // plays at its size whenever the connection allows.
-                capLevelToPlayerSize: auto !== null,
+                // takes none bigger than the player shows (`capToPlayer`); a
+                // quality picked plays at its size whenever the connection allows.
+                capLevelToPlayerSize: false,
                 maxBufferLength: 30,
                 maxMaxBufferLength: 120,
                 backBufferLength: 60,
@@ -669,6 +702,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                 // (the one it started making), or for Automatic the smallest
                 // that fills the player, as it then keeps to.
                 hls.startLevel = auto ? startSize(data.levels, video, data.firstLevel) : data.firstLevel;
+                capToPlayer();
                 hls.startLoad(hlsStartPosition(startSec));
               });
               hls.on(Hls.Events.LEVEL_SWITCHED, (_evt, data: LevelSwitchedData) => {

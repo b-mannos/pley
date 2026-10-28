@@ -1082,6 +1082,10 @@ impl Job {
         let on = !awaited && lead >= ahead.as_secs_f64();
         if p.set_paused(on) {
             tracing::debug!(job = %self.id, "{} {lead:.0} s ahead of the player", if on { "pausing" } else { "resuming" });
+            // Paused, it makes nothing: no speed, rather than the last one.
+            if on && let Some(process) = self.runtime.lock().process.as_mut() {
+                process.speed = None;
+            }
         }
     }
 
@@ -1655,6 +1659,7 @@ mod tests {
         assert!(!job.far_ahead(100));
 
         job.plan.throttle = true;
+        job.runtime.lock().process = Some(ProcessStatus { speed: Some(1.0), ..Default::default() });
         at(40, 0);
         job.pace_lead(&p);
         assert!(!p.paused(), "78 s ahead: on it goes");
@@ -1662,6 +1667,7 @@ mod tests {
         assert!(job.far_ahead(47));
         job.pace_lead(&p);
         assert!(p.paused(), "92 s ahead: paused");
+        assert_eq!(job.status().process.unwrap().speed, None, "paused, it has no speed");
 
         // It stays paused until the player is within a minute of it.
         at(47, 5);
