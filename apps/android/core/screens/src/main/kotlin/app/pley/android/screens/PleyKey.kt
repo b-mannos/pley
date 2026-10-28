@@ -39,10 +39,12 @@ sealed interface PleyKey : NavKey {
 
     /**
      * One library, on [tab] (recommended, library or collections); `null`:
-     * on the tab it was left on this device, else Library.
+     * on the tab it was left on this device, else Library. [view] is a
+     * sort to show it in ("sort=added&order=desc", a row's See all), in
+     * place of the one it was left in.
      */
     @Serializable
-    data class Library(val libraryId: Long, val tab: LibraryTab? = null) : PleyKey
+    data class Library(val libraryId: Long, val tab: LibraryTab? = null, val view: String? = null) : PleyKey
 
     /** A library's collections. */
     @Serializable

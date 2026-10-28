@@ -168,7 +168,11 @@ internal fun TvRecommendedTab(
                             },
                             memory = memory,
                             initialFocus = initial && at == 0,
-                            seeAll = if (row.key == TileRow.COLLECTIONS) SeeAll(seeAll) { vm.select(LibraryTab.Collections) } else null,
+                            seeAll = if (row.key == TileRow.COLLECTIONS) {
+                                SeeAll(seeAll) { vm.select(LibraryTab.Collections) }
+                            } else {
+                                row.seeAll?.let { view -> SeeAll(seeAll) { vm.seeAll(view) } }
+                            },
                         )
                     }
                 }

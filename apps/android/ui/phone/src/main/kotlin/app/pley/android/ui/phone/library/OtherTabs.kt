@@ -102,7 +102,11 @@ internal fun RecommendedPane(state: LibraryUiState<ArtworkTileModel>, vm: Librar
                         } else {
                             { tile -> navigator.open(PleyKey.ItemActions(tile.id, continueWatching = HubKeys.isContinueWatching(model.key))) }
                         },
-                        onTitleClick = if (row?.key == TileRow.COLLECTIONS) ({ vm.select(LibraryTab.Collections) }) else null,
+                        onTitleClick = if (row?.key == TileRow.COLLECTIONS) {
+                            { vm.select(LibraryTab.Collections) }
+                        } else {
+                            row?.seeAll?.let { view -> { vm.seeAll(view) } }
+                        },
                     )
                 }
             }

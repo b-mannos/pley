@@ -26,6 +26,7 @@ import app.pley.android.model.SortOrder
 import app.pley.android.screens.LibraryTab
 import app.pley.android.screens.PleyKey
 import app.pley.android.screens.ScreensGraph
+import app.pley.android.screens.home.seeAllView
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -91,6 +92,8 @@ data class TileRow<T : Any>(
     val look: TileLook,
     val tiles: List<T>,
     val opens: List<PleyKey>,
+    /** The Library tab's sort its See all shows ([LibraryViewModel.seeAll]); `null` without one. */
+    val seeAll: String? = null,
 ) {
     companion object {
         /** The key of the library's collections row. */
@@ -160,9 +163,10 @@ data class LibraryUiState<T : Any>(
  * handing them back as [saved]; a page opened anew starts with the sort
  * and filters the library was left in on this device ([LibraryViews]),
  * read before the page shows anything, on [tab], or without one on the
- * tab it was left on (Library the first time). Each tab reads only once
- * it has been shown. Tiles and the A to Z are worked out off the main
- * thread.
+ * tab it was left on (Library the first time). Opened with a [view] (a
+ * row's See all), it starts in that instead, as the web's address with a
+ * sort does. Each tab reads only once it has been shown. Tiles and the A
+ * to Z are worked out off the main thread.
  */
 class LibraryViewModel<T : Any>(
     val libraryId: Long,
@@ -170,15 +174,16 @@ class LibraryViewModel<T : Any>(
     saved: String?,
     private val deps: LibraryDeps,
     private val tiles: TileFactory<T>,
+    view: String? = null,
 ) : ViewModel() {
     private val opening = tab ?: LibraryTab.Library
-    private val params = MutableStateFlow(saved?.let { LibraryParams.parse(it, opening) } ?: LibraryParams(tab = opening))
+    private val params = MutableStateFlow((saved ?: view)?.let { LibraryParams.parse(it, opening) } ?: LibraryParams(tab = opening))
 
-    /** The view the library was left in is read (a page that came back has its own). */
-    private val viewRead = MutableStateFlow(saved != null)
+    /** The view the library was left in is read (a page that came back has its own, as does one opened with a view). */
+    private val viewRead = MutableStateFlow(saved != null || view != null)
 
     /** The tab the page opened on, once the view it was left in is read. */
-    private val openedOn = MutableStateFlow(if (saved != null) params.value.tab else null)
+    private val openedOn = MutableStateFlow(if (viewRead.value) params.value.tab else null)
     private val retry = MutableStateFlow(0)
     private val builder = GridBuilder(tiles)
 
@@ -307,6 +312,11 @@ class LibraryViewModel<T : Any>(
     /** Shows [tab]; its content starts reading the first time. */
     fun select(tab: LibraryTab) = params.update { it.copy(tab = tab) }
 
+    /** A Recommended row's See all ([TileRow.seeAll]): the Library tab in that sort, without filters, as the web's link to it. */
+    fun seeAll(view: String) {
+        params.value = LibraryParams.parse(view, LibraryTab.Library)
+    }
+
     /** Sorts by [sort] in its own order (titles A to Z, the rest newest or best first). */
     fun sortBy(sort: LibrarySort) = params.update { if (it.sort == sort) it else it.sortedBy(sort) }
 
@@ -366,6 +376,7 @@ class LibraryViewModel<T : Any>(
             look = look,
             tiles = hub.items.map { tiles.item(it, look, origin) },
             opens = hub.items.map { opens(it) },
+            seeAll = seeAllView(hub.key),
         )
     }
 

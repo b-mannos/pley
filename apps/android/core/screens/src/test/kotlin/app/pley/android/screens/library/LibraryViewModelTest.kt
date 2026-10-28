@@ -51,12 +51,13 @@ class LibraryViewModelTest {
     @After
     fun reset() = Dispatchers.resetMain()
 
-    private fun viewModel(libraryId: Long = 1, tab: LibraryTab? = null, saved: String? = null) = LibraryViewModel(
+    private fun viewModel(libraryId: Long = 1, tab: LibraryTab? = null, saved: String? = null, view: String? = null) = LibraryViewModel(
         libraryId = libraryId,
         tab = tab,
         saved = saved,
         deps = LibraryDeps(libraries, items, hubs, collections, settings, MutableStateFlow("http://pley"), dispatcher, views),
         tiles = FakeTiles,
+        view = view,
     )
 
     private val byTitle = LibraryQuery(LibrarySort.Title, SortOrder.Ascending)
@@ -198,7 +199,7 @@ class LibraryViewModelTest {
         val otherJob = launch { other.state.collect {} }
         advanceUntilIdle()
         assertEquals(LibraryParams(LibraryTab.Collections, LibrarySort.Added), other.state.value.params)
-        // "See all" opens the Library tab, with the sort it was left in.
+        // Opened on the Library tab, it keeps the sort it was left in.
         val seeAll = viewModel(libraryId = 3, tab = LibraryTab.Library)
         val seeAllJob = launch { seeAll.state.collect {} }
         advanceUntilIdle()
@@ -206,6 +207,32 @@ class LibraryViewModelTest {
         job.cancel()
         otherJob.cancel()
         seeAllJob.cancel()
+    }
+
+    @Test
+    fun seeAllOpensInTheRowsOrderNotTheOneTheLibraryWasLeftIn() = runTest(dispatcher) {
+        views.kept[1] = "sort=year&watched=false&genre=Comedy"
+        val vm = viewModel(tab = LibraryTab.Library, view = "sort=added&order=desc")
+        assertEquals("shows at once, with nothing to read first", LibraryTab.Library, vm.state.value.openedOn)
+        val job = launch { vm.state.collect {} }
+        advanceUntilIdle()
+        assertEquals(LibraryParams(LibraryTab.Library, LibrarySort.Added, SortOrder.Descending), vm.state.value.params)
+        assertEquals("what the library was left in stays", "sort=year&watched=false&genre=Comedy", views.kept[1])
+        job.cancel()
+    }
+
+    @Test
+    fun aRecommendedRowsSeeAllShowsTheLibraryTabInItsOrder() = runTest(dispatcher) {
+        hubs.library.value = Loadable.Ready(Hubs(listOf(Hub("recently_added:1", "Recently Added", 1, listOf(movie(3))), Hub("continue_watching:1", "Continue Watching", 1, listOf(movie(4))))), true)
+        val vm = viewModel(tab = LibraryTab.Recommended, saved = "tab=recommended&watched=false")
+        val job = launch { vm.state.collect {} }
+        advanceUntilIdle()
+        val rows = vm.state.value.recommended.valueOrNull!!
+        assertEquals(listOf("sort=added&order=desc", null), rows.map { it.seeAll })
+        vm.seeAll(rows.first().seeAll!!)
+        advanceUntilIdle()
+        assertEquals(LibraryParams(LibraryTab.Library, LibrarySort.Added, SortOrder.Descending), vm.state.value.params)
+        job.cancel()
     }
 
     @Test

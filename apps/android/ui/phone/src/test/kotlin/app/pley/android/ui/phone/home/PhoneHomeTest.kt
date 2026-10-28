@@ -110,7 +110,7 @@ class PhoneHomeTest {
     fun aRowTitleOpensItsLibrary() {
         home()
         compose.onNodeWithText("Recently Added in Movies").performClick()
-        assertEquals(PleyKey.Library(1, LibraryTab.Library), opened.last())
+        assertEquals(PleyKey.Library(1, LibraryTab.Library, "sort=added&order=desc"), opened.last())
     }
 
     @Test

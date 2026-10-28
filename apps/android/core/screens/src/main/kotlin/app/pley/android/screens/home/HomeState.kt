@@ -157,17 +157,23 @@ fun rowShape(hub: Hub, libraryKind: LibraryKind? = null): RowShape = when {
 }
 
 /**
- * Where a row's "See all" goes: its library's items, as the web's hubLink
- * (recently added, recently released and top rated). The library page
- * opens on its Library tab.
+ * Where a row's "See all" goes: its library's items in the row's order, as
+ * the web's hubLink (recently added, recently released and top rated,
+ * newest or best first). The library page opens on its Library tab.
  */
 fun seeAllOf(hub: Hub): PleyKey? {
     val library = hub.libraryId ?: return null
-    val listed = SEE_ALL_PREFIXES.any { hub.key.startsWith(it) }
-    return if (listed) PleyKey.Library(library, LibraryTab.Library) else null
+    return seeAllView(hub.key)?.let { PleyKey.Library(library, LibraryTab.Library, it) }
 }
 
-private val SEE_ALL_PREFIXES = listOf("recently_added", "recently_released", "top_rated")
+/** The Library tab's sort a row of [hubKey] lists its items in, for its See all; `null` for rows without one. */
+fun seeAllView(hubKey: String): String? = SEE_ALL_VIEWS.entries.firstOrNull { hubKey.startsWith(it.key) }?.value
+
+private val SEE_ALL_VIEWS = mapOf(
+    "recently_added" to "sort=added&order=desc",
+    "recently_released" to "sort=release&order=desc",
+    "top_rated" to "sort=rating&order=desc",
+)
 
 /**
  * The item the TV's hero shows: the first of Continue Watching, else the

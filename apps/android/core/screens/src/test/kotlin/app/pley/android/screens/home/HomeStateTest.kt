@@ -42,8 +42,8 @@ class HomeStateTest {
     @Test
     fun seeAllOpensTheLibraryForItsListedRowsOnly() {
         assertNull(seeAllOf(CONTINUE))
-        assertEquals(PleyKey.Library(1, LibraryTab.Library), seeAllOf(ADDED_MOVIES))
-        assertEquals(PleyKey.Library(2, LibraryTab.Library), seeAllOf(Hub("top_rated:2", "Top Rated", 2, listOf(OVERGROWTH))))
+        assertEquals(PleyKey.Library(1, LibraryTab.Library, "sort=added&order=desc"), seeAllOf(ADDED_MOVIES))
+        assertEquals(PleyKey.Library(2, LibraryTab.Library, "sort=rating&order=desc"), seeAllOf(Hub("top_rated:2", "Top Rated", 2, listOf(OVERGROWTH))))
         assertNull(seeAllOf(Hub("continue_watching:2", "Continue Watching", 2, listOf(GLASSHOUSE))))
     }
 

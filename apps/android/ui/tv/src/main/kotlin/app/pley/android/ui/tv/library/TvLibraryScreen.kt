@@ -84,7 +84,7 @@ internal fun TvLibraryScreen(key: PleyKey.Library) {
     var saved by rememberSaveable { mutableStateOf<String?>(null) }
     val resources = LocalResources.current
     val vm: LibraryViewModel<ArtworkTileModel> = viewModel {
-        LibraryViewModel(key.libraryId, key.tab, saved, LibraryDeps.of(screensGraph()), TvTiles(resources))
+        LibraryViewModel(key.libraryId, key.tab, saved, LibraryDeps.of(screensGraph()), TvTiles(resources), key.view)
     }
     LaunchedEffect(vm) {
         vm.state.map { it.params.toQueryString() }.distinctUntilChanged().collect { saved = it }

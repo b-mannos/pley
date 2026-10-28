@@ -41,6 +41,7 @@ import app.pley.android.ui.phone.kit.ErrorState
 import app.pley.android.ui.phone.kit.PleyIconButton
 import app.pley.android.ui.phone.kit.PleyTopAppBar
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
+import app.pley.android.ui.phone.shell.ReportLoad
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -58,7 +59,7 @@ internal fun LibraryScreen(key: PleyKey.Library) {
     var saved by rememberSaveable { mutableStateOf<String?>(null) }
     val resources = LocalResources.current
     val vm: LibraryViewModel<ArtworkTileModel> = viewModel {
-        LibraryViewModel(key.libraryId, key.tab, saved, LibraryDeps.of(screensGraph()), PhoneTiles(resources))
+        LibraryViewModel(key.libraryId, key.tab, saved, LibraryDeps.of(screensGraph()), PhoneTiles(resources), key.view)
     }
     LaunchedEffect(vm) {
         vm.state.map { it.params.toQueryString() }.distinctUntilChanged().collect { saved = it }
@@ -89,6 +90,14 @@ private fun LibraryPage(state: LibraryUiState<ArtworkTileModel>, vm: LibraryView
             // The tab the library was left on is read first: no other flashes before it.
             state.openedOn == null -> Unit
             else -> {
+                // Saved tiles shown while the server is out of reach raise the offline banner.
+                ReportLoad(
+                    when (state.params.tab) {
+                        LibraryTab.Recommended -> state.recommended
+                        LibraryTab.Library -> state.grid.cells
+                        LibraryTab.Collections -> state.collections
+                    },
+                )
                 LibraryTabs(state.tabs, state.params.tab, onSelect = vm::select)
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     when (state.params.tab) {
