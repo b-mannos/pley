@@ -330,6 +330,9 @@ private fun TvLibraryTab(
                     )
                 }
                 else -> {
+                    // A tile its actions took out of the grid (watched, with Unwatched on): focus comes back to the one in its place.
+                    val tileKeys = remember(cells) { cells?.tiles?.mapTo(HashSet()) { "grid/${it.id}" }.orEmpty() }
+                    memory.settle { it in tileKeys }
                     TvPosterGrid(
                         total = cells?.total ?: SKELETONS,
                         tileAt = { cells?.get(it) },
@@ -337,7 +340,12 @@ private fun TvLibraryTab(
                         keyAt = { it },
                         kind = kind,
                         onOpen = { _, tile -> navigator.open(state.opens(tile.id)) },
-                        onActions = { tile -> navigator.open(PleyKey.ItemActions(tile.id)) },
+                        onActions = { tile ->
+                            val at = cells?.positionOf(tile.id) ?: -1
+                            val near = cells?.let { c -> listOf(c.idAt(at + 1), c.idAt(at - 1)).firstOrNull { at >= 0 && it >= 0 } }
+                            memory.mayLeave("grid/${tile.id}", near?.let { "grid/$it" })
+                            navigator.open(PleyKey.ItemActions(tile.id))
+                        },
                         memory = memory,
                         memoryPrefix = "grid",
                         skeleton = skeleton,

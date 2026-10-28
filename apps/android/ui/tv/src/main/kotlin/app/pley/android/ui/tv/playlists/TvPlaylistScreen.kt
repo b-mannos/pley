@@ -33,9 +33,9 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -106,6 +106,7 @@ import app.pley.android.ui.tv.kit.TvSidePanel
 import app.pley.android.ui.tv.kit.TvTextButton
 import app.pley.android.ui.tv.kit.TvTextField
 import app.pley.android.ui.tv.kit.initialFocus
+import app.pley.android.ui.tv.kit.menuKey
 import app.pley.android.ui.tv.kit.railOnLeftStopOnRight
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberedFocus
@@ -216,15 +217,21 @@ private fun PlaylistContent(page: PlaylistPage<ArtworkTileModel>, vm: PlaylistVi
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var overlay by remember { mutableStateOf<Overlay?>(null) }
     var moving by remember { mutableStateOf<Long?>(null) }
-    /** Each row's focus, so focus can go back to the row a panel was opened from, or to a neighbour. */
-    val rowFocus = remember { mutableStateMapOf<Long, FocusRequester>() }
+    /** Each shown row's focus, so focus can go back to the row a panel was opened from, or to a neighbour. */
+    val rowFocus = remember { HashMap<Long, FocusRequester>() }
     var focusNext by remember { mutableStateOf<Long?>(null) }
+    /** Delete's, which Cancel goes back to, as does the last entry removed. */
+    val deleteFocus = remember { FocusRequester() }
     val heroPx = with(density) { HeroHeight.toPx() }
 
-    // A removed entry's neighbour takes focus once the entry has gone.
+    // A removed entry's neighbour takes focus once the entry has gone; Delete, when it was the last.
     LaunchedEffect(page.rows, focusNext) {
         val next = focusNext ?: return@LaunchedEffect
-        if (page.rows.any { it.entryId == next }) {
+        if (next == NO_ENTRY && page.rows.isEmpty()) {
+            withFrameNanos { }
+            runCatching { deleteFocus.requestFocus() }
+            focusNext = null
+        } else if (page.rows.any { it.entryId == next }) {
             withFrameNanos { }
             runCatching { rowFocus[next]?.requestFocus() }
             focusNext = null
@@ -259,10 +266,13 @@ private fun PlaylistContent(page: PlaylistPage<ArtworkTileModel>, vm: PlaylistVi
                     .testTag(TV_PLAYLIST_ENTRIES),
                 contentPadding = PaddingValues(bottom = 200.dp),
             ) {
-                hero(page, vm, memory, onRename = { overlay = Overlay.Rename }, onDelete = { overlay = Overlay.Delete })
+                hero(page, vm, memory, deleteFocus, onRename = { overlay = Overlay.Rename }, onDelete = { overlay = Overlay.Delete })
                 itemsIndexed(page.rows, key = { _, row -> row.entryId }, contentType = { _, _ -> "entry" }) { index, row ->
                     val requester = remember { FocusRequester() }
-                    rowFocus[row.entryId] = requester
+                    DisposableEffect(row.entryId) {
+                        rowFocus[row.entryId] = requester
+                        onDispose { if (rowFocus[row.entryId] === requester) rowFocus.remove(row.entryId) }
+                    }
                     EntryRow(
                         row = row,
                         video = page.video,
@@ -301,7 +311,7 @@ private fun PlaylistContent(page: PlaylistPage<ArtworkTileModel>, vm: PlaylistVi
                 },
                 remove = {
                     val at = page.rows.indexOfFirst { it.entryId == row.entryId }
-                    focusNext = (page.rows.getOrNull(at + 1) ?: page.rows.getOrNull(at - 1))?.entryId
+                    focusNext = (page.rows.getOrNull(at + 1) ?: page.rows.getOrNull(at - 1))?.entryId ?: NO_ENTRY
                     vm.remove(row.entryId, undoable = false)
                     toasts.show(resources.getString(R.string.tv_playlist_removed, row.title))
                 },
@@ -321,6 +331,7 @@ private fun PlaylistContent(page: PlaylistPage<ArtworkTileModel>, vm: PlaylistVi
                 title = stringResource(R.string.tv_playlist_delete_title),
                 body = stringResource(R.string.tv_playlist_delete_body, page.title),
                 onDismiss = { overlay = null },
+                returnTo = deleteFocus,
             ) {
                 TvTextButton(stringResource(R.string.tv_playlist_cancel), onClick = { overlay = null }, modifier = Modifier.focusRequester(cancel))
                 TvTextButton(
@@ -341,6 +352,7 @@ private fun LazyListScope.hero(
     page: PlaylistPage<ArtworkTileModel>,
     vm: PlaylistViewModel<ArtworkTileModel>,
     memory: app.pley.android.ui.tv.kit.FocusMemory,
+    deleteFocus: FocusRequester,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -401,7 +413,8 @@ private fun LazyListScope.hero(
                     stringResource(R.string.tv_playlist_delete),
                     TvTrashIcon,
                     onClick = onDelete,
-                    modifier = if (page.canPlay || page.editable) Modifier.rememberedFocus(memory, "delete") else Modifier.rememberedFocus(memory, "delete", initial = true),
+                    modifier = (if (page.canPlay || page.editable) Modifier.rememberedFocus(memory, "delete") else Modifier.rememberedFocus(memory, "delete", initial = true))
+                        .focusRequester(deleteFocus),
                 )
             }
             Spacer(Modifier.height(PleyTv.ButtonLabelRoom + 12.dp))
@@ -504,6 +517,7 @@ private fun EntryRow(
                     }
                 }
                 .semantics { contentDescription = "${index + 1}. ${row.title}, ${row.subtitle}, ${row.duration}" }
+                .menuKey(onMore)
                 .combinedClickable(interactionSource = interactions, indication = null, onClick = onPlay, onLongClick = onMore, onClickLabel = playLabel)
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -631,6 +645,9 @@ private val HeroHeight = 436.dp
 
 /** Where a focused entry's top settles once the page has scrolled. */
 private val RowAnchor = 140.dp
+
+/** The neighbour of the last entry removed: Delete takes focus. */
+private const val NO_ENTRY = -1L
 
 /** Text stays in the backdrop's 85 % scrim: x 96 to 560. */
 private val TextColumn = PleyTv.TextColumnEnd - PleyTv.Gutter

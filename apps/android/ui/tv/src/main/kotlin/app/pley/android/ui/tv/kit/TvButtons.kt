@@ -81,6 +81,7 @@ fun TvPillButton(
         enabled = enabled,
         interactionSource = interactions,
         modifier = modifier
+            .menuKey(onLongClick)
             .heightIn(min = PleyTv.ButtonHeight)
             .widthIn(min = PillMinWidth)
             .alpha(if (enabled) 1f else DISABLED_ALPHA)
@@ -147,7 +148,7 @@ fun TvRoundButton(
     val focused by interactions.collectIsFocusedAsState()
     HandOffFocus(enabled, focused)
     val labelAlpha by animateFloatAsState(if (focused) 1f else 0f, PleyMotion.reveal(), label = "label")
-    Box(modifier.width(PleyTv.ButtonHeight).alpha(if (enabled) 1f else DISABLED_ALPHA), contentAlignment = Alignment.TopCenter) {
+    Box(modifier.menuKey(onLongClick).width(PleyTv.ButtonHeight).alpha(if (enabled) 1f else DISABLED_ALPHA), contentAlignment = Alignment.TopCenter) {
         IconButton(
             onClick = onClick,
             onLongClick = onLongClick,

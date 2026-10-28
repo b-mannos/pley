@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -24,6 +25,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -31,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -150,19 +154,25 @@ private const val QUIET = 4
  * radius 16, at most 560 wide, centred over a [scrim][PleyColors.Scrim];
  * [title] in tvTitle, [body] in tvBody muted, and its buttons
  * right-aligned. Back calls [onDismiss]. The buttons say where focus
- * starts (the safe choice).
+ * starts (the safe choice). Focus stays on the buttons while it is open,
+ * never reaching the page behind the scrim, and goes to [returnTo] (what
+ * opened it) once it has closed.
  */
 @Composable
 internal fun TvDialog(
     title: String,
     body: String,
     onDismiss: () -> Unit,
+    returnTo: FocusRequester? = null,
     buttons: @Composable () -> Unit,
 ) {
     BackHandler(onBack = onDismiss)
+    val view = LocalView.current
+    // Once the dialog's buttons are gone from the focus tree, after this frame.
+    DisposableEffect(returnTo) { onDispose { returnTo?.let { r -> view.post { runCatching { r.requestFocus() } } } } }
     Box(Modifier.fillMaxSize().background(PleyColors.Scrim), contentAlignment = Alignment.Center) {
         Surface(
-            modifier = Modifier.widthIn(max = 560.dp).focusGroup(),
+            modifier = Modifier.widthIn(max = 560.dp).focusProperties { onExit = { cancelFocusChange() } }.focusGroup(),
             shape = PleyShape.Dialog,
             colors = SurfaceDefaults.colors(containerColor = PleyColors.Surface2, contentColor = PleyColors.Fg),
         ) {

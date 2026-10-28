@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,6 +31,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
@@ -66,8 +69,9 @@ import app.pley.android.ui.tv.shell.failedTitle
  * Watch history on TV: the profile's plays, newest first, one row each
  * with its picture, title, what it is, when and on which device. Select
  * opens it; the cross at the row's end (Right) removes it at once, as
- * does a long press of Select. Show more loads the next 15. Focus starts
- * on the first play.
+ * does a long press of Select, and focus goes to the play below it (or
+ * above, for the last). Show more loads the next 15. Focus starts on the
+ * first play.
  */
 @Composable
 internal fun TvHistoryScreen() {
@@ -77,6 +81,8 @@ internal fun TvHistoryScreen() {
     var problem by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(model) { model.errors.collect { problem = sentenceOf(it) } }
     val memory = rememberFocusMemory()
+    // Each shown row's focus and its cross's, for the neighbour of a row removed.
+    val focus = remember { HashMap<Long, Pair<FocusRequester, FocusRequester>>() }
     Column(Modifier.fillMaxSize().padding(top = TvSafeArea.Vertical).testTag(TV_HISTORY_PAGE)) {
         Row(Modifier.padding(start = PleyTv.Gutter, end = TvSafeArea.Horizontal), verticalAlignment = Alignment.Bottom) {
             BasicText(stringResource(R.string.tv_account_history), style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg))
@@ -112,11 +118,25 @@ internal fun TvHistoryScreen() {
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     items(s.rows, key = { it.entryId }, contentType = { "row" }) { row ->
+                        val requesters = remember { FocusRequester() to FocusRequester() }
+                        DisposableEffect(row.entryId) {
+                            focus[row.entryId] = requesters
+                            onDispose { focus.remove(row.entryId) }
+                        }
                         HistoryLine(
                             row,
                             s.origin,
+                            requesters,
                             onOpen = { navigator.open(row.opens) },
-                            onRemove = { model.remove(row.entryId) },
+                            onRemove = { fromCross ->
+                                // Focus moves on before the row goes, to the same place in the next row, else the one above.
+                                val at = s.rows.indexOfFirst { it.entryId == row.entryId }
+                                listOfNotNull(s.rows.getOrNull(at + 1), s.rows.getOrNull(at - 1)).firstOrNull { near ->
+                                    val (line, cross) = focus[near.entryId] ?: return@firstOrNull false
+                                    runCatching { (if (fromCross) cross else line).requestFocus() }.isSuccess
+                                }
+                                model.remove(row.entryId)
+                            },
                             modifier = Modifier.rememberedFocus(memory, "entry-${row.entryId}", initial = row == s.rows.first()),
                         )
                     }
@@ -138,19 +158,31 @@ internal fun TvHistoryScreen() {
     }
 }
 
-/** A play: the row opens it; the cross at its end removes it. Neither scales: they are rows of a list. */
+/**
+ * A play: the row opens it; the cross at its end removes it ([onRemove]
+ * says whether from the cross). Neither scales: they are rows of a list.
+ * [focus] is the row's and the cross's.
+ */
 @Composable
-private fun HistoryLine(row: HistoryRow, origin: String, onOpen: () -> Unit, onRemove: () -> Unit, modifier: Modifier = Modifier) {
+private fun HistoryLine(
+    row: HistoryRow,
+    origin: String,
+    focus: Pair<FocusRequester, FocusRequester>,
+    onOpen: () -> Unit,
+    onRemove: (fromCross: Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val art = remember(row.artPaths, origin) { ArtworkImage(row.artPaths.map { absolute(it, origin) }) }
     val rowFocus = remember { MutableInteractionSource() }
     val focused by rowFocus.collectIsFocusedAsState()
     Row(verticalAlignment = Alignment.CenterVertically) {
         Row(
             modifier
+                .focusRequester(focus.first)
                 .width(ROW_WIDTH)
                 .heightIn(min = 64.dp)
                 .background(if (focused) PleyColors.Accent else Color.Transparent, PleyShape.Field)
-                .combinedClickable(interactionSource = rowFocus, indication = null, role = Role.Button, onLongClick = onRemove, onClick = onOpen)
+                .combinedClickable(interactionSource = rowFocus, indication = null, role = Role.Button, onLongClick = { onRemove(false) }, onClick = onOpen)
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -183,17 +215,18 @@ private fun HistoryLine(row: HistoryRow, origin: String, onOpen: () -> Unit, onR
             }
         }
         Spacer(Modifier.width(12.dp))
-        RemoveButton(row.title, onRemove)
+        RemoveButton(row.title, focus.second) { onRemove(true) }
     }
 }
 
 @Composable
-private fun RemoveButton(title: String, onRemove: () -> Unit) {
+private fun RemoveButton(title: String, focus: FocusRequester, onRemove: () -> Unit) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
     val label = stringResource(R.string.tv_account_history_remove, title)
     Box(
         Modifier
+            .focusRequester(focus)
             .size(40.dp)
             .clip(PleyShape.Circle)
             .background(if (focused) PleyColors.Accent else PleyColors.Surface3)

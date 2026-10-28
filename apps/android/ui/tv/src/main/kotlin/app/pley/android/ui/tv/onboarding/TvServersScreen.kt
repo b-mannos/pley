@@ -73,6 +73,7 @@ import app.pley.android.screens.onboarding.sentence
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.kit.TvTextButton
 import app.pley.android.ui.tv.kit.initialFocus
+import app.pley.android.ui.tv.kit.menuKey
 import app.pley.android.ui.tv.shell.LocalTvNavigator
 
 /**
@@ -164,6 +165,8 @@ internal fun TvServersContent(
 ) {
     var forgetting by remember { mutableStateOf<ServerRow?>(null) }
     val firstRow = remember { FocusRequester() }
+    // Each row's focus, for the row a cancelled Forget goes back to.
+    val rowFocus = remember { HashMap<String, FocusRequester>() }
     val enterAddress = remember { FocusRequester() }
     var touched by remember { mutableStateOf(false) }
     val rows = state.rows
@@ -207,7 +210,8 @@ internal fun TvServersContent(
                         } else {
                             null
                         },
-                        modifier = if (first) Modifier.focusRequester(firstRow) else Modifier,
+                        modifier = (if (first) Modifier.focusRequester(firstRow) else Modifier)
+                            .focusRequester(rowFocus.getOrPut(row.url) { FocusRequester() }),
                     )
                 }
             }
@@ -246,6 +250,7 @@ internal fun TvServersContent(
             title = stringResource(R.string.tv_onboarding_forget_title, row.name),
             body = stringResource(R.string.tv_onboarding_forget_body),
             onDismiss = { forgetting = null },
+            returnTo = rowFocus[row.url],
         ) {
             // The safe choice has focus.
             TvTextButton(stringResource(R.string.tv_onboarding_cancel), onClick = { forgetting = null }, modifier = Modifier.initialFocus())
@@ -281,6 +286,7 @@ private fun TvServerRow(
             .height(64.dp)
             .testTag(SERVER_ROW_TAG + row.url)
             .onFocusChanged { focused = it.isFocused }
+            .menuKey(onLongClick)
             .combinedClickable(interactionSource = interactions, indication = null, onLongClick = onLongClick, onClick = onClick)
             .drawBehind {
                 if (focused) drawRoundRect(PleyColors.Accent, size = Size(size.width, size.height), cornerRadius = CornerRadius(PleyShape.CardRadius.toPx()))

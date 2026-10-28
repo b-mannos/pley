@@ -70,6 +70,8 @@ class TvPlaylistTest {
 
         override suspend fun remove(playlistId: Long, entryIds: List<Long>) {
             sent += "remove $entryIds"
+            val d = (detail.value as Loadable.Ready).value
+            detail.value = Loadable.Ready(d.copy(entries = d.entries.filterNot { it.entryId in entryIds }), fresh = true)
         }
 
         override suspend fun reorder(playlistId: Long, entryIds: List<Long>) {
@@ -172,6 +174,36 @@ class TvPlaylistTest {
         assertEquals(listOf(1L, 2L, 3L), vm.order())
         assertEquals(emptyList<String>(), repo.sent)
         compose.focused().assert(hasContentDescription("Northern Lights, 2024, 1h 40m", substring = true))
+    }
+
+    @Test
+    fun deletesQuestionKeepsFocusAndCancelGivesItBackToDelete() {
+        show(Playlists(detail()))
+        compose.press(Key.DirectionRight, 3)
+        compose.focused().assert(hasContentDescription("Delete"))
+        compose.press(Key.Enter)
+        compose.focused().assert(hasText("Cancel"))
+        // Nothing behind the scrim takes focus.
+        compose.press(Key.DirectionDown)
+        compose.press(Key.DirectionLeft)
+        compose.focused().assert(hasText("Cancel"))
+        compose.press(Key.Enter)
+        compose.onNodeWithText("Cancel").assertDoesNotExist()
+        compose.focused().assert(hasContentDescription("Delete"))
+    }
+
+    @Test
+    fun removingTheOnlyEntryGivesFocusToDelete() {
+        val repo = Playlists(detail().let { it.copy(itemCount = 1, entries = it.entries.take(1)) })
+        show(repo)
+        compose.press(Key.DirectionDown)
+        compose.press(Key.DirectionRight)
+        compose.press(Key.Enter)
+        compose.press(Key.DirectionDown, 3)
+        compose.focused().assert(hasText("Remove from playlist"))
+        compose.press(Key.Enter)
+        assertEquals(listOf("remove [1]"), repo.sent)
+        compose.focused().assert(hasContentDescription("Delete"))
     }
 
     @Test

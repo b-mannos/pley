@@ -82,6 +82,7 @@ import app.pley.android.ui.tv.item.TvToastHost
 import app.pley.android.ui.tv.item.TvToastState
 import app.pley.android.ui.tv.kit.TvPillButton
 import app.pley.android.ui.tv.kit.TvSidePanel
+import app.pley.android.ui.tv.kit.menuKey
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberedFocus
 import app.pley.android.ui.tv.playlists.TvPanelRow
@@ -308,6 +309,7 @@ private fun LibraryCard(
         onClick = onClick,
         onLongClick = onLongClick,
         modifier = modifier
+            .menuKey(onLongClick)
             .fillMaxWidth()
             .height(CardHeight)
             .bringIntoViewRequester(bring)
