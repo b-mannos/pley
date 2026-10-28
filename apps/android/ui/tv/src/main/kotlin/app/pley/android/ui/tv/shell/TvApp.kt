@@ -77,7 +77,11 @@ import app.pley.android.ui.tv.onboarding.onboardingEntries
 import app.pley.android.ui.tv.playlists.playlistsEntries
 import app.pley.android.ui.tv.search.searchEntries
 import app.pley.android.ui.tv.theme.TvTheme
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.filterNotNull
 
 /**
  * The TV app (Android TV, Google TV, Fire TV): the theme, the D-pad rules
@@ -86,7 +90,9 @@ import kotlinx.coroutines.flow.drop
  * adds (its <Area>Entries). Screens not built yet show [placeholder].
  *
  * [tier] is the device's ([app.pley.android.common.DeviceProfile]); [onExit]
- * leaves the app, the last step of Back.
+ * leaves the app, the last step of Back. [opened] is an item the home
+ * screen's Watch Next row asked for: once the app is past signing in and
+ * "Who's watching?", its page opens and [onOpened] plays it.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -96,6 +102,8 @@ fun TvApp(
     tier: Tier = Tier.T2,
     reducedMotion: Boolean? = null,
     placeholder: @Composable (NavKey) -> Unit = { Placeholder(it) },
+    opened: Flow<Long?> = emptyFlow(),
+    onOpened: (Long) -> Unit = {},
 ) {
     // Settings → Display → Reduce motion, on top of the system's "Remove animations".
     val chosen by source.reduceMotion.collectAsStateWithLifecycle(false)
@@ -109,7 +117,7 @@ fun TvApp(
                 val start by produceState(source.startFactsNow()?.let(::startKey), source) {
                     if (value == null) value = startKey(source.startFacts())
                 }
-                start?.let { TvShell(it, source, onExit, placeholder) }
+                start?.let { TvShell(it, source, onExit, placeholder, opened, onOpened) }
             }
         }
         KeepUpdated(source)
@@ -122,6 +130,8 @@ private fun TvShell(
     source: TvShellSource,
     onExit: () -> Unit,
     placeholder: @Composable (NavKey) -> Unit,
+    opened: Flow<Long?>,
+    onOpened: (Long) -> Unit,
 ) {
     val backStack = rememberNavBackStack(start)
     val libraries by source.libraries.collectAsStateWithLifecycle(emptyList())
@@ -155,6 +165,14 @@ private fun TvShell(
     // A refused sign-in (the server ended it, or forgot it): that server's sign-in again, as on phones.
     LaunchedEffect(source, navigator) {
         source.signedOut.collect { issuer -> if (rail.shown) navigator.restart(PleyKey.Link(issuer)) }
+    }
+
+    // A Watch Next program: its page, and it plays, once past signing in and choosing a profile.
+    LaunchedEffect(opened, navigator) {
+        combine(opened, snapshotFlow { rail.shown }) { id, shown -> id.takeIf { shown } }.filterNotNull().collect { id ->
+            navigator.open(PleyKey.Item(id))
+            onOpened(id)
+        }
     }
 
     // The last resort of Back: below every screen's own (they are added later, so they come first).

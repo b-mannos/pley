@@ -1,15 +1,28 @@
 package app.pley.android
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import app.pley.android.common.Tier
+import app.pley.android.data.SessionState
 import app.pley.android.designsystem.image.LocalArtworkImageLoader
+import app.pley.android.player.PlayRequest
 import app.pley.android.screens.onboarding.Household
 import app.pley.android.ui.tv.shell.TvApp
 import app.pley.android.ui.tv.shell.TvShellDemo
 import app.pley.android.ui.tv.shell.TvShellSource
+import app.pley.android.watchnext.WatchNextLink
+import app.pley.android.watchnext.WatchNextOwner
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The native app on TVs (Android TV, Google TV, Fire TV). Back goes
@@ -26,12 +39,27 @@ import app.pley.android.ui.tv.shell.TvShellSource
  * ```
  * adb shell am start -n app.pley.android/.TvActivity --ez demo true --es tier T2
  * ```
+ *
+ * A program of the home screen's Watch Next row opens it with its server,
+ * profile and item ([WatchNextLink]): when that profile is the one signed
+ * in, the item's page opens and it plays from where it was; otherwise the
+ * app just opens. While it is in the foreground, Android TV and Google TV
+ * get the profile's Continue Watching in that row (WatchNext).
  */
 class TvActivity : ComponentActivity() {
+    /** The Watch Next program that opened the app, until it is played. */
+    private val link = MutableStateFlow<Pair<WatchNextOwner, Long>?>(null)
+
+    /** The item of [link], once its profile is the one signed in. */
+    private val opened = MutableStateFlow<Long?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val app = application as PleyApplication
         val device = app.graph.device
+        // Not again when the activity is made anew (a rotation, a process brought back).
+        if (savedInstanceState == null) link.value = WatchNextLink.read(intent)
+        followWatchNext(app)
         val tier = debugTier() ?: device.tier
         val demo = BuildConfig.DEBUG && intent.getBooleanExtra(EXTRA_DEMO, false)
         // Made before the content, so what the first screen is chosen by is read
@@ -56,9 +84,41 @@ class TvActivity : ComponentActivity() {
                     TvApp(TvShellDemo.source, onExit = ::finish, tier = tier, placeholder = TvShellDemo.placeholder)
                 }
             } else {
-                TvApp(source, onExit = ::finish, tier = tier)
+                TvApp(source, onExit = ::finish, tier = tier, opened = opened, onOpened = ::play)
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        WatchNextLink.read(intent)?.let { link.value = it }
+    }
+
+    /**
+     * The link's item, once its profile is signed in; and on Android TV and
+     * Google TV (not Fire TV: no such row), the Watch Next row kept while
+     * the app is in the foreground.
+     */
+    private fun followWatchNext(app: PleyApplication) {
+        val graph = app.graph
+        if (!graph.device.isTv) return
+        lifecycleScope.launch {
+            // The data graph is made off the main thread (the start reads it there too).
+            val data = withContext(Dispatchers.Default) { graph.data }
+            combine(link, data.session.state) { wanted, state ->
+                val session = (state as? SessionState.SignedIn)?.session
+                wanted?.takeIf { (owner, _) -> session != null && session.issuer == owner.issuer && session.me?.id == owner.profileId }?.second
+            }.collect { opened.value = it }
+        }
+        val row = graph.watchNext ?: return
+        lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { row.follow() } }
+    }
+
+    /** The Watch Next program's item: it plays, from where it was. */
+    private fun play(itemId: Long) {
+        link.value = null
+        opened.value = null
+        (application as PleyApplication).graph.playerLauncher.play(PlayRequest(itemId))
     }
 
     /** Debug builds: the tier asked for with `--es tier`, or `null`. */

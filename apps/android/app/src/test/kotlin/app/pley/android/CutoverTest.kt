@@ -44,7 +44,7 @@ class CutoverTest {
     fun onlyTheAppsOwnDoorsAreOpen() {
         assertTrue(releaseManifests.size >= 5)
         val exported = components().filter { it.attr("exported") == "true" }.map { it.simpleName() }.sorted()
-        assertEquals(listOf("MainActivity", "MusicService", "SignInRedirectActivity", "TvActivity"), exported)
+        assertEquals(listOf("MainActivity", "MusicService", "SignInRedirectActivity", "TvActivity", "WatchNextImageProvider"), exported)
     }
 
     @Test

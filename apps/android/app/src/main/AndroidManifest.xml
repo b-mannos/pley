@@ -2,7 +2,8 @@
 <!--
   The native app: MainActivity on phones and tablets, TvActivity on Android
   TV, Google TV and Fire TV home screens. Exported, beside these two: the
-  sign-in's return address (core/auth) and the music service (core/player).
+  sign-in's return address (core/auth), the music service (core/player) and
+  the Watch Next row's pictures (watchnext/).
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
@@ -110,6 +111,16 @@
                 android:name="okhttp3.internal.platform.PlatformInitializer"
                 tools:node="remove" />
         </provider>
+
+        <!--
+          The pictures of the home screen's Watch Next row (Android TV and
+          Google TV), which the home screen reads: read only, by names it was
+          given (watchnext/WatchNextImages).
+        -->
+        <provider
+            android:name=".watchnext.WatchNextImageProvider"
+            android:authorities="${applicationId}.watchnext"
+            android:exported="true" />
 
         <!-- The sign-in module's return address is in core/auth's manifest. -->
     </application>

@@ -1,6 +1,7 @@
 package app.pley.android
 
 import android.app.Application
+import android.os.Build
 import app.pley.android.auth.AuthGraph
 import app.pley.android.caps.CapsDecision
 import app.pley.android.caps.CapsGraph
@@ -17,6 +18,9 @@ import app.pley.android.player.PlayerGraph
 import app.pley.android.player.session.Qualities
 import app.pley.android.screens.PlayerLauncher
 import app.pley.android.screens.ScreensGraph
+import app.pley.android.watchnext.TvProviderRow
+import app.pley.android.watchnext.WatchNext
+import app.pley.android.watchnext.WatchNextImages
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import okhttp3.OkHttp
@@ -82,4 +86,17 @@ class AppGraph(private val app: Application) : ScreensGraph {
     /** What the player plays from the device: the downloads, on phones and tablets. */
     private val localMedia: Downloads get() = downloads
     override val playerLauncher: PlayerLauncher by lazy { PlayerLauncherImpl(app, { player }, device) }
+
+    /**
+     * The home screen's Watch Next row: Android TV and Google TV only
+     * (Android 8 and later); Fire TV's home screen has none, and phones no
+     * such row.
+     */
+    val watchNext: WatchNext? by lazy {
+        if (device.isTv && !device.fireTv && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WatchNext({ data }, { network }, TvProviderRow(app), WatchNextImages(app) { network.images })
+        } else {
+            null
+        }
+    }
 }

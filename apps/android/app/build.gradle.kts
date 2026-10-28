@@ -107,6 +107,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.profileinstaller)
+    implementation(libs.androidx.tvprovider)
     implementation(libs.androidx.tracing.ktx)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
