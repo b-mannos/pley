@@ -134,6 +134,10 @@ class Dialogs:
             def input(self, heading, *args, **kwargs):
                 return outer.typed.pop(0)
 
+            def numeric(self, kind, heading, defaultt="", hidden=False):
+                outer.asked.append((heading, hidden))
+                return outer.typed.pop(0)
+
             def contextmenu(self, entries):
                 outer.shown.append((list(entries), -1))
                 return outer.picks.pop(0)
@@ -277,6 +281,71 @@ class WindowTest(unittest.TestCase):
         win.session.get = Client({"/api/items/52/children": {"items": []}}).get
         win.play({"id": 52, "kind": "album"})
         self.assertEqual(win.toasts, [window.T("no_tracks")])
+
+    def test_whos_watching(self):
+        household = [
+            {"id": 1, "name": "Anna", "current": True, "needs": "none"},
+            {"id": 2, "name": "Ben", "needs": "none", "avatar_url": "/api/users/2/avatar"},
+            {"id": 3, "name": "Kid", "needs": "pin"},
+            {"id": 4, "name": "Dad", "needs": "password"},
+        ]
+        asked, refusals = [], []
+
+        def switch(client, profile_id, pin=None):
+            asked.append((profile_id, pin))
+            if refusals:
+                raise refusals.pop(0)
+
+        real = window.profiles.switch
+        window.profiles.switch = switch
+        self.addCleanup(setattr, window.profiles, "switch", real)
+        self.addCleanup(window.kodi.clear_property, window.profiles.GATE)
+        win = FakeWindow()
+        win.me = {"id": 1, "has_pin": True}
+        win.session.client = Client()
+        switched = []
+        win.switched = lambda: switched.append(True)
+        page = window.Profiles(win, household, gate=True)
+        page.show(False)
+        faces = win.made[L.PROFILES_LIST]
+        self.assertEqual([li.label for li in faces.items], ["Anna", "Ben", "Kid", "Dad"])
+        self.assertEqual(faces.items[2].properties.get("locked"), "1")
+        self.assertIn("/api/users/2/avatar", faces.items[1].art["tile"])
+        # The one in use first, and the row centred.
+        self.assertEqual(faces.selected, 0)
+        self.assertEqual(faces.position[0], L.profiles_left(4) - L.PROFILE_MARGIN)
+        # Another without a PIN: at once.
+        page.pick(household[1])
+        self.assertEqual((asked[-1], switched), ((2, None), [True]))
+        self.assertEqual(window.kodi.get_property(window.profiles.GATE), "1")
+        # One with a PIN: Kodi's number dialog, hidden; a wrong one says so.
+        refusals.append(window.api.ApiError(400, "wrong_pin", "wrong PIN"))
+        with Dialogs(typed=["9999"]) as dialogs:
+            page.pick(household[2])
+        self.assertEqual(dialogs.asked, [(window.T("pin_of") % "Kid", True)])
+        self.assertEqual(asked[-1], (3, "9999"))
+        self.assertEqual(win.made[L.PROFILES_NOTE].label, window.T("wrong_pin"))
+        with Dialogs(typed=["12"]):
+            page.pick(household[2])
+        self.assertEqual(win.made[L.PROFILES_NOTE].label, window.T("pin_digits"))
+        self.assertEqual(asked[-1], (3, "9999"))
+        # One that needs its password: signing in again with a code.
+        with Dialogs(yes=[True]):
+            page.pick(household[3])
+        self.assertEqual(win.after, "sign_in")
+        # Going on as the one in use, at Kodi's start, asks its PIN; a
+        # server that can't check it lets it through.
+        win.after = None
+        refusals.append(window.api.ApiError(400, "invalid_request", "already"))
+        with Dialogs(typed=["1234"]):
+            page.pick(household[0])
+        self.assertEqual(asked[-1], (1, "1234"))
+        self.assertIsInstance(win.opened[-1], window.Home)
+        # Not at the start: no PIN for the one in use, and Back goes back.
+        later = window.Profiles(win, household)
+        later.pick(household[0])
+        self.assertEqual(len(asked), 3)
+        self.assertFalse(later.back())
 
     def test_library_filters(self):
         win = FakeWindow()

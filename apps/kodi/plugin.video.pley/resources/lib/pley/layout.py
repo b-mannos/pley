@@ -26,6 +26,7 @@ SUBTLE = "FF8B95A5"
 ACCENT = "FF38BDF8"
 ACCENT_BRIGHT = "FF7DD3FC"
 ON_ACCENT = "FF03131F"
+DANGER_TEXT = "FFFF6B70"
 DIM = "990B0D10"
 
 # Estuary's fonts (Kodi's own skin, LibreELEC's and CoreELEC's): the
@@ -161,7 +162,7 @@ def rail_row(pitch: int) -> int:
 
 
 # Screens: each a group, shown alone.
-SCREENS = {"home": 2000, "item": 3000, "library": 4000, "search": 5000, "grid": 6000, "notice": 7000, "libraries": 8000}
+SCREENS = {"home": 2000, "item": 3000, "library": 4000, "search": 5000, "grid": 6000, "notice": 7000, "libraries": 8000, "profiles": 9000}
 
 # A metadata line (TvMetaLine): a group (which the window moves) around a row
 # of pieces, each a separator, a star, a text and a badge, of which the
@@ -241,6 +242,27 @@ LIBRARIES_LIST = 8020
 LIBRARIES_TOP = 196
 LIBRARIES_CARD = (522, 160)
 LIBRARIES_GAP = 32
+
+# "Who's watching?" (TvProfilesScreen), without the rail: the title, the
+# household's faces in a row, centred while six fit, and what a refused
+# switch said.
+PROFILES_TITLE, PROFILES_NOTE = 9011, 9012
+PROFILES_LIST = 9020
+PROFILES_TOP = 408
+PROFILE = 200  # a face, round
+PROFILE_GAP = 80
+PROFILES_FIT = 6
+PROFILE_MARGIN = 30  # room in the list for a focused face's growth and ring
+
+
+def profiles_left(count: int) -> int:
+    """Where the row of `count` faces starts: centred while they fit, else
+    at the safe area's edge, and it scrolls."""
+    if count > PROFILES_FIT:
+        return SAFE_X
+    span = count * PROFILE + max(count - 1, 0) * PROFILE_GAP
+    return (WIDTH - span) // 2
+
 
 # Signing in (signin.py, TvLinkScreen): the code in two halves, the steps
 # (the first only with a QR code, which the server draws), the QR code.

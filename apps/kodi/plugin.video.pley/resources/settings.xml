@@ -48,6 +48,13 @@
             <close>true</close>
           </control>
         </setting>
+        <setting id="switch_profile" type="action" label="30220">
+          <level>0</level>
+          <data>RunPlugin(plugin://plugin.video.pley/?route=profiles)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
         <setting id="sign_out" type="action" label="30002">
           <level>0</level>
           <data>RunPlugin(plugin://plugin.video.pley/?route=sign_out)</data>

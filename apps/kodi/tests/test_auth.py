@@ -39,6 +39,12 @@ class TokenServer:
         with self.lock:
             if form.get("refresh_token") != "rt-%d" % self.issued:
                 return support.answer(400, {"error": "invalid_grant", "error_description": "used again"})
+            if form["grant_type"] == auth.SWITCH_GRANT:
+                # Profile 3 has the PIN 1234; profile 9 needs its password.
+                if form["profile"] == "9":
+                    return support.answer(400, {"error": "invalid_grant", "reason": "browser", "error_description": "sign in again"})
+                if form["profile"] == "3" and form.get("pin") != "1234":
+                    return support.answer(400, {"error": "invalid_grant", "reason": "wrong_pin", "error_description": "wrong PIN"})
             time.sleep(0.05)
             self.issued += 1
             self.refreshes += 1
@@ -111,6 +117,31 @@ class TokensTest(unittest.TestCase):
         self.assertIsNone(self.store.load())
         with self.assertRaises(auth.SignedOut):
             self.tokens.access()
+
+    def test_switching_profiles(self):
+        self.assertEqual(self.tokens.identity(), (self.server.url, None))
+        # A wrong PIN spends nothing.
+        with self.assertRaises(api.ApiError) as refused:
+            self.tokens.switch_profile(3, "9999")
+        self.assertEqual(refused.exception.code, "wrong_pin")
+        self.assertEqual(self.store.load()["refresh_token"], "rt-1")
+        with self.assertRaises(api.ApiError) as refused:
+            self.tokens.switch_profile(9)
+        self.assertEqual(refused.exception.code, "browser")
+        # The right one: new tokens acting as the profile, saved before use.
+        self.tokens.switch_profile(3, "1234")
+        saved = self.store.load()
+        self.assertEqual((saved["access_token"], saved["refresh_token"], saved["profile"]), ("at-2", "rt-2", 3))
+        self.assertEqual(self.tokens.access(), "at-2")
+        self.assertEqual(self.tokens.identity(), (self.server.url, 3))
+        # A refresh keeps the profile.
+        self.assertEqual(self.tokens.refreshed("at-2"), "at-3")
+        self.assertEqual(self.store.load()["profile"], 3)
+        # A refresh token that doesn't work any more ends the sign-in.
+        self.store.save(self.record(refresh_token="rt-0"))
+        with self.assertRaises(auth.SignedOut):
+            self.tokens.switch_profile(4)
+        self.assertIsNone(self.store.load())
 
     def test_a_server_that_doesnt_answer_keeps_the_tokens(self):
         self.server.down = True

@@ -175,6 +175,20 @@ TEXT = {
     "tracks_row": 30216,
     "go_to_artist": 30217,
     "no_tracks": 30218,
+    "whos_watching": 30219,
+    "switch_profile": 30220,
+    "pin_of": 30221,
+    "wrong_pin": 30222,
+    "too_many_pins": 30223,
+    "pin_locked": 30224,
+    "not_allowed": 30225,
+    "profile_locked": 30226,
+    "cant_switch": 30227,
+    "needs_password": 30228,
+    "pin_digits": 30229,
+    "watching_as": 30230,
+    "no_other_profile": 30231,
+    "pin": 30232,
 }
 
 

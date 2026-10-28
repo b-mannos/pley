@@ -19,9 +19,11 @@ from .api import ApiError, Client
 
 CLIENT_ID = "https://hhaidar.github.io/pley/oauth/kodi.json"
 DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
-# What the add-on asks to do: browse, play, and make and change playlists
-# (Add to playlist, a library's Save as…).
-SCOPE = "library play playlists"
+SWITCH_GRANT = "urn:pley:params:oauth:grant-type:switch-profile"
+# What the add-on asks to do: browse, play, make and change playlists (Add
+# to playlist, a library's Save as…), and switch to the household's other
+# profiles ("Who's watching?").
+SCOPE = "library play playlists profiles"
 # Access tokens are refreshed this long before they expire.
 REFRESH_MARGIN = 300
 
@@ -175,6 +177,13 @@ class Tokens:
         data = self.current()
         return data["server"] if data else None
 
+    def identity(self):
+        """Who the sign-in acts as: the server, and the profile switched to
+        (None: the one that signed in). The event stream is opened again
+        when it changes."""
+        data = self.current()
+        return (data["server"], data.get("profile")) if data else None
+
     def access(self) -> str:
         """An access token good for a while yet."""
         with self.lock:
@@ -201,36 +210,74 @@ class Tokens:
         form = {"grant_type": "refresh_token", "refresh_token": data["refresh_token"], "client_id": CLIENT_ID}
         response = client.request("POST", path_of(data["server"], data["token_endpoint"]), form=form)
         if response.status == 200:
-            try:
-                tokens = response.json()
-                renewed = dict(data)
-                renewed.update(
-                    access_token=str(tokens["access_token"]),
-                    refresh_token=str(tokens["refresh_token"]),
-                    expires_at=self.clock() + int(tokens.get("expires_in") or 3600),
-                    scope=tokens.get("scope", data.get("scope")),
-                )
-            except (ValueError, KeyError, TypeError, AttributeError):
-                raise ApiError(response.status, "refresh", "the server's answer to a refresh wasn't tokens")
-            on_disk = self.store.load()
-            if not on_disk or on_disk.get("refresh_token") != data["refresh_token"]:
-                # Signed out, or in again, while this refresh was asked (the
-                # plugin): what it got belongs to no sign-in any more.
-                revoke(renewed, self.user_agent)
-                self.data, self.stamp = None, None
-                current = self.current()
-                if not current:
-                    raise SignedOut()
-                return current
-            # Saved before it is used: the old refresh token is spent.
-            self.store.save(renewed)
-            self.data, self.stamp = renewed, self.store.stamp()
-            return renewed
+            return self._take(data, response)
         if response.status in (400, 401) and response.body.startswith(b"{"):
             if (response.json() or {}).get("error") in ("invalid_grant", "invalid_client", "unauthorized_client"):
                 self.forget()
                 raise SignedOut()
         raise ApiError(response.status, "refresh", "the server didn't renew the sign-in (%d)" % response.status)
+
+    def _take(self, data: dict, response, **changed) -> dict:
+        """The new tokens of a refresh or a switch, saved in place of
+        `data`'s (with `changed`)."""
+        try:
+            tokens = response.json()
+            renewed = dict(data)
+            renewed.update(
+                access_token=str(tokens["access_token"]),
+                refresh_token=str(tokens["refresh_token"]),
+                expires_at=self.clock() + int(tokens.get("expires_in") or 3600),
+                scope=tokens.get("scope", data.get("scope")),
+                **changed
+            )
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise ApiError(response.status, "refresh", "the server's answer to a refresh wasn't tokens")
+        on_disk = self.store.load()
+        if not on_disk or on_disk.get("refresh_token") != data["refresh_token"]:
+            # Signed out, or in again, while this refresh was asked (the
+            # plugin): what it got belongs to no sign-in any more.
+            revoke(renewed, self.user_agent)
+            self.data, self.stamp = None, None
+            current = self.current()
+            if not current:
+                raise SignedOut()
+            return current
+        # Saved before it is used: the old refresh token is spent.
+        self.store.save(renewed)
+        self.data, self.stamp = renewed, self.store.stamp()
+        return renewed
+
+    def switch_profile(self, profile_id: int, pin=None) -> None:
+        """Acts as another profile of the household from now on (the
+        switch-profile grant), with its PIN when it has one; to the profile
+        it acts as already, with its PIN, checks that PIN. A refusal spends
+        nothing and raises ApiError, its code the server's reason
+        ("wrong_pin", "throttled", "pin_locked", "browser", "not_allowed")
+        or else its OAuth error ("invalid_request" without a reason: the
+        server can't check the PIN of the profile in use)."""
+        with self.lock:
+            data = self.current()
+            if not data:
+                raise SignedOut()
+            form = {"grant_type": SWITCH_GRANT, "refresh_token": data["refresh_token"], "client_id": CLIENT_ID, "profile": str(int(profile_id))}
+            if pin:
+                form["pin"] = pin
+            client = Client(data["server"], self.user_agent)
+            response = client.request("POST", path_of(data["server"], data["token_endpoint"]), form=form)
+            if response.status == 200:
+                self._take(data, response, profile=int(profile_id))
+                return
+            try:
+                body = response.json() if response.body.startswith(b"{") else {}
+            except ValueError:
+                body = {}
+            error, reason = body.get("error"), body.get("reason")
+            if error == "invalid_grant" and not reason:
+                # The refresh token doesn't work, as for a refresh.
+                self.forget()
+                raise SignedOut()
+            message = body.get("error_description") or "the server refused (%d)" % response.status
+            raise ApiError(response.status, reason or error or "http_%d" % response.status, message)
 
     def forget(self) -> None:
         self.store.clear()

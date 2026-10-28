@@ -78,10 +78,14 @@ class StreamServer:
 class Tokens:
     def __init__(self, server):
         self.at = server
+        self.profile = None
         self.token = "at-1"
 
     def server(self):
         return self.at
+
+    def identity(self):
+        return (self.at, self.profile) if self.at else None
 
     def access(self):
         return self.token
@@ -172,6 +176,16 @@ class EventsTest(unittest.TestCase):
         tokens.at = second.url
         self.assertTrue(wait_for(lambda: self.heard), "the second server's events")
         self.assertEqual(len(first.requests), 1)
+
+    def test_another_profile_is_listened_to_as_itself(self):
+        # Switched profiles: the stream opened as the profile before goes.
+        server = self.server([(200, [], True), (200, [{"type": "as_the_new_profile"}], True)])
+        tokens = Tokens(server.url)
+        self.listen(tokens)
+        self.assertTrue(wait_for(lambda: server.requests))
+        tokens.profile, tokens.token = 3, "at-9"
+        self.assertTrue(wait_for(lambda: self.heard), "the new profile's events")
+        self.assertIn("Authorization: Bearer at-9", server.requests[1])
 
     def test_stopping_ends_a_stream_waiting_for_events_at_once(self):
         server = self.server([(200, [], True)])

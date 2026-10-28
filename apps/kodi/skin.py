@@ -585,7 +585,8 @@ def rail() -> list:
             )
         )
         y += L.RAIL_PITCH
-    return [group(L.RAIL, 0, 0, 600, L.HEIGHT, out)]
+    # "Who's watching?" is before any page: no rail.
+    return [group(L.RAIL, 0, 0, 600, L.HEIGHT, out, visible="!" + is_("pley.screen", "profiles"))]
 
 
 def home() -> ET.Element:
@@ -937,6 +938,65 @@ def libraries_page() -> ET.Element:
     )
 
 
+def profiles_page() -> ET.Element:
+    """"Who's watching?" (TvProfilesScreen): the title, then a face for each
+    profile of the household, round, with its name under it: its picture,
+    else its initial on its placeholder, and a lock when it has a PIN.
+    Focused, it grows and takes the ring, and its name is bold. Under them,
+    what a refused switch said."""
+    size, m = L.PROFILE, L.PROFILE_MARGIN
+    stride = size + L.PROFILE_GAP
+    height = m + size + 24 + 44
+    list_id = L.PROFILES_LIST
+    lit = "Control.HasFocus(%d)" % list_id
+    locked = "!String.IsEmpty(ListItem.Property(locked))"
+
+    def face(focused: bool) -> list:
+        circle = [
+            image(0, 0, size, size, "$INFO[ListItem.Property(ph)]", diffuse="mask-circle.png"),
+            label(0, 0, size, size, L.FONT_HERO, L.FG, "$INFO[ListItem.Property(initial)]", align="center"),
+            image(0, 0, size, size, "$INFO[ListItem.Art(tile)]", diffuse="mask-circle.png", aspect="scale", fade=150, background="true"),
+            image(144, 144, 56, 56, "circle.png", color=L.SURFACE3, visible=locked),
+            image(156, 156, 32, 32, "icon-lock.png", color=L.FG, visible=locked),
+        ]
+        top = m + size + 24
+        if focused:
+            circle.append(image(-12, -12, size + 24, size + 24, "ring-circle.png", visible=lit))
+            return [
+                group(None, m, m, size, size, circle, animations=[anim("Focus", ZOOM_TILE)]),
+                label(m - 40, top, size + 80, 44, L.FONT_CAPTION_BOLD, L.FG, "$INFO[ListItem.Label]", align="center", visible=lit),
+                label(m - 40, top, size + 80, 44, L.FONT_CAPTION, L.FG, "$INFO[ListItem.Label]", align="center", visible="!" + lit),
+            ]
+        return [group(None, m, m, size, size, circle), label(m - 40, top, size + 80, 44, L.FONT_CAPTION, L.FG, "$INFO[ListItem.Label]", align="center")]
+
+    faces = control(
+        "list",
+        list_id,
+        L.profiles_left(1) - m,
+        L.PROFILES_TOP - m,
+        L.WIDTH - 2 * L.SAFE_X + 2 * m,
+        height,
+        orientation="horizontal",
+        scrolltime={"text": "200", "attrs": {"tween": "cubic", "easing": "out"}},
+        itemlayout=el("itemlayout", None, face(False), width=stride, height=height),
+        focusedlayout=el("focusedlayout", None, face(True), width=stride, height=height),
+    )
+    return group(
+        L.SCREENS["profiles"],
+        0,
+        0,
+        L.WIDTH,
+        L.HEIGHT,
+        [
+            image(0, 0, L.WIDTH, L.HEIGHT, "glow.png"),
+            label(0, 220, L.WIDTH, 80, L.FONT_PAGE, L.FG, "$ADDON[plugin.video.pley 30219]", id_=L.PROFILES_TITLE, align="center"),
+            faces,
+            label(400, 800, L.WIDTH - 800, 100, L.FONT_BODY, L.DANGER_TEXT, id_=L.PROFILES_NOTE, align="center", wrap=True, aligny="top"),
+        ],
+        visible=is_("pley.screen", "profiles"),
+    )
+
+
 def notice() -> ET.Element:
     return group(
         L.SCREENS["notice"],
@@ -992,11 +1052,12 @@ def window() -> ET.Element:
     controls.append(image(0, 0, L.WIDTH, L.HEIGHT, "pley-white.png", color=L.BG))
     for c in backdrop():
         controls.append(c)
-    for screen in (home(), item(), library(), search(), grid_page(), libraries_page(), notice()):
+    for screen in (home(), item(), library(), search(), grid_page(), libraries_page(), notice(), profiles_page()):
         controls.append(screen)
     # Rows pass under the rail: bg to 112, clear from 144.
-    controls.append(image(0, 0, 112, L.HEIGHT, "pley-white.png", color=L.BG, visible="!" + is_("pley.screen", "notice")))
-    controls.append(image(112, 0, 32, L.HEIGHT, "fade-left.png", color=L.BG, visible="!" + is_("pley.screen", "notice")))
+    railless = "!%s + !%s" % (is_("pley.screen", "notice"), is_("pley.screen", "profiles"))
+    controls.append(image(0, 0, 112, L.HEIGHT, "pley-white.png", color=L.BG, visible=railless))
+    controls.append(image(112, 0, 32, L.HEIGHT, "fade-left.png", color=L.BG, visible=railless))
     controls.append(image(0, 0, L.WIDTH, L.HEIGHT, "pley-white.png", color=L.DIM, visible="ControlGroup(%d).HasFocus" % L.RAIL, animations=fades(150)))
     for c in rail():
         controls.append(c)

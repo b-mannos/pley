@@ -367,6 +367,60 @@ class Plugin:
             api.ApiError,
         )
 
+    def route_profiles(self) -> None:
+        """Switch profile (the add-on's settings, Kodi's lists): the
+        household in Kodi's list, a PIN in its number dialog, never kept."""
+        from . import profiles
+
+        client = self.client()
+        dialog = xbmcgui.Dialog()
+        household = profiles.household(client)
+        if household is None:
+            # Signed in before the add-on asked for `profiles`.
+            if dialog.yesno(kodi.text("switch_profile"), kodi.text("cant_switch"), nolabel=kodi.text("cancel"), yeslabel=kodi.text("sign_in")):
+                self.route_sign_in()
+            return
+        if len(household) < 2:
+            return kodi.notify(kodi.text("no_other_profile"))
+        entries = []
+        for profile in household:
+            li = xbmcgui.ListItem(profile.get("name") or "", kodi.text("pin") if profile.get("needs") == "pin" else "", offscreen=True)
+            picture = listing.image(self.proxy_base, profile.get("avatar_url"), 256)
+            li.setArt({"icon": picture or "DefaultUser.png", "thumb": picture or "DefaultUser.png"})
+            entries.append(li)
+        current = next((i for i, p in enumerate(household) if p.get("current")), 0)
+        chosen = dialog.select(kodi.text("whos_watching"), entries, preselect=current, useDetails=True)
+        if chosen < 0 or household[chosen].get("current"):
+            return
+        profile = household[chosen]
+        name = profile.get("name") or ""
+        needs = profile.get("needs")
+        pin = None
+        if needs == "pin":
+            pin = dialog.numeric(0, kodi.text("pin_of") % name, "", True)
+            if not pin:
+                return
+        elif needs != "none":
+            return self.password_profile(profile) if needs == "password" else kodi.notify(kodi.text("profile_locked"), error=True)
+        try:
+            profiles.switch(client, profile["id"], pin)
+        except api.ApiError as e:
+            if e.code == "browser":
+                return self.password_profile(profile)
+            return kodi.notify(profiles.refusal(e, kodi.text, self.server_name()), error=True)
+        kodi.set_property(profiles.GATE, "1")
+        kodi.notify(kodi.text("watching_as") % name)
+        if kodi.get_property(kodi.WINDOW_OPEN):
+            xbmc.executebuiltin("NotifyAll(%s,%s)" % (kodi.ADDON_ID, profiles.SWITCHED))
+        xbmc.executebuiltin("Container.Refresh")
+
+    def password_profile(self, profile: dict) -> None:
+        """A profile that needs its password: signed in to again with a
+        code, chosen where the code is approved."""
+        name = profile.get("name") or ""
+        if xbmcgui.Dialog().yesno(name, kodi.text("needs_password") % (name, name), nolabel=kodi.text("cancel"), yeslabel=kodi.text("sign_in")):
+            self.route_sign_in()
+
     def route_choose_server(self) -> None:
         dialog = xbmcgui.Dialog()
         progress = xbmcgui.DialogProgressBG()
@@ -438,7 +492,7 @@ class Plugin:
             return False
 
     def sign_in(self, server: str, name: str, server_id: str) -> None:
-        from . import auth, signin
+        from . import auth, profiles, signin
 
         flow = auth.DeviceSignIn(server, kodi.user_agent())
         started = flow.start()
@@ -480,6 +534,8 @@ class Plugin:
                     record = flow.record(tokens, name, server_id)
                     store.save(record)
                     choose(server, name, server_id)
+                    # Whoever approved it chose the profile: "Who's watching?" is answered.
+                    kodi.set_property(profiles.GATE, "1")
                     if previous and previous.get("refresh_token") != record["refresh_token"]:
                         # The sign-in this one replaces ends on its server too.
                         auth.revoke(previous, kodi.user_agent())
@@ -508,7 +564,7 @@ class Plugin:
 
 
 # Routes that run as actions, with no listing to end.
-ACTIONS = ("play", "watched", "my_list", "settings", "tracks", "choose_server", "sign_in", "sign_out", "retry")
+ACTIONS = ("play", "watched", "my_list", "settings", "tracks", "profiles", "choose_server", "sign_in", "sign_out", "retry")
 
 
 def choose(server: str, name: str, server_id: str) -> None:

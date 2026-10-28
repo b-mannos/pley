@@ -229,6 +229,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             # Here, under the refresh lock: a refresh can't bring it back.
             proxy.tokens.sign_out()
             return self.answer(200, {"signed_in": False, "server": None})
+        if rest == "/switch-profile" and self.command == "POST":
+            # Here too, as the service alone renews the tokens: {profile, pin}.
+            return self.switch_profile()
         if not rest.startswith("/api/"):
             return self.answer(404, {"code": "not_found", "message": "not found"})
         rest = server_path(rest)
@@ -260,6 +263,28 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         finally:
             if upstream:
                 upstream.close()
+
+    def switch_profile(self) -> None:
+        """Acts as another profile from now on (Tokens.switch_profile): 200,
+        or the refusal as {code, message}, its code the server's reason."""
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            asked = json.loads(self.rfile.read(min(length, 4096)).decode("utf-8")) if length else {}
+            profile = int(asked["profile"])
+        except (ValueError, KeyError, TypeError, AttributeError):
+            return self.answer(400, {"code": "bad_request", "message": "which profile?"})
+        pin = asked.get("pin")
+        try:
+            self.proxy.tokens.switch_profile(profile, str(pin) if pin else None)
+        except SignedOut:
+            return self.answer(401, {"code": "signed_out", "message": "pley is signed out"})
+        except api.ApiError as e:
+            if e.status == 0:
+                return self.answer(502, {"code": "unreachable", "message": e.message})
+            return self.answer(400 if e.status < 500 else 502, {"code": e.code, "message": e.message})
+        except (OSError, http.client.HTTPException) as e:
+            return self.answer(502, {"code": "unreachable", "message": str(e)})
+        return self.answer(200, {"switched": True})
 
     def location(self, location):
         """Where the server sends Kodi (a collection's picture falling back to

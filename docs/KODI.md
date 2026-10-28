@@ -47,10 +47,29 @@ this Kodi by what its User-Agent says (`pleyKodi/0.1.0 (Kodi 21.3;
 Windows)`), so two of them can be told apart. The
 add-on is one of pley's own apps (`https://hhaidar.github.io/pley/oauth/kodi.json`):
 it signs in only with a code and gets a viewer's rights, whoever allows it:
-`library play playlists` (browse, play, and make and change the profile's
-playlists). A Kodi signed in before it asked for `playlists` is told by the
-server to sign in again when it adds to a playlist.
-Settings has Sign out, which asks "Sign out?" first, and Choose a server.
+`library play playlists profiles` (browse, play, make and change the
+profile's playlists, and switch to the household's other profiles). A Kodi
+signed in before it asked for `playlists` is told by the server to sign in
+again when it adds to a playlist; one signed in before `profiles`, choosing
+Switch profile, is asked to sign in again.
+Settings has Switch profile, Sign out, which asks "Sign out?" first, and
+Choose a server.
+
+**Who's watching?** A Kodi signed in to a household of more than one
+profile asks it once each time Kodi starts, as the TV apps do (not right
+after signing in: whoever approved the code chose the profile): the
+household's faces in a row, without the rail, the one in use in focus and
+a lock on those with a PIN. Another one is switched to at once; one with a
+PIN asks it in Kodi's number dialog (hidden, never kept), and going on as a
+profile with a PIN at the start asks its PIN too. A wrong PIN, too many of
+them, a locked PIN or a profile the app can't use says so under the faces;
+nothing is tried again by itself. A profile that needs its password is
+signed in to again with a code, chosen on the phone that approves it. Back
+leaves pley. The profile's menu (the rail's avatar) has Switch profile
+too, and the add-on's settings for Kodi's lists. The service switches
+(the switch-profile grant, docs/API.md) under the same lock as its
+refreshes, keeps which profile it acts as in the token file, and opens the
+event stream again as that profile.
 Choosing another server keeps the sign-in there until the new one is made,
 then ends it on its server.
 The same server at another address is signed in to again: anything on the
@@ -68,7 +87,8 @@ side by side with Kodi's were the reference):
   than three libraries, Libraries takes Collections' place, as on Android
   TV (collections stay on each library's Collections tab). Collapsed it
   shows icons, the current page's marked; Left opens it over the page with
-  each entry's name. The profile's menu has Audio and subtitles (below). The
+  each entry's name. The profile's menu has Switch profile, Choose a
+  server, Audio and subtitles (below), Sort libraries and Sign out. The
   libraries come in the profile's order: the profile's menu has Sort
   libraries (a library, then where it goes), a library's
   menu key Move up, Move down and Use the server's order, each saved at
@@ -372,7 +392,6 @@ in `portable_data/userdata/advancedsettings.xml`.
 
 ## Not yet
 
-- "Who's watching?" and switching profiles (the `profiles` scope).
 - What the Android app's pages have below their rows: a title's Details
   (plays, versions, media info) and the library's letter bar; a person's
   page with their photo (theirs is a grid of titles).
@@ -395,3 +414,5 @@ in `portable_data/userdata/advancedsettings.xml`.
   sentence is longer than Kodi's box and scrolls across once in its 5
   seconds. A step back up is unseen so far: how often a Kodi's segment
   reads prove the network carries more.
+- "Who's watching?", music's pages and editing playlists have been through
+  the tests only, not a running Kodi yet.

@@ -710,3 +710,59 @@ msgstr ""
 msgctxt "#30218"
 msgid "No tracks found"
 msgstr ""
+
+msgctxt "#30219"
+msgid "Who's watching?"
+msgstr ""
+
+msgctxt "#30220"
+msgid "Switch profile"
+msgstr ""
+
+msgctxt "#30221"
+msgid "Enter %s's PIN"
+msgstr ""
+
+msgctxt "#30222"
+msgid "Wrong PIN."
+msgstr ""
+
+msgctxt "#30223"
+msgid "Too many wrong PINs: try again in a few minutes."
+msgstr ""
+
+msgctxt "#30224"
+msgid "This profile's PIN is locked after too many wrong tries: its owner can set it again in their account, or an administrator can."
+msgstr ""
+
+msgctxt "#30225"
+msgid "You can't switch to this profile."
+msgstr ""
+
+msgctxt "#30226"
+msgid "This profile can't be used from the app."
+msgstr ""
+
+msgctxt "#30227"
+msgid "This sign-in can't switch profiles: sign in again to allow it."
+msgstr ""
+
+msgctxt "#30228"
+msgid "%s needs its password, which only the phone or computer approving a sign-in asks for. Sign in again with a code, and choose %s there."
+msgstr ""
+
+msgctxt "#30229"
+msgid "A PIN has 4 to 8 digits."
+msgstr ""
+
+msgctxt "#30230"
+msgid "Watching as %s"
+msgstr ""
+
+msgctxt "#30231"
+msgid "There's no other profile to switch to."
+msgstr ""
+
+msgctxt "#30232"
+msgid "PIN"
+msgstr ""

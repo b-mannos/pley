@@ -99,7 +99,8 @@ class Events:
 
     def listen(self, server: str) -> None:
         """One connection, until the stream ends (the token expired, the
-        server stopped) or the sign-in moves to another server."""
+        server stopped) or the sign-in moves to another server or profile."""
+        who = self.tokens.identity()
         token = self.tokens.access()
         for attempt in range(2):
             conn = api.connect(server, self.read_timeout)
@@ -121,7 +122,7 @@ class Events:
                 if answer.status != 200:
                     raise api.ApiError(answer.status, "events", "the server answered %d" % answer.status)
                 self.open.set()
-                for event in events_of(self.lines(answer, server)):
+                for event in events_of(self.lines(answer, who)):
                     self.heard(event)
                 return
             finally:
@@ -130,13 +131,13 @@ class Events:
                     self.sock = None
                 conn.close()
 
-    def lines(self, answer, server: str):
+    def lines(self, answer, who):
         while not self.stopping.is_set():
             raw = answer.readline(65536)
             if not raw:
                 return
             yield raw.decode("utf-8", "replace").rstrip("\r\n")
-            if self.tokens.server() != server:
+            if self.tokens.identity() != who:
                 return
 
 

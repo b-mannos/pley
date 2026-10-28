@@ -18,7 +18,7 @@ from urllib.parse import quote_plus, urlencode
 import xbmc
 import xbmcgui
 
-from . import api, kodi, playback, tiles, tracks, words
+from . import api, kodi, playback, profiles, tiles, tracks, words
 from . import layout as L
 from .listing import image, list_item
 
@@ -156,6 +156,8 @@ def clamp(text: str, size: int, width: int, most: int) -> str:
 
 # Work posted to the window's thread (Window.post) is announced by this.
 POSTED = "pley.posted"
+# The add-on acts as another profile (profiles.SWITCHED).
+SWITCHED = profiles.SWITCHED
 
 
 class Monitor(xbmc.Monitor):
@@ -171,6 +173,11 @@ class Monitor(xbmc.Monitor):
             return
         if method.endswith(POSTED):
             self.window.run_posted()
+        elif method.endswith(SWITCHED):
+            # Switched from the add-on's settings, over the window.
+            with self.window.lock:
+                if not self.window.closing:
+                    self.window.switched()
         elif method.endswith("changed"):
             self.window.changed()
 
@@ -219,6 +226,8 @@ class Window(xbmcgui.WindowXML):
         self.ready = False
         self.libraries = []
         self.me = {}
+        # The household's profiles (None: this sign-in can't switch).
+        self.household = []
         self.rest_token = 0
         self.rest_timer = None
         self.toast_timer = None
@@ -296,6 +305,24 @@ class Window(xbmcgui.WindowXML):
             kodi.log("pley's window ready in %d ms" % ((time.perf_counter() - started) * 1000))
 
     def start(self) -> None:
+        try:
+            self.me, self.libraries, self.household = api.together(
+                lambda: self.session.get("/api/auth/me"),
+                lambda: self.session.get("/api/libraries"),
+                lambda: profiles.household(self.session.client),
+            )
+        except api.ApiError as e:
+            return self.failed(e, Home(self))
+        self.setup_rail()
+        if self.household and len(self.household) > 1 and not kodi.get_property(profiles.GATE):
+            # A household's Kodi asks who is watching as it starts, as the
+            # TV apps do: once each time Kodi starts.
+            return self.go(Profiles(self, self.household, gate=True))
+        self.go(Home(self))
+
+    def switched(self) -> None:
+        """Acting as another profile: the rail and Home are its own."""
+        self.session.forget()
         try:
             self.me, self.libraries = api.together(lambda: self.session.get("/api/auth/me"), lambda: self.session.get("/api/libraries"))
         except api.ApiError as e:
@@ -406,8 +433,8 @@ class Window(xbmcgui.WindowXML):
         light = len(tint) == 6 and luminance(tint) > 0.45
         self.c(L.RAIL_COLOR).setColorDiffuse("FF" + tint.upper() if len(tint) == 6 else L.SURFACE3)
         self.c(L.RAIL_INITIAL).setLabel(name[:1].upper(), textColor=L.ON_ACCENT if light else L.FG)
-        if self.me.get("avatar_url"):
-            self.prop("pley.avatar.picture", image(self.session.base, self.me["avatar_url"], 128))
+        # None: the initial shows (another profile's picture mustn't stay).
+        self.prop("pley.avatar.picture", image(self.session.base, self.me.get("avatar_url"), 128))
         for i, entry in enumerate(L.RAIL_LIBRARIES):
             if i < len(self.libraries):
                 library = self.libraries[i]
@@ -480,7 +507,13 @@ class Window(xbmcgui.WindowXML):
                 self.go(Library(self, self.libraries[i], "lib%d" % i))
 
     def account(self) -> None:
-        actions = [(T("choose_server"), lambda: self.leave_for("choose_server"))]
+        actions = []
+        if self.household is None:
+            # Signed in before the add-on asked for `profiles`.
+            actions.append((T("switch_profile"), self.sign_in_to_switch))
+        elif len(self.household) > 1:
+            actions.append((T("switch_profile"), self.switch_profile))
+        actions.append((T("choose_server"), lambda: self.leave_for("choose_server")))
         actions.append((T("tracks"), self.track_defaults))
         if len(self.libraries) > 1:
             actions.append((T("sort_libraries"), self.sort_libraries))
@@ -488,6 +521,23 @@ class Window(xbmcgui.WindowXML):
         chosen = xbmcgui.Dialog().contextmenu([name for name, _ in actions])
         if chosen >= 0:
             actions[chosen][1]()
+
+    def switch_profile(self) -> None:
+        """"Who's watching?", the household as it is now."""
+        try:
+            found = profiles.household(self.session.client)
+        except api.ApiError as e:
+            return self.toast(T("server_error") % e.message, 6)
+        if found is None:
+            return self.sign_in_to_switch()
+        self.household = found
+        self.open(Profiles(self, found))
+
+    def sign_in_to_switch(self) -> None:
+        """This sign-in can't switch profiles: signing in again with a code
+        allows it."""
+        if xbmcgui.Dialog().yesno(T("switch_profile"), T("cant_switch"), nolabel=T("cancel"), yeslabel=T("sign_in")):
+            self.leave_for("sign_in")
 
     def sign_out(self) -> None:
         """Sign out, once the person says so: the window closes first."""
@@ -2444,6 +2494,123 @@ def library_card(library: dict) -> "xbmcgui.ListItem":
         line = "%s · %s" % (line, T("scanning_now")) if line else T("scanning_now")
     li = xbmcgui.ListItem(library.get("name") or "", line, offscreen=True)
     li.setProperty("icon", LIBRARY_ICONS.get(library.get("kind"), "icon-folder.png"))
+    return li
+
+
+class Profiles(Screen):
+    """"Who's watching?" (TvProfilesScreen): the household's profiles, the
+    one in use first in focus. Another one is switched to at once, with its
+    PIN (Kodi's number dialog) when it has one; one that needs its password
+    is signed in to again with a code. `gate`: Kodi's start, where going on
+    as a profile with a PIN asks it too, and Back leaves pley."""
+
+    name = "profiles"
+
+    def __init__(self, win: Window, household: list, gate: bool = False):
+        super().__init__(win)
+        self.household = household
+        self.gate = gate
+
+    def show(self, filled: bool) -> None:
+        win = self.win
+        faces = win.c(L.PROFILES_LIST)
+        if not filled:
+            faces.reset()
+            faces.addItems([profile_face(self.session.base, p) for p in self.household])
+            win.place(L.PROFILES_LIST, L.profiles_left(len(self.household)) - L.PROFILE_MARGIN, L.PROFILES_TOP - L.PROFILE_MARGIN)
+            faces.selectItem(next((i for i, p in enumerate(self.household) if p.get("current")), 0))
+            win.put(L.PROFILES_NOTE, "")
+        win.setFocusId(L.PROFILES_LIST)
+
+    def first(self) -> int:
+        return L.PROFILES_LIST
+
+    def back(self) -> bool:
+        if self.gate:
+            self.win.close()
+            return True
+        return False
+
+    def click(self, control_id: int) -> None:
+        if control_id != L.PROFILES_LIST:
+            return
+        at = self.win.c(control_id).getSelectedPosition()
+        if 0 <= at < len(self.household):
+            self.pick(self.household[at])
+
+    def pick(self, profile: dict) -> None:
+        self.say("")
+        if profile.get("current"):
+            if self.gate and profiles.needs_pin(profile, self.win.me):
+                return self.with_pin(profile, confirm=True)
+            return self.done(switched=False)
+        needs = profile.get("needs")
+        if needs == "none":
+            return self.switch(profile, None)
+        if needs == "pin":
+            return self.with_pin(profile)
+        if needs == "password":
+            return self.sign_in_as(profile)
+        self.say(T("profile_locked"))
+
+    def with_pin(self, profile: dict, confirm: bool = False) -> None:
+        """Its PIN, typed in Kodi's number dialog (hidden), then sent."""
+        pin = xbmcgui.Dialog().numeric(0, T("pin_of") % (profile.get("name") or ""), "", True)
+        if not pin:
+            return
+        if not (profiles.PIN_MIN <= len(pin) <= profiles.PIN_MAX and pin.isdigit()):
+            return self.say(T("pin_digits"))
+        self.switch(profile, pin, confirm)
+
+    def switch(self, profile: dict, pin, confirm: bool = False) -> None:
+        win = self.win
+        try:
+            profiles.switch(self.session.client, profile["id"], pin)
+        except api.ApiError as e:
+            if confirm and e.code == "invalid_request":
+                # The server can't check the PIN of the profile in use: on.
+                return self.done(switched=False)
+            if e.code == "browser":
+                return self.sign_in_as(profile)
+            if e.code == "wrong_pin" and not pin:
+                # The list was older than the profile's new PIN.
+                return self.with_pin(profile)
+            if e.code == "signed_out":
+                return win.failed(e, Home(win))
+            name = kodi.setting("server_name") or kodi.setting("server_url")
+            return self.say(profiles.refusal(e, T, name))
+        self.done(switched=True)
+
+    def sign_in_as(self, profile: dict) -> None:
+        """A profile that needs its password: only a sign-in with a code,
+        approved where it is typed, can choose it."""
+        name = profile.get("name") or ""
+        if xbmcgui.Dialog().yesno(name, T("needs_password") % (name, name), nolabel=T("cancel"), yeslabel=T("sign_in")):
+            self.win.leave_for("sign_in")
+
+    def done(self, switched: bool) -> None:
+        kodi.set_property(profiles.GATE, "1")
+        if switched:
+            self.win.switched()
+        else:
+            self.win.go(Home(self.win))
+
+    def say(self, words_: str) -> None:
+        self.win.put(L.PROFILES_NOTE, words_)
+
+
+def profile_face(base: str, profile: dict) -> xbmcgui.ListItem:
+    """A face on "Who's watching?": the name, the picture or the initial on
+    the name's placeholder, and a lock for a PIN."""
+    name = profile.get("name") or ""
+    li = xbmcgui.ListItem(name, offscreen=True)
+    li.setProperty("ph", words.placeholder(name))
+    li.setProperty("initial", name.strip()[:1].upper() or "?")
+    found = image(base, profile.get("avatar_url"), 256)
+    if found:
+        li.setArt({"tile": found})
+    if profile.get("needs") == "pin":
+        li.setProperty("locked", "1")
     return li
 
 

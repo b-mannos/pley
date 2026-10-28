@@ -8,7 +8,7 @@ import time
 import unittest
 
 import support
-from pley import api, auth
+from pley import api, auth, profiles
 from pley.api import path_in
 from pley.proxy import Proxy
 
@@ -47,6 +47,8 @@ class ProxyTest(unittest.TestCase):
 
     def handle(self, request):
         if request.path == "/api/oauth/token":
+            if request.form().get("profile") == "5" and request.form().get("pin") != "2468":
+                return support.answer(400, {"error": "invalid_grant", "reason": "wrong_pin", "error_description": "wrong PIN"})
             self.valid = {"at-2"}
             return support.answer(200, {"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 3600})
         if request.path == "/api/oauth/revoke":
@@ -157,6 +159,21 @@ class ProxyTest(unittest.TestCase):
         self.assertEqual(self.server.requests[-1].path, "/api/oauth/revoke")
         response, data = self.ask("GET", "/%s/api/libraries" % SECRET)
         self.assertEqual((response.status, json.loads(data)["code"]), (401, "signed_out"))
+
+    def test_switching_profiles_through_the_service(self):
+        # The service alone holds the sign-in: the window and the plugin
+        # switch through it, and a refusal comes back as the server's reason.
+        client = api.Client(self.proxy.base, "pleyKodi/test", timeout=10, local=True)
+        with self.assertRaises(api.ApiError) as refused:
+            profiles.switch(client, 5, "1111")
+        self.assertEqual((refused.exception.status, refused.exception.code), (400, "wrong_pin"))
+        self.assertEqual(self.store.load()["refresh_token"], "rt-1")
+        profiles.switch(client, 5, "2468")
+        sent = self.server.requests[-1].form()
+        self.assertEqual((sent["grant_type"], sent["profile"], sent["pin"]), (auth.SWITCH_GRANT, "5", "2468"))
+        self.assertEqual((self.store.load()["access_token"], self.store.load()["profile"]), ("at-2", 5))
+        response, data = self.ask("POST", "/%s/switch-profile" % SECRET)
+        self.assertEqual((response.status, json.loads(data)["code"]), (400, "bad_request"))
 
     def test_the_plugins_own_client_reads_the_proxys_answers(self):
         # The plugin talks to the proxy over a socket of its own (no
