@@ -295,8 +295,9 @@ counters aren't read on LG, so a struggling stream isn't judged by them.
   extended; turning it off removes the apps it installed
   ([Developer Mode](https://webostv.developer.lge.com/develop/getting-started/developer-mode-app),
   [webosbrew](https://www.webosbrew.org/devmode/)).
-- **CLI:** `@webos-tools/cli` (3.2.6 wants Node 20 or newer; here a dev
-  dependency, run with `npx`): `ares-setup-device`, `ares-novacom --getkey`, `ares-package`,
+- **CLI:** `@webos-tools/cli` (3.2.6; here a dev dependency, run on Bun
+  through `bunx`, its packager called through Bun's shim, a program on
+  Windows too): `ares-setup-device`, `ares-novacom --getkey`, `ares-package`,
   `ares-install`, `ares-launch`, `ares-inspect`
   ([CLI guide](https://webostv.developer.lge.com/develop/tools/cli-dev-guide)).
 - **Simulator** (webOS 22 and later; the VirtualBox emulator stops at
@@ -321,7 +322,7 @@ counters aren't read on LG, so a struggling stream isn't judged by them.
 | `api/`, `net/`, `auth/` | The HTTP API, the event stream, finding a server, signing in with a code (QR and short link), profiles and their PINs |
 | `state.ts`, `platform.ts` | What the TV keeps (servers, sign-ins, settings, a per-install player id), and what a shell provides |
 | `ui/focus.ts`, `ui/input.ts`, `ui/keys.ts` | Focus moved by the app: rows, columns, grids and free groups, remembered places, panels that keep focus; the remote's keys, held keys at most every 100 ms, long OK; LG's Magic Remote pointer and wheel |
-| `ui/shell/`, `ui/screens/`, `ui/kit/` | The rail, the back stack and the screens: Home (Continue Watching with remove, My List), libraries with A–Z (and in the profile's own order, sorted here), items, people, collections, playlists (made here, smart ones from a library's filters, entries moved and removed), search, music, Settings, Diagnostics, history |
+| `ui/shell/`, `ui/screens/`, `ui/kit/` | The rail, the back stack and the screens: Home (Continue Watching with remove, My List), libraries with A–Z (and in the profile's own order, sorted here), items (Media info closed until OK opens it), people, collections, playlists (made here, smart ones from a library's filters, entries moved and removed), search, music, Settings, Diagnostics, history |
 | `player/` | The playback session: the play request, the recovery ladder, quality, Up Next, skip markers, seek previews, the sleep timer, reports, music in the background |
 | `subs/` | Subtitles drawn by the app: text as WebVTT from the server, pictures (PGS, VobSub, DVB) decoded from the server's `.mks` and drawn on a canvas, with the offset the person sets |
 | `caps/` | The server's direct-play rules, so the player knows what a play request will get, and Playback details can say why |
@@ -359,6 +360,23 @@ What keeps them quick on a 2018 TV:
 - When focus rests on a title for 400 ms, what playing it needs is
   fetched, so OK starts playback at once.
 
+Audio and subtitles are the profile's. A play request names an audio
+track (`audio_index`) only when the person picked one, on the title's
+page or in the player; otherwise the server picks, of the profile's
+language, the track this TV plays best (its receiver's channels,
+lossless, Atmos passed through), and the player switches to the one its
+answer names in a file played as it is and marks it in its menu. Picks
+are saved for the show or the movie (`PUT /api/items/{id}/streams`);
+subtitles picked alone are saved without the audio, so the server's
+choice is never saved as a pick. Play starts with the tracks just picked
+on the title's page or as new defaults, and the next episode with those
+picked while its Up Next showed. Settings → Profile sets the defaults
+(Audio language, Subtitles, Subtitle language; `PUT
+/api/me/track-defaults`). Subtitles forced only by their title say
+Forced in the track menus. The Subtitles panel's sync row moves the
+subtitles in 0.1 s steps, up to 10 s either way, kept for each file on
+the TV and never sent to the server.
+
 Signing in, finding the server on the network (a sweep of the TV's own
 subnet), the player's keys and panels, and the offline behaviour follow
 the Android TV app; `docs/API.md` has the server's side (built-in OAuth
@@ -366,18 +384,22 @@ clients `tizen.json` and `webos.json`, keyed addresses, CORS).
 
 ## Building, installing, testing
 
+With Bun, from the repository's root (`bun install` first); a
+`bunfig.toml` in each package has Bun run the tools too (TypeScript,
+Vitest, LG's CLI), whatever their shebang says:
+
 ```sh
-npm run tv:check                     # type checks and tests: the shared package, Samsung, LG
-npm run tizen                        # apps/tizen/out/pley.wgt, signed
-npm run webos                        # apps/webos/out/app.pley.tv_<version>_all.ipk
-node apps/webos/scripts/build.mjs    # only an app's dist/ (apps/tizen too); --dev keeps it readable
+bun run tv:check                     # type checks and tests: the shared package, Samsung, LG
+bun run --cwd apps/tizen package     # apps/tizen/out/pley.wgt, signed (bun run tizen too)
+bun run --cwd apps/webos package     # apps/webos/out/app.pley.tv_<version>_all.ipk (bun run webos too)
+bun run --cwd apps/webos build       # only an app's dist/ (apps/tizen too); add --dev to keep it readable
 ```
 
 The tests run in Vitest with jsdom: focus moves, keys, playback
 negotiation, the seek keys, real TVs' capabilities as snapshots, AVPlay's
 errors.
 
-`node scripts/render-icons.mjs` draws the apps' pictures from the logo,
+`bun scripts/render-icons.mjs` draws the apps' pictures from the logo,
 the P on the logo's tile colour (#0a1622) to the edges, as 24-bit RGB PNGs
 at 72 dpi: Samsung's 512×423 icon (Samsung asks for that format), LG's 80
 and 130 px icons, which `iconColor` in `appinfo.json` matches on the TV's
@@ -401,22 +423,22 @@ certificate: the store wants every update signed with it. To install:
 4. `tizen install -n pley.wgt -t <target> -- apps/tizen/out`.
 
 **LG.** LG's command-line tools (`@webos-tools/cli`) come with the
-workspace's dependencies; run them with `npx`. LG signs store builds
+workspace's dependencies; run them with `bunx`. LG signs store builds
 itself. To install:
 
 1. On the TV: Developer Mode from LG's store, signed in with an LG
    developer account; Dev Mode Status on (the TV restarts), then Key
    Server on.
-2. `npx ares-setup-device --add tv -i "host=<TV address>" -i
+2. `bunx ares-setup-device --add tv -i "host=<TV address>" -i
    "port=9922" -i "username=prisoner"`
-3. `npx ares-novacom --device tv --getkey`, with the passphrase Developer
+3. `bunx ares-novacom --device tv --getkey`, with the passphrase Developer
    Mode shows.
-4. `npx ares-install -d tv apps/webos/out/app.pley.tv_1.0.0_all.ipk`,
-   then `npx ares-launch -d tv app.pley.tv`. `npx ares-inspect -d tv -a
+4. `bunx ares-install -d tv apps/webos/out/app.pley.tv_<version>_all.ipk`,
+   then `bunx ares-launch -d tv app.pley.tv`. `bunx ares-inspect -d tv -a
    app.pley.tv --open` opens the web inspector.
 
-**Without a TV.** `node apps/webos/scripts/build.mjs --dev`, then `node
-apps/webos/scripts/serve.mjs`, serves the LG build on
+**Without a TV.** `bun run --cwd apps/webos serve` builds the LG app with
+`--dev` and serves it on
 `http://localhost:7650` and passes everything else to a pley server
 (`PLEY_SERVER`, default `http://127.0.0.1:7640`), so the app and the
 server share an origin. At 960×540 it is the TV's layout; arrows, Enter
@@ -434,7 +456,8 @@ Samsung, on a 2018–2019 set and a 2021 or later one:
    Vision profile 8 film showing as HDR10.
 4. E-AC-3 with Atmos to a receiver with the output on Dolby Digital+;
    what TrueHD does when Settings sends it.
-5. Switching the audio track while playing; AVPlay's subtitles staying
+5. Switching the audio track while playing, and to the server's track as
+   a file starts; AVPlay's subtitles staying
    silent under pley's; picture subtitles from the `.mks`.
 6. fMP4 HLS on 2020–2021 sets; 4K HLS.
 7. A session stopped from the web (`410`), on Tizen 6.0 and later and on
@@ -453,8 +476,9 @@ LG, on a webOS 4–6 set and a webOS 23 or later one:
    before the fix, and on webOS 26: if it comes out stereo, HLS through
    hls.js.
 4. CORS on each firmware (a sign-in and the API with `Authorization`).
-5. Audio track switching while playing a file as it is, and the order of
-   `audioTracks` against the server's.
+5. Audio track switching while playing a file as it is (the server's
+   track as it starts too), and the order of `audioTracks` against the
+   server's.
 6. `umsmediainfo` reaching Playback details; the start position from
    `mediaOption`.
 7. DTS to a receiver on a 2023–2024 set; what `tv.model.edidType` says.
