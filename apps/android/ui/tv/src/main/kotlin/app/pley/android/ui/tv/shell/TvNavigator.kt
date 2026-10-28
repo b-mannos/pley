@@ -40,6 +40,16 @@ class TvNavigator internal constructor(
         }
     }
 
+    /**
+     * Shows [key] in place of the page on top, which turned out to be
+     * another (an album's track opens the album). Unlike [back] then
+     * [open], it never leaves the app, whatever has focus.
+     */
+    fun replace(key: PleyKey) {
+        if (backStack.isEmpty()) backStack.add(key) else backStack[backStack.lastIndex] = key
+        rail.pageChanged()
+    }
+
     override fun restart(key: PleyKey) {
         if (backStack.size == 1 && backStack[0] == key) return
         backStack.clear()

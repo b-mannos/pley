@@ -13,7 +13,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -34,11 +33,11 @@ import app.pley.android.screens.item.destination
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.kit.BackdropScrim
 import app.pley.android.ui.tv.kit.TvBackdrop
+import app.pley.android.ui.tv.kit.initialFocus
 import app.pley.android.ui.tv.shell.LocalTvNavigator
 import app.pley.android.ui.tv.shell.failedBody
 import app.pley.android.ui.tv.shell.failedTitle
 import app.pley.android.ui.tv.theme.LocalTvTier
-import kotlinx.coroutines.delay
 
 /**
  * An item's actions as a screen of their own (PleyKey.ItemActions), for
@@ -73,11 +72,6 @@ internal fun TvItemActionsScreen(itemId: Long, continueWatching: Boolean = false
             )
             is ItemActionsUiState.Ready -> {
                 TvBackdrop(remember(s.item, s.origin, tier) { ArtworkCandidates.backdrop(s.item, s.origin, tier) }, s.title, scrim = BackdropScrim.Item)
-                val first = remember { FocusRequester() }
-                LaunchedEffect(Unit) {
-                    delay(16)
-                    runCatching { first.requestFocus() }
-                }
                 Column(Modifier.padding(start = PleyTv.Gutter, top = 58.dp).width(TextColumn)) {
                     BasicText(s.title, style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg), maxLines = 2, overflow = TextOverflow.Ellipsis)
                     if (s.subtitle.isNotEmpty()) BasicText(s.subtitle, style = PleyType.Tv.Body.copy(color = PleyColors.Muted), maxLines = 1)
@@ -86,7 +80,7 @@ internal fun TvItemActionsScreen(itemId: Long, continueWatching: Boolean = false
                         PanelRow(
                             label = label(action),
                             icon = if (action == ItemAction.Play || action == ItemAction.Resume) PleyIcons.Play else null,
-                            focusRequester = if (i == 0) first else null,
+                            modifier = if (i == 0) Modifier.initialFocus() else Modifier,
                             onClick = {
                                 val handled = model.perform(action)
                                 val next = if (handled) null else destination(action, s.item)

@@ -135,10 +135,7 @@ internal fun TvItemScreen(model: ItemViewModel) {
                 action = stringResource(R.string.tv_item_retry),
                 onAction = model::retry,
             )
-            is ItemUiState.Elsewhere -> LaunchedEffect(s.key) {
-                navigator.back()
-                navigator.open(s.key)
-            }
+            is ItemUiState.Elsewhere -> LaunchedEffect(s.key) { navigator.replace(s.key) }
             is ItemUiState.Ready -> {
                 LaunchedEffect(Unit) {
                     withFrameNanos { }
