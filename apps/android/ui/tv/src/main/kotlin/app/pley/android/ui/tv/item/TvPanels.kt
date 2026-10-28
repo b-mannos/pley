@@ -106,6 +106,17 @@ private fun LazyListScope.tracks(page: ItemPage, actions: TvPageActions, first: 
     }
     if (tracks.audio.isNotEmpty()) {
         item(key = "audio") { PanelHeading(stringResource(R.string.tv_item_audio)) }
+        // Automatic: no pick, each device plays its best track of the language.
+        val automatic = take(tracks.automaticAudio)
+        item(key = "audio-automatic") {
+            val language = tracks.automaticLanguage
+            PanelRow(
+                if (language != null) stringResource(R.string.tv_item_audio_automatic_language, language) else stringResource(R.string.tv_item_audio_automatic),
+                onClick = { actions.model.chooseAudio(null) },
+                checked = tracks.automaticAudio,
+                focusRequester = automatic,
+            )
+        }
         tracks.audio.forEach { a ->
             val requester = take(a.selected)
             item(key = "audio-${a.id}") {

@@ -60,6 +60,9 @@
     <!-- Side panels (design spec §2.7). -->
     <string name="tv_item_version">Version</string>
     <string name="tv_item_audio">Audio</string>
+    <!-- No track picked: each device plays its best track of the language. -->
+    <string name="tv_item_audio_automatic">Automatic</string>
+    <string name="tv_item_audio_automatic_language">Automatic (%1$s)</string>
     <string name="tv_item_subtitles">Subtitles</string>
     <string name="tv_item_subtitles_off">Off</string>
     <string name="tv_item_your_rating">Your rating</string>

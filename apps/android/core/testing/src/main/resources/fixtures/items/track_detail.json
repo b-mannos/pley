@@ -39,6 +39,7 @@
       ],
       "edition": null,
       "selected_audio": 0,
+      "audio_picked": false,
       "selected_subtitle": null,
       "chapters": []
     }

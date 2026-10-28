@@ -47,6 +47,7 @@
       "streams": null,
       "edition": null,
       "selected_audio": null,
+      "audio_picked": false,
       "selected_subtitle": null,
       "chapters": null
     }

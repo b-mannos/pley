@@ -124,7 +124,11 @@ internal class Views(private val catalog: Catalog) {
         return MediaSummary(best.bitrate, best.size, best.width, best.height, best.videoCodec, video?.dynamicRange)
     }
 
-    /** The tracks a file starts with for [profile]: its choice for the movie or show, else its defaults. */
+    /**
+     * The tracks a file starts with for [profile]: its choice for the movie
+     * or show, else its defaults. The audio is a pick only when the choice
+     * names one; else each player gets its best track of that language.
+     */
     fun withChoices(item: ItemDetail, file: MediaFile, profile: Profile): MediaFile {
         val owner = if (item.kind == ItemKind.Episode) item.grandparentId else item.id
         val choice = owner?.let { profile.streamChoices[it] }
@@ -132,11 +136,12 @@ internal class Views(private val catalog: Catalog) {
         val subtitles = file.streams.filter { it.kind == StreamKind.Subtitle && it.textBased == true }
         val defaults = profile.trackDefaults
         // A choice without audio (subtitles picked alone) leaves it to the defaults.
-        val chosenAudio = choice?.audioIndex?.let { index -> audio.firstOrNull { it.index == index } }
-            ?: audio.firstOrNull { it.language == defaults.audioLanguage } ?: audio.firstOrNull { it.default }
+        val pickedAudio = choice?.audioIndex?.let { index -> audio.firstOrNull { it.index == index } }
+        val chosenAudio = pickedAudio ?: audio.firstOrNull { it.language == defaults.audioLanguage } ?: audio.firstOrNull { it.default }
         if (choice != null) {
             return file.copy(
                 selectedAudio = chosenAudio?.index,
+                audioPicked = pickedAudio != null,
                 selectedSubtitle = choice.subtitleIndex?.takeIf { index -> file.streams.any { it.index == index } },
             )
         }

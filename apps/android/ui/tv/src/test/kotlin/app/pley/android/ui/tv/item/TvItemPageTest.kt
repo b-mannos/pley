@@ -84,13 +84,18 @@ class TvItemPageTest {
         compose.onNode(isFocused()).assert(hasContentDescription("Audio and subtitles"))
         press(Key.Enter)
         compose.onNodeWithTag(TV_PANEL).assertExists()
-        // Focus starts on the current audio track, and stays in the panel.
+        // Nothing picked: focus starts on Automatic, in the language, and stays in the panel.
         compose.onNode(isFocused()).assertExists()
         press(Key.DirectionLeft, 3)
-        compose.onNode(isFocused()).assert(hasText("English (TrueHD 7.1)"))
-        press(Key.DirectionDown)
+        compose.onNode(isFocused()).assert(hasText("Automatic (English)"))
+        press(Key.DirectionDown, 2)
+        compose.onNode(isFocused()).assert(hasText("French (AC3 5.1)"))
         press(Key.Enter)
         assertEquals(listOf(listOf<Long?>(1, 11, 2, null)), data.streams)
+        // Automatic again: the pick is forgotten.
+        press(Key.DirectionUp, 2)
+        press(Key.Enter)
+        assertEquals(listOf<Long?>(1, 11, null, null), data.streams.last())
         compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
         compose.waitForIdle()
         compose.onNode(isFocused()).assert(hasContentDescription("Audio and subtitles"))

@@ -51,7 +51,13 @@ class FixtureServerTest {
         app.send("PUT", "/api/items/${FixtureIds.SHOW_S1E1}/streams", """{"audio_index":1,"subtitle_index":2}""")
         val episode = app.read("/api/items/${FixtureIds.SHOW_S1E2}", ItemDetail.serializer()).files.single()
         assertEquals(1, episode.selectedAudio)
+        assertTrue(episode.audioPicked)
         assertEquals(2, episode.selectedSubtitle)
+        // Automatic: the pick goes, and the episode's audio is the default's again, not a pick.
+        app.send("PUT", "/api/items/${FixtureIds.SHOW_S1E1}/streams", """{"audio_index":null,"subtitle_index":2}""")
+        val automatic = app.read("/api/items/${FixtureIds.SHOW_S1E2}", ItemDetail.serializer()).files.single()
+        assertFalse(automatic.audioPicked)
+        assertEquals(2, automatic.selectedSubtitle)
 
         val defaults = app.send("PUT", "/api/me/track-defaults", """{"audio_language":"fre","subtitle_language":"eng","subtitle_mode":"always"}""")
         assertEquals(200, defaults.code)
@@ -69,6 +75,7 @@ class FixtureServerTest {
                 "PUT /api/items/$movie/rating",
                 "POST /api/items/${FixtureIds.SHOW}/watched",
                 "POST /api/items/${FixtureIds.SHOW_SEASON_2}/unwatched",
+                "PUT /api/items/${FixtureIds.SHOW_S1E1}/streams",
                 "PUT /api/items/${FixtureIds.SHOW_S1E1}/streams",
                 "PUT /api/me/track-defaults",
                 "PUT /api/me/track-defaults",

@@ -27,6 +27,13 @@ data class MediaFile(
     val edition: String? = null,
     /** The audio track ([MediaStream.index]) to start with for this profile: its choice, else its defaults. `null`: the file's default. */
     val selectedAudio: Int? = null,
+    /**
+     * The profile picked [selectedAudio] for the movie or show. `false`:
+     * nothing was picked, so each device plays its best track of that
+     * language (the server picks it at play time), and a title's page says
+     * automatic with the language rather than naming this track.
+     */
+    val audioPicked: Boolean = false,
     /** The subtitle track to start with; `null`: none. */
     val selectedSubtitle: Int? = null,
     /** From the container, by start time. */

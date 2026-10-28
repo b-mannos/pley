@@ -22,6 +22,9 @@
     <string name="item_read_less">Less</string>
     <string name="item_version">Version</string>
     <string name="item_audio">Audio</string>
+    <!-- No track picked: each device plays its best track of the language. -->
+    <string name="item_audio_automatic">Automatic</string>
+    <string name="item_audio_automatic_language">Automatic (%1$s)</string>
     <string name="item_subtitles">Subtitles</string>
     <string name="item_subtitles_off">Off</string>
     <string name="item_extras">Extras</string>

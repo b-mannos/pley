@@ -47,6 +47,7 @@ data class StreamPick(
     val fileId: Long? = null,
     /** The version [audio] was picked for; `null`: none was. */
     val audioFile: Long? = null,
+    /** The track picked; `null` with [audioFile]: Automatic was. */
     val audio: Int? = null,
     /** The version [subtitle] was picked for; `null`: none was ([subtitle] `null` with a file: Off). */
     val subtitleFile: Long? = null,
@@ -75,7 +76,8 @@ data class PageInput(
  * the audio picked on the page for that file, the only one the player and
  * the saved choice are told of: otherwise the server picks the track each
  * device plays best, and [audioIndex] is the details' choice, made for no
- * device in particular.
+ * device in particular. [automaticAudio]: no track is picked, on the page
+ * or before, so the page names only [audioIndex]'s language.
  */
 internal data class Playing(
     val file: MediaFile?,
@@ -83,6 +85,7 @@ internal data class Playing(
     val subtitleIndex: Int?,
     val defaultAudio: MediaStream?,
     val pickedAudio: Int? = null,
+    val automaticAudio: Boolean = false,
 )
 
 /** The version and tracks [pick] comes to on [detail], as the web works them out. */
@@ -90,10 +93,12 @@ internal fun playing(detail: ItemDetail, pick: StreamPick): Playing {
     val file = detail.files.firstOrNull { it.id == pick.fileId } ?: detail.files.firstOrNull()
     val audio = file?.streams?.filter { it.kind == StreamKind.Audio }.orEmpty()
     val defaultAudio = audio.firstOrNull { it.default } ?: audio.firstOrNull()
-    val audioPicked = file != null && pick.audioFile == file.id
-    val audioIndex = if (audioPicked) pick.audio else file?.selectedAudio
+    val pickedHere = file != null && pick.audioFile == file.id
+    val pickedAudio = if (pickedHere) pick.audio else null
+    val automatic = if (pickedHere) pick.audio == null else file?.audioPicked != true
+    val audioIndex = pickedAudio ?: file?.selectedAudio
     val subtitleIndex = if (file != null && pick.subtitleFile == file.id) pick.subtitle else file?.selectedSubtitle
-    return Playing(file, audioIndex, subtitleIndex, defaultAudio, pickedAudio = if (audioPicked) pick.audio else null)
+    return Playing(file, audioIndex, subtitleIndex, defaultAudio, pickedAudio = pickedAudio, automaticAudio = automatic)
 }
 
 /** The page of [input]'s item. */
@@ -236,7 +241,9 @@ private fun trackChoices(d: ItemDetail, playing: Playing): TrackChoices? {
     val audio = file.streams.filter { it.kind == StreamKind.Audio }
     val subtitles = file.streams.filter { it.kind == StreamKind.Subtitle }
     if (d.files.size < 2 && audio.size < 2 && subtitles.isEmpty()) return null
-    val audioShown = playing.audioIndex ?: playing.defaultAudio?.index
+    val audioStart = playing.audioIndex ?: playing.defaultAudio?.index
+    // Without a pick no track is named: each device plays its best of this one's language.
+    val audioShown = audioStart.takeUnless { playing.automaticAudio }
     return TrackChoices(
         versions = if (d.files.size > 1) {
             d.files.mapIndexed { i, f -> TrackChoice(f.id, versionLabel(f, i), f.id == file.id) }
@@ -246,6 +253,8 @@ private fun trackChoices(d: ItemDetail, playing: Playing): TrackChoices? {
         audio = if (audio.size > 1) audio.map { TrackChoice(it.index.toLong(), streamLabel(it), it.index == audioShown) } else emptyList(),
         subtitles = subtitles.map { TrackChoice(it.index.toLong(), streamLabel(it), it.index == playing.subtitleIndex) },
         versionId = file.id,
+        automaticAudio = playing.automaticAudio,
+        automaticLanguage = languageName(audio.firstOrNull { it.index == audioStart }?.language),
         audioIndex = audioShown,
         subtitleIndex = playing.subtitleIndex?.takeIf { index -> subtitles.any { it.index == index } },
     )

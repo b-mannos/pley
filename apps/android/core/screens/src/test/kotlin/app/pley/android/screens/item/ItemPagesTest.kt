@@ -64,21 +64,38 @@ class ItemPagesTest {
     }
 
     @Test
-    fun `tracks use the web's labels and start on the file's choices`() {
+    fun `tracks use the web's labels, and without a pick the audio is automatic in its language`() {
         val tracks = page(movie()).tracks!!
         assertEquals(listOf("English (TrueHD 7.1)", "French (AC3 5.1)"), tracks.audio.map { it.label })
-        assertEquals(1, tracks.audioIndex)
-        assertEquals("English (TrueHD 7.1)", tracks.audioLabel)
+        // Each device plays its best English track: none is named.
+        assertTrue(tracks.automaticAudio)
+        assertEquals("English", tracks.automaticLanguage)
+        assertNull(tracks.audioIndex)
+        assertNull(tracks.audioLabel)
+        assertTrue(tracks.audio.none { it.selected })
         assertNull(tracks.subtitleIndex)
         assertEquals(listOf("English (SRT)"), tracks.subtitles.map { it.label })
         assertTrue(tracks.versions.isEmpty())
     }
 
     @Test
+    fun `a picked track is named and ticked, and Automatic picked here names none`() {
+        val streams = arrayOf(stream(1, StreamKind.Audio, "truehd", "eng", default = true, channels = 8), stream(2, StreamKind.Audio, "ac3", "fra", channels = 6))
+        val picked = movie(files = listOf(file(11, *streams, selectedAudio = 2, audioPicked = true)))
+        val tracks = page(picked).tracks!!
+        assertFalse(tracks.automaticAudio)
+        assertEquals(2, tracks.audioIndex)
+        assertEquals("French (AC3 5.1)", tracks.audioLabel)
+        val automatic = page(picked) { copy(pick = StreamPick(audioFile = 11, audio = null)) }.tracks!!
+        assertTrue(automatic.automaticAudio)
+        assertNull(automatic.audioIndex)
+    }
+
+    @Test
     fun `the profile's saved choice wins, and a pick for another version doesn't apply`() {
         val withChoice = movie(
             files = listOf(
-                file(11, stream(1, StreamKind.Audio, "aac", "eng", default = true), stream(2, StreamKind.Audio, "ac3", "fra"), stream(3, StreamKind.Subtitle, "subrip", "eng"), selectedAudio = 2, selectedSubtitle = 3),
+                file(11, stream(1, StreamKind.Audio, "aac", "eng", default = true), stream(2, StreamKind.Audio, "ac3", "fra"), stream(3, StreamKind.Subtitle, "subrip", "eng"), selectedAudio = 2, selectedSubtitle = 3, audioPicked = true),
                 file(12, stream(1, StreamKind.Audio, "aac", "eng", default = true), stream(2, StreamKind.Audio, "ac3", "deu")),
             ),
         )
@@ -88,8 +105,10 @@ class ItemPagesTest {
         assertEquals(2, first.versions.size)
         val other = page(withChoice) { copy(pick = StreamPick(fileId = 12, audioFile = 11, audio = 1)) }.tracks!!
         assertEquals(12L, other.versionId)
-        // The second version has no saved choice: its default track.
-        assertEquals(1, other.audioIndex)
+        // The second version has no saved choice: automatic, in its default track's language.
+        assertNull(other.audioIndex)
+        assertTrue(other.automaticAudio)
+        assertEquals("English", other.automaticLanguage)
     }
 
     @Test

@@ -182,10 +182,15 @@ internal class CachedWatchState(private val cache: ResourceCache) : WatchStateRe
         undoing(patched) { cache.api(cache.profile()).setRating(itemId, RatingRequest(kept)) }
     }
 
-    override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) {
-        val patched = cache.patchAll(ItemPatch.streams(itemId, fileId, audioIndex, subtitleIndex)::apply)
-        undoing(patched) { cache.api(cache.profile()).setStreams(itemId, StreamChoice(fileId, audioIndex, subtitleIndex)) }
-        othersAskedAgain(itemId)
+    override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?, automaticAudio: Boolean) {
+        val patched = cache.patchAll(ItemPatch.streams(itemId, fileId, audioIndex, subtitleIndex, automaticAudio)::apply)
+        undoing(patched) { cache.api(cache.profile()).setStreams(itemId, StreamChoice(fileId, audioIndex, subtitleIndex, automaticAudio)) }
+        if (automaticAudio) {
+            // Without a pick, the details' track is the server's to work out: this page is asked again too.
+            cache.revalidate { key, _ -> key.startsWith("item:") }
+        } else {
+            othersAskedAgain(itemId)
+        }
     }
 
     override fun streamsChosen(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) {

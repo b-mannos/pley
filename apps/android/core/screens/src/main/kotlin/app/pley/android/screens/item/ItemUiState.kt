@@ -137,13 +137,21 @@ data class PrimaryAction(
 data class TrackChoices(
     /** Versions (several files), with the web's labels. */
     val versions: List<TrackChoice>,
-    /** Audio tracks, when there are two or more. */
+    /** Audio tracks, when there are two or more; none is selected while the audio is automatic. */
     val audio: List<TrackChoice>,
     /** Subtitle tracks; "Off" comes before them on screen, chosen when none of them is. */
     val subtitles: List<TrackChoice>,
     /** The chosen version's id. */
     val versionId: Long?,
-    /** The chosen audio track's index: the profile's choice, else the file's default. */
+    /**
+     * No audio track is picked: each device plays its best track of
+     * [automaticLanguage] (the server picks it at play time), so the page
+     * shows "Automatic (English)" first among the audio choices, ticked.
+     */
+    val automaticAudio: Boolean,
+    /** The language automatic audio plays, "English"; `null` when the tracks don't say. */
+    val automaticLanguage: String?,
+    /** The picked audio track's index; `null` while the audio is automatic. */
     val audioIndex: Int?,
     /** The chosen subtitle track's index; `null`: off. */
     val subtitleIndex: Int?,

@@ -66,7 +66,7 @@ internal class ItemData(vararg details: ItemDetail) : DataGraph {
     override val watchState: WatchStateRepository = object : WatchStateRepository {
         override suspend fun setWatched(itemId: Long, watched: Boolean) = Unit
         override suspend fun rate(itemId: Long, rating: Double?) = Unit
-        override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) {
+        override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?, automaticAudio: Boolean) {
             streams += listOf(itemId, fileId, audioIndex?.toLong(), subtitleIndex?.toLong())
         }
 

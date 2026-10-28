@@ -148,6 +148,10 @@ class PleyJsonTest {
     fun nullsAreLeftOutOfBodiesAndDefaultsKept() {
         val choice = PleyJson.encodeToString(StreamChoice.serializer(), StreamChoice(audioIndex = 2, subtitleIndex = null))
         assertEquals("""{"audio_index":2}""", choice)
+        val automatic = PleyJson.encodeToString(StreamChoice.serializer(), StreamChoice(fileId = 3, subtitleIndex = 4, automaticAudio = true))
+        assertEquals("""{"file_id":3,"subtitle_index":4,"audio_index":null}""", automatic)
+        assertEquals(StreamChoice(fileId = 3, subtitleIndex = 4, automaticAudio = true), PleyJson.decodeFromString(StreamChoice.serializer(), automatic))
+        assertEquals(StreamChoice(audioIndex = 2), PleyJson.decodeFromString(StreamChoice.serializer(), choice))
         val progress = PleyJson.encodeToString(ProgressReport.serializer(), ProgressReport(positionMs = 5000, sessionId = "s1"))
         assertEquals("""{"position_ms":5000,"state":"playing","session_id":"s1"}""", progress)
         assertEquals("""{}""", PleyJson.encodeToString(RatingRequest.serializer(), RatingRequest(null)))

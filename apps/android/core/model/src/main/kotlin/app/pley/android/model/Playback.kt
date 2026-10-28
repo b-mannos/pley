@@ -1,7 +1,17 @@
 package app.pley.android.model
 
 import app.pley.android.model.caps.ClientCaps
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.KeepGeneratedSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonTransformingSerializer
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /** How the app asks for an item to be delivered (apps/server/src/playback.rs, `PlaybackMode`). */
 @Serializable(with = PlaybackMode.Serializer::class)
@@ -292,7 +302,9 @@ data class ProgressReport(
  * for the whole show (episodes) or the movie, by language, title and
  * forced, so every episode starts with its own matching tracks.
  */
-@Serializable
+@OptIn(ExperimentalSerializationApi::class)
+@KeepGeneratedSerializer
+@Serializable(with = StreamChoice.Serializer::class)
 data class StreamChoice(
     /** The file the indexes are of; `null`: the item's first. */
     val fileId: Long? = null,
@@ -305,7 +317,36 @@ data class StreamChoice(
     val audioIndex: Int? = null,
     /** `null`: subtitles off (left out, which the server reads the same). */
     val subtitleIndex: Int? = null,
-)
+    /**
+     * The person chose Automatic: the audio picked before is forgotten
+     * (`audio_index` is sent as `null`), and each device plays its best
+     * track of the language again. [audioIndex] is not sent then.
+     */
+    val automaticAudio: Boolean = false,
+) {
+    /** [automaticAudio] travels as an `audio_index` of `null`, the one `null` a body carries. */
+    object Serializer : JsonTransformingSerializer<StreamChoice>(generatedSerializer()) {
+        override fun transformSerialize(element: JsonElement): JsonElement {
+            val fields = element.jsonObject
+            val automatic = fields[AUTOMATIC]?.jsonPrimitive?.booleanOrNull == true
+            return JsonObject(
+                buildMap {
+                    putAll(fields - AUTOMATIC)
+                    if (automatic) put(AUDIO, JsonNull)
+                },
+            )
+        }
+
+        override fun transformDeserialize(element: JsonElement): JsonElement {
+            val fields = element.jsonObject
+            val automatic = fields.containsKey(AUDIO) && fields[AUDIO] is JsonNull
+            return if (automatic) JsonObject(fields - AUDIO + (AUTOMATIC to JsonPrimitive(true))) else element
+        }
+
+        private const val AUDIO = "audio_index"
+        private const val AUTOMATIC = "automatic_audio"
+    }
+}
 
 /** The body of PUT /api/items/{id}/rating: 0 to 10, rounded to half stars; `null` clears it. */
 @Serializable

@@ -123,7 +123,8 @@ class ItemViewModelTest {
         )
         // The details' audio is the profile's, chosen for no device: the server picks for this one.
         data.set(movie(files = listOf(file(11, *streams, selectedAudio = 2))))
-        assertEquals(2, model.page.tracks?.audioIndex)
+        assertEquals(true, model.page.tracks?.automaticAudio)
+        assertEquals("French", model.page.tracks?.automaticLanguage)
         model.play()
         assertEquals(null, launcher.played.single().audioIndex)
         // Subtitles alone: the audio chosen before stays.
@@ -131,6 +132,18 @@ class ItemViewModelTest {
         assertEquals(FakeData.StreamWrite(1, 11, null, 3), data.streams.last())
         model.play()
         assertEquals(3L, launcher.played.last().subtitleIndex)
+        assertEquals(null, launcher.played.last().audioIndex)
+    }
+
+    @Test
+    fun `Automatic forgets the audio picked, and the player gets none`() = runTest(dispatcher) {
+        val model = model(1)
+        data.set(movie())
+        model.chooseAudio(2)
+        model.chooseAudio(null)
+        assertEquals(FakeData.StreamWrite(1, 11, null, null, automaticAudio = true), data.streams.last())
+        assertEquals(true, model.page.tracks?.automaticAudio)
+        model.play()
         assertEquals(null, launcher.played.last().audioIndex)
     }
 

@@ -63,7 +63,7 @@ class FakeData : DataGraph {
     var listFailure: Exception? = null
     val active = MutableStateFlow<String?>(ORIGIN)
 
-    data class StreamWrite(val itemId: Long, val fileId: Long?, val audio: Int?, val subtitle: Int?)
+    data class StreamWrite(val itemId: Long, val fileId: Long?, val audio: Int?, val subtitle: Int?, val automaticAudio: Boolean = false)
 
     fun detail(id: Long): MutableStateFlow<Loadable<ItemDetail>> = details.getOrPut(id) { MutableStateFlow(Loadable.Loading) }
 
@@ -98,8 +98,8 @@ class FakeData : DataGraph {
             ratings += itemId to rating
         }
 
-        override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) {
-            streams += StreamWrite(itemId, fileId, audioIndex, subtitleIndex)
+        override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?, automaticAudio: Boolean) {
+            streams += StreamWrite(itemId, fileId, audioIndex, subtitleIndex, automaticAudio)
         }
 
         override suspend fun hideFromContinueWatching(itemId: Long) {
@@ -180,7 +180,15 @@ class RecordingLauncher : PlayerLauncher {
 fun stream(index: Int, kind: StreamKind, codec: String, language: String? = null, default: Boolean = false, channels: Int? = null) =
     MediaStream(index = index, kind = kind, codec = codec, language = language, default = default, channels = channels)
 
-fun file(id: Long, vararg streams: MediaStream, selectedAudio: Int? = null, selectedSubtitle: Int? = null, width: Int = 3840, height: Int = 2160) =
+fun file(
+    id: Long,
+    vararg streams: MediaStream,
+    selectedAudio: Int? = null,
+    selectedSubtitle: Int? = null,
+    width: Int = 3840,
+    height: Int = 2160,
+    audioPicked: Boolean = false,
+) =
     MediaFile(
         id = id,
         path = "Movie ($id).mkv",
@@ -191,6 +199,7 @@ fun file(id: Long, vararg streams: MediaStream, selectedAudio: Int? = null, sele
         videoCodec = "hevc",
         streams = streams.toList(),
         selectedAudio = selectedAudio,
+        audioPicked = audioPicked,
         selectedSubtitle = selectedSubtitle,
     )
 

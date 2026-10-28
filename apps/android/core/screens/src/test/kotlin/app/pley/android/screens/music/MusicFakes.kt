@@ -64,7 +64,7 @@ class FakeWatchState : WatchStateRepository {
     override suspend fun rate(itemId: Long, rating: Double?) {
         ratings += itemId to rating
     }
-    override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) = Unit
+    override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?, automaticAudio: Boolean) = Unit
     override suspend fun hideFromContinueWatching(itemId: Long) = Unit
 }
 

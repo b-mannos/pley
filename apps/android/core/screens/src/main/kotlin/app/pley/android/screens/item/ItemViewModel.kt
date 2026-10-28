@@ -266,12 +266,16 @@ class ItemViewModel(
         pick.update { it.copy(fileId = fileId) }
     }
 
-    /** Plays audio track [index], and keeps it for the item (and the rest of a show). */
-    fun chooseAudio(index: Int) {
+    /**
+     * Plays audio track [index], and keeps it for the item (and the rest of
+     * a show). `null` is Automatic: the pick is forgotten, and each device
+     * plays its best track of the language.
+     */
+    fun chooseAudio(index: Int?) {
         val d = shown ?: return
         val file = playing(d, pick.value).file ?: return
         pick.update { it.copy(audioFile = file.id, audio = index) }
-        remember(d, file.id, index, playing(d, pick.value).subtitleIndex)
+        remember(d, file.id, index, playing(d, pick.value).subtitleIndex, automaticAudio = index == null)
     }
 
     /**
@@ -286,8 +290,8 @@ class ItemViewModel(
         remember(d, file.id, playing.pickedAudio, index)
     }
 
-    private fun remember(d: ItemDetail, fileId: Long, audio: Int?, subtitle: Int?) {
-        viewModelScope.launch { attempt { data.watchState.chooseStreams(d.id, fileId, audio, subtitle) } }
+    private fun remember(d: ItemDetail, fileId: Long, audio: Int?, subtitle: Int?, automaticAudio: Boolean = false) {
+        viewModelScope.launch { attempt { data.watchState.chooseStreams(d.id, fileId, audio, subtitle, automaticAudio) } }
     }
 
     /** [block]'s value; `null` once a failure was told as an event. */

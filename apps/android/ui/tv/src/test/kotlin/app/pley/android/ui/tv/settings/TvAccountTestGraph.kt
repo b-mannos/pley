@@ -167,7 +167,7 @@ class TvAccountTestGraph : ScreensGraph {
         override val watchState = object : WatchStateRepository {
             override suspend fun setWatched(itemId: Long, watched: Boolean) = Unit
             override suspend fun rate(itemId: Long, rating: Double?) = Unit
-            override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) = Unit
+            override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?, automaticAudio: Boolean) = Unit
             override suspend fun hideFromContinueWatching(itemId: Long) = Unit
         }
         override val liveUpdates: LiveUpdates get() = unused()

@@ -23,7 +23,8 @@ import kotlinx.serialization.json.JsonNamingStrategy
  *   (encodeDefaults), so what the app builds is what the server gets; but
  *   never a `null` (explicitNulls off): the server reads a missing field as
  *   `None`, the same as `null`, for every body an app sends, but one:
- *   [StreamChoice.audioIndex] left out keeps the audio chosen before.
+ *   [StreamChoice.audioIndex] left out keeps the audio chosen before, and
+ *   its `null` ([StreamChoice.automaticAudio]) forgets it.
  */
 val PleyJson: Json = Json {
     namingStrategy = JsonNamingStrategy.SnakeCase

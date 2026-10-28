@@ -98,7 +98,7 @@ class TestHomeSources : HomeSources {
         }
 
         override suspend fun rate(itemId: Long, rating: Double?) = Unit
-        override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?) = Unit
+        override suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?, automaticAudio: Boolean) = Unit
         // As the data side does: out of Continue Watching at once, the row gone with its last tile.
         override suspend fun hideFromContinueWatching(itemId: Long) {
             hidden += itemId

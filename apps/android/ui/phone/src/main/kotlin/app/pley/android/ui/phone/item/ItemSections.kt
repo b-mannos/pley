@@ -114,7 +114,8 @@ internal class PageActions(private val model: ItemViewModel, private val navigat
 
     fun chooseVersion(fileId: Long) = model.chooseVersion(fileId)
 
-    fun chooseAudio(index: Int) = model.chooseAudio(index)
+    /** [index] `null`: Automatic. */
+    fun chooseAudio(index: Int?) = model.chooseAudio(index)
 
     fun chooseSubtitle(index: Int?) = model.chooseSubtitle(index)
 
@@ -197,7 +198,9 @@ internal fun phoneRows(page: ItemPage, titles: RowTitles): List<TileRow> = build
 /**
  * Version, Audio and Subtitles (VideoItemView.tsx's selects; design spec
  * §4.3): outlined fields, Audio and Subtitles side by side and as tall as
- * each other. Choosing a track is kept for the item.
+ * each other. Choosing a track is kept for the item. Audio starts with
+ * Automatic and its language, ticked while no track is picked: each device
+ * then plays its best track of that language.
  */
 @Composable
 internal fun TrackSelects(page: ItemPage, actions: PageActions, modifier: Modifier = Modifier) {
@@ -216,12 +219,13 @@ internal fun TrackSelects(page: ItemPage, actions: PageActions, modifier: Modifi
         if (tracks.audio.isNotEmpty() || tracks.subtitles.isNotEmpty()) {
             Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (tracks.audio.isNotEmpty()) {
+                    val automatic = automaticAudioLabel(tracks.automaticLanguage)
                     Select(
                         label = stringResource(R.string.item_audio),
-                        value = tracks.audioLabel.orEmpty(),
-                        options = tracks.audio.map { it.id to it.label },
+                        value = if (tracks.automaticAudio) automatic else tracks.audioLabel.orEmpty(),
+                        options = listOf<Pair<Long?, String>>(null to automatic) + tracks.audio.map { it.id to it.label },
                         selected = tracks.audioIndex?.toLong(),
-                        onSelect = { id -> id?.let { actions.chooseAudio(it.toInt()) } },
+                        onSelect = { id -> actions.chooseAudio(id?.toInt()) },
                         modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
                 }
@@ -240,6 +244,11 @@ internal fun TrackSelects(page: ItemPage, actions: PageActions, modifier: Modifi
         }
     }
 }
+
+/** "Automatic (English)", or "Automatic" when the tracks don't say their language. */
+@Composable
+private fun automaticAudioLabel(language: String?): String =
+    if (language != null) stringResource(R.string.item_audio_automatic_language, language) else stringResource(R.string.item_audio_automatic)
 
 /**
  * An outlined select: the [label] notched into its edge, the [value] on up

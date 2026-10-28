@@ -54,9 +54,11 @@ interface WatchStateRepository {
     /**
      * The version and tracks to play [itemId] with next time. [audioIndex]
      * only for a track the person picked: `null` keeps the audio chosen
-     * before (subtitles alone were picked). [subtitleIndex] `null` is off.
+     * before (subtitles alone were picked), unless [automaticAudio], which
+     * forgets it so each device plays its best track of the language.
+     * [subtitleIndex] `null` is off.
      */
-    suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?)
+    suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?, automaticAudio: Boolean = false)
 
     /**
      * The player saved these tracks for [itemId] itself: its page, and
