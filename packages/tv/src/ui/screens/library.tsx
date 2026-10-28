@@ -128,6 +128,14 @@ export function LibraryScreen(p: { entry: Entry; id: number; tab?: LibraryTab; s
           class="library-tabs"
           elRef={(el) => (tabsRef.current = el)}
           onEnter={() => tabsRef.current?.querySelector<HTMLElement>(`[data-fid="tab/${shown}"]`) ?? null}
+          onEdge={(dir) => {
+            // Recommended's rows are placed in a box of no height of its own, which a move by geometry passes
+            // over: Down goes back to the tile focused last in them, else into the nearest row.
+            const rows = dir === "down" ? document.querySelector<HTMLElement>(".library-rows .page-scroll") : null;
+            if (!rows) return false;
+            const target = ui.focus.rememberedIn(rows) ?? ui.focus.enter(rows, "down", tabsRef.current?.getBoundingClientRect() ?? null);
+            return !!target && ui.focus.focus(target);
+          }}
         >
           {tabs.map((t) => (
             <Tab key={t} fid={`tab/${t}`} label={TAB_LABELS[t]} shown={t === shown} onSelect={() => showTab(t)} />
