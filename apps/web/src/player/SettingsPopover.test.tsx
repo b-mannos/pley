@@ -10,7 +10,7 @@ function renderPopover(overrides: Partial<SettingsPopoverProps> = {}) {
   const props: SettingsPopoverProps = {
     open: true,
     setOpen: vi.fn(),
-    qualities: qualitiesFor({ bitrate: 9_000_000, height: 1080 }),
+    qualities: qualitiesFor({ bitrate: 9_000_000, width: 1920, height: 1080 }),
     quality: "original",
     originalHint: "1080p · 9.0 Mbps",
     onQuality: vi.fn(),
@@ -43,7 +43,11 @@ describe("SettingsPopover", () => {
 
   it("names the quality the original is converted at", async () => {
     const user = userEvent.setup();
-    renderPopover({ qualities: qualitiesFor({ bitrate: 60_000_000, height: 2160 }), originalHint: "4K · 60 Mbps", autoQuality: "30m" });
+    renderPopover({
+      qualities: qualitiesFor({ bitrate: 60_000_000, width: 3840, height: 2160 }),
+      originalHint: "4K · 60 Mbps",
+      autoQuality: "30m",
+    });
     expect(screen.getByRole("button", { name: /Quality\s*30 Mbps 4K \(auto\)/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Quality/ }));
     const original = screen.getAllByRole("menuitemradio")[0];
@@ -59,7 +63,7 @@ describe("SettingsPopover", () => {
     expect(options.map((o) => o.textContent)).toEqual([
       "Original1080p · 9.0 Mbps",
       "AutomaticOriginal, lower only when it doesn't play well",
-      "8 Mbps 1080pConverted",
+      // 8 Mbps is too close to the file's 9 to play any better.
       "4 Mbps 720pConverted",
       "2 Mbps 480pConverted",
     ]);

@@ -34,18 +34,67 @@ export function qualityById(id: string | null | undefined): QualityOption {
   return QUALITIES.find((q) => q.id === id) ?? ORIGINAL;
 }
 
+type FileSize = Pick<MediaFile, "bitrate" | "width" | "height">;
+
 /**
- * The qualities worth offering for a file: the original and Automatic, then
- * those that make it smaller (every one when its bitrate and size are unknown).
+ * A file's lines, as qualities are named: 2160, 1080, 720 or 480, by its
+ * width too (a 1920×800 film is 1080p); `null` when neither is known.
  */
-export function qualitiesFor(file: Pick<MediaFile, "bitrate" | "height"> | null): QualityOption[] {
+function linesOf(file: FileSize | null): number | null {
+  const w = file?.width ?? 0;
+  const h = file?.height ?? 0;
+  if (w <= 0 && h <= 0) return null;
+  return w >= 3800 || h >= 2100 ? 2160 : w >= 1800 || h >= 1000 ? 1080 : w >= 1200 || h >= 700 ? 720 : 480;
+}
+
+/** A copy at more than this share of a file's bitrate, at its lines, plays no better than the file. */
+const LIGHTER = 0.8;
+
+/**
+ * `quality` as it is named for `file`: by the file's own lines when the
+ * quality is taller than the file ("8 Mbps 720p" for a 720p file, whose copy
+ * is no taller), else as the table names it.
+ */
+export function namedFor(file: FileSize | null, quality: QualityOption): QualityOption {
+  const lines = linesOf(file);
+  if (quality.maxBitrate === null || quality.maxHeight === null || lines === null || quality.maxHeight <= lines) {
+    return quality;
+  }
+  return { ...quality, label: `${quality.maxBitrate / 1000} Mbps ${lines >= 2160 ? "4K" : `${lines}p`}` };
+}
+
+/**
+ * The qualities worth offering for a file (docs/QUALITY.md): the original
+ * and Automatic, and each of `table` with fewer lines than the file or at
+ * most 80 % of its bitrate (every one when neither is known), named by the
+ * file's own lines when taller (`namedFor`), once for each bitrate and
+ * lines. Renamed, a 4K quality falls among the file's own: the copies go
+ * tallest first, then by bitrate, which is the table's order for a 4K file.
+ */
+export function qualitiesFor(file: FileSize | null, table: QualityOption[] = QUALITIES): QualityOption[] {
   const kbps = file?.bitrate ? file.bitrate / 1000 : null;
   const height = file?.height ?? null;
-  if (kbps == null && height == null) return QUALITIES;
-  return QUALITIES.filter(
-    (q) =>
-      q.maxBitrate === null || (kbps != null && q.maxBitrate < kbps) || (height != null && (q.maxHeight ?? 0) < height),
-  );
+  if (kbps == null && height == null) return table;
+  const lines = linesOf(file);
+  const out: QualityOption[] = [];
+  const copies: { quality: QualityOption; lines: number }[] = [];
+  const seen = new Set<string>();
+  for (const q of table) {
+    if (q.maxBitrate === null || q.maxHeight === null) {
+      out.push(q);
+      continue;
+    }
+    const fewerLines = height != null && q.maxHeight < height;
+    const lighter = kbps != null && q.maxBitrate <= kbps * LIGHTER;
+    if (!fewerLines && !lighter) continue;
+    const shown = lines === null ? q.maxHeight : Math.min(q.maxHeight, lines);
+    const key = `${q.maxBitrate}:${shown}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    copies.push({ quality: namedFor(file, q), lines: shown });
+  }
+  copies.sort((a, b) => b.lines - a.lines || (b.quality.maxBitrate ?? 0) - (a.quality.maxBitrate ?? 0));
+  return out.concat(copies.map((c) => c.quality));
 }
 
 /**
@@ -71,10 +120,8 @@ export function modeFor(quality: QualityOption): PlaybackMode {
  * file's lines, the highest bitrate up to 1.5 times the file's, else that
  * resolution's lowest. Automatic never goes above it.
  */
-export function serverQuality(file: Pick<MediaFile, "bitrate" | "width" | "height"> | null): QualityOption {
-  const w = file?.width ?? 0;
-  const h = file?.height ?? 0;
-  const lines = w >= 3800 || h >= 2100 ? 2160 : w >= 1800 || h >= 1000 || (w <= 0 && h <= 0) ? 1080 : w >= 1200 || h >= 700 ? 720 : 480;
+export function serverQuality(file: FileSize | null): QualityOption {
+  const lines = linesOf(file) ?? 1080;
   const cap = file?.bitrate && file.bitrate > 0 ? (file.bitrate * 1.5) / 1000 : null;
   const tier = QUALITIES.filter((q) => q.maxHeight === lines);
   return tier.find((q) => cap === null || (q.maxBitrate ?? 0) <= cap) ?? tier[tier.length - 1]!;
@@ -86,7 +133,7 @@ export function serverQuality(file: Pick<MediaFile, "bitrate" | "width" | "heigh
  * server's own quality for it, each lower in bitrate than the one above
  * (a 4K file goes 30 Mbps 4K, 15 Mbps 4K, then 12 Mbps 1080p).
  */
-export function autoLadder(file: Pick<MediaFile, "bitrate" | "width" | "height"> | null): Rung[] {
+export function autoLadder(file: FileSize | null): Rung[] {
   const top = serverQuality(file);
   const out: Rung[] = [];
   let below = Infinity;

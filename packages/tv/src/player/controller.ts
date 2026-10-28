@@ -43,7 +43,7 @@ import {
   type PlayRequest,
 } from "./plan";
 import { AutoQuality, type AutoMemory, type AutoStep } from "./autoquality";
-import { AUTO, autoLadder, chooseQuality, fileHint, modeOf, ORIGINAL, presetById, qualitiesFor, type QualityPreset } from "./quality";
+import { AUTO, autoLadder, chooseQuality, fileHint, modeOf, namedFor, ORIGINAL, presetById, qualitiesFor, type QualityPreset } from "./quality";
 import { failureText, Recovery, StruggleMeter, type EngineError, type RecoveryAction } from "./recovery";
 import type { Reporter } from "./reporter";
 import { SLEEP_OFF, SleepTimer, type SleepChoice, type SleepState } from "./sleep";
@@ -1364,7 +1364,7 @@ export class PlaybackController {
 
   /** What plays: Automatic's quality of the moment, or the one chosen. */
   private get playingPreset(): QualityPreset {
-    return this.auto ? presetById(this.auto.playing) ?? ORIGINAL : this.quality;
+    return this.auto ? namedFor(this.file, presetById(this.auto.playing) ?? ORIGINAL) : this.quality;
   }
 
   /** Automatic, when chosen: a new one for the title, starting where the network last allowed (Up Next too). */
@@ -1400,7 +1400,7 @@ export class PlaybackController {
   /** Starts again at Automatic's new quality; a step down says so, once. */
   private applyAuto(step: AutoStep | null): boolean {
     if (!step || this.closed || this.stopped) return false;
-    const to = presetById(step.to) ?? ORIGINAL;
+    const to = namedFor(this.file, presetById(step.to) ?? ORIGINAL);
     this.update({ suggestLowerQuality: false, note: this.noteText() });
     this.publishChoices();
     if (step.why) this.notice(T.smoother(to.label));
@@ -1436,7 +1436,8 @@ export class PlaybackController {
     const playing = this.playingPreset;
     // The original, converted here: at the closest quality, which the menu names.
     const convertedId = info?.auto_quality && playing.id === ORIGINAL.id ? info.auto_quality : null;
-    const converted = convertedId ? presetById(convertedId) : null;
+    const known = convertedId ? presetById(convertedId) : null;
+    const converted = known ? namedFor(file, known) : null;
     const convertedLabel = converted && converted.maxBitrateKbps !== null ? converted.label : null;
     const hint = fileHint(file) || null;
     const auto = this.auto;

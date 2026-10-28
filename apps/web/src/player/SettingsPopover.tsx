@@ -176,8 +176,11 @@ export function SettingsPopover(props: SettingsPopoverProps) {
   const textSub = currentSub && currentSub.text_based !== false ? currentSub : undefined;
   const sleepValue =
     sleep === null ? "Off" : sleep === "end" ? sleepEndLabel : sleepLeft !== null ? `${formatClock(sleepLeft)} left` : `${sleep} min`;
-  // The original, converted: at the closest quality, which the menu names.
-  const auto = quality === "original" && autoQuality ? qualityById(autoQuality) : null;
+  // The original, converted: at the closest quality, named as the menu names it for this file.
+  const auto =
+    quality === "original" && autoQuality
+      ? (qualities.find((q) => q.id === autoQuality) ?? qualityById(autoQuality))
+      : null;
   const qualityLabel =
     quality === "auto"
       ? `Automatic · ${autoNow ?? "Original"}`

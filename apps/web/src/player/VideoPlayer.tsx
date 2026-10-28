@@ -45,7 +45,7 @@ import {
 import { playUrl } from "@/lib/usePlayItem";
 import { nextInQueue, queuePlayUrl, type QueuePosition } from "@/lib/videoQueue";
 import { AutoQuality, ORIGINAL_ID, storedMemory, type AutoMemory, type AutoStep, type Lowered } from "./autoQuality";
-import { autoLadder, chooseQuality, modeFor, qualitiesFor, qualityById } from "./quality";
+import { autoLadder, chooseQuality, modeFor, namedFor, qualitiesFor, qualityById } from "./quality";
 import { ChaptersMenu } from "./ChaptersMenu";
 import { SeekBar } from "./SeekBar";
 import { methodLabel, PlaybackDetails } from "./PlaybackDetails";
@@ -256,7 +256,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [file?.id, selectedQuality.id, autoRun],
   );
-  const playingQuality = auto ? qualityById(auto.playing) : selectedQuality;
+  const playingQuality = auto ? namedFor(file, qualityById(auto.playing)) : selectedQuality;
   const mode = modeFor(playingQuality);
   const [loadToken, setLoadToken] = useState(0);
 
@@ -464,7 +464,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     if (!auto) return;
     auto.began();
     // The original converted here (a fallback): Automatic steps down from what it plays at.
-    const converted = auto.playing === ORIGINAL_ID && pinfo.auto_quality ? qualityById(pinfo.auto_quality) : null;
+    const converted = auto.playing === ORIGINAL_ID && pinfo.auto_quality ? namedFor(file, qualityById(pinfo.auto_quality)) : null;
     if (converted?.maxBitrate) {
       auto.setOriginalKbps(converted.maxBitrate);
       if (announce) say(smootherText(converted.label));
@@ -857,7 +857,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     // The stall watch starts over: the new session is on its way.
     lastAdvance.current = { at: performance.now(), time: -1 };
     setAutoStepped((n) => n + 1);
-    if (step.why) say(smootherText(qualityById(step.to).label));
+    if (step.why) say(smootherText(namedFor(file, qualityById(step.to)).label));
   };
 
   const watchQuality = useEffectEvent(() => {
@@ -1422,7 +1422,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       : "This browser couldn't play the original file."
     : null;
   // What Automatic plays ("Original", "8 Mbps 1080p"; the original converted here by its quality), and why when lower.
-  const converted = info?.auto_quality && playingQuality.id === ORIGINAL_ID ? qualityById(info.auto_quality) : null;
+  const converted = info?.auto_quality && playingQuality.id === ORIGINAL_ID ? namedFor(file, qualityById(info.auto_quality)) : null;
   const autoNow = auto ? (playingQuality.id === ORIGINAL_ID ? (converted?.maxBitrate ? converted.label : "Original") : playingQuality.label) : null;
   const autoWhy = auto?.lowered && auto.playing !== ORIGINAL_ID ? LOWERED[auto.lowered] : null;
   const note = fallbackNote ?? autoWhy;

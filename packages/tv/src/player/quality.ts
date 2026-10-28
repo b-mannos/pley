@@ -51,18 +51,62 @@ function widthOf(file: MediaFile | null): number | null {
 }
 
 /**
- * The qualities worth offering for `file`: the original and Automatic, and
- * each preset below the file's bitrate or height; every one when neither
- * is known.
+ * A file's lines, as qualities are named: 2160, 1080, 720 or 480, by its
+ * width too (a 1920×800 film is 1080p); `null` when neither is known.
  */
-export function qualitiesFor(file: MediaFile | null): QualityPreset[] {
+function linesOf(file: MediaFile | null): number | null {
+  const w = widthOf(file) ?? 0;
+  const h = heightOf(file) ?? 0;
+  if (w <= 0 && h <= 0) return null;
+  return w >= 3800 || h >= 2100 ? 2160 : w >= 1800 || h >= 1000 ? 1080 : w >= 1200 || h >= 700 ? 720 : 480;
+}
+
+/** A copy at more than this share of a file's bitrate, at its lines, plays no better than the file. */
+const LIGHTER = 0.8;
+
+/**
+ * `preset` as it is named for `file`: by the file's own lines when the
+ * preset is taller than the file ("8 Mbps 720p" for a 720p file, whose copy
+ * is no taller), else as the table names it.
+ */
+export function namedFor(file: MediaFile | null, preset: QualityPreset): QualityPreset {
+  const lines = linesOf(file);
+  if (preset.maxBitrateKbps === null || preset.maxHeight === null || lines === null || preset.maxHeight <= lines) return preset;
+  return { ...preset, label: `${preset.maxBitrateKbps / 1000} Mbps ${lines >= 2160 ? "4K" : `${lines}p`}` };
+}
+
+/**
+ * The qualities worth offering for `file` (docs/QUALITY.md): the original
+ * and Automatic, and each of `table` with fewer lines than the file or at
+ * most 80 % of its bitrate (every one when neither is known), named by the
+ * file's own lines when taller (`namedFor`), once for each bitrate and
+ * lines. Renamed, a 4K quality falls among the file's own: the copies go
+ * tallest first, then by bitrate, which is the table's order for a 4K file.
+ */
+export function qualitiesFor(file: MediaFile | null, table: QualityPreset[] = PRESETS): QualityPreset[] {
   const kbps = file?.bitrate ? file.bitrate / 1000 : null;
   const height = heightOf(file);
-  if (kbps == null && height == null) return PRESETS.slice();
-  return PRESETS.filter(
-    (p) =>
-      p.maxBitrateKbps === null || (kbps != null && p.maxBitrateKbps < kbps) || (height != null && p.maxHeight! < height),
-  );
+  if (kbps == null && height == null) return table.slice();
+  const lines = linesOf(file);
+  const out: QualityPreset[] = [];
+  const copies: { preset: QualityPreset; lines: number }[] = [];
+  const seen: string[] = [];
+  for (const p of table) {
+    if (p.maxBitrateKbps === null || p.maxHeight === null) {
+      out.push(p);
+      continue;
+    }
+    const fewerLines = height != null && p.maxHeight < height;
+    const lighter = kbps != null && p.maxBitrateKbps <= kbps * LIGHTER;
+    if (!fewerLines && !lighter) continue;
+    const shown = lines === null ? p.maxHeight : Math.min(p.maxHeight, lines);
+    const key = `${p.maxBitrateKbps}:${shown}`;
+    if (seen.indexOf(key) >= 0) continue;
+    seen.push(key);
+    copies.push({ preset: namedFor(file, p), lines: shown });
+  }
+  copies.sort((a, b) => b.lines - a.lines || b.preset.maxBitrateKbps! - a.preset.maxBitrateKbps!);
+  return out.concat(copies.map((c) => c.preset));
 }
 
 /**
@@ -81,9 +125,7 @@ export function chooseQuality(remembered: string | null, offered: QualityPreset[
  * resolution's lowest. Automatic never goes above it.
  */
 export function serverQuality(file: MediaFile | null): QualityPreset {
-  const w = widthOf(file) ?? 0;
-  const h = heightOf(file) ?? 0;
-  const lines = w >= 3800 || h >= 2100 ? 2160 : w >= 1800 || h >= 1000 || (w <= 0 && h <= 0) ? 1080 : w >= 1200 || h >= 700 ? 720 : 480;
+  const lines = linesOf(file) ?? 1080;
   const cap = file?.bitrate && file.bitrate > 0 ? (file.bitrate * 1.5) / 1000 : null;
   const tier = PRESETS.filter((p) => p.maxHeight === lines);
   return tier.filter((p) => cap === null || p.maxBitrateKbps! <= cap)[0] ?? tier[tier.length - 1]!;
