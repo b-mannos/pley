@@ -10,6 +10,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
@@ -125,6 +126,18 @@ class AccountScreensTest {
         waitFor("Change on the web")
         compose.onNode(hasText("Audio language") and hasClickAction()).assertIsNotEnabled()
         assertTrue(graph.saved.isEmpty())
+    }
+
+    @Test
+    fun signingOutAsksFirstInOneShortLine() {
+        show { MeScreen() }
+        waitFor("Anna")
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Sign out") and hasClickAction())
+        compose.onNode(hasText("Sign out") and hasClickAction()).performClick()
+        compose.onNodeWithText("Sign out?").assertExists()
+        compose.onNodeWithText("You'll be signed out of 192.168.1.20:7539.").assertExists()
+        compose.onAllNodes(hasText("Sign out") and hasClickAction()).onLast().performClick()
+        compose.waitUntil(5_000) { graph.sessionFlow.value == null }
     }
 
     @Test

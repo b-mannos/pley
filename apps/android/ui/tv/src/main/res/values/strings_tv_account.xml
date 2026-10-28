@@ -43,7 +43,7 @@
     <!-- Sign out. -->
     <string name="tv_account_sign_out">Sign out</string>
     <string name="tv_account_sign_out_title">Sign out?</string>
-    <string name="tv_account_sign_out_body">pley signs this TV out of %1$s and deletes what it saved from it. The music stops.</string>
+    <string name="tv_account_sign_out_body">You\'ll be signed out of %1$s.</string>
     <string name="tv_account_sign_out_intro">Sign this TV out of %1$s. You\'ll need a new link code to sign in again.</string>
     <string name="tv_account_cancel">Cancel</string>
 

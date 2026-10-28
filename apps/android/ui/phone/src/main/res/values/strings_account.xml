@@ -19,7 +19,7 @@
     <string name="account_switch_server">Switch server</string>
     <string name="account_sign_out">Sign out</string>
     <string name="account_sign_out_title">Sign out?</string>
-    <string name="account_sign_out_body">pley signs this device out of %1$s and deletes what it saved from it. The music stops.</string>
+    <string name="account_sign_out_body">You\'ll be signed out of %1$s.</string>
     <string name="account_version">pley %1$s for Android</string>
 
     <!-- Track defaults (AccountPage.tsx PlaybackCard). -->

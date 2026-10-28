@@ -134,8 +134,12 @@ class TvSettingsFocusTest {
         compose.press(Key.DirectionDown, times = 7)
         category(Category.SignOut).assertIsFocused()
         compose.press(Key.DirectionCenter)
+        // Short and plain: the question, one line, Cancel and Sign out.
+        compose.onNodeWithText("Sign out?").assertExists()
+        compose.onNodeWithText("You'll be signed out of 192.168.1.20:7539.").assertExists()
         compose.focused().assert(hasText("Cancel"))
         compose.press(Key.DirectionRight)
+        compose.focused().assert(hasText("Sign out"))
         compose.press(Key.DirectionCenter)
         compose.waitUntil(5_000) { stack.firstOrNull() is PleyKey.Link }
         assertNull(graph.sessionFlow.value)
