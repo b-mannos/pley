@@ -8,6 +8,8 @@
         <field id="signedIn" type="boolean" alwaysNotify="true" />
         <!-- "ended" (by the server), "wider_scope", "signed_out" (by the person) -->
         <field id="signOutReason" type="string" />
+        <!-- What the sign-in was allowed: "library play playlists profiles". -->
+        <field id="scope" type="string" />
         <!-- The current access token, for the HTTP agents of pictures and video. -->
         <field id="accessToken" type="string" />
         <field id="userAgent" type="string" />

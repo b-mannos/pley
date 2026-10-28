@@ -142,6 +142,60 @@ function authRefreshOutcome(status as integer, text as dynamic) as string
     return "failed"
 end function
 
+' --- Switching profiles ---
+
+function authSwitchGrant() as string
+    return "urn:pley:params:oauth:grant-type:switch-profile"
+end function
+
+' Whether a scope ("library play playlists profiles") allows name.
+function authAllows(scope as string, name as string) as boolean
+    for each part in scope.Split(" ")
+        if part = name then return true
+    end for
+    return false
+end function
+
+' What the token endpoint's answer to a profile switch (or to a PIN
+' checked for the profile signed in) means (docs/API.md, the switch-profile
+' grant): { kind, reason, message }. kind: "tokens"; "through" (no PIN to
+' check: the profile has none, or the server can't); "refused" (reason:
+' wrong_pin, throttled, pin_locked, browser, not_allowed,
+' unauthorized_client; nothing spent); "ended" (the refresh token doesn't
+' work: the sign-in is over); "failed" (the network or the server).
+function authSwitchOutcome(status as integer, text as dynamic) as object
+    if status >= 200 and status < 300 then return { kind: "tokens", reason: "", message: "" }
+    error = ""
+    reason = ""
+    description = ""
+    data = invalid
+    data = httpObject(httpJson(text))
+    if data <> invalid
+        error = httpString(data.error)
+        reason = httpString(data.reason)
+        description = httpSentence(data.error_description)
+    end if
+    if status <= 0 or status = 502 or status = 504 then return { kind: "failed", reason: "network", message: "The server can't be reached." }
+    if error = "invalid_request" and reason = "" then return { kind: "through", reason: "", message: "" }
+    if error = "unauthorized_client" then return { kind: "refused", reason: error, message: "This sign-in can't switch profiles." }
+    if error = "invalid_grant"
+        if reason = "" then return { kind: "ended", reason: "", message: "" }
+        messages = {
+            wrong_pin: "Wrong PIN.",
+            throttled: "Too many wrong PINs: try again in a few minutes.",
+            pin_locked: "This profile's PIN is locked after too many wrong tries: its owner can set it again in their account, or an administrator can.",
+            browser: "This profile needs its password: sign in to it with a code, choosing it in the browser.",
+            not_allowed: "You can't switch to this profile."
+        }
+        message = messages[reason]
+        if reason = "throttled" and description <> "" then message = description
+        if message = invalid then message = description
+        return { kind: "refused", reason: reason, message: message }
+    end if
+    if description = "" then description = "The server refused: try again."
+    return { kind: "failed", reason: error, message: description }
+end function
+
 ' Whether the tokens a refresh of old gave are kept: only while the
 ' registry (stored, its tokens for old's server) still holds old's refresh
 ' token. Signing out, forgetting the server or signing in again with a code

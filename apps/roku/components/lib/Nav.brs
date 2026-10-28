@@ -5,6 +5,7 @@ function navScreen(name as string) as string
     screens = {
         servers: "ServersScreen",
         link: "LinkScreen",
+        profiles: "ProfilesScreen",
         home: "HomeScreen",
         library: "LibraryScreen",
         show: "ShowScreen",

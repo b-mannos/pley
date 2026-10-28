@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Who's watching?": the household's profiles, a PIN for those with one,
+     and a sign-in with a code for one that needs its password. -->
+<component name="ProfilesScreen" extends="Group">
+    <interface>
+        <field id="route" type="string" />
+        <field id="params" type="assocarray" />
+        <field id="navigate" type="assocarray" alwaysNotify="true" />
+        <field id="active" type="boolean" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/screens/ProfilesScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Nodes.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Auth.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Profiles.brs" />
+    <children>
+        <Label id="title" translation="[0, 200]" width="1920" horizAlign="center" text="Who's watching?" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
+        <MarkupGrid id="profiles" translation="[0, 400]" itemComponentName="ProfileTile" numRows="1" numColumns="6" itemSize="[220, 330]" itemSpacing="[48, 0]" drawFocusFeedback="false" />
+        <Label id="message" translation="[360, 780]" width="1200" wrap="true" maxLines="3" horizAlign="center" color="0xA1A9B6FF" text="Loading…" font="font:SmallSystemFont" />
+        <ButtonGroup id="buttons" iconUri="" focusedIconUri="" translation="[660, 900]" minWidth="600" visible="false" />
+    </children>
+</component>

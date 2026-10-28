@@ -216,12 +216,12 @@ async function openFromMenu(index, pattern, what, then = async () => {}) {
 }
 
 // From Settings: Sign out, and Sign out again in the dialog. Sign out is
-// the last of seven buttons, Subtitle language showing once subtitles come
+// the last of eight buttons, Subtitle language showing once subtitles come
 // on always.
 async function signOut() {
   for (let attempt = 0; attempt < 3; attempt++) {
     const since = mark();
-    await press("down", 6);
+    await press("down", 7);
     await press("select");
     await sleep(800);
     await press("select");
@@ -413,10 +413,11 @@ async function walk() {
   await press("down", 5);
   await press("select");
   await settle();
-  // Sort libraries, next: Movies lifted and put after TV Shows, saved at
-  // once; then the server's order again, which the rest of the walk expects.
+  // Sort libraries, after Switch profile: Movies lifted and put after TV
+  // Shows, saved at once; then the server's order again, which the rest of
+  // the walk expects.
   since = mark();
-  await press("down");
+  await press("down", 2);
   await press("select"); // Sort libraries
   await waitFor(/^GET \/api\/libraries$/, since, "the libraries to sort");
   await press("select"); // lifts Movies
@@ -446,8 +447,18 @@ async function walk() {
   await waitFor(/^PUT \/api\/me\/track-defaults$/, since, "the subtitle mode saved");
   await settle();
   shoot("settings-saved");
+  // Switch profile, two rows down: "Who's watching?", Ben chosen, and Home
+  // again as Ben, the old tokens stopped.
+  since = mark();
+  await press("down", 3);
+  await press("select");
+  await waitFor(/^GET \/api\/oauth\/profiles$/, since, "the household's profiles");
+  shoot("profiles");
+  since = mark();
+  await press("right"); // Ben
+  await press("select");
+  await waitFor(/^GET \/api\/hubs\/home$/, since, "Home as another profile");
   // The server goes away: a library can't load, and says so.
-  await press("back");
   await sleep(1500);
   fixture.down = true;
   await press("left", 3);
@@ -564,6 +575,7 @@ const checks = [
   ["asked for a show's More Like This and collections", asked(/^GET \/api\/items\/99\/related\?limit=20$/) && asked(/^GET \/api\/items\/99\/collections$/)],
   ["opened a person's page", asked(/^GET \/api\/people\/7$/)],
   ["took an entry out of a playlist", fixture.playlistRemoved.length > 0],
+  ["switched to another profile of the household", fixture.switched.includes(2)],
   ["played a playlist from its top, the next entry to come", fixture.playbacks.some((p) => p.item === 101)],
   ["searched", asked(/^GET \/api\/search\?/)],
   ["asked again with a new token after a 401", new Set(fixture.requests.filter((r) => r.path === "/api/items/103").map((r) => r.auth)).size > 1],

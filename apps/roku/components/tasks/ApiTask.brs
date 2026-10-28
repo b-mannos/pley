@@ -28,6 +28,8 @@ sub apiRun()
     m.tokens = invalid
     m.signIn = invalid
     m.signIns = 0
+    ' A profile switch waiting for a refresh to end: { request, spec }.
+    m.switchWaiting = invalid
     m.profileAsked = 0
     apiDeviceFacts()
     m.top.ready = true
@@ -114,6 +116,8 @@ sub apiAccept(request as dynamic)
         apiSignOut(request)
     else if op = "play"
         apiPlay(request, spec)
+    else if op = "switchProfile"
+        apiSwitchProfile(request, spec)
     else
         apiCall(request, spec)
     end if
@@ -231,6 +235,8 @@ sub apiAnswered(job as object, status as integer, body as string, headers as dyn
         apiDeviceAnswered(job, status, body)
     else if purpose = "poll"
         apiPollAnswered(job, status, body)
+    else if purpose = "switch"
+        apiSwitchAnswered(job, status, body)
     else if purpose = "revoke"
         ' The app signed out whatever the answer; a busy server is asked
         ' once more.
@@ -460,6 +466,16 @@ sub apiRefreshAnswered(job as object, status as integer, body as string)
     end if
     ' What waits goes again, with the new token; when these tokens were
     ' replaced meanwhile (signed in again), with the ones in use.
+    apiSendWaiting()
+    ' A profile switch asked for meanwhile goes now, with the new pair.
+    if m.switchWaiting <> invalid
+        waiting = m.switchWaiting
+        m.switchWaiting = invalid
+        apiSwitchProfile(waiting.request, waiting.spec)
+    end if
+end sub
+
+sub apiSendWaiting()
     jobs = m.waiting
     m.waiting = []
     for each waiting in jobs
@@ -485,6 +501,10 @@ sub apiFailWaiting(answer as object)
     for each job in jobs
         apiAnswer(job.request, answer)
     end for
+    if m.switchWaiting <> invalid
+        apiAnswer(m.switchWaiting.request, answer)
+        m.switchWaiting = invalid
+    end if
 end sub
 
 ' Ends the grant of tokens on its server (RFC 7009); nothing waits for it.
@@ -525,7 +545,13 @@ sub apiBoot(request as object)
         end for
         apiSelect(current, name)
     end if
-    apiAnswer(request, apiOk({ screen: serversStartScreen(m.server, m.tokens <> invalid), servers: servers }))
+    ' "Who's watching?" first when the household had more than one profile.
+    askWho = false
+    if m.tokens <> invalid
+        household = Val(CreateObject("roRegistrySection", "household").Read(m.server))
+        askWho = profAskWho(m.tokens.scope, Int(household))
+    end if
+    apiAnswer(request, apiOk({ screen: serversStartScreen(m.server, m.tokens <> invalid, askWho), servers: servers }))
 end sub
 
 ' Makes url the server the screens talk to, signed in when it has tokens.
@@ -540,8 +566,10 @@ sub apiSelect(url as string, name as string)
     m.session.serverName = name
     m.session.signOutReason = ""
     if m.tokens <> invalid
+        m.session.scope = m.tokens.scope
         m.session.accessToken = m.tokens.access
     else
+        m.session.scope = ""
         m.session.accessToken = ""
     end if
     m.session.signedIn = m.tokens <> invalid
@@ -814,11 +842,86 @@ sub apiSignedIn(signIn as object, body as string)
         m.tokens = fresh
         m.lastIssued = invalid
         m.session.signOutReason = ""
+        m.session.scope = fresh.scope
         m.session.accessToken = fresh.access
         m.session.signedIn = true
         apiAskProfile()
     end if
     apiSignInUpdate(signIn, { status: "signed_in" })
+end sub
+
+' --- Switching profiles ---
+
+' Moves the sign-in to another profile of the household, or checks the PIN
+' of the one it acts as (docs/API.md, the switch-profile grant): with the
+' refresh token, which a switch spends as a refresh does, so never beside
+' one. spec: { profile, pin ("" for none) }. The answer: ok ({ through:
+' true } when there was no PIN to check), or the refusal (authSwitchOutcome)
+' with its reason as the error.
+sub apiSwitchProfile(request as object, spec as object)
+    tokens = m.tokens
+    if tokens = invalid
+        apiAnswer(request, apiSignedOut())
+        return
+    end if
+    if m.refreshing.DoesExist(tokens.issuer)
+        m.switchWaiting = { request: request, spec: spec }
+        return
+    end if
+    m.refreshing[tokens.issuer] = true
+    params = { grant_type: authSwitchGrant(), client_id: httpClientId(), refresh_token: tokens.refresh, profile: urlValue(spec.profile) }
+    pin = httpString(spec.pin)
+    if pin <> "" then params.pin = pin
+    job = apiForm(apiJob("switch", "POST", tokens.tokenEndpoint), params)
+    job.tokens = tokens
+    job.request = request
+    ' As a refresh: an answer given up on can be a spent refresh token.
+    job.timeoutMs = 120000
+    apiSend(job)
+end sub
+
+sub apiSwitchAnswered(job as object, status as integer, body as string)
+    old = job.tokens
+    m.refreshing.Delete(old.issuer)
+    current = m.tokens <> invalid and m.tokens.issuer = old.issuer and m.tokens.refresh = old.refresh
+    outcome = authSwitchOutcome(status, body)
+    if outcome.kind = "tokens"
+        answer = authParseTokens(body, old.scope, apiNow())
+        fresh = invalid
+        if answer.ok then fresh = tokensFrom(answer, old.issuer, old.tokenEndpoint, old.revocationEndpoint)
+        if fresh <> invalid and authExtraScopes(fresh.scope, old.scope).Count() > 0
+            apiRevoke(fresh)
+            fresh = invalid
+        end if
+        if fresh = invalid
+            ' The old refresh token is spent: the sign-in is over.
+            if current then apiEnd("ended")
+            apiAnswer(job.request, apiSignedOut())
+        else if not current
+            ' Signed out or in again meanwhile: those stay.
+            apiRevoke(fresh)
+            apiAnswer(job.request, apiFail("server_changed", "The sign-in changed."))
+        else
+            ' Saved before they are used: the old refresh token is spent.
+            tokensSave(m.tokensSection, fresh)
+            m.tokens = fresh
+            m.lastIssued = { token: fresh.access, at: apiNow() }
+            m.session.scope = fresh.scope
+            m.session.accessToken = fresh.access
+            apiAskProfile()
+            apiAnswer(job.request, apiOk({ through: false }))
+        end if
+    else if outcome.kind = "ended"
+        if current then apiEnd("ended")
+        apiAnswer(job.request, apiSignedOut())
+    else if outcome.kind = "through"
+        apiAnswer(job.request, apiOk({ through: true }))
+    else
+        failure = apiFail(outcome.reason, outcome.message)
+        failure.status = status
+        apiAnswer(job.request, failure)
+    end if
+    apiSendWaiting()
 end sub
 
 ' --- Playback ---

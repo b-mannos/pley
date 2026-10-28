@@ -10,9 +10,10 @@ from start, a show's next episode, Mark as watched, My List, Go to show,
 and rows of its seasons, cast and crew, extras, More Like This and the
 collections it is part of), people's and collections' pages, playlists
 (Play, Shuffle, Rename, Delete, an entry taken out), Search with the
-on-screen keyboard (titles and people), and Settings with the
-profile's audio and subtitle defaults, Sort libraries, Switch server and
-Sign out. The Options key (*) on a title offers Mark as watched or
+on-screen keyboard (titles and people), "Who's watching?" as it starts
+when the household has more than one profile, and Settings with the
+profile's audio and subtitle defaults, Switch profile, Sort libraries,
+Switch server and Sign out. The Options key (*) on a title offers Mark as watched or
 unwatched, Add to or Remove from My List, Add to playlist (a new one
 named on the keyboard too), Remove from Continue Watching and Go to show. The player plays files as they are whenever the
 Roku can (it reports what it decodes, from `roDeviceInfo`), HLS otherwise,
@@ -220,6 +221,20 @@ Rules the code keeps:
   are asked for beside it, and each row shows as it comes, in that order.
   Down past the buttons slides the page up to the rows, Up from the first
   row (or Back) slides it down again.
+- "Who's watching?", as the other TVs ask it: as the app starts on a
+  server whose household had more than one profile when last asked (Home
+  asks `GET /api/oauth/profiles` once, the registry's `household`
+  section keeps the count), and from Settings → Switch profile. OK on a
+  profile switches to it with the switch-profile grant (docs/API.md),
+  after its PIN (Roku's PIN pad) for one that has one; the profile signed
+  in goes on, its PIN asked first at a start, unless a sign-in with a
+  code chose it in the browser. A profile that needs its password is
+  signed in to with a code instead, chosen in the browser, as apps never
+  see passwords. The switch spends the refresh token, so it never runs
+  beside a refresh: one asked for while a refresh is under way waits for
+  it, and requests meanwhile wait for the new pair. Switched, the app
+  starts again at Home, everything as that profile sees it. A sign-in
+  from before the app asked for `profiles` says to sign in again.
 - Playlists (Home's menu) are the profile's own, as tiles of their first
   entry's picture. A playlist's page plays its entries one after the
   other from the top, shuffled, or from the entry OK is pressed on: the
@@ -331,7 +346,7 @@ to the store.
 
 ## Not yet
 
-- Music libraries, "Who's watching?" and switching profiles.
+- Music libraries.
 - Hearing what other devices change at once: Home asks again once its rows
   are a minute old.
 - Audio other than the file's default played as it is: reporting

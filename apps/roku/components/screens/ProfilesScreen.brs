@@ -1,0 +1,189 @@
+' "Who's watching?" (GET /api/oauth/profiles), as the other TVs ask it: OK
+' on a profile switches to it (the switch-profile grant, through the API
+' task), after its PIN for one that has one; the one signed in goes on,
+' its PIN asked first at a start. A profile that needs its password is
+' signed in to with a code, chosen in the browser. Shown as the app
+' starts when the household has more than one profile, and from Settings.
+
+sub init()
+    m.profiles = m.top.findNode("profiles")
+    m.message = m.top.findNode("message")
+    m.buttons = m.top.findNode("buttons")
+    m.started = false
+    m.list = []
+    ' The profile a PIN is being typed for, and the dialog.
+    m.picked = invalid
+    m.dialog = invalid
+    m.busy = false
+    m.profiles.observeField("itemSelected", "onPicked")
+    m.buttons.observeField("buttonSelected", "onButton")
+    m.top.observeField("active", "onActive")
+end sub
+
+sub onActive()
+    if not m.top.active then return
+    if not m.started
+        m.started = true
+        load()
+    end if
+    if m.list.Count() > 0
+        m.profiles.setFocus(true)
+    else if m.buttons.visible
+        m.buttons.setFocus(true)
+    else
+        m.top.setFocus(true)
+    end if
+end sub
+
+' A sign-in from before the app asked to switch profiles can't list them:
+' signing in again, choosing the profile in the browser, does instead.
+sub load()
+    if not authAllows(m.global.session.scope, "profiles")
+        showMessage("This sign-in can't switch profiles: sign in again, and choose the profile in the browser.", ["Sign in again"])
+        return
+    end if
+    showMessage("Loading…", [])
+    uiGet("/api/oauth/profiles", "onProfiles")
+end sub
+
+sub onProfiles(event as object)
+    answer = event.getData()
+    if not answer.ok
+        if answer.error = "signed_out" then return
+        message = answer.message
+        if answer.status = 403 then message = "This sign-in can't switch profiles: sign in again, and choose the profile in the browser."
+        showMessage(message, ["Try again", "Sign in again"])
+        return
+    end if
+    m.list = profTiles(answer.data, m.global.session.server)
+    uiKeepHousehold(m.list.Count())
+    if m.list.Count() = 0
+        showMessage("No profiles to choose from.", ["Try again", "Sign in again"])
+        return
+    end if
+    shown = m.list.Count()
+    if shown > 6 then shown = 6
+    m.profiles.numColumns = shown
+    m.profiles.translation = [(1920 - shown * 220 - (shown - 1) * 48) / 2, 400]
+    m.profiles.content = nodesContent(m.list)
+    for i = 0 to m.list.Count() - 1
+        if m.list[i].current then m.profiles.jumpToItem = i
+    end for
+    showMessage("", [])
+    if m.top.isInFocusChain() then m.profiles.setFocus(true)
+end sub
+
+sub showMessage(text as string, buttons as object)
+    m.message.text = text
+    m.buttons.buttons = buttons
+    m.buttons.visible = buttons.Count() > 0
+    if buttons.Count() > 0 and m.top.isInFocusChain() then m.buttons.setFocus(true)
+end sub
+
+sub onButton(event as object)
+    if m.buttons.buttons[event.getData()] = "Try again"
+        load()
+    else
+        uiNavigate({ to: "link" })
+    end if
+end sub
+
+sub onPicked(event as object)
+    if m.busy then return
+    profile = m.list[event.getData()]
+    m.message.text = ""
+    if profile.current
+        ' At a start, the PIN of the profile signed in is asked too.
+        if profile.needs = "pin" and not m.top.getScene().profileChosen
+            askPin(profile, "")
+        else
+            done()
+        end if
+    else if profile.needs = "none"
+        switchTo(profile, "")
+    else if profile.needs = "pin"
+        askPin(profile, "")
+    else if profile.needs = "password"
+        askSignIn(profile)
+    else
+        m.message.text = "This profile can't be used from the app."
+    end if
+end sub
+
+sub askPin(profile as object, problem as string)
+    m.picked = profile
+    dialog = CreateObject("roSGNode", "StandardPinPadDialog")
+    dialog.title = "PIN for " + profile.title
+    lines = []
+    if problem <> "" then lines.Push(problem)
+    dialog.message = lines
+    dialog.buttons = ["OK", "Cancel"]
+    dialog.observeField("buttonSelected", "onPin")
+    m.dialog = dialog
+    m.top.getScene().dialog = dialog
+end sub
+
+sub onPin(event as object)
+    pin = ""
+    if m.dialog <> invalid then pin = httpString(m.dialog.pin)
+    closeDialog()
+    if event.getData() <> 0 or m.picked = invalid then return
+    if Len(pin) < 4
+        askPin(m.picked, "PINs are 4 to 8 digits.")
+        return
+    end if
+    switchTo(m.picked, pin)
+end sub
+
+' The profile needs its password, which apps never see: sign in to it with
+' a code instead, choosing it in the browser.
+sub askSignIn(profile as object)
+    dialog = CreateObject("roSGNode", "StandardMessageDialog")
+    dialog.title = profile.title
+    dialog.message = ["This profile needs its password: sign in to it with a code, and choose it in the browser."]
+    dialog.buttons = ["Sign in with a code", "Cancel"]
+    dialog.observeField("buttonSelected", "onSignIn")
+    m.dialog = dialog
+    m.top.getScene().dialog = dialog
+end sub
+
+sub onSignIn(event as object)
+    closeDialog()
+    if event.getData() = 0 then uiNavigate({ to: "link" })
+end sub
+
+sub closeDialog()
+    if m.dialog <> invalid then m.dialog.close = true
+    m.dialog = invalid
+end sub
+
+sub switchTo(profile as object, pin as string)
+    m.busy = true
+    m.picked = profile
+    m.message.text = "Switching to " + profile.title + "…"
+    uiRequest({ op: "switchProfile", profile: profile.itemId, pin: pin }, "onSwitched")
+end sub
+
+sub onSwitched(event as object)
+    m.busy = false
+    answer = event.getData()
+    if answer.ok
+        done()
+        return
+    end if
+    m.message.text = ""
+    if answer.error = "signed_out" then return
+    if answer.error = "wrong_pin"
+        askPin(m.picked, answer.message)
+    else if answer.error = "browser"
+        askSignIn(m.picked)
+    else
+        m.message.text = answer.message
+    end if
+end sub
+
+' The profile chosen: Home, everything as that profile sees it.
+sub done()
+    m.top.getScene().profileChosen = true
+    uiNavigate({ to: "home", reset: true })
+end sub

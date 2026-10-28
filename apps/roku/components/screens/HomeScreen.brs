@@ -19,6 +19,9 @@ sub init()
     ' Orders saved at the last load: the menu and the rows follow a new one.
     m.movedSeen = 0
     m.lastFocus = m.menu
+    ' How many profiles the household has is asked once, for "Who's
+    ' watching?" at the next start.
+    m.householdAsked = false
     m.menu.observeField("itemSelected", "onMenu")
     m.rows.observeField("rowItemSelected", "onTile")
     m.top.observeField("active", "onActive")
@@ -67,8 +70,17 @@ sub load()
     m.loadedAgo.Mark()
     if m.rowKeys.Count() = 0 then showMessage("Loading…")
     uiGet("/api/libraries", "onLibraries")
+    if not m.householdAsked and authAllows(m.global.session.scope, "profiles")
+        m.householdAsked = true
+        uiGet("/api/oauth/profiles", "onHousehold")
+    end if
     m.rowsAsked = m.rowsAsked + 1
     uiRequest({ method: "GET", path: "/api/hubs/home", build: "rows", known: m.rowSigs, asked: m.rowsAsked }, "onRows")
+end sub
+
+sub onHousehold(event as object)
+    answer = event.getData()
+    if answer.ok and GetInterface(answer.data, "ifArray") <> invalid then uiKeepHousehold(answer.data.Count())
 end sub
 
 sub onLibraries(event as object)

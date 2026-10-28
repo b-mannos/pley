@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Settings: the server and the profile this TV uses; the profile's audio
      and subtitle defaults and this Roku's quality, chosen in a panel at
-     the right; sort the libraries, switch server or sign out. -->
+     the right; switch profile, sort the libraries, switch server or sign
+     out. -->
 <component name="SettingsScreen" extends="Group">
     <interface>
         <field id="route" type="string" />

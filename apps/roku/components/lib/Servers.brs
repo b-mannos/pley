@@ -120,8 +120,9 @@ function serversInsert(list as object, index as integer, value as object) as obj
 end function
 
 ' The first screen: choosing a server, signing in to it, or Home.
-function serversStartScreen(current as string, signedIn as boolean) as string
+function serversStartScreen(current as string, signedIn as boolean, askWho = false as boolean) as string
     if current = "" then return "servers"
     if not signedIn then return "link"
+    if askWho then return "profiles"
     return "home"
 end function

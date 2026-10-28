@@ -11,6 +11,7 @@ const USER_AGENT = /^pleyRoku\/\d+\.\d+\.\d+ \(Roku OS [^;()]+; [^;()]+\)$/;
 const CLIENT_ID = "https://hhaidar.github.io/pley/oauth/roku.json";
 const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 const SCOPE = "library play playlists profiles";
+const SWITCH_GRANT = "urn:pley:params:oauth:grant-type:switch-profile";
 // A new code for each sign-in.
 const USER_CODES = ["BCDF-GHJK", "LMNP-QRST"];
 
@@ -255,6 +256,27 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
         refresh.set(token, "used");
         return json(200, issue(accessSeconds));
       }
+      // Another profile of the household: its tokens, the old ones stopped
+      // at once (docs/API.md). Never beside a refresh: both spend the
+      // refresh token.
+      if (form.get("grant_type") === SWITCH_GRANT) {
+        const token = form.get("refresh_token");
+        refreshing += 1;
+        if (refreshing > 1) problems.push("a profile switch beside a refresh");
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        refreshing -= 1;
+        if (refresh.get(token) !== "fresh") {
+          problems.push(`refresh token ${token} used again`);
+          return oauthError("invalid_grant", "refresh token used again: the app's access is ended");
+        }
+        const profile = fixture.household.find((p) => String(p.id) === form.get("profile"));
+        if (!profile) return json(400, { error: "invalid_grant", reason: "not_allowed", error_description: "not a profile of the household" });
+        refresh.set(token, "used");
+        access.clear();
+        fixture.switched.push(profile.id);
+        fixture.household = fixture.household.map((p) => ({ ...p, current: p.id === profile.id }));
+        return json(200, issue(accessSeconds));
+      }
       return oauthError("unsupported_grant_type", "");
     }
     if (url.pathname === "/api/oauth/revoke" && req.method === "POST") return json(200);
@@ -320,6 +342,9 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
         ],
       });
     }
+    // The household: two profiles until the walk switched, then one, so the
+    // second start opens on Home, as the walk times it.
+    if (path === "/api/oauth/profiles") return json(200, fixture.switched.length ? fixture.household.filter((p) => p.current) : fixture.household);
     // Playlists: the profile's one, its entries, taking one out.
     const playlist = () => ({
       id: 1, title: "Road trip", kind: "video", item_count: fixture.playlistEntries.length, duration_ms: 9300000,
@@ -450,7 +475,9 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     return json(404, { code: "not_found", message: `nothing at ${path}` });
   });
 
-  const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], myList: [1003], marks: [], playlistEntries: [[1, 1000], [2, 101], [3, 102]], playlistRemoved: [], problems, requests, progress, closed, close: () => server.close() };
+  const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], myList: [1003], marks: [], playlistEntries: [[1, 1000], [2, 101], [3, 102]], playlistRemoved: [],
+    household: [{ id: 1, name: "Anna", avatar_url: null, avatar_color: "#38bdf8", current: true, needs: "none" }, { id: 2, name: "Ben", avatar_url: null, avatar_color: "#f472b6", current: false, needs: "none" }],
+    switched: [], problems, requests, progress, closed, close: () => server.close() };
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       issuer = `http://127.0.0.1:${server.address().port}`;

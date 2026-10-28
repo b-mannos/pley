@@ -180,6 +180,8 @@ sub expired(text as string, problem as boolean)
 end sub
 
 sub signedIn()
+    ' The profile was chosen in the browser: no "Who's watching?" now.
+    m.top.getScene().profileChosen = true
     m.done = true
     m.request = invalid
     m.steps.visible = false

@@ -40,4 +40,6 @@ sub test_servers_choose_the_first_screen()
     tkEqual(serversStartScreen("", false), "servers")
     tkEqual(serversStartScreen("http://nas:7539", false), "link")
     tkEqual(serversStartScreen("http://nas:7539", true), "home")
+    tkEqual(serversStartScreen("http://nas:7539", true, true), "profiles", "the household's profiles first")
+    tkEqual(serversStartScreen("http://nas:7539", false, true), "link")
 end sub

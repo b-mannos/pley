@@ -71,8 +71,8 @@ sub useProfile(me as dynamic)
     showRows()
 end sub
 
-' The buttons: the defaults' rows, then Sort libraries, Switch server and
-' Sign out; the focus stays on the row it was on.
+' The buttons: the defaults' rows, then Switch profile, Sort libraries,
+' Switch server and Sign out; the focus stays on the row it was on.
 sub showRows()
     labels = []
     actions = []
@@ -83,7 +83,7 @@ sub showRows()
     ' This Roku's, kept on it: no server needed.
     labels.Push("Quality: " + aqLabel(aqChoice(playbackSection())))
     actions.Push("quality")
-    for each action in ["Sort libraries", "Switch server", "Sign out"]
+    for each action in ["Switch profile", "Sort libraries", "Switch server", "Sign out"]
         labels.Push(action)
         actions.Push(action)
     end for
@@ -114,6 +114,10 @@ sub onButton(event as object)
     end if
     if chosen = "Sort libraries"
         uiNavigate({ to: "sortLibraries" })
+        return
+    end if
+    if chosen = "Switch profile"
+        uiNavigate({ to: "profiles" })
         return
     end if
     if chosen = "Switch server"
