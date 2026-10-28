@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalResources
@@ -442,23 +443,30 @@ internal fun TvPlayerScreen(
 /**
  * Subtitles over the video: the server's and the file's own through the
  * player. Text stays inside the TV's safe area, its last line
- * [SUBTITLES_BOTTOM] above the bottom edge, and moves up above the
- * controls while they show; it keeps its size either way. Pictures (PGS,
+ * [SUBTITLES_BOTTOM] above the bottom edge, and glides up above the
+ * controls while they show, with them (their fade's time and easing), not
+ * a jump; it keeps its size and its lines either way, as only its drawing
+ * moves. Pictures (PGS,
  * VobSub) keep the places their frames give them on the whole screen.
  * The cues are collected inside, so they recompose nothing else.
  */
 @Composable
 private fun PlayerSubtitles(controller: PlaybackController, player: Player?, look: CaptionLook, lifted: Boolean) {
     val cues = controller.cues.collectAsState()
+    // Read in the drawing only: the lift redraws, nothing composes or lays out again.
+    val lift = animateFloatAsState(if (lifted) 1f else 0f, PleyMotion.overlay(reducedMotion()), label = "subtitles")
     ScreenCaptions(
         player = player,
         serverCues = cues,
         look = look,
         pictures = false,
-        bottomPadding = if (lifted) SUBTITLES_LIFTED else SUBTITLES_BOTTOM,
+        bottomPadding = SUBTITLES_BOTTOM,
         sidePadding = TvSafeArea.Horizontal,
         topPadding = TvSafeArea.Vertical,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer { translationY = -(SUBTITLES_LIFTED - SUBTITLES_BOTTOM).toPx() * lift.value }
+            .testTag(TAG_SUBTITLES_TEXT),
     )
     ScreenCaptions(player = player, serverCues = cues, look = look, pictures = true, bottomPadding = 0.dp, modifier = Modifier.fillMaxSize())
 }
@@ -505,3 +513,6 @@ internal val SUBTITLES_BOTTOM = TvSafeArea.Vertical + 13.dp
 internal val SUBTITLES_LIFTED = PleyTv.CanvasHeight - TIMES_TOP + 12.dp
 
 internal const val TAG_PLAYER = "pley.tv.player"
+
+/** The text subtitles' layer, which glides up above the controls. */
+internal const val TAG_SUBTITLES_TEXT = "pley.tv.player.subtitle-text"

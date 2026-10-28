@@ -2,6 +2,7 @@ package app.pley.android.ui.phone.player
 
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -25,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
@@ -36,6 +38,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.compose.PlayerSurface
 import androidx.media3.ui.compose.SURFACE_TYPE_SURFACE_VIEW
 import androidx.media3.ui.compose.state.rememberPresentationState
+import app.pley.android.designsystem.PleyMotion
+import app.pley.android.designsystem.reducedMotion
 import app.pley.android.player.PlaybackController
 import app.pley.android.player.PlayerPhase
 import app.pley.android.player.subtitles.CaptionLook
@@ -267,28 +271,29 @@ private val CAPTION_MARGIN = 20.dp
 private const val PLAYHEAD_MS = 250L
 
 /**
- * Text subtitles over the whole screen, lifted above the controls while
- * they show; picture subtitles (PGS) over the part of the picture on
- * screen, so they keep their place in Fit and stay in view when zoomed.
+ * Text subtitles over the whole screen, gliding up above the controls while
+ * they show, with them (their fade's time and easing), not a jump: only
+ * their drawing moves, so their lines stay as they are. Picture subtitles
+ * (PGS) over the part of the picture on screen, so they keep their place
+ * in Fit and stay in view when zoomed.
  */
 @Composable
 private fun Captions(state: PlayerScreenState, player: Player?, picture: PictureState, look: CaptionLook, inPip: Boolean) {
     PlayerProbe.composed?.invoke("captions")
     val cues = state.controller.cues.collectAsStateWithLifecycle()
     val lifted = state.controlsVisible && !state.locked && !inPip
-    // A little room under them, more above the controls; none in picture in picture's small window.
-    val clear = when {
-        inPip -> 4.dp
-        lifted -> ControlsLift + CAPTION_MARGIN
-        else -> CAPTION_MARGIN
-    }
+    // A little room under them (less in picture in picture's small window),
+    // and the controls' height more while they show, read in the drawing only.
+    val lift = animateFloatAsState(if (lifted) 1f else 0f, PleyMotion.overlay(reducedMotion()), label = "captions")
     ScreenCaptions(
         player = player,
         serverCues = cues,
         look = look,
         pictures = false,
-        bottomPadding = clear,
-        modifier = Modifier.fillMaxSize(),
+        bottomPadding = if (inPip) 4.dp else CAPTION_MARGIN,
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer { translationY = -ControlsLift.toPx() * lift.value },
     )
     ScreenCaptions(
         player = player,

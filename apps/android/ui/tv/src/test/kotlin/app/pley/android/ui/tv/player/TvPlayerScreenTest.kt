@@ -5,6 +5,7 @@ import android.view.KeyEvent as AndroidKeyEvent
 import android.view.View
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.getBoundsInRoot
 import kotlin.math.roundToInt
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
@@ -205,7 +206,7 @@ class TvPlayerScreenTest {
     }
 
     @Test
-    fun `text subtitles stay inside the safe area, above the controls while they show, at the same size`() {
+    fun `text subtitles stay inside the safe area, and glide above the controls while they show, at the same size`() {
         show(playing())
         val density = compose.activity.resources.displayMetrics.density
         fun px(dp: androidx.compose.ui.unit.Dp) = (dp.value * density).roundToInt()
@@ -216,8 +217,13 @@ class TvPlayerScreenTest {
         assertEquals(px(app.pley.android.designsystem.TvSafeArea.Horizontal), text.paddingRight)
         // Pictures (PGS) keep their frame's places over the whole screen.
         assertEquals(0, pictures.paddingBottom)
+        val resting = compose.onNodeWithTag(TAG_SUBTITLES_TEXT).getBoundsInRoot().top
         press(Key.DirectionUp)
-        assertEquals(px(SUBTITLES_LIFTED), subtitleViews().first().paddingBottom)
+        compose.mainClock.advanceTimeBy(1_000)
+        // Their lines stay as they were (the same padding), only drawn higher, by the controls' height.
+        assertEquals(px(SUBTITLES_BOTTOM), subtitleViews().first().paddingBottom)
+        val lifted = compose.onNodeWithTag(TAG_SUBTITLES_TEXT).getBoundsInRoot().top
+        assertEquals((SUBTITLES_LIFTED - SUBTITLES_BOTTOM).value, (resting - lifted).value, 0.5f)
         assertTrue(SUBTITLES_LIFTED > app.pley.android.designsystem.PleyTv.CanvasHeight - TIMES_TOP)
     }
 
