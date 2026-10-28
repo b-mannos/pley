@@ -244,7 +244,7 @@ ${form.tvdb_pin}`}
               </Row>
               <Row
                 label="Previews for whole libraries"
-                hint="After each scan, make missing seek previews and chapter pictures, one file at a time, pausing during transcodes."
+                hint="After each scan, make missing seek previews and chapter pictures."
               >
                 <Toggle
                   checked={form.previews_in_background}

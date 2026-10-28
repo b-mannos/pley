@@ -99,10 +99,6 @@ export function StorageSection() {
               Back up now
             </Button>
           </div>
-          <p className="mb-2 text-xs text-muted">
-            {health?.ok ? "The database passed its check at start. " : ""}A checked copy is made every day; the last
-            three are kept.
-          </p>
           {backups.isPending ? (
             <Skeleton className="h-10" />
           ) : list.length === 0 ? (
