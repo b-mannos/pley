@@ -20,7 +20,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ "$skip_web" = 0 ]; then
-    (cd "$root" && { [ -d node_modules ] || npm ci --no-fund --no-audit; } && npm run build -w apps/web)
+    (cd "$root" && { [ -d node_modules ] || bun install --frozen-lockfile; } && bun run --cwd apps/web build)
 fi
 touch "$root/apps/server/src/web.rs"   # re-embed the fresh UI build
 

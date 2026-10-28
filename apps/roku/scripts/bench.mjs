@@ -6,7 +6,7 @@
 // BrightScript: these numbers compare versions of the code, they don't
 // predict a device.
 //
-//   node scripts/bench.mjs
+//   bun scripts/bench.mjs
 
 import { createRequire } from "node:module";
 import { readFileSync, readdirSync } from "node:fs";

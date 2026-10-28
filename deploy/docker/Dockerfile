@@ -11,18 +11,18 @@
 # covers hardware transcoding.
 
 # ---- web app ----------------------------------------------------------------
-FROM node:24-trixie-slim AS web
+FROM oven/bun:1.4.4-slim AS web
 # The commit apps show beside the version (scripts/commit.mjs): the build
 # context has no .git.
 ARG PLEY_COMMIT=unknown
 ENV PLEY_COMMIT=$PLEY_COMMIT
 WORKDIR /src
-COPY VERSION package.json package-lock.json ./
+COPY VERSION package.json bun.lock bunfig.toml ./
 COPY scripts/commit.mjs scripts/commit.d.mts scripts/
 COPY apps/web/package.json apps/web/
-RUN npm ci --no-fund --no-audit
+RUN bun install --frozen-lockfile
 COPY apps/web apps/web
-RUN npm run build
+RUN bun run build
 
 # ---- Rust binaries ----------------------------------------------------------
 FROM rust:1-trixie AS build

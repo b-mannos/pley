@@ -5,12 +5,12 @@
   "description": "pley for LG TVs: a webOS web app that plays through LG's own media pipeline.",
   "type": "module",
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "package": "node scripts/build.mjs && node scripts/package.mjs",
+    "build": "bun scripts/build.mjs",
+    "package": "bun scripts/build.mjs && bun scripts/package.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "check": "tsc -p tsconfig.json && vitest run",
-    "serve": "node scripts/build.mjs --dev && node scripts/serve.mjs"
+    "serve": "bun scripts/build.mjs --dev && bun scripts/serve.mjs"
   },
   "dependencies": {
     "pley-tv": "*"

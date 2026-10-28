@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Renders the pictures pley's Kodi screens are drawn with
 // (apps/kodi/plugin.video.pley/resources/skins/default/media), in the
 // Android TV app's look (docs/KODI.md, "pley's look"): its Lucide icons, read
@@ -10,7 +10,7 @@
 // White pictures are tinted by Kodi (colordiffuse); masks are drawn as
 // `diffuse` over artwork, which keeps their opaque parts.
 //
-//   node scripts/render-kodi-skin.mjs
+//   bun scripts/render-kodi-skin.mjs
 
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

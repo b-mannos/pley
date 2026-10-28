@@ -16,8 +16,8 @@ $version = (Select-String -Path "$root/apps/server/Cargo.toml" -Pattern '^versio
 if (-not $SkipWeb) {
     Push-Location $root
     try {
-        if (-not (Test-Path node_modules)) { npm ci --no-fund --no-audit; if ($LASTEXITCODE) { throw "npm ci failed" } }
-        npm run build -w apps/web
+        if (-not (Test-Path node_modules)) { bun install --frozen-lockfile; if ($LASTEXITCODE) { throw "bun install failed" } }
+        bun run --cwd apps/web build
         if ($LASTEXITCODE) { throw "web build failed" }
     } finally {
         Pop-Location

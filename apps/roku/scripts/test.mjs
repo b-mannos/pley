@@ -3,8 +3,8 @@
 // no SceneGraph. Every `sub test_…()` in tests/*.test.brs is a test; this
 // script writes the Main that runs them all, then reads the results.
 //
-//   node scripts/test.mjs            failures and the count
-//   node scripts/test.mjs --verbose  every test
+//   bun scripts/test.mjs            failures and the count
+//   bun scripts/test.mjs --verbose  every test
 
 import { createRequire } from "node:module";
 import { readdirSync, readFileSync } from "node:fs";

@@ -5,8 +5,8 @@
   "description": "pley for Samsung TVs: a Tizen web app that plays through Samsung's own player (AVPlay).",
   "type": "module",
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "package": "node scripts/build.mjs && node scripts/package.mjs",
+    "build": "bun scripts/build.mjs",
+    "package": "bun scripts/build.mjs && bun scripts/package.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "check": "tsc -p tsconfig.json && vitest run"

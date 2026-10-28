@@ -11,6 +11,5 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const out = join(root, "out");
 mkdirSync(out, { recursive: true });
 const args = [join(root, "dist"), "--outdir", out, "--no-minify"];
-// Windows runs the CLI's .cmd through cmd.
-if (process.platform === "win32") execFileSync("cmd.exe", ["/d", "/c", "ares-package.cmd"].concat(args), { stdio: "inherit" });
-else execFileSync("ares-package", args, { stdio: "inherit" });
+// Bun's shim for the CLI is a program on Windows too (node_modules/.bin/ares-package.exe).
+execFileSync("ares-package", args, { stdio: "inherit" });

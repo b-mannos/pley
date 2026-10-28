@@ -1,6 +1,6 @@
 // Builds pley for LG TVs into dist/: the app, its fonts, icons and launch
 // picture (scripts/render-icons.mjs draws them), and appinfo.json with the
-// package's version. `npm run package` makes the .ipk from it.
+// package's version. `bun run package` makes the .ipk from it.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

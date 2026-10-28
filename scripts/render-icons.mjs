@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Renders the icons the web app, the desktop app and the TV apps (Samsung,
 // LG, Kodi, Roku) ship from the logo (apps/web/public/favicon.svg), through
 // a headless Chrome or Edge:
@@ -39,7 +39,7 @@
 // (svg-render.mjs).
 // The banner's wordmark is in the system's bold sans (Roboto, else Segoe UI).
 //
-//   node scripts/render-icons.mjs
+//   bun scripts/render-icons.mjs
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

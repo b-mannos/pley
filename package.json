@@ -11,18 +11,22 @@
     "apps/webos"
   ],
   "scripts": {
-    "dev": "npm run dev -w apps/web",
-    "build": "npm run build -w apps/web",
-    "typecheck": "npm run typecheck -w apps/web",
-    "lint": "npm run lint -w apps/web",
-    "test": "npm test -w apps/web",
-    "check": "npm run check -w apps/web && npm run check -w apps/desktop",
-    "desktop": "npm run dev -w apps/desktop",
-    "tv:check": "npm run check -w packages/tv && npm run check -w apps/tizen && npm run check -w apps/webos",
-    "tizen": "npm run package -w apps/tizen",
-    "webos": "npm run package -w apps/webos"
+    "dev": "bun run --cwd apps/web dev",
+    "build": "bun run --cwd apps/web build",
+    "typecheck": "bun run --cwd apps/web typecheck",
+    "lint": "bun run --cwd apps/web lint",
+    "test": "bun run --cwd apps/web test",
+    "check": "bun run --cwd apps/web check && bun run --cwd apps/desktop check",
+    "desktop": "bun run --cwd apps/desktop dev",
+    "tv:check": "bun run --cwd packages/tv check && bun run --cwd apps/tizen check && bun run --cwd apps/webos check",
+    "tizen": "bun run --cwd apps/tizen package",
+    "webos": "bun run --cwd apps/webos package"
   },
   "engines": {
-    "node": ">=22"
+    "bun": ">=1.4"
+  },
+  "packageManager": "bun@1.4.4",
+  "overrides": {
+    "body-parser": "^2.4.0"
   }
 }

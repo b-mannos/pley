@@ -85,14 +85,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          node-version-file: .nvmrc
+          bun-version-file: package.json
       - name: Every manifest and the tag agree
         env:
           TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
         # No argument at all off a tag.
-        run: node scripts/version.mjs check ${TAG:+"$TAG"}
+        run: bun scripts/version.mjs check ${TAG:+"$TAG"}
 
   # The Android app for phones, tablets, Android TV and Fire TV: the APK to
   # sideload and the bundle for Google Play, signed with the release key from
@@ -163,17 +163,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          node-version-file: .nvmrc
+          bun-version-file: package.json
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
       - name: Linux libraries
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
-      - run: npm ci --no-fund --no-audit
-      - run: npm run build -w apps/desktop
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd apps/desktop build
       # Named as the server's are: pley-desktop-<version>-<os>-<arch>, with
       # the installer's own ending (Tauri's names differ by format).
       - name: Collect the installers
@@ -201,7 +201,7 @@ jobs:
 
   # pley for LG TVs, as a TV in Developer Mode installs it (LG signs store
   # builds itself). Samsung's .wgt needs a Samsung certificate, which only
-  # its owner can make: `npm run package -w apps/tizen` (docs/TV_PLATFORMS.md).
+  # its owner can make: `bun run --cwd apps/tizen package` (docs/TV_PLATFORMS.md).
   tv:
     name: LG TV app
     needs: [ci, version]
@@ -211,11 +211,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          node-version-file: .nvmrc
-      - run: npm ci --no-fund --no-audit
-      - run: npm run package -w apps/webos
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd apps/webos package
       - run: |
           mkdir -p dist
           cp apps/webos/out/*.ipk "dist/pley-lg-$(cat VERSION).ipk"
@@ -256,11 +256,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          node-version-file: .nvmrc
-      - run: npm ci --no-fund --no-audit
-      - run: npm run package
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run package
       - run: |
           version=$(awk -F= '/^major_version=/{a=$2} /^minor_version=/{b=$2} /^build_version=/{c=$2} END{print a "." b "." c}' manifest)
           mkdir -p "$GITHUB_WORKSPACE/dist"
