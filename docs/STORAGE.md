@@ -6,8 +6,12 @@ artwork, which pley never moves or changes.
 
 ```
 <data>/
+  pley.toml                  the config file (unless --config names another):
+                             Settings → Network saves where pley listens there
   pley.db                    the database (SQLite, WAL)
   pley.lock                  locked while pley runs: one server per data folder
+  plex-machine-id            the compatibility API's server id, kept so tools
+                             know the server again
   secret.key                 the key that encrypts authenticator secrets
                              (two-step sign-in): keep it with the database
   metadata/blobs/ab/<sha256>.<ext>
@@ -21,6 +25,10 @@ artwork, which pley never moves or changes.
                              made before the last upgrade
   cache/                     resized images, subtitles, fingerprints; safe to
                              delete, old files are removed (see Clean-up)
+  transcode/                 the managed transcoder's work folder (stream
+                             segments, its own caches, converted downloads;
+                             `transcode_dir` in pley.toml puts it elsewhere).
+                             The transcoder prunes it: docs/TRANSCODER.md
   logs/pley.log              the server log, then pley.log.1 to .3 (10 MB each)
 ```
 
@@ -105,7 +113,7 @@ keep the cache from growing for ever:
 |---|---|---|
 | `cache/images` | resized pictures | 30 days |
 | `cache/covers` | albums known to have no embedded cover | 30 days |
-| `cache/subtitles` | subtitles converted to WebVTT | 90 days |
+| `cache/subtitles` | subtitles converted to WebVTT, and picture subtitles copied into Matroska (`.mks`) | 90 days |
 | `cache/fingerprints` | audio fingerprints (intro and credits detection) | 90 days |
 
 A file that is needed again later is simply made again. Subtitles are written
