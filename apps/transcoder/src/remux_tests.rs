@@ -302,12 +302,13 @@ fn profile_7_is_remuxed_as_8_1_without_hdr10_plus() {
     let video_plan = plan.video_plan(&media, None).unwrap();
     assert_eq!((video_plan.dolby_vision, video_plan.hdr10plus_stripped), (Some(DolbyVisionMode::To81), true));
 
-    // The master playlist says Dolby Vision 8.1 over HDR10.
+    // The master playlist says Dolby Vision 8.1 over HDR10, at the level
+    // its 640×360 at 24 fps needs (1), though the stream says 6.
     let master = hls::master_playlist(&plan, &media);
     let level = media.video().unwrap().level.unwrap();
     assert!(
         master.contains(&format!(
-            "CODECS=\"hvc1.2.4.L{level}.B0,ec-3\",SUPPLEMENTAL-CODECS=\"dvh1.08.06/db1p\",RESOLUTION=640x360,\
+            "CODECS=\"hvc1.2.4.L{level}.B0,ec-3\",SUPPLEMENTAL-CODECS=\"dvh1.08.01/db1p\",RESOLUTION=640x360,\
              FRAME-RATE=24.000,VIDEO-RANGE=PQ\nindex.m3u8\n"
         )),
         "{master}"
@@ -423,7 +424,8 @@ async fn jobs_edit_segments_before_serving_them() {
         let segment = jobs.segment(&job, n).await.unwrap();
         assert_made_8_1(&segment);
     }
-    assert!(job.master_playlist().contains("SUPPLEMENTAL-CODECS=\"dvh1.08.06/db1p\""), "{}", job.master_playlist());
+    // At the level its 640×360 needs, as above.
+    assert!(job.master_playlist().contains("SUPPLEMENTAL-CODECS=\"dvh1.08.01/db1p\""), "{}", job.master_playlist());
     assert!(job.status().warnings.is_empty(), "{:?}", job.status().warnings);
     jobs.shutdown().await;
 }
