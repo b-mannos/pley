@@ -103,6 +103,7 @@ fn file(container: &str) -> FileRow {
         media_info: None,
         external_subs: "[]".into(),
         fingerprint: None,
+        added_subs: "[]".into(),
     }
 }
 

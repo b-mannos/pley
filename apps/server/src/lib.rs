@@ -44,6 +44,7 @@ pub mod setup;
 pub mod state;
 pub mod store;
 pub mod streams;
+pub mod subtitles;
 pub mod transcoder;
 pub mod trickplay;
 pub mod two_step;

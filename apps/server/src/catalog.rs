@@ -11,6 +11,7 @@ use sqlx::FromRow;
 use crate::db::Db;
 use crate::events::{EventBus, ServerEvent};
 use crate::library::sidecar::ExternalSub;
+use crate::subtitles::AddedSub;
 use crate::util::now;
 
 /// The requesting user and their restrictions. Item queries bind the user id
@@ -397,11 +398,27 @@ pub struct FileRow {
     pub external_subs: String,
     /// See [`crate::store::fingerprint`]; `None` until computed after a scan.
     pub fingerprint: Option<String>,
+    /// JSON [`AddedSub`]s, from [`added_subs_column!`].
+    pub added_subs: String,
 }
 
-const FILE_SELECT: &str =
+/// The `added_subs` column of [`FileRow`] in a select of `media_files`.
+#[macro_export]
+macro_rules! added_subs_column {
+    () => {
+        "(SELECT json_group_array(json_object('id', a.id, 'index', a.idx, 'codec', a.codec,
+        'language', a.language, 'title', a.title, 'forced', json(iif(a.forced, 'true', 'false')),
+        'sdh', json(iif(a.sdh, 'true', 'false')), 'added_by', a.added_by) ORDER BY a.idx)
+        FROM added_subtitles a WHERE a.file_id = media_files.id) AS added_subs"
+    };
+}
+
+const FILE_SELECT: &str = concat!(
     "SELECT id, item_id, library_id, path, size, mtime, container, duration_ms, bitrate, width, height,
-    video_codec, audio_codec, media_info, external_subs, fingerprint FROM media_files";
+    video_codec, audio_codec, media_info, external_subs, fingerprint, ",
+    added_subs_column!(),
+    " FROM media_files"
+);
 
 impl FileRow {
     pub fn media_info(&self) -> Option<MediaInfo> {
@@ -412,13 +429,19 @@ impl FileRow {
         serde_json::from_str(&self.external_subs).unwrap_or_default()
     }
 
-    /// Embedded streams followed by sidecar subtitles.
+    /// Subtitles people added ([`crate::subtitles`]), by index.
+    pub fn added_subs(&self) -> Vec<AddedSub> {
+        serde_json::from_str(&self.added_subs).unwrap_or_default()
+    }
+
+    /// Embedded streams followed by sidecar subtitles, then added ones.
     pub fn streams(&self) -> Vec<MediaStream> {
         self.streams_of(self.media_info().map(|m| m.streams).unwrap_or_default())
     }
 
     fn streams_of(&self, mut streams: Vec<MediaStream>) -> Vec<MediaStream> {
         streams.extend(self.external_subs().iter().map(ExternalSub::to_stream));
+        streams.extend(self.added_subs().iter().map(AddedSub::to_stream));
         streams
     }
 

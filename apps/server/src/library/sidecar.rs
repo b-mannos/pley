@@ -15,8 +15,11 @@ use serde::{Deserialize, Serialize};
 
 use super::walk::{IMAGE_EXTENSIONS, SUBTITLE_EXTENSIONS};
 
-/// External subtitle streams get indexes from this value up.
+/// External subtitle streams get indexes from this value up, below
+/// [`crate::subtitles::ADDED_INDEX_BASE`].
 pub const EXTERNAL_INDEX_BASE: i64 = 1000;
+/// The most subtitle files of a video that are listed.
+const MAX_SUBTITLE_FILES: usize = (crate::subtitles::ADDED_INDEX_BASE - EXTERNAL_INDEX_BASE) as usize;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExternalSub {
@@ -178,6 +181,7 @@ fn describe(mut found: Vec<Tagged>) -> Vec<ExternalSub> {
     found.dedup_by(|a, b| a.0 == b.0);
     found
         .into_iter()
+        .take(MAX_SUBTITLE_FILES)
         .enumerate()
         .filter_map(|(i, (path, tags))| {
             let ext = path.extension()?.to_string_lossy().to_lowercase();

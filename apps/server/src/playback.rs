@@ -320,6 +320,13 @@ pub struct SubtitleTrack {
     pub external: bool,
     pub text_based: bool,
     pub url: Option<String>,
+    /// Added by someone (uploaded; see
+    /// [`crate::subtitles`]), external too.
+    pub added: bool,
+    /// An added track this user may delete (an administrator, or whoever
+    /// added it); left out otherwise.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub deletable: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1276,6 +1283,8 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     };
     let subtitle = burn.map(|s| {
         if s.external {
+            // An added track's file is in the data folder: the caller, which
+            // knows where that is, names it ([`crate::subtitles::AddedSub::path`]).
             let path = file.external_subs().into_iter().find(|e| e.index == s.index).map(|e| e.path);
             SubtitleBurnRequest { stream_index: None, external_path: path }
         } else {
@@ -1337,6 +1346,8 @@ pub fn subtitle_tracks(file_id: i64, streams: &[MediaStream]) -> Vec<SubtitleTra
                 external: s.external,
                 text_based: text,
                 url: text.then(|| format!("/api/files/{file_id}/subtitles/{}.vtt", s.index)),
+                added: s.added,
+                deletable: false,
             }
         })
         .collect()
@@ -2191,6 +2202,7 @@ mod tests {
             media_info: None,
             external_subs: "[]".into(),
             fingerprint: None,
+            added_subs: "[]".into(),
         }
     }
 

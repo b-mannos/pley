@@ -14,6 +14,7 @@ mod oauth;
 mod people;
 pub(crate) mod playback;
 mod playlists;
+mod subtitles;
 mod two_step;
 mod watchlist;
 
@@ -111,6 +112,11 @@ pub fn router(state: AppState) -> Router {
         .route("/items/{id}/analyze", post(items::analyze))
         .route("/items/{id}/images/{kind}", get(items::image))
         .route("/items/{id}/collections", get(collections::for_item))
+        .route(
+            "/items/{id}/subtitles",
+            post(subtitles::add).layer(DefaultBodyLimit::max(crate::subtitles::MAX_BYTES + 64 * 1024)),
+        )
+        .route("/items/{id}/subtitles/{index}", delete(subtitles::delete))
         .route("/people/{id}", get(people::get))
         .route("/people/{id}/photo", get(people::photo))
         .route("/history", get(history::list))

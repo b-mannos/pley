@@ -148,8 +148,8 @@ pub async fn part_file(
 /// fetch those here).
 const MAX_SIDECAR_BYTES: u64 = 64 * 1024 * 1024;
 
-/// `/library/streams/{id}`: a subtitle stream (sidecar files as they are,
-/// embedded text subtitles converted to WebVTT).
+/// `/library/streams/{id}`: a subtitle stream (sidecar files and added
+/// subtitles as they are, embedded text subtitles converted to WebVTT).
 pub async fn stream_file(
     State(state): State<AppState>,
     PlexUser(user): PlexUser,
@@ -158,6 +158,12 @@ pub async fn stream_file(
     let file = catalog::file(&state.db, id / 10_000).await?.ok_or(PlexError::NotFound)?;
     let index = meta::stream_index(file.id, id).ok_or(PlexError::NotFound)?;
     catalog::item(&state.db, user.id, file.item_id).await?.ok_or(PlexError::NotFound)?;
+    if index >= crate::subtitles::ADDED_INDEX_BASE {
+        let sub = file.added_subs().into_iter().find(|s| s.index == index).ok_or(PlexError::NotFound)?;
+        let path = sub.path(&state.config.added_subtitles_dir(), file.id);
+        let bytes = tokio::fs::read(&path).await.map_err(|_| PlexError::NotFound)?;
+        return Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], bytes).into_response());
+    }
     if index >= EXTERNAL_INDEX_BASE {
         // Only a subtitle file (not a link swapped in since the scan, to
         // pley's database or /dev/zero), and only one of subtitle size.

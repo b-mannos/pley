@@ -348,6 +348,11 @@ impl Config {
     pub fn media_dir(&self) -> PathBuf {
         self.data_dir.join("media")
     }
+
+    /// Subtitles people added, by media file (see [`crate::subtitles`]).
+    pub fn added_subtitles_dir(&self) -> PathBuf {
+        self.data_dir.join("subtitles")
+    }
 }
 
 impl Cli {

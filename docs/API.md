@@ -249,7 +249,8 @@ interface Chapter {
 }
 
 interface MediaStream {
-  index: number;                    // ffprobe stream index; external subtitle files use 1000+
+  index: number;                    // ffprobe stream index (below 1000); subtitle files next to the video 1000-8999,
+                                    // added subtitles 9000-9999 (see [Added subtitles](#added-subtitles))
   kind: "video" | "audio" | "subtitle";
   codec: string;
   language: string | null;          // ISO 639-2 as found in the file, e.g. "eng"
@@ -290,7 +291,8 @@ interface MediaStream {
   channel_layout?: string;
   sample_rate?: number;
   // subtitle
-  external?: boolean;               // sidecar file next to the media
+  external?: boolean;               // sidecar file next to the media, or added subtitles
+  added?: boolean;                  // added subtitles (uploaded): external too
   text_based?: boolean;             // srt/ass/webvtt/mov_text (true) vs pgs/vobsub (false, needs burn-in)
 }
 
@@ -308,9 +310,12 @@ interface SubtitleTrack {
   title: string | null;
   default: boolean;
   forced: boolean;
-  external: boolean;
+  external: boolean;                // a file next to the video, or added subtitles
   text_based: boolean;
   url: string | null;               // WebVTT url for text-based subs, null for image subs
+  added: boolean;                   // added subtitles (see [Added subtitles](#added-subtitles))
+  deletable?: true;                 // added subtitles this user may delete (an administrator, or whoever added
+                                    // them); left out otherwise
 }
 
 interface PlaybackInfo {
@@ -1000,6 +1005,46 @@ may open only some libraries see those, in that order.
 | POST | `/api/items/{id}/refresh` *(admin)* | – | `202` re-fetch metadata from the item's source (movies: TMDB; shows, seasons, episodes: the TV source; artists, albums, tracks: MusicBrainz). `400` when that source is off or lacks its key. |
 | POST | `/api/items/{id}/analyze` *(admin)* | – | `202` find the intro and credits again: a movie's chapters, or every episode of an episode's season, a season or a show. `400` for other kinds. |
 | GET | `/api/items/{id}/images/{poster\|backdrop\|thumb}` | query: `w=<px>` (optional resize, bucketed), `v=` (cache buster, ignored) | image bytes (`image/jpeg`), long-lived cache headers. Falls back to parent artwork (season → show). `404` if none. |
+| POST | `/api/items/{id}/subtitles` | `multipart/form-data` | `201` `SubtitleTrack`: subtitles added to the file (see [Added subtitles](#added-subtitles)) |
+| DELETE | `/api/items/{id}/subtitles/{index}` | – | `204`; an added track of the title, by an administrator or whoever added it |
+
+### Added subtitles
+
+Subtitles anyone who can see a movie, episode or extra adds to one of its
+files, uploaded from the web app. pley
+keeps them in its data folder (`subtitles/`, see docs/STORAGE.md), never
+next to the media, and every client gets them as it gets a subtitle file
+next to the video: an external text track (`external: true`, `text_based:
+true`, `added: true`) in `PlaybackInfo.subtitles` and the file's
+`MediaStream`s, with a WebVTT `url`, chosen by `subtitle_index` in `POST
+/api/playback` and `PUT /api/items/{id}/streams`, listed by the
+Plex-compatible API (`/library/streams/{id}` serves them as they are), and
+shown by the player like any text track (a transcode that is to draw one onto
+the video is given its file).
+
+Track indexes don't collide: a file's own tracks are below 1000 (FFmpeg
+opens no more streams), subtitle files next to the video take 1000 to 8999
+(in path order; more aren't listed) and added ones 9000 to 9999 (the
+Plex-compatible API's stream ids, `file_id × 10000 + index`, hold four
+digits). An added track's index is given once among the files of its title,
+counting on from the highest (the lowest free one once 9999 is taken), so
+`DELETE /api/items/{id}/subtitles/{index}` needs no file; ids are never given
+twice, so a new track never shows an old one's cached WebVTT.
+
+`POST /api/items/{id}/subtitles` adds a file: `multipart/form-data` with
+`file` (`.srt`, `.vtt`, `.ass` or `.ssa`, 2 MiB at most), `language` (a
+language code or English name: `en`, `eng`, `English`, `pt-BR`), and if
+need be `hearing_impaired` and `forced` (`true`/`false`) and `file_id`.
+Named after the file.
+
+The text is made UTF-8 (UTF-16 by its byte order mark, else UTF-8
+when it reads as such, else Windows-1252), checked to be the subtitles it
+says (SRT cues, WebVTT with its header and cues, ASS/SSA with events; a
+WebVTT file named `.srt` is taken as WebVTT), and its language kept as ISO
+639-2 where pley knows the language (`eng`), as other tracks have it. `400`
+when it isn't, `404` for a title the user can't see, `409` once a title has
+1000 added tracks. The answer is the new `SubtitleTrack`, `deletable` for its
+adder.
 
 ## Home & search
 
@@ -1890,7 +1935,7 @@ type ServerEvent =
 | PUT | `/api/system/transcode-dir` | `{ path: string \| null }` | the new `transcode_dir`: saved in the config file for the next start (`null`, or the default folder, removes `transcode_dir`). `400` for a relative path, a whole drive, the data folder itself, a folder Pley can't write in, and when the command line or the environment sets it |
 | GET | `/api/system/resources` | `since` | `{ available, interval_ms, cpus, memory_total, samples: [{ at, cpu, pley_cpu, memory, pley_memory }] }`: the processors' and memory's use, sampled every 2 s for the last five minutes, oldest first (only the samples after `since`, in Unix milliseconds, when given; `at` is in Unix milliseconds too). `cpu` and `pley_cpu` are shares of all the processors' time, 0–100; `memory` (in use on the machine, without what only caches files) and `pley_memory` (its processes' resident memory) bytes, `memory_total` the machine's, `cpus` its logical processors. Pley is the server and every process it started: a managed transcoder and its FFmpegs. `available` is false where the system can't be sampled (Windows, Linux and macOS can) |
 | GET | `/api/system/storage` | – | `{ blobs, blob_bytes, media_folders, media_bytes, cache_bytes }`: space used by stored pictures, generated media files and the cache (docs/STORAGE.md) |
-| POST | `/api/system/storage/clean` | – | `{ blobs_removed, media_folders_removed, bytes_freed, cache_files_removed, cache_bytes_freed }`: removes what nothing uses any more, and old cache files |
+| POST | `/api/system/storage/clean` | – | `{ blobs_removed, media_folders_removed, subtitles_removed, bytes_freed, cache_files_removed, cache_bytes_freed }`: removes what nothing uses any more (`subtitles_removed`: added subtitles whose media file went), and old cache files |
 | GET | `/api/system/backups` | – | `{ health: { ok, problem?, checked_at }, backups: { name, path, bytes, created_at }[] }`, newest first |
 | POST | `/api/system/backups` | – | the new backup (a checked `VACUUM INTO` copy; the last 3 are kept) |
 | GET | `/api/transcoder` | – | `TranscoderStatus` – live metrics of the transcoder component (all jobs, counters) |

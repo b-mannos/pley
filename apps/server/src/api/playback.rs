@@ -33,6 +33,7 @@ use crate::playback::{
 };
 use crate::state::AppState;
 use crate::streams;
+use crate::subtitles::ADDED_INDEX_BASE;
 use crate::webvtt;
 
 /// Length of HLS segments. Nothing plays before FFmpeg has written a whole
@@ -74,14 +75,25 @@ async fn decide_picked(
     streams: &[MediaStream],
     req: &mut PlaybackRequest,
 ) -> ApiResult<Decision> {
-    if req.audio_index.is_some() {
-        return Ok(decide(file, info, streams, req));
+    let mut decision = if req.audio_index.is_some() {
+        decide(file, info, streams, req)
+    } else {
+        let pref = streams::load(&state.db, user_id, streams::scope(row)).await?;
+        let defaults = streams::defaults(&state.db, user_id).await?;
+        decide_with_audio(file, info, streams, req, |out| {
+            streams::resolve(pref.as_ref(), &defaults, streams, Some(out)).audio
+        })
+    };
+    // An added track is burned in from its file in the data folder.
+    if let Some(burn) = decision.subtitle.as_mut()
+        && burn.stream_index.is_none()
+        && burn.external_path.is_none()
+        && let Some(sub) = decision.burn_index.and_then(|i| file.added_subs().into_iter().find(|s| s.index == i))
+    {
+        let path = sub.path(&state.config.added_subtitles_dir(), file.id);
+        burn.external_path = Some(path.to_string_lossy().into_owned());
     }
-    let pref = streams::load(&state.db, user_id, streams::scope(row)).await?;
-    let defaults = streams::defaults(&state.db, user_id).await?;
-    Ok(decide_with_audio(file, info, streams, req, |out| {
-        streams::resolve(pref.as_ref(), &defaults, streams, Some(out)).audio
-    }))
+    Ok(decision)
 }
 
 pub async fn start(
@@ -120,7 +132,11 @@ pub async fn start(
     let decision = decide_picked(&state, user.id, &row, &file, info.as_ref(), &streams, &mut req).await?;
     let mut reasons = decision.reasons.clone();
     let video_stream = info.as_ref().and_then(|i| i.video()).cloned();
-    let subtitles = subtitle_tracks(file.id, &streams);
+    let mut subtitles = subtitle_tracks(file.id, &streams);
+    let added = file.added_subs();
+    for track in subtitles.iter_mut().filter(|t| t.added) {
+        track.deletable = added.iter().any(|s| s.index == track.index && s.may_delete(&user));
+    }
     let start_ms = req.start_ms.unwrap_or(0).max(0);
     let client_id = req.client_id.clone().filter(|c| !c.is_empty() && c.len() <= 128);
 
@@ -1006,7 +1022,7 @@ pub async fn subtitles(
         .and_then(|n| n.parse().ok())
         .ok_or_else(|| AppError::not_found("unknown subtitle file"))?;
     let file = visible_file(&state, &user, id).await?;
-    let (sidecar, version) = subtitle_source(&file, index).await?;
+    let (sidecar, version) = subtitle_source(&state, &file, index).await?;
     let offset = query.offset_ms.unwrap_or(0).clamp(-webvtt::MAX_OFFSET_MS, webvtt::MAX_OFFSET_MS);
     let moved = |text: String| if offset == 0 { text } else { webvtt::shift(&text, offset) };
     let cache =
@@ -1049,9 +1065,19 @@ pub async fn subtitles(
 /// the track is in the file), and what tells its versions apart in cache
 /// names. A sidecar can be replaced without its video changing (subtitle
 /// downloaders upgrade them): its own time is part of the name too.
-async fn subtitle_source(file: &catalog::FileRow, index: i64) -> ApiResult<(Option<String>, String)> {
+async fn subtitle_source(state: &AppState, file: &catalog::FileRow, index: i64) -> ApiResult<(Option<String>, String)> {
     if index < EXTERNAL_INDEX_BASE {
         return Ok((None, String::new()));
+    }
+    // An added track's file never changes: its id names its version.
+    if index >= ADDED_INDEX_BASE {
+        let sub = file
+            .added_subs()
+            .into_iter()
+            .find(|s| s.index == index)
+            .ok_or_else(|| AppError::not_found("subtitle not found"))?;
+        let path = sub.path(&state.config.added_subtitles_dir(), file.id);
+        return Ok((Some(path.to_string_lossy().into_owned()), format!("_a{}", sub.id)));
     }
     let sub = file
         .external_subs()
@@ -1087,7 +1113,7 @@ async fn picture_track(
     if !picture {
         return Err(AppError::not_found("no picture subtitle track has this index"));
     }
-    let (sidecar, version) = subtitle_source(&file, index).await?;
+    let (sidecar, version) = subtitle_source(state, &file, index).await?;
     let cache =
         state.config.cache_dir().join("subtitles").join(format!("{}_{}_{}{version}.mks", file.id, index, file.mtime));
     if !is_matroska(&cache).await {

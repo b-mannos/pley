@@ -133,6 +133,8 @@ pub struct CleanReport {
     /// Old files of the caches ([`CACHES`]).
     pub cache_files_removed: u64,
     pub cache_bytes_freed: u64,
+    /// Added subtitles whose media file went (counted in `bytes_freed`).
+    pub subtitles_removed: u64,
 }
 
 pub struct Store {
@@ -140,6 +142,8 @@ pub struct Store {
     blobs: PathBuf,
     media: PathBuf,
     cache: PathBuf,
+    /// Added subtitles ([`crate::subtitles`]), beside `media`.
+    subtitles: PathBuf,
     http: reqwest::Client,
     cleaning: tokio::sync::Mutex<()>,
     fingerprinting: tokio::sync::Mutex<()>,
@@ -197,6 +201,7 @@ impl Store {
             blobs: metadata_dir.join("blobs"),
             media: media_dir.to_path_buf(),
             cache: cache_dir.to_path_buf(),
+            subtitles: media_dir.with_file_name("subtitles"),
             http,
             cleaning: tokio::sync::Mutex::new(()),
             fingerprinting: tokio::sync::Mutex::new(()),
@@ -472,6 +477,15 @@ impl Store {
         })
         .await?;
         report.media_folders_removed = count;
+        report.bytes_freed += bytes;
+
+        // Added subtitles go with their media file's row; their files here.
+        let listed: HashSet<i64> =
+            sqlx::query_scalar("SELECT id FROM added_subtitles").fetch_all(&self.db.read).await?.into_iter().collect();
+        let subtitles = self.subtitles.clone();
+        let (count, bytes) =
+            crate::util::blocking(move || Ok(crate::subtitles::sweep(&subtitles, &listed, grace))).await?;
+        report.subtitles_removed = count;
         report.bytes_freed += bytes;
 
         let cache = self.cache.clone();

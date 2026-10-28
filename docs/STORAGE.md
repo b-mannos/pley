@@ -20,6 +20,10 @@ artwork, which Pley never moves or changes.
     thumb.jpg                frame grab (movies and episodes without a still)
     trickplay/               seek-bar previews (sprite sheets and index-sd.bif files)
     chapters/<n>.jpg         chapter pictures, cut from the previews
+  subtitles/<file_id>/<n>.srt
+                             subtitles people added to a media file (uploaded,
+                             or from OpenSubtitles), as UTF-8 (.srt, .vtt,
+                             .ass, .ssa): pley never writes next to the media
   avatars/                   profile pictures
   backups/pley-<date>.db     the last 3 daily database backups, and the copy
                              made before the last upgrade
@@ -105,6 +109,9 @@ never removed between being stored and being used:
   right before each removal, so it holds while a clean-up runs.
 - The URLs of downloads nothing uses are forgotten with their pictures, after
   the same hour.
+
+Added subtitles (`subtitles/`) go with their media file: once a file is
+removed from its library, the clean-ups remove its subtitles too.
 
 The same clean-ups remove old files from `cache/`. Cached files are named
 after what they were made from (a path, a size, a modification time), so the

@@ -1568,3 +1568,54 @@ async fn titles_about_to_play_are_read_ahead_where_play_starts() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(w.fake.prefetches.lock().len(), 2);
 }
+
+#[tokio::test]
+async fn added_subtitles_play_and_convert_as_subtitle_files_do() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let feature = w.movies["Feature"];
+    let file = app.file_of(feature).await;
+    let boundary = "x-boundary";
+    let mut body = Vec::new();
+    for (name, filename, data) in
+        [("file", Some("Feature.srt"), "1\n00:00:01,000 --> 00:00:02,000\nHi\n"), ("language", None, "de")]
+    {
+        body.extend(format!("--{boundary}\r\n").bytes());
+        let disposition = match filename {
+            Some(f) => format!("Content-Disposition: form-data; name=\"{name}\"; filename=\"{f}\"\r\n\r\n"),
+            None => format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n"),
+        };
+        body.extend(disposition.bytes());
+        body.extend(data.bytes());
+        body.extend(b"\r\n");
+    }
+    body.extend(format!("--{boundary}--\r\n").bytes());
+    let content_type = format!("multipart/form-data; boundary={boundary}");
+    let added =
+        app.send_body(Method::POST, &format!("/api/items/{feature}/subtitles"), admin, &content_type, body).await;
+    assert_eq!(added.status, StatusCode::CREATED, "{}", added.text());
+
+    // Listed with the file's own tracks and its sidecar, last; picked, it
+    // is the player's to show.
+    let started =
+        play(app, admin, json!({"item_id": feature, "caps": browser(), "client_id": "tab", "subtitle_index": 9000}))
+            .await;
+    assert_eq!(started.status, StatusCode::OK, "{:?}", started.body);
+    assert_eq!(started.body["burn_subtitles"], json!(false));
+    let subtitles = started.body["subtitles"].as_array().unwrap();
+    let last = subtitles.last().unwrap();
+    assert_eq!((&last["index"], &last["language"], &last["added"]), (&json!(9000), &json!("ger"), &json!(true)));
+    assert_eq!(last["deletable"], json!(true));
+    assert!(subtitles.iter().filter(|s| s["index"] != json!(9000)).all(|s| s["added"] == json!(false)));
+    assert!(subtitles.iter().all(|s| s.get("deletable").is_none() || s["index"] == json!(9000)));
+
+    // Converted to WebVTT from its file in the data folder, once.
+    let vtt = app.get(&format!("/api/files/{file}/subtitles/9000.vtt"), admin).await;
+    assert_eq!(vtt.status, StatusCode::OK, "{}", vtt.text());
+    let request = w.fake.subtitles.lock().last().cloned().unwrap();
+    let kept = app.state.config.added_subtitles_dir().join(file.to_string());
+    assert!(std::path::Path::new(&request.path).starts_with(&kept), "{}", request.path);
+    assert_eq!(request.stream_index, None);
+    assert_eq!(app.get(&format!("/api/files/{file}/subtitles/9000.vtt"), admin).await.text(), vtt.text());
+    assert_eq!(app.get(&format!("/api/files/{file}/subtitles/9001.vtt"), admin).await.status, StatusCode::NOT_FOUND);
+}

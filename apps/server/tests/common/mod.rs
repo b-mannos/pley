@@ -147,6 +147,18 @@ impl TestApp {
         reply(self.api.clone().oneshot(req.body(Body::empty()).unwrap()).await.unwrap()).await
     }
 
+    /// A pley API request with a raw `body` of `content_type` (a form).
+    pub async fn send_body(&self, method: Method, uri: &str, token: &str, content_type: &str, body: Vec<u8>) -> Reply {
+        let req = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, content_type)
+            .body(Body::from(body))
+            .unwrap();
+        reply(self.api.clone().oneshot(req).await.unwrap()).await
+    }
+
     /// A Plex-compatible API request with `body` (an upload).
     pub async fn plex_upload(&self, method: Method, uri: &str, token: &str, body: Vec<u8>) -> Reply {
         let req = Request::builder()

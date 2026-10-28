@@ -226,6 +226,10 @@ pub struct MediaStream {
     /// Set by the server for sidecar subtitle files; never by the transcoder.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub external: bool,
+    /// Set by the server for subtitles people added (uploaded, or found on
+    /// OpenSubtitles), which are external too; never by the transcoder.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub added: bool,
 }
 
 /// "Dolby Vision P8.1", "HDR10", … for display: the profile with its base
