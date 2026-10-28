@@ -207,14 +207,12 @@ export class AvplayEngine implements PlayerEngine {
     this.run(() => {
       this.seeking = true;
       this.set("buffering");
-      this.player.seekTo(
-        target,
-        () => {
-          this.seekDone();
-          if (this.state === "buffering") this.set("ready");
-        },
-        () => this.seekDone(),
-      );
+      // A seek AVPlay refuses leaves it playing where it was: neither way does it stay waiting.
+      const done = () => {
+        this.seekDone();
+        if (this.state === "buffering") this.set("ready");
+      };
+      this.player.seekTo(target, done, done);
     });
   }
 
