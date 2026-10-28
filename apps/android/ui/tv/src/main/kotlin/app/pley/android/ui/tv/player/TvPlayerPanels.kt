@@ -45,6 +45,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import app.pley.android.data.Settings
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyElevation
 import app.pley.android.designsystem.PleyMotion
@@ -59,17 +60,20 @@ import app.pley.android.player.engine.EngineState
 import app.pley.android.player.sleep.SleepChoice
 import app.pley.android.player.sleep.SleepState
 import app.pley.android.player.sleep.SleepTexts
+import app.pley.android.player.subtitles.CaptionLook
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.item.FactLine
 import app.pley.android.ui.tv.item.PanelHeading
 import app.pley.android.ui.tv.item.PanelRow
 import app.pley.android.ui.tv.kit.focusRow
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
  * The player's side panels (design spec §2.7): Subtitles (with Sync while
- * the subtitles chosen can move), Audio, Quality, Chapters, Sleep timer and Info. 360 dp (Info 440 dp) from the right edge, full height, surface2
+ * the subtitles chosen can move, and their size and background when
+ * [onSubtitleStyle] saves them), Audio, Quality, Chapters, Sleep timer and Info. 360 dp (Info 440 dp) from the right edge, full height, surface2
  * with 16 dp left corners. It slides in on its own layer over 200 ms (in
  * place with reduced motion) and the scrim behind it fades by its colour
  * while drawing, so no layer covers the video. Focus starts on the current
@@ -81,6 +85,8 @@ internal fun BoxScope.TvPlayerPanels(
     state: State<PlayerUiState>,
     engine: State<EngineState?>,
     controller: PlaybackController,
+    captionLook: CaptionLook = CaptionLook(),
+    onSubtitleStyle: ((CaptionLook) -> Unit)? = null,
 ) {
     val open = ui.panel != null
     val reduced = reducedMotion()
@@ -108,14 +114,21 @@ internal fun BoxScope.TvPlayerPanels(
     ) {
         when (panel) {
             PlayerPanel.Info -> InfoPanel(state, engine, ui)
-            else -> ChoicePanel(panel, state, ui, controller)
+            else -> ChoicePanel(panel, state, ui, controller, captionLook, onSubtitleStyle)
         }
     }
 }
 
 /** A list of choices, the current one ticked and focused first. */
 @Composable
-private fun ChoicePanel(panel: PlayerPanel, state: State<PlayerUiState>, ui: TvPlayerUi, controller: PlaybackController) {
+private fun ChoicePanel(
+    panel: PlayerPanel,
+    state: State<PlayerUiState>,
+    ui: TvPlayerUi,
+    controller: PlaybackController,
+    captionLook: CaptionLook,
+    onSubtitleStyle: ((CaptionLook) -> Unit)?,
+) {
     val s by remember(state) { derivedStateOf { PanelData.of(state.value) } }
     val focus = ui.requester(PlayerFocus.Panel)
     val title = stringResource(
@@ -131,6 +144,12 @@ private fun ChoicePanel(panel: PlayerPanel, state: State<PlayerUiState>, ui: TvP
     val burnIn = stringResource(R.string.tv_player_burn_in)
     val original = stringResource(R.string.tv_player_play_original)
     val originalHint = stringResource(R.string.tv_player_play_original_hint)
+    val style = SubtitleStyleTexts(
+        size = stringResource(R.string.tv_settings_subtitle_size),
+        sizes = SubtitleSizeLabels.map { stringResource(it) },
+        background = stringResource(R.string.tv_settings_subtitle_background),
+        backgrounds = listOf(stringResource(R.string.tv_settings_background_none), stringResource(R.string.tv_settings_background_box)),
+    )
     val resources = LocalResources.current
     // Each panel's own list: its current choice may be further down than shows.
     val list = remember(panel) { LazyListState() }
@@ -154,6 +173,7 @@ private fun ChoicePanel(panel: PlayerPanel, state: State<PlayerUiState>, ui: TvP
                     controller.selectSubtitle(s.subtitles[i].index)
                     ui.closePanel()
                 }
+                if (onSubtitleStyle != null) subtitleStyle(captionLook, style, onSubtitleStyle)
             }
             PlayerPanel.Sleep -> choices(
                 SleepChoice.ALL.map { choice ->
@@ -201,6 +221,34 @@ private fun ChoicePanel(panel: PlayerPanel, state: State<PlayerUiState>, ui: TvP
 }
 
 private data class Row(val label: String, val checked: Boolean, val supporting: String?)
+
+/** The words of the subtitles' size and background rows. */
+private class SubtitleStyleTexts(val size: String, val sizes: List<String>, val background: String, val backgrounds: List<String>)
+
+/** Small, Normal, Large and Huge: [Settings.SUBTITLE_SIZES]'s names. */
+private val SubtitleSizeLabels = listOf(
+    R.string.tv_settings_size_small,
+    R.string.tv_settings_size_medium,
+    R.string.tv_settings_size_large,
+    R.string.tv_settings_size_largest,
+)
+
+/**
+ * The subtitles' size and background under the tracks, as Settings has
+ * them (and saved there): choosing keeps the panel open, and the
+ * subtitles change behind it.
+ */
+private fun LazyListScope.subtitleStyle(look: CaptionLook, texts: SubtitleStyleTexts, onStyle: (CaptionLook) -> Unit) {
+    val size = Settings.SUBTITLE_SIZES.indices.minBy { abs(Settings.SUBTITLE_SIZES[it] - look.textFraction) }
+    item(key = "size") { PanelHeading(texts.size) }
+    itemsIndexed(texts.sizes, key = { i, _ -> "size-$i" }) { i, label ->
+        PanelRow(label, onClick = { onStyle(look.copy(textFraction = Settings.SUBTITLE_SIZES[i])) }, checked = i == size)
+    }
+    item(key = "background") { PanelHeading(texts.background) }
+    itemsIndexed(texts.backgrounds, key = { i, _ -> "background-$i" }) { i, label ->
+        PanelRow(label, onClick = { onStyle(look.copy(box = i == 1)) }, checked = look.box == (i == 1))
+    }
+}
 
 /** Rows of [rows]; the checked one (or the first) takes [focus]. */
 private fun LazyListScope.choices(rows: List<Row>, focus: FocusRequester, onChoose: (Int) -> Unit) {

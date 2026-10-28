@@ -67,7 +67,7 @@ import kotlinx.coroutines.delay
  *
  * [onExit] leaves the player for where playing started; [now] is the wall
  * clock, for the clock and "Ends at". [captionLook] is Settings →
- * Subtitles; [showDetails] (Settings → Playback details) keeps the compact
+ * Subtitles, which the Subtitles panel changes with [onSubtitleStyle]; [showDetails] (Settings → Playback details) keeps the compact
  * readout over the video while nothing else shows.
  */
 @Composable
@@ -76,6 +76,7 @@ internal fun TvPlayerScreen(
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
     captionLook: CaptionLook = CaptionLook(),
+    onSubtitleStyle: ((CaptionLook) -> Unit)? = null,
     showDetails: Boolean = false,
     now: () -> Long = System::currentTimeMillis,
 ) {
@@ -419,7 +420,7 @@ internal fun TvPlayerScreen(
         if (!ui.controls) TvSeekBadge(seeker.badgeMs)
         if (switching || phase == PlayerPhase.Switching) TvSwitchingCover()
         TvBufferingRing(waiting = phase == PlayerPhase.Buffering || phase == PlayerPhase.Preparing || switching, reconnecting = reconnecting)
-        TvPlayerPanels(ui, state, engineState, controller)
+        TvPlayerPanels(ui, state, engineState, controller, captionLook, onSubtitleStyle)
         if (error != null) {
             TvPlayerError(
                 error.message,

@@ -6,6 +6,7 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.getBoundsInRoot
+import app.pley.android.player.subtitles.CaptionLook
 import kotlin.math.roundToInt
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
@@ -242,6 +243,33 @@ class TvPlayerScreenTest {
         press(Key.DirectionUp)
         compose.onNodeWithTag(TAG_DETAILS).assertDoesNotExist()
         assertEquals(false, controller.calls("setDetailsOpen").last().args.single())
+    }
+
+    @Test
+    fun `the Subtitles panel sets their size and background, and stays open`() {
+        val controller = playing()
+        val chosen = mutableListOf<CaptionLook>()
+        compose.setContent {
+            TvTheme {
+                TvPlayerScreen(controller, onExit = { exits++ }, onSubtitleStyle = { chosen += it }, now = { 0L })
+            }
+        }
+        compose.waitForIdle()
+        press(Key.DirectionDown)
+        press(Key.DirectionCenter)
+        compose.onNodeWithTag(TAG_PANEL).assertExists()
+        // Off, English (SRT), then Small, Normal and Large.
+        press(Key.DirectionDown, times = 4)
+        compose.onNodeWithText("Large").assertIsFocused()
+        press(Key.DirectionCenter)
+        assertEquals(listOf(CaptionLook(textFraction = 0.06f)), chosen)
+        assertTrue(controller.calls("selectSubtitle").isEmpty())
+        compose.onNodeWithTag(TAG_PANEL).assertExists()
+        // Then Huge, None and Dark box (headings don't take focus).
+        press(Key.DirectionDown, times = 3)
+        compose.onNodeWithText("Dark box").assertIsFocused()
+        press(Key.DirectionCenter)
+        assertEquals(CaptionLook(box = true), chosen.last())
     }
 
     @Test

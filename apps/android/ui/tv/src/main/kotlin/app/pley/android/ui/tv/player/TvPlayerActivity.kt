@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import app.pley.android.data.SubtitleBackground
 import app.pley.android.player.PlaybackController
 import app.pley.android.player.PlayerEngine
 import app.pley.android.player.PlayerPhase
@@ -83,6 +84,7 @@ class TvPlayerActivity : ComponentActivity() {
                             controller = playing,
                             onExit = ::finish,
                             captionLook = captionLook,
+                            onSubtitleStyle = ::chooseStyle,
                             showDetails = showDetails,
                         )
                     }
@@ -168,6 +170,15 @@ class TvPlayerActivity : ComponentActivity() {
                     }
                     if (phase == PlayerPhase.Ended) finish()
                 }
+            }
+        }
+    }
+
+    /** A size or background chosen in the Subtitles panel: Settings' own, so every video has it from now on. */
+    private fun chooseStyle(look: CaptionLook) {
+        lifecycleScope.launch {
+            graph.data.settings.update {
+                it.copy(subtitleSize = look.textFraction, subtitleBackground = if (look.box) SubtitleBackground.DarkBox else SubtitleBackground.None)
             }
         }
     }
