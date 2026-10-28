@@ -3,6 +3,7 @@ import { ApiError, errorMessage, SessionStoppedError, unreachable, type Api } fr
 import type {
   ClientCaps,
   ItemDetail,
+  ItemKind,
   ItemSummary,
   Marker,
   MediaFile,
@@ -95,6 +96,8 @@ export interface UpNextCard {
 export interface PlayerState {
   phase: Phase;
   itemId: number;
+  /** What plays: a movie, an episode, an extra; `null` until its details come. */
+  kind: ItemKind | null;
   /** A movie's "Title (Year)", an episode's show. */
   title: string;
   /** An episode's "S1 · E2 · Title", as it reads everywhere. */
@@ -135,6 +138,7 @@ export interface PlayerClock {
 const INITIAL: PlayerState = {
   phase: { kind: "preparing" },
   itemId: 0,
+  kind: null,
   title: "",
   subtitle: null,
   audio: [],
@@ -419,6 +423,7 @@ export class PlaybackController {
     const episode = detail.kind === "episode";
     this.update({
       itemId: detail.id,
+      kind: detail.kind,
       title: episode ? detail.grandparent_title || detail.title : detail.year != null ? `${detail.title} (${detail.year})` : detail.title,
       subtitle: episode ? [episodeLabel(detail.parent_index, detail.index), detail.title].filter(Boolean).join(" · ") : null,
       markers: this.markers,

@@ -92,7 +92,7 @@ export function PlayerPanels(p: { panel: PlayerPanel; state: PlayerState; contro
             return (
               <PanelRow
                 key={sleepLabel(choice)}
-                label={sleepLabel(choice)}
+                label={sleepLabel(choice, s.kind)}
                 sub={on && choice.kind === "minutes" && s.sleep.minutesLeft !== null ? `${s.sleep.minutesLeft} min left` : null}
                 checked={on}
                 initial={on}

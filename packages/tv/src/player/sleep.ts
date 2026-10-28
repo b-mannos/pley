@@ -1,3 +1,5 @@
+import type { ItemKind } from "../api/types";
+
 /** What the sleep timer is set to. Not remembered between playbacks. */
 export type SleepChoice = { kind: "off" } | { kind: "minutes"; minutes: number } | { kind: "end_of_item" };
 
@@ -12,8 +14,11 @@ export const SLEEP_CHOICES: SleepChoice[] = [
   { kind: "end_of_item" },
 ];
 
-export function sleepLabel(c: SleepChoice): string {
-  return c.kind === "off" ? "Off" : c.kind === "minutes" ? `${c.minutes} min` : "End of this episode";
+/** "Off", "30 min", "End of this episode" (of this movie, track or video, by what plays), as on the web. */
+export function sleepLabel(c: SleepChoice, playing: ItemKind | null = "episode"): string {
+  if (c.kind === "off") return "Off";
+  if (c.kind === "minutes") return `${c.minutes} min`;
+  return playing === "episode" ? "End of this episode" : playing === "movie" ? "End of this movie" : playing === "track" ? "End of this track" : "End of this video";
 }
 
 export function sameChoice(a: SleepChoice, b: SleepChoice): boolean {
