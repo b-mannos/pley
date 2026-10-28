@@ -176,13 +176,44 @@ pub trait AudioOut {
     fn stream_copies(&self, codec: &str) -> bool {
         self.plays(codec)
     }
+    /// The file streams whatever its audio (its video is converted), so no
+    /// track plays with the file as it is.
+    fn streams(&self) -> bool {
+        false
+    }
+}
+
+/// A player whose file streams anyway (see [`AudioOut::streams`]): of a
+/// language's tracks, one its stream copies beats one the file would have
+/// played as it is, which the stream converts.
+pub struct Streamed<'a>(pub &'a dyn AudioOut);
+
+impl AudioOut for Streamed<'_> {
+    fn plays(&self, codec: &str) -> bool {
+        self.0.plays(codec)
+    }
+    fn passes_through(&self, codec: &str) -> bool {
+        self.0.passes_through(codec)
+    }
+    fn switches_tracks(&self) -> bool {
+        self.0.switches_tracks()
+    }
+    fn channels(&self) -> Option<i64> {
+        self.0.channels()
+    }
+    fn stream_copies(&self, codec: &str) -> bool {
+        self.0.stream_copies(codec)
+    }
+    fn streams(&self) -> bool {
+        true
+    }
 }
 
 /// How a track sounds on a player, better greater: as many channels as its
 /// output takes (what a conversion makes of the others), mixed for no more
 /// than that (a stereo mix beats a 5.1 one folded down), lossless, object
 /// audio (Atmos, DTS:X) sent on to a receiver, then the bitrate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 struct Sound {
     channels: i64,
     native: bool,
@@ -195,20 +226,18 @@ struct Sound {
 /// can't play, or one that a stream it needs (another track than the
 /// default, for a player that doesn't switch them) would convert, is
 /// converted: E-AC-3, AC-3 or AAC, 5.1 at most (stereo for version 1
-/// players, which name no channels), so only its channels count. A version
-/// 1 player's stream copies only AAC and MP3: its AC-3 5.1 came out as
-/// stereo AAC where the file's own stereo AAC would have been copied.
+/// players, which name no channels), so only its channels and its mix
+/// count. A version 1 player's stream copies only AAC and MP3: its AC-3 5.1
+/// came out as stereo AAC where the file's own stereo AAC would have been
+/// copied.
 fn fit(s: &MediaStream, out: &dyn AudioOut, default_audio: Option<&MediaStream>) -> (bool, Sound) {
     let channels = s.channels.unwrap_or(2);
     if !out.plays(&s.codec) || !(as_is(s, out, default_audio) || out.stream_copies(&s.codec)) {
-        let channels = channels.min(out.channels().unwrap_or(2)).min(6);
-        return (false, Sound { channels, native: false, lossless: false, objects: false, bitrate: 0 });
+        let most = out.channels().unwrap_or(2).min(6);
+        let sound = Sound { channels: channels.min(most), native: channels <= most, ..Sound::default() };
+        return (false, sound);
     }
-    // DTS-HD Master Audio is lossless; its core and High Resolution Audio aren't.
-    let master_audio = s.profile.as_deref().is_some_and(|p| p.split(|c: char| !c.is_alphanumeric()).any(|w| w == "MA"));
-    let lossless = matches!(s.codec.as_str(), "truehd" | "mlp" | "flac" | "alac")
-        || s.codec.starts_with("pcm_")
-        || (s.codec == "dts" && master_audio);
+    let lossless = is_lossless(s);
     // Atmos and DTS:X, as FFmpeg names the profile ("Dolby TrueHD + Dolby Atmos"), or the title does.
     let objects = [s.profile.as_deref(), s.title.as_deref()].into_iter().flatten().any(|text| {
         let text = text.to_lowercase();
@@ -227,6 +256,21 @@ fn fit(s: &MediaStream, out: &dyn AudioOut, default_audio: Option<&MediaStream>)
         bitrate: s.bitrate.unwrap_or(0),
     };
     (true, sound)
+}
+
+/// DTS-HD Master Audio is lossless; its core and High Resolution Audio aren't.
+fn is_lossless(s: &MediaStream) -> bool {
+    let master_audio = s.profile.as_deref().is_some_and(|p| p.split(|c: char| !c.is_alphanumeric()).any(|w| w == "MA"));
+    matches!(s.codec.as_str(), "truehd" | "mlp" | "flac" | "alac")
+        || s.codec.starts_with("pcm_")
+        || (s.codec == "dts" && master_audio)
+}
+
+/// Of tracks that come out alike, the one cheapest to convert, smaller
+/// greater: lossy before lossless, then the fewest bits to decode. A track
+/// that plays isn't converted, and costs nothing.
+fn conversion(s: &MediaStream, fits: Option<(bool, Sound)>) -> Option<std::cmp::Reverse<(bool, i64)>> {
+    fits.filter(|(plays, _)| !plays).map(|_| std::cmp::Reverse((is_lossless(s), s.bitrate.unwrap_or(0))))
 }
 
 /// Pick the tracks of `streams` that best match `pref`, or without one the
@@ -262,6 +306,7 @@ pub fn resolve(
                         same_title(s.title.as_deref(), pref.audio_title.as_deref()),
                         out.is_some_and(|out| as_is(s, out, default_audio)),
                         fits.map(|(_, sound)| sound),
+                        conversion(s, fits),
                         s.default,
                         // Prefer the earliest track among equals.
                         std::cmp::Reverse(s.index),
@@ -311,7 +356,9 @@ pub fn resolve(
 /// Whether `out` plays `s` with the file as it is: it plays the codec, and
 /// the track is the file's default or the player switches tracks itself.
 fn as_is(s: &MediaStream, out: &dyn AudioOut, default_audio: Option<&MediaStream>) -> bool {
-    out.plays(&s.codec) && (out.switches_tracks() || default_audio.is_some_and(|d| d.index == s.index))
+    !out.streams()
+        && out.plays(&s.codec)
+        && (out.switches_tracks() || default_audio.is_some_and(|d| d.index == s.index))
 }
 
 /// The audio of a title the user picked none for: the main track in their
@@ -338,6 +385,7 @@ fn automatic_audio<'a>(
             fits.is_some_and(|(plays, _)| plays),
             out.is_some_and(|out| as_is(s, out, default_audio)),
             fits.map(|(_, sound)| sound),
+            conversion(s, fits),
             s.default,
             std::cmp::Reverse(s.index),
         )
@@ -911,9 +959,52 @@ mod tests {
         // With a Dolby Digital default, that one plays with the file as it is.
         let streams = vec![track(1, "ac3", 6, None, true), track(2, "aac", 2, None, false)];
         assert_eq!(resolve(None, &NONE, &streams, Some(&lite)).audio, None);
-        // Only a converted track in the language: that one, as before.
+        // Only converted tracks in the language: the one cheaper to convert,
+        // as both come out the same (the DTS's lossy core, not TrueHD).
         let only = vec![track(1, "truehd", 8, None, true), track(2, "dts", 6, None, false)];
-        assert_eq!(resolve(None, &NONE, &only, Some(&lite)).audio, None);
+        assert_eq!(resolve(None, &NONE, &only, Some(&lite)).audio, Some(2));
+    }
+
+    #[test]
+    fn converted_audio_comes_from_the_track_cheapest_to_convert() {
+        // Chrome converts both to stereo AAC: from the AC-3, not the TrueHD.
+        let streams = vec![track(1, "truehd", 8, None, true), track(2, "ac3", 6, None, false)];
+        assert_eq!(resolve(None, &NONE, &streams, Some(&CHROME)).audio, Some(2));
+        // A 5.1 output: what's mixed for 5.1 before what's folded down to
+        // it, though it costs more to convert.
+        let six = Player { decodes: &["aac"], channels: Some(6), ..CHROME };
+        let streams = vec![track(1, "truehd", 6, None, true), track(2, "eac3", 8, None, false)];
+        assert_eq!(resolve(None, &NONE, &streams, Some(&six)).audio, None);
+        // Of two lossy tracks alike, the fewer bits.
+        let with_bits =
+            |index, bits, default| MediaStream { bitrate: Some(bits), ..track(index, "dts", 6, None, default) };
+        let streams = vec![with_bits(1, 1_509_000, true), with_bits(2, 768_000, false)];
+        assert_eq!(resolve(None, &NONE, &streams, Some(&CHROME)).audio, Some(2));
+    }
+
+    #[test]
+    fn a_file_that_streams_anyway_has_the_track_its_stream_copies() {
+        // A TV box that decodes DTS and Dolby Digital, and switches tracks.
+        let boxed = Player {
+            decodes: &["aac", "ac3", "eac3", "dts"],
+            passes: &[],
+            switches: true,
+            channels: Some(6),
+            v1: false,
+        };
+        let streams = vec![track(1, "dts", 6, None, true), track(2, "ac3", 6, None, false)];
+        // The file as it is: the DTS default plays.
+        assert_eq!(resolve(None, &NONE, &streams, Some(&boxed)).audio, None);
+        // Its video converted (Automatic lowered it): MPEG-TS takes no DTS,
+        // so the stream copies the AC-3 rather than converting the DTS.
+        assert_eq!(resolve(None, &NONE, &streams, Some(&Streamed(&boxed))).audio, Some(2));
+        // A remembered DTS pick gives way the same, as on a player without DTS.
+        let picked = from_selection(&streams, Some(1), None);
+        assert_eq!(resolve(Some(&picked), &NONE, &streams, Some(&boxed)).audio, None);
+        assert_eq!(resolve(Some(&picked), &NONE, &streams, Some(&Streamed(&boxed))).audio, Some(2));
+        // Only DTS in the language: converted, as there's nothing to copy.
+        let only = vec![track(1, "dts", 6, None, true)];
+        assert_eq!(resolve(None, &NONE, &only, Some(&Streamed(&boxed))).audio, None);
     }
 
     #[test]

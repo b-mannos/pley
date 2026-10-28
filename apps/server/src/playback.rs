@@ -1190,6 +1190,32 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     }
 }
 
+/// [`decide`] for a play that names no audio track, with the track `pick`
+/// chooses for the player (`streams::resolve`): with the file as it is if it
+/// plays so, and else again for a stream, whose copy of a track beats a
+/// conversion of the one the file would have played (a DTS default next to
+/// AC-3, once Automatic quality lowers the video): the transcoder converts
+/// no audio it needn't.
+pub fn decide_with_audio(
+    file: &FileRow,
+    info: Option<&MediaInfo>,
+    streams: &[MediaStream],
+    req: &mut PlaybackRequest,
+    pick: impl Fn(&dyn crate::streams::AudioOut) -> Option<i64>,
+) -> Decision {
+    req.audio_index = pick(&req.caps);
+    let decision = decide(file, info, streams, req);
+    if decision.method == Method::Direct {
+        return decision;
+    }
+    let streamed = pick(&crate::streams::Streamed(&req.caps));
+    if streamed == req.audio_index {
+        return decision;
+    }
+    req.audio_index = streamed;
+    decide(file, info, streams, req)
+}
+
 pub fn subtitle_tracks(file_id: i64, streams: &[MediaStream]) -> Vec<SubtitleTrack> {
     streams
         .iter()
@@ -2226,6 +2252,30 @@ mod tests {
         let d = decide(&file("mp4", 5_000_000), Some(&i), &i.streams, &req);
         assert_eq!(d.method, Method::Remux);
         assert_eq!(d.audio.unwrap().stream_index, Some(2));
+    }
+
+    #[test]
+    fn a_file_that_streams_anyway_has_the_track_its_stream_copies() {
+        // FLAC (the default) and AAC in English: a browser plays the FLAC
+        // with the file as it is, but its stream copies only AAC.
+        let mut i = info("h264", &["flac", "aac"], DynamicRange::Sdr);
+        for s in i.streams.iter_mut().filter(|s| s.kind == StreamKind::Audio) {
+            s.language = Some("eng".into());
+        }
+        let mut req = request();
+        req.caps.audio_codecs.push("flac".into());
+        let defaults = crate::streams::Defaults::default();
+        let pick =
+            |out: &dyn crate::streams::AudioOut| crate::streams::resolve(None, &defaults, &i.streams, Some(out)).audio;
+        let d = decide_with_audio(&file("mp4", 8_000_000), Some(&i), &i.streams, &mut req, pick);
+        assert_eq!((d.method, req.audio_index), (Method::Direct, None), "the FLAC, as it is");
+        // Automatic lowers the quality: the video is converted, and the AAC
+        // copied, where the FLAC would have been converted too.
+        req.max_bitrate = Some(2_000);
+        let d = decide_with_audio(&file("mp4", 8_000_000), Some(&i), &i.streams, &mut req, pick);
+        let audio = d.audio.unwrap();
+        assert_eq!((d.method, req.audio_index), (Method::Transcode, Some(2)));
+        assert_eq!((audio.stream_index, audio.mode), (Some(2), AudioMode::Copy));
     }
 
     fn dolby_vision(profile: i64, compat: i64) -> MediaInfo {

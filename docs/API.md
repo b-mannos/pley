@@ -1253,8 +1253,19 @@ description, unless picked), then the one this player plays best:
    stereo), lossless (TrueHD, DTS-HD MA, FLAC, PCM), Atmos or DTS:X when
    passed through, the bitrate. A track passed through counts its own
    channels, since the receiver decodes it: a 2.0 player passing AC-3 to
-   a receiver gets the AC-3 5.1, not the stereo mix;
-5. the file's default, then the first.
+   a receiver gets the AC-3 5.1, not the stereo mix; of tracks that are
+   converted, the channels and the mix they come out with;
+5. of converted tracks alike, the one cheapest to convert: lossy before
+   lossless, then the fewer bits (Chrome's stereo AAC comes from a file's
+   AC-3 5.1, not its TrueHD 7.1);
+6. the file's default, then the first.
+
+A file that streams anyway (its video converted: a quality lower than the
+original, which Automatic picks when the original doesn't play well, or a
+codec the player lacks) plays no track with the file as it is, so the
+track is chosen again for the stream: one the stream copies beats the one
+the file would have played, which the stream would convert (a DTS default
+next to AC-3 on a box that decodes both: the AC-3, copied).
 
 Tracks whose language is undetermined (`und`) or missing are never
 swapped for one another. A TV whose receiver takes TrueHD gets the TrueHD

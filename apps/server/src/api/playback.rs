@@ -12,8 +12,8 @@ use dashmap::DashMap;
 use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 use pley_transcoder_api::{
-    AudioMode, ConversionState, ConversionStatus, FileContainer, JobRequest, SUBTITLES_COMPLETE_HEADER, StreamKind,
-    VideoMode,
+    AudioMode, ConversionState, ConversionStatus, FileContainer, JobRequest, MediaInfo, MediaStream,
+    SUBTITLES_COMPLETE_HEADER, StreamKind, VideoMode,
 };
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt;
@@ -26,8 +26,8 @@ use crate::error::{ApiResult, AppError};
 use crate::events::ServerEvent;
 use crate::library::sidecar::EXTERNAL_INDEX_BASE;
 use crate::playback::{
-    Delivery, Method, PlaybackInfo, PlaybackRequest, Session, SessionStatus, TranscodeSpec, decide, new_media_key,
-    sentence, subtitle_tracks, transcode_info, video_range_shown,
+    Decision, Delivery, Method, PlaybackInfo, PlaybackRequest, Session, SessionStatus, TranscodeSpec, decide,
+    decide_with_audio, new_media_key, sentence, subtitle_tracks, transcode_info, video_range_shown,
 };
 use crate::state::AppState;
 use crate::streams;
@@ -58,6 +58,28 @@ fn label(row: &ItemRow) -> String {
             None => row.title.clone(),
         },
     }
+}
+
+/// [`decide`] with the audio track the player named, or with none named
+/// the one the user's choices and the player pick (`decide_with_audio`).
+#[allow(clippy::too_many_arguments)]
+async fn decide_picked(
+    state: &AppState,
+    user_id: i64,
+    row: &ItemRow,
+    file: &catalog::FileRow,
+    info: Option<&MediaInfo>,
+    streams: &[MediaStream],
+    req: &mut PlaybackRequest,
+) -> ApiResult<Decision> {
+    if req.audio_index.is_some() {
+        return Ok(decide(file, info, streams, req));
+    }
+    let pref = streams::load(&state.db, user_id, streams::scope(row)).await?;
+    let defaults = streams::defaults(&state.db, user_id).await?;
+    Ok(decide_with_audio(file, info, streams, req, |out| {
+        streams::resolve(pref.as_ref(), &defaults, streams, Some(out)).audio
+    }))
 }
 
 pub async fn start(
@@ -91,13 +113,9 @@ pub async fn start(
     // No audio track named: the one the user's choices pick, not just the
     // file's default, and of the tracks of that language the one this
     // player plays best (as it is, then with the file as it is, then as it
-    // sounds on its output). `PlaybackInfo.audio_index` tells the player.
-    if req.audio_index.is_none() {
-        let pref = streams::load(&state.db, user.id, streams::scope(&row)).await?;
-        let defaults = streams::defaults(&state.db, user.id).await?;
-        req.audio_index = streams::resolve(pref.as_ref(), &defaults, &streams, Some(&req.caps)).audio;
-    }
-    let decision = decide(&file, info.as_ref(), &streams, &req);
+    // sounds on its output), or for a file that streams anyway the one its
+    // stream copies. `PlaybackInfo.audio_index` tells the player.
+    let decision = decide_picked(&state, user.id, &row, &file, info.as_ref(), &streams, &mut req).await?;
     let mut reasons = decision.reasons.clone();
     let video_stream = info.as_ref().and_then(|i| i.video()).cloned();
     let subtitles = subtitle_tracks(file.id, &streams);
@@ -511,12 +529,7 @@ pub async fn convert(
     };
     let info = file.media_info();
     let streams = file.streams();
-    if req.audio_index.is_none() {
-        let pref = streams::load(&state.db, user.id, streams::scope(&row)).await?;
-        let defaults = streams::defaults(&state.db, user.id).await?;
-        req.audio_index = streams::resolve(pref.as_ref(), &defaults, &streams, Some(&req.caps)).audio;
-    }
-    let decision = decide(&file, info.as_ref(), &streams, &req);
+    let decision = decide_picked(&state, user.id, &row, &file, info.as_ref(), &streams, &mut req).await?;
     if decision.method == Method::Direct {
         return Ok(Json(DownloadInfo {
             id: None,
