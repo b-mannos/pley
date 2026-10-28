@@ -9,7 +9,7 @@
 // showed at each step in out/smoke/. brs-node is a simulator: layouts and
 // the player differ from a Roku, and so does its speed.
 //
-//   bun scripts/smoke.mjs
+//   node scripts/smoke.mjs
 
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";

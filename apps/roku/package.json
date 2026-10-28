@@ -6,13 +6,13 @@
   "scripts": {
     "compile": "bsc --create-package false --copy-to-staging false",
     "lint": "bslint --project bsconfig.lint.json",
-    "test": "bun scripts/test.mjs",
+    "test": "node scripts/test.mjs",
     "check": "bun run compile && bun run lint && bun run test",
-    "smoke": "bun scripts/smoke.mjs",
-    "preview": "bun scripts/preview.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "preview": "node scripts/preview.mjs",
     "package": "bsc --create-package --out-file out/pley-roku.zip",
     "images": "python scripts/make_images.py",
-    "bench": "bun scripts/bench.mjs"
+    "bench": "node scripts/bench.mjs"
   },
   "devDependencies": {
     "@rokucommunity/bslint": "0.8.46",

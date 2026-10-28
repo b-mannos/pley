@@ -5,7 +5,7 @@
 // it. brs-node is a simulator: it plays no video, draws with its own fonts
 // and isn't a Roku's speed.
 //
-//   bun scripts/preview.mjs [--port 8086] [--server http://192.168.1.5:7539]
+//   node scripts/preview.mjs [--port 8086] [--server http://192.168.1.5:7539]
 
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
