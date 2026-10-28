@@ -1,0 +1,110 @@
+{
+  "total_pages": 1,
+  "total_count": 6,
+  "per_page": 60,
+  "page": 1,
+  "data": [
+    {
+      "id": "5602424",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "5602424",
+        "language": "en",
+        "download_count": 113298,
+        "new_download_count": 2541,
+        "hearing_impaired": false,
+        "hd": true,
+        "fps": 23.976,
+        "votes": 8,
+        "ratings": 8.5,
+        "from_trusted": true,
+        "foreign_parts_only": false,
+        "upload_date": "2019-11-16T03:41:46Z",
+        "ai_translated": false,
+        "machine_translated": false,
+        "release": "Joker.2019.1080p.WEBRip.x264-[YTS.LT]",
+        "comments": "",
+        "legacy_subtitle_id": 7924285,
+        "uploader": { "uploader_id": 47823, "name": "scooby07", "rank": "translator" },
+        "feature_details": {
+          "feature_id": 521104,
+          "feature_type": "Movie",
+          "year": 2019,
+          "title": "Joker",
+          "movie_name": "2019 - Joker",
+          "imdb_id": 7286456,
+          "tmdb_id": 475557
+        },
+        "url": "https://www.opensubtitles.com/en/subtitles/legacy/7924285",
+        "related_links": [],
+        "files": [{ "file_id": 1923552, "cd_number": 1, "file_name": "Joker.2019.1080p.WEBRip.x264-[YTS.LT].srt" }]
+      }
+    },
+    {
+      "id": "6011110",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "6011110",
+        "language": "en",
+        "download_count": "5000",
+        "hearing_impaired": true,
+        "foreign_parts_only": false,
+        "release": "Joker.2019.HDR.2160p.WEB.H265-SDH",
+        "files": [{ "file_id": "2081045", "cd_number": 1, "file_name": "Joker.2019.SDH.ass" }]
+      }
+    },
+    {
+      "id": "6020001",
+      "type": "subtitle",
+      "attributes": {
+        "language": "en",
+        "download_count": 1204,
+        "hearing_impaired": false,
+        "foreign_parts_only": false,
+        "moviehash_match": true,
+        "release": " Joker.2019.1080p.BluRay.x264-SPARKS ",
+        "files": [{ "file_id": 4934512, "cd_number": 1, "file_name": "Joker.2019.1080p.BluRay.x264-SPARKS.srt" }]
+      }
+    },
+    {
+      "id": "6020002",
+      "type": "subtitle",
+      "attributes": {
+        "language": "fr",
+        "download_count": 90,
+        "hearing_impaired": null,
+        "foreign_parts_only": true,
+        "release": null,
+        "files": [{ "file_id": 7710021, "cd_number": 1, "file_name": "joker.french.forced.srt" }]
+      }
+    },
+    {
+      "id": "6020003",
+      "type": "subtitle",
+      "attributes": {
+        "language": "en",
+        "download_count": 900000,
+        "release": "Joker.2019.DVDRip.2CD",
+        "files": [
+          { "file_id": 8000001, "cd_number": 1, "file_name": "cd1.srt" },
+          { "file_id": 8000002, "cd_number": 2, "file_name": "cd2.srt" }
+        ]
+      }
+    },
+    {
+      "id": "6600001",
+      "type": "subtitle",
+      "attributes": {
+        "language": "es",
+        "download_count": 3,
+        "release": "Joker 2019",
+        "files": [{ "file_id": 6600001, "cd_number": 1, "file_name": "Joker.2019.sub" }]
+      }
+    },
+    {
+      "id": "6020004",
+      "type": "subtitle",
+      "attributes": { "language": "en", "download_count": 10, "release": "Joker.2019", "files": [] }
+    }
+  ]
+}

@@ -34,6 +34,8 @@ pub struct Inner {
     pub events: EventBus,
     pub transcoder: Arc<Transcoder>,
     pub metadata: Arc<MetadataAgent>,
+    /// Subtitle search and downloads (see [`crate::subtitles`]).
+    pub opensubtitles: Arc<crate::providers::opensubtitles::OpenSubtitles>,
     pub store: Arc<Store>,
     pub backups: Arc<Backups>,
     pub scanner: Arc<Scanner>,
@@ -106,6 +108,10 @@ impl AppState {
             store.clone(),
             config.metadata_endpoints.clone(),
         );
+        let opensubtitles = Arc::new(crate::providers::opensubtitles::OpenSubtitles::new(
+            settings.clone(),
+            config.metadata_endpoints.as_ref().map(|e| e.opensubtitles.clone()),
+        ));
         let scanner =
             Scanner::new(db.clone(), transcoder.clone(), events.clone(), metadata.clone(), store.clone(), &config);
         let watcher = LibraryWatcher::new(db.clone(), scanner.clone(), settings.clone());
@@ -159,6 +165,7 @@ impl AppState {
                 events,
                 transcoder,
                 metadata,
+                opensubtitles,
                 store,
                 backups,
                 scanner,

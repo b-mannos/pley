@@ -116,6 +116,7 @@ pub fn router(state: AppState) -> Router {
             "/items/{id}/subtitles",
             post(subtitles::add).layer(DefaultBodyLimit::max(crate::subtitles::MAX_BYTES + 64 * 1024)),
         )
+        .route("/items/{id}/subtitles/search", get(subtitles::search))
         .route("/items/{id}/subtitles/{index}", delete(subtitles::delete))
         .route("/people/{id}", get(people::get))
         .route("/people/{id}/photo", get(people::photo))

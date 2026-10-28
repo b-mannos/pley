@@ -66,6 +66,33 @@ pub struct Settings {
     /// whose `Host` has no port gets the port of the one with its scheme
     /// and host name back, so pley names itself as apps reached it.
     pub proxy_addresses: Vec<String>,
+    /// OpenSubtitles.com's API key, which each server's administrator gets
+    /// from opensubtitles.com (pley can't ship one): subtitle search is off
+    /// without it.
+    pub opensubtitles_api_key: String,
+    /// An opensubtitles.com account, for its larger daily download quota
+    /// (without one, downloads count against the API key's).
+    pub opensubtitles_username: String,
+    /// Its password: saved, never sent back ([`Settings::for_admin`]).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub opensubtitles_password: String,
+}
+
+/// The settings as administrators see them: everything but the
+/// OpenSubtitles password, which only says whether one is saved.
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminSettings {
+    #[serde(flatten)]
+    pub settings: Settings,
+    pub opensubtitles_password_set: bool,
+}
+
+impl Settings {
+    pub fn for_admin(&self) -> AdminSettings {
+        let mut settings = self.clone();
+        let set = !std::mem::take(&mut settings.opensubtitles_password).is_empty();
+        AdminSettings { settings, opensubtitles_password_set: set }
+    }
 }
 
 impl Default for Settings {
@@ -94,6 +121,9 @@ impl Default for Settings {
             previews_in_background: true,
             third_party_apps: false,
             proxy_addresses: Vec::new(),
+            opensubtitles_api_key: String::new(),
+            opensubtitles_username: String::new(),
+            opensubtitles_password: String::new(),
         }
     }
 }
@@ -256,6 +286,10 @@ pub struct SettingsPatch {
     pub previews_in_background: Option<bool>,
     pub third_party_apps: Option<bool>,
     pub proxy_addresses: Option<Vec<String>>,
+    pub opensubtitles_api_key: Option<String>,
+    pub opensubtitles_username: Option<String>,
+    /// Left out: the saved one stays; empty: none.
+    pub opensubtitles_password: Option<String>,
 }
 
 pub struct SettingsStore {
@@ -379,6 +413,29 @@ impl SettingsStore {
                 return Err(AppError::bad_request(format!("at most {MAX_PROXY_ADDRESSES} proxy addresses")));
             }
             next.proxy_addresses = addresses;
+        }
+        if let Some(v) = patch.opensubtitles_api_key {
+            next.opensubtitles_api_key = v.trim().to_owned();
+        }
+        if let Some(v) = patch.opensubtitles_username {
+            let v = v.trim().to_owned();
+            // Another account's password isn't this one's.
+            if v != next.opensubtitles_username {
+                next.opensubtitles_password.clear();
+            }
+            next.opensubtitles_username = v;
+        }
+        if let Some(v) = patch.opensubtitles_password {
+            next.opensubtitles_password = v;
+        }
+        if next.opensubtitles_username.is_empty() {
+            next.opensubtitles_password.clear();
+        }
+        if next.opensubtitles_api_key.chars().count() > 128
+            || next.opensubtitles_username.chars().count() > 128
+            || next.opensubtitles_password.chars().count() > 256
+        {
+            return Err(AppError::bad_request("the OpenSubtitles key, username or password is too long"));
         }
         let json = serde_json::to_string(&next).map_err(|e| AppError::Internal(e.into()))?;
         sqlx::query(
@@ -615,6 +672,37 @@ mod tests {
         assert!(decodes_on_gpu(&vulkan));
         let mac = Capabilities { hwaccels: vec!["videotoolbox".into()], ..software };
         assert!(decodes_on_gpu(&mac));
+    }
+
+    #[tokio::test]
+    async fn the_opensubtitles_password_is_kept_but_never_shown() {
+        let (_dir, db, store) = store().await;
+        let set = |json: serde_json::Value| store.update(&db, patch(json));
+        let s = set(serde_json::json!({
+            "opensubtitles_api_key": " key ",
+            "opensubtitles_username": " ana ",
+            "opensubtitles_password": "s3cret",
+        }))
+        .await
+        .unwrap();
+        assert_eq!((s.opensubtitles_api_key.as_str(), s.opensubtitles_username.as_str()), ("key", "ana"));
+        assert_eq!(s.opensubtitles_password, "s3cret");
+        let shown = serde_json::to_value(s.for_admin()).unwrap();
+        assert_eq!(shown["opensubtitles_password_set"], serde_json::json!(true));
+        assert_eq!(shown["opensubtitles_username"], serde_json::json!("ana"));
+        assert!(!shown.to_string().contains("s3cret"), "{shown}");
+        assert!(shown.get("opensubtitles_password").is_none());
+        // Saved, and kept by changes that leave it out.
+        let s = set(serde_json::json!({"server_name": "Den"})).await.unwrap();
+        assert_eq!(s.opensubtitles_password, "s3cret");
+        assert_eq!(SettingsStore::load(&db).await.unwrap().get().opensubtitles_password, "s3cret");
+        // Another account, or none, forgets it.
+        let s = set(serde_json::json!({"opensubtitles_username": "bo"})).await.unwrap();
+        assert_eq!(s.opensubtitles_password, "");
+        let s = set(serde_json::json!({"opensubtitles_password": "pw"})).await.unwrap();
+        assert_eq!(s.opensubtitles_password, "pw");
+        let s = set(serde_json::json!({"opensubtitles_username": ""})).await.unwrap();
+        assert!(!s.for_admin().opensubtitles_password_set);
     }
 
     #[tokio::test]

@@ -292,7 +292,7 @@ interface MediaStream {
   sample_rate?: number;
   // subtitle
   external?: boolean;               // sidecar file next to the media, or added subtitles
-  added?: boolean;                  // added subtitles (uploaded): external too
+  added?: boolean;                  // added subtitles (uploaded, or from OpenSubtitles): external too
   text_based?: boolean;             // srt/ass/webvtt/mov_text (true) vs pgs/vobsub (false, needs burn-in)
 }
 
@@ -1005,13 +1005,14 @@ may open only some libraries see those, in that order.
 | POST | `/api/items/{id}/refresh` *(admin)* | – | `202` re-fetch metadata from the item's source (movies: TMDB; shows, seasons, episodes: the TV source; artists, albums, tracks: MusicBrainz). `400` when that source is off or lacks its key. |
 | POST | `/api/items/{id}/analyze` *(admin)* | – | `202` find the intro and credits again: a movie's chapters, or every episode of an episode's season, a season or a show. `400` for other kinds. |
 | GET | `/api/items/{id}/images/{poster\|backdrop\|thumb}` | query: `w=<px>` (optional resize, bucketed), `v=` (cache buster, ignored) | image bytes (`image/jpeg`), long-lived cache headers. Falls back to parent artwork (season → show). `404` if none. |
-| POST | `/api/items/{id}/subtitles` | `multipart/form-data` | `201` `SubtitleTrack`: subtitles added to the file (see [Added subtitles](#added-subtitles)) |
+| GET | `/api/items/{id}/subtitles/search` | query: `file_id`, `language` | `{ results: SubtitleResult[] }`: subtitles for the file on OpenSubtitles (see [Added subtitles](#added-subtitles)) |
+| POST | `/api/items/{id}/subtitles` | `{ result, file_id? }`, or `multipart/form-data` | `201` `SubtitleTrack`: subtitles added to the file (see [Added subtitles](#added-subtitles)) |
 | DELETE | `/api/items/{id}/subtitles/{index}` | – | `204`; an added track of the title, by an administrator or whoever added it |
 
 ### Added subtitles
 
 Subtitles anyone who can see a movie, episode or extra adds to one of its
-files, uploaded from the web app. pley
+files: a file uploaded from the web app, or one found on OpenSubtitles. pley
 keeps them in its data folder (`subtitles/`, see docs/STORAGE.md), never
 next to the media, and every client gets them as it gets a subtitle file
 next to the video: an external text track (`external: true`, `text_based:
@@ -1031,13 +1032,51 @@ counting on from the highest (the lowest free one once 9999 is taken), so
 `DELETE /api/items/{id}/subtitles/{index}` needs no file; ids are never given
 twice, so a new track never shows an old one's cached WebVTT.
 
-`POST /api/items/{id}/subtitles` adds a file: `multipart/form-data` with
-`file` (`.srt`, `.vtt`, `.ass` or `.ssa`, 2 MiB at most), `language` (a
-language code or English name: `en`, `eng`, `English`, `pt-BR`), and if
-need be `hearing_impaired` and `forced` (`true`/`false`) and `file_id`.
-Named after the file.
+`GET /api/items/{id}/subtitles/search?file_id=&language=`: `file_id` the
+title's file (default: its first), `language` OpenSubtitles' or pley's
+language codes, comma separated (`en,fr`, `eng`, `pt-BR`; Portuguese and
+Chinese ask for both of their regions; default: the user's subtitle language
+from their track choices, else their audio language, else `en`; `400` for
+anything that isn't a language code, or more than 20). OpenSubtitles is asked
+by the file's OpenSubtitles hash and the film's IMDb and TMDB ids (an
+episode: its show's, with its season and number), or else by title and year.
 
-The text is made UTF-8 (UTF-16 by its byte order mark, else UTF-8
+```ts
+interface SubtitleResult {
+  id: string;                 // opaque, passed back to POST: "opensubtitles:1923552:en" (and ":hi", ":forced",
+                              // ":srt" when they apply)
+  provider: "opensubtitles";
+  language: string;           // OpenSubtitles' code: "en", "pt-BR"
+  name: string;               // the release it was made for, or its file's name
+  format: "srt" | "vtt" | "ass" | "ssa"; // what it is added as (other formats come as SubRip)
+  hearing_impaired: boolean;
+  forced: boolean;            // foreign parts only
+  downloads: number;
+  matched: "hash" | "title";  // "hash": made for this very file
+}
+```
+
+Results made for the file come first, then the most downloaded; subtitles
+split over several files (CDs) are left out. When the server has no
+OpenSubtitles API key, search and adding a result answer `503 { code:
+"unavailable", message, setup: false }`, for clients to say "Subtitle search
+isn't set up on this server" (and point administrators to Settings → Server);
+other `503`s (OpenSubtitles rejects the key or account, or can't be reached)
+say `setup: true`. When the day's downloads are used up, adding a result
+answers `429` with OpenSubtitles' words (when the quota renews).
+
+`POST /api/items/{id}/subtitles` adds:
+
+- a search result: `application/json` `{ "result": "<id>", "file_id"?: n }`.
+  It is downloaded from OpenSubtitles (with the account in the settings when
+  there is one, for its larger quota) and added in the result's language,
+  named after its release.
+- a file: `multipart/form-data` with `file` (`.srt`, `.vtt`, `.ass` or
+  `.ssa`, 2 MiB at most), `language` (a language code or English name:
+  `en`, `eng`, `English`, `pt-BR`), and if need be `hearing_impaired` and
+  `forced` (`true`/`false`) and `file_id`. Named after the file.
+
+Either way the text is made UTF-8 (UTF-16 by its byte order mark, else UTF-8
 when it reads as such, else Windows-1252), checked to be the subtitles it
 says (SRT cues, WebVTT with its header and cues, ASS/SSA with events; a
 WebVTT file named `.srt` is taken as WebVTT), and its language kept as ISO
@@ -1939,9 +1978,9 @@ type ServerEvent =
 | GET | `/api/system/backups` | – | `{ health: { ok, problem?, checked_at }, backups: { name, path, bytes, created_at }[] }`, newest first |
 | POST | `/api/system/backups` | – | the new backup (a checked `VACUUM INTO` copy; the last 3 are kept) |
 | GET | `/api/transcoder` | – | `TranscoderStatus` – live metrics of the transcoder component (all jobs, counters) |
-| GET | `/api/settings` | – | `Settings` |
+| GET | `/api/settings` | – | `Settings` (never with `opensubtitles_password`) |
 | PUT | `/api/settings` | partial `Settings` | `Settings`. `400` for a `hwaccel` or `tonemapping` that can't work here, changed from what is saved: VAAPI off Linux, VideoToolbox off macOS, NVENC, Quick Sync or AMF on macOS (for a managed transcoder, which runs on Pley's system), or one the transcoder found no working encoder or tone mapper for (`transcoder.accels`, `transcoder.tonemapping`; not checked while it isn't running). A value saved before stays and saves with the rest; the transcoder does without it (software encoding, Automatic's tone mapper) |
-| POST | `/api/settings/test` | `{ service: "tmdb" \| "tvdb" \| "tvmaze" \| "musicbrainz" \| "transcoder", api_key?, pin? }` | `{ ok, message, ms }`: one request to the service, with the key and PIN given (not saved) or else the saved ones. `message` says what happened, for people |
+| POST | `/api/settings/test` | `{ service: "tmdb" \| "tvdb" \| "tvmaze" \| "musicbrainz" \| "transcoder" \| "opensubtitles", api_key?, pin?, username?, password? }` | `{ ok, message, ms }`: one request to the service, with the key and PIN given (not saved) or else the saved ones. OpenSubtitles: its key, or with a `username` a sign-in of that account (`password` left out: the saved one, for the saved username). `message` says what happened, for people |
 | GET | `/api/fs` | `path` (omit for roots/drives) | `{ path: string \| null, parent: string \| null, entries: { name: string, path: string }[] }` – directories only |
 | GET | `/api/network` | – | `Network`: where Pley listens, and could |
 | PUT | `/api/network` | `{ web, plex, plex_on_web?, discovery }` | `Network`, once the new listeners listen or have tried for a moment (3 s at most). Saved in the config file for the next start (`plex_bind`: `"web"`, `"off"` or the addresses). `400` for addresses Pley can't listen on together, `plex_on_web` with `plex` addresses too, more than 32 addresses of a kind, and a change of what the command line or the environment sets |
@@ -1994,6 +2033,12 @@ interface Settings {
                                     // the port out of `Host` ("https://media.example.com:9999"; see Discovery).
                                     // http or https with a port and no path, one per scheme and host, 16 at most;
                                     // empty strings are dropped. Anything else → 400
+  opensubtitles_api_key: string;    // OpenSubtitles.com API key, "" = subtitle search is off. Each server's
+                                    // administrator gets one from opensubtitles.com (Consumers)
+  opensubtitles_username: string;   // an opensubtitles.com account, for its daily download quota; "" = the API
+                                    // key's own (smaller) quota. A new username forgets the saved password
+  opensubtitles_password?: string;  // PUT only: never sent back. Left out: the saved one stays; "" = none
+  opensubtitles_password_set: boolean; // GET: a password is saved
 }
 
 interface SystemInfo {

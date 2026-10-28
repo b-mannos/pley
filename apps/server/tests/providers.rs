@@ -160,6 +160,7 @@ impl TestApp {
             musicbrainz: format!("{base}/mb"),
             cover_art: format!("{base}/caa"),
             tmdb: format!("{base}/tmdb"),
+            opensubtitles: format!("{base}/opensubtitles"),
         })
         .await
     }

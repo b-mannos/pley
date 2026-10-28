@@ -640,16 +640,27 @@ export interface Settings {
    * Absent from servers before it.
    */
   proxy_addresses?: string[];
+  /** OpenSubtitles.com API key: subtitle search is off without it. Absent from servers before it. */
+  opensubtitles_api_key?: string;
+  /** An opensubtitles.com account, for its daily download quota. */
+  opensubtitles_username?: string;
+  /** Sent only to change it (never sent back): "" removes it. */
+  opensubtitles_password?: string;
+  /** A password is saved. */
+  opensubtitles_password_set?: boolean;
 }
 
 /** A service the settings can test (`POST /api/settings/test`). */
-export type TestedService = "tmdb" | "tvdb" | "tvmaze" | "musicbrainz" | "transcoder";
+export type TestedService = "tmdb" | "tvdb" | "tvmaze" | "musicbrainz" | "transcoder" | "opensubtitles";
 
 export interface ServiceTest {
   service: TestedService;
   /** A key typed in the form (not saved yet); the saved one when left out. */
   api_key?: string;
   pin?: string;
+  /** An OpenSubtitles account typed in; the saved password when left out. */
+  username?: string;
+  password?: string;
 }
 
 export interface ServiceTestResult {

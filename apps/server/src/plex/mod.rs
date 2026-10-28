@@ -12,7 +12,7 @@ mod edit;
 mod library;
 pub(crate) use library::{smart_count, smart_items, valid_smart_filter};
 mod lists;
-mod meta;
+pub(crate) mod meta;
 mod notifications;
 mod playback;
 mod queues;

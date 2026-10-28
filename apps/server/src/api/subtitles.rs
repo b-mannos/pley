@@ -1,22 +1,33 @@
-//! Subtitles added to a title (see [`crate::subtitles`]): uploaded, or
-//! deleted again.
+//! Subtitles added to a title (see [`crate::subtitles`]): found on
+//! OpenSubtitles, uploaded, or deleted again.
 //!
-//! - `POST /api/items/{id}/subtitles`: a file (`multipart/form-data`)
+//! - `GET /api/items/{id}/subtitles/search?file_id=&language=`
+//! - `POST /api/items/{id}/subtitles`: a search result (JSON) or a file
+//!   (`multipart/form-data`)
 //! - `DELETE /api/items/{id}/subtitles/{index}`
+
+use std::time::Duration;
 
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use serde::Deserialize;
+use serde_json::json;
 
 use crate::api::items::item_or_404;
 use crate::auth::AuthUser;
 use crate::catalog::{self, FileRow, ItemRow};
 use crate::error::{ApiResult, AppError};
 use crate::playback::{SubtitleTrack, subtitle_tracks};
+use crate::providers::opensubtitles::{Picked, Search, SearchError, search_languages};
 use crate::state::AppState;
 use crate::subtitles::{self, AddedSub, NewSub};
+
+/// How long reading a file's hash (128 KiB of it) may take before a search
+/// goes on without it: a share waking up.
+const HASH_TIME: Duration = Duration::from_secs(10);
 
 /// A title that plays as video, and the file of it asked for (its first).
 async fn video_file(state: &AppState, user: &AuthUser, id: i64, file_id: Option<i64>) -> ApiResult<(ItemRow, FileRow)> {
@@ -32,10 +43,126 @@ async fn video_file(state: &AppState, user: &AuthUser, id: i64, file_id: Option<
     Ok((row, file))
 }
 
+#[derive(Deserialize)]
+pub struct SearchQuery {
+    file_id: Option<i64>,
+    /// Languages, comma separated (`en,fr`); the user's subtitle language
+    /// when left out.
+    language: Option<String>,
+}
+
+/// `GET /api/items/{id}/subtitles/search`: OpenSubtitles' subtitles for the
+/// file, those made for it (by its hash) first, then the most downloaded.
+pub async fn search(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<i64>,
+    Query(query): Query<SearchQuery>,
+) -> ApiResult<Response> {
+    let (row, file) = video_file(&state, &user, id, query.file_id).await?;
+    if !state.opensubtitles.is_set_up() {
+        return Ok(failure(SearchError::NotSetUp));
+    }
+    let languages = match query.language.as_deref().filter(|l| !l.trim().is_empty()) {
+        Some(asked) => {
+            let mut languages = Vec::new();
+            for code in asked.split(',').filter(|c| !c.trim().is_empty()) {
+                if subtitles::language(code).is_none() {
+                    return Err(AppError::bad_request(format!("{} isn't a language code", code.trim())));
+                }
+                languages.extend(search_languages(code));
+            }
+            languages
+        }
+        None => {
+            let defaults = crate::streams::defaults(&state.db, user.id).await?;
+            let mine = defaults.subtitle_language.or(defaults.audio_language).unwrap_or_default();
+            let languages = search_languages(&mine);
+            if languages.is_empty() { vec!["en".to_owned()] } else { languages }
+        }
+    };
+    if languages.len() > 20 {
+        return Err(AppError::bad_request("at most 20 languages at once"));
+    }
+    let search = search_for(&state, &row, &file, languages).await?;
+    match state.opensubtitles.search(&search).await {
+        Ok(results) => Ok(Json(json!({ "results": results })).into_response()),
+        Err(err) => Ok(failure(err)),
+    }
+}
+
+/// What OpenSubtitles is asked for a file: its hash, and its film's or
+/// show's ids, or else their title.
+async fn search_for(state: &AppState, row: &ItemRow, file: &FileRow, languages: Vec<String>) -> ApiResult<Search> {
+    let hash =
+        tokio::time::timeout(HASH_TIME, state.store.fingerprint_of(file.id, &file.path, file.fingerprint.as_deref()))
+            .await
+            .ok()
+            .and_then(Result::ok);
+    let ids = |id: i64| async move {
+        sqlx::query_as::<_, (Option<i64>, Option<String>, String, Option<i64>)>(
+            "SELECT tmdb_id, imdb_id, title, year FROM items WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&state.db.read)
+        .await
+    };
+    let imdb = |id: Option<String>| id.and_then(|id| id.trim().trim_start_matches("tt").parse::<i64>().ok());
+    let mut search = Search { moviehash: hash, languages, ..Default::default() };
+    match (row.kind.as_str(), row.grandparent_id) {
+        ("episode", Some(show)) => {
+            let (tmdb, imdb_id, title, _) = ids(show).await?.unwrap_or_default();
+            search.parent_tmdb_id = tmdb;
+            search.parent_imdb_id = imdb(imdb_id);
+            search.season_number = row.parent_idx;
+            search.episode_number = row.idx;
+            if search.parent_tmdb_id.is_none() && search.parent_imdb_id.is_none() {
+                search.query = Some(row.grandparent_title.clone().unwrap_or(title));
+            }
+        }
+        _ => {
+            let (tmdb, imdb_id, _, _) = ids(row.id).await?.unwrap_or_default();
+            search.tmdb_id = tmdb;
+            search.imdb_id = imdb(imdb_id);
+            if search.tmdb_id.is_none() && search.imdb_id.is_none() {
+                search.query = Some(row.title.clone());
+                search.year = row.year;
+            }
+        }
+    }
+    Ok(search)
+}
+
+/// What a search or download that failed answers: the day's quota used up
+/// `429`, a subtitle OpenSubtitles doesn't have `404`, anything else `503`
+/// with `setup`, whether subtitle search is set up on this server (`false`:
+/// no OpenSubtitles API key yet).
+fn failure(err: SearchError) -> Response {
+    let message = match err {
+        SearchError::Quota(message) => return AppError::TooManyRequests(message).into_response(),
+        SearchError::NotFound => return AppError::not_found("OpenSubtitles has no such subtitle").into_response(),
+        SearchError::Other(ref cause) => {
+            tracing::warn!("OpenSubtitles: {cause:#}");
+            format!("OpenSubtitles couldn't be reached: {cause:#}")
+        }
+        ref err => err.to_string(),
+    };
+    let setup = !matches!(err, SearchError::NotSetUp);
+    let body = json!({ "code": "unavailable", "message": message, "setup": setup });
+    (StatusCode::SERVICE_UNAVAILABLE, Json(body)).into_response()
+}
+
+#[derive(Deserialize)]
+struct Pick {
+    result: String,
+    file_id: Option<i64>,
+}
+
 /// `POST /api/items/{id}/subtitles`: adds a subtitle to the title's file
-/// (its first, or `file_id`): a file uploaded as `multipart/form-data`
-/// (`file`, `language`, and `hearing_impaired`, `forced`, `file_id` if need
-/// be). `201` with the new track.
+/// (its first, or `file_id`): a search result (`{"result": id}`), or a file
+/// uploaded as `multipart/form-data` (`file`, `language`, and
+/// `hearing_impaired`, `forced`, `file_id` if need be). `201` with the new
+/// track.
 pub async fn add(
     State(state): State<AppState>,
     user: AuthUser,
@@ -67,7 +194,38 @@ pub async fn add(
         };
         (file, sub)
     } else {
-        return Err(AppError::bad_request("subtitles are added as a file, in a multipart/form-data form"));
+        let pick: Pick =
+            serde_json::from_slice(&body).map_err(|e| AppError::bad_request(format!("bad request: {e}")))?;
+        let (_, file) = video_file(&state, &user, id, pick.file_id).await?;
+        let picked = Picked::parse(&pick.result).ok_or_else(|| AppError::bad_request("unknown search result"))?;
+        if !state.opensubtitles.is_set_up() {
+            return Ok(failure(SearchError::NotSetUp));
+        }
+        let (name, data) =
+            match state.opensubtitles.download(picked.file_id, picked.convert, subtitles::MAX_BYTES).await {
+                Ok(downloaded) => downloaded,
+                Err(err) => return Ok(failure(err)),
+            };
+        // OpenSubtitles names its files by their format; one it made SubRip
+        // may keep its first name.
+        let name = match name.rsplit_once('.') {
+            Some((stem, _)) if picked.convert => format!("{stem}.srt"),
+            Some(_) => name,
+            None => format!("{name}.srt"),
+        };
+        let (format, text) = subtitles::read(&data, &name)?;
+        let language = subtitles::language(&picked.language).unwrap_or_else(|| "und".to_owned());
+        let sub = NewSub {
+            format,
+            text,
+            language,
+            title: subtitles::title_from(&name),
+            forced: picked.forced,
+            sdh: picked.hearing_impaired,
+            source: format!("opensubtitles:{}", picked.file_id),
+            added_by: user.id,
+        };
+        (file, sub)
     };
     let added = subtitles::add(&state.db, &state.config.added_subtitles_dir(), &file, sub).await?;
     tracing::info!("{} added subtitles {} to {}", user.username, added.index, file.path);

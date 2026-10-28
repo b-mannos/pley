@@ -12,20 +12,20 @@ use crate::error::{ApiResult, AppError};
 use crate::network::{self, Adapter, Fixed, Listen, Listener};
 use crate::playback::{TranscodeInfo, transcode_info};
 use crate::providers::{Check, ProviderError};
-use crate::settings::{Settings, SettingsPatch};
+use crate::settings::{AdminSettings, SettingsPatch};
 use crate::state::AppState;
 
 // ------------------------------------------------------------------ settings
 
-pub async fn get_settings(State(state): State<AppState>, _admin: AdminUser) -> Json<Settings> {
-    Json(Settings::clone(&state.settings.get()))
+pub async fn get_settings(State(state): State<AppState>, _admin: AdminUser) -> Json<AdminSettings> {
+    Json(state.settings.get().for_admin())
 }
 
 pub async fn put_settings(
     State(state): State<AppState>,
     _admin: AdminUser,
     Json(patch): Json<SettingsPatch>,
-) -> ApiResult<Json<Settings>> {
+) -> ApiResult<Json<AdminSettings>> {
     let before = state.settings.get();
     // A choice that can't work here is refused; one saved before (another
     // GPU, another FFmpeg) stays, and the transcoder does without it.
@@ -62,7 +62,7 @@ pub async fn put_settings(
     if crate::providers::settings_changed(&state.db, &before, &after).await? {
         state.scanner.enqueue_all(false).await?;
     }
-    Ok(Json(Settings::clone(&after)))
+    Ok(Json(after.for_admin()))
 }
 
 /// The transcoder's operating system, when known: a managed one runs on
@@ -80,6 +80,7 @@ pub enum Service {
     Tvmaze,
     Musicbrainz,
     Transcoder,
+    Opensubtitles,
 }
 
 impl Service {
@@ -90,6 +91,7 @@ impl Service {
             Service::Tvmaze => "TVmaze",
             Service::Musicbrainz => "MusicBrainz",
             Service::Transcoder => "The transcoder",
+            Service::Opensubtitles => "OpenSubtitles",
         }
     }
 }
@@ -103,6 +105,12 @@ pub struct TestRequest {
     /// TheTVDB's subscriber PIN, likewise.
     #[serde(default)]
     pin: Option<String>,
+    /// An OpenSubtitles account, likewise (the password: the saved one when
+    /// left out and the username is the saved one).
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    password: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -125,6 +133,9 @@ pub async fn test_service(
     Json(req): Json<TestRequest>,
 ) -> Json<TestResult> {
     let settings = state.settings.get();
+    if req.service == Service::Opensubtitles {
+        return Json(test_opensubtitles(&state, &req).await);
+    }
     let saved = if req.service == Service::Tvdb { &settings.tvdb_api_key } else { &settings.tmdb_api_key };
     let key = req.api_key.as_deref().unwrap_or(saved).trim().to_owned();
     let pin = req.pin.as_deref().unwrap_or(&settings.tvdb_pin).trim().to_owned();
@@ -141,6 +152,7 @@ pub async fn test_service(
             Service::Tvdb => state.metadata.check_provider(Check::Tvdb { key: &key, pin: &pin }).await.map(|()| None),
             Service::Tvmaze => state.metadata.check_provider(Check::Tvmaze).await.map(|()| None),
             Service::Musicbrainz => state.metadata.check_provider(Check::MusicBrainz).await.map(|()| None),
+            Service::Opensubtitles => unreachable!("tested above"),
             Service::Transcoder => match state.transcoder.status().await {
                 Ok(status) => Ok(Some(match status.ffmpeg_version {
                     Some(ffmpeg) => format!("pley-transcoder {} with ffmpeg {ffmpeg}", status.version),
@@ -183,6 +195,37 @@ pub async fn test_service(
         Ok(Err(ProviderError::Other(err))) => fail(format!("Couldn't reach {}: {err:#}", object(name)), ms),
         Err(_) => fail(format!("{name} didn't answer within {} seconds.", TEST_TIMEOUT.as_secs()), ms),
     }
+}
+
+/// The OpenSubtitles key and account typed in (or saved): whether
+/// OpenSubtitles takes them.
+async fn test_opensubtitles(state: &AppState, req: &TestRequest) -> TestResult {
+    use crate::providers::opensubtitles::SearchError;
+    let settings = state.settings.get();
+    let key = req.api_key.as_deref().unwrap_or(&settings.opensubtitles_api_key).trim().to_owned();
+    let username = req.username.as_deref().unwrap_or(&settings.opensubtitles_username).trim().to_owned();
+    let password = match req.password.as_deref().filter(|p| !p.is_empty()) {
+        Some(password) => password.to_owned(),
+        None if username == settings.opensubtitles_username => settings.opensubtitles_password.clone(),
+        None => String::new(),
+    };
+    if key.is_empty() {
+        return TestResult { ok: false, message: "Enter an OpenSubtitles API key first.".into(), ms: 0 };
+    }
+    if !username.is_empty() && password.is_empty() {
+        return TestResult { ok: false, message: "Enter the account's password too.".into(), ms: 0 };
+    }
+    let started = Instant::now();
+    let outcome = tokio::time::timeout(TEST_TIMEOUT, state.opensubtitles.check(&key, &username, &password)).await;
+    let ms = started.elapsed().as_millis() as u64;
+    let (ok, message) = match outcome {
+        Ok(Ok(message)) => (true, message),
+        Ok(Err(SearchError::Rejected(what))) => (false, format!("OpenSubtitles rejected {what}.")),
+        Ok(Err(SearchError::Other(err))) => (false, format!("Couldn't reach OpenSubtitles: {err:#}")),
+        Ok(Err(err)) => (false, format!("{err}.")),
+        Err(_) => (false, format!("OpenSubtitles didn't answer within {} seconds.", TEST_TIMEOUT.as_secs())),
+    };
+    TestResult { ok, message, ms }
 }
 
 /// "The transcoder" in the middle of a sentence.

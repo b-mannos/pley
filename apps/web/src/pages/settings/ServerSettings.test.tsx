@@ -113,6 +113,39 @@ describe("ServerSettings", () => {
     expect(screen.getByText(/lacks Chromaprint/)).toBeInTheDocument();
   });
 
+  it("sets up subtitle search, sending the password only when it changes", async () => {
+    const user = userEvent.setup();
+    const requests = mockApi({
+      "GET /api/settings": () => ({ ...SETTINGS, opensubtitles_api_key: "key", opensubtitles_username: "ana", opensubtitles_password_set: true }),
+      "GET /api/system": () => ({}),
+      "PUT /api/settings": (req) => ({ ...SETTINGS, ...(req.body as Partial<Settings>), opensubtitles_password: undefined, opensubtitles_password_set: true }),
+      "POST /api/settings/test": (): ServiceTestResult => ({ ok: true, message: "OpenSubtitles accepted the key and signed the account in.", ms: 240 }),
+    });
+    renderWithProviders(<ServerSettings />);
+    const password = await screen.findByLabelText("OpenSubtitles password");
+    expect(password).toHaveValue("");
+    expect(password).toHaveAttribute("placeholder", "Saved");
+    expect(screen.getByLabelText("OpenSubtitles username")).toHaveValue("ana");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    // The saved password is tested when none is typed.
+    await user.click(screen.getByRole("button", { name: "Test OpenSubtitles" }));
+    expect(await screen.findByText("OpenSubtitles accepted the key and signed the account in.")).toBeInTheDocument();
+    expect(requests.find((r) => r.method === "POST")?.body).toEqual({ service: "opensubtitles", api_key: "key", username: "ana" });
+
+    await user.type(password, "s3cret");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Settings saved")).toBeInTheDocument();
+    await waitFor(() => expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ opensubtitles_password: "s3cret" }));
+    expect(screen.getByLabelText("OpenSubtitles password")).toHaveValue("");
+
+    // Another account: its password is asked for again.
+    const username = screen.getByLabelText("OpenSubtitles username");
+    await user.clear(username);
+    await user.type(username, "bo");
+    expect(screen.getByLabelText("OpenSubtitles password")).toHaveAttribute("placeholder", "Password");
+  });
+
   it("leaves the transcoder to its own page", async () => {
     mockApi({ "GET /api/settings": () => SETTINGS, "GET /api/system": () => ({}) });
     renderWithProviders(<ServerSettings />);

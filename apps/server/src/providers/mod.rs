@@ -5,6 +5,8 @@
 //!   subscriber PIN).
 //! - [`musicbrainz`]: artists and albums, no key needed, with album covers
 //!   from the Cover Art Archive.
+//! - [`opensubtitles`]: subtitles to add to a file, with an API key each
+//!   server's administrator gets (see [`crate::subtitles`]).
 //!
 //! [`crate::metadata::MetadataAgent`] decides which source refreshes an item
 //! (see [`tv_source`]) and hands TV shows and music to [`Providers`]. The TV
@@ -12,6 +14,7 @@
 //! way for both.
 
 pub mod musicbrainz;
+pub mod opensubtitles;
 pub mod tv;
 pub mod tvdb;
 pub mod tvmaze;
@@ -47,6 +50,8 @@ pub struct Endpoints {
     pub cover_art: String,
     /// TMDB's API (used once a TMDB key is set).
     pub tmdb: String,
+    /// OpenSubtitles.com's API (used once its key is set).
+    pub opensubtitles: String,
 }
 
 impl Default for Endpoints {
@@ -57,6 +62,7 @@ impl Default for Endpoints {
             musicbrainz: musicbrainz::API.into(),
             cover_art: musicbrainz::COVER_ART.into(),
             tmdb: crate::metadata::API.into(),
+            opensubtitles: opensubtitles::API.into(),
         }
     }
 }
@@ -334,7 +340,7 @@ impl Api {
     }
 }
 
-fn retry_after(resp: &reqwest::Response) -> Option<Duration> {
+pub(crate) fn retry_after(resp: &reqwest::Response) -> Option<Duration> {
     let value = resp.headers().get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
     value.trim().parse::<u64>().ok().map(Duration::from_secs)
 }

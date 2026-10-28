@@ -1,5 +1,6 @@
-//! Subtitles added to a media file, uploaded from the web app. They are
-//! kept in the data folder (`subtitles/<file_id>/<id>.<ext>`, never next to the
+//! Subtitles added to a media file: uploaded from the web app, or downloaded
+//! from OpenSubtitles ([`crate::providers::opensubtitles`]). They are kept in
+//! the data folder (`subtitles/<file_id>/<id>.<ext>`, never next to the
 //! media, which pley doesn't change) as UTF-8 text, and every client sees
 //! them as ordinary subtitle files: external text tracks, flagged `added`,
 //! whose WebVTT, burn-in and downloads go the way a sidecar's do.

@@ -25,6 +25,9 @@ const KEYS = [
   "seek_previews",
   "previews_in_background",
   "third_party_apps",
+  "opensubtitles_api_key",
+  "opensubtitles_username",
+  "opensubtitles_password",
 ] as const satisfies readonly (keyof Settings)[];
 
 const LANGUAGES = [
@@ -218,6 +221,72 @@ ${form.tvdb_pin}`}
                 <Link href="https://thetvdb.com">TheTVDB</Link>. TV data from TVmaze is licensed{" "}
                 <Link href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA</Link>; music data from MusicBrainz is public domain.
               </p>
+            </Group>
+
+            <Group title="Subtitles" description="Find subtitles for a movie or episode on OpenSubtitles, from the player's subtitle menu.">
+              <Row
+                label="OpenSubtitles API key"
+                htmlFor="opensubtitles-key"
+                hint={
+                  <>
+                    Each server needs its own key: create a consumer at{" "}
+                    <Link href="https://www.opensubtitles.com/consumers">opensubtitles.com/consumers</Link>. Without one, subtitle search is off.
+                  </>
+                }
+              >
+                <SecretInput
+                  id="opensubtitles-key"
+                  what="key"
+                  value={form.opensubtitles_api_key ?? ""}
+                  onChange={(v) => set("opensubtitles_api_key", v)}
+                />
+              </Row>
+              <Row
+                label="OpenSubtitles account"
+                htmlFor="opensubtitles-username"
+                hint="Optional. Downloads count against this account's daily quota instead of the key's smaller one."
+              >
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <TextInput
+                    id="opensubtitles-username"
+                    aria-label="OpenSubtitles username"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="Username"
+                    value={form.opensubtitles_username ?? ""}
+                    onChange={(e) => {
+                      const username = e.target.value;
+                      // Another account's password isn't this one's (the server forgets it too).
+                      setForm((f) =>
+                        f ? { ...f, opensubtitles_username: username, opensubtitles_password: undefined, opensubtitles_password_set: false } : f,
+                      );
+                    }}
+                  />
+                  <TextInput
+                    id="opensubtitles-password"
+                    aria-label="OpenSubtitles password"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder={form.opensubtitles_password_set ? "Saved" : "Password"}
+                    disabled={!form.opensubtitles_username?.trim()}
+                    value={form.opensubtitles_password ?? ""}
+                    // Left empty, the saved password stays.
+                    onChange={(e) => set("opensubtitles_password", e.target.value || undefined)}
+                  />
+                </div>
+                <TestButton
+                  key={`${form.opensubtitles_api_key ?? ""}
+${form.opensubtitles_username ?? ""}
+${form.opensubtitles_password ?? ""}`}
+                  label="Test OpenSubtitles"
+                  test={{
+                    service: "opensubtitles",
+                    api_key: form.opensubtitles_api_key ?? "",
+                    username: form.opensubtitles_username ?? "",
+                    ...(form.opensubtitles_password ? { password: form.opensubtitles_password } : {}),
+                  }}
+                />
+              </Row>
             </Group>
 
             <Group title="Library scanning">

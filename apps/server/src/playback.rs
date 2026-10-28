@@ -320,7 +320,7 @@ pub struct SubtitleTrack {
     pub external: bool,
     pub text_based: bool,
     pub url: Option<String>,
-    /// Added by someone (uploaded; see
+    /// Added by someone (uploaded, or from OpenSubtitles; see
     /// [`crate::subtitles`]), external too.
     pub added: bool,
     /// An added track this user may delete (an administrator, or whoever
