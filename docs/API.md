@@ -235,6 +235,9 @@ interface MediaFile {
   selected_subtitle: number | null; // choice or their defaults); null = default / off. The audio
                                     // for an unknown player: a play request picks the track of
                                     // that language its player plays best (`audio_index` below)
+  audio_picked: boolean;            // selected_audio is a track the user picked for the show or
+                                    // movie; false: automatic, each player gets its best of that
+                                    // language, so a title's page names the language, not a track
   chapters: Chapter[];              // from the container, by start time (empty if none)
 }
 

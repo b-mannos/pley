@@ -244,6 +244,10 @@ pub struct MediaFileDto {
     /// Tracks to start with for the requesting user (remembered choices,
     /// see [`crate::streams`]); `None` = the file's default audio / no subtitles.
     pub selected_audio: Option<i64>,
+    /// Whether [`Self::selected_audio`] is a track the user picked (for the
+    /// show or the movie): without one, each player gets the track of that
+    /// language it plays best, which a title's page can only call automatic.
+    pub audio_picked: bool,
     pub selected_subtitle: Option<i64>,
     pub chapters: Vec<ChapterDto>,
 }
@@ -435,6 +439,7 @@ impl FileRow {
             streams: self.streams_of(streams),
             edition: crate::library::parse::edition(std::path::Path::new(&self.path)),
             selected_audio: None,
+            audio_picked: false,
             selected_subtitle: None,
             chapters: chapters
                 .into_iter()

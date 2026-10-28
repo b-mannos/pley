@@ -760,7 +760,7 @@ fn stream_node(file: &FileRow, s: &MediaStream, default_audio: Option<i64>) -> N
     let (stream_type, selected) = match s.kind {
         StreamKind::Video => (1, true),
         StreamKind::Audio => (2, Some(s.index) == default_audio),
-        StreamKind::Subtitle => (3, s.forced && s.default),
+        StreamKind::Subtitle => (3, crate::streams::is_forced(s) && s.default),
     };
     let codec = codec_name(&s.codec);
     let mut node = Node::new("Stream").attr("id", id).attr("streamType", stream_type);
@@ -851,9 +851,11 @@ fn stream_node(file: &FileRow, s: &MediaStream, default_audio: Option<i64>) -> N
                 .attr("extendedDisplayTitle", extended);
         }
         StreamKind::Subtitle => {
-            let label = if s.forced { format!("{lang_name} Forced") } else { lang_name.to_owned() };
+            // Flagged, or only named so ("English (Forced)", "Signs & Songs"), as pley's own apps count them.
+            let forced = crate::streams::is_forced(s);
+            let label = if forced { format!("{lang_name} Forced") } else { lang_name.to_owned() };
             let display = format!("{label} ({})", codec.to_uppercase());
-            node = node.attr("forced", s.forced).attr("displayTitle", display.clone()).attr(
+            node = node.attr("forced", forced).attr("displayTitle", display.clone()).attr(
                 "extendedDisplayTitle",
                 s.title.as_deref().map(|t| format!("{t} ({display})")).unwrap_or(display),
             );

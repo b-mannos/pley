@@ -504,7 +504,7 @@ fn is_sdh(title: Option<&str>) -> bool {
 
 /// Forced subtitles: flagged so, or only named so (`English (Forced)`,
 /// `Signs & Songs`), as many files are.
-fn is_forced(s: &MediaStream) -> bool {
+pub fn is_forced(s: &MediaStream) -> bool {
     s.forced
         || s.title.as_deref().is_some_and(|t| {
             t.to_lowercase().split(|c: char| !c.is_alphanumeric()).any(|w| matches!(w, "forced" | "signs"))

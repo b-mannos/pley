@@ -1256,8 +1256,12 @@ async fn the_audio_a_player_plays_best_is_chosen_for_it() {
     assert_eq!(chosen(&browser()).await, ("remux".to_owned(), json!(3)));
     assert_eq!(w.fake.last_request().audio.unwrap().mode, AudioMode::Copy, "copied, not converted");
     assert_eq!(chosen(&soundbar).await, ("direct".to_owned(), json!(2)));
-    // The item's details don't know the player: its default, as before.
-    assert_eq!(app.get(&format!("/api/items/{film}"), admin).await.body["files"][0]["selected_audio"], Value::Null);
+    // The item's details don't know the player: its default, as before, and not a pick.
+    let picked = async || {
+        let files = app.get(&format!("/api/items/{film}"), admin).await.body["files"].clone();
+        (files[0]["selected_audio"].clone(), files[0]["audio_picked"].clone())
+    };
+    assert_eq!(picked().await, (Value::Null, json!(false)));
 
     let choose = async |choice: Value| {
         let put = app.put(&format!("/api/items/{film}/streams"), admin, choice).await;
@@ -1266,14 +1270,17 @@ async fn the_audio_a_player_plays_best_is_chosen_for_it() {
     // Subtitles alone: the audio stays the player's best.
     choose(json!({"file_id": file, "subtitle_index": 4})).await;
     assert_eq!(chosen(&soundbar).await.1, json!(2));
+    assert_eq!(picked().await.1, json!(false));
     // The stereo track picked: played on the soundbar too, and subtitles chosen later keep it.
     choose(json!({"file_id": file, "audio_index": 3, "subtitle_index": 4})).await;
     assert_eq!(chosen(&soundbar).await, ("direct".to_owned(), json!(3)));
     choose(json!({"file_id": file, "subtitle_index": null})).await;
     assert_eq!(chosen(&soundbar).await.1, json!(3));
+    assert_eq!(picked().await, (json!(3), json!(true)));
     // Audio chosen as `null`: automatic again.
     choose(json!({"file_id": file, "audio_index": null, "subtitle_index": null})).await;
     assert_eq!(chosen(&soundbar).await.1, json!(2));
+    assert_eq!(picked().await.1, json!(false));
 }
 
 #[tokio::test]
