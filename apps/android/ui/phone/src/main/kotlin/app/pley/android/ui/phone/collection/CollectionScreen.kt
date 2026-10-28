@@ -52,7 +52,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.sentenceOf
 import app.pley.android.data.Loadable
 import app.pley.android.data.valueOrNull
 import app.pley.android.designsystem.PleyColors
@@ -90,6 +89,7 @@ import app.pley.android.ui.phone.library.count
 import app.pley.android.ui.phone.library.libraryColumns
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.shell.LocalPhoneShell
+import app.pley.android.ui.phone.shell.ReportLoad
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 
 /**
@@ -111,10 +111,11 @@ internal fun CollectionScreen(key: PleyKey.Collection) {
         vm.events.collect { event ->
             when (event) {
                 CollectionEvent.NothingToPlay -> shell.toasts.show(nothing)
-                is CollectionEvent.Failed -> shell.toasts.show(sentenceOf(event.error), error = true)
+                is CollectionEvent.Failed -> shell.report(event.error)
             }
         }
     }
+    ReportLoad(state)
     CollectionContent(state, vm)
 }
 
