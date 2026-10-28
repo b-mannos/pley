@@ -106,6 +106,9 @@ describe("finding subtitles", () => {
       "/api/items/7/subtitles/search?file_id=3&language=en",
       "/api/items/7/subtitles/search?file_id=3&language=fr",
     ]);
+    // Back goes to the subtitles, not the menu's top.
+    await userEvent.click(screen.getByRole("button", { name: "Find subtitles" }));
+    expect(screen.getByRole("menuitem", { name: "Find subtitles…" })).toBeInTheDocument();
   });
 
   it("says search isn't set up, pointing an administrator to Settings → Server, and leaves it out for others then", async () => {

@@ -314,7 +314,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
             <>
               <button
                 type="button"
-                onClick={() => setPanel("root")}
+                onClick={() => setPanel(panel === "find" || panel === "upload" ? "subtitles" : "root")}
                 className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold transition-colors hover:bg-white/10"
               >
                 <ChevronLeft className="size-4" />
