@@ -2,7 +2,7 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } fro
 import { useLocation, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type HlsType from "hls.js";
-import type { ErrorData, FragLoadedData, LevelSwitchedData } from "hls.js";
+import type { ErrorData, FragLoadedData, LevelSwitchedData, ManifestParsedData } from "hls.js";
 import {
   ArrowLeft,
   CircleStop,
@@ -91,6 +91,25 @@ function rangesOf(tr: TimeRanges): [number, number][] {
  */
 function hlsStartPosition(startSec: number): number {
   return startSec > 0 ? startSec : 0.001;
+}
+
+/**
+ * Of a stream's sizes (hls.js's levels, smallest first), the one to start
+ * at for a player shown `video`'s size: the smallest that fills it (as
+ * hls.js's `capLevelToPlayerSize` measures it), no bigger than `first`, the
+ * largest the server lists.
+ */
+export function startSize(
+  levels: readonly { width: number; height: number }[],
+  video: { clientWidth: number; clientHeight: number },
+  first: number,
+): number {
+  const scale = window.devicePixelRatio || 1;
+  const [w, h] = [video.clientWidth * scale, video.clientHeight * scale];
+  // Not laid out yet: no size to go by.
+  if (!w || !h) return first;
+  const fills = levels.findIndex((l) => l.width >= w || l.height >= h);
+  return fills < 0 ? first : Math.min(fills, first);
 }
 
 export interface VideoPlayerProps {
@@ -586,6 +605,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             } else {
               const hls = new Hls({
                 startPosition: hlsStartPosition(startSec),
+                // Started once the playlist is read, at the size chosen then.
+                autoStartLoad: false,
                 // The first segment is asked for as soon as the playlist is
                 // in, not once the element's MediaSource has opened (~0.1 s later).
                 startFragPrefetch: true,
@@ -641,6 +662,14 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                 // No answer at all, after the retries: the server is out of reach.
                 if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !data.response?.code) failUnreachable();
                 else setError(`Playback failed (${data.details}).`);
+              });
+              hls.on(Hls.Events.MANIFEST_PARSED, (_evt, data: ManifestParsedData) => {
+                // The size to start at, rather than hls.js's guess from a
+                // bandwidth it hasn't measured: the first the server lists
+                // (the one it started making), or for Automatic the smallest
+                // that fills the player, as it then keeps to.
+                hls.startLevel = auto ? startSize(data.levels, video, data.firstLevel) : data.firstLevel;
+                hls.startLoad(hlsStartPosition(startSec));
               });
               hls.on(Hls.Events.LEVEL_SWITCHED, (_evt, data: LevelSwitchedData) => {
                 const level = hls.levels[data.level];

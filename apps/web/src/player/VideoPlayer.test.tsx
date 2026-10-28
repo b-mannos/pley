@@ -5,7 +5,7 @@ import { useServerEvents } from "@/api/events";
 import type { ItemDetail, PlaybackInfo, ServerEvent } from "@/api/types";
 import { makeItem, makeStream } from "@/test/fixtures";
 import { mockApi, renderWithProviders, type FakeRequest } from "@/test/render";
-import { VideoPlayer } from "./VideoPlayer";
+import { VideoPlayer, startSize } from "./VideoPlayer";
 
 /** A stand-in for hls.js: records its config and calls, and fires events on demand. */
 const { FakeHls, hlsInstances } = vi.hoisted(() => {
@@ -13,7 +13,14 @@ const { FakeHls, hlsInstances } = vi.hoisted(() => {
   const hlsInstances: FakeHls[] = [];
   class FakeHls {
     static isSupported = () => true;
-    static Events = { ERROR: "hlsError", FRAG_LOADED: "hlsFragLoaded" };
+    static Events = {
+      ERROR: "hlsError",
+      FRAG_LOADED: "hlsFragLoaded",
+      MANIFEST_PARSED: "hlsManifestParsed",
+      LEVEL_SWITCHED: "hlsLevelSwitched",
+    };
+    startLevel = -1;
+    levels: { width: number; height: number }[] = [];
     static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError" };
     static ErrorDetails = {
       MANIFEST_LOAD_ERROR: "manifestLoadError",
@@ -520,6 +527,38 @@ describe("VideoPlayer with hls.js", () => {
     renderPlayer(0);
     await waitFor(() => expect(hlsInstances[0]?.calls).toContain("attachMedia"));
     expect(hlsInstances[0]?.config.startFragPrefetch).toBe(true);
+  });
+
+  it("starts at the size the server lists first, once the playlist is read", async () => {
+    serve([session("s1")]);
+    renderPlayer(90_000);
+    await waitFor(() => expect(hlsInstances[0]?.calls).toContain("attachMedia"));
+    const hls = hlsInstances[0]!;
+    // Not at hls.js's guess from a bandwidth it hasn't measured.
+    expect(hls.config.autoStartLoad).toBe(false);
+    expect(hls.calls).not.toContain("startLoad");
+    const levels = [
+      { width: 640, height: 360 },
+      { width: 1280, height: 720 },
+      { width: 1920, height: 1080 },
+    ];
+    act(() => hls.emit("hlsManifestParsed", { levels, firstLevel: 2 }));
+    expect(hls.startLevel).toBe(2);
+    expect(hls.calls).toContain("startLoad");
+  });
+});
+
+describe("startSize", () => {
+  const levels = [
+    { width: 640, height: 360 },
+    { width: 1280, height: 720 },
+    { width: 1920, height: 1080 },
+  ];
+  it("is the smallest that fills the player, never above the server's first", () => {
+    expect(startSize(levels, { clientWidth: 1100, clientHeight: 620 }, 2)).toBe(1);
+    expect(startSize(levels, { clientWidth: 2560, clientHeight: 1440 }, 2)).toBe(2);
+    expect(startSize(levels, { clientWidth: 1100, clientHeight: 620 }, 0)).toBe(0);
+    expect(startSize(levels, { clientWidth: 0, clientHeight: 0 }, 2), "not laid out yet").toBe(2);
   });
 });
 
