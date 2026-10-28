@@ -1,6 +1,8 @@
 package app.pley.android.player.session
 
 import android.content.Context
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import kotlin.math.min
 
 /** Why Automatic plays below the original. */
@@ -82,31 +84,54 @@ interface CeilingMemory {
             }
         }
 
-        /**
-         * In the app's preferences, one per server ([server] is its address).
-         * The clock is elapsedRealtime: a ceiling from before the device
-         * restarted reads as from the future, and is forgotten.
-         */
-        fun preferences(context: Context, server: String): CeilingMemory = object : CeilingMemory {
-            private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            private val kbpsKey = "$server|kbps"
-            private val atKey = "$server|at"
+    }
+}
 
-            override fun read(): Pair<Int, Long>? {
-                if (!prefs.contains(kbpsKey)) return null
-                return prefs.getInt(kbpsKey, 0) to prefs.getLong(atKey, 0)
-            }
+/**
+ * The ceilings of every server, in the app's preferences: read once off the
+ * main thread when made (pressing play never waits on the disk), held in
+ * memory, and written behind. The clock is elapsedRealtime: a ceiling from
+ * before the device restarted reads as from the future, and is forgotten.
+ */
+class PreferencesCeilings(context: Context) {
+    private val app = context.applicationContext
+    private val held = ConcurrentHashMap<String, Pair<Int, Long>>()
+    private val disk = Executors.newSingleThreadExecutor { r -> Thread(r, "pley-ceilings").apply { isDaemon = true } }
+    private val prefs by lazy { app.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
 
-            override fun write(kbps: Int, atMs: Long) {
-                prefs.edit().putInt(kbpsKey, kbps).putLong(atKey, atMs).apply()
-            }
-
-            override fun forget() {
-                prefs.edit().remove(kbpsKey).remove(atKey).apply()
+    init {
+        disk.execute {
+            for ((key, value) in prefs.all) {
+                val server = key.removeSuffix(KBPS)
+                if (key.endsWith(KBPS) && value is Int) held.putIfAbsent(server, value to prefs.getLong(server + AT, 0))
             }
         }
+    }
 
-        private const val PREFS = "auto_quality"
+    /** Waits for what was asked of the disk so far (tests). */
+    internal fun settle() {
+        disk.submit {}.get()
+    }
+
+    /** The ceiling of the server at [server] (its address). */
+    fun forServer(server: String): CeilingMemory = object : CeilingMemory {
+        override fun read(): Pair<Int, Long>? = held[server]
+
+        override fun write(kbps: Int, atMs: Long) {
+            held[server] = kbps to atMs
+            disk.execute { prefs.edit().putInt(server + KBPS, kbps).putLong(server + AT, atMs).apply() }
+        }
+
+        override fun forget() {
+            held.remove(server)
+            disk.execute { prefs.edit().remove(server + KBPS).remove(server + AT).apply() }
+        }
+    }
+
+    private companion object {
+        const val PREFS = "auto_quality"
+        const val KBPS = "|kbps"
+        const val AT = "|at"
     }
 }
 

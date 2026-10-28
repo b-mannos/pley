@@ -87,6 +87,7 @@ class SessionPlaybackServices(
             val clientId = clientIdOf(app)
             val networkKind = networkKindOf(app)
             val offsets = PreferencesSubtitleOffsets(app)
+            val ceilings = PreferencesCeilings(app)
             val pictureDir = File(app.cacheDir, PICTURE_SUBTITLES_DIR)
             return SessionPlaybackServices({
                 val session = data.session.session.value ?: error("Sign in to play")
@@ -102,7 +103,7 @@ class SessionPlaybackServices(
                     reporter = reporter,
                     subtitles = OkHttpSubtitleFetcher({ network.subtitles(session.issuer) }),
                     quality = QualityMemory.of(data.settings, networkKind),
-                    ceiling = CeilingMemory.preferences(app, session.issuer),
+                    ceiling = ceilings.forServer(session.issuer),
                     sheets = OkHttpSheetSource({ network.images }),
                     autoplayNext = {
                         try {
