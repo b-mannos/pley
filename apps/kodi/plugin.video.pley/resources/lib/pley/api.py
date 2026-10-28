@@ -177,6 +177,9 @@ class Client:
     def put(self, path: str, body=None):
         return self.json("PUT", path, json_body=body if body is not None else {})
 
+    def patch(self, path: str, body=None):
+        return self.json("PATCH", path, json_body=body if body is not None else {})
+
     def delete(self, path: str):
         return self.json("DELETE", path)
 

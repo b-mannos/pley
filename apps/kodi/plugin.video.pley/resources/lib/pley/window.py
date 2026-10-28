@@ -817,8 +817,9 @@ class Window(xbmcgui.WindowXML):
             self.session.client.delete(path)
         self.changed()
 
-    def tile_menu(self, item: dict, continue_watching: bool = False) -> None:
-        """A tile's actions (TvItemActionsScreen), in Kodi's context menu."""
+    def tile_menu(self, item: dict, continue_watching: bool = False, extra=()) -> None:
+        """A tile's actions (TvItemActionsScreen), in Kodi's context menu;
+        then the page's own (`extra`: a playlist's)."""
         kind = item.get("kind")
         actions = []
         if kind in ("movie", "show", "season", "episode", "extra"):
@@ -836,6 +837,11 @@ class Window(xbmcgui.WindowXML):
             actions.append((T("remove_from_continue"), lambda: self.forget_progress(item)))
         if kind == "episode" and item.get("grandparent_id"):
             actions.append((T("go_to_show"), lambda: self.open(Item(self, item["grandparent_id"]))))
+        self.choose(actions + list(extra))
+
+    def choose(self, actions: list) -> None:
+        """(name, action) pairs in Kodi's context menu: the one chosen is
+        done, and what the server refused said."""
         if not actions:
             return
         chosen = xbmcgui.Dialog().contextmenu([name for name, _ in actions])
@@ -844,6 +850,24 @@ class Window(xbmcgui.WindowXML):
                 actions[chosen][1]()
             except api.ApiError as e:
                 self.toast(T("server_error") % e.message, 6)
+
+    def rename_playlist(self, playlist: dict):
+        """Rename playlist: the new title, once saved (None: unchanged)."""
+        old = playlist.get("title") or ""
+        title = (xbmcgui.Dialog().input(T("rename_playlist"), defaultt=old) or "").strip()
+        if not title or title == old:
+            return None
+        self.session.client.patch("/api/playlists/%d" % playlist["id"], {"title": title})
+        return title
+
+    def delete_playlist(self, playlist: dict) -> bool:
+        """Delete playlist, once the person says so: whether it went."""
+        asked = T("delete_playlist_body") % (playlist.get("title") or "")
+        if not xbmcgui.Dialog().yesno(T("delete_playlist_ask"), asked, nolabel=T("cancel"), yeslabel=T("delete")):
+            return False
+        self.session.client.delete("/api/playlists/%d" % playlist["id"])
+        self.toast(T("playlist_deleted"))
+        return True
 
     def forget_progress(self, item: dict) -> None:
         self.session.client.delete("/api/continue-watching/%d" % item["id"])
@@ -2131,7 +2155,7 @@ class Library(Screen):
             made = self.session.client.post("/api/playlists", body)
         except api.ApiError as e:
             return self.win.toast(T("server_error") % e.message, 6)
-        self.win.open(Grid.playlist(self.win, made))
+        self.win.open(Playlist(self.win, made))
 
     def moved(self, control_id: int, action: int) -> None:
         if self.tab != "all" or control_id != L.grid_list(L.LIBRARY_GRID, self.shape) or self.loading:
@@ -2293,7 +2317,7 @@ class Grid(Screen):
 
     name = "grid"
 
-    def __init__(self, win: Window, title: str, loader, shape: str = "grid", rail=None, opener=None, empty: str = "", subtitle: str = ""):
+    def __init__(self, win: Window, title: str, loader, shape: str = "grid", rail=None, opener=None, empty: str = "", subtitle: str = "", menu_for=None):
         super().__init__(win)
         self.title = title
         self.loader = loader
@@ -2302,6 +2326,8 @@ class Grid(Screen):
         self.opener = opener
         self.empty = empty
         self.subtitle = subtitle
+        # An entry's actions, when they aren't a title's (playlists').
+        self.menu_for = menu_for
         self.entries = []
         self.items = []
 
@@ -2318,15 +2344,10 @@ class Grid(Screen):
             li.setProperty("ph", words.placeholder(playlist.get("title") or ""))
             return li
 
-        return cls(win, T("playlists"), (load, tile), "wide", "playlists", lambda p: win.open(Grid.playlist(win, p)), T("no_playlists"))
+        def menu_for(playlist):
+            return [(T("rename_playlist"), lambda: win.rename_playlist(playlist)), (T("delete_playlist"), lambda: win.delete_playlist(playlist))]
 
-    @classmethod
-    def playlist(cls, win: Window, playlist: dict):
-        def load():
-            entries = win.session.get("/api/playlists/%d" % playlist["id"], summaries=1).get("entries", [])
-            return [e["item"] for e in entries]
-
-        return cls(win, playlist.get("title") or "", (load, None), "wide", opener=win.open_item)
+        return cls(win, T("playlists"), (load, tile), "wide", "playlists", lambda p: win.open(Playlist(win, p)), T("no_playlists"), menu_for=menu_for)
 
     @classmethod
     def collections(cls, win: Window):
@@ -2388,10 +2409,19 @@ class Grid(Screen):
             self.opener(self.entries[at])
 
     def menu(self, control_id: int) -> None:
-        if control_id == L.grid_list(L.GRID_LISTS, self.shape) and self.loader[1] is None:
-            at = self.win.c(control_id).getSelectedPosition()
-            if 0 <= at < len(self.entries):
-                self.win.tile_menu(self.entries[at])
+        if control_id != L.grid_list(L.GRID_LISTS, self.shape):
+            return
+        at = self.win.c(control_id).getSelectedPosition()
+        if not 0 <= at < len(self.entries):
+            return
+        if self.menu_for is not None:
+            self.win.choose(self.menu_for(self.entries[at]))
+            try:
+                self.refresh()
+            except api.ApiError as e:
+                self.win.toast(T("server_error") % e.message, 6)
+        elif self.loader[1] is None:
+            self.win.tile_menu(self.entries[at])
 
     def refresh(self) -> None:
         focus = self.win.getFocusId()
@@ -2402,6 +2432,97 @@ class Grid(Screen):
         if at >= 0 and self.entries:
             self.win.setFocusId(grid)
             self.win.c(grid).selectItem(min(at, len(self.entries) - 1))
+        elif at >= 0:
+            # The last one went: focus mustn't stay on the hidden grid.
+            self.win.focus_rail()
+
+
+class Playlist(Grid):
+    """A playlist (the web's PlaylistPage): its titles, a music playlist's
+    tracks playing on from the one chosen. A title's menu edits the
+    playlist too: Move up, Move down and Remove from playlist (not a smart
+    playlist's, which fills itself), Rename playlist and Delete playlist."""
+
+    def __init__(self, win: Window, playlist: dict):
+        super().__init__(win, playlist.get("title") or "", (self.fetch, None), "wide", opener=win.open_item)
+        self.playlist = playlist
+        self.listed = []
+
+    def fetch(self) -> list:
+        found = self.session.get("/api/playlists/%d" % self.playlist["id"], summaries=1)
+        self.take(found)
+        return self.entries
+
+    def take(self, found: dict) -> None:
+        """The playlist as the server answered it."""
+        self.playlist = found
+        self.title = found.get("title") or self.title
+        self.listed = found.get("entries") or []
+        self.entries = [e["item"] for e in self.listed]
+        self.empty = T("smart_playlist_empty") if found.get("smart_filter") else T("playlist_empty")
+
+    def click(self, control_id: int) -> None:
+        if control_id != L.grid_list(L.GRID_LISTS, self.shape):
+            return
+        at = self.win.c(control_id).getSelectedPosition()
+        if not 0 <= at < len(self.entries):
+            return
+        if self.playlist.get("kind") == "audio":
+            return self.win.play_music(self.playlist, at=at, tracks=self.entries)
+        self.win.open_item(self.entries[at])
+
+    def menu(self, control_id: int) -> None:
+        if control_id != L.grid_list(L.GRID_LISTS, self.shape):
+            return
+        at = self.win.c(control_id).getSelectedPosition()
+        if not 0 <= at < len(self.entries):
+            return
+        edits = []
+        if not self.playlist.get("smart_filter"):
+            if at > 0:
+                edits.append((T("move_up"), lambda: self.move(at, at - 1)))
+            if at + 1 < len(self.entries):
+                edits.append((T("move_down"), lambda: self.move(at, at + 1)))
+            edits.append((T("remove_from_playlist"), lambda: self.remove(at)))
+        edits += [(T("rename_playlist"), self.rename), (T("delete_playlist"), self.delete)]
+        self.win.tile_menu(self.entries[at], extra=edits)
+
+    def move(self, at: int, to: int) -> None:
+        ids = [e["entry_id"] for e in self.listed]
+        ids.insert(to, ids.pop(at))
+        self.redraw(self.session.client.put("/api/playlists/%d/order" % self.playlist["id"], {"entry_ids": ids}), to)
+
+    def remove(self, at: int) -> None:
+        self.session.client.delete("/api/playlists/%d/items/%d" % (self.playlist["id"], self.listed[at]["entry_id"]))
+        self.redraw(None, at)
+
+    def redraw(self, found, at: int) -> None:
+        """The playlist as it is now (`found`, else asked again), focus on
+        `at` (or the one before, past its end)."""
+        if found and "entries" in found:
+            self.take(found)
+        else:
+            self.load()
+        self.draw()
+        grid = L.grid_list(L.GRID_LISTS, self.shape)
+        if self.entries:
+            self.win.setFocusId(grid)
+            self.win.c(grid).selectItem(min(at, len(self.entries) - 1))
+        else:
+            self.win.focus_rail()
+
+    def rename(self) -> None:
+        title = self.win.rename_playlist(self.playlist)
+        if title:
+            self.title = self.playlist["title"] = title
+            self.win.put(L.GRID_TITLE, title)
+
+    def delete(self) -> None:
+        if self.win.delete_playlist(self.playlist):
+            self.win.back()
+            if isinstance(self.win.screen, Grid):
+                # The playlists, without this one.
+                self.win.screen.refresh()
 
 
 class Libraries(Screen):

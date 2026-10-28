@@ -766,3 +766,39 @@ msgstr ""
 msgctxt "#30232"
 msgid "PIN"
 msgstr ""
+
+msgctxt "#30233"
+msgid "Remove from playlist"
+msgstr ""
+
+msgctxt "#30234"
+msgid "Rename playlist"
+msgstr ""
+
+msgctxt "#30235"
+msgid "Delete playlist"
+msgstr ""
+
+msgctxt "#30236"
+msgid "Delete playlist?"
+msgstr ""
+
+msgctxt "#30237"
+msgid "“%s” will be deleted. What's in it stays in your libraries."
+msgstr ""
+
+msgctxt "#30238"
+msgid "Delete"
+msgstr ""
+
+msgctxt "#30239"
+msgid "Playlist deleted"
+msgstr ""
+
+msgctxt "#30240"
+msgid "This playlist is empty. Use “Add to playlist” on a title, or press Menu on a poster."
+msgstr ""
+
+msgctxt "#30241"
+msgid "Nothing matches this playlist's filter yet."
+msgstr ""

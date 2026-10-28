@@ -72,18 +72,19 @@ class Plugin:
         li.setArt({"icon": icon, "thumb": icon})
         xbmcplugin.addDirectoryItem(self.handle, self.url(**params), li, isFolder=False)
 
-    def items(self, items: list, content: str | None = None, in_season: bool = False) -> None:
+    def items(self, items: list, content: str | None = None, in_season: bool = False, extra=None) -> None:
         """`in_season`: a season's episodes, which need no show in their
-        names; elsewhere (Home's rows, search, playlists) they say it."""
+        names; elsewhere (Home's rows, search, playlists) they say it.
+        `extra(at)`: more of the menu of the item at `at` (a playlist's)."""
         kinds = {item["kind"] for item in items}
         # Among films and shows, episodes show their show's poster, as the
         # others do theirs; on their own, their stills.
         posters = kinds != {"episode"}
         base = self.proxy_base
         entries = []
-        for item in items:
+        for at, item in enumerate(items):
             li = listing.list_item(base, item, with_show=not in_season, posters=posters)
-            li.addContextMenuItems(self.menu(item))
+            li.addContextMenuItems(self.menu(item) + (extra(at) if extra else []))
             if item["kind"] in listing.PLAYABLE:
                 # The resume point goes along, so playing needs no details first.
                 position = (item.get("user_state") or {}).get("position_ms") or 0
@@ -293,13 +294,51 @@ class Plugin:
             artwork = playlist.get("artwork") or []
             if artwork:
                 li.setArt({"thumb": listing.image(self.proxy_base, artwork[0], 500)})
+            li.addContextMenuItems(
+                [
+                    (kodi.text("rename_playlist"), "RunPlugin(%s)" % self.url(route="rename_playlist", id=playlist["id"])),
+                    (kodi.text("delete_playlist"), "RunPlugin(%s)" % self.url(route="delete_playlist", id=playlist["id"])),
+                ]
+            )
             xbmcplugin.addDirectoryItem(self.handle, self.url(route="playlist", id=playlist["id"]), li, isFolder=True)
         self.end()
 
     def route_playlist(self) -> None:
-        entries = self.client().get("/api/playlists/%s" % self.params["id"], summaries=1).get("entries", [])
-        self.items([entry["item"] for entry in entries])
+        playlist = self.client().get("/api/playlists/%s" % self.params["id"], summaries=1)
+        entries = playlist.get("entries", [])
+
+        def extra(at):
+            # A smart playlist fills itself.
+            if playlist.get("smart_filter"):
+                return []
+            url = self.url(route="playlist_remove", id=playlist["id"], entry=entries[at]["entry_id"])
+            return [(kodi.text("remove_from_playlist"), "RunPlugin(%s)" % url)]
+
+        self.items([entry["item"] for entry in entries], extra=extra)
         self.end()
+
+    def route_rename_playlist(self) -> None:
+        client = self.client()
+        path = "/api/playlists/%s" % self.params["id"]
+        old = client.get(path).get("title") or ""
+        title = (xbmcgui.Dialog().input(kodi.text("rename_playlist"), defaultt=old) or "").strip()
+        if title and title != old:
+            client.patch(path, {"title": title})
+            xbmc.executebuiltin("Container.Refresh")
+
+    def route_delete_playlist(self) -> None:
+        client = self.client()
+        path = "/api/playlists/%s" % self.params["id"]
+        title = client.get(path).get("title") or ""
+        asked = kodi.text("delete_playlist_body") % title
+        if xbmcgui.Dialog().yesno(kodi.text("delete_playlist_ask"), asked, nolabel=kodi.text("cancel"), yeslabel=kodi.text("delete")):
+            client.delete(path)
+            kodi.notify(kodi.text("playlist_deleted"))
+            xbmc.executebuiltin("Container.Refresh")
+
+    def route_playlist_remove(self) -> None:
+        self.client().delete("/api/playlists/%s/items/%s" % (self.params["id"], self.params["entry"]))
+        xbmc.executebuiltin("Container.Refresh")
 
     def route_search(self) -> None:
         query = self.params.get("q")
@@ -564,7 +603,21 @@ class Plugin:
 
 
 # Routes that run as actions, with no listing to end.
-ACTIONS = ("play", "watched", "my_list", "settings", "tracks", "profiles", "choose_server", "sign_in", "sign_out", "retry")
+ACTIONS = (
+    "play",
+    "watched",
+    "my_list",
+    "settings",
+    "tracks",
+    "profiles",
+    "rename_playlist",
+    "delete_playlist",
+    "playlist_remove",
+    "choose_server",
+    "sign_in",
+    "sign_out",
+    "retry",
+)
 
 
 def choose(server: str, name: str, server_id: str) -> None:

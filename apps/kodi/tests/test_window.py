@@ -95,6 +95,9 @@ class FakeWindow(window.Window):
     def setProperty(self, name, value):
         pass
 
+    def getProperty(self, name):
+        return ""
+
     def open(self, screen):
         self.opened.append(screen)
 
@@ -346,6 +349,94 @@ class WindowTest(unittest.TestCase):
         later.pick(household[0])
         self.assertEqual(len(asked), 3)
         self.assertFalse(later.back())
+
+    def test_editing_a_playlist(self):
+        class Server:
+            """A playlist's routes, noted; answers as pley's."""
+
+            def __init__(self):
+                self.calls, self.title, self.smart = [], "Road trip", None
+                self.entries = [{"entry_id": 10 + n, "item": {"id": n, "kind": "movie", "title": "Film %d" % n}} for n in (1, 2, 3)]
+
+            def detail(self):
+                return {"id": 7, "title": self.title, "kind": "video", "smart_filter": self.smart, "entries": list(self.entries)}
+
+            def get(self, path, **query):
+                return self.detail()
+
+            def put(self, path, body=None):
+                self.calls.append(("PUT", path, body))
+                order = {entry_id: at for at, entry_id in enumerate(body["entry_ids"])}
+                self.entries.sort(key=lambda e: order[e["entry_id"]])
+                return self.detail()
+
+            def patch(self, path, body=None):
+                self.calls.append(("PATCH", path, body))
+                self.title = body["title"]
+                return self.detail()
+
+            def delete(self, path):
+                self.calls.append(("DELETE", path))
+                self.entries = [e for e in self.entries if not path.endswith("/%d" % e["entry_id"])]
+
+        server = Server()
+        win = FakeWindow()
+        win.session.client, win.session.get = server, server.get
+        win.session.details, win.session.lock = {}, window.threading.Lock()
+        page = window.Playlist(win, {"id": 7, "title": "Road trip"})
+        page.load()
+        page.show(False)
+        grid = win.made[L.grid_list(L.GRID_LISTS, page.shape)]
+        self.assertEqual([li.label for li in grid.items], ["Film 1", "Film 2", "Film 3"])
+        # A title's menu: its own actions, then the playlist's.
+        grid.selected = 0
+        with Dialogs(picks=[3]) as asked:
+            page.menu(L.grid_list(L.GRID_LISTS, page.shape))
+        names = asked.shown[0][0]
+        self.assertEqual(names[3:], [window.T("move_down"), window.T("remove_from_playlist"), window.T("rename_playlist"), window.T("delete_playlist")])
+        self.assertEqual(server.calls[-1], ("PUT", "/api/playlists/7/order", {"entry_ids": [12, 11, 13]}))
+        self.assertEqual(([li.label for li in grid.items], grid.selected), (["Film 2", "Film 1", "Film 3"], 1))
+        # Remove from playlist: focus on the one before, past the end.
+        grid.selected = 2
+        with Dialogs(picks=[4]) as asked:
+            page.menu(L.grid_list(L.GRID_LISTS, page.shape))
+        self.assertEqual(asked.shown[0][0][3:5], [window.T("move_up"), window.T("remove_from_playlist")])
+        self.assertEqual(server.calls[-1], ("DELETE", "/api/playlists/7/items/13"))
+        self.assertEqual((len(grid.items), grid.selected), (2, 1))
+        # Rename playlist.
+        grid.selected = 0
+        with Dialogs(picks=[5], typed=["Long trip"]):
+            page.menu(L.grid_list(L.GRID_LISTS, page.shape))
+        self.assertEqual(server.calls[-1], ("PATCH", "/api/playlists/7", {"title": "Long trip"}))
+        self.assertEqual(win.made[L.GRID_TITLE].label, "Long trip")
+        # A smart playlist fills itself: renamed and deleted only.
+        server.smart = "genre=Comedy"
+        page.refresh()
+        with Dialogs(picks=[-1]) as asked:
+            page.menu(L.grid_list(L.GRID_LISTS, page.shape))
+        self.assertEqual(asked.shown[0][0][3:], [window.T("rename_playlist"), window.T("delete_playlist")])
+        # Delete playlist asks first.
+        with Dialogs(picks=[4], yes=[False]):
+            page.menu(L.grid_list(L.GRID_LISTS, page.shape))
+        self.assertEqual(server.calls[-1][0], "PATCH")
+        with Dialogs(picks=[4], yes=[True]) as asked:
+            page.menu(L.grid_list(L.GRID_LISTS, page.shape))
+        self.assertEqual(asked.asked[0][0], window.T("delete_playlist_ask"))
+        self.assertEqual(server.calls[-1], ("DELETE", "/api/playlists/7"))
+        self.assertEqual(win.toasts[-1], window.T("playlist_deleted"))
+
+    def test_a_music_playlist_plays_on_from_a_track(self):
+        tracks = [{"entry_id": 20 + n, "item": {"id": 30 + n, "kind": "track", "title": "Song %d" % n}} for n in (1, 2)]
+        win = FakeWindow()
+        win.session.get = Client({"/api/playlists/8": {"id": 8, "title": "Running", "kind": "audio", "entries": tracks}}).get
+        page = window.Playlist(win, {"id": 8, "title": "Running"})
+        page.load()
+        self.assertEqual(page.shape, "square")
+        win.made[L.grid_list(L.GRID_LISTS, "square")] = grid = Control()
+        grid.selected = 1
+        page.click(L.grid_list(L.GRID_LISTS, "square"))
+        self.assertEqual(len(window.xbmc.PlayList.entries[window.xbmc.PLAYLIST_MUSIC]), 2)
+        self.assertEqual(window.xbmc.played[-1][2], 1)
 
     def test_library_filters(self):
         win = FakeWindow()

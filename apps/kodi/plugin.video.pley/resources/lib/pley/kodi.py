@@ -189,6 +189,15 @@ TEXT = {
     "watching_as": 30230,
     "no_other_profile": 30231,
     "pin": 30232,
+    "remove_from_playlist": 30233,
+    "rename_playlist": 30234,
+    "delete_playlist": 30235,
+    "delete_playlist_ask": 30236,
+    "delete_playlist_body": 30237,
+    "delete": 30238,
+    "playlist_deleted": 30239,
+    "playlist_empty": 30240,
+    "smart_playlist_empty": 30241,
 }
 
 

@@ -123,6 +123,13 @@ side by side with Kodi's were the reference):
   track plays the album on from it. They play in Kodi's music playlist,
   each asked of the server as Kodi comes to it (the plugin's play route),
   so each is reported as it plays.
+- **Playlists**: Add to playlist and a library's Save as… make and fill
+  them. A title's menu in a playlist has Move up, Move down and Remove
+  from playlist (a smart playlist fills itself: not those), then Rename
+  playlist and Delete playlist, which asks first; a playlist's menu on
+  Playlists has the last two. Kodi's lists have Rename and Delete on a
+  playlist and Remove from playlist on its titles. A music playlist's
+  tracks play on from the one chosen.
 - **A library**: Recommended (its rows), Library (every title in a grid,
   more loading as focus nears the end) and Collections. It opens on the
   tab it was last left on, as on the other TVs: the add-on remembers that
@@ -397,8 +404,9 @@ in `portable_data/userdata/advancedsettings.xml`.
   page with their photo (theirs is a grid of titles).
 - In Kodi's lists, a title's information page shows its synopsis, not its
   cast, genres or crew: lists don't carry them.
-- Editing playlists (renaming, reordering, taking titles out): Add to
-  playlist and Save as… make and fill them.
+- Playing a video playlist through, as the web's queue does: a title in
+  one opens its page (a music playlist's tracks play on from the one
+  chosen).
 - Picture subtitles (PGS, VobSub) picked in Kodi's player during a
   converted stream: only text subtitles come beside it (the profile's
   choice is drawn onto the video from the start). Files played as they
