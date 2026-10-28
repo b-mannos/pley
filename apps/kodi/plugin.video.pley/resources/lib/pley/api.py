@@ -168,6 +168,65 @@ class Client:
             # A web page, a router's: not pley.
             raise ApiError(response.status, "not_pley", "the answer isn't Pley's")
 
+    def measure(self, path: str, query: dict, test, deadline: float, clock=None) -> int:
+        """GETs `path`, handing each piece of its body to `test` (an
+        autoquality.SpeedTest) as it comes, until `test.done` or the clock
+        reaches `deadline`; then the connection is dropped, which ends the
+        answer on the server. The answer's status (0 for none)."""
+        import time
+
+        clock = clock or time.monotonic
+        target = self.prefix + path + "?" + urllib.parse.urlencode(query)
+        headers = {"User-Agent": self.user_agent, "Accept": "application/octet-stream", "Connection": "close"}
+        if self.token:
+            headers["Authorization"] = "Bearer " + self.token
+        parts = urllib.parse.urlsplit(self.base)
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+
+        def left():
+            return max(deadline - clock(), 0.01)
+
+        sock = None
+        try:
+            sock = socket.create_connection((parts.hostname, port), timeout=min(CONNECT_TIMEOUT, left()))
+            if parts.scheme == "https":
+                sock = tls().wrap_socket(sock, server_hostname=parts.hostname)
+            lines = ["GET %s HTTP/1.1" % target, "Host: %s" % parts.netloc] + ["%s: %s" % kv for kv in headers.items()]
+            sock.settimeout(left())
+            sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1"))
+            head = b""
+            while b"\r\n\r\n" not in head:
+                sock.settimeout(left())
+                piece = sock.recv(65536)
+                if not piece:
+                    return 0
+                head += piece
+                if len(head) > 65536:
+                    return 0
+            head, _, rest = head.partition(b"\r\n\r\n")
+            try:
+                status = int(head.split(b" ")[1])
+            except (IndexError, ValueError):
+                return 0
+            if status != 200:
+                return status
+            test.chunk(clock(), len(rest))
+            while not test.done(clock()) and clock() < deadline:
+                sock.settimeout(max(test.until(deadline) - clock(), 0.01))
+                try:
+                    piece = sock.recv(65536)
+                except socket.timeout:
+                    break
+                if not piece:
+                    break
+                test.chunk(clock(), len(piece))
+            return status
+        except OSError:
+            return 0
+        finally:
+            if sock is not None:
+                sock.close()
+
     def get(self, path: str, **query):
         return self.json("GET", path, query=query or None)
 

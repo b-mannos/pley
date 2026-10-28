@@ -305,6 +305,9 @@ class Window(xbmcgui.WindowXML):
             kodi.set_property(UI, "1")
             self.monitor = Monitor(self)
             started = time.perf_counter()
+            # What the server knows of this network, kept by the proxy by the
+            # time something is played (playback.starting_ceiling).
+            threading.Thread(target=playback.look_ahead, args=(self.session.client,), daemon=True).start()
             self.start()
             kodi.log("Pley's window ready in %d ms" % ((time.perf_counter() - started) * 1000))
 

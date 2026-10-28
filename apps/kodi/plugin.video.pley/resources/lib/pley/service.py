@@ -315,11 +315,17 @@ class Player(xbmc.Player):
         return watch, None
 
     def remember(self, auto: dict, kbps) -> None:
-        """The ceiling for the next titles on this server (None forgets it), on the worker."""
+        """The ceiling for the next titles on this server (None forgets
+        it), kept here and told to the server, on the worker."""
         from . import playback
 
         server = auto.get("server") or ""
-        self.worker.put(lambda: playback.remember_ceiling(server, kbps))
+
+        def both():
+            playback.remember_ceiling(server, kbps)
+            playback.tell_ceiling(server, kbps, self.user_agent)
+
+        self.worker.put(both)
 
     def read_ahead(self):
         """Seconds Kodi has read ahead of the position, where its player
@@ -365,6 +371,10 @@ class Player(xbmc.Player):
         if down:
             notice = kodi.text("smoother") % autoquality.label(quality)
             self.remember(auto, watch.ceiling or autoquality.kbps_of(quality))
+        elif quality != autoquality.ORIGINAL:
+            # Up to a quality: the next title starts there, not under the
+            # older, lower ceiling.
+            self.remember(auto, autoquality.kbps_of(quality))
         kodi.log(
             "automatic: %s to %s at %d s (%s)"
             % ("down" if down else "up", quality, position / 1000, "network" if down else "%s kbps carried" % int(carried or 0))
@@ -643,16 +653,41 @@ def save_proxy_config(profile: str, config: dict) -> None:
     auth.write_private(os.path.join(profile, "proxy.json"), json.dumps(config))
 
 
-def carry_quality_over() -> None:
-    from . import playback
+class QualitySetting:
+    """The quality setting as the service last read it (a choice made
+    before Automatic carried over as it starts): Automatic chosen again,
+    from another quality, starts afresh, here and on the server."""
 
-    playback.chosen_quality()
+    def __init__(self, user_agent: str):
+        self.user_agent = user_agent
+        self.last = None
+
+    def read(self) -> None:
+        from . import playback
+
+        kodi.begin()
+        now = playback.chosen_quality()
+        was, self.last = self.last, now
+        if was is not None and was != now and now == autoquality.AUTO:
+            playback.picked_automatic(self.user_agent)
+
+
+class Monitor(xbmc.Monitor):
+    """Kodi's word that the add-on's settings changed."""
+
+    def __init__(self, changed):
+        super().__init__()
+        self.changed = changed
+
+    def onSettingsChanged(self) -> None:
+        self.changed()
 
 
 def run() -> None:
-    monitor = xbmc.Monitor()
     profile = kodi.profile_dir()
     user_agent = kodi.user_agent()
+    quality = QualitySetting(user_agent)
+    monitor = Monitor(lambda: worker.put(quality.read))
     tokens = auth.Tokens(auth.Store(os.path.join(profile, "tokens.json")), user_agent)
     config = proxy_config(profile)
     worker = Worker()
@@ -667,7 +702,7 @@ def run() -> None:
     events = Events(tokens, user_agent, player.heard)
     events.start()
     # A quality chosen before Automatic, shown in the settings as it was.
-    worker.put(carry_quality_over)
+    worker.put(quality.read)
     while not monitor.waitForAbort(1):
         try:
             player.tick()

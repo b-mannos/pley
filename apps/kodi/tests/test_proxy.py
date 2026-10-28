@@ -21,6 +21,8 @@ class ProxyTest(unittest.TestCase):
         self.dir = tempfile.mkdtemp()
         self.valid = {"at-1"}
         self.stopped = []
+        self.network = {"local": False, "ceiling_kbps": 8000, "source": "playback", "since": 1, "probe": False}
+        self.network_down = False
         self.server = support.FakeServer(self.handle)
         self.store = auth.Store(os.path.join(self.dir, "tokens.json"))
         self.store.save(
@@ -77,6 +79,16 @@ class ProxyTest(unittest.TestCase):
             return 307, {"Location": "/api/items/9/images/poster?v=3"}, b""
         if request.path == "/api/collections/5/images/poster":
             return 307, {"Location": self.server.url + "/api/items/10/images/poster"}, b""
+        if request.path.startswith("/api/playback/speedtest"):
+            return 200, {"Content-Type": "application/octet-stream", "Cache-Control": "no-store"}, MOVIE
+        if request.path.startswith("/api/playback/network"):
+            if self.network is None:
+                return support.answer(404, {"code": "not_found", "message": "no route"})
+            if request.method == "PUT" and self.network_down:
+                return support.answer(500, {"code": "internal", "message": "busy"})
+            if request.method == "PUT":
+                self.network = dict(self.network, ceiling_kbps=request.json().get("ceiling_kbps"))
+            return support.answer(200, self.network)
         if request.path.startswith("/api/progress"):
             return 200, {"Content-Type": "application/json"}, request.body
         return support.answer(200, {"path": request.path, "agent": request.headers.get("user-agent")})
@@ -195,6 +207,67 @@ class ProxyTest(unittest.TestCase):
         with self.assertRaises(api.ApiError) as down:
             client.get("/status")
         self.assertEqual((down.exception.status, down.exception.code), (0, "service_off"))
+
+    def test_what_the_server_knows_of_the_network_is_kept_a_while(self):
+        client = api.Client(self.proxy.base, "pleyKodi/test", timeout=10, local=True)
+        asked = lambda: [r.method for r in self.server.requests if r.path.startswith("/api/playback/network")]
+        self.assertEqual(client.get("/api/playback/network", client_id="kodi-1")["ceiling_kbps"], 8000)
+        self.assertEqual(client.get("/api/playback/network", client_id="kodi-1")["ceiling_kbps"], 8000)
+        self.assertEqual(asked(), ["GET"], "the second from the proxy: a play doesn't wait")
+        client.get("/api/playback/network", client_id="kodi-2")
+        self.assertEqual(asked(), ["GET", "GET"], "another client's own")
+        # A ceiling told replaces what is kept.
+        self.assertEqual(client.put("/api/playback/network", {"client_id": "kodi-1", "ceiling_kbps": 4000})["ceiling_kbps"], 4000)
+        self.assertEqual(client.get("/api/playback/network", client_id="kodi-1")["ceiling_kbps"], 4000)
+        self.assertEqual(asked(), ["GET", "GET", "PUT"])
+        # One the server didn't take: asked again.
+        self.network_down = True
+        with self.assertRaises(api.ApiError):
+            client.put("/api/playback/network", {"client_id": "kodi-1", "ceiling_kbps": None})
+        self.assertEqual(client.get("/api/playback/network", client_id="kodi-1")["ceiling_kbps"], 4000)
+        self.assertEqual(asked()[-1], "GET")
+        # Another profile's is its own.
+        data = self.store.load()
+        self.store.save(dict(data, profile=7))
+        before = len(asked())
+        client.get("/api/playback/network", client_id="kodi-1")
+        self.assertEqual(len(asked()), before + 1)
+        # Kept no longer than ten minutes.
+        self.proxy.network.clock = lambda: time.monotonic() + 601
+        client.get("/api/playback/network", client_id="kodi-1")
+        self.assertEqual(len(asked()), before + 2)
+
+    def test_a_server_from_before_is_asked_once_a_while(self):
+        self.network = None
+        client = api.Client(self.proxy.base, "pleyKodi/test", timeout=10, local=True)
+        for _ in range(2):
+            with self.assertRaises(api.ApiError) as refused:
+                client.get("/api/playback/network", client_id="kodi-1")
+            self.assertEqual(refused.exception.status, 404)
+        self.assertEqual(len([r for r in self.server.requests if r.path.startswith("/api/playback/network")]), 1)
+
+    def test_a_speed_test_is_read_as_it_comes_and_let_go(self):
+        from pley.autoquality import SpeedTest
+
+        client = api.Client(self.proxy.base, "pleyKodi/test", timeout=10, local=True)
+        test = SpeedTest(total=len(MOVIE))
+        status = client.measure("/api/playback/speedtest", {"bytes": len(MOVIE)}, test, time.monotonic() + 10)
+        self.assertEqual((status, test.size), (200, len(MOVIE)))
+        self.assertTrue(test.result()["probe_complete"])
+        self.assertIn("bytes=%d" % len(MOVIE), self.server.requests[-1].path)
+        self.assertEqual(self.server.requests[-1].headers["authorization"], "Bearer at-1")
+        # Stopped once enough came: the rest isn't waited for.
+        test = SpeedTest(total=len(MOVIE) * 100)
+        ticks = iter(range(100_000))
+        status = client.measure("/api/playback/speedtest", {}, test, 50.0, clock=lambda: next(ticks) * 0.02)
+        self.assertEqual(status, 200)
+        self.assertLess(test.size, len(MOVIE))
+        self.assertFalse(test.result(test.last_at)["probe_complete"])
+        # A refusal measures nothing.
+        self.store.clear()
+        test = SpeedTest()
+        self.assertEqual(client.measure("/api/playback/speedtest", {}, test, time.monotonic() + 5), 401)
+        self.assertEqual(test.size, 0)
 
     def test_a_server_out_of_reach_is_said_within_seconds(self):
         # 192.0.2.1 is for documentation: nothing ever answers there, as a

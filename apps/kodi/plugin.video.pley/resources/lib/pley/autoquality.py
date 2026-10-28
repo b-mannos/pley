@@ -69,6 +69,19 @@ REMEMBER_FOR = 30 * 60.0
 # The position moving this much less or more than the time is a seek.
 JUMP = 3.0
 
+# Where Automatic starts (docs/QUALITY.md): what the server knows of this
+# Kodi's network is asked for at most this long, and a speed test is
+# 32 MiB stopped 2 s after its first byte, measuring nothing under 256 KiB.
+# The whole of it, asking and testing, holds the play back no longer than
+# START_BUDGET. A speed test the server couldn't keep counts for 70 % of
+# what it measured, as the server counts it.
+NETWORK_TIMEOUT = 1.5
+PROBE_BYTES = 32 * 1024 * 1024
+PROBE_SECONDS = 2.0
+PROBE_LEAST = 256 * 1024
+PROBE_SHARE = 0.7
+START_BUDGET = 3.5
+
 
 def label(quality_id: str) -> str:
     for id_, text, _, _ in MENU:
@@ -427,6 +440,80 @@ def remembered_ceiling(value: str, now: float) -> Optional[float]:
 
 def remember_ceiling(kbps: float, now: float) -> str:
     return "%d@%d" % (kbps, now)
+
+
+def network_ceiling(answer) -> Optional[float]:
+    """The ceiling in the server's word on this Kodi's network
+    (GET /api/playback/network), None for no limit."""
+    if not isinstance(answer, dict):
+        return None
+    kbps = answer.get("ceiling_kbps")
+    if isinstance(kbps, bool) or not isinstance(kbps, (int, float)) or kbps <= 0:
+        return None
+    return float(kbps)
+
+
+def wants_probe(answer) -> bool:
+    return isinstance(answer, dict) and answer.get("probe") is True and not answer.get("local")
+
+
+class SpeedTest:
+    """A speed test's body as it arrives: `chunk` with each piece read,
+    `done` says when to stop (all of it, or PROBE_SECONDS after the first
+    byte), `result` is what to tell the server. The first piece holds what
+    arrived before the clock started (through the proxy, up to 256 KB), so
+    the speed is of the bytes after it over the time since it."""
+
+    def __init__(self, total: int = PROBE_BYTES):
+        self.total = total
+        self.size = 0
+        self.first_at = None
+        self.first_size = 0
+        self.last_at = None
+
+    def chunk(self, now: float, size: int) -> None:
+        if size <= 0:
+            return
+        if self.first_at is None:
+            self.first_at = now
+            self.first_size = size
+        self.size += size
+        self.last_at = now
+
+    def until(self, deadline: float) -> float:
+        """When to stop reading at the latest."""
+        if self.first_at is None:
+            return deadline
+        return min(deadline, self.first_at + PROBE_SECONDS)
+
+    def complete(self) -> bool:
+        return self.size >= self.total and self.first_at is not None and self.last_at - self.first_at <= PROBE_SECONDS
+
+    def done(self, now: float) -> bool:
+        return self.size >= self.total or (self.first_at is not None and now - self.first_at >= PROBE_SECONDS)
+
+    def result(self, now: Optional[float] = None) -> Optional[dict]:
+        """{probe_kbps, probe_complete}, or None when under 256 KiB came
+        (nothing is known then)."""
+        if self.size < PROBE_LEAST or self.first_at is None:
+            return None
+        complete = self.complete()
+        end = self.last_at if complete or now is None else max(now, self.last_at)
+        seconds = end - self.first_at
+        counted = self.size - self.first_size
+        if seconds <= 0 or counted <= 0:
+            # All of it in one piece: as fast as can be told.
+            seconds, counted = 0.001, self.size
+        kbps = int(round(counted * 8 / seconds / 1000))
+        return {"probe_kbps": min(max(kbps, 1), 10_000_000), "probe_complete": complete}
+
+
+def probe_ceiling(result: dict) -> Optional[float]:
+    """The ceiling a speed test gives when the server can't say: none for
+    one that came whole in time, else 70 % of what it measured."""
+    if result.get("probe_complete"):
+        return None
+    return result["probe_kbps"] * PROBE_SHARE
 
 
 def media_prefix(url: str) -> str:

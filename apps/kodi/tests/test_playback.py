@@ -2,8 +2,9 @@ import tempfile
 import unittest
 
 import support  # noqa: F401
+import xbmc
 import xbmcaddon
-from pley import playback
+from pley import api, autoquality, playback
 
 BASE = "http://127.0.0.1:5000/s"
 TRACKS = [
@@ -107,6 +108,95 @@ class QualityTest(unittest.TestCase):
         converted = playback.automatic(playback.ask("original"), dict(info, auto_quality="15m"), file)
         self.assertEqual((converted["quality"], converted["playing_kbps"], converted["cap"]), ("original", 15000, "15m"))
         self.assertIsNone(playback.automatic(asked, info, None)["file_kbps"], "details that didn't come")
+
+
+class Network:
+    """A client for the network's routes: GET's answer (or refusal), what
+    the speed test brings, and PUT's answer."""
+
+    def __init__(self, answer, pieces=(), put=None):
+        self.answer, self.pieces, self.put_answer = answer, list(pieces), put
+        self.puts, self.measured = [], []
+
+    def get(self, path, **query):
+        self.asked = (path, query)
+        if isinstance(self.answer, api.ApiError):
+            raise self.answer
+        return self.answer
+
+    def put(self, path, body=None):
+        self.puts.append((path, body))
+        if isinstance(self.put_answer, api.ApiError):
+            raise self.put_answer
+        return self.put_answer
+
+    def measure(self, path, query, test, deadline, clock):
+        self.measured.append((path, query, deadline))
+        for at, size in self.pieces:
+            test.chunk(at, size)
+        return 200
+
+
+class StartingQualityTest(unittest.TestCase):
+    """Automatic's start from what the server knows of the network."""
+
+    def setUp(self):
+        self.profile = tempfile.mkdtemp()
+        self.saved = dict(xbmcaddon.settings)
+        xbmcaddon.settings.clear()
+        xbmcaddon.settings.update({"_profile": self.profile, "server_id": "srv-1", "video_quality": "auto"})
+        self.now = 100.0
+
+    def tearDown(self):
+        xbmcaddon.settings.clear()
+        xbmcaddon.settings.update(self.saved)
+
+    def clock(self):
+        return self.now
+
+    def test_the_servers_ceiling_takes_the_place_of_this_kodis(self):
+        playback.remember_ceiling("srv-1", 3000)
+        client = Network({"local": False, "ceiling_kbps": 9000, "source": "playback", "since": 1, "probe": False})
+        self.assertEqual(playback.ask(client=client)["quality"], "8m")
+        self.assertEqual(client.asked, ("/api/playback/network", {"client_id": playback.install_id()}))
+        client = Network({"local": True, "ceiling_kbps": None, "source": None, "since": None, "probe": False})
+        self.assertEqual(playback.ask(client=client)["quality"], "original", "nothing known: the original")
+        self.assertEqual(client.puts, [])
+
+    def test_without_the_servers_word_this_kodis_memory(self):
+        playback.remember_ceiling("srv-1", 3000)
+        for refusal in (api.ApiError(404, "not_found", "no route"), api.ApiError(0, "unreachable", "timed out")):
+            self.assertEqual(playback.ask(client=Network(refusal)), dict(automatic=True, quality="2m", lowered=True, mode="auto", max_bitrate=2000, max_height=480))
+
+    def test_a_speed_test_first_where_the_server_asks_for_one(self):
+        pieces = [(100.0, 262_144), (101.0, 1_000_000), (102.0, 1_000_000)]
+        told = {"local": False, "ceiling_kbps": 5600, "source": "probe", "since": 2, "probe": False}
+        client = Network({"local": False, "ceiling_kbps": None, "probe": True}, pieces, told)
+        self.assertEqual(playback.starting_ceiling(client, self.clock), 5600)
+        self.assertEqual(client.measured, [("/api/playback/speedtest", {"bytes": 33554432}, 103.5)])
+        self.assertEqual(client.puts, [("/api/playback/network", {"probe_kbps": 8000, "probe_complete": False, "client_id": playback.install_id()})])
+        self.assertIn("ActivateWindow(busydialognocancel)", xbmc.builtins)
+        self.assertEqual(xbmc.builtins[-1], "Dialog.Close(busydialognocancel)")
+        # The server didn't keep it: 70 % of it all the same.
+        client = Network({"probe": True}, pieces, api.ApiError(500, "internal", "no"))
+        self.assertEqual(playback.starting_ceiling(client, self.clock), 5600)
+
+    def test_too_little_measured_is_as_if_nothing_were_known(self):
+        playback.remember_ceiling("srv-1", 3000)
+        client = Network({"probe": True, "ceiling_kbps": None}, [(100.0, 100_000)])
+        self.assertIsNone(playback.starting_ceiling(client, self.clock))
+        self.assertEqual(client.puts, [], "nothing is told")
+
+    def test_original_and_chosen_qualities_never_ask(self):
+        for chosen in ("original", "12m"):
+            xbmcaddon.settings["video_quality"] = chosen
+            client = Network(api.ApiError(500, "x", "asked"))
+            playback.ask(client=client)
+            self.assertFalse(hasattr(client, "asked"), chosen)
+        self.assertFalse(hasattr(Network(None), "asked"))
+        client = Network(None)
+        playback.ask("4m", client)
+        self.assertFalse(hasattr(client, "asked"), "a restart at a quality")
 
 
 if __name__ == "__main__":

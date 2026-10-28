@@ -69,7 +69,7 @@ def prepare(client: api.Client, base: str, item_id: int, start_ms: int, detail=N
     if not detail:
         loader = threading.Thread(target=load_details, args=(client, item_id, details), daemon=True)
         loader.start()
-    asked = ask(restart)
+    asked = ask(restart, client)
     request = {
         "item_id": item_id,
         "start_ms": start_ms,
@@ -172,12 +172,13 @@ def chosen_quality() -> str:
     return autoquality.from_setting(kodi.setting(QUALITY))
 
 
-def ask(restart=None) -> dict:
+def ask(restart=None, client=None) -> dict:
     """How the playback is asked for. Original and Automatic let the server
     choose (the file as it is where it plays); a quality from the settings
     caps it, and the server converts a file that is over it (one under it
     plays as it is, as the other apps play a file the quality wouldn't make
-    smaller). Automatic under a ceiling remembered for a slow network
+    smaller). Automatic under a ceiling known for this network (the
+    server's word, asked with `client`, else this Kodi's own memory)
     starts at the quality under it, the same way; the service's restart
     at a quality converts."""
     if restart is not None:
@@ -188,7 +189,7 @@ def ask(restart=None) -> dict:
     if chosen != autoquality.AUTO:
         max_bitrate, max_height = autoquality.limits(chosen)
         return dict(automatic=False, quality=chosen, lowered=False, mode="auto", max_bitrate=max_bitrate, max_height=max_height)
-    start = autoquality.start_quality(ceiling())
+    start = autoquality.start_quality(starting_ceiling(client) if client is not None else ceiling())
     max_bitrate, max_height = autoquality.limits(start) if start else (None, None)
     return dict(
         automatic=True,
@@ -244,6 +245,108 @@ def ceiling():
 def remember_ceiling(server: str, kbps) -> None:
     """Remembered for the next titles in Automatic (None forgets it)."""
     kodi.remember(CEILING + server, autoquality.remember_ceiling(kbps, time.time()) if kbps else "")
+
+
+NETWORK = "/api/playback/network"
+SPEED_TEST = "/api/playback/speedtest"
+
+
+def starting_ceiling(client: api.Client, clock=time.monotonic):
+    """The ceiling Automatic starts under (kbps, None for none): the
+    server's word on this Kodi's network, which keeps it a day after a
+    step down and a week after a speed test, run here first when the
+    server asks for one. Without an answer (out of reach, a server from
+    before it), this Kodi's own memory, as before."""
+    began = clock()
+    answer = network(client)
+    if answer is None:
+        return ceiling()
+    if autoquality.wants_probe(answer):
+        result = speed_test(client, began + autoquality.START_BUDGET, clock)
+        if result is None:
+            # Too little came to tell: as if nothing were known.
+            return None
+        told = tell_network(client, dict(result))
+        return autoquality.network_ceiling(told) if told is not None else autoquality.probe_ceiling(result)
+    return autoquality.network_ceiling(answer)
+
+
+def network(client: api.Client):
+    """GET /api/playback/network for this Kodi, within 1.5 s: the answer,
+    None on any failure (404 from an older server among them). The
+    service's proxy keeps it a while, so a play on the home network waits
+    for none of it (proxy.NetworkMemo)."""
+    try:
+        answer = quick(client, autoquality.NETWORK_TIMEOUT).get(NETWORK, client_id=install_id())
+    except (api.ApiError, ValueError) as e:
+        kodi.log("network: %s" % e, xbmc.LOGDEBUG)
+        return None
+    return answer if isinstance(answer, dict) else None
+
+
+def quick(client, seconds: float):
+    """`client`, waiting `seconds` at most for each answer."""
+    if not isinstance(client, api.Client):
+        return client
+    return api.Client(client.base, client.user_agent, client.token, timeout=seconds, local=client.local)
+
+
+def look_ahead(client: api.Client) -> None:
+    """Asks for what the server knows of this network ahead of a play, in
+    Automatic: the proxy keeps the answer, and the play doesn't wait."""
+    try:
+        if chosen_quality() == autoquality.AUTO:
+            network(client)
+    except Exception as e:  # noqa: BLE001 - a thread of its own, for nothing but speed
+        kodi.log("network ahead: %r" % e, xbmc.LOGDEBUG)
+
+
+def tell_network(client: api.Client, body: dict):
+    """PUT /api/playback/network: a speed test's result ({probe_kbps,
+    probe_complete}) or Automatic's ceiling ({ceiling_kbps}, None to
+    forget). The server's answer, None on any failure (said nowhere)."""
+    body = dict(body, client_id=install_id())
+    try:
+        answer = quick(client, 5).put(NETWORK, body)
+    except (api.ApiError, ValueError) as e:
+        kodi.log("network not told: %s" % e, xbmc.LOGDEBUG)
+        return None
+    return answer if isinstance(answer, dict) else None
+
+
+def tell_ceiling(server: str, kbps, user_agent: str) -> None:
+    """Automatic's ceiling for `server` changed (None: forgotten): told to
+    the server too, through the service's proxy, so a Kodi on this network
+    starts under it for a day, whatever this one remembers. Nothing is said
+    when it can't be told; a server from before answers 404."""
+    base = kodi.get_property(kodi.PROXY)
+    if not base or server != server_key():
+        return
+    client = api.Client(base, user_agent, timeout=5, local=True)
+    tell_network(client, {"ceiling_kbps": int(round(kbps)) if kbps else None})
+
+
+def picked_automatic(user_agent: str) -> None:
+    """Automatic chosen again in the settings: it starts afresh at the
+    original, here and on the server."""
+    server = server_key()
+    remember_ceiling(server, None)
+    tell_ceiling(server, None, user_agent)
+
+
+def speed_test(client: api.Client, deadline: float, clock=time.monotonic):
+    """The speed test before a first Automatic play on a network the server
+    knows nothing of: {probe_kbps, probe_complete}, or None when too
+    little came. Kodi's busy circle shows meanwhile."""
+    test = autoquality.SpeedTest()
+    xbmc.executebuiltin("ActivateWindow(busydialognocancel)")
+    try:
+        status = client.measure(SPEED_TEST, {"bytes": autoquality.PROBE_BYTES}, test, deadline, clock)
+    finally:
+        xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
+    result = test.result(clock()) if status == 200 else None
+    kodi.log("speed test: %s" % (result or "nothing measured (%d, %d bytes)" % (status, test.size)))
+    return result
 
 
 def install_id() -> str:

@@ -20,6 +20,7 @@ import re
 import socket
 import threading
 import time
+import urllib.parse
 
 # Python 3.8's http.server reads the system's MIME types as it loads (on
 # Windows from the registry, about half a second of a Kodi start); the
@@ -46,6 +47,10 @@ MAX_BODY = 1 << 20
 CHUNK = 256 * 1024
 # Segments of a conversion can take a while to be made.
 UPSTREAM_TIMEOUT = 120
+# What the server knows of this Kodi's network, for Automatic's start
+# (playback.starting_ceiling): kept this long, so a play doesn't wait for it.
+NETWORK = "/api/playback/network"
+NETWORK_KEEP = 600.0
 
 
 def new_secret() -> str:
@@ -74,6 +79,7 @@ class Proxy:
         # after 5 seconds.
         self.lock = threading.Lock()
         self.sockets = set()
+        self.network = NetworkMemo()
 
     @property
     def port(self) -> int:
@@ -111,6 +117,53 @@ class Proxy:
     def closed(self, sock) -> None:
         with self.lock:
             self.sockets.discard(sock)
+
+
+class NetworkMemo:
+    """The server's answers about this Kodi's network (GET and PUT
+    /api/playback/network) as (status, body), for each sign-in (server
+    and profile) and client id, kept NETWORK_KEEP seconds. Every ceiling
+    Automatic sets is told to the server through the proxy, whose answer
+    replaces what is kept; one the server didn't take leaves nothing kept,
+    so the next play asks again."""
+
+    def __init__(self, clock=time.monotonic, keep: float = NETWORK_KEEP):
+        self.clock = clock
+        self.keep = keep
+        self.lock = threading.Lock()
+        self.kept = {}
+
+    def get(self, key):
+        with self.lock:
+            found = self.kept.get(key)
+            if found is None or self.clock() - found[0] > self.keep:
+                self.kept.pop(key, None)
+                return None
+            return found[1]
+
+    def put(self, key, answer) -> None:
+        with self.lock:
+            self.kept[key] = (self.clock(), answer)
+
+    def drop(self, key) -> None:
+        with self.lock:
+            self.kept.pop(key, None)
+
+
+def network_key(method: str, path: str, body, identity):
+    """What a request about the network is kept under: (identity, client
+    id); None for any other request, or one without a client id."""
+    route, _, query = path.partition("?")
+    if route != NETWORK or method not in ("GET", "PUT") or identity is None:
+        return None
+    if method == "GET":
+        client = urllib.parse.parse_qs(query).get("client_id", [""])[0]
+    else:
+        try:
+            client = json.loads((body or b"").decode("utf-8")).get("client_id") or ""
+        except (ValueError, AttributeError):
+            return None
+    return (identity, client) if isinstance(client, str) and client else None
 
 
 class _Server(http.server.ThreadingHTTPServer):
@@ -239,6 +292,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if length > MAX_BODY:
             return self.answer(413, {"code": "bad_request", "message": "too large"})
         body = self.rfile.read(length) if length else None
+        network = network_key(self.command, rest, body, proxy.tokens.identity())
+        if network is not None:
+            if self.command == "GET":
+                kept = proxy.network.get(network)
+                if kept is not None:
+                    return self.send_network(*kept)
+            else:
+                proxy.network.drop(network)
         headers = {"User-Agent": proxy.user_agent}
         for name in REQUEST_HEADERS:
             if self.headers.get(name):
@@ -259,6 +320,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return self.answer(401, {"code": "signed_out", "message": "Pley is signed out"})
             except (api.ApiError, OSError, http.client.HTTPException) as e:
                 return self.answer(502, {"code": "unreachable", "message": str(e)})
+            if network is not None:
+                return self.relay_network(response, network)
             self.relay(response, rest)
         finally:
             if upstream:
@@ -297,6 +360,28 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not location.startswith("/api/"):
             return None
         return "/" + self.proxy.secret + location
+
+    def relay_network(self, response: http.client.HTTPResponse, key) -> None:
+        """An answer about the network, kept when it is the server's word:
+        its answer, or a 404 from a server from before it (asked again
+        only once that is old)."""
+        try:
+            data = response.read()
+        except (OSError, http.client.HTTPException) as e:
+            return self.answer(502, {"code": "unreachable", "message": str(e)})
+        if response.status == 404 or (response.status == 200 and is_object(data)):
+            self.proxy.network.put(key, (response.status, data))
+        self.send_network(response.status, data)
+
+    def send_network(self, status: int, data: bytes) -> None:
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except OSError:
+            self.close_connection = True
 
     def relay(self, response: http.client.HTTPResponse, path: str = "") -> None:
         try:
@@ -349,6 +434,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             # stopping: the connection ends, and Kodi asks again from where
             # it got to.
             self.close_connection = True
+
+
+def is_object(data: bytes) -> bool:
+    try:
+        return isinstance(json.loads(data.decode("utf-8")), dict)
+    except ValueError:
+        return False
 
 
 def is_media(response: http.client.HTTPResponse) -> bool:

@@ -286,6 +286,28 @@ own views instead (below), which skins' widgets and favourites always get.
   meanwhile, Up Next's included, asks for the quality under it as a cap
   (a file under it still plays as it is).
 
+  **Where it starts.** The server remembers what this Kodi's network carries
+  too (`GET /api/playback/network`, docs/API.md): a day after a step down, a
+  week after a speed test. Before a title starts in Automatic the plugin
+  asks it (1.5 s at most), and its ceiling takes the place of the one kept
+  here; without an answer (out of reach, or a server from before it, 404)
+  the one kept here counts, as before. Where the server asks for one (a
+  network away from it that it knows nothing of), a speed test runs first
+  under Kodi's busy circle: 32 MiB of `GET /api/playback/speedtest`, read as
+  it comes through the proxy and let go 2 s after its first byte, its speed
+  told to the server (`probe_kbps`, and `probe_complete` when all of it came
+  in time), whose answer is the ceiling (70 % of the speed when it can't
+  keep it). Under 256 KiB measures nothing and the original starts. The
+  asking and the test hold the play back 3.5 s at most. The service's proxy
+  keeps the server's answer 10 minutes for each sign-in
+  (`proxy.NetworkMemo`, a 404 too) and asks for it as pley's window opens,
+  so a play on the home network doesn't wait for it. Every ceiling the
+  service keeps here is told to the server as well (`PUT`, through the
+  proxy, whose kept answer it replaces): a step down's, a step up's to a
+  quality (its bitrate, now kept here too), and none back at Original or
+  with Automatic chosen again in the settings. Original and the chosen
+  qualities ask nothing.
+
   **Back up** needs a measure of the network, which only the proxy has:
   every segment and file passes through it, and it times each answer
   from its first byte to its last, Kodi's taking of them included, so a

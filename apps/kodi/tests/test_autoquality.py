@@ -289,5 +289,48 @@ class MeterTest(unittest.TestCase):
         self.assertIsNone(self.meter.carried_kbps("/api/playback/a/", 5), "since the last issue")
 
 
+class StartTest(unittest.TestCase):
+    """Where Automatic starts on a network the server knows (docs/QUALITY.md)."""
+
+    def test_the_servers_ceiling(self):
+        self.assertEqual(aq.network_ceiling({"local": False, "ceiling_kbps": 8000, "source": "playback"}), 8000)
+        for answer in ({"ceiling_kbps": None}, {"ceiling_kbps": 0}, {"ceiling_kbps": True}, {}, None, []):
+            self.assertIsNone(aq.network_ceiling(answer), answer)
+        self.assertTrue(aq.wants_probe({"local": False, "probe": True}))
+        self.assertFalse(aq.wants_probe({"local": True, "probe": True}), "never on the server's own network")
+        self.assertFalse(aq.wants_probe({"probe": 1}))
+        self.assertFalse(aq.wants_probe(None))
+
+    def test_a_speed_test_that_comes_whole_in_time(self):
+        test = aq.SpeedTest(total=1_000_000)
+        test.chunk(10.0, 100_000)
+        self.assertFalse(test.done(10.5))
+        for i in range(9):
+            test.chunk(10.1 + i * 0.1, 100_000)
+        self.assertTrue(test.done(10.9))
+        # The first piece held what came before the clock started.
+        self.assertEqual(test.result(11.0), {"probe_kbps": 8000, "probe_complete": True})
+        self.assertIsNone(aq.probe_ceiling(test.result()), "at least that fast: no limit")
+
+    def test_a_speed_test_stopped_two_seconds_after_its_first_byte(self):
+        test = aq.SpeedTest()
+        test.chunk(0.0, 262_144)
+        test.chunk(1.0, 500_000)
+        test.chunk(1.9, 500_000)
+        self.assertFalse(test.done(1.99))
+        self.assertTrue(test.done(2.0))
+        self.assertEqual(test.until(5.0), 2.0)
+        self.assertEqual(test.result(2.0), {"probe_kbps": 4000, "probe_complete": False})
+        self.assertEqual(aq.probe_ceiling(test.result(2.0)), 2800, "70 %, as the server keeps it")
+
+    def test_too_little_measures_nothing(self):
+        test = aq.SpeedTest()
+        self.assertIsNone(test.result(3.0))
+        self.assertEqual(test.until(3.5), 3.5, "the first byte awaited until the budget runs out")
+        test.chunk(0.0, 200_000)
+        test.chunk(1.0, 60_000)
+        self.assertIsNone(test.result(2.0), "under 256 KiB")
+
+
 if __name__ == "__main__":
     unittest.main()

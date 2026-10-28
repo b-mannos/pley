@@ -277,6 +277,58 @@ class AutomaticTest(unittest.TestCase):
         self.assertEqual(xbmcgui.notified, [])
 
 
+class NetworkTest(unittest.TestCase):
+    """Automatic's ceiling told to the server (docs/QUALITY.md, step 4)."""
+
+    def setUp(self):
+        import tempfile
+
+        self.profile = tempfile.mkdtemp()
+        self.saved = dict(xbmcaddon.settings)
+        xbmcaddon.settings.update({"_profile": self.profile, "server_id": "srv-1", "video_quality": "auto"})
+        self.server = support.FakeServer(lambda request: support.answer(200, {"ceiling_kbps": None}))
+        kodi.set_property(kodi.PROXY, self.server.url + "/s3cret")
+
+    def tearDown(self):
+        self.server.close()
+        kodi.clear_property(kodi.PROXY)
+        xbmcaddon.settings.clear()
+        xbmcaddon.settings.update(self.saved)
+
+    def told(self):
+        return [(r.method, r.path, r.json()) for r in self.server.requests]
+
+    def test_each_ceiling_is_told_through_the_proxy(self):
+        from pley import playback
+
+        playback.tell_ceiling("srv-1", 8549.6, "pleyKodi/test")
+        playback.tell_ceiling("srv-1", None, "pleyKodi/test")
+        me = playback.install_id()
+        self.assertEqual(
+            self.told(),
+            [("PUT", "/s3cret/api/playback/network", {"ceiling_kbps": 8550, "client_id": me}),
+             ("PUT", "/s3cret/api/playback/network", {"ceiling_kbps": None, "client_id": me})],
+        )
+        playback.tell_ceiling("srv-2", 4000, "pleyKodi/test")
+        self.assertEqual(len(self.told()), 2, "another server's ceiling isn't this one's")
+
+    def test_automatic_chosen_again_starts_afresh(self):
+        from pley import playback
+        from pley.service import QualitySetting
+
+        playback.remember_ceiling("srv-1", 3000)
+        setting = QualitySetting("pleyKodi/test")
+        setting.read()
+        self.assertEqual(self.told(), [], "as the service starts: nothing changed")
+        xbmcaddon.settings["video_quality"] = "8m"
+        setting.read()
+        self.assertEqual(self.told(), [])
+        xbmcaddon.settings["video_quality"] = "auto"
+        setting.read()
+        self.assertEqual([body["ceiling_kbps"] for _, _, body in self.told()], [None])
+        self.assertIsNone(playback.ceiling())
+
+
 class RestartTest(unittest.TestCase):
     """The service playing a title again at another quality."""
 
