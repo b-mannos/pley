@@ -41,9 +41,10 @@ services:
     tmpfs:
       # The transcoder's self-tests; SQLite keeps its temporary data in memory.
       - /tmp:size=256m,mode=1777,noexec,nosuid,nodev
-      # Optional: the segments of the streams being transcoded in RAM, up to
-      # about 2 GB each (the transcoder's caches stay on disk).
-      # - /config/transcode/jobs:size=4g,uid=${PLEY_UID:-1000},gid=${PLEY_GID:-1000},mode=0700,noexec,nosuid,nodev
+    # Settings → Transcoder → Transcode in memory keeps the segments of the
+    # streams being transcoded in /dev/shm, up to half of it (Docker's
+    # default 64 MB is too little to offer it). Taken only as it is used.
+    shm_size: ${PLEY_SHM_SIZE:-2gb}
     security_opt:
       - no-new-privileges:true
     cap_drop:

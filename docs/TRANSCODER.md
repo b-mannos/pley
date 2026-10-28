@@ -80,8 +80,8 @@ with the following status codes:
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/health` | – | `ok` |
-| GET | `/v1/info` | – | `TranscoderInfo`: version, commit (the build's short hash, when known), license, source, capabilities, limits |
-| GET | `/v1/status` | – | `TranscoderStatus`: counters, running processes, disk use, every job with live metrics |
+| GET | `/v1/info` | – | `TranscoderInfo`: version, commit (the build's short hash, when known), license, source, capabilities, limits, and `memory {available, reason?, path?, budget_bytes}`: whether segments can be kept in memory (see *Segments in memory*) |
+| GET | `/v1/status` | – | `TranscoderStatus`: counters, running processes, disk use, `memory_bytes` (segments in memory), every job with live metrics (`in_memory`, `memory_bytes`) |
 | GET | `/metrics` | – | Prometheus text format |
 | POST | `/v1/probe` | `ProbeRequest {path}` | `MediaInfo` (cached per file version) |
 | POST | `/v1/thumbnail` | `ThumbnailRequest {path, time_ms?, width?, duration_ms?, hdr}` | `image/jpeg` |
@@ -171,8 +171,9 @@ half-made ones are deleted.
    bitrates, and a file with nothing plausible is refused. Media info sent
    with a job is probed again when its duration is implausible. Files long
    enough to need it get segments longer than requested instead of more.
-2. **Segments on demand.** A segment request is answered from disk if that
-   segment already exists. If it doesn't:
+2. **Segments on demand.** A segment request is answered from disk (or
+   memory, see *Segments in memory*) if that segment already exists. If it
+   doesn't:
    - When a running ffmpeg process is about to produce it (at most 12 s of
      segments ahead of the process, never behind it), the request waits for
      that process. Not when the read rate holds the process back (see
@@ -233,8 +234,10 @@ half-made ones are deleted.
    - A process idle for 60 s (paused player) is stopped.
    - A job idle for 20 minutes expires.
    - Segments more than 6 minutes behind the playhead are deleted (in small
-     batches, off the async runtime).
-   - On startup, segments left over from an earlier run are removed.
+     batches, off the async runtime); in memory, those more than a minute
+     behind it or 3 minutes ahead (see *Segments in memory*).
+   - On startup, segments left over from an earlier run are removed, in
+     memory those of transcoders gone (a crash).
    - The caches in the work directory are pruned an hour apart (the first
      time two minutes after start-up). Entries unused for longer than their
      age limit go, then the least recently used ones until the folder fits its
@@ -282,6 +285,55 @@ half-made ones are deleted.
    from 2000 lines, 12 from 1400, 8 from 1000, 4 from 700, 2 from 500, 1.2
    from 400 and 0.7 below, counting the lines a 16:9 picture as wide
    would have (a 1920×800 film is 1080p's 8 Mbps).
+8. **Segments in memory.** A job's segments live in its folder on disk,
+   `jobs/<id>/` in the work folder, or in memory when the request's
+   `options.in_memory` is on (`transcode_in_memory`, on by default), the
+   job is throttled (its lead on the player is bounded then) and the
+   transcoder has room. FFmpeg writes segments as files, so memory is a
+   folder in RAM: `/dev/shm` on Linux, when it is a tmpfs. The transcoder
+   keeps its own folder there, `pley-transcoder-<pid>/<id>/` (renditions
+   in `v1/`…), private to its user, removed at shutdown; one left by a
+   transcoder gone (a crash, its process no longer there) is removed at
+   the next start, as a tmpfs holds it in memory until then. Each process
+   runs in the folder it writes to, with a copy of the burned-in
+   subtitles there, and each segment is served, edited (Dolby Vision, see
+   *Dolby Vision in remuxes*) and pruned where its process made it.
+
+   Windows and macOS have no folder in RAM by default, and their segments
+   stay on disk (`/v1/info` says `memory.available: false`, "works on
+   Linux only"). FFmpeg creates the files, so they can't be marked to
+   stay in the file cache (`FILE_ATTRIBUTE_TEMPORARY`); a RAM disk needs a
+   driver (Windows) or stays behind when the transcoder doesn't (macOS's
+   `hdiutil`); FFmpeg sending its segments to the transcoder over HTTP
+   would need the segment muxer's file handling and Dolby Vision's
+   editing redone in memory. Windows' file cache keeps segments just
+   written in memory for serving anyway.
+
+   Memory is bounded twice:
+   - A job keeps segments in memory a minute behind the playhead (6 on
+     disk), and those more than 3 minutes ahead of it (a seek back leaves
+     them) go too. A throttled process pauses 90 s ahead of the player.
+   - The transcoder takes at most a quarter of the computer's memory and
+     half of the folder's size (`/v1/info`'s `budget_bytes`; a budget
+     under 256 MB, as Docker's default 64 MB `/dev/shm`, is no memory:
+     give the container `--shm-size`, as deploy/docker's compose file
+     does, 2 GB). Each job (each rendition) reserves what it
+     is reckoned to take, 3 minutes of its bitrate (a transcode's with a
+     quarter to spare, a remux's the source's, 40 Mbps when unknown):
+     4K at 20 Mbps takes about 700 MB. A process goes to memory when that
+     reservation fits the budget beside the others' (or what they take,
+     when more), the folder keeps 64 MB free besides, and the computer a
+     tenth of its memory (512 MB at least, from `MemAvailable`); else to
+     disk.
+   - When memory runs short later (segments past the budget, the folder
+     or the computer short of room), the job with most in memory moves
+     to disk, one every 5 s: its reservation goes, and its process starts
+     again on disk at the segment it was making (a paused one, far ahead,
+     at the next request). What it made stays in memory, served from
+     there until pruned, so the player notices nothing.
+
+   Conversions (`conversions/`) and the caches (keyframes, subtitles,
+   seek previews, shaders) stay on disk.
 
 ## Transcoding features
 

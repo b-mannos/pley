@@ -623,6 +623,8 @@ export interface Settings {
   max_transcodes: number;
   transcode_preset: TranscodePreset;
   throttle_transcodes: boolean;
+  /** Keep transcodes' segments in RAM where the transcoder can, else on disk. Throttled transcodes only. */
+  transcode_in_memory: boolean;
   scan_interval_minutes: number;
   watch_libraries: boolean;
   detect_markers: boolean;
@@ -676,9 +678,21 @@ export interface TranscoderInfo {
   chromaprint: boolean;
   /** FFmpeg can hold transcodes back (6.1 and newer). */
   throttling: boolean;
+  /** Whether segments can be kept in memory, and how much; `null` while the transcoder is unavailable. */
+  memory?: TranscoderMemory | null;
   max_jobs: number;
   active_jobs: number;
   error: string | null;
+}
+
+export interface TranscoderMemory {
+  available: boolean;
+  /** Why not ("works on Linux only"). */
+  reason?: string | null;
+  /** The folder in RAM (`/dev/shm`). */
+  path?: string | null;
+  /** The most segments take there. */
+  budget_bytes: number;
 }
 
 export interface TranscoderCounters {

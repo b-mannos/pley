@@ -75,6 +75,7 @@ All in `.env` ([.env.example](.env.example) explains each one):
 | `PLEY_PLEX_LISTEN` | `127.0.0.1:32400` | `compose.plex.yaml`: where the compatibility API is published |
 | `PLEY_IMAGE` | `pley:local` | The image; a release is `ghcr.io/hhaidar/pley:<version>` |
 | `PLEY_PULL_POLICY` | `build` | `build` from this checkout, or `missing` for a release |
+| `PLEY_SHM_SIZE` | `2gb` | `/dev/shm`: transcodes keep their segments in half of it |
 | `PLEY_LOG` | `info` | Log detail (`debug` to look into a problem) |
 
 Settings that change at runtime are in pley's web UI: the TMDB key in

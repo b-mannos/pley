@@ -3,16 +3,17 @@
 //!
 //! A job owns a fixed segment layout (its VOD playlist never changes) and at
 //! most one ffmpeg process producing a window of segments. Segment requests
-//! are served from disk when ready; otherwise the running process is awaited
-//! when it is about to produce the segment, or a new process is started right
-//! at the requested segment (seeking). Idle processes are stopped, idle jobs
-//! expire, and segments far behind the playhead are pruned.
+//! are served from disk (or memory, see [`crate::memory`]) when ready;
+//! otherwise the running process is awaited when it is about to produce the
+//! segment, or a new process is started right at the requested segment
+//! (seeking). Idle processes are stopped, idle jobs expire, and segments far
+//! behind the playhead are pruned.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering::Relaxed};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -30,6 +31,7 @@ use crate::extract::Extractor;
 use crate::ffmpeg::Ffmpeg;
 use crate::hls;
 use crate::keyframes::KeyframeStore;
+use crate::memory::{self, Lease, MemoryStore};
 use crate::metrics::Metrics;
 use crate::plan::{ArgsContext, Burn, MAX_DURATION_MS, PROCESS_WINDOW, Plan, READRATE, READRATE_BURST_MS};
 use crate::probe::Prober;
@@ -44,8 +46,9 @@ const SEGMENT_WAIT: Duration = Duration::from_secs(45);
 const PROCESS_IDLE_MS: i64 = 60_000;
 /// Forget jobs nobody touched for this long.
 const JOB_EXPIRE_MS: i64 = 20 * 60_000;
-/// Segments kept behind the most recently requested one: this long of them
-/// (90 segments of 4 s, 180 of 2 s).
+/// Segments on disk kept behind the most recently requested one: this long
+/// of them (90 segments of 4 s, 180 of 2 s). In memory, less
+/// ([`memory::KEEP_BEHIND`]).
 const KEEP_BEHIND: Duration = Duration::from_secs(6 * 60);
 /// Give up on a segment after this many failed process starts at it.
 const MAX_FAILURES: u32 = 2;
@@ -156,6 +159,9 @@ pub struct JobManager {
     /// Background work, held while jobs start.
     pub background: Arc<Background>,
     jobs: Mutex<HashMap<String, Arc<Job>>>,
+    /// The folder in RAM that jobs asking for it keep their segments in
+    /// ([`crate::memory`]), when this system has one.
+    memory: OnceLock<Arc<MemoryStore>>,
     /// Set on shutdown: no new jobs are accepted.
     closed: AtomicBool,
     /// Job creations begun so far, and when the last began: reading ahead
@@ -174,7 +180,8 @@ pub struct Job {
     pub created_at_ms: i64,
     last_access_ms: AtomicI64,
     last_requested: AtomicU32,
-    ready: Mutex<Vec<bool>>,
+    /// Where each segment made is: `None` until it is.
+    ready: Mutex<Vec<Option<Place>>>,
     ready_count: AtomicU32,
     /// Segments that requests are currently waiting for (one entry per request).
     waiting: Mutex<Vec<u32>>,
@@ -195,6 +202,76 @@ pub struct Job {
     /// The rendition its player asked for last: 0 for its own, 1 for its
     /// first variant…
     active: AtomicU32,
+    /// Its folder in RAM, when it asked for memory and may have it.
+    memory: Option<JobMemory>,
+}
+
+/// Where a segment is made: in the job's folder on disk, or in RAM
+/// ([`crate::memory`]). Each process chooses for the segments it makes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Place {
+    Disk,
+    Memory,
+}
+
+/// A job's (a rendition's) folder in RAM.
+struct JobMemory {
+    store: Arc<MemoryStore>,
+    dir: PathBuf,
+    /// What its segments are reckoned to take ([`memory::reckoned_bytes`]).
+    want: u64,
+    /// Its reservation, while its segments go to memory.
+    lease: Mutex<Option<Lease>>,
+    /// Bytes of its segments in memory now.
+    bytes: AtomicU64,
+}
+
+impl JobMemory {
+    /// A job's folder in RAM, `folder` in `store`, with what FFmpeg reads
+    /// from its folder on disk, `disk` (burned-in text subtitles): each
+    /// process runs in the folder it writes its segments to. `None` when
+    /// it can't be made: its segments go to disk.
+    async fn make(
+        store: Option<&Arc<MemoryStore>>,
+        folder: Option<PathBuf>,
+        disk: &Path,
+        plan: &Plan,
+        media: &MediaInfo,
+    ) -> Option<JobMemory> {
+        let (store, folder) = (store?, folder?);
+        let made = async {
+            tokio::fs::create_dir_all(&folder).await?;
+            if let Some(Burn::Text { file_name, .. }) = &plan.burn {
+                tokio::fs::copy(disk.join(file_name), folder.join(file_name)).await?;
+            }
+            std::io::Result::Ok(())
+        };
+        if let Err(err) = made.await {
+            tracing::warn!("segments go to disk: {} can't be made: {err}", folder.display());
+            return None;
+        }
+        Some(JobMemory {
+            store: store.clone(),
+            dir: folder,
+            want: memory::reckoned_bytes(plan, media),
+            lease: Mutex::new(None),
+            bytes: AtomicU64::new(0),
+        })
+    }
+
+    /// Its segments of `bytes` left memory.
+    fn removed(&self, bytes: u64) {
+        // No more than it counted (a prune finishing after the job went).
+        if let Ok(before) = self.bytes.try_update(Relaxed, Relaxed, |b| Some(b.saturating_sub(bytes))) {
+            self.store.removed(before.min(bytes));
+        }
+    }
+
+    /// The job is gone: so are its segments in memory, and its reservation.
+    fn release(&self) {
+        self.store.removed(self.bytes.swap(0, Relaxed));
+        self.lease.lock().take();
+    }
 }
 
 /// A job's file by name ([`JobRequest::variants`]).
@@ -261,6 +338,8 @@ struct Proc {
     /// The segment it started at.
     start: u32,
     end: u32,
+    /// Where it writes its segments.
+    place: Place,
     started: Instant,
     next: Arc<AtomicU32>,
     /// [`LOOKAHEAD`] in the job's segments.
@@ -366,6 +445,7 @@ impl JobManager {
             hardware_failures: AtomicU32::new(0),
             limits,
             jobs: Mutex::default(),
+            memory: OnceLock::new(),
             closed: AtomicBool::new(false),
             creations: AtomicU64::new(0),
             last_creation: Mutex::new(None),
@@ -386,6 +466,16 @@ impl JobManager {
     /// Whether a job creation began within `window`.
     pub fn created_within(&self, window: Duration) -> bool {
         self.last_creation.lock().is_some_and(|at| at.elapsed() < window)
+    }
+
+    /// Jobs asking for memory keep their segments in `store` from now on.
+    pub fn keep_in_memory(&self, store: Arc<MemoryStore>) {
+        let _ = self.memory.set(store);
+    }
+
+    /// Bytes of segments in memory now.
+    pub fn memory_bytes(&self) -> u64 {
+        self.memory.get().map_or(0, |store| store.used())
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<Job>> {
@@ -448,7 +538,11 @@ impl JobManager {
         let id = uuid::Uuid::new_v4().simple().to_string();
         let dir = self.jobs_dir.join(&id);
         tokio::fs::create_dir_all(&dir).await?;
-        let unmade = Unmade(Some(dir.clone()));
+        // Its folder in RAM, when it asks for memory and is throttled: its
+        // lead on the player is bounded then.
+        let store = self.memory.get().filter(|_| req.options.in_memory && plan.throttle);
+        let memory_dir = store.map(|store| store.root().join(&id));
+        let unmade = Unmade(std::iter::once(dir.clone()).chain(memory_dir.clone()).collect());
         if let Some(Burn::Text { source, file_name, .. }) = &plan.burn {
             self.extractor.extract_ass(&input, source, &dir.join(file_name)).await?;
         }
@@ -463,10 +557,13 @@ impl JobManager {
             if let Some(Burn::Text { file_name, .. }) = &plan.burn {
                 tokio::fs::copy(dir.join(file_name), variant_dir.join(file_name)).await?;
             }
+            let folder = memory_dir.as_ref().map(|d| d.join(format!("v{k}")));
+            let memory = JobMemory::make(store, folder, &variant_dir, &plan, &media).await;
             let job =
                 Job::new(format!("{id}-v{k}"), variant, media.clone(), plan, input.clone(), variant_dir, start_segment);
-            variants.push(Arc::new(Job { prefix: format!("v{k}-"), ..job }));
+            variants.push(Arc::new(Job { prefix: format!("v{k}-"), memory, ..job }));
         }
+        let memory = JobMemory::make(store, memory_dir, &dir, &plan, &media).await;
         let created = JobCreated {
             id: id.clone(),
             duration_ms: plan.duration_ms,
@@ -477,7 +574,8 @@ impl JobManager {
             warnings: plan.warnings.clone(),
             variants: variants.len() as u32,
         };
-        let job = Arc::new(Job { variants, ..Job::new(id.clone(), req, media, plan, input, dir, start_segment) });
+        let job =
+            Arc::new(Job { variants, memory, ..Job::new(id.clone(), req, media, plan, input, dir, start_segment) });
         self.jobs.lock().insert(id.clone(), job.clone());
         unmade.made();
         Metrics::inc(&self.metrics.jobs_created);
@@ -770,8 +868,14 @@ impl JobManager {
         };
         let args = plan.ffmpeg_args(&ctx, start, end);
         tracing::debug!(job = %job.id, "ffmpeg {}", args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "));
+        // It writes its segments where it runs.
+        let place = job.choose_place();
         let mut cmd = self.ff.command();
-        cmd.args(&args).current_dir(&job.dir).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.args(&args)
+            .current_dir(job.folder(place))
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         let starting = self.background.start();
         let spawned = Instant::now();
         let mut child =
@@ -812,6 +916,7 @@ impl JobManager {
         let lister = tokio::spawn(read_segment_list(
             job.clone(),
             stdout,
+            place,
             next.clone(),
             spawned,
             starting,
@@ -858,7 +963,11 @@ impl JobManager {
             // must not start another one that writes them again.
             let _ = lister.await;
             drop(slot);
-            job_ref.on_exit(generation, end, next_ref.load(Relaxed), status, killed, &tail, &metrics);
+            let at = next_ref.load(Relaxed);
+            if job_ref.on_exit(generation, end, at, status, killed, &tail, &metrics) && place == Place::Memory {
+                // The segment it was making, half made, takes no memory.
+                job_ref.drop_unmade(at);
+            }
             let _ = exit_tx.send(true);
             job_ref.notify.notify_waiters();
         });
@@ -866,6 +975,7 @@ impl JobManager {
         Ok(Proc {
             start,
             end,
+            place,
             started: Instant::now(),
             next,
             lookahead: job.segments_in(LOOKAHEAD),
@@ -885,9 +995,15 @@ impl JobManager {
             }
             // Wake waiting requests so they fail now instead of at their timeout.
             rendition.notify.notify_waiters();
+            if let Some(memory) = &rendition.memory {
+                memory.release();
+            }
         }
         // The variants' folders with it.
         remove_dir_with_retry(&job.dir).await;
+        if let Some(store) = self.memory.get() {
+            remove_dir_with_retry(&store.root().join(id)).await;
+        }
         tracing::info!(job = %id, "job removed");
         true
     }
@@ -904,8 +1020,53 @@ impl JobManager {
         });
     }
 
+    /// The rendition to move to disk, when memory runs short
+    /// ([`memory::short`]): of those whose segments go to memory, the one
+    /// with most there.
+    fn memory_victim(&self) -> Option<Arc<Job>> {
+        if !self.memory.get()?.short() {
+            return None;
+        }
+        self.renditions()
+            .into_iter()
+            .filter_map(|job| {
+                let memory = job.memory.as_ref()?;
+                let bytes = memory.lease.lock().is_some().then(|| memory.bytes.load(Relaxed))?;
+                Some((bytes, job))
+            })
+            .max_by_key(|(bytes, _)| *bytes)
+            .map(|(_, job)| job)
+    }
+
+    /// When memory runs short, moves a rendition to disk (one a look, see
+    /// [`JobManager::memory_victim`]): its reservation goes, and a process
+    /// writing to memory starts again on disk where it was (a paused one,
+    /// far ahead, at the next request). What it made stays where it is,
+    /// served from there until pruned.
+    async fn relieve_memory(self: &Arc<Self>) {
+        let Some(job) = self.memory_victim() else { return };
+        let Ok(mut guard) = job.process.try_lock() else { return };
+        if let Some(memory) = &job.memory {
+            memory.lease.lock().take();
+        }
+        tracing::info!(job = %job.id, "memory runs short: its segments go to disk from now on");
+        let Some(old) = guard.take_if(|p| p.running() && p.place == Place::Memory) else { return };
+        let (next, end, paused) = (old.next.load(Relaxed), old.end, old.paused());
+        old.stop().await;
+        if !paused && next < end {
+            let preset = job.runtime.lock().preset.map(|(i, _)| i);
+            match self.spawn(&job, next, preset) {
+                Ok(process) => *guard = Some(process),
+                Err(err) => tracing::warn!(job = %job.id, "could not go on on disk: {err:?}"),
+            }
+        }
+        drop(guard);
+        job.notify.notify_waiters();
+    }
+
     async fn reap(self: &Arc<Self>) {
         self.adapt().await;
+        self.relieve_memory().await;
         let now = now_ms();
         for job in self.list() {
             // A job is asked for whichever rendition its player takes.
@@ -1003,7 +1164,7 @@ impl Job {
             created_at_ms: now_ms(),
             last_access_ms: AtomicI64::new(now_ms()),
             last_requested: AtomicU32::new(start_segment),
-            ready: Mutex::new(vec![false; count]),
+            ready: Mutex::new(vec![None; count]),
             ready_count: AtomicU32::new(0),
             waiting: Mutex::default(),
             closed: AtomicBool::new(false),
@@ -1015,6 +1176,7 @@ impl Job {
             variants: Vec::new(),
             prefix: String::new(),
             active: AtomicU32::new(0),
+            memory: None,
         }
     }
 
@@ -1108,18 +1270,47 @@ impl Job {
         (f64::from(next) - f64::from(asked) - 1.0) * self.plan.segment_seconds
     }
 
+    /// Where segment `n` is, when made; else where it would be on disk.
     pub fn segment_path(&self, n: u32) -> PathBuf {
-        self.dir.join(format!("{n}.ts"))
+        let place = self.ready.lock().get(n as usize).copied().flatten();
+        self.path_in(place.unwrap_or(Place::Disk), n)
+    }
+
+    fn path_in(&self, place: Place, n: u32) -> PathBuf {
+        self.folder(place).join(format!("{n}.ts"))
+    }
+
+    /// The folder segments made in `place` are in.
+    fn folder(&self, place: Place) -> &Path {
+        match (place, &self.memory) {
+            (Place::Memory, Some(memory)) => &memory.dir,
+            _ => &self.dir,
+        }
+    }
+
+    /// Where a process starting now makes its segments: in memory when the
+    /// job asked for it and has its reservation, or gets one now; else on
+    /// disk.
+    fn choose_place(&self) -> Place {
+        let Some(memory) = &self.memory else { return Place::Disk };
+        let mut lease = memory.lease.lock();
+        if lease.is_none() {
+            *lease = memory.store.lease(memory.want);
+            if lease.is_none() {
+                tracing::debug!(job = %self.id, "no room in memory: segments go to disk");
+            }
+        }
+        if lease.is_some() { Place::Memory } else { Place::Disk }
     }
 
     fn is_ready(&self, n: u32) -> bool {
-        self.ready.lock().get(n as usize).copied().unwrap_or(false)
+        self.ready.lock().get(n as usize).is_some_and(Option::is_some)
     }
 
     /// First ready segment in `[from, to)`.
     fn first_ready(&self, from: u32, to: u32) -> Option<u32> {
         let ready = self.ready.lock();
-        (from..to).find(|&n| ready.get(n as usize).copied().unwrap_or(false))
+        (from..to).find(|&n| ready.get(n as usize).is_some_and(Option::is_some))
     }
 
     /// Whether any request is waiting for a segment matching `pred`.
@@ -1127,14 +1318,24 @@ impl Job {
         self.waiting.lock().iter().any(|&m| pred(m))
     }
 
-    /// Marks segment `n` ready, without waking anyone: see [`segment_written`].
-    fn mark_ready(&self, n: u32) {
+    /// Marks segment `n` ready in `place`, without waking anyone: see
+    /// [`segment_written`].
+    fn mark_ready(&self, n: u32, place: Place) {
+        // What it takes in memory (a tmpfs answers at once).
+        let bytes = match (place, &self.memory) {
+            (Place::Memory, Some(_)) => std::fs::metadata(self.path_in(place, n)).map_or(0, |m| m.len()),
+            _ => 0,
+        };
         let mut ready = self.ready.lock();
         if let Some(slot) = ready.get_mut(n as usize)
-            && !*slot
+            && slot.is_none()
         {
-            *slot = true;
+            *slot = Some(place);
             self.ready_count.fetch_add(1, Relaxed);
+            if let (Some(memory), true) = (&self.memory, bytes > 0) {
+                memory.bytes.fetch_add(bytes, Relaxed);
+                memory.store.added(bytes);
+            }
         }
     }
 
@@ -1162,7 +1363,7 @@ impl Job {
     }
 
     /// Process `generation` exited, at segment `next` of those it was to
-    /// make up to `end`.
+    /// make up to `end`: whether it is the latest one (none started since).
     #[allow(clippy::too_many_arguments)]
     fn on_exit(
         &self,
@@ -1173,13 +1374,13 @@ impl Job {
         killed: bool,
         tail: &Mutex<VecDeque<String>>,
         metrics: &Metrics,
-    ) {
+    ) -> bool {
         let success = status.as_ref().is_ok_and(ExitStatus::success);
         tracing::debug!(job = %self.id, "ffmpeg exited at segment {next} (killed: {killed}, success: {success})");
         let mut rt = self.runtime.lock();
         if rt.generation != generation {
             // Stopped long ago, gone at last: the job is the running one's.
-            return;
+            return false;
         }
         let process = rt.process.take();
         if killed {
@@ -1211,34 +1412,57 @@ impl Job {
                 rt.hardware_failed = true;
             }
         }
+        true
     }
 
-    /// Delete segments far behind the playhead. Blocking: run it on the
-    /// blocking pool. The lock is held per batch so segment lookups never wait
-    /// long, and a segment is only marked missing once its file is gone.
+    /// Delete segments far behind the playhead: on disk [`KEEP_BEHIND`],
+    /// in memory [`memory::KEEP_BEHIND`], and in memory those far ahead of
+    /// it too ([`memory::KEEP_AHEAD`]: a seek back leaves them). Blocking:
+    /// run it on the blocking pool. The lock is held per batch so segment
+    /// lookups never wait long, and a segment is only marked missing once
+    /// its file is gone.
     fn prune(&self) {
-        let last = self.last_requested.load(Relaxed);
-        let keep = self.segments_in(KEEP_BEHIND);
-        if last <= keep {
-            return;
-        }
-        let cutoff = (last - keep) as usize;
+        let last = self.last_requested.load(Relaxed) as usize;
+        let behind = |keep: Duration| last.saturating_sub(self.segments_in(keep) as usize);
+        let disk_from = behind(KEEP_BEHIND);
+        let (memory_from, memory_to) =
+            (behind(memory::KEEP_BEHIND), last + self.segments_in(memory::KEEP_AHEAD) as usize);
+        let stale = |n: usize, place: Place| match place {
+            Place::Disk => n < disk_from,
+            Place::Memory => n < memory_from || n > memory_to,
+        };
         let mut n = 0;
         loop {
             let mut ready = self.ready.lock();
-            let end = cutoff.min(ready.len());
+            // Without memory, nothing past the disk's cutoff goes.
+            let end = if self.memory.is_some() { ready.len() } else { disk_from.min(ready.len()) };
             if n >= end {
                 return;
             }
             let mut deleted = 0;
             while n < end && deleted < PRUNE_BATCH {
-                if ready[n] && std::fs::remove_file(self.segment_path(n as u32)).is_ok() {
-                    ready[n] = false;
-                    self.ready_count.fetch_sub(1, Relaxed);
-                    deleted += 1;
+                if let Some(place) = ready[n].filter(|&place| stale(n, place)) {
+                    let path = self.path_in(place, n as u32);
+                    let bytes = (place == Place::Memory).then(|| std::fs::metadata(&path).map_or(0, |m| m.len()));
+                    if std::fs::remove_file(&path).is_ok() {
+                        ready[n] = None;
+                        self.ready_count.fetch_sub(1, Relaxed);
+                        if let (Some(bytes), Some(memory)) = (bytes, &self.memory) {
+                            memory.removed(bytes);
+                        }
+                        deleted += 1;
+                    }
                 }
                 n += 1;
             }
+        }
+    }
+
+    /// Process writing to memory stopped at segment `n`, not made: what it
+    /// wrote of it goes.
+    fn drop_unmade(&self, n: u32) {
+        if self.ready.lock().get(n as usize).copied().flatten() != Some(Place::Memory) {
+            let _ = std::fs::remove_file(self.path_in(Place::Memory, n));
         }
     }
 
@@ -1253,8 +1477,8 @@ impl Job {
 
     /// Does to segment `n`'s video what FFmpeg couldn't (see
     /// [`crate::tsedit`]), before anyone is told it is ready.
-    async fn edit_segment(&self, n: u32, edits: Edits) {
-        let path = self.segment_path(n);
+    async fn edit_segment(&self, n: u32, place: Place, edits: Edits) {
+        let path = self.path_in(place, n);
         let edited = tokio::task::spawn_blocking(move || tsedit::edit_segment(&path, edits)).await;
         match edited {
             Ok(Ok(edited)) => {
@@ -1305,6 +1529,7 @@ impl Job {
             served_bytes: renditions.iter().map(|r| r.served_bytes.load(Relaxed)).sum(),
             rendition: k as u32,
             variants: self.variants.len() as u32,
+            memory_bytes: renditions.iter().filter_map(|r| r.memory.as_ref()).map(|m| m.bytes.load(Relaxed)).sum(),
             ..renditions[k].own_status()
         }
     }
@@ -1342,6 +1567,8 @@ impl Job {
             warnings,
             rendition: 0,
             variants: 0,
+            in_memory: self.memory.as_ref().is_some_and(|m| m.lease.lock().is_some()),
+            memory_bytes: self.memory.as_ref().map_or(0, |m| m.bytes.load(Relaxed)),
         }
     }
 
@@ -1366,9 +1593,11 @@ impl Job {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn read_segment_list(
     job: Arc<Job>,
     stdout: ChildStdout,
+    place: Place,
     next: Arc<AtomicU32>,
     spawned: Instant,
     starting: Starting,
@@ -1383,13 +1612,13 @@ async fn read_segment_list(
     while let Ok(Some(line)) = lines.next_line().await {
         if let Some(n) = parse_list_line(&line) {
             if let Some(edits) = edits {
-                job.edit_segment(n, edits).await;
+                job.edit_segment(n, place, edits).await;
             }
             tracing::trace!(job = %job.id, "segment {n} ready");
             if std::mem::take(&mut first) {
                 job.runtime.lock().start_cost = Some(spawned.elapsed());
             }
-            segment_written(&job, &next, n);
+            segment_written(&job, &next, n, place);
             Metrics::inc(&metrics.segments_produced);
             // Throttling: far enough ahead, it pauses (see `PAUSE_AHEAD`)
             // right away rather than at the reaper's next look.
@@ -1408,8 +1637,8 @@ async fn read_segment_list(
 /// FFmpeg finished segment `n`: it is ready, and the process is past it,
 /// before anyone wakes. A woken request then never sees the process still
 /// owing the segment just finished (and wait on it for nothing).
-fn segment_written(job: &Job, next: &AtomicU32, n: u32) {
-    job.mark_ready(n);
+fn segment_written(job: &Job, next: &AtomicU32, n: u32, place: Place) {
+    job.mark_ready(n, place);
     next.store(n + 1, Relaxed);
     job.notify.notify_waiters();
 }
@@ -1521,25 +1750,26 @@ fn describe(created: &JobCreated) -> String {
 /// The folder of a job being made, removed with what's in it (a burn-in
 /// track half written) when the job isn't made after all: an error, or its
 /// request gone (the server gave up waiting, the player left).
-struct Unmade(Option<PathBuf>);
+struct Unmade(Vec<PathBuf>);
 
 impl Unmade {
-    /// The job is made: its folder stays.
+    /// The job is made: its folders stay.
     fn made(mut self) {
-        self.0 = None;
+        self.0.clear();
     }
 }
 
 impl Drop for Unmade {
     fn drop(&mut self) {
-        let Some(dir) = self.0.take() else { return };
-        // FFmpeg, killed with the request, may hold a file there a moment longer.
-        match tokio::runtime::Handle::try_current() {
-            Ok(runtime) => {
-                runtime.spawn(async move { remove_dir_with_retry(&dir).await });
-            }
-            Err(_) => {
-                let _ = std::fs::remove_dir_all(&dir);
+        for dir in std::mem::take(&mut self.0) {
+            // FFmpeg, killed with the request, may hold a file there a moment longer.
+            match tokio::runtime::Handle::try_current() {
+                Ok(runtime) => {
+                    runtime.spawn(async move { remove_dir_with_retry(&dir).await });
+                }
+                Err(_) => {
+                    let _ = std::fs::remove_dir_all(&dir);
+                }
             }
         }
     }
@@ -1572,9 +1802,9 @@ mod tests {
             std::fs::create_dir(job).unwrap();
             std::fs::write(job.join("burn.ass"), "[Script Info]\n").unwrap();
         }
-        Unmade(Some(made.clone())).made();
+        Unmade(vec![made.clone()]).made();
         // Dropped midway (an error, or the request gone).
-        drop(Unmade(Some(unmade.clone())));
+        drop(Unmade(vec![unmade.clone()]));
         for _ in 0..50 {
             if !unmade.exists() {
                 break;
@@ -1597,6 +1827,7 @@ mod tests {
         let p = Proc {
             start: 0,
             end: 20,
+            place: Place::Disk,
             started: Instant::now(),
             next: Arc::new(AtomicU32::new(10)),
             lookahead: 3,
@@ -1639,6 +1870,7 @@ mod tests {
         let p = Proc {
             start: 0,
             end: 500,
+            place: Place::Disk,
             started: Instant::now(),
             next: Arc::new(AtomicU32::new(10)),
             lookahead: 6,
@@ -1700,6 +1932,7 @@ mod tests {
         let p = Proc {
             start: 0,
             end: 100,
+            place: Place::Disk,
             started: Instant::now(),
             next: Arc::new(AtomicU32::new(70)),
             lookahead: 6,
@@ -2186,9 +2419,9 @@ mod tests {
     fn segments_become_ready_once() {
         let dir = tempfile::tempdir().unwrap();
         let job = job(dir.path(), vec![0, 4_000, 8_000, 12_000]);
-        job.mark_ready(1);
-        job.mark_ready(1);
-        job.mark_ready(7);
+        job.mark_ready(1, Place::Disk);
+        job.mark_ready(1, Place::Disk);
+        job.mark_ready(7, Place::Disk);
         assert_eq!(job.ready_count.load(Relaxed), 1, "counted once; out of range ignored");
         assert!(job.is_ready(1) && !job.is_ready(0) && !job.is_ready(7));
         assert_eq!(job.first_ready(0, 3), Some(1));
@@ -2235,7 +2468,7 @@ mod tests {
         let waker = Waker::from(seen.clone());
         let mut notified = std::pin::pin!(job.notify.notified());
         assert!(notified.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
-        segment_written(&job, &next, 0);
+        segment_written(&job, &next, 0, Place::Disk);
         assert_eq!(*seen.at_wake.lock(), Some(1), "the process had moved on when the request woke");
         assert!(job.is_ready(0));
     }
@@ -2434,7 +2667,7 @@ mod tests {
         let job = job(dir.path(), (0..=200).map(|i| i * 4_000).collect());
         for n in [0, 10, 59, 60, 100, 150] {
             std::fs::write(job.segment_path(n), b"ts").unwrap();
-            job.mark_ready(n);
+            job.mark_ready(n, Place::Disk);
         }
         job.last_requested.store(90, Relaxed);
         job.prune();
@@ -2449,5 +2682,182 @@ mod tests {
             assert!(job.is_ready(n) && job.segment_path(n).exists(), "segment {n}");
         }
         assert_eq!(job.ready_count.load(Relaxed), 3);
+    }
+
+    const GIB: u64 = 1024 * 1024 * 1024;
+
+    /// A computer with 16 GB, half of it its folder in RAM: 4 GB for segments.
+    fn roomy() -> Arc<Mutex<memory::Room>> {
+        Arc::new(Mutex::new(memory::Room { size: 8 * GIB, free: 8 * GIB, memory: 16 * GIB, available: 12 * GIB }))
+    }
+
+    /// A store in `dir` ("shm") whose room is `room`'s.
+    fn store(dir: &Path, room: Arc<Mutex<memory::Room>>) -> Arc<MemoryStore> {
+        MemoryStore::new(&dir.join("shm"), Box::new(move || Some(*room.lock()))).unwrap()
+    }
+
+    /// Job `id` (folder `dir/id` on disk), 4 s segments for 400 of them,
+    /// asking for memory in `store`, reckoned to take `want` there.
+    fn job_in_memory(dir: &Path, id: &str, store: &Arc<MemoryStore>, want: u64) -> Job {
+        let disk = dir.join(id);
+        let memory_dir = store.root().join(id);
+        std::fs::create_dir_all(&disk).unwrap();
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        let memory = JobMemory {
+            store: store.clone(),
+            dir: memory_dir,
+            want,
+            lease: Mutex::new(None),
+            bytes: AtomicU64::new(0),
+        };
+        Job { id: id.into(), memory: Some(memory), ..job(&disk, (0..=400).map(|i| i * 4_000).collect()) }
+    }
+
+    /// Segment `n` of `bytes` made in `place`.
+    fn make(job: &Job, n: u32, place: Place, bytes: usize) {
+        std::fs::write(job.path_in(place, n), vec![0u8; bytes]).unwrap();
+        job.mark_ready(n, place);
+    }
+
+    #[test]
+    fn segments_go_to_memory_while_it_has_room() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(dir.path(), roomy());
+        let big = job_in_memory(dir.path(), "big", &store, 3 * GIB);
+        let other = job_in_memory(dir.path(), "other", &store, 2 * GIB);
+        assert_eq!(big.choose_place(), Place::Memory);
+        assert_eq!(big.choose_place(), Place::Memory, "it keeps its reservation");
+        assert_eq!(store.reserved(), 3 * GIB);
+        assert_eq!(other.choose_place(), Place::Disk, "past the budget: to disk");
+        // A job that didn't ask for memory (or isn't throttled) has none.
+        assert_eq!(job(dir.path(), vec![0, 4_000]).choose_place(), Place::Disk);
+
+        // Each segment is where its process made it, and is found there.
+        make(&big, 0, Place::Memory, 1_000);
+        make(&big, 1, Place::Disk, 10);
+        assert!(big.segment_path(0).starts_with(store.root()), "{:?}", big.segment_path(0));
+        assert_eq!(big.segment_path(1), dir.path().join("big").join("1.ts"));
+        let status = big.status();
+        assert!(status.in_memory);
+        assert_eq!((status.memory_bytes, store.used()), (1_000, 1_000), "segments on disk don't count");
+
+        // The job gone: its reservation and its memory with it.
+        big.memory.as_ref().unwrap().release();
+        assert_eq!((store.used(), store.reserved()), (0, 0));
+        assert_eq!(other.choose_place(), Place::Memory);
+    }
+
+    #[test]
+    fn segments_in_memory_keep_a_minute_behind_and_three_ahead() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(dir.path(), roomy());
+        let job = job_in_memory(dir.path(), "job", &store, GIB);
+        // 4 s segments: 15 in a minute, 45 in three, 90 in six (on disk).
+        let in_memory = [0, 84, 85, 100, 145, 146, 300];
+        for n in in_memory {
+            make(&job, n, Place::Memory, 100);
+        }
+        for n in [5, 10, 30] {
+            make(&job, n, Place::Disk, 100);
+        }
+        assert_eq!(store.used(), 700);
+        job.last_requested.store(100, Relaxed);
+        job.prune();
+        for n in [0, 84, 146, 300, 5] {
+            assert!(!job.is_ready(n) && !job.path_in(Place::Memory, n).exists(), "segment {n} went");
+        }
+        assert!(!job.path_in(Place::Disk, 5).exists());
+        for n in [85, 100, 145, 10, 30] {
+            assert!(job.is_ready(n) && job.segment_path(n).exists(), "segment {n} stayed");
+        }
+        assert_eq!((store.used(), job.memory.as_ref().unwrap().bytes.load(Relaxed)), (300, 300));
+    }
+
+    #[test]
+    fn a_segment_half_made_in_memory_goes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(dir.path(), roomy());
+        let job = job_in_memory(dir.path(), "job", &store, GIB);
+        make(&job, 7, Place::Memory, 100);
+        std::fs::write(job.path_in(Place::Memory, 8), b"half").unwrap();
+        job.drop_unmade(8);
+        job.drop_unmade(7);
+        assert!(!job.path_in(Place::Memory, 8).exists());
+        assert!(job.path_in(Place::Memory, 7).exists(), "made, it stays");
+    }
+
+    #[tokio::test]
+    async fn throttled_jobs_asking_for_memory_get_a_folder_in_ram() {
+        use pley_transcoder_api::{AudioRequest, MediaStream, StreamKind, TranscodeOptions};
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("song.flac");
+        std::fs::write(&input, b"not really audio").unwrap();
+        let ff = Ffmpeg {
+            ffmpeg: dir.path().join("no-ffmpeg"),
+            ffprobe: dir.path().join("no-ffprobe"),
+            caps: pley_transcoder_api::Capabilities { ffmpeg_available: true, readrate: true, ..Default::default() },
+            segment_times_relative: true,
+        };
+        let jobs = manager_with(dir.path(), ff);
+        let store = store(dir.path(), roomy());
+        jobs.keep_in_memory(store.clone());
+        let request = |options: TranscodeOptions| JobRequest {
+            input: input.to_string_lossy().into_owned(),
+            media: Some(MediaInfo {
+                duration_ms: Some(60_000),
+                streams: vec![MediaStream { kind: StreamKind::Audio, codec: "flac".into(), ..Default::default() }],
+                ..Default::default()
+            }),
+            audio: Some(AudioRequest::default()),
+            options,
+            ..Default::default()
+        };
+        let made = jobs.create(request(TranscodeOptions::default())).await.unwrap();
+        let job = jobs.get(&made.id).unwrap();
+        let folder = &job.memory.as_ref().expect("in memory by default").dir;
+        assert!(folder.is_dir() && folder.starts_with(store.root()));
+        for options in [
+            TranscodeOptions { in_memory: false, ..Default::default() },
+            // Its lead on the player isn't bounded.
+            TranscodeOptions { throttle: false, ..Default::default() },
+        ] {
+            let other = jobs.create(request(options)).await.unwrap();
+            assert!(jobs.get(&other.id).unwrap().memory.is_none());
+        }
+        let folder = folder.clone();
+        jobs.remove(&made.id).await;
+        assert!(!folder.exists(), "the folder in RAM goes with the job");
+    }
+
+    #[tokio::test]
+    async fn memory_running_short_moves_the_job_taking_most_to_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let room = roomy();
+        let store = store(dir.path(), room.clone());
+        let mgr = manager(dir.path());
+        mgr.keep_in_memory(store.clone());
+        let jobs: Vec<Arc<Job>> =
+            ["small", "large"].map(|id| Arc::new(job_in_memory(dir.path(), id, &store, GIB))).into();
+        for (job, bytes) in jobs.iter().zip([1_000, 5_000]) {
+            assert_eq!(job.choose_place(), Place::Memory);
+            make(job, 0, Place::Memory, bytes);
+            mgr.jobs.lock().insert(job.id.clone(), job.clone());
+        }
+        assert!(mgr.memory_victim().is_none(), "plenty of room");
+
+        // Something else takes the computer's memory.
+        room.lock().available = GIB;
+        assert_eq!(mgr.memory_victim().unwrap().id, "large");
+        mgr.relieve_memory().await;
+        let (small, large) = (&jobs[0], &jobs[1]);
+        assert!(!large.status().in_memory && small.status().in_memory);
+        assert_eq!(large.choose_place(), Place::Disk, "no room while short");
+        assert!(large.segment_path(0).starts_with(store.root()), "what it made stays where it is");
+        assert_eq!(mgr.memory_victim().unwrap().id, "small", "one a look");
+
+        room.lock().available = 12 * GIB;
+        assert!(mgr.memory_victim().is_none());
+        assert_eq!(large.choose_place(), Place::Memory, "room again: the next process goes to memory");
+        assert_eq!(mgr.memory_bytes(), 6_000);
     }
 }

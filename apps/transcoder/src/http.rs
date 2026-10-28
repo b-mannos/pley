@@ -112,6 +112,7 @@ impl AppState {
             hw_processes: hw,
             max_hw_jobs: self.jobs.limits.max_hw_jobs,
             work_dir_bytes,
+            memory_bytes: self.jobs.memory_bytes(),
             background_paused: self.jobs.background.paused() as u32,
             counters: self.metrics.snapshot(),
             jobs: self.jobs.list().iter().map(|j| j.status()).collect(),

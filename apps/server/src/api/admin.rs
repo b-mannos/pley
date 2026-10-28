@@ -29,7 +29,8 @@ pub async fn put_settings(
     let before = state.settings.get();
     // A choice that can't work here is refused; one saved before (another
     // GPU, another FFmpeg) stays, and the transcoder does without it.
-    let caps = state.transcoder.info().map(|info| info.capabilities);
+    let info = state.transcoder.info();
+    let caps = info.as_ref().map(|info| info.capabilities.clone());
     let os = transcoder_os(&state);
     if let Some(hwaccel) = patch.hwaccel.filter(|v| *v != before.hwaccel)
         && let Some(why) = crate::settings::hwaccel_problem(hwaccel, os, caps.as_ref())
@@ -40,6 +41,12 @@ pub async fn put_settings(
         && let Some(why) = crate::settings::tonemap_problem(mode, caps.as_ref())
     {
         return Err(AppError::bad_request(why));
+    }
+    if patch.transcode_in_memory == Some(true)
+        && !before.transcode_in_memory
+        && let Some(why) = crate::settings::memory_problem(info.as_ref())
+    {
+        return Err(AppError::bad_request(format!("transcoding in memory isn't available here: {why}")));
     }
     let after = state.settings.update(&state.db, patch).await?;
     if before.watch_libraries != after.watch_libraries {
@@ -369,6 +376,9 @@ pub struct TranscoderSummary {
     chromaprint: bool,
     /// FFmpeg can hold transcodes back (6.1 and newer).
     throttling: bool,
+    /// Whether segments can be kept in memory, and how much (`null` while
+    /// the transcoder is unavailable, or from one too old to say).
+    memory: Option<pley_transcoder_api::MemoryInfo>,
     max_jobs: u32,
     active_jobs: u32,
     error: Option<String>,
@@ -430,6 +440,12 @@ pub async fn system(State(state): State<AppState>, _admin: AdminUser) -> ApiResu
         dolby_vision: info.as_ref().is_some_and(|i| i.capabilities.dolby_vision),
         chromaprint: info.as_ref().is_some_and(|i| i.capabilities.chromaprint),
         throttling: info.as_ref().is_some_and(|i| i.capabilities.readrate),
+        memory: info.as_ref().map(|i| {
+            i.memory.clone().unwrap_or_else(|| pley_transcoder_api::MemoryInfo {
+                reason: crate::settings::memory_problem(Some(i)),
+                ..Default::default()
+            })
+        }),
         max_jobs: info.as_ref().map(|i| i.limits.max_jobs).unwrap_or(0),
         active_jobs,
         error: state.transcoder.last_error(),

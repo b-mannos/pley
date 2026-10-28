@@ -19,6 +19,7 @@ const SETTINGS = {
   max_transcodes: 4,
   transcode_preset: "veryfast",
   throttle_transcodes: true,
+  transcode_in_memory: true,
   scan_interval_minutes: 360,
   watch_libraries: true,
   detect_markers: true,
@@ -178,6 +179,73 @@ describe("TranscoderSettings on this server's hardware", () => {
     expect(await screen.findByRole("option", { name: "Automatic · VAAPI" })).toBeEnabled();
     expect(option(/^VAAPI$/)).toBeEnabled();
     expect(option(/^VideoToolbox$/)).toBeDisabled();
+  });
+
+  describe("in memory", () => {
+    const memorySwitch = () => screen.findByRole("switch", { name: "Transcode in memory" });
+    /** pley on Linux with 16 GB, whose FFmpeg throttles. */
+    const linux = {
+      ...intel,
+      throttling: true,
+      memory: { available: true, path: "/dev/shm", budget_bytes: 4 * 1024 ** 3 },
+    };
+
+    it("is on by default where the transcoder has a folder in RAM, and turns off", async () => {
+      const user = userEvent.setup();
+      const requests = mockApi({
+        "GET /api/settings": () => SETTINGS,
+        "GET /api/system": () => system(linux, "linux"),
+        "PUT /api/settings": (req) => ({ ...SETTINGS, ...(req.body as Partial<Settings>) }),
+      });
+      renderWithProviders(<TranscoderSettings />);
+      const toggle = await memorySwitch();
+      expect(toggle).toBeEnabled();
+      expect(toggle).toBeChecked();
+      expect(screen.getByText("Keeps segments in RAM instead of on disk. Up to 4.0 GB.")).toBeInTheDocument();
+      expect(screen.queryByText(/segments go to disk/)).not.toBeInTheDocument();
+
+      await user.click(toggle);
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ transcode_in_memory: false }));
+    });
+
+    it("is greyed out where the transcoder has none, and says why", async () => {
+      const windows = { ...intel, throttling: true, memory: { available: false, reason: "works on Linux only", budget_bytes: 0 } };
+      mockApi({ "GET /api/settings": () => SETTINGS, "GET /api/system": () => system(windows) });
+      renderWithProviders(<TranscoderSettings />);
+      const toggle = await memorySwitch();
+      expect(toggle).toBeDisabled();
+      expect(toggle).toBeChecked();
+      expect(screen.getByText("Works on Linux only: segments go to disk.")).toBeInTheDocument();
+      expect(screen.getByText("Keeps segments in RAM instead of on disk.")).toBeInTheDocument();
+    });
+
+    it("needs throttling", async () => {
+      const user = userEvent.setup();
+      mockApi({ "GET /api/settings": () => SETTINGS, "GET /api/system": () => system(linux, "linux") });
+      renderWithProviders(<TranscoderSettings />);
+      expect(await memorySwitch()).toBeEnabled();
+      await user.click(screen.getByRole("switch", { name: "Throttle transcodes" }));
+      expect(screen.getByRole("switch", { name: "Transcode in memory" })).toBeDisabled();
+      expect(screen.getByText("Needs throttling: segments go to disk.")).toBeInTheDocument();
+    });
+
+    it("needs an FFmpeg that throttles", async () => {
+      mockApi({ "GET /api/settings": () => SETTINGS, "GET /api/system": () => system({ ...linux, throttling: false }, "linux") });
+      renderWithProviders(<TranscoderSettings />);
+      expect(await memorySwitch()).toBeDisabled();
+      expect(screen.getByText("Needs throttling: segments go to disk.")).toBeInTheDocument();
+    });
+
+    it("is left alone while the transcoder isn't running", async () => {
+      mockApi({
+        "GET /api/settings": () => SETTINGS,
+        "GET /api/system": () => system({ ...intel, available: false, accels: [], encoders: [], memory: null }),
+      });
+      renderWithProviders(<TranscoderSettings />);
+      expect(await memorySwitch()).toBeEnabled();
+      expect(screen.queryByText(/segments go to disk/)).not.toBeInTheDocument();
+    });
   });
 
   it("says when the transcoder runs fewer at once than allowed", async () => {

@@ -6,6 +6,7 @@ import type { HwAccel, Settings, ToneMapping, TranscodeDir, TranscodePreset } fr
 import { FolderPicker } from "@/components/FolderPicker";
 import { useToast } from "@/components/Toast";
 import { Button, Select, TextInput, Toggle } from "@/components/ui";
+import { formatBytes } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
 import { Group, Link, Note, Row, SettingsForm, TestButton, useSettingsForm } from "./SettingsForm";
 import {
@@ -15,6 +16,7 @@ import {
   accelReason,
   capitalize,
   knownTranscoder,
+  memoryReason,
   tonemapChoices,
   tonemapFallback,
   tonemapReason,
@@ -29,6 +31,7 @@ const KEYS = [
   "transcode_preset",
   "max_transcodes",
   "throttle_transcodes",
+  "transcode_in_memory",
 ] as const satisfies readonly (keyof Settings)[];
 
 const PRESETS: { value: TranscodePreset; label: string }[] = [
@@ -147,6 +150,8 @@ export function TranscoderSettings() {
         const tonemapProblem = tonemapReason(form.tonemapping, system.data);
         const noGpuDecoding = known?.hardware_decoding === false;
         const noThrottling = known?.throttling === false;
+        const memoryProblem = memoryReason(system.data, form.throttle_transcodes);
+        const memoryBudget = tc?.memory?.available ? tc.memory.budget_bytes : 0;
 
         return (
           <>
@@ -275,6 +280,18 @@ export function TranscoderSettings() {
                   label="Throttle transcodes"
                 />
                 {noThrottling ? <Note>This FFmpeg can't hold transcodes back: it needs FFmpeg 6.1 or newer.</Note> : null}
+              </Row>
+              <Row
+                label="Transcode in memory"
+                hint={`Keeps segments in RAM instead of on disk.${memoryBudget ? ` Up to ${formatBytes(memoryBudget)}.` : ""}`}
+              >
+                <Toggle
+                  checked={form.transcode_in_memory}
+                  disabled={memoryProblem !== null}
+                  onChange={(v) => set("transcode_in_memory", v)}
+                  label="Transcode in memory"
+                />
+                {memoryProblem ? <Note>{capitalize(memoryProblem)}: segments go to disk.</Note> : null}
               </Row>
             </Group>
           </>

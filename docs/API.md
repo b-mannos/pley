@@ -1854,6 +1854,9 @@ interface Settings {
   max_transcodes: number;
   transcode_preset: "ultrafast" | "superfast" | "veryfast" | "faster" | "fast" | "medium";
   throttle_transcodes: boolean;     // real time once a 120 s buffer is built, paused 90 s ahead of the player
+  transcode_in_memory: boolean;     // keep throttled transcodes' segments in RAM where the transcoder can (Linux's
+                                    // /dev/shm, within a budget), else on disk (default true). Turning it on where
+                                    // `transcoder.memory.available` is false → 400; saved on before, it stays
   scan_interval_minutes: number;    // 0 disables periodic scans
   watch_libraries: boolean;         // pick up file changes automatically
   detect_markers: boolean;          // find intros and credits in the background (default true)
@@ -1893,6 +1896,9 @@ interface SystemInfo {
     dolby_vision: boolean;          // Dolby Vision profile 5 can be tone-mapped correctly
     chromaprint: boolean;           // audio fingerprints find intros and credits; without, only chapters
     throttling: boolean;            // FFmpeg can throttle transcodes (6.1 and newer)
+    memory: { available: boolean; reason?: string; path?: string; budget_bytes: number } | null;
+                                    // segments can be kept in RAM (`transcode_in_memory`), and at most how much;
+                                    // reason: why not ("works on Linux only"); null while unavailable
     max_jobs: number;
     active_jobs: number;
     error: string | null;

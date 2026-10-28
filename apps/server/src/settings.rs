@@ -4,7 +4,9 @@
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use pley_transcoder_api::{Capabilities, HwAccel, TonemapMode, Tonemapper, TranscodeOptions, VideoCodec};
+use pley_transcoder_api::{
+    Capabilities, HwAccel, TonemapMode, Tonemapper, TranscodeOptions, TranscoderInfo, VideoCodec,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::db::Db;
@@ -43,6 +45,9 @@ pub struct Settings {
     pub max_transcodes: u32,
     pub transcode_preset: String,
     pub throttle_transcodes: bool,
+    /// Keep transcodes' segments in memory where the transcoder can (a
+    /// folder in RAM with room: Linux's `/dev/shm`), else on disk.
+    pub transcode_in_memory: bool,
     pub scan_interval_minutes: u32,
     pub watch_libraries: bool,
     /// Find intros and credits (Skip Intro / Skip Credits) in the background.
@@ -81,6 +86,7 @@ impl Default for Settings {
             // Chosen by the transcoder from its load and lead (crate::transcoder).
             transcode_preset: "auto".into(),
             throttle_transcodes: true,
+            transcode_in_memory: true,
             scan_interval_minutes: 360,
             watch_libraries: true,
             detect_markers: true,
@@ -127,6 +133,7 @@ impl Settings {
             tonemap: self.tonemapping,
             preset: Some(self.transcode_preset.clone()),
             throttle: self.throttle_transcodes,
+            in_memory: self.transcode_in_memory,
         }
     }
 }
@@ -198,6 +205,16 @@ pub fn tonemap_problem(mode: TonemapMode, caps: Option<&Capabilities>) -> Option
     (!caps.tonemappers.contains(&wanted)).then(|| why.to_owned())
 }
 
+/// Why transcodes' segments can't be kept in memory here, or `None` when
+/// they can (or nobody can tell: no transcoder). Without it, they go to disk.
+pub fn memory_problem(info: Option<&TranscoderInfo>) -> Option<String> {
+    match &info?.memory {
+        Some(memory) if memory.available => None,
+        Some(memory) => Some(memory.reason.clone().unwrap_or_else(|| "not available here".into())),
+        None => Some("needs a newer transcoder".into()),
+    }
+}
+
 /// Whether some video is decoded on a GPU here, so that
 /// [`Settings::hardware_decoding`] changes something: as the transcoder's
 /// planner chooses, through a GPU pipeline, Vulkan (for libplacebo) or the
@@ -231,6 +248,7 @@ pub struct SettingsPatch {
     pub max_transcodes: Option<u32>,
     pub transcode_preset: Option<String>,
     pub throttle_transcodes: Option<bool>,
+    pub transcode_in_memory: Option<bool>,
     pub scan_interval_minutes: Option<u32>,
     pub watch_libraries: Option<bool>,
     pub detect_markers: Option<bool>,
@@ -319,6 +337,9 @@ impl SettingsStore {
         }
         if let Some(v) = patch.throttle_transcodes {
             next.throttle_transcodes = v;
+        }
+        if let Some(v) = patch.transcode_in_memory {
+            next.transcode_in_memory = v;
         }
         if let Some(v) = patch.scan_interval_minutes {
             next.scan_interval_minutes = v.min(7 * 24 * 60);
@@ -567,6 +588,22 @@ mod tests {
         assert_eq!(tonemap_problem(TonemapMode::Libplacebo, None), None);
         let none = Capabilities { tonemappers: vec![], ..intel() };
         assert!(tonemap_problem(TonemapMode::Zscale, Some(&none)).unwrap().contains("zimg"));
+    }
+
+    #[test]
+    fn memory_needs_a_transcoder_that_has_it() {
+        use pley_transcoder_api::MemoryInfo;
+        assert_eq!(memory_problem(None), None, "no transcoder: nobody can tell");
+        let info = |memory| TranscoderInfo { memory, ..Default::default() };
+        let linux = MemoryInfo { available: true, path: Some("/dev/shm".into()), budget_bytes: 1 << 32, reason: None };
+        assert_eq!(memory_problem(Some(&info(Some(linux)))), None);
+        let windows = MemoryInfo { available: false, reason: Some("works on Linux only".into()), ..Default::default() };
+        assert_eq!(memory_problem(Some(&info(Some(windows)))).as_deref(), Some("works on Linux only"));
+        assert_eq!(memory_problem(Some(&info(None))).as_deref(), Some("needs a newer transcoder"));
+        // On by default, and in every job's request.
+        assert!(Settings::default().transcode_in_memory && Settings::default().transcode_options().in_memory);
+        let off = Settings { transcode_in_memory: false, ..Settings::default() };
+        assert!(!off.transcode_options().in_memory);
     }
 
     #[test]

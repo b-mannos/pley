@@ -21,6 +21,7 @@ mod http;
 mod job;
 mod keyframes;
 mod matroska;
+mod memory;
 mod metrics;
 mod mp4;
 mod plan;
@@ -412,6 +413,19 @@ async fn run(args: Args) -> anyhow::Result<()> {
         limits.clone(),
         background,
     );
+    // Segments in memory, for jobs that ask, where this system has a folder in RAM.
+    let memory = memory::MemoryStore::open();
+    match &memory {
+        Ok(store) => {
+            tracing::info!(
+                "segments can be kept in memory, {} MB at most, in {}",
+                store.budget() / (1024 * 1024),
+                store.root().display()
+            );
+            jobs.keep_in_memory(store.clone());
+        }
+        Err(why) => tracing::info!("segments are kept on disk, not in memory: {why}"),
+    }
     jobs.spawn_reaper();
     let conversions = convert::Conversions::new(
         ff.clone(),
@@ -441,6 +455,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
             ..ff.caps.clone()
         },
         limits,
+        memory: Some(memory::MemoryStore::info(&memory)),
     };
     let state = Arc::new(http::AppState::new(
         jobs.clone(),
@@ -500,6 +515,9 @@ async fn run(args: Args) -> anyhow::Result<()> {
 
     jobs.shutdown().await;
     let _ = std::fs::remove_dir_all(&jobs_dir);
+    if let Ok(store) = &memory {
+        let _ = std::fs::remove_dir_all(store.root());
+    }
     tracing::info!("pley-transcoder stopped");
     Ok(())
 }

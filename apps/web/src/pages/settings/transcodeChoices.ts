@@ -139,6 +139,20 @@ export function tonemapReason(mode: ToneMapping, system: SystemInfo | undefined)
   return tc.tonemapping.includes(mode) ? null : (TONEMAP_NEEDS[mode] ?? null);
 }
 
+/**
+ * Why transcodes' segments can't be kept in memory here, or `null`: as the
+ * transcoder says (nobody knows while it isn't running), and only
+ * throttled transcodes are, since their lead on the player is bounded.
+ */
+export function memoryReason(system: SystemInfo | undefined, throttle: boolean): string | null {
+  const tc = system?.transcoder;
+  if (tc?.available) {
+    if (!tc.memory) return "needs a newer transcoder";
+    if (!tc.memory.available) return tc.memory.reason ?? "not available here";
+  }
+  return !throttle || knownTranscoder(system)?.throttling === false ? "needs throttling" : null;
+}
+
 /** What a saved tone mapper that can't work here gives instead: Automatic's choice. */
 export function tonemapFallback(system: SystemInfo | undefined): string {
   const first = knownTranscoder(system)?.tonemapping[0] as ToneMapping | undefined;

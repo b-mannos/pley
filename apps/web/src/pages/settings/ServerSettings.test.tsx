@@ -20,6 +20,7 @@ const SETTINGS = {
   max_transcodes: 4,
   transcode_preset: "veryfast",
   throttle_transcodes: true,
+  transcode_in_memory: true,
   scan_interval_minutes: 360,
   watch_libraries: true,
   detect_markers: true,

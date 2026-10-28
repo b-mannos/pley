@@ -536,6 +536,28 @@ pub struct TranscoderInfo {
     pub started_at_ms: i64,
     pub capabilities: Capabilities,
     pub limits: Limits,
+    /// Whether jobs' segments can be kept in memory
+    /// ([`TranscodeOptions::in_memory`]). `None` from older transcoders,
+    /// which keep them on disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemoryInfo>,
+}
+
+/// Where a transcoder can keep jobs' segments in memory: a folder in RAM
+/// (`/dev/shm` on Linux), with room to spare.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct MemoryInfo {
+    pub available: bool,
+    /// Why not, when not ("works on Linux only").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The folder in RAM.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// The most segments take there, in bytes: past it, jobs' segments go
+    /// to disk.
+    #[serde(default)]
+    pub budget_bytes: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -565,6 +587,9 @@ pub struct TranscoderStatus {
     pub hw_processes: u32,
     pub max_hw_jobs: u32,
     pub work_dir_bytes: u64,
+    /// Segments kept in memory now ([`TranscodeOptions::in_memory`]).
+    #[serde(default)]
+    pub memory_bytes: u64,
     /// Background FFmpeg runs (seek previews, fingerprints, keyframe scans)
     /// paused while a playback starts.
     #[serde(default)]
@@ -774,6 +799,11 @@ pub struct TranscodeOptions {
     /// Hold ffmpeg to real time once a buffer has been built.
     #[serde(default = "default_true")]
     pub throttle: bool,
+    /// Keep the segments in memory when the transcoder can
+    /// ([`TranscoderInfo::memory`]) and has room, else on disk. Throttled
+    /// jobs only: their lead on the player is bounded.
+    #[serde(default = "default_true")]
+    pub in_memory: bool,
 }
 
 impl Default for TranscodeOptions {
@@ -784,6 +814,7 @@ impl Default for TranscodeOptions {
             tonemap: TonemapMode::Auto,
             preset: None,
             throttle: true,
+            in_memory: true,
         }
     }
 }
@@ -1046,6 +1077,13 @@ pub struct JobStatus {
     /// How many lower renditions the job has.
     #[serde(default)]
     pub variants: u32,
+    /// Its segments go to memory now ([`TranscodeOptions::in_memory`]);
+    /// those made before may be on disk, or the other way round.
+    #[serde(default)]
+    pub in_memory: bool,
+    /// Bytes of its segments in memory now.
+    #[serde(default)]
+    pub memory_bytes: u64,
 }
 
 // ---------------------------------------------------------------------------

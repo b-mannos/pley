@@ -12,7 +12,9 @@ use axum::Json;
 use axum::Router;
 use axum::http::StatusCode;
 use axum::routing::get;
-use pley_transcoder_api::{API_VERSION, Capabilities, EncoderInfo, HwAccel, Tonemapper, TranscoderInfo, VideoCodec};
+use pley_transcoder_api::{
+    API_VERSION, Capabilities, EncoderInfo, HwAccel, MemoryInfo, Tonemapper, TranscoderInfo, VideoCodec,
+};
 use serde_json::json;
 
 use common::TestApp;
@@ -21,8 +23,8 @@ fn encoder(name: &str, accel: HwAccel) -> EncoderInfo {
     EncoderInfo { name: name.into(), codec: VideoCodec::H264, hardware: accel != HwAccel::None, accel, main10: false }
 }
 
-/// A transcoder elsewhere, on a computer with an Intel graphics chip, whose
-/// FFmpeg has zscale but neither libplacebo nor Chromaprint.
+/// A transcoder elsewhere, on a Windows computer with an Intel graphics
+/// chip, whose FFmpeg has zscale but neither libplacebo nor Chromaprint.
 async fn intel_transcoder() -> String {
     let app = Router::new().route(
         "/v1/info",
@@ -37,6 +39,11 @@ async fn intel_transcoder() -> String {
                     readrate: true,
                     ..Default::default()
                 },
+                memory: Some(MemoryInfo {
+                    available: false,
+                    reason: Some("works on Linux only".into()),
+                    ..Default::default()
+                }),
                 ..Default::default()
             })
         }),
@@ -67,6 +74,8 @@ async fn the_system_says_what_the_transcoder_can_do() {
     assert_eq!(tc["chromaprint"], json!(false));
     assert_eq!(tc["throttling"], json!(true));
     assert_eq!(tc["active_encoder"], json!("h264_qsv"), "Automatic");
+    assert_eq!(tc["memory"]["available"], json!(false));
+    assert_eq!(tc["memory"]["reason"], json!("works on Linux only"));
 
     // Nothing is known without a transcoder.
     let app = TestApp::new().await;
@@ -74,6 +83,26 @@ async fn the_system_says_what_the_transcoder_can_do() {
     let tc = app.get("/api/system", &admin).await.body["transcoder"].clone();
     assert_eq!((tc["available"].clone(), tc["accels"].clone()), (json!(false), json!([])));
     assert_eq!((tc["hardware_decoding"].clone(), tc["chromaprint"].clone()), (json!(false), json!(false)));
+    assert_eq!(tc["memory"], json!(null));
+}
+
+#[tokio::test]
+async fn memory_is_refused_where_the_transcoder_has_none() {
+    let (app, admin) = with_intel().await;
+    // On by default: the transcoder keeps the segments on disk meanwhile.
+    let settings = app.get("/api/settings", &admin).await;
+    assert_eq!(settings.body["transcode_in_memory"], json!(true));
+    let off = app.put("/api/settings", &admin, json!({"transcode_in_memory": false})).await;
+    assert_eq!((off.status, off.body["transcode_in_memory"].clone()), (StatusCode::OK, json!(false)));
+    let refused = app.put("/api/settings", &admin, json!({"transcode_in_memory": true})).await;
+    assert_eq!(refused.status, StatusCode::BAD_REQUEST);
+    assert!(refused.mentions("works on Linux only"), "{:?}", refused.body);
+
+    // Without a transcoder, nobody can tell.
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    assert_eq!(app.put("/api/settings", &admin, json!({"transcode_in_memory": false})).await.status, StatusCode::OK);
+    assert_eq!(app.put("/api/settings", &admin, json!({"transcode_in_memory": true})).await.status, StatusCode::OK);
 }
 
 #[tokio::test]
