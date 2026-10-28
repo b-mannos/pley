@@ -34,10 +34,11 @@ export function methodText(info: PlaybackInfo): string {
   return "Direct play";
 }
 
-export function whyText(method: PlaybackMethod): string {
+/** Why a stream plays as it does, when nothing more specific is known; direct play goes without saying. */
+export function whyText(method: PlaybackMethod): string | null {
   if (method === "remux") return "The original video, in a format this player opens.";
   if (method === "transcode") return "Converted for this player.";
-  return "The original file, as it is.";
+  return null;
 }
 
 export function fallbackText(reason: FallbackReason): string {
@@ -67,7 +68,7 @@ export interface DetailRow {
 /** How the video plays, while the details are open. */
 export interface PlaybackDetails {
   method: string;
-  why: string;
+  why: string | null;
   pipeline: string | null;
   rows: DetailRow[];
   playbackMethod: PlaybackMethod;
@@ -140,7 +141,7 @@ export function buildDetails(opts: {
   const want = opts.audioIndex ?? info.audio_index;
   const audio = audios.filter((s) => s.index === want)[0] ?? audios.filter((s) => s.default)[0] ?? audios[0] ?? null;
   const why =
-    info.method === "direct" ? whyText("direct") : opts.note ?? ((info.reasons ?? []).join(" ") || null) ?? info.reason ?? whyText(info.method);
+    info.method === "direct" ? opts.note ?? null : opts.note ?? ((info.reasons ?? []).join(" ") || null) ?? info.reason ?? whyText(info.method);
   const pending = "…";
   const videoIn = transcode?.video_in ? simplified(transcode.video_in) : videoLabel(video);
   const audioIn = transcode?.audio_in ?? audioLabel(audio);

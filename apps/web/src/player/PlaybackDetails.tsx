@@ -15,9 +15,8 @@ export function methodLabel(info: PlaybackInfo): string {
   return info.method === "remux" && info.audio_converted ? `${METHOD_LABEL.remux} · Audio transcoding` : METHOD_LABEL[info.method];
 }
 
-/** What it means, when nothing more specific is known. */
-const METHOD_TEXT: Record<PlaybackMethod, string> = {
-  direct: "The original file, as it is.",
+/** What it means, when nothing more specific is known; direct play goes without saying. */
+const METHOD_TEXT: Record<Exclude<PlaybackMethod, "direct">, string> = {
   remux: "The original video, in a format this player opens.",
   transcode: "Converted for this player.",
 };
@@ -121,7 +120,7 @@ export function PlaybackDetails({
   const audios = streams.filter((s) => s.kind === "audio");
   const audio =
     audios.find((s) => s.index === (audioIndex ?? info.audio_index)) ?? audios.find((s) => s.default) ?? audios[0];
-  const why = info.method === "direct" ? METHOD_TEXT.direct : (note ?? info.reasons?.join(" ") ?? info.reason ?? METHOD_TEXT[info.method]);
+  const why = info.method === "direct" ? note : (note ?? info.reasons?.join(" ") ?? info.reason ?? METHOD_TEXT[info.method]);
   const pending = "…";
 
   const videoIn = live?.video_in ? simplified(live.video_in) : videoLabel(video);
@@ -148,7 +147,7 @@ export function PlaybackDetails({
           </span>
         ) : null}
       </div>
-      <p className="mt-0.5 text-xs leading-snug text-white/65">{why}</p>
+      {why ? <p className="mt-0.5 text-xs leading-snug text-white/65">{why}</p> : null}
       <dl className="mt-2.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs tabular-nums">
         {video ? <Row label="Video">{videoRow}</Row> : null}
         {audio ? <Row label="Audio">{audioRow}</Row> : null}

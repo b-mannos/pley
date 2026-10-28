@@ -144,7 +144,8 @@ export function readoutSections(state: PlayerState, stats: EngineStats | null, e
   const d = state.details;
   const out: FactBlock[] = [];
   if (!d) return out;
-  const how: FactBlock = { title: "How it plays", facts: [{ label: "Playback", value: d.pipeline ? `${d.method} · ${d.pipeline}` : d.method }, { label: "Why", value: d.why }] };
+  const playback = { label: "Playback", value: d.pipeline ? `${d.method} · ${d.pipeline}` : d.method };
+  const how: FactBlock = { title: "How it plays", facts: d.why ? [playback, { label: "Why", value: d.why }] : [playback] };
   for (const r of d.rows) how.facts.push({ label: r.label, value: r.value });
   how.facts.push({ label: "Quality", value: state.quality });
   out.push(how);
