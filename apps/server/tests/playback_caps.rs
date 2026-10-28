@@ -331,12 +331,18 @@ fn dolby_vision_needs_the_screen_the_profile_and_its_level() {
     assert_eq!(outcome(&play(caps.clone(), &source("P8.1"))), "D");
     assert_eq!(outcome(&play(caps, &source("P5"))), "T", "no base layer to fall back to");
 
-    // A level above the decoder's: the base layer, or a conversion.
-    let mut high = source("P8.1");
-    high.streams[0].dv_level = Some(10);
-    let d = play(fire_tv_4k_max(), &high);
-    assert_eq!(outcome(&d), "D", "{:?}", d.reasons);
+    // A level above the decoder's that the picture (1080p at 23.976 fps)
+    // doesn't need: repackaged, named at the one it needs.
+    for row in ["P8.1", "P5"] {
+        let mut said = source(row);
+        said.streams[0].dv_level = Some(10);
+        let d = play(fire_tv_4k_max(), &said);
+        assert_eq!(outcome(&d), "R", "{row}: {:?}", d.reasons);
+        assert!(d.reasons[0].contains("repackaged to stay Dolby Vision"), "{:?}", d.reasons);
+    }
+    // One it needs (4K at 120 fps): no Dolby Vision here.
     let mut high = source("P5");
+    (high.streams[0].width, high.streams[0].height, high.streams[0].frame_rate) = (Some(3840), Some(2160), Some(120.0));
     high.streams[0].dv_level = Some(10);
     let d = play(fire_tv_4k_max(), &high);
     assert_eq!(outcome(&d), "T");

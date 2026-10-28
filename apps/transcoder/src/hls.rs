@@ -127,7 +127,9 @@ fn video_codecs(v: &VideoOut, src: Option<&MediaStream>) -> (String, Option<Stri
     if !signalled || src.dynamic_range() != DynamicRange::DolbyVision {
         return (base, None, range);
     }
-    let level = src.dv_level.unwrap_or(0).clamp(0, 99);
+    // The level the stream needs, where the file says more (the server
+    // repackages such a stream for a decoder that refuses what it says).
+    let level = src.dv_level_named().unwrap_or(0).clamp(0, 99);
     let to_81 = v.dolby_vision == Some(DolbyVisionMode::To81);
     match (if to_81 { 8 } else { src.dv_profile.unwrap_or(0) }, src.dv_bl_compat) {
         // No base layer anything else decodes: Dolby Vision alone.
@@ -136,8 +138,9 @@ fn video_codecs(v: &VideoOut, src: Option<&MediaStream>) -> (String, Option<Stri
         // Vision as its supplement, the brand saying what the base layer is.
         (8, compat) => {
             let compat = if to_81 { Some(1) } else { compat };
+            // 6, the Blu-ray's HDR10, in a profile 7 made 8.1 elsewhere: HDR10.
             let (brand, range) = match compat {
-                Some(1) | None => ("db1p", "PQ"),
+                Some(1 | 6) | None => ("db1p", "PQ"),
                 Some(4) => ("db4h", "HLG"),
                 Some(2) => ("db2g", "SDR"),
                 _ => return (base, None, range),
@@ -373,10 +376,19 @@ mod tests {
         let p84 = media(DynamicRange::DolbyVision, Some((8, 6, 4)));
         let inf = stream_inf(video_out(true, Some(DolbyVisionMode::Signal)), &p84);
         assert!(inf.contains("SUPPLEMENTAL-CODECS=\"dvh1.08.06/db4h\"") && inf.ends_with("VIDEO-RANGE=HLG"), "{inf}");
-        // Profile 5: Dolby Vision alone.
+        // Profile 5: Dolby Vision alone, at the level its 4K at 23.976 fps
+        // needs, though the file says 9.
         let p5 = media(DynamicRange::DolbyVision, Some((5, 9, 0)));
         let inf = stream_inf(video_out(true, Some(DolbyVisionMode::Signal)), &p5);
-        assert!(inf.contains("CODECS=\"dvh1.05.09,ec-3\",RESOLUTION") && inf.ends_with("VIDEO-RANGE=PQ"), "{inf}");
+        assert!(inf.contains("CODECS=\"dvh1.05.06,ec-3\",RESOLUTION") && inf.ends_with("VIDEO-RANGE=PQ"), "{inf}");
+        // A re-encode's 8.1 that says level 10: 6, as it needs.
+        let p81_10 = media(DynamicRange::DolbyVision, Some((8, 10, 1)));
+        let inf = stream_inf(video_out(true, Some(DolbyVisionMode::Signal)), &p81_10);
+        assert!(inf.contains("SUPPLEMENTAL-CODECS=\"dvh1.08.06/db1p\""), "{inf}");
+        // Profile 8 with the Blu-ray's HDR10 id (a profile 7 made 8.1 elsewhere): HDR10 underneath.
+        let p86 = media(DynamicRange::DolbyVision, Some((8, 6, 6)));
+        let inf = stream_inf(video_out(true, Some(DolbyVisionMode::Signal)), &p86);
+        assert!(inf.contains("SUPPLEMENTAL-CODECS=\"dvh1.08.06/db1p\"") && inf.ends_with("VIDEO-RANGE=PQ"), "{inf}");
         // Profile 7 made 8.1, or named as it is for a player that decodes it.
         let p7 = media(DynamicRange::DolbyVision, Some((7, 6, 6)));
         let inf = stream_inf(video_out(true, Some(DolbyVisionMode::To81)), &p7);

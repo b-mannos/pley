@@ -450,15 +450,66 @@ fn repackaged_dolby_vision_stays_dolby_vision() {
 
 #[test]
 fn profile_7_needs_the_8_1_level_to_be_converted() {
+    // A profile 8 decoder up to level 2 takes no 1080p at 23.976 fps (3).
+    let mut low = fire_tv_4k_max();
+    low["dolby_vision_profiles"] = json!([{"profile": 5, "max_level": 2}, {"profile": 8, "max_level": 2}]);
     let mut info = source("P7");
     info.streams[0].dv_level = Some(10);
-    let d = play_in(fire_tv_4k_max(), "mkv", &info);
+    let d = play_in(low, "mkv", &info);
     assert_eq!(outcome(&d), "R");
     assert_eq!(d.reasons, ["Dolby Vision P7 plays as its HDR10 base layer, repackaged."]);
+    // 1080p at 23.976 fps that says 10 needs 3: converted, named at 3.
+    let mut info = source("P7");
+    info.streams[0].dv_level = Some(10);
+    assert_eq!(outcome(&play_in(fire_tv_4k_max(), "mkv", &info)), "R+8.1");
     // No Dolby Vision screen: the base layer, as before.
     let mut caps = fire_tv_4k_max();
     caps["hdr_types"] = json!(["hdr10", "hlg"]);
     assert_eq!(outcome(&play_in(caps, "mkv", &source("P7"))), "R");
+}
+
+#[test]
+fn a_level_the_file_overstates_is_repackaged_to_stay_dolby_vision() {
+    // A re-encode's 8.1 at 4K, 23.976 fps, that says level 10: the stick
+    // takes 9, and Media3 would play it as its HDR10 base layer as it is.
+    let mut info = source("P8.1");
+    (info.streams[0].width, info.streams[0].height) = (Some(3840), Some(1632));
+    info.streams[0].dv_level = Some(10);
+    let d = play_in(fire_tv_4k_max(), "mkv", &info);
+    assert_eq!(outcome(&d), "R+DV");
+    assert_eq!(
+        d.reasons,
+        ["Dolby Vision P8.1 is repackaged to stay Dolby Vision: its file says level 10, above this player's 9, where \
+          its picture needs 6."]
+    );
+    // Profile 5 the same, rather than converted.
+    let mut p5 = source("P5");
+    p5.streams[0].dv_level = Some(10);
+    assert_eq!(outcome(&play_in(fire_tv_4k_max(), "mkv", &p5)), "R+DV");
+    // With HDR10+ too, that goes as for any Dolby Vision decoder.
+    let mut hybrid = source("P8.1+");
+    hybrid.streams[0].dv_level = Some(10);
+    assert_eq!(outcome(&play_in(fire_tv_4k_max(), "mkv", &hybrid)), "R+DV-HDR10+");
+    // Without a master playlist to name it: the base layer, as it is.
+    assert_eq!(outcome(&play_in(without_master(fire_tv_4k_max()), "mkv", &info)), "D");
+    // A download is the file as it is.
+    let mut req = request(fire_tv_4k_max());
+    req.download = true;
+    assert_eq!(decide(&file("mkv"), Some(&info), &info.streams, &req).method, Method::Direct);
+    // Really 4K at 120 fps: level 10 it is, past the stick's Dolby Vision.
+    info.streams[0].frame_rate = Some(120.0);
+    assert!(!outcome(&play_in(fire_tv_4k_max(), "mkv", &info)).contains("DV"));
+}
+
+#[test]
+fn profile_8_with_the_blu_ray_id_has_an_hdr10_base_layer() {
+    // A profile 7 converted to 8 elsewhere, its compatibility id (6) kept.
+    let mut info = source("P8.1");
+    info.streams[0].dv_bl_compat = Some(6);
+    // As it is where Dolby Vision is shown; its HDR10 where it isn't, never converted.
+    assert_eq!(outcome(&play_in(fire_tv_4k_max(), "mkv", &info)), "D");
+    let d = play_in(google_tv_streamer(), "mkv", &info);
+    assert_eq!(outcome(&d), "D", "{:?}", d.reasons);
 }
 
 #[test]

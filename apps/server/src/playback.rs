@@ -463,6 +463,9 @@ impl VideoVerdict {
 const DV_BL_HDR10: i64 = 1;
 const DV_BL_SDR: i64 = 2;
 const DV_BL_HLG: i64 = 4;
+/// The Blu-ray's HDR10, profile 7's: HDR10 too in a profile 8 stream (a
+/// profile 7 converted elsewhere, its id kept).
+const DV_BL_BLU_RAY: i64 = 6;
 
 /// The version 2 rules for a video stream (docs/API.md, "Version 2"):
 /// - SDR video needs a decoder entry that takes it: codec, profile (Main 10
@@ -485,8 +488,12 @@ const DV_BL_HLG: i64 = 4;
 /// a player listing 8 but not 7; and Dolby Vision + HDR10+ streams
 /// repackaged without their HDR10+ for any player that would decode them
 /// as Dolby Vision, never played as they are (androidx/media#1895). Without
-/// a master playlist, those are repackaged as their base layer.
-fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange) -> VideoVerdict {
+/// a master playlist, those are repackaged as their base layer. A stream
+/// whose file says a higher level than its decoder takes, though its size
+/// and frame rate need one it takes (a re-encode's 10 for 4K at 24 fps), is
+/// repackaged to keep Dolby Vision, named at the level it needs; a
+/// download stays the file as it is.
+fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange, download: bool) -> VideoVerdict {
     let label = v.dynamic_range_label();
     // What the video is converted to when the screen doesn't show it.
     let out = converted.dynamic_range().label();
@@ -510,13 +517,23 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange) -> VideoVerdic
                 (Some(level), Some(max)) => level <= max,
                 _ => true,
             };
+            // The level a repackaged stream is named with (the transcoder's
+            // master playlist): the one its size and frame rate need, where
+            // the file says more.
+            let takes_named = |d: &DolbyVisionDecoder| match (v.dv_level_named(), d.max_level) {
+                (Some(level), Some(max)) => level <= max,
+                _ => true,
+            };
             let decoder = decoder_of(profile);
             let level_ok = decoder.is_none_or(takes_level);
             // Remuxes keep Dolby Vision only where a master playlist names it.
             let signal = caps.master_playlist() && v.codec == "hevc";
             let hybrid = v.hdr10plus == Some(true);
             // What plays when Dolby Vision itself doesn't: the base layer.
-            let compat = v.dv_bl_compat.or((profile == 8).then_some(DV_BL_HDR10));
+            let compat = match v.dv_bl_compat {
+                Some(DV_BL_BLU_RAY) if profile == 8 => Some(DV_BL_HDR10),
+                compat => compat.or((profile == 8).then_some(DV_BL_HDR10)),
+            };
             let base_layer = base_layer_name(v, caps);
             // No base layer to fall back on: a Dolby Vision screen whose
             // player doesn't decode the profile is told apart from the rest.
@@ -576,6 +593,22 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange) -> VideoVerdic
                     dolby_vision: if signal { DolbyVisionMode::Signal } else { DolbyVisionMode::Copy },
                     ..Default::default()
                 },
+                // As it is, the decoder refuses the level the file says
+                // and its base layer plays: repackaged, it's named at the
+                // level the stream needs, which the decoder takes.
+                Some(d) if signal && !download && takes_named(d) => VideoVerdict {
+                    direct: false,
+                    copy: true,
+                    dolby_vision: DolbyVisionMode::Signal,
+                    strip_hdr10plus: hybrid,
+                    reasons: vec![format!(
+                        "{label} is repackaged to stay Dolby Vision: its file says level {}, above this player's {}, \
+                         where its picture needs {}.",
+                        v.dv_level.unwrap_or_default(),
+                        d.max_level.unwrap_or_default(),
+                        v.dv_level_named().unwrap_or_default(),
+                    )],
+                },
                 Some(d) if !base.direct => {
                     let mut base = base;
                     let max = d.max_level.unwrap_or_default();
@@ -587,7 +620,7 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange) -> VideoVerdic
                 }
                 // Profile 7 for a player that decodes 8.1: converted while
                 // repackaged (rather than its base layer alone).
-                _ if profile == 7 && signal && decoder_of(8).is_some_and(takes_level) => {
+                _ if profile == 7 && signal && decoder_of(8).is_some_and(takes_named) => {
                     // What profile 8.1 can't carry.
                     let left_out = match (v.dv_el == Some(DolbyVisionLayer::Fel), hybrid) {
                         (true, true) => ", without its enhancement layer and HDR10+",
@@ -990,7 +1023,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     let video_ok = match video {
         None => true,
         Some(v) if v2 => {
-            let verdict = video_v2(v, caps, hdr_out);
+            let verdict = video_v2(v, caps, hdr_out, req.download);
             reasons.extend(verdict.reasons);
             // A download's file carries what its stream would only hint at
             // (a Dolby Vision profile the device doesn't decode, kept in

@@ -292,6 +292,42 @@ impl MediaStream {
             && (self.dv_profile == Some(5) || self.dv_bl_compat == Some(0))
     }
 
+    /// The Dolby Vision level the stream's size and frame rate need: the
+    /// lowest whose pixels a second take them, in Dolby's table (1 for 720p
+    /// at 24 fps up to 13 for 8K at 120). `None` without a size or a rate.
+    pub fn dv_level_needed(&self) -> Option<i64> {
+        const PIXEL_RATES: [(i64, f64); 13] = [
+            (1, 1280.0 * 720.0 * 24.0),
+            (2, 1280.0 * 720.0 * 30.0),
+            (3, 1920.0 * 1080.0 * 24.0),
+            (4, 1920.0 * 1080.0 * 30.0),
+            (5, 1920.0 * 1080.0 * 60.0),
+            (6, 3840.0 * 2160.0 * 24.0),
+            (7, 3840.0 * 2160.0 * 30.0),
+            (8, 3840.0 * 2160.0 * 48.0),
+            (9, 3840.0 * 2160.0 * 60.0),
+            (10, 3840.0 * 2160.0 * 120.0),
+            (11, 7680.0 * 4320.0 * 30.0),
+            (12, 7680.0 * 4320.0 * 60.0),
+            (13, 7680.0 * 4320.0 * 120.0),
+        ];
+        let (w, h, fps) = (self.width?, self.height?, self.frame_rate.filter(|f| *f > 0.0)?);
+        // A hair over, for rates rounded up (24.0001).
+        let rate = (w * h) as f64 * fps / 1.001;
+        PIXEL_RATES.iter().find(|(_, most)| rate <= *most).map(|(level, _)| *level)
+    }
+
+    /// The level Dolby Vision is named with: the file's, unless its size
+    /// and frame rate need less (a re-encode that says 10 for 4K at 24
+    /// fps): a decoder that refuses the level the file says takes the one
+    /// the stream needs.
+    pub fn dv_level_named(&self) -> Option<i64> {
+        match (self.dv_level.filter(|l| *l > 0), self.dv_level_needed()) {
+            (Some(said), Some(needed)) => Some(said.min(needed)),
+            (said, needed) => said.or(needed),
+        }
+    }
+
     pub fn is_text_subtitle(&self) -> bool {
         self.kind == StreamKind::Subtitle && self.text_based.unwrap_or(false)
     }
@@ -1270,5 +1306,31 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(info.default_audio().unwrap().index, 2);
+    }
+
+    #[test]
+    fn dolby_vision_is_named_at_the_level_its_stream_needs() {
+        let dv = |w, h, fps, level| MediaStream {
+            width: Some(w),
+            height: Some(h),
+            frame_rate: Some(fps),
+            dv_level: level,
+            ..Default::default()
+        };
+        // 4K at 24 fps (scope or not) needs 6, at 30 fps 7, at 60 fps 9.
+        assert_eq!(dv(3840, 2160, 24_000.0 / 1001.0, None).dv_level_needed(), Some(6));
+        assert_eq!(dv(3840, 2160, 24.0, None).dv_level_needed(), Some(6));
+        assert_eq!(dv(3840, 2072, 30.0, None).dv_level_needed(), Some(7));
+        assert_eq!(dv(3840, 2160, 59.94, None).dv_level_needed(), Some(9));
+        assert_eq!(dv(1920, 1080, 60.0, None).dv_level_needed(), Some(5));
+        assert_eq!(dv(1920, 804, 24.0, None).dv_level_needed(), Some(3));
+        // A re-encode that says 10 for 4K at 24 fps is named 6; a level said
+        // lower than the size needs stays as said.
+        assert_eq!(dv(3840, 1632, 24_000.0 / 1001.0, Some(10)).dv_level_named(), Some(6));
+        assert_eq!(dv(3840, 2160, 24.0, Some(6)).dv_level_named(), Some(6));
+        assert_eq!(dv(1920, 1080, 60.0, Some(4)).dv_level_named(), Some(4));
+        // Nothing to go by: the file's.
+        let unknown = MediaStream { dv_level: Some(10), ..Default::default() };
+        assert_eq!((unknown.dv_level_needed(), unknown.dv_level_named()), (None, Some(10)));
     }
 }

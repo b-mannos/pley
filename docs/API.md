@@ -1472,6 +1472,18 @@ For those players, the Dolby Vision rules of version 2 become:
   anyway (the container, the audio, another track), the video is copied
   with Dolby Vision kept and named, **profile 5 included** (before, it was
   tone-mapped).
+- A **level the file overstates** (a re-encode that says 10 for 4K at 24
+  fps): Dolby Vision is named at the level its size and frame rate need,
+  the lowest whose pixel rate takes them in Dolby's table, when that is
+  below what the file says. A decoder whose level is under the file's but
+  takes the one the stream needs gets the stream repackaged, Dolby Vision
+  kept and named ("…is repackaged to stay Dolby Vision: its file says
+  level 10, above this player's 9, where its picture needs 6."), where as
+  it is Media3 would refuse the level and play the base layer. A download
+  stays the file as it is.
+- **Profile 8 with compatibility id 6** (the Blu-ray's HDR10, a profile 7
+  converted elsewhere with its id kept) has an HDR10 base layer, as 8.1:
+  named `/db1p`, and played as HDR10 where Dolby Vision isn't shown.
 - **Profile 7** for a player that lists 8 but not 7 (every Fire TV, Google
   TV devices) is **converted to 8.1** while repackaged: the enhancement
   layer is left out and each RPU rewritten (no residual, no enhancement
