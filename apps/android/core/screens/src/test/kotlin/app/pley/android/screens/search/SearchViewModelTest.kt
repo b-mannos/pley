@@ -230,4 +230,18 @@ class SearchViewModelTest {
         assertEquals("north", failed.query)
         assertEquals("Can't reach the server", failed.error.message)
     }
+
+    @Test
+    fun retryAsksForTheSameQueryAgain() = runTest(dispatcher) {
+        val vm = viewModel("north")
+        search.answer("north").completeExceptionally(IOException("Can't reach the server"))
+        advanceUntilIdle()
+        assertTrue(vm.results() is SearchResultsState.Failed)
+        search.answers.remove("north")
+        vm.retry()
+        search.answer("north").complete(SearchResults(items = listOf(item(1, ItemKind.Movie, "Northern Lights"))))
+        advanceUntilIdle()
+        assertEquals(listOf("north", "north"), search.asked)
+        assertTrue(vm.results() is SearchResultsState.Ready)
+    }
 }

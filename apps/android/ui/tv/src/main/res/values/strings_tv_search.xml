@@ -9,6 +9,7 @@
     <string name="tv_search_none_title">No results for “%1$s”</string>
     <string name="tv_search_none_body">Try a different spelling or fewer words.</string>
     <string name="tv_search_failed">Search failed</string>
+    <string name="tv_search_retry">Retry</string>
     <string name="tv_search_loading">Searching…</string>
 
     <!-- The groups results come in, in their order. -->

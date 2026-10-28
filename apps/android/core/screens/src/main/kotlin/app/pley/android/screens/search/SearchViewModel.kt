@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.runningFold
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** What search reads: the server's answers, recent searches, and the server's address for pictures. */
@@ -139,6 +140,9 @@ class SearchViewModel<T : Any>(
 ) : ViewModel() {
     private val typed = MutableStateFlow(initialQuery)
 
+    /** Retry after a failed search: the same query, asked again. */
+    private val retries = MutableStateFlow(0)
+
     /** What is typed now, as the field shows it. */
     val query: StateFlow<String> = typed.asStateFlow()
 
@@ -152,6 +156,7 @@ class SearchViewModel<T : Any>(
         .map { it.trim() }
         .distinctUntilChanged()
         .debounce { if (it.isEmpty()) 0L else DEBOUNCE_MS }
+        .combine(retries) { q, _ -> q }
         .flatMapLatest { q ->
             if (q.isEmpty()) {
                 flowOf<Step<T>>(Step.Idle)
@@ -172,6 +177,9 @@ class SearchViewModel<T : Any>(
     fun onQueryChange(text: String) {
         typed.value = text
     }
+
+    /** Asks for the query again, after it failed. */
+    fun retry() = retries.update { it + 1 }
 
     /** Search was pressed on the keyboard: the query is kept among the recent ones. */
     fun submit() {

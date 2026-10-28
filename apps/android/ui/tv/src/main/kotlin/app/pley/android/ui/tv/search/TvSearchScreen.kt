@@ -67,6 +67,7 @@ import app.pley.android.screens.search.SearchViewModel
 import app.pley.android.ui.tv.R
 
 import app.pley.android.ui.tv.kit.LocalTvRailFocus
+import app.pley.android.ui.tv.kit.TvPillButton
 import app.pley.android.ui.tv.kit.TvRow
 import app.pley.android.ui.tv.kit.TvRowColumn
 import app.pley.android.ui.tv.kit.TvTextButton
@@ -111,6 +112,7 @@ internal fun TvSearchScreen(key: PleyKey.Search) {
         onClearRecent = vm::clearRecent,
         onOpen = { group, id -> vm.open(group, id)?.let(navigator::open) },
         onActions = { id -> navigator.open(PleyKey.ItemActions(id)) },
+        onRetry = vm::retry,
     )
 }
 
@@ -139,13 +141,15 @@ internal fun TvSearchContent(
     onClearRecent: () -> Unit,
     onOpen: (SearchGroupKind, Long) -> Unit,
     onActions: (Long) -> Unit,
+    onRetry: () -> Unit = {},
 ) {
     val rail = LocalTvRailFocus.current
     val memory = rememberFocusMemory()
     val fieldFocus = remember { FocusRequester() }
     // What Down from the field goes to: the chips or the rows (the field is wide; nearest would be a guess).
     val below = remember { FocusRequester() }
-    val hasBelow = (state.results is SearchResultsState.Ready) || (state.results == SearchResultsState.Idle && state.recent.isNotEmpty())
+    val hasBelow = (state.results is SearchResultsState.Ready) || (state.results is SearchResultsState.Failed) ||
+        (state.results == SearchResultsState.Idle && state.recent.isNotEmpty())
     Box(Modifier.fillMaxSize().testTag(TV_SEARCH)) {
         when (val results = state.results) {
             SearchResultsState.Idle -> Recent(
@@ -169,7 +173,10 @@ internal fun TvSearchContent(
             is SearchResultsState.Failed -> Notice(
                 failedTitle(results.error, stringResource(R.string.tv_search_failed)),
                 failedBody(results.error),
-            )
+            ) {
+                // Down from the field; focus stays on the field until then.
+                TvPillButton(stringResource(R.string.tv_search_retry), onClick = onRetry, icon = PleyIcons.RotateCcw, modifier = Modifier.focusRequester(below))
+            }
             is SearchResultsState.Ready -> {
                 val names = groupNames()
                 TvRowColumn(
@@ -253,13 +260,17 @@ private fun Recent(recent: List<String>, focus: FocusRequester, onRecent: (Strin
 
 /** `No results for "north"`, "Search failed": at the gutter, y = 120, in tvTitle over tvBody. */
 @Composable
-private fun Notice(title: String, body: String) {
+private fun Notice(title: String, body: String, action: (@Composable () -> Unit)? = null) {
     Column(
         Modifier.padding(start = PleyTv.Gutter, top = NoticeTop, end = TvSafeArea.Horizontal).widthIn(max = 560.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         BasicText(title, style = PleyType.Tv.Title.copy(color = PleyColors.Fg), modifier = Modifier.semantics { heading() })
         BasicText(body, style = PleyType.Tv.Body.copy(color = PleyColors.Muted))
+        if (action != null) {
+            Spacer(Modifier.height(12.dp))
+            action()
+        }
     }
 }
 

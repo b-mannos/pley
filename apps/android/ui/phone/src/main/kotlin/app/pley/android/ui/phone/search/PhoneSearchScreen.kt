@@ -65,7 +65,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.sentenceOf
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyPhone
 import app.pley.android.designsystem.PleyShape
@@ -92,6 +91,7 @@ import app.pley.android.screens.search.SearchViewModel
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.DelayedSpinner
 import app.pley.android.ui.phone.kit.EmptyState
+import app.pley.android.ui.phone.kit.ErrorState
 import app.pley.android.ui.phone.kit.MediaCard
 import app.pley.android.ui.phone.kit.OfflineBanner
 import app.pley.android.ui.phone.kit.PleyIconButton
@@ -130,6 +130,7 @@ internal fun PhoneSearchScreen(key: PleyKey.Search) {
         },
         onClearRecent = vm::clearRecent,
         open = vm::open,
+        onRetry = vm::retry,
     )
 }
 
@@ -146,6 +147,7 @@ internal fun SearchContent(
     onRecent: (String) -> Unit,
     onClearRecent: () -> Unit,
     open: (SearchGroupKind, Long) -> PleyKey?,
+    onRetry: () -> Unit = {},
 ) {
     val navigator = LocalPhoneNavigator.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -179,11 +181,9 @@ internal fun SearchContent(
                     body = stringResource(R.string.search_none_body),
                     icon = PleyIcons.Search,
                 )
-                is SearchResultsState.Failed -> Message(
-                    title = stringResource(R.string.search_failed),
-                    body = sentenceOf(results.error),
-                    icon = PleyIcons.CircleAlert,
-                )
+                is SearchResultsState.Failed -> Column(Modifier.fillMaxSize().padding(top = 48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    ErrorState(stringResource(R.string.search_failed), results.error, onRetry = onRetry)
+                }
                 is SearchResultsState.Ready -> Results(
                     results,
                     onOpen = { group, id -> open(group, id)?.let(navigator::open) },
