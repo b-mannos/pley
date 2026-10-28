@@ -122,6 +122,18 @@ class SkinTest(unittest.TestCase):
                         if picture and not picture.startswith("$"):
                             self.assertIn(picture, media, "%s in %s" % (picture, name))
 
+    def test_the_pictures_notice_ships_with_them(self):
+        # Lucide's icons (ISC, the ones from Feather MIT) are in the pictures:
+        # their notice goes in the add-on's folder, which package.py zips whole.
+        addon = os.path.join(HERE, "..", "plugin.video.pley")
+        with open(os.path.join(addon, "NOTICES.txt"), encoding="utf-8") as f:
+            notices = f.read()
+        for words in ("LICENSE.txt", "https://lucide.dev", "ISC License", "Cole Bemis", "arrow-right", "check"):
+            self.assertIn(words, notices)
+        self.assertTrue(os.path.exists(os.path.join(addon, "LICENSE.txt")))
+        found = ET.parse(os.path.join(addon, "addon.xml")).getroot().find("extension/license")
+        self.assertEqual(found.text, "GPL-2.0-or-later AND ISC AND MIT")
+
 
 if __name__ == "__main__":
     unittest.main()

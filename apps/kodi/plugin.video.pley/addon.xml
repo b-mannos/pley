@@ -14,7 +14,7 @@
     <description lang="en_GB">Browse and play what is on your pley server: Continue Watching, My List, every library, search and playlists. pley plays files as they are whenever Kodi can, and converts the rest on the server. Sign in with a code shown on screen, typed on your server's link page.</description>
     <disclaimer lang="en_GB">pley isn't affiliated with Plex Inc. or Team Kodi.</disclaimer>
     <platform>all</platform>
-    <license>GPL-2.0-or-later</license>
+    <license>GPL-2.0-or-later AND ISC AND MIT</license>
     <source>https://github.com/hhaidar/pley</source>
     <website>https://github.com/hhaidar/pley</website>
     <assets>

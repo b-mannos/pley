@@ -10,7 +10,8 @@ always, and the server's conversion otherwise.
 
 It is free software under the GPL (version 2 or later, as Kodi), since it
 runs inside Kodi; it talks to the server only over HTTP, like the other
-apps (LICENSING.md).
+apps (LICENSING.md). Its pictures are drawn from Lucide's icons, whose
+notice is in `NOTICES.txt` beside `LICENSE.txt`.
 
 The add-on is in `apps/kodi/plugin.video.pley`, its tests in
 `apps/kodi/tests`; file names below are the add-on's own.
