@@ -104,6 +104,20 @@ class TvOnboardingUiTest {
     }
 
     @Test
+    fun aPinTypedWithTheRemotesDigitsIsSentWithOk() {
+        pinPad()
+        compose.press(Key.One)
+        compose.press(Key.Two)
+        compose.press(Key.Three)
+        compose.onNodeWithTag("pley.pad.5").assertIsFocused()
+        compose.press(Key.Four)
+        // Four digits could be sent: OK has focus, so OK on the remote sends them rather than typing a 5.
+        compose.onNodeWithTag("pley.pad.ok").assertIsFocused()
+        compose.press(Key.DirectionCenter)
+        assertEquals(listOf("1234"), submitted)
+    }
+
+    @Test
     fun aLockedPinCantBeTypedAndOffersAnotherProfile() {
         pinPad(lockedOut = true)
         compose.onNodeWithTag("pley.pad.5").assertIsNotEnabled()

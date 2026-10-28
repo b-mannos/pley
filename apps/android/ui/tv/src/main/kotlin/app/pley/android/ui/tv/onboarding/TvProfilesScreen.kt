@@ -34,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,6 +73,7 @@ import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.image.Artwork
 import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.designsystem.reducedMotion
+import app.pley.android.screens.onboarding.PinEntry
 import app.pley.android.screens.onboarding.ProfileGate
 import app.pley.android.screens.onboarding.ProfileTile
 import app.pley.android.screens.onboarding.ProfilesStep
@@ -342,6 +344,9 @@ internal fun TvPinPad(
         delay(if (reduced) 0L else PleyMotion.OVERLAY_MS + 50L)
         if (!touched && !step.lockedOut) runCatching { five.requestFocus() }
     }
+    // A PIN typed with the remote's number keys is sent with OK: OK takes focus once it could be sent, rather than 5 typing a 5.
+    val ok = remember { FocusRequester() }
+    val digits by rememberUpdatedState(step.digits)
     val resources = LocalResources.current
     Box(
         Modifier
@@ -354,6 +359,7 @@ internal fun TvPinPad(
                 onDigit = { d ->
                     flash.flash(PadKey.Digit(d))
                     onDigit(d)
+                    if (digits + 1 >= PinEntry.MIN && !step.lockedOut) runCatching { ok.requestFocus() }
                 },
                 onDelete = {
                     flash.flash(PadKey.Delete)
@@ -403,6 +409,7 @@ internal fun TvPinPad(
                 },
                 flash = flash,
                 initialRequester = five,
+                okRequester = ok,
                 enabled = !step.lockedOut,
                 onKey = { key ->
                     when (key) {

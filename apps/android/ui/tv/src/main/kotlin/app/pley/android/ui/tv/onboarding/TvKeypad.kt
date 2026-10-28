@@ -101,6 +101,8 @@ internal fun TvKeypad(
     initial: PadKey? = PadKey.Digit(5),
     /** Asks for the initial key's focus again (after a crossfade took it elsewhere). */
     initialRequester: FocusRequester = remember { FocusRequester() },
+    /** OK's, for a pad that gives it focus. */
+    okRequester: FocusRequester? = null,
 ) {
     Column(
         modifier.graphicsLayer { alpha = if (enabled) 1f else 0.4f },
@@ -115,7 +117,11 @@ internal fun TvKeypad(
                         enabled = enabled,
                         flashing = flash.key == key,
                         initial = enabled && key == initial,
-                        modifier = if (key == initial) Modifier.focusRequester(initialRequester) else Modifier,
+                        modifier = when {
+                            key == initial -> Modifier.focusRequester(initialRequester)
+                            key == PadKey.Ok && okRequester != null -> Modifier.focusRequester(okRequester)
+                            else -> Modifier
+                        },
                         onClick = {
                             flash.flash(key)
                             onKey(key)
