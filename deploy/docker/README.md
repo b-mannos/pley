@@ -245,10 +245,7 @@ From this folder:
 | Update | `git pull && ./setup.sh` |
 | Stop, start | `docker compose stop`, `docker compose start` |
 | Remove the container (data stays) | `docker compose down` |
-| Set a lost password | `docker compose exec pley pley reset-password <user> '<new password>'` |
-
-Change a password set that way in the web UI afterwards: it went through your
-shell's history.
+| Set a lost password | `docker compose exec pley pley reset-password <user>` (it asks for the new one) |
 
 **Backups:** pley keeps the last 3 daily copies of its database in
 `config/backups`. For a full backup, stop pley and copy the whole config

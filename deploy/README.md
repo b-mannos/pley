@@ -51,8 +51,8 @@ for NVIDIA, `--gpus all` (with the NVIDIA Container Toolkit).
 The container runs as uid 1000 (`--user` changes it), so `/config` must be
 writable by it. Setting pley up takes the code it prints at start:
 `docker logs pley` shows a link that fills it in.
-`docker exec pley pley reset-password <user> <password>` recovers a lost
-password.
+`docker exec -it pley pley reset-password <user>` recovers a lost
+password (it asks for the new one).
 
 ## Linux (systemd)
 
@@ -195,4 +195,4 @@ in the data folder) and older backups still hold the old client secret.
 
 Accounts that signed in only through the provider stay signed in where they
 are, but have no password to sign in again: an administrator gives them one
-in **Settings → Users**, or `pley reset-password <user> <password>` does.
+in **Settings → Users**, or `pley reset-password <user>` does.

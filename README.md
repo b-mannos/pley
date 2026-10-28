@@ -160,8 +160,9 @@ pley prints a link with a one-time setup code when it starts
 Open it, create the administrator account and add a library. Nobody without
 the code can claim a new server.
 
-A lost password is reset with `pley reset-password <user> <new-password>
-[--admin]`, which also turns that account's two-step sign-in off.
+A lost password is reset with `pley reset-password <user> [--admin]`, which
+asks for the new one (or reads it from standard input) and also turns that
+account's two-step sign-in off.
 
 To run it on a home server instead, `deploy/docker/setup.sh` builds and
 starts it in Docker, locked down, for a reverse proxy in front of it

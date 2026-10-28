@@ -50,9 +50,13 @@ a common password. Sign-ins are limited to 5 failures every 15 minutes per
 account from each address and 50 from all of them, so someone guessing
 elsewhere doesn't lock its owner out; PINs and the current password on
 changes to 5 per account. Password checks queue and failures are forgotten
-as their window ends, so a flood of sign-ins can't exhaust memory. A PIN stops working
+as their window ends, so a flood of sign-ins can't exhaust memory; when the
+table of counts fills, those that block nobody give way, so lockouts stay
+and everyone else signs in. A PIN stops working
 after 100 wrong tries in a row, until it is set again. A new password signs
-the account out on every other device.
+the account out on every other device. `pley reset-password` asks for the
+new password (or reads it from standard input) rather than taking it on its
+command line, where the shell's history and the list of processes keep it.
 
 **Two-step sign-in** (optional): after the password, a code from an
 authenticator app (TOTP) or one of ten recovery codes. Turning it on takes
@@ -88,8 +92,9 @@ rotated on every use, and one used twice ends the app's access. People are
 asked every time, pley's own apps included, on a page that shows the app's
 address first and can't be framed. Apps never get administrator rights:
 every route they may use is listed with the scope it needs, anything else
-is refused, and the compatibility API refuses their tokens. Apps also
-don't see library folders or file paths, the transcoder's error messages
+is refused, and the compatibility API refuses their tokens. Apps, and
+people who aren't administrators, don't see library folders or file paths
+on either API (only a file's name), the transcoder's error messages
 included. pley's own apps are built in and sign in without internet access.
 Descriptions of other publishers' apps are read only when an administrator
 allows those apps, for someone signed in, from public addresses only,
@@ -106,17 +111,23 @@ pley.
 2.6 × 10¹⁰ of them) that someone signed in types on pley's `/link` page,
 where they see the same consent as other apps and are told to allow only a
 code on a screen in front of them (RFC 8628 §5.4). Only pley's own apps can
-start one. At most 20 are in progress from one address and 1,000 in all,
-and none is dropped to make room; past 10 wrong codes from one person or 300
+start one. At most 20 are in progress from one address (an IPv6 /64), 50
+from one home's /56 and 1,000 in all, and none is dropped to make room; past 10 wrong codes from one person or 300
 from everyone in 10 minutes, no code is looked up. A TV asking too often is
 slowed down. Its answer comes once, and a TV allowed before the account's
-sign-ins end, or from a session signed out since, gets nothing.
+sign-ins end, or from a session signed out since, gets nothing. A signed
+out app's number is never given to another, so its keyed media addresses
+stay dead.
 
 **Pages.** A `Content-Security-Policy` allows only pley's own scripts and
 styles, no other site may frame pley (`frame-ancestors 'none'`,
 `X-Frame-Options: DENY`), and answers carry `nosniff` and
 `Referrer-Policy: same-origin`. Clients get 30 seconds to send a request's
-headers.
+headers, and a body may pause for 20 seconds at most. At most 8,192
+connections are open at once, 256 from one address on the internet (a
+proxy on this computer or its network carries everyone's, so its aren't
+counted), and a session keeps at most 16 event streams; on Unix pley raises
+its open-files limit to the most it may have.
 
 **Files.** A symbolic link in a library is followed only to a file of the
 same kind (a video to a video, a picture to a picture), when the library is
@@ -125,7 +136,9 @@ transcoded, downloaded, its pictures or subtitles served): a link named like
 a film can't hand out other files. The data folder (database, backups, log,
 settings) is kept to pley's account: mode 0700 on Unix; on Windows, a
 folder every account could use (one on D:\, say) is limited to pley's
-account, SYSTEM and the administrators. The Windows service takes a data
+account, SYSTEM and the administrators. pley warns at start when every
+account may change the folder its programs are in, since any of them could
+replace them. The Windows service takes a data
 folder only when it is new or the administrators' (one an ordinary user
 made beforehand would stay theirs to open up again), makes a new one closed
 from the start, and keeps two privileges, never impersonation, restricted
@@ -141,7 +154,10 @@ profile picture is decoded only up to 4096 pixels.
 **Transcoder.** The transcoder pley starts listens on `127.0.0.1` with a
 random token. One started on another machine refuses to listen on the
 network without a token of at least 16 characters, since it reads whatever
-files it can open, and keeps its work folder private.
+files it can open, and keeps its work folder private: on Windows too, the
+folders it makes in one chosen elsewhere (segments, converted downloads, its
+caches). A converted download several people asked for stops only when the
+last of them, or an administrator, cancels it.
 
 **The desktop app.** Its window shows the server's own pages only: other
 sites open in the browser. It hands only web and mail links to the system

@@ -116,7 +116,7 @@ interface Library {
   id: Id;
   name: string;
   kind: LibraryKind;
-  paths: string[];              // empty for apps' tokens
+  paths: string[];              // empty but for administrators (not their apps' tokens)
   item_count: number;           // top-level items (movies / shows / artists) this user can see
   created_at: Timestamp;
   scanned_at: Timestamp | null;
@@ -220,7 +220,7 @@ interface Marker {
 
 interface MediaFile {
   id: Id;
-  path: string;                     // apps' tokens: the file name only
+  path: string;                     // the file name only but for administrators (not their apps' tokens)
   size: number;                     // bytes
   container: string | null;         // "mkv" | "mp4" | "webm" | "avi" | "mp3" | "flac" | ...
   duration_ms: number | null;
@@ -1753,7 +1753,8 @@ type ServerEvent =
 
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
-| GET | `/api/system` | – | `SystemInfo` (with `database: { ok, problem?, checked_at }`, the integrity check made at start) |
+| GET | `/api/system` | – | `SystemInfo` (with `database: { ok, problem?, checked_at }`, the integrity check made at start, and `transcode_dir: { in_use, next, default, problem: { folder, reason } \| null, fixed }`: the transcoder's work folder, the one the next start uses when that is another, and why the one chosen couldn't be used) |
+| PUT | `/api/system/transcode-dir` | `{ path: string \| null }` | the new `transcode_dir`: saved in the config file for the next start (`null`, or the default folder, removes `transcode_dir`). `400` for a relative path, a whole drive, the data folder itself, a folder pley can't write in, and when the command line or the environment sets it |
 | GET | `/api/system/resources` | `since` | `{ available, interval_ms, cpus, memory_total, samples: [{ at, cpu, pley_cpu, memory, pley_memory }] }`: the processors' and memory's use, sampled every 2 s for the last five minutes, oldest first (only the samples after `since`, in Unix milliseconds, when given; `at` is in Unix milliseconds too). `cpu` and `pley_cpu` are shares of all the processors' time, 0–100; `memory` (in use on the machine, without what only caches files) and `pley_memory` (its processes' resident memory) bytes, `memory_total` the machine's, `cpus` its logical processors. pley is the server and every process it started: a managed transcoder and its FFmpegs. `available` is false where the system can't be sampled (Windows, Linux and macOS can) |
 | GET | `/api/system/storage` | – | `{ blobs, blob_bytes, media_folders, media_bytes, cache_bytes }`: space used by stored pictures, generated media files and the cache (docs/STORAGE.md) |
 | POST | `/api/system/storage/clean` | – | `{ blobs_removed, media_folders_removed, bytes_freed, cache_files_removed, cache_bytes_freed }`: removes what nothing uses any more, and old cache files |
