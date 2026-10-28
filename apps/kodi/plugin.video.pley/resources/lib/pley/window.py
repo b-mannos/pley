@@ -814,11 +814,12 @@ def rail_view(library: dict) -> tuple:
 def rail_entries(libraries: int) -> list:
     """The rail's entries from Search down, Settings apart (RailItems.kt):
     the first three libraries, and with more, Libraries in Collections'
-    place (collections stay on each library's Collections tab)."""
+    place (collections stay on each library's Collections tab); without a
+    library, no Collections."""
     shown = list(L.RAIL_LIBRARIES[:libraries])
     if libraries > len(L.RAIL_LIBRARIES):
         return [L.RAIL_SEARCH, L.RAIL_HOME, *shown, L.RAIL_ALL_LIBRARIES, L.RAIL_PLAYLISTS]
-    return [L.RAIL_SEARCH, L.RAIL_HOME, *shown, L.RAIL_PLAYLISTS, L.RAIL_COLLECTIONS]
+    return [L.RAIL_SEARCH, L.RAIL_HOME, *shown, L.RAIL_PLAYLISTS] + ([L.RAIL_COLLECTIONS] if libraries else [])
 
 
 def library_rail(libraries: list, library_id) -> str:

@@ -318,16 +318,17 @@ class WindowTest(unittest.TestCase):
             win = FakeWindow()
             win.libraries = [{"id": i, "name": "Library %d" % i, "kind": "movies"} for i in range(count)]
             win.setup_rail()
-            # As on Android TV (RailItems.kt): three libraries, then Libraries in Collections' place.
+            # As on Android TV (RailItems.kt): three libraries, then Libraries in Collections'
+            # place; no Collections without a library.
             more = count > 3
             if more:
                 entries = [L.RAIL_SEARCH, L.RAIL_HOME, *L.RAIL_LIBRARIES, L.RAIL_ALL_LIBRARIES, L.RAIL_PLAYLISTS, L.RAIL_SETTINGS]
             else:
-                entries = [L.RAIL_SEARCH, L.RAIL_HOME, *L.RAIL_LIBRARIES[:count], L.RAIL_PLAYLISTS, L.RAIL_COLLECTIONS, L.RAIL_SETTINGS]
+                entries = [L.RAIL_SEARCH, L.RAIL_HOME, *L.RAIL_LIBRARIES[:count], L.RAIL_PLAYLISTS] + ([L.RAIL_COLLECTIONS] if count else []) + [L.RAIL_SETTINGS]
             for i, entry in enumerate(L.RAIL_LIBRARIES):
                 self.assertEqual(win.made[L.rail_group(entry)].visible, i < count)
             self.assertEqual(win.made[L.rail_group(L.RAIL_ALL_LIBRARIES)].visible, more)
-            self.assertEqual(win.made[L.rail_group(L.RAIL_COLLECTIONS)].visible, not more)
+            self.assertEqual(win.made[L.rail_group(L.RAIL_COLLECTIONS)].visible, 0 < count <= 3)
             # Each pill's top and bottom on the screen.
             pills = []
             for entry in entries:
