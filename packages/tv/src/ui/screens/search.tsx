@@ -99,6 +99,9 @@ export function SearchScreen(p: { entry: Entry; query?: string }) {
           const res = { items: r.items.filter((i) => i.kind !== "extra"), people: r.people ?? [] };
           setResults(res);
           setShownQuery(query);
+          // New results: Back from one of them comes to it, not to where the last ones were.
+          p.entry.state.rowIndex = {};
+          p.entry.state.section = undefined;
           setLoading(false);
           setError(null);
           p.entry.state.results = res;
@@ -128,7 +131,9 @@ export function SearchScreen(p: { entry: Entry; query?: string }) {
     ui.nav.open(pageOf(item));
   };
 
-  // The rows: one per group with results.
+  // The rows: one per group with results. Each row's tile focused last, so a row drawn again comes back to it.
+  const rowIndex = (p.entry.state.rowIndex as Record<string, number> | undefined) ?? {};
+  p.entry.state.rowIndex = rowIndex;
   const sections: Section[] = [];
   if (results && query) {
     for (const g of GROUPS) {
@@ -144,8 +149,12 @@ export function SearchScreen(p: { entry: Entry; query?: string }) {
               kind="person"
               items={results.people}
               keyOf={(x) => x.id}
+              enterAt={rowIndex.people}
               onLeftEdge={ui.toRail}
-              onFocusIndex={onFocus}
+              onFocusIndex={(i) => {
+                rowIndex.people = i;
+                onFocus();
+              }}
               tile={(person, _i, place) => (
                 <ArtTile
                   kind="person"
@@ -177,8 +186,12 @@ export function SearchScreen(p: { entry: Entry; query?: string }) {
             kind={g.tile}
             items={items}
             keyOf={(x) => x.id}
+            enterAt={rowIndex[g.kind]}
             onLeftEdge={ui.toRail}
-            onFocusIndex={onFocus}
+            onFocusIndex={(i) => {
+              rowIndex[g.kind] = i;
+              onFocus();
+            }}
             tile={(item, _i, place) => (
               <Tile
                 item={item}
@@ -202,7 +215,13 @@ export function SearchScreen(p: { entry: Entry; query?: string }) {
     <div class="search-page">
       {sections.length > 0 && (
         <div class="search-rows">
-          <SectionPage sections={sections} top={ROWS_TOP} clipAbove={ROWS_TOP - 12} />
+          <SectionPage
+            sections={sections}
+            top={ROWS_TOP}
+            clipAbove={ROWS_TOP - 12}
+            focusedKey={p.entry.state.section as string | undefined}
+            onFocusSection={(k) => (p.entry.state.section = k)}
+          />
         </div>
       )}
       {!results && loading && <RowsSkeleton top={ROWS_TOP} />}
@@ -278,7 +297,7 @@ export function SearchScreen(p: { entry: Entry; query?: string }) {
       )}
       {query && error && !results ? (
         <div class="search-notice">
-          <div class="t-title c-fg">{failedTitle(error, "Search failed")}</div>
+          <div class="t-title c-fg">{failedTitle(error, "Couldn't search your libraries")}</div>
           <div class="t-body c-muted" style="margin-top:8px">
             {problem(error)}
           </div>

@@ -65,6 +65,9 @@ export function PersonScreen(p: { entry: Entry; id: number }) {
       </div>
     );
   }
+  // Each row's tile focused last, so Back from a title comes to it, the rows drawn again.
+  const rowIndex = (p.entry.state.rowIndex as Record<string, number> | undefined) ?? {};
+  p.entry.state.rowIndex = rowIndex;
   const sections: Section[] = [];
   let first = true;
   for (const r of ROLES) {
@@ -82,8 +85,12 @@ export function PersonScreen(p: { entry: Entry; id: number }) {
           kind="poster"
           items={credits}
           keyOf={(c) => c.item.id}
+          enterAt={rowIndex[r.role]}
           onLeftEdge={ui.toRail}
-          onFocusIndex={onFocus}
+          onFocusIndex={(i) => {
+            rowIndex[r.role] = i;
+            onFocus();
+          }}
           tile={(c, i, place) => (
             <Tile
               item={c.item}
@@ -123,7 +130,13 @@ export function PersonScreen(p: { entry: Entry; id: number }) {
           )}
         </div>
       </div>
-      <SectionPage sections={sections} top={ROWS_TOP} clipAbove={ROWS_TOP - 12} />
+      <SectionPage
+        sections={sections}
+        top={ROWS_TOP}
+        clipAbove={ROWS_TOP - 12}
+        focusedKey={p.entry.state.section as string | undefined}
+        onFocusSection={(k) => (p.entry.state.section = k)}
+      />
       <div class="rail-fade" />
     </div>
   );
