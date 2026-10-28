@@ -266,7 +266,7 @@ export function TranscoderSettings() {
               </Row>
               <Row
                 label="Throttle transcodes"
-                hint="Once a buffer is built, convert at up to 2× real time and pause 90 s ahead of the player. Saves CPU, GPU and disk for other playbacks."
+                hint="Once a buffer is built, convert at real time. Saves CPU, GPU and disk for other playbacks."
               >
                 <Toggle
                   checked={form.throttle_transcodes}

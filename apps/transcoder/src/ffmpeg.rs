@@ -21,7 +21,7 @@ use crate::devices;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 8;
+const DETECTION_REVISION: u32 = 9;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -484,30 +484,31 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
         let vf = format!("{HDR_TAGS},{}", crate::plan::ZSCALE_TONEMAP);
         test_filter(ffmpeg, &[], &vf).await
     };
+    // Whether -readrate works, and -readrate_catchup with it (FFmpeg 8).
     let readrate_test = async {
-        let args = [
-            "-hide_banner",
-            "-nostdin",
-            "-loglevel",
-            "error",
-            "-readrate",
-            "50",
-            "-readrate_initial_burst",
-            "1",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=black:s=64x64:r=25:d=0.1",
-            "-frames:v",
-            "1",
-            "-f",
-            "null",
-            "-",
-        ];
-        matches!(run(ffmpeg, &args, timeout).await, Some(Output { success: true, .. }))
+        let reads = |catchup: &'static [&'static str]| {
+            let mut args = vec!["-hide_banner", "-nostdin", "-loglevel", "error", "-readrate", "50"];
+            args.extend_from_slice(catchup);
+            args.extend_from_slice(&[
+                "-readrate_initial_burst",
+                "1",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=black:s=64x64:r=25:d=0.1",
+                "-frames:v",
+                "1",
+                "-f",
+                "null",
+                "-",
+            ]);
+            async move { matches!(run(ffmpeg, &args, timeout).await, Some(Output { success: true, .. })) }
+        };
+        let readrate = reads(&[]).await;
+        (readrate, readrate && reads(&["-readrate_catchup", "60"]).await)
     };
 
-    let (encoder_results, (libplacebo, libplacebo_on_gpu), opencl, zscale, readrate, relative) = tokio::join!(
+    let (encoder_results, (libplacebo, libplacebo_on_gpu), opencl, zscale, (readrate, catchup), relative) = tokio::join!(
         encoder_tests,
         libplacebo_test,
         opencl_test,
@@ -539,6 +540,7 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
     caps.subtitle_burn_image = has("overlay");
     caps.subtitle_burn_text = has("subtitles");
     caps.readrate = readrate;
+    caps.readrate_catchup = catchup;
 
     let gpu = detect_gpu_pipelines(ffmpeg, &encoder_names, &filter_names, &caps, libplacebo && libplacebo_on_gpu).await;
     caps.vulkan_decode = gpu.vulkan_decode;

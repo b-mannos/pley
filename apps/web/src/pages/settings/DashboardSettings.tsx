@@ -520,8 +520,7 @@ export function DashboardSettings() {
             </span>
           </SectionTitle>
           <p className="rounded-lg border border-border bg-surface px-4 py-3 text-sm text-muted">
-            {previewsPending === 1 ? "1 file left" : `${previewsPending.toLocaleString()} files left`}, one at a time,
-            pausing while videos are being transcoded.
+            {previewsPending === 1 ? "1 file left" : `${previewsPending.toLocaleString()} files left`}
           </p>
         </section>
       ) : null}

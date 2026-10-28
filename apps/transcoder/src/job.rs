@@ -1341,14 +1341,17 @@ impl Job {
         }
     }
 
-    fn update_progress(&self, progress: &HashMap<String, String>, start_ms: i64) {
+    /// A process's progress, with its speed over the last seconds (`recent`)
+    /// rather than FFmpeg's own, an average since it started.
+    fn update_progress(&self, progress: &HashMap<String, String>, start_ms: i64, recent: Option<f64>) {
         let mut rt = self.runtime.lock();
         let Some(p) = rt.process.as_mut() else { return };
         let num = |k: &str| progress.get(k).and_then(|v| v.trim().parse::<f64>().ok());
         p.frame = num("frame").map(|v| v as u64);
         p.fps = num("fps").filter(|v| *v > 0.0);
-        p.speed =
+        let average =
             progress.get("speed").and_then(|v| v.trim().trim_end_matches('x').parse().ok()).filter(|v: &f64| *v > 0.0);
+        p.speed = recent.filter(|v| *v > 0.0).or(average);
         p.bitrate_kbps = progress.get("bitrate").and_then(|v| v.trim().trim_end_matches("kbits/s").parse().ok());
         p.total_size = num("total_size").map(|v| v as u64);
         p.dup_frames = num("dup_frames").map(|v| v as u64);
@@ -1429,17 +1432,28 @@ async fn read_progress(
         "stream_0_0_q",
     ];
     let mut lines = BufReader::new(stderr).lines();
-    let mut block = HashMap::new();
+    let mut block: HashMap<String, String> = HashMap::new();
     while let Ok(Some(line)) = lines.next_line().await {
         if let Some((key, value)) = line.split_once('=') {
             let key = key.trim();
             if PROGRESS_KEYS.contains(&key) || key.starts_with("stream_") {
                 if key == "progress" {
-                    job.update_progress(&block, start_ms);
                     let out_us = block.get("out_time_us").and_then(|v| v.trim().parse::<f64>().ok());
+                    let mut recent = None;
                     if let Some(us) = out_us.filter(|us| *us >= 0.0) {
-                        pace.lock().record(Instant::now(), start_ms + (us / 1000.0) as i64);
+                        let out_ms = start_ms + (us / 1000.0) as i64;
+                        let mut pace = pace.lock();
+                        pace.record(Instant::now(), out_ms);
+                        recent = pace.speed().map(|speed| {
+                            // Held to the read rate past its burst: real time, as meant
+                            // (players take less than 1× for a transcoder falling behind).
+                            let paced = job.plan.throttle
+                                && out_ms - start_ms >= READRATE_BURST_MS
+                                && (speed - READRATE).abs() <= READRATE * 0.1;
+                            if paced { READRATE } else { speed }
+                        });
                     }
+                    job.update_progress(&block, start_ms, recent);
                     block.clear();
                 } else {
                     block.insert(key.to_owned(), value.to_owned());
@@ -1681,7 +1695,7 @@ mod tests {
             start: 0,
             end: 100,
             started: Instant::now(),
-            next: Arc::new(AtomicU32::new(40)),
+            next: Arc::new(AtomicU32::new(70)),
             lookahead: 6,
             pace: Arc::default(),
             exited,
@@ -1692,42 +1706,42 @@ mod tests {
             let at = Instant::now();
             let mut pace = p.pace.lock();
             *pace = Pace::default();
-            pace.record(at, 80_000);
-            pace.record(at + Duration::from_secs(3), 80_000 + (3_000.0 * speed) as i64);
+            pace.record(at, 140_000);
+            pace.record(at + Duration::from_secs(3), 140_000 + (3_000.0 * speed) as i64);
         };
-        going(2.0);
-        assert_eq!(job.throttled_wait(&p, 42), None, "no restart measured yet");
-        job.runtime.lock().start_cost = Some(Duration::from_millis(400));
+        going(1.0);
+        assert_eq!(job.throttled_wait(&p, 72), None, "no restart measured yet");
+        job.runtime.lock().start_cost = Some(Duration::from_millis(1_100));
         job.runtime.lock().stop_cost = Some(Duration::from_millis(100));
 
-        // Two segments past the one being made: 2.5 segments of 2 s at twice
-        // real time, against 0.5 s to restart.
-        let wait = job.throttled_wait(&p, 42).unwrap();
-        assert!((wait.as_secs_f64() - 2.5).abs() < 0.001, "{wait:?}");
-        assert_eq!(job.throttled_wait(&p, 40), None, "half a segment: no quicker to restart");
-        // (a) Still in its burst (40 s made of 60).
-        p.next.store(20, Relaxed);
-        assert_eq!(job.throttled_wait(&p, 22), None);
-        p.next.store(40, Relaxed);
+        // Two segments past the one being made: 2.5 segments of 2 s at real
+        // time, against 1.2 s to restart.
+        let wait = job.throttled_wait(&p, 72).unwrap();
+        assert!((wait.as_secs_f64() - 5.0).abs() < 0.001, "{wait:?}");
+        assert_eq!(job.throttled_wait(&p, 70), None, "half a segment: no quicker to restart");
+        // (a) Still in its burst (100 s made of 120).
+        p.next.store(50, Relaxed);
+        assert_eq!(job.throttled_wait(&p, 52), None);
+        p.next.store(70, Relaxed);
         // (b) Slower than the read rate: the encoder is what limits it.
-        going(1.5);
-        assert_eq!(job.throttled_wait(&p, 42), None);
-        going(2.1);
-        assert!(job.throttled_wait(&p, 42).is_some());
+        going(0.7);
+        assert_eq!(job.throttled_wait(&p, 72), None);
+        going(1.05);
+        assert!(job.throttled_wait(&p, 72).is_some());
         // (c) A restart costing more than the wait.
-        job.runtime.lock().start_cost = Some(Duration::from_secs(3));
-        assert_eq!(job.throttled_wait(&p, 42), None);
-        job.runtime.lock().start_cost = Some(Duration::from_millis(400));
+        job.runtime.lock().start_cost = Some(Duration::from_secs(6));
+        assert_eq!(job.throttled_wait(&p, 72), None);
+        job.runtime.lock().start_cost = Some(Duration::from_millis(1_100));
         // (d) Another request waits for a segment the process is about to make.
-        let other = Waiting::register(&job, 41);
-        assert_eq!(job.throttled_wait(&p, 42), None);
+        let other = Waiting::register(&job, 71);
+        assert_eq!(job.throttled_wait(&p, 72), None);
         drop(other);
-        let this = Waiting::register(&job, 42);
-        assert!(job.throttled_wait(&p, 42).is_some(), "the request itself doesn't count");
+        let this = Waiting::register(&job, 72);
+        assert!(job.throttled_wait(&p, 72).is_some(), "the request itself doesn't count");
         drop(this);
         // Not throttled at all.
         job.plan.throttle = false;
-        assert_eq!(job.throttled_wait(&p, 42), None);
+        assert_eq!(job.throttled_wait(&p, 72), None);
     }
 
     #[test]
@@ -1773,6 +1787,7 @@ mod tests {
             audio: None,
             burn: None,
             throttle: false,
+            catchup: false,
             warnings: vec![],
         };
         let job = Job::new(
@@ -2299,7 +2314,7 @@ mod tests {
         let block = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
             pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect()
         };
-        job.update_progress(&block(&[("fps", "50")]), 0);
+        job.update_progress(&block(&[("fps", "50")]), 0, None);
         assert!(job.status().process.is_none(), "no process, nothing to update");
 
         job.runtime.lock().process = Some(ProcessStatus::default());
@@ -2313,15 +2328,20 @@ mod tests {
                 ("drop_frames", "2"),
             ]),
             12_000,
+            None,
         );
         let p = job.status().process.unwrap();
         assert_eq!((p.frame, p.fps, p.speed, p.bitrate_kbps), (Some(120), Some(48.5), Some(2.1), Some(3000.5)));
+        // How fast it went lately wins over FFmpeg's average since it started.
+        job.update_progress(&block(&[("speed", "6.2x")]), 12_000, Some(1.0));
+        assert_eq!(job.status().process.unwrap().speed, Some(1.0));
         assert_eq!((p.out_time_ms, p.drop_frames), (17_000, Some(2)), "absolute media time");
 
         // Values ffmpeg doesn't know yet.
         job.update_progress(
             &block(&[("fps", "0.00"), ("speed", "N/A"), ("bitrate", "N/A"), ("out_time_us", "-9223372036854775807")]),
             12_000,
+            None,
         );
         let p = job.status().process.unwrap();
         assert_eq!((p.fps, p.speed, p.bitrate_kbps), (None, None, None));

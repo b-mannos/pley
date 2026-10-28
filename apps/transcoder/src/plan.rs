@@ -35,9 +35,13 @@ pub const MAX_SEGMENTS: i64 = 200_000;
 pub const MAX_DURATION_MS: i64 = MAX_SEGMENTS * 4_000;
 /// Maximum segments per ffmpeg process (keeps command lines short on Windows).
 pub const PROCESS_WINDOW: u32 = 1200;
-/// Throttling: read at 2× realtime after a 60 s burst.
-pub const READRATE: f64 = 2.0;
-pub const READRATE_BURST_MS: i64 = 60_000;
+/// Throttling: read at real time after a 120 s burst, so a process stays
+/// as far ahead of the player as the burst took it.
+pub const READRATE: f64 = 1.0;
+pub const READRATE_BURST_MS: i64 = 120_000;
+/// How fast a throttled read that fell behind (a slow disk or share)
+/// catches up, where FFmpeg can.
+pub const READRATE_CATCHUP: f64 = 2.0;
 
 /// CPU tone mapping chain (zimg). Expects HDR input, outputs 8-bit BT.709.
 pub const ZSCALE_TONEMAP: &str = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
@@ -288,6 +292,8 @@ pub struct Plan {
     pub audio: Option<AudioOut>,
     pub burn: Option<Burn>,
     pub throttle: bool,
+    /// A throttled read catches up faster when it falls behind ([`READRATE_CATCHUP`]).
+    pub catchup: bool,
     pub warnings: Vec<String>,
 }
 
@@ -533,6 +539,7 @@ impl Plan {
             audio,
             burn,
             throttle: req.options.throttle && ff.caps.readrate,
+            catchup: req.options.throttle && ff.caps.readrate && ff.caps.readrate_catchup,
             warnings,
         })
     }
@@ -795,6 +802,9 @@ impl Plan {
         if self.throttle {
             let (rate, burst) = (trim_float(READRATE), (READRATE_BURST_MS / 1000).to_string());
             a.push_all(["-readrate", &rate, "-readrate_initial_burst", &burst]);
+            if self.catchup {
+                a.push_all(["-readrate_catchup", &trim_float(READRATE_CATCHUP)]);
+            }
         }
         if seek_ms > 0 {
             // Converted audio starts at the keyframe like the copied video,
@@ -1628,6 +1638,7 @@ mod tests {
             audio: None,
             burn: None,
             throttle: false,
+            catchup: false,
             warnings: vec![],
         };
         assert_eq!(plan.segment_for(0), 0);
@@ -1673,7 +1684,7 @@ mod tests {
         assert!(args.contains("-segment_times 3.500,7.500,11.500,15.500"), "{args}");
         assert!(args.contains("-segment_start_number 3"));
         assert!(args.contains("-t 20.000"));
-        assert!(args.contains("-readrate 2 -readrate_initial_burst 60"));
+        assert!(args.contains("-readrate 1 -readrate_initial_burst 120"));
     }
 
     #[test]

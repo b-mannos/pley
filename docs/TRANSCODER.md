@@ -210,21 +210,25 @@ half-made ones are deleted.
    wakes waiting requests at once, with no polling (after noting the process has moved past it, so a
    woken request never sees it still owing that segment). ffmpeg's `-progress` output on stderr supplies the
    live metrics: fps, speed, bitrate and position.
-4. **Throttling.** Once a 60 s buffer exists, ffmpeg reads at most 2× realtime
-   (`-readrate`), which saves CPU, GPU and disk. And once a process is 90 s
+4. **Throttling.** A process makes its first 120 s as fast as it can, then
+   reads at real time (`-readrate 1`), so it stays as far ahead of the
+   player as that burst took it, at a steady 1×: this saves CPU, GPU and
+   disk. A read that falls behind (a slow disk or share) catches up at 2×
+   where FFmpeg can (`-readrate_catchup`, FFmpeg 8). And once a process is 90 s
    ahead of the last segment the player asked for (players hold their own
    buffer ahead of the picture, so minutes ahead of it), it is paused, its
    process suspended (`NtSuspendProcess` on Windows, `SIGSTOP` on Linux),
    until it is less than 60 s ahead, or a request waits for a segment it is
-   to make. Without the pause a process went on at twice real time to the
-   end of the film, minutes or an hour ahead: work lost when the player
+   to make. Without the pause a process could go on to the end of the
+   film, minutes or an hour ahead: work lost when the player
    stops or seeks, taken from other playbacks meanwhile (on a small
    computer, what lets two play at once), and segments on the disk. Both
    apply when the request's `throttle` is on (`throttle_transcodes`, on by
    default) and the read rate when FFmpeg supports it. How fast a process
    goes is measured over its last 4 s of progress (since it last went on,
    after a pause), since FFmpeg's own `speed` averages in the burst and the
-   pauses.
+   pauses; a job's status says that speed, and 1× for a process held to the
+   read rate.
 5. **Housekeeping.**
    - A process idle for 60 s (paused player) is stopped.
    - A job idle for 20 minutes expires.

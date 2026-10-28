@@ -477,6 +477,10 @@ pub struct Capabilities {
     pub subtitle_burn_text: bool,
     /// `-readrate`/`-readrate_initial_burst` are supported (transcode throttling).
     pub readrate: bool,
+    /// `-readrate_catchup` is supported: a throttled read that fell behind
+    /// (a slow disk or share) catches up faster than real time.
+    #[serde(default)]
+    pub readrate_catchup: bool,
     /// FFmpeg's `chromaprint` muxer is available: audio fingerprints for
     /// intro and credits detection (`POST /v1/fingerprint`).
     #[serde(default)]
@@ -767,7 +771,7 @@ pub struct TranscodeOptions {
     /// it is, and changed as they change.
     #[serde(default)]
     pub preset: Option<String>,
-    /// Limit ffmpeg to ~2× realtime once a buffer has been built.
+    /// Hold ffmpeg to real time once a buffer has been built.
     #[serde(default = "default_true")]
     pub throttle: bool,
 }

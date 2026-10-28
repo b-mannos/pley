@@ -314,6 +314,7 @@ mod tests {
             audio,
             burn: None,
             throttle: false,
+            catchup: false,
             warnings: vec![],
         }
     }
