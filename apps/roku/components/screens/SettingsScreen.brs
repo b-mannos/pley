@@ -71,8 +71,10 @@ sub useProfile(me as dynamic)
     showRows()
 end sub
 
-' The buttons: the defaults' rows, then Switch profile, Sort libraries,
-' Switch server and Sign out; the focus stays on the row it was on.
+' The buttons: the defaults' rows, this Roku's quality and whether the
+' next episode plays by itself, then Watch history, Switch profile, Sort
+' libraries, Switch server and Sign out; the focus stays on the row it was
+' on.
 sub showRows()
     labels = []
     actions = []
@@ -83,7 +85,11 @@ sub showRows()
     ' This Roku's, kept on it: no server needed.
     labels.Push("Quality: " + aqLabel(aqChoice(playbackSection())))
     actions.Push("quality")
-    for each action in ["Switch profile", "Sort libraries", "Switch server", "Sign out"]
+    autoplay = "Off"
+    if playerAutoplay(playbackSection()) then autoplay = "On"
+    labels.Push("Play the next episode by itself: " + autoplay)
+    actions.Push("autoplay")
+    for each action in ["Watch history", "Switch profile", "Sort libraries", "Switch server", "Sign out"]
         labels.Push(action)
         actions.Push(action)
     end for
@@ -106,6 +112,15 @@ sub onButton(event as object)
     chosen = m.actions[event.getData()]
     if chosen = "quality"
         openQuality()
+        return
+    end if
+    if chosen = "autoplay"
+        playerSetAutoplay(playbackSection(), not playerAutoplay(playbackSection()))
+        showRows()
+        return
+    end if
+    if chosen = "Watch history"
+        uiNavigate({ to: "history" })
         return
     end if
     if chosen = "audio" or chosen = "mode" or chosen = "subtitle"

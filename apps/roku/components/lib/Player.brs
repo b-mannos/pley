@@ -174,6 +174,21 @@ function playerUpNextSeconds() as integer
     return 10
 end function
 
+' Whether Up Next plays the next episode by itself at the end of its
+' countdown (Settings, kept on the Roku): yes, unless turned off.
+function playerAutoplay(section as object) as boolean
+    return section.Read("autoplay") <> "off"
+end function
+
+sub playerSetAutoplay(section as object, playsOn as boolean)
+    if playsOn
+        section.Delete("autoplay")
+    else
+        section.Write("autoplay", "off")
+    end if
+    section.Flush()
+end sub
+
 ' Whether a broken stream may be started again: at most 3 times a minute.
 ' restarts are the clock readings (ms) of the earlier restarts.
 function playerMayRestart(restarts as object, nowMs as integer) as boolean

@@ -294,6 +294,58 @@ function pagePlaylistRefusal(answer as object) as string
     return answer.message
 end function
 
+' --- Watch history ---
+
+' "now", "12 min ago", "3 hours ago", "yesterday", "5 days ago", else the
+' day ("Mar 4, 2026"). seconds and now are unix seconds.
+function pageRelativeTime(seconds as dynamic, now as integer) as string
+    at = httpNumber(seconds, 0)
+    diff = now - at
+    if diff < 0 then diff = 0
+    if diff < 60 then return "now"
+    if diff < 3600 then return urlValue(Int(diff / 60)) + " min ago"
+    if diff < 86400
+        hours = Int(diff / 3600)
+        if hours = 1 then return "1 hour ago"
+        return urlValue(hours) + " hours ago"
+    end if
+    days = Int(diff / 86400)
+    if days = 1 then return "yesterday"
+    if days < 30 then return urlValue(days) + " days ago"
+    date = CreateObject("roDateTime")
+    date.FromSeconds(Int(at))
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    return months[date.GetMonth() - 1] + " " + urlValue(date.GetDayOfMonth()) + ", " + urlValue(date.GetYear())
+end function
+
+' The plays of the watch history as rows (EpisodeRow): an episode's show,
+' then its number and title, when and where it played; historyId, the
+' entry's own id.
+function pageHistoryRows(entries as dynamic, server as string, now as integer) as object
+    rows = []
+    for each entry in httpArray(entries)
+        item = invalid
+        if GetInterface(entry, "ifAssociativeArray") <> invalid then item = httpObject(entry.item)
+        if item <> invalid and contentShown(httpString(item.kind))
+            tile = contentTile(item, server, true)
+            parts = []
+            if tile.subtitle <> "" then parts.Push(tile.subtitle)
+            if httpString(item.kind) = "track"
+                album = httpSentence(item.parent_title)
+                if album <> "" then parts.Push(album)
+            end if
+            parts.Push(pageRelativeTime(entry.viewed_at, now))
+            device = httpSentence(entry.device)
+            if device <> "" then parts.Push(device)
+            tile.subtitle = parts.Join(" · ")
+            tile.summary = ""
+            tile.historyId = httpNumber(entry.id, 0)
+            rows.Push(tile)
+        end if
+    end for
+    return rows
+end function
+
 ' queue from its entry at, in order or shuffled (the entry at first).
 function pageQueueFrom(queue as object, at as integer, shuffled as boolean) as object
     out = []

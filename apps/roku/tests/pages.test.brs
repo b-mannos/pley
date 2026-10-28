@@ -113,6 +113,22 @@ sub test_pages_playlists()
     tkEqual(pagePlaylistRefusal({ status: 403, message: "not allowed" }), "This sign-in can't change playlists: sign out in Settings and sign in again to allow it.")
 end sub
 
+sub test_pages_watch_history()
+    now = 1800000000
+    tkEqual(pageRelativeTime(now - 30, now), "now")
+    tkEqual(pageRelativeTime(now - 720, now), "12 min ago")
+    tkEqual(pageRelativeTime(now - 3600, now), "1 hour ago")
+    tkEqual(pageRelativeTime(now - 7300, now), "2 hours ago")
+    tkEqual(pageRelativeTime(now - 90000, now), "yesterday")
+    tkEqual(pageRelativeTime(now - 86400 * 5, now), "5 days ago")
+    tkEqual(pageRelativeTime(1772582400, now), "Mar 4, 2026")
+    rows = pageHistoryRows([{ id: 9, viewed_at: now - 7300, device: "Roku Ultra", item: contentTestEpisode() }, { id: 10, viewed_at: now, item: { id: 7, kind: "person" } }], "http://nas:7539", now)
+    tkEqual(rows.Count(), 1, "kinds this version shows")
+    tkEqual(rows[0].title, "Severance")
+    tkEqual(rows[0].subtitle, "S1 E1 · Good News About Hell · 2 hours ago · Roku Ultra")
+    tkEqual(rows[0].historyId, 9)
+end sub
+
 sub test_pages_actions_ask_the_server()
     tkEqual(pageActionRequest("watched", 12), { method: "POST", path: "/api/items/12/watched" })
     tkEqual(pageActionRequest("unwatched", 12), { method: "POST", path: "/api/items/12/unwatched" })

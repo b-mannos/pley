@@ -375,6 +375,10 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       res.writeHead(204);
       return res.end();
     }
+    // The watch history: one play.
+    if (path === "/api/history" && req.method === "GET") {
+      return json(200, { total: 1, entries: [{ id: 1, viewed_at: Math.floor(Date.now() / 1000) - 7200, device: "Roku Ultra", user: { id: 1, name: "Anna" }, item: items.get(101) }] });
+    }
     // A library's tabs: its rows, its collections, and what it filters by.
     if ((match = path.match(/^\/api\/libraries\/(\d+)\/hubs$/))) {
       const listed = match[1] === "1" ? movies.slice(0, 20) : match[1] === "2" ? [show] : [];

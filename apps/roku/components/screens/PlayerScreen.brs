@@ -713,7 +713,7 @@ sub ended()
     if m.durationMs > 0 then m.positionMs = m.durationMs
     report("stopped")
     endSession()
-    if m.next <> invalid and not m.upNextCancelled
+    if m.next <> invalid and not m.upNextCancelled and playerAutoplay(playbackSection())
         playNext()
     else
         uiNavigate({ back: true })
@@ -843,11 +843,14 @@ sub showUpNext()
     m.nextLine.text = m.next.line
     m.nextImage.setHttpAgent(m.top.getScene().getHttpAgent())
     m.nextImage.uri = m.next.image
-    m.countdownLeft = playerUpNextSeconds()
-    m.countdown.text = "Next in " + m.countdownLeft.ToStr() + " s"
     m.upNext.visible = true
     m.nextButtons.focusButton = 0
     m.nextButtons.setFocus(true)
+    ' Turned off in Settings, the next episode waits for Play now.
+    m.countdown.text = ""
+    if not playerAutoplay(playbackSection()) then return
+    m.countdownLeft = playerUpNextSeconds()
+    m.countdown.text = "Next in " + m.countdownLeft.ToStr() + " s"
     m.countdownTimer.control = "start"
 end sub
 

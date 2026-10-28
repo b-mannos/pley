@@ -216,12 +216,12 @@ async function openFromMenu(index, pattern, what, then = async () => {}) {
 }
 
 // From Settings: Sign out, and Sign out again in the dialog. Sign out is
-// the last of eight buttons, Subtitle language showing once subtitles come
+// the last of ten buttons, Subtitle language showing once subtitles come
 // on always.
 async function signOut() {
   for (let attempt = 0; attempt < 3; attempt++) {
     const since = mark();
-    await press("down", 7);
+    await press("down", 9);
     await press("select");
     await sleep(800);
     await press("select");
@@ -437,6 +437,14 @@ async function walk() {
   await press("down", 5);
   await press("select");
   await settle();
+  // Watch history, two rows down: its plays; Back to Settings.
+  since = mark();
+  await press("down", 2);
+  await press("select");
+  await waitFor(/^GET \/api\/history\?/, since, "the watch history");
+  shoot("history");
+  await press("back");
+  await settle();
   // Sort libraries, after Switch profile: Movies lifted and put after TV
   // Shows, saved at once; then the server's order again, which the rest of
   // the walk expects.
@@ -471,10 +479,10 @@ async function walk() {
   await waitFor(/^PUT \/api\/me\/track-defaults$/, since, "the subtitle mode saved");
   await settle();
   shoot("settings-saved");
-  // Switch profile, two rows down: "Who's watching?", Ben chosen, and Home
-  // again as Ben, the old tokens stopped.
+  // Switch profile, five rows down: "Who's watching?", Ben chosen, and
+  // Home again as Ben, the old tokens stopped.
   since = mark();
-  await press("down", 3);
+  await press("down", 5);
   await press("select");
   await waitFor(/^GET \/api\/oauth\/profiles$/, since, "the household's profiles");
   shoot("profiles");
@@ -600,6 +608,7 @@ const checks = [
   ["opened a person's page", asked(/^GET \/api\/people\/7$/)],
   ["took an entry out of a playlist", fixture.playlistRemoved.length > 0],
   ["switched to another profile of the household", fixture.switched.includes(2)],
+  ["showed the watch history", asked(/^GET \/api\/history\?/)],
   ["played an album's tracks with the music player", fixture.playbacks.some((p) => p.item === 5201) && fixture.progress.some((p) => p.item >= 5201 && p.item <= 5203)],
   ["played a playlist from its top, the next entry to come", fixture.playbacks.some((p) => p.item === 101)],
   ["searched", asked(/^GET \/api\/search\?/)],

@@ -17,6 +17,7 @@ function navScreen(name as string) as string
         player: "PlayerScreen",
         search: "SearchScreen",
         settings: "SettingsScreen",
+        history: "HistoryScreen",
         sortLibraries: "SortLibrariesScreen",
         unreachable: "UnreachableScreen"
     }

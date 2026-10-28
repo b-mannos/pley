@@ -1,3 +1,13 @@
+sub test_player_autoplay_kept_on_the_roku()
+    section = CreateObject("roRegistrySection", "playerAutoplayTest")
+    section.Delete("autoplay")
+    tkTrue(playerAutoplay(section), "on unless turned off")
+    playerSetAutoplay(section, false)
+    tkFalse(playerAutoplay(section))
+    playerSetAutoplay(section, true)
+    tkTrue(playerAutoplay(section))
+end sub
+
 sub test_player_reports_every_ten_seconds_while_playing()
     tkTrue(playerShouldReport("playing", 10000))
     tkFalse(playerShouldReport("playing", 9999))

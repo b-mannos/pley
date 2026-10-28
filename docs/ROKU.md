@@ -16,8 +16,10 @@ household has more than one profile, and shows:
   goes on while the app is used, with Now Playing;
 - playlists: Play, Shuffle, Rename, Delete, an entry taken out;
 - Search with the on-screen keyboard (titles and people);
-- Settings: the profile's audio and subtitle defaults, Quality, Switch
-  profile, Sort libraries, Switch server and Sign out.
+- Settings: the profile's audio and subtitle defaults, Quality, Play the
+  next episode by itself, Watch history (a play taken out with the
+  Options key), Switch profile, Sort libraries, Switch server and Sign
+  out.
 
 The Options key (*) on a title offers Mark as watched or unwatched, Add
 to or Remove from My List, Add to playlist (a new one named on the
@@ -42,7 +44,7 @@ The app is in `apps/roku`; paths below are relative to it.
 | `source/main.brs` | Starts the one scene |
 | `components/MainScene` | The stack of screens, the HTTP agent of pictures, sign-in when the server ends it |
 | `components/MusicPlayer` | The music player: a queue of tracks on the scene's Audio node, as `m.global.music` |
-| `components/screens/` | Servers, sign-in with a code, Home, Library, Show, Details (a title's page), Grid (a person's or a collection's titles, the playlists), Playlist, Player, Search, Settings, "Can't reach your server" |
+| `components/screens/` | Servers, sign-in with a code, "Who's watching?", Home, Library, Show, Details (a title's page), Grid (a person's, a collection's or an artist's titles, the playlists), Playlist, Album, Now Playing, Player, Search, Settings, Watch history, "Can't reach your server" |
 | `components/shared/` | The screens' helpers (`Ui.brs`), and what can be done with a title (`Titles.brs`) |
 | `components/items/` | The tiles and rows of lists and grids, the player's skip button |
 | `components/tasks/ApiTask` | The one place that talks to the server |
@@ -206,7 +208,9 @@ Rules the code keeps:
   code and address are enough.
 - Skip Intro and Skip Credits show while the video plays, from a marker's
   start until a second before its end, for the markers of the file playing;
-  an episode's credits bring up Up Next instead. The button is a child of
+  an episode's credits bring up Up Next instead (its countdown only while
+  Settings → Play the next episode by itself is on: off, the next waits
+  for Play now, and the end of the episode leaves the player). The button is a child of
   the Video node and has the focus while shown: OK skips; play pauses or
   goes on, fast forward and rewind move 10 s; Back leaves the player as
   ever. While Up Next counts down, Back cancels it, and play, fast forward

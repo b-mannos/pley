@@ -392,6 +392,11 @@ sub apiBuild(job as object, answer as object)
         queue = pagePlaylistQueue(data.entries, server)
         if kind = "audio" then queue = musicTracks(data.entries, server)
         answer.data = { title: httpSentence(data.title), line: pagePlaylistLine(data), kind: kind, smart: httpString(data.smart_filter) <> "", queue: queue, shown: rows.Count() }
+    else if job.build = "history"
+        entries = httpArray(data.entries)
+        rows = pageHistoryRows(entries, server, apiNow())
+        job.request.content = nodesContent(rows)
+        answer.data = { total: httpNumber(data.total, -1), listed: entries.Count(), shown: rows.Count() }
     else if job.build = "tracks"
         tracks = musicTracks(data.items, server)
         job.request.content = nodesContent(musicTrackRows(tracks, true))
