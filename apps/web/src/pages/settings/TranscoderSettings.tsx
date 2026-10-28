@@ -182,12 +182,11 @@ export function TranscoderSettings() {
                 </Select>
                 {accelProblem ? (
                   <Note notice>
-                    {capitalize(accelProblem)}: transcodes are encoded in software instead
-                    {known?.active_encoder && form.hwaccel === saved?.hwaccel ? ` (${known.active_encoder})` : ""}.
+                    {capitalize(accelProblem)}: transcodes are encoded in software instead.
                   </Note>
                 ) : null}
               </Row>
-              <Row label="Hardware decoding" hint="Decode on the GPU when possible (falls back to CPU automatically).">
+              <Row label="Hardware decoding" hint="Decode on the GPU when possible.">
                 <Toggle
                   checked={form.hardware_decoding}
                   disabled={noGpuDecoding}

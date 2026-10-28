@@ -122,13 +122,13 @@ describe("TranscoderSettings on this server's hardware", () => {
     renderWithProviders(<TranscoderSettings />);
     expect(await screen.findByRole("option", { name: "Automatic · Intel Quick Sync" })).toBeEnabled();
     expect(option(/^Intel Quick Sync$/)).toBeEnabled();
-    expect(option(/^NVIDIA NVENC \(needs an NVIDIA graphics card\)$/)).toBeDisabled();
-    expect(option(/^AMD AMF \(needs an AMD graphics card\)$/)).toBeDisabled();
+    expect(option(/^NVIDIA NVENC$/)).toBeDisabled();
+    expect(option(/^AMD AMF$/)).toBeDisabled();
     // Never on Windows: not offered at all.
     expect(screen.queryByRole("option", { name: /VAAPI|VideoToolbox/ })).not.toBeInTheDocument();
 
     expect(option(/^Automatic · OpenCL$/)).toBeEnabled();
-    expect(option(/^libplacebo \(needs libplacebo and a Vulkan GPU\)$/)).toBeDisabled();
+    expect(option(/^libplacebo$/)).toBeDisabled();
     expect(option(/^zscale/)).toBeEnabled();
 
     // The current values stay, greyed out with the reason.
@@ -147,7 +147,7 @@ describe("TranscoderSettings on this server's hardware", () => {
     });
     renderWithProviders(<TranscoderSettings />);
     expect(await screen.findByLabelText("Hardware acceleration")).toHaveValue("nvenc");
-    expect(screen.getByText("Needs an NVIDIA graphics card: transcodes are encoded in software instead (libx264).")).toBeInTheDocument();
+    expect(screen.getByText("Needs an NVIDIA graphics card: transcodes are encoded in software instead.")).toBeInTheDocument();
     expect(screen.getByLabelText("HDR tone mapping")).toHaveValue("libplacebo");
     expect(screen.getByText("Needs libplacebo and a Vulkan GPU: HDR is tone mapped with OpenCL instead.")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Hardware decoding" })).toBeDisabled();
@@ -161,11 +161,11 @@ describe("TranscoderSettings on this server's hardware", () => {
     });
     renderWithProviders(<TranscoderSettings />);
     expect(await screen.findByLabelText("Hardware acceleration")).toHaveValue("vaapi");
-    expect(option(/^VAAPI \(on Linux only\)$/)).toBeDisabled();
+    expect(option(/^VAAPI$/)).toBeDisabled();
     expect(screen.getByText("On Linux only: transcodes are encoded in software instead.")).toBeInTheDocument();
     // The transcoder isn't running: what its FFmpeg can do isn't known, so nothing else is greyed out.
     expect(option(/^NVIDIA NVENC$/)).toBeEnabled();
-    expect(option(/^Automatic \(best available\)$/)).toBeEnabled();
+    expect(option(/^Automatic$/)).toBeEnabled();
     expect(screen.getByRole("switch", { name: "Throttle transcodes" })).toBeEnabled();
   });
 
@@ -177,7 +177,7 @@ describe("TranscoderSettings on this server's hardware", () => {
     renderWithProviders(<TranscoderSettings />);
     expect(await screen.findByRole("option", { name: "Automatic · VAAPI" })).toBeEnabled();
     expect(option(/^VAAPI$/)).toBeEnabled();
-    expect(option(/^VideoToolbox \(needs an FFmpeg with VideoToolbox\)$/)).toBeDisabled();
+    expect(option(/^VideoToolbox$/)).toBeDisabled();
   });
 
   it("says when the transcoder runs fewer at once than allowed", async () => {

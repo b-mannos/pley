@@ -21,8 +21,8 @@ const ACCEL_NAME: Record<HwAccel, string> = {
   amf: "AMD AMF",
   vaapi: "VAAPI",
   videotoolbox: "VideoToolbox",
-  vulkan: "Vulkan (h264_vulkan)",
-  none: "Software only (libx264)",
+  vulkan: "Vulkan",
+  none: "Software only",
 };
 
 const ACCEL_NEEDS: Partial<Record<HwAccel, string>> = {
@@ -38,10 +38,10 @@ const ACCELS: HwAccel[] = ["auto", "nvenc", "qsv", "amf", "vaapi", "videotoolbox
 
 const TONEMAP_NAME: Record<ToneMapping, string> = {
   auto: "Automatic",
-  libplacebo: "libplacebo (GPU, best quality, Dolby Vision)",
-  opencl: "OpenCL (GPU)",
-  zscale: "zscale (CPU)",
-  none: "Disabled (HDR may look washed out)",
+  libplacebo: "libplacebo",
+  opencl: "OpenCL",
+  zscale: "zscale",
+  none: "Disabled",
 };
 
 const TONEMAP_SHORT: Partial<Record<ToneMapping, string>> = { libplacebo: "libplacebo", opencl: "OpenCL", zscale: "zscale" };
@@ -102,9 +102,7 @@ export function accelChoices(saved: HwAccel, system: SystemInfo | undefined): Ch
       let label = ACCEL_NAME[value];
       if (value === "auto") {
         const first = tc?.accels[0];
-        label = tc ? `Automatic · ${first ? ACCEL_NAME[first] : "software encoding"}` : "Automatic (best available)";
-      } else if (reason) {
-        label = `${label} (${reason})`;
+        label = tc ? `Automatic · ${first ? ACCEL_NAME[first] : "software encoding"}` : "Automatic";
       }
       return { value, label, reason };
     });
@@ -129,8 +127,6 @@ export function tonemapChoices(system: SystemInfo | undefined): Choice<ToneMappi
     if (value === "auto" && tc) {
       const first = tc.tonemapping[0] as ToneMapping | undefined;
       label = `Automatic · ${first ? (TONEMAP_SHORT[first] ?? first) : "none available"}`;
-    } else if (reason) {
-      label = `${TONEMAP_SHORT[value] ?? value} (${reason})`;
     }
     return { value, label, reason };
   });
