@@ -62,8 +62,9 @@ pub async fn static_handler(State(state): State<AppState>, request: Request) -> 
             let looks_like_file = Path::new(&wanted).extension().is_some();
             match (looks_like_file, load("index.html")) {
                 (false, Some(asset)) => ("index.html".to_owned(), asset),
-                _ => {
-                    return (StatusCode::NOT_FOUND, "web UI not built: run `npm run build` in web/").into_response();
+                (true, Some(_)) => return StatusCode::NOT_FOUND.into_response(),
+                (_, None) => {
+                    return (StatusCode::NOT_FOUND, "web UI not built: run `bun run build`").into_response();
                 }
             }
         }

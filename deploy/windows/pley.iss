@@ -1,5 +1,5 @@
 ; pley's Windows installer, built with Inno Setup 6.7 or newer:
-;   ISCC /DAppVersion=0.1.0 /DSourceDir=<folder with pley.exe> /DFfmpegDir=<an FFmpeg build's bin folder>
+;   ISCC /DAppVersion=<version> /DSourceDir=<folder with pley.exe> /DFfmpegDir=<an FFmpeg build's bin folder>
 ;        [/DFfmpegLabel=<its name>] [/DArch=arm64] [/DFlavor=fel] deploy\windows\pley.iss
 ; scripts\build.ps1 -Installer builds it next to the release archive.
 ; README.md in this folder says what it sets up and how to install silently.

@@ -131,7 +131,7 @@ HTTP, so the two can have different licenses
 | `packages/transcoder-api` | Protocol types shared by server and transcoder |
 | `deploy/` | Docker, systemd and launchd setups, and the Windows installer ([guide](deploy/README.md)) |
 | `docs/` | [HTTP API](docs/API.md), [compatibility API](docs/COMPATIBILITY.md), [transcoder](docs/TRANSCODER.md), [storage](docs/STORAGE.md), [Samsung and LG TVs](docs/TV_PLATFORMS.md) |
-| `scripts/` | Release build, transcoder source package, license check, the web and desktop icons (`render-icons.mjs`) |
+| `scripts/` | Release build, transcoder source package, license check, the apps' icons and the stores' pictures (`render-icons.mjs`) |
 
 ## Requirements
 
