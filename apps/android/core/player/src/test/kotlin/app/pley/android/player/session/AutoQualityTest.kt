@@ -188,6 +188,16 @@ class AutoQualityTest {
     }
 
     @Test
+    fun `the steps follow the menu the file is offered`() {
+        // 4K at 18 Mbps: 15 Mbps 4K isn't offered (83 %), and 20 Mbps is above the server's 15 Mbps 4K.
+        val file = file(18_000_000, 3840, 2160)
+        started(file)
+        assertEquals(listOf("12m", "8m", "4m", "2m"), ids(auto.ladder()))
+        assertNull(play(20_000))
+        assertEquals("12m", play(3_000, waiting = true)!!.to.id)
+    }
+
+    @Test
     fun `never above the server's quality for the file`() {
         started(uhd)
         // 60 Mbps × 1.2 × 0.75 = 54 Mbps: 30 Mbps 4K, the server's own.

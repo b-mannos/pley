@@ -67,7 +67,8 @@ object Qualities {
      * The qualities worth offering for [file] (docs/QUALITY.md): the
      * original and Automatic, then those that make it smaller, with fewer
      * lines or at most 80 % of its bitrate (a copy a little lighter plays no
-     * better). Two that come to the same bitrate and lines for it show once.
+     * better). Two that come to the same bitrate and lines for it show once,
+     * and they go by the lines they give the file, then bitrate.
      * Every one when its bitrate and size are unknown.
      */
     fun forFile(file: MediaFile?): List<QualityPreset> {
@@ -75,12 +76,14 @@ object Qualities {
         val lines = linesClassOf(file)
         if (kbps == null && lines == null) return ALL
         val seen = HashSet<Pair<Int, Int?>>()
-        return ALL.filter { q ->
-            q.original || q.automatic || (
-                ((kbps != null && (q.maxBitrateKbps ?: 0) <= kbps * LIGHTER) || (lines != null && (q.maxHeight ?: 0) < lines)) &&
-                    seen.add((q.maxBitrateKbps ?: 0) to linesFor(q, lines))
-                )
+        val smaller = TRANSCODES.filter { q ->
+            ((kbps != null && (q.maxBitrateKbps ?: 0) <= kbps * LIGHTER) || (lines != null && (q.maxHeight ?: 0) < lines)) &&
+                seen.add((q.maxBitrateKbps ?: 0) to linesFor(q, lines))
         }
+        // By the lines they give the file, then bitrate: a 4K file keeps the table's order.
+        return listOf(ORIGINAL, AUTOMATIC) + smaller.sortedWith(
+            compareByDescending<QualityPreset> { linesFor(it, lines) ?: 0 }.thenByDescending { it.maxBitrateKbps ?: 0 },
+        )
     }
 
     /** The lines [preset] gives a file of [fileLines]: never more than the file's. */

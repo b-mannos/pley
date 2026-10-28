@@ -75,9 +75,10 @@ class QualityTest {
         assertEquals(2160, Qualities.linesClassOf(MediaFile(id = 1, path = "a", width = 3840, height = 1600)))
         assertEquals(720, Qualities.linesClassOf(MediaFile(id = 1, path = "a", height = 720)))
         assertNull(Qualities.linesClassOf(MediaFile(id = 1, path = "a")))
-        // 1920×800 at 30 Mbps: 20 Mbps 1080p has no fewer lines, but is 67 % of the bitrate.
+        // 1920×800 at 30 Mbps: 20 Mbps 1080p has no fewer lines, but is 67 % of the bitrate; 15 Mbps 4K is
+        // 15 Mbps 1080p here, and goes under it.
         val scope = MediaFile(id = 1, path = "a", bitrate = 30_000_000, width = 1920, height = 800)
-        assertEquals(listOf("original", "auto", "15m", "20m", "12m", "8m", "4m", "2m"), Qualities.forFile(scope).map { it.id })
+        assertEquals(listOf("original", "auto", "20m", "15m", "12m", "8m", "4m", "2m"), Qualities.forFile(scope).map { it.id })
     }
 
     @Test
