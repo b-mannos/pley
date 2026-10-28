@@ -164,6 +164,9 @@ TEXT = {
     "subtitles_always": 30204,
     "tracks_on_web": 30205,
     "saved": 30206,
+    "libraries": 30207,
+    "open": 30208,
+    "scanning_now": 30209,
 }
 
 

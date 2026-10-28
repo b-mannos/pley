@@ -104,17 +104,20 @@ WINDOW = "pley-main.xml"
 BACKDROP = 1001
 SCRIM_HERO, SCRIM_ROWS, SCRIM_ITEM = 1003, 1004, 1005
 
-# The rail (TvRail): a group, its entries' groups and buttons. Libraries
-# take up to six entries.
+# The rail (TvRail, RailItems.kt): a group, its entries' groups and buttons.
+# The first three libraries take an entry each; with more, Libraries (a page
+# of them all) takes Collections' place, so the rail never holds more than
+# seven entries between the avatar and Settings.
 RAIL = 100
 RAIL_AVATAR = 110
 RAIL_SEARCH = 111
 RAIL_HOME = 112
-RAIL_LIBRARIES = tuple(range(113, 119))
+RAIL_LIBRARIES = (113, 114, 115)
+RAIL_ALL_LIBRARIES = 116
 RAIL_PLAYLISTS = 119
 RAIL_COLLECTIONS = 120
 RAIL_SETTINGS = 121
-RAIL_ENTRIES = (RAIL_AVATAR, RAIL_SEARCH, RAIL_HOME) + RAIL_LIBRARIES + (RAIL_PLAYLISTS, RAIL_COLLECTIONS, RAIL_SETTINGS)
+RAIL_ENTRIES = (RAIL_AVATAR, RAIL_SEARCH, RAIL_HOME) + RAIL_LIBRARIES + (RAIL_ALL_LIBRARIES, RAIL_PLAYLISTS, RAIL_COLLECTIONS, RAIL_SETTINGS)
 RAIL_TOP = 194  # the first entry's middle, under the avatar's 86
 RAIL_PITCH = 112
 RAIL_SETTINGS_Y = 974
@@ -143,13 +146,11 @@ def rail_pill(entry: int) -> int:
     return entry * 10 + 7
 
 
-def rail_pitch(libraries: int) -> int:
-    """How far apart the entries from Search to Collections are: closer
-    than RAIL_PITCH when there are too many for Collections to end a step
-    above Settings (with four libraries it was on Settings, with six off
-    the screen). Settings' pill is as tall as the others', so a full rail
-    goes down to it evenly."""
-    entries = 2 + min(libraries, len(RAIL_LIBRARIES)) + 2
+def rail_pitch(entries: int) -> int:
+    """How far apart `entries` entries from Search down are: closer than
+    RAIL_PITCH when there are too many for the last to end a step above
+    Settings (seven do). Settings' pill is as tall as the others', so a
+    full rail goes down to it evenly."""
     # From Search's middle, a step per entry down to Settings' middle.
     return min(RAIL_PITCH, (RAIL_SETTINGS_Y - RAIL_TOP) // entries)
 
@@ -160,7 +161,7 @@ def rail_row(pitch: int) -> int:
 
 
 # Screens: each a group, shown alone.
-SCREENS = {"home": 2000, "item": 3000, "library": 4000, "search": 5000, "grid": 6000, "notice": 7000}
+SCREENS = {"home": 2000, "item": 3000, "library": 4000, "search": 5000, "grid": 6000, "notice": 7000, "libraries": 8000}
 
 # A metadata line (TvMetaLine): a group (which the window moves) around a row
 # of pieces, each a separator, a star, a text and a badge, of which the
@@ -184,7 +185,7 @@ HOME_PLAY, HOME_FROM_START, HOME_INFO, HOME_WATCHED, HOME_UNWATCHED = 2017, 2018
 HOME_INFO_BLOCK = 2050
 HOME_INFO_TITLE, HOME_INFO_META, HOME_INFO_SUMMARY = 2051, 2150, 2053
 HOME_ROWS = 2200
-HOME_SLOTS = 10  # Continue Watching, My List and a row for each of the rail's six libraries
+HOME_SLOTS = 10  # Continue Watching, My List and the libraries' rows
 
 # An item's page (TvItemScreen).
 ITEM_HERO = 3010
@@ -231,6 +232,14 @@ GRID_EMPTY = 6040
 
 # A page with a sentence instead (TvHomeNotice).
 NOTICE_TITLE, NOTICE_BODY, NOTICE_BUTTONS, NOTICE_FIRST, NOTICE_SECOND = 7011, 7012, 7013, 7014, 7015
+
+# Every library (TvLibrariesScreen): its title, Sort libraries, a card for
+# each, three to a row (80 by 40 dp apart, doubled).
+LIBRARIES_TITLE, LIBRARIES_BUTTONS, LIBRARIES_SORT = 8011, 8012, 8013
+LIBRARIES_LIST = 8020
+LIBRARIES_TOP = 196
+LIBRARIES_CARD = (522, 160)
+LIBRARIES_GAP = 32
 
 # Signing in (signin.py, TvLinkScreen): the code in two halves, the steps
 # (the first only with a QR code, which the server draws), the QR code.

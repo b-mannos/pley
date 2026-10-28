@@ -515,6 +515,7 @@ def rail() -> list:
     ]
     entries += [(e, "lib%d" % i, "icon-folder.png", "") for i, e in enumerate(L.RAIL_LIBRARIES)]
     entries += [
+        (L.RAIL_ALL_LIBRARIES, "libraries", "icon-layers.png", "$ADDON[plugin.video.pley 30207]"),
         (L.RAIL_PLAYLISTS, "playlists", "icon-list-music.png", "$ADDON[plugin.video.pley 30004]"),
         (L.RAIL_COLLECTIONS, "collections", "icon-layers.png", "$ADDON[plugin.video.pley 30005]"),
         (L.RAIL_SETTINGS, "settings", "icon-settings.png", "$ADDON[plugin.video.pley 30027]"),
@@ -868,6 +869,73 @@ def grid_page() -> ET.Element:
     )
 
 
+def libraries_page() -> ET.Element:
+    """Every library (TvLibrariesScreen): the title, Sort libraries at the
+    row's other end, and a card for each library, three to a row. A card
+    (LibraryCard) is surface2 with its kind's icon in a box of the text's
+    colour at 12 %, its name and how much it holds; focused, the accent with
+    on-accent content, at 1.05."""
+    width, height = L.LIBRARIES_CARD
+    margin = 16  # room for a focused card's zoom inside the list
+    list_id = L.LIBRARIES_LIST
+    lit = "Control.HasFocus(%d)" % list_id
+
+    def card(shown, surface, fg, faint, box) -> list:
+        return [
+            image(0, 0, width, height, "round12.png", color=surface, border=14, visible=shown),
+            image(36, 40, 80, 80, "round12.png", color=box, border=14, visible=shown),
+            image(56, 60, 40, 40, "$INFO[ListItem.Property(icon)]", color=fg, visible=shown),
+            label(144, 36, width - 180, 46, L.FONT_TITLE, fg, "$INFO[ListItem.Label]", visible=shown),
+            label(144, 84, width - 180, 36, L.FONT_CAPTION, faint, "$INFO[ListItem.Label2]", visible=shown),
+        ]
+
+    rest = card(None, L.SURFACE2, L.FG, "BFE9EBEF", "1FE9EBEF")
+    focused = card("!" + lit, L.SURFACE2, L.FG, "BFE9EBEF", "1FE9EBEF") + card(lit, L.ACCENT, L.ON_ACCENT, "BF03131F", "1F03131F")
+    cell = (width + L.LIBRARIES_GAP, height + L.LIBRARIES_GAP)
+    cards = control(
+        "panel",
+        list_id,
+        L.GUTTER - margin,
+        L.LIBRARIES_TOP - margin,
+        3 * cell[0] + margin,
+        L.HEIGHT - L.LIBRARIES_TOP + margin,
+        orientation="vertical",
+        scrolltime={"text": "200", "attrs": {"tween": "cubic", "easing": "out"}},
+        itemlayout=el("itemlayout", None, [group(None, margin, margin, width, height, rest)], width=cell[0], height=cell[1]),
+        focusedlayout=el(
+            "focusedlayout",
+            None,
+            [group(None, margin, margin, width, height, focused, animations=[anim("Focus", ZOOM_PILL)])],
+            width=cell[0],
+            height=cell[1],
+        ),
+        **nav(onup=str(L.LIBRARIES_BUTTONS), onleft=str(L.RAIL)),
+    )
+    sort = nav(ondown=str(list_id), onleft=str(L.RAIL))
+    return group(
+        L.SCREENS["libraries"],
+        0,
+        0,
+        L.WIDTH,
+        L.HEIGHT,
+        [
+            label(L.GUTTER, 64, 1000, 68, L.FONT_PAGE, L.FG, "$ADDON[plugin.video.pley 30207]", id_=L.LIBRARIES_TITLE),
+            grouplist(
+                L.LIBRARIES_BUTTONS,
+                1000,
+                58,
+                L.WIDTH - L.SAFE_X - 1000,
+                L.BUTTON,
+                [pill(L.LIBRARIES_SORT, "arrow-up-down", navigation=sort)],
+                align="right",
+                navigation=sort,
+            ),
+            cards,
+        ],
+        visible=is_("pley.screen", "libraries"),
+    )
+
+
 def notice() -> ET.Element:
     return group(
         L.SCREENS["notice"],
@@ -923,7 +991,7 @@ def window() -> ET.Element:
     controls.append(image(0, 0, L.WIDTH, L.HEIGHT, "pley-white.png", color=L.BG))
     for c in backdrop():
         controls.append(c)
-    for screen in (home(), item(), library(), search(), grid_page(), notice()):
+    for screen in (home(), item(), library(), search(), grid_page(), libraries_page(), notice()):
         controls.append(screen)
     # Rows pass under the rail: bg to 112, clear from 144.
     controls.append(image(0, 0, 112, L.HEIGHT, "pley-white.png", color=L.BG, visible="!" + is_("pley.screen", "notice")))

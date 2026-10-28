@@ -100,7 +100,7 @@ for (const name of ["rotate-ccw", "circle-check", "eye-off", "bookmark-plus", "b
 // starts after it.
 add("pill.png", 48, 80, box(48, 80, 12, "rgba(233,235,239,0.12)", CONTROL, 2));
 add("pill-focus.png", 48, 80, box(48, 80, 12, ACCENT));
-for (const name of ["play", "refresh-cw"]) {
+for (const name of ["play", "refresh-cw", "arrow-up-down"]) {
   add(`pill-${name}.png`, 160, 80, box(160, 80, 12, "rgba(233,235,239,0.12)", CONTROL, 2) + icon(name, 40, FG, 40, 20));
   add(`pill-${name}-focus.png`, 160, 80, box(160, 80, 12, ACCENT) + icon(name, 40, ON_ACCENT, 40, 20));
 }

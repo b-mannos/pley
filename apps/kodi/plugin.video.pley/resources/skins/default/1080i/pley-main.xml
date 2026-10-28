@@ -30207,6 +30207,227 @@
         <label />
       </control>
     </control>
+    <control type="group" id="8000">
+      <left>0</left>
+      <top>0</top>
+      <width>1920</width>
+      <height>1080</height>
+      <visible>String.IsEqual(Window.Property(pley.screen),libraries)</visible>
+      <control type="label" id="8011">
+        <left>192</left>
+        <top>64</top>
+        <width>1000</width>
+        <height>68</height>
+        <font>font52_title</font>
+        <textcolor>FFE9EBEF</textcolor>
+        <align>left</align>
+        <aligny>center</aligny>
+        <scroll>false</scroll>
+        <label>$ADDON[plugin.video.pley 30207]</label>
+      </control>
+      <control type="grouplist" id="8012">
+        <left>1000</left>
+        <top>58</top>
+        <width>824</width>
+        <height>80</height>
+        <orientation>horizontal</orientation>
+        <itemgap>0</itemgap>
+        <align>right</align>
+        <usecontrolcoords>true</usecontrolcoords>
+        <ondown>8020</ondown>
+        <onleft>100</onleft>
+        <control type="button" id="8013">
+          <top>0</top>
+          <height>80</height>
+          <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
+          <texturefocus border="80,0,40,0">pill-arrow-up-down-focus.png</texturefocus>
+          <texturenofocus border="80,0,40,0">pill-arrow-up-down.png</texturenofocus>
+          <font>font27</font>
+          <textcolor>FFE9EBEF</textcolor>
+          <focusedcolor>FF03131F</focusedcolor>
+          <disabledcolor>FFE9EBEF</disabledcolor>
+          <align>left</align>
+          <aligny>center</aligny>
+          <textoffsetx>40</textoffsetx>
+          <label />
+          <ondown>8020</ondown>
+          <onleft>100</onleft>
+          <width min="256" max="900">auto</width>
+        </control>
+      </control>
+      <control type="panel" id="8020">
+        <left>176</left>
+        <top>180</top>
+        <width>1678</width>
+        <height>900</height>
+        <orientation>vertical</orientation>
+        <scrolltime tween="cubic" easing="out">200</scrolltime>
+        <itemlayout width="554" height="192">
+          <control type="group">
+            <left>16</left>
+            <top>16</top>
+            <width>522</width>
+            <height>160</height>
+            <control type="image">
+              <left>0</left>
+              <top>0</top>
+              <width>522</width>
+              <height>160</height>
+              <texture colordiffuse="FF191D24" border="14">round12.png</texture>
+            </control>
+            <control type="image">
+              <left>36</left>
+              <top>40</top>
+              <width>80</width>
+              <height>80</height>
+              <texture colordiffuse="1FE9EBEF" border="14">round12.png</texture>
+            </control>
+            <control type="image">
+              <left>56</left>
+              <top>60</top>
+              <width>40</width>
+              <height>40</height>
+              <texture colordiffuse="FFE9EBEF">$INFO[ListItem.Property(icon)]</texture>
+            </control>
+            <control type="label">
+              <left>144</left>
+              <top>36</top>
+              <width>342</width>
+              <height>46</height>
+              <font>font32_title</font>
+              <textcolor>FFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label]</label>
+            </control>
+            <control type="label">
+              <left>144</left>
+              <top>84</top>
+              <width>342</width>
+              <height>36</height>
+              <font>font12</font>
+              <textcolor>BFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label2]</label>
+            </control>
+          </control>
+        </itemlayout>
+        <focusedlayout width="554" height="192">
+          <control type="group">
+            <left>16</left>
+            <top>16</top>
+            <width>522</width>
+            <height>160</height>
+            <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
+            <control type="image">
+              <left>0</left>
+              <top>0</top>
+              <width>522</width>
+              <height>160</height>
+              <visible>!Control.HasFocus(8020)</visible>
+              <texture colordiffuse="FF191D24" border="14">round12.png</texture>
+            </control>
+            <control type="image">
+              <left>36</left>
+              <top>40</top>
+              <width>80</width>
+              <height>80</height>
+              <visible>!Control.HasFocus(8020)</visible>
+              <texture colordiffuse="1FE9EBEF" border="14">round12.png</texture>
+            </control>
+            <control type="image">
+              <left>56</left>
+              <top>60</top>
+              <width>40</width>
+              <height>40</height>
+              <visible>!Control.HasFocus(8020)</visible>
+              <texture colordiffuse="FFE9EBEF">$INFO[ListItem.Property(icon)]</texture>
+            </control>
+            <control type="label">
+              <left>144</left>
+              <top>36</top>
+              <width>342</width>
+              <height>46</height>
+              <visible>!Control.HasFocus(8020)</visible>
+              <font>font32_title</font>
+              <textcolor>FFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label]</label>
+            </control>
+            <control type="label">
+              <left>144</left>
+              <top>84</top>
+              <width>342</width>
+              <height>36</height>
+              <visible>!Control.HasFocus(8020)</visible>
+              <font>font12</font>
+              <textcolor>BFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label2]</label>
+            </control>
+            <control type="image">
+              <left>0</left>
+              <top>0</top>
+              <width>522</width>
+              <height>160</height>
+              <visible>Control.HasFocus(8020)</visible>
+              <texture colordiffuse="FF38BDF8" border="14">round12.png</texture>
+            </control>
+            <control type="image">
+              <left>36</left>
+              <top>40</top>
+              <width>80</width>
+              <height>80</height>
+              <visible>Control.HasFocus(8020)</visible>
+              <texture colordiffuse="1F03131F" border="14">round12.png</texture>
+            </control>
+            <control type="image">
+              <left>56</left>
+              <top>60</top>
+              <width>40</width>
+              <height>40</height>
+              <visible>Control.HasFocus(8020)</visible>
+              <texture colordiffuse="FF03131F">$INFO[ListItem.Property(icon)]</texture>
+            </control>
+            <control type="label">
+              <left>144</left>
+              <top>36</top>
+              <width>342</width>
+              <height>46</height>
+              <visible>Control.HasFocus(8020)</visible>
+              <font>font32_title</font>
+              <textcolor>FF03131F</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label]</label>
+            </control>
+            <control type="label">
+              <left>144</left>
+              <top>84</top>
+              <width>342</width>
+              <height>36</height>
+              <visible>Control.HasFocus(8020)</visible>
+              <font>font12</font>
+              <textcolor>BF03131F</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label2]</label>
+            </control>
+          </control>
+        </focusedlayout>
+        <onup>8012</onup>
+        <onleft>100</onleft>
+      </control>
+    </control>
     <control type="group" id="7000">
       <left>0</left>
       <top>0</top>
@@ -30990,7 +31211,7 @@
           <top>0</top>
           <width>528</width>
           <height>100</height>
-          <visible>ControlGroup(100).HasFocus + String.IsEqual(Window.Property(pley.rail),lib3) + !Control.HasFocus(116)</visible>
+          <visible>ControlGroup(100).HasFocus + String.IsEqual(Window.Property(pley.rail),libraries) + !Control.HasFocus(116)</visible>
           <texture colordiffuse="FF222731" border="14">round12.png</texture>
         </control>
         <control type="image">
@@ -30998,7 +31219,7 @@
           <top>30</top>
           <width>8</width>
           <height>40</height>
-          <visible>!ControlGroup(100).HasFocus + String.IsEqual(Window.Property(pley.rail),lib3)</visible>
+          <visible>!ControlGroup(100).HasFocus + String.IsEqual(Window.Property(pley.rail),libraries)</visible>
           <texture colordiffuse="FF38BDF8" border="4">round4.png</texture>
         </control>
         <control type="button" id="116">
@@ -31017,7 +31238,7 @@
           <textoffsetx>40</textoffsetx>
           <label />
           <onup>115</onup>
-          <ondown>117</ondown>
+          <ondown>119</ondown>
           <width>528</width>
         </control>
         <control type="image" id="1161">
@@ -31025,16 +31246,16 @@
           <top>30</top>
           <width>40</width>
           <height>40</height>
-          <visible>!Control.HasFocus(116) + !String.IsEqual(Window.Property(pley.rail),lib3)</visible>
-          <texture colordiffuse="FFA1A9B6">icon-folder.png</texture>
+          <visible>!Control.HasFocus(116) + !String.IsEqual(Window.Property(pley.rail),libraries)</visible>
+          <texture colordiffuse="FFA1A9B6">icon-layers.png</texture>
         </control>
         <control type="image" id="1162">
           <left>48</left>
           <top>30</top>
           <width>40</width>
           <height>40</height>
-          <visible>!Control.HasFocus(116) + String.IsEqual(Window.Property(pley.rail),lib3)</visible>
-          <texture colordiffuse="FFE9EBEF">icon-folder.png</texture>
+          <visible>!Control.HasFocus(116) + String.IsEqual(Window.Property(pley.rail),libraries)</visible>
+          <texture colordiffuse="FFE9EBEF">icon-layers.png</texture>
         </control>
         <control type="image" id="1163">
           <left>48</left>
@@ -31042,14 +31263,14 @@
           <width>40</width>
           <height>40</height>
           <visible>Control.HasFocus(116)</visible>
-          <texture colordiffuse="FF03131F">icon-folder.png</texture>
+          <texture colordiffuse="FF03131F">icon-layers.png</texture>
         </control>
         <control type="label" id="1164">
           <left>113</left>
           <top>0</top>
           <width>400</width>
           <height>100</height>
-          <visible>ControlGroup(100).HasFocus + !Control.HasFocus(116) + !String.IsEqual(Window.Property(pley.rail),lib3)</visible>
+          <visible>ControlGroup(100).HasFocus + !Control.HasFocus(116) + !String.IsEqual(Window.Property(pley.rail),libraries)</visible>
           <animation effect="fade" start="0" end="100" time="150">Visible</animation>
           <animation effect="fade" start="100" end="0" time="150">Hidden</animation>
           <font>font13</font>
@@ -31057,14 +31278,14 @@
           <align>left</align>
           <aligny>center</aligny>
           <scroll>false</scroll>
-          <label />
+          <label>$ADDON[plugin.video.pley 30207]</label>
         </control>
         <control type="label" id="1165">
           <left>113</left>
           <top>0</top>
           <width>400</width>
           <height>100</height>
-          <visible>ControlGroup(100).HasFocus + !Control.HasFocus(116) + String.IsEqual(Window.Property(pley.rail),lib3)</visible>
+          <visible>ControlGroup(100).HasFocus + !Control.HasFocus(116) + String.IsEqual(Window.Property(pley.rail),libraries)</visible>
           <animation effect="fade" start="0" end="100" time="150">Visible</animation>
           <animation effect="fade" start="100" end="0" time="150">Hidden</animation>
           <font>font13</font>
@@ -31072,7 +31293,7 @@
           <align>left</align>
           <aligny>center</aligny>
           <scroll>false</scroll>
-          <label />
+          <label>$ADDON[plugin.video.pley 30207]</label>
         </control>
         <control type="label" id="1166">
           <left>113</left>
@@ -31085,228 +31306,12 @@
           <align>left</align>
           <aligny>center</aligny>
           <scroll>false</scroll>
-          <label />
-        </control>
-      </control>
-      <control type="group" id="217">
-        <left>0</left>
-        <top>816</top>
-        <width>544</width>
-        <height>100</height>
-        <control type="image" id="1177">
-          <left>8</left>
-          <top>0</top>
-          <width>528</width>
-          <height>100</height>
-          <visible>ControlGroup(100).HasFocus + String.IsEqual(Window.Property(pley.rail),lib4) + !Control.HasFocus(117)</visible>
-          <texture colordiffuse="FF222731" border="14">round12.png</texture>
-        </control>
-        <control type="image">
-          <left>16</left>
-          <top>30</top>
-          <width>8</width>
-          <height>40</height>
-          <visible>!ControlGroup(100).HasFocus + String.IsEqual(Window.Property(pley.rail),lib4)</visible>
-          <texture colordiffuse="FF38BDF8" border="4">round4.png</texture>
-        </control>
-        <control type="button" id="117">
-          <left>8</left>
-          <top>0</top>
-          <height>100</height>
-          <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
-          <texturefocus border="14" colordiffuse="FF38BDF8">round12.png</texturefocus>
-          <texturenofocus />
-          <font>font27</font>
-          <textcolor>FFE9EBEF</textcolor>
-          <focusedcolor>FF03131F</focusedcolor>
-          <disabledcolor>FFE9EBEF</disabledcolor>
-          <align>center</align>
-          <aligny>center</aligny>
-          <textoffsetx>40</textoffsetx>
-          <label />
-          <onup>116</onup>
-          <ondown>118</ondown>
-          <width>528</width>
-        </control>
-        <control type="image" id="1171">
-          <left>48</left>
-          <top>30</top>
-          <width>40</width>
-          <height>40</height>
-          <visible>!Control.HasFocus(117) + !String.IsEqual(Window.Property(pley.rail),lib4)</visible>
-          <texture colordiffuse="FFA1A9B6">icon-folder.png</texture>
-        </control>
-        <control type="image" id="1172">
-          <left>48</left>
-          <top>30</top>
-          <width>40</width>
-          <height>40</height>
-          <visible>!Control.HasFocus(117) + String.IsEqual(Window.Property(pley.rail),lib4)</visible>
-          <texture colordiffuse="FFE9EBEF">icon-folder.png</texture>
-        </control>
-        <control type="image" id="1173">
-          <left>48</left>
-          <top>30</top>
-          <width>40</width>
-          <height>40</height>
-          <visible>Control.HasFocus(117)</visible>
-          <texture colordiffuse="FF03131F">icon-folder.png</texture>
-        </control>
-        <control type="label" id="1174">
-          <left>113</left>
-          <top>0</top>
-          <width>400</width>
-          <height>100</height>
-          <visible>ControlGroup(100).HasFocus + !Control.HasFocus(117) + !String.IsEqual(Window.Property(pley.rail),lib4)</visible>
-          <animation effect="fade" start="0" end="100" time="150">Visible</animation>
-          <animation effect="fade" start="100" end="0" time="150">Hidden</animation>
-          <font>font13</font>
-          <textcolor>FFA1A9B6</textcolor>
-          <align>left</align>
-          <aligny>center</aligny>
-          <scroll>false</scroll>
-          <label />
-        </control>
-        <control type="label" id="1175">
-          <left>113</left>
-          <top>0</top>
-          <width>400</width>
-          <height>100</height>
-          <visible>ControlGroup(100).HasFocus + !Control.HasFocus(117) + String.IsEqual(Window.Property(pley.rail),lib4)</visible>
-          <animation effect="fade" start="0" end="100" time="150">Visible</animation>
-          <animation effect="fade" start="100" end="0" time="150">Hidden</animation>
-          <font>font13</font>
-          <textcolor>FFE9EBEF</textcolor>
-          <align>left</align>
-          <aligny>center</aligny>
-          <scroll>false</scroll>
-          <label />
-        </control>
-        <control type="label" id="1176">
-          <left>113</left>
-          <top>0</top>
-          <width>400</width>
-          <height>100</height>
-          <visible>Control.HasFocus(117)</visible>
-          <font>font13</font>
-          <textcolor>FF03131F</textcolor>
-          <align>left</align>
-          <aligny>center</aligny>
-          <scroll>false</scroll>
-          <label />
-        </control>
-      </control>
-      <control type="group" id="218">
-        <left>0</left>
-        <top>928</top>
-        <width>544</width>
-        <height>100</height>
-        <control type="image" id="1187">
-          <left>8</left>
-          <top>0</top>
-          <width>528</width>
-          <height>100</height>
-          <visible>ControlGroup(100).HasFocus + String.IsEqual(Window.Property(pley.rail),lib5) + !Control.HasFocus(118)</visible>
-          <texture colordiffuse="FF222731" border="14">round12.png</texture>
-        </control>
-        <control type="image">
-          <left>16</left>
-          <top>30</top>
-          <width>8</width>
-          <height>40</height>
-          <visible>!ControlGroup(100).HasFocus + String.IsEqual(Window.Property(pley.rail),lib5)</visible>
-          <texture colordiffuse="FF38BDF8" border="4">round4.png</texture>
-        </control>
-        <control type="button" id="118">
-          <left>8</left>
-          <top>0</top>
-          <height>100</height>
-          <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
-          <texturefocus border="14" colordiffuse="FF38BDF8">round12.png</texturefocus>
-          <texturenofocus />
-          <font>font27</font>
-          <textcolor>FFE9EBEF</textcolor>
-          <focusedcolor>FF03131F</focusedcolor>
-          <disabledcolor>FFE9EBEF</disabledcolor>
-          <align>center</align>
-          <aligny>center</aligny>
-          <textoffsetx>40</textoffsetx>
-          <label />
-          <onup>117</onup>
-          <ondown>119</ondown>
-          <width>528</width>
-        </control>
-        <control type="image" id="1181">
-          <left>48</left>
-          <top>30</top>
-          <width>40</width>
-          <height>40</height>
-          <visible>!Control.HasFocus(118) + !String.IsEqual(Window.Property(pley.rail),lib5)</visible>
-          <texture colordiffuse="FFA1A9B6">icon-folder.png</texture>
-        </control>
-        <control type="image" id="1182">
-          <left>48</left>
-          <top>30</top>
-          <width>40</width>
-          <height>40</height>
-          <visible>!Control.HasFocus(118) + String.IsEqual(Window.Property(pley.rail),lib5)</visible>
-          <texture colordiffuse="FFE9EBEF">icon-folder.png</texture>
-        </control>
-        <control type="image" id="1183">
-          <left>48</left>
-          <top>30</top>
-          <width>40</width>
-          <height>40</height>
-          <visible>Control.HasFocus(118)</visible>
-          <texture colordiffuse="FF03131F">icon-folder.png</texture>
-        </control>
-        <control type="label" id="1184">
-          <left>113</left>
-          <top>0</top>
-          <width>400</width>
-          <height>100</height>
-          <visible>ControlGroup(100).HasFocus + !Control.HasFocus(118) + !String.IsEqual(Window.Property(pley.rail),lib5)</visible>
-          <animation effect="fade" start="0" end="100" time="150">Visible</animation>
-          <animation effect="fade" start="100" end="0" time="150">Hidden</animation>
-          <font>font13</font>
-          <textcolor>FFA1A9B6</textcolor>
-          <align>left</align>
-          <aligny>center</aligny>
-          <scroll>false</scroll>
-          <label />
-        </control>
-        <control type="label" id="1185">
-          <left>113</left>
-          <top>0</top>
-          <width>400</width>
-          <height>100</height>
-          <visible>ControlGroup(100).HasFocus + !Control.HasFocus(118) + String.IsEqual(Window.Property(pley.rail),lib5)</visible>
-          <animation effect="fade" start="0" end="100" time="150">Visible</animation>
-          <animation effect="fade" start="100" end="0" time="150">Hidden</animation>
-          <font>font13</font>
-          <textcolor>FFE9EBEF</textcolor>
-          <align>left</align>
-          <aligny>center</aligny>
-          <scroll>false</scroll>
-          <label />
-        </control>
-        <control type="label" id="1186">
-          <left>113</left>
-          <top>0</top>
-          <width>400</width>
-          <height>100</height>
-          <visible>Control.HasFocus(118)</visible>
-          <font>font13</font>
-          <textcolor>FF03131F</textcolor>
-          <align>left</align>
-          <aligny>center</aligny>
-          <scroll>false</scroll>
-          <label />
+          <label>$ADDON[plugin.video.pley 30207]</label>
         </control>
       </control>
       <control type="group" id="219">
         <left>0</left>
-        <top>1040</top>
+        <top>816</top>
         <width>544</width>
         <height>100</height>
         <control type="image" id="1197">
@@ -31340,7 +31345,7 @@
           <aligny>center</aligny>
           <textoffsetx>40</textoffsetx>
           <label />
-          <onup>118</onup>
+          <onup>116</onup>
           <ondown>120</ondown>
           <width>528</width>
         </control>
@@ -31414,7 +31419,7 @@
       </control>
       <control type="group" id="220">
         <left>0</left>
-        <top>1152</top>
+        <top>928</top>
         <width>544</width>
         <height>100</height>
         <control type="image" id="1207">

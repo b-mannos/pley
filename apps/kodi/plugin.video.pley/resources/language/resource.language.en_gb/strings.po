@@ -662,3 +662,15 @@ msgstr ""
 msgctxt "#30206"
 msgid "Saved"
 msgstr ""
+
+msgctxt "#30207"
+msgid "Libraries"
+msgstr ""
+
+msgctxt "#30208"
+msgid "Open"
+msgstr ""
+
+msgctxt "#30209"
+msgid "Scanning…"
+msgstr ""

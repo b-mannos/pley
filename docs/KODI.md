@@ -61,18 +61,23 @@ Opened from Kodi's add-ons (or a favourite), pley shows its own screens
 over Kodi, as its Android TV app does (apps/android/ui/tv, its screenshots
 side by side with Kodi's were the reference):
 
-- **The rail** on the left: the profile, Search, Home, each library,
-  Playlists, Collections and Settings (the add-on's). Collapsed it shows
-  icons, the current page's marked; Left opens it over the page with each
-  entry's name. However many libraries there are, the entries come closer
-  when they must, their pills shorter (Settings' too), so Collections
-  always ends a step above Settings. The profile's menu has Audio and
-  subtitles (below). The
+- **The rail** on the left: the profile, Search, Home, the first three
+  libraries, Playlists, Collections and Settings (the add-on's). With more
+  than three libraries, Libraries takes Collections' place, as on Android
+  TV (collections stay on each library's Collections tab). Collapsed it
+  shows icons, the current page's marked; Left opens it over the page with
+  each entry's name. The profile's menu has Audio and subtitles (below). The
   libraries come in the profile's order: the profile's menu has Sort
   libraries (a library, then where it goes), a library's
   menu key Move up, Move down and Use the server's order, each saved at
   once for every device of the profile's (`PUT /api/me/libraries/order`);
   sorted elsewhere, the rail follows.
+- **Libraries** (TvLibrariesScreen): every library as a card, three to a
+  row: its kind's icon, its name, how much it holds and "Scanning…" while
+  the server scans it, with Sort libraries at the top. A card's menu key
+  has Open, Move up, Move down and Use the server's order. A library opened
+  from here marks its own rail entry when it is among the first three,
+  else Libraries.
 - **Home**: the hero for what to watch next (the first of Continue
   Watching, else the newest) over its backdrop, with Resume or Play, From
   start, Info and Watched; under it the server's rows. Down goes into the

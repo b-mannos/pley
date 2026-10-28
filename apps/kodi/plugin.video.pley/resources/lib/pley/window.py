@@ -316,10 +316,8 @@ class Window(xbmcgui.WindowXML):
             self.session.forget()
             rail = self.getFocusId() if self.focus_in_rail() else None
             try:
-                # A library added, renamed or moved (on any of the profile's devices).
-                libraries = self.session.get("/api/libraries")
-                if [rail_view(lib) for lib in libraries] != [rail_view(lib) for lib in self.libraries]:
-                    self.place_libraries(libraries)
+                # A library added, renamed, moved (on any of the profile's devices) or scanned.
+                self.take_libraries(self.session.get("/api/libraries"))
                 self.screen.refresh()
             except api.ApiError as e:
                 kodi.log("refreshing %s: %s" % (self.screen.name, e.message), xbmc.LOGWARNING)
@@ -406,13 +404,7 @@ class Window(xbmcgui.WindowXML):
         self.c(L.RAIL_INITIAL).setLabel(name[:1].upper(), textColor=L.ON_ACCENT if light else L.FG)
         if self.me.get("avatar_url"):
             self.prop("pley.avatar.picture", image(self.session.base, self.me["avatar_url"], 128))
-        pitch = L.rail_pitch(len(self.libraries))
-        y = L.RAIL_TOP
-        for entry in (L.RAIL_SEARCH, L.RAIL_HOME):
-            self.place_rail_entry(entry, y, pitch)
-            y += pitch
         for i, entry in enumerate(L.RAIL_LIBRARIES):
-            group = L.rail_group(entry)
             if i < len(self.libraries):
                 library = self.libraries[i]
                 icon = LIBRARY_ICONS.get(library.get("kind"), "icon-folder.png")
@@ -420,14 +412,13 @@ class Window(xbmcgui.WindowXML):
                     self.c(control).setImage(icon, False)
                 for control in L.rail_labels(entry):
                     self.put(control, library.get("name"))
-                self.place_rail_entry(entry, y, pitch)
-                self.visible(group, True)
-                y += pitch
-            else:
-                self.visible(group, False)
-        for entry in (L.RAIL_PLAYLISTS, L.RAIL_COLLECTIONS):
-            self.place_rail_entry(entry, y, pitch)
-            y += pitch
+            self.visible(L.rail_group(entry), i < len(self.libraries))
+        entries = rail_entries(len(self.libraries))
+        self.visible(L.rail_group(L.RAIL_ALL_LIBRARIES), L.RAIL_ALL_LIBRARIES in entries)
+        self.visible(L.rail_group(L.RAIL_COLLECTIONS), L.RAIL_COLLECTIONS in entries)
+        pitch = L.rail_pitch(len(entries))
+        for at, entry in enumerate(entries):
+            self.place_rail_entry(entry, L.RAIL_TOP + at * pitch, pitch)
         # Settings stays at the foot, its pill as tall as the others'.
         self.place_rail_entry(L.RAIL_SETTINGS, L.RAIL_SETTINGS_Y, pitch)
 
@@ -448,15 +439,20 @@ class Window(xbmcgui.WindowXML):
         self.setFocusId(self.rail_entry(self.getProperty("pley.rail")))
 
     def rail_entry(self, key: str) -> int:
-        if key.startswith("lib"):
-            return L.RAIL_LIBRARIES[int(key[3:])]
-        return {
-            "profile": L.RAIL_AVATAR,
-            "search": L.RAIL_SEARCH,
-            "playlists": L.RAIL_PLAYLISTS,
-            "collections": L.RAIL_COLLECTIONS,
-            "settings": L.RAIL_SETTINGS,
-        }.get(key, L.RAIL_HOME)
+        if key.startswith("lib") and key[3:].isdigit():
+            entry = L.RAIL_LIBRARIES[int(key[3:])] if int(key[3:]) < len(L.RAIL_LIBRARIES) else L.RAIL_HOME
+        else:
+            entry = {
+                "profile": L.RAIL_AVATAR,
+                "search": L.RAIL_SEARCH,
+                "libraries": L.RAIL_ALL_LIBRARIES,
+                "playlists": L.RAIL_PLAYLISTS,
+                "collections": L.RAIL_COLLECTIONS,
+                "settings": L.RAIL_SETTINGS,
+            }.get(key, L.RAIL_HOME)
+        # Collections or Libraries as the page's, while the rail shows the other: Home.
+        shown = rail_entries(len(self.libraries)) + [L.RAIL_AVATAR, L.RAIL_SETTINGS]
+        return entry if entry in shown else L.RAIL_HOME
 
     def rail_click(self, control_id: int) -> None:
         if control_id == L.RAIL_AVATAR:
@@ -468,6 +464,8 @@ class Window(xbmcgui.WindowXML):
             return self.go(Search(self))
         if control_id == L.RAIL_HOME:
             return self.go(Home(self))
+        if control_id == L.RAIL_ALL_LIBRARIES:
+            return self.go(Libraries(self))
         if control_id == L.RAIL_PLAYLISTS:
             return self.go(Grid.playlists(self))
         if control_id == L.RAIL_COLLECTIONS:
@@ -546,8 +544,9 @@ class Window(xbmcgui.WindowXML):
         if to is None:
             return self.use_server_order()
         ids.insert(to, ids.pop(i))
-        if self.save_order(ids) and to < len(L.RAIL_LIBRARIES):
-            self.setFocusId(L.RAIL_LIBRARIES[to])
+        if self.save_order(ids):
+            # Moved past the rail's three, it is on the Libraries page.
+            self.setFocusId(L.RAIL_LIBRARIES[to] if to < len(L.RAIL_LIBRARIES) else L.RAIL_ALL_LIBRARIES)
 
     def save_order(self, ids: list) -> bool:
         """The profile's own order (PUT /api/me/libraries/order): whether it
@@ -571,10 +570,18 @@ class Window(xbmcgui.WindowXML):
                     pass
             return False
         self.place_libraries(libraries)
-        if isinstance(self.screen, Home):
-            # Home's rows follow the libraries' order.
+        if isinstance(self.screen, (Home, Libraries)):
+            # Home's rows and the Libraries page follow the libraries' order.
             self.screen.refresh()
         return True
+
+    def take_libraries(self, libraries: list) -> None:
+        """The libraries as the server lists them now: the rail redrawn if
+        what it shows of them changed (the rest is the Libraries page's)."""
+        if [rail_view(lib) for lib in libraries] != [rail_view(lib) for lib in self.libraries]:
+            self.place_libraries(libraries)
+        else:
+            self.libraries = libraries
 
     def place_libraries(self, libraries: list) -> None:
         """The rail in the libraries' order, its mark staying on the library
@@ -583,8 +590,7 @@ class Window(xbmcgui.WindowXML):
         self.setup_rail()
         for screen in self.stack + ([self.screen] if self.screen is not None else []):
             if isinstance(screen, Library) and (screen.rail or "").startswith("lib"):
-                at = next((i for i, lib in enumerate(libraries) if lib["id"] == screen.library["id"]), None)
-                screen.rail = "lib%d" % at if at is not None else "home"
+                screen.rail = library_rail(libraries, screen.library["id"])
         if self.screen is not None:
             self.prop("pley.rail", self.screen.rail or (self.stack[0].rail if self.stack else "home"))
 
@@ -803,6 +809,35 @@ class Window(xbmcgui.WindowXML):
 def rail_view(library: dict) -> tuple:
     """What the rail shows of a library."""
     return library.get("id"), library.get("name"), library.get("kind")
+
+
+def rail_entries(libraries: int) -> list:
+    """The rail's entries from Search down, Settings apart (RailItems.kt):
+    the first three libraries, and with more, Libraries in Collections'
+    place (collections stay on each library's Collections tab)."""
+    shown = list(L.RAIL_LIBRARIES[:libraries])
+    if libraries > len(L.RAIL_LIBRARIES):
+        return [L.RAIL_SEARCH, L.RAIL_HOME, *shown, L.RAIL_ALL_LIBRARIES, L.RAIL_PLAYLISTS]
+    return [L.RAIL_SEARCH, L.RAIL_HOME, *shown, L.RAIL_PLAYLISTS, L.RAIL_COLLECTIONS]
+
+
+def library_rail(libraries: list, library_id) -> str:
+    """The rail's entry a library's page marks: its own among the first
+    three, else Libraries (Home, once the library has gone)."""
+    at = next((i for i, lib in enumerate(libraries) if lib["id"] == library_id), None)
+    if at is None:
+        return "home"
+    return "lib%d" % at if at < len(L.RAIL_LIBRARIES) else "libraries"
+
+
+LIBRARY_NOUNS = {"movies": ("movie", "movies"), "shows": ("show", "shows"), "music": ("artist", "artists")}
+
+
+def library_count(library: dict) -> str:
+    """How much a library holds: "12 movies", "1 show", "40 artists"."""
+    if library.get("item_count") is None:
+        return ""
+    return words.plural(library["item_count"], *LIBRARY_NOUNS.get(library.get("kind"), ("item", "items")))
 
 
 def luminance(hex_rgb: str) -> float:
@@ -1653,7 +1688,7 @@ class Library(Screen):
     def __init__(self, win: Window, library: dict, rail_key):
         super().__init__(win)
         self.library = library
-        self.rail = rail_key or "lib%d" % next((i for i, lib in enumerate(win.libraries) if lib["id"] == library["id"]), 0)
+        self.rail = rail_key or library_rail(win.libraries, library["id"])
         self.tab = "all"
         self.sort = "title"
         self.descending = False
@@ -1766,8 +1801,7 @@ class Library(Screen):
                 win.visible(chip, not music and not on)
                 win.visible(chip + 100, not music and on)
                 win.put(chip + 100, ICON_ROOM + text)
-            kind = self.library.get("kind")
-            noun = {"movies": ("movie", "movies"), "shows": ("show", "shows"), "music": ("artist", "artists")}.get(kind, ("item", "items"))
+            noun = LIBRARY_NOUNS.get(self.library.get("kind"), ("item", "items"))
             every = self.library.get("item_count")
             if self.filtered and every is not None and every >= self.total:
                 # "23 of 342 movies"
@@ -2201,6 +2235,99 @@ class Grid(Screen):
         if at >= 0 and self.entries:
             self.win.setFocusId(grid)
             self.win.c(grid).selectItem(min(at, len(self.entries) - 1))
+
+
+class Libraries(Screen):
+    """Every library (TvLibrariesScreen): the rail shows the first three,
+    and Libraries opens this page. A card for each in the profile's order:
+    its kind's icon, its name, how much it holds, and "Scanning…" while the
+    server scans it. Sort libraries sorts them as the profile's menu does;
+    a card's menu opens it, moves it, or goes back to the server's order."""
+
+    name = "libraries"
+
+    @property
+    def rail(self) -> str:
+        return "libraries" if L.RAIL_ALL_LIBRARIES in rail_entries(len(self.win.libraries)) else "home"
+
+    def load(self) -> None:
+        # How much each holds, and which the server is scanning, as of now.
+        self.win.take_libraries(self.session.get("/api/libraries"))
+
+    def instead(self):
+        if self.win.libraries:
+            return None
+        return Notice(self.win, T("no_libraries"), T("no_libraries_body"), retry=Home(self.win))
+
+    def show(self, filled: bool) -> None:
+        if not filled:
+            self.draw()
+        self.win.setFocusId(self.last_focus if filled and self.last_focus else self.first())
+
+    def first(self) -> int:
+        return L.LIBRARIES_LIST
+
+    def draw(self) -> None:
+        win = self.win
+        cards = win.c(L.LIBRARIES_LIST)
+        cards.reset()
+        cards.addItems([library_card(lib) for lib in win.libraries])
+        win.put(L.LIBRARIES_SORT, ICON_ROOM + T("sort_libraries"))
+        win.visible(L.LIBRARIES_SORT, len(win.libraries) > 1)
+
+    def refresh(self) -> None:
+        cards = self.win.c(L.LIBRARIES_LIST)
+        at = cards.getSelectedPosition()
+        self.draw()
+        if self.win.libraries:
+            cards.selectItem(min(max(at, 0), len(self.win.libraries) - 1))
+
+    def chosen(self):
+        at = self.win.c(L.LIBRARIES_LIST).getSelectedPosition()
+        return at if 0 <= at < len(self.win.libraries) else None
+
+    def click(self, control_id: int) -> None:
+        win = self.win
+        if control_id == L.LIBRARIES_SORT:
+            return win.sort_libraries()
+        at = self.chosen() if control_id == L.LIBRARIES_LIST else None
+        if at is not None:
+            win.open(Library(win, win.libraries[at], None))
+
+    def menu(self, control_id: int) -> None:
+        win = self.win
+        at = self.chosen() if control_id == L.LIBRARIES_LIST else None
+        if at is None:
+            return
+        library = win.libraries[at]
+        actions = [(T("open"), lambda: win.open(Library(win, library, None)))]
+        if len(win.libraries) > 1:
+            if at > 0:
+                actions.append((T("move_up"), lambda: self.move(at, at - 1)))
+            if at + 1 < len(win.libraries):
+                actions.append((T("move_down"), lambda: self.move(at, at + 1)))
+            actions.append((T("server_order"), win.use_server_order))
+        chosen = xbmcgui.Dialog().contextmenu([name for name, _ in actions])
+        if chosen >= 0:
+            actions[chosen][1]()
+
+    def move(self, at: int, to: int) -> None:
+        ids = [lib["id"] for lib in self.win.libraries]
+        ids.insert(to, ids.pop(at))
+        if self.win.save_order(ids):
+            # Focus goes with the card.
+            self.win.c(L.LIBRARIES_LIST).selectItem(to)
+
+
+def library_card(library: dict) -> "xbmcgui.ListItem":
+    """A library's card on the Libraries page: its name, how much it holds
+    (and that the server is scanning it), its kind's icon."""
+    line = library_count(library)
+    if library.get("scanning"):
+        line = "%s · %s" % (line, T("scanning_now")) if line else T("scanning_now")
+    li = xbmcgui.ListItem(library.get("name") or "", line, offscreen=True)
+    li.setProperty("icon", LIBRARY_ICONS.get(library.get("kind"), "icon-folder.png"))
+    return li
 
 
 class Notice(Screen):
