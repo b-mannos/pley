@@ -285,7 +285,7 @@ mod tests {
     }
 
     fn audio_out(copy: bool, codec: AudioCodec) -> AudioOut {
-        AudioOut { stream_index: 1, copy, codec, channels: 6, bitrate_kbps: 640, resample: false }
+        AudioOut { stream_index: 1, copy, codec, channels: 6, bitrate_kbps: 640, resample: false, partial_decode: None }
     }
 
     fn plan(video: Option<VideoOut>, audio: Option<AudioOut>) -> Plan {

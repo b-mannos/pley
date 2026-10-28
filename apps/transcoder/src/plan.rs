@@ -227,6 +227,24 @@ pub struct AudioOut {
     pub channels: u32,
     pub bitrate_kbps: u32,
     pub resample: bool,
+    /// A decoder option that decodes only what the conversion keeps (see
+    /// [`partial_decode`]), as its name and value.
+    pub partial_decode: Option<(&'static str, &'static str)>,
+}
+
+/// What of a lossless track a conversion to `channels` needs decoded: a
+/// DTS-HD Master Audio track's lossy 5.1 core, which the lossy result can't
+/// tell from the whole; of TrueHD, the substream mastered with that many
+/// channels (Blu-rays carry a 2.0 and a 5.1 one inside the 7.1), which the
+/// decoder falls back from to the whole where it's missing.
+fn partial_decode(src: &MediaStream, channels: u32) -> Option<(&'static str, &'static str)> {
+    let src_channels = src.channels.unwrap_or(2);
+    match src.codec.as_str() {
+        "dts" if channels <= 6 && src.profile.as_deref().is_some_and(|p| p.contains("MA")) => Some(("core_only", "1")),
+        "truehd" if channels <= 2 && src_channels > 2 => Some(("downmix", "stereo")),
+        "truehd" if channels <= 6 && src_channels > 6 => Some(("downmix", "5.1")),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -469,7 +487,16 @@ impl Plan {
                 let bitrate = areq.bitrate_kbps.unwrap_or(default_bitrate).clamp(64, 640);
                 // FFmpeg's AC-3 encoders take 32, 44.1 and 48 kHz only.
                 let resample = !matches!(src.sample_rate, Some(44_100) | Some(48_000));
-                Some(AudioOut { stream_index: src.index, copy, codec, channels, bitrate_kbps: bitrate, resample })
+                let partial_decode = (!copy).then(|| partial_decode(src, channels)).flatten();
+                Some(AudioOut {
+                    stream_index: src.index,
+                    copy,
+                    codec,
+                    channels,
+                    bitrate_kbps: bitrate,
+                    resample,
+                    partial_decode,
+                })
             }
             (Some(_), None) if video.is_none() => return Err("file has no audio or video stream".into()),
             _ => None,
@@ -777,6 +804,9 @@ impl Plan {
                 a.push("-noaccurate_seek");
             }
             a.push_all(["-ss", &secs(seek_ms)]);
+        }
+        if let Some((au, (option, value))) = self.audio.as_ref().and_then(|au| au.partial_decode.map(|d| (au, d))) {
+            a.push_all([&format!("-{option}:{}", au.stream_index), value]);
         }
         a.push_all(MEDIA_INPUT_OPTIONS);
         a.push("-i");
@@ -2338,6 +2368,33 @@ mod tests {
         assert_eq!(plan.warnings, ["truehd audio cannot be copied into HLS, transcoding to E-AC-3"]);
         let (_, args) = audio_args(AudioCodec::default(), None, &truehd);
         assert!(args.contains("-c:a aac -ac 2 -b:a 192k"), "{args}");
+    }
+
+    #[test]
+    fn lossless_audio_is_decoded_only_as_far_as_the_conversion_keeps() {
+        let input = |args: &str| args.split(" -i ").next().unwrap().to_owned();
+        // TrueHD 7.1: its 2.0 substream for stereo, its 5.1 one for 5.1.
+        let truehd = with_audio("truehd", 8, 48_000);
+        let (_, args) = audio_args(AudioCodec::Aac, Some(2), &truehd);
+        assert!(input(&args).contains("-downmix:1 stereo"), "{args}");
+        let (_, args) = audio_args(AudioCodec::Eac3, Some(6), &truehd);
+        assert!(input(&args).contains("-downmix:1 5.1"), "{args}");
+        // 7.1 kept (AAC): all of it.
+        let (_, args) = audio_args(AudioCodec::Aac, Some(8), &truehd);
+        assert!(!args.contains("-downmix"), "{args}");
+        // DTS-HD Master Audio: its core, for any conversion of 5.1 or fewer.
+        let mut ma = with_audio("dts", 8, 48_000);
+        ma.streams[1].profile = Some("DTS-HD MA + DTS:X".into());
+        let (_, args) = audio_args(AudioCodec::Eac3, Some(6), &ma);
+        assert!(input(&args).contains("-core_only:1 1"), "{args}");
+        // A core-only DTS track, and a copy, are left as they are.
+        let (_, args) = audio_args(AudioCodec::Ac3, Some(6), &with_audio("dts", 6, 48_000));
+        assert!(!args.contains("-core_only"), "{args}");
+        let ff = ffmpeg_with(vec![x264()], vec![]);
+        let mut req = request();
+        req.audio = Some(AudioRequest { mode: AudioMode::Copy, codec: AudioCodec::Eac3, ..Default::default() });
+        let plan = Plan::build(&req, &with_audio("eac3", 8, 48_000), &ff, None).unwrap();
+        assert!(!args_string(&plan, 0, 2).contains("-downmix"));
     }
 
     /// One stream's fields as ffprobe reports them: `codec_name=eac3`, ….

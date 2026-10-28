@@ -362,6 +362,13 @@ half-made ones are deleted.
   whose output has 6 channels or more and that decode E-AC-3 or pass it
   through, AC-3 5.1 when they take only AC-3, and AAC otherwise (docs/API.md,
   *Version 2*). The job's audio plan reports the codec as `codec_out`.
+
+  Lossless audio is decoded only as far as the conversion keeps: a DTS-HD
+  Master Audio track converted to 5.1 or fewer channels is decoded from
+  its lossy core (`-core_only`), and TrueHD converted to stereo or 5.1
+  from the substream mastered with those channels (`-downmix stereo` or
+  `5.1`; Blu-rays carry both inside the 7.1, and without one FFmpeg
+  decodes the whole).
 - **Remux.** H.264 and HEVC video is copied into HLS, with segments cut
   exactly on the source's keyframes.
   - Matroska and WebM: the keyframe index is read instantly from the file's
