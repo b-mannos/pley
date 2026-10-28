@@ -73,13 +73,14 @@ export function SkipButton({ marker, onSkip, lifted }: { marker: Marker; onSkip:
       }}
       onDoubleClick={(e) => e.stopPropagation()}
       title={`${LABEL[marker.kind]} (s)`}
+      // Quiet over the picture: dark and see-through with a faint outline, firmer on hover or focus.
       className={cn(
-        "absolute right-4 z-20 flex h-11 animate-pop-in items-center gap-2 rounded-md border border-white/25 bg-black/70 px-5 text-sm font-semibold text-white shadow-2xl backdrop-blur-md transition-[bottom,background-color,border-color,color] duration-300 hover:border-accent hover:bg-accent hover:text-accent-fg focus-visible:border-accent sm:right-8",
+        "absolute right-4 z-20 flex h-9 animate-fade-in items-center gap-1.5 rounded-md border border-white/25 bg-black/45 px-3.5 text-[13px] font-medium text-white/85 backdrop-blur-sm transition-[bottom,background-color,border-color,color] duration-300 hover:border-white/80 hover:bg-black/60 hover:text-white focus-visible:border-white/80 focus-visible:outline-none sm:right-8",
         lifted ? "bottom-28" : "bottom-10",
       )}
     >
       {LABEL[marker.kind]}
-      <ChevronsRight className="size-4" />
+      <ChevronsRight className="size-3.5" />
     </button>
   );
 }
