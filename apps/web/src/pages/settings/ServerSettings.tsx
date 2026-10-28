@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { CircleAlert, CircleCheck, Eye, EyeOff, FolderOpen, Save } from "lucide-react";
+import { CircleAlert, CircleCheck, Eye, EyeOff, FolderOpen, Info, Save } from "lucide-react";
 import { appKeys } from "@/api/apps";
 import { errorMessage } from "@/api/client";
 import { useSaveSettings, useSaveTranscodeDir, useSettings, useSystemInfo, useTestService } from "@/api/hooks";
@@ -11,24 +11,18 @@ import { useToast } from "@/components/Toast";
 import { Button, Card, EmptyState, IconButton, PageSpinner, Select, TextInput, Toggle } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useDocumentTitle, useOnChange } from "@/lib/hooks";
-
-const HWACCEL: { value: HwAccel; label: string }[] = [
-  { value: "auto", label: "Automatic (best available)" },
-  { value: "nvenc", label: "NVIDIA NVENC" },
-  { value: "qsv", label: "Intel Quick Sync (QSV)" },
-  { value: "amf", label: "AMD AMF" },
-  { value: "vaapi", label: "VAAPI (Linux)" },
-  { value: "videotoolbox", label: "VideoToolbox (macOS)" },
-  { value: "none", label: "Software only (libx264)" },
-];
-
-const TONEMAP: { value: ToneMapping; label: string }[] = [
-  { value: "auto", label: "Automatic" },
-  { value: "libplacebo", label: "libplacebo (GPU, best quality, Dolby Vision)" },
-  { value: "opencl", label: "OpenCL (GPU)" },
-  { value: "zscale", label: "zscale (CPU)" },
-  { value: "none", label: "Disabled (HDR may look washed out)" },
-];
+import {
+  accelChoices,
+  accelInUse,
+  accelName,
+  accelReason,
+  capitalize,
+  knownTranscoder,
+  tonemapChoices,
+  tonemapFallback,
+  tonemapReason,
+  transcoderOs,
+} from "./transcodeChoices";
 
 const PRESETS: { value: TranscodePreset; label: string }[] = [
   { value: "auto", label: "Automatic (adapts to load)" },
@@ -95,6 +89,20 @@ function Link({ href, children }: { href: string; children: ReactNode }) {
     <a href={href} target="_blank" rel="noreferrer" className="text-accent hover:underline">
       {children}
     </a>
+  );
+}
+
+/** FFmpeg builds with libplacebo for the transcoder's system (every one's, when it runs elsewhere). */
+function DolbyVisionBuilds({ os }: { os: string | null }) {
+  const gyan = <Link href="https://www.gyan.dev/ffmpeg/builds/">gyan.dev's full build</Link>;
+  const jellyfin = <Link href="https://github.com/jellyfin/jellyfin-ffmpeg/releases">jellyfin-ffmpeg</Link>;
+  if (os === "windows") return <>{gyan} or {jellyfin}</>;
+  if (os === "linux") return jellyfin;
+  if (os === "macos") return <>Homebrew's ffmpeg-full</>;
+  return (
+    <>
+      {gyan} on Windows, {jellyfin} on Windows and Linux, or Homebrew's ffmpeg-full on a Mac
+    </>
   );
 }
 
@@ -173,6 +181,19 @@ function Row({ label, hint, children, htmlFor }: { label: string; hint?: ReactNo
       </div>
       <div className="min-w-0">{children}</div>
     </div>
+  );
+}
+
+/**
+ * Under a choice: why it is greyed out here, or (`notice`) what happens
+ * instead of a choice saved before that can't work here.
+ */
+function Note({ notice, children }: { notice?: boolean; children: ReactNode }) {
+  return (
+    <p className={cn("mt-1.5 flex items-start gap-1.5 text-xs", notice ? "text-fg/80" : "text-subtle")}>
+      {notice ? <CircleAlert className="mt-px size-3.5 shrink-0 text-danger" /> : <Info className="mt-px size-3.5 shrink-0" />}
+      <span>{children}</span>
+    </p>
   );
 }
 
@@ -292,6 +313,17 @@ export function ServerSettings() {
   const hasTmdb = form.tmdb_api_key.trim() !== "";
   const hasTvdb = form.tvdb_api_key.trim() !== "";
   const tc = system.data?.transcoder;
+  // What the transcoder's FFmpeg can do, once it says (nothing is greyed out before).
+  const known = knownTranscoder(system.data);
+  const os = transcoderOs(system.data);
+  const accels = accelChoices(settings.data?.hwaccel ?? form.hwaccel, system.data);
+  const accelProblem = accelReason(form.hwaccel, system.data);
+  const encodesOn = accelInUse(form.hwaccel, system.data);
+  const tonemaps = tonemapChoices(system.data);
+  const tonemapProblem = tonemapReason(form.tonemapping, system.data);
+  const noGpuDecoding = known?.hardware_decoding === false;
+  const noChromaprint = known?.chromaprint === false;
+  const noThrottling = known?.throttling === false;
 
   const onSave = () => {
     if (!form || !settings.data) return;
@@ -437,15 +469,27 @@ ${form.tvdb_pin}`}
           hint={tc && tc.encoders.length ? `Detected encoders: ${tc.encoders.join(", ")}` : "Encoder used for video transcodes."}
         >
           <Select id="hwaccel" value={form.hwaccel} onChange={(e) => set("hwaccel", e.target.value as HwAccel)} className="w-full">
-            {HWACCEL.map((o) => (
-              <option key={o.value} value={o.value}>
+            {accels.map((o) => (
+              <option key={o.value} value={o.value} disabled={o.reason !== null}>
                 {o.label}
               </option>
             ))}
           </Select>
+          {accelProblem ? (
+            <Note notice>
+              {capitalize(accelProblem)}: transcodes are encoded in software instead
+              {known?.active_encoder && form.hwaccel === settings.data?.hwaccel ? ` (${known.active_encoder})` : ""}.
+            </Note>
+          ) : null}
         </Row>
         <Row label="Hardware decoding" hint="Decode on the GPU when possible (falls back to CPU automatically).">
-          <Toggle checked={form.hardware_decoding} onChange={(v) => set("hardware_decoding", v)} label="Hardware decoding" />
+          <Toggle
+            checked={form.hardware_decoding}
+            disabled={noGpuDecoding}
+            onChange={(v) => set("hardware_decoding", v)}
+            label="Hardware decoding"
+          />
+          {noGpuDecoding ? <Note>No graphics card here that FFmpeg decodes on: videos are decoded on the CPU.</Note> : null}
         </Row>
         <Row
           label="HDR tone mapping"
@@ -457,22 +501,25 @@ ${form.tvdb_pin}`}
                 : "Convert HDR10, HLG and Dolby Vision to SDR when transcoding."}
               {tc?.available && !tc.dolby_vision ? (
                 <span className="mt-1 block">
-                  Dolby Vision needs an FFmpeg with libplacebo, and a GPU it reaches through Vulkan:{" "}
-                  <Link href="https://www.gyan.dev/ffmpeg/builds/">gyan.dev's full build</Link> on Windows,{" "}
-                  <Link href="https://github.com/jellyfin/jellyfin-ffmpeg/releases">jellyfin-ffmpeg</Link> on Windows and Linux, or
-                  Homebrew's ffmpeg-full on a Mac. Point pley at it with --ffmpeg and --ffprobe, or in pley.toml.
+                  Dolby Vision needs an FFmpeg with libplacebo, and a GPU it reaches through Vulkan: <DolbyVisionBuilds os={os} />. Point
+                  pley at it with --ffmpeg and --ffprobe, or in pley.toml.
                 </span>
               ) : null}
             </>
           }
         >
           <Select id="tonemap" value={form.tonemapping} onChange={(e) => set("tonemapping", e.target.value as ToneMapping)} className="w-full">
-            {TONEMAP.map((o) => (
-              <option key={o.value} value={o.value}>
+            {tonemaps.map((o) => (
+              <option key={o.value} value={o.value} disabled={o.reason !== null}>
                 {o.label}
               </option>
             ))}
           </Select>
+          {tonemapProblem ? (
+            <Note notice>
+              {capitalize(tonemapProblem)}: {tonemapFallback(system.data)}
+            </Note>
+          ) : null}
         </Row>
         <Row
           label="Software encoder preset"
@@ -491,6 +538,7 @@ ${form.tvdb_pin}`}
               </option>
             ))}
           </Select>
+          {encodesOn ? <Note>{accelName(encodesOn)} encodes here: this applies only when software encodes instead.</Note> : null}
         </Row>
         <Row label="Max simultaneous transcodes" htmlFor="max-transcodes">
           <TextInput
@@ -502,9 +550,21 @@ ${form.tvdb_pin}`}
             onChange={(e) => set("max_transcodes", Math.max(1, Number(e.target.value) || 1))}
             className="w-28"
           />
+          {tc?.available && tc.max_jobs > 0 && form.max_transcodes > tc.max_jobs ? (
+            <Note>
+              The transcoder itself runs {tc.max_jobs} at most
+              {tc.managed ? <> (transcoder_max_jobs in pley.toml)</> : <> (its --max-jobs)</>}.
+            </Note>
+          ) : null}
         </Row>
         <Row label="Throttle transcodes" hint="Limit ffmpeg to ~2× realtime once a buffer is built (saves CPU/GPU and disk).">
-          <Toggle checked={form.throttle_transcodes} onChange={(v) => set("throttle_transcodes", v)} label="Throttle transcodes" />
+          <Toggle
+            checked={form.throttle_transcodes}
+            disabled={noThrottling}
+            onChange={(v) => set("throttle_transcodes", v)}
+            label="Throttle transcodes"
+          />
+          {noThrottling ? <Note>This FFmpeg can't hold transcodes back: it needs FFmpeg 6.1 or newer.</Note> : null}
         </Row>
       </Group>
 
@@ -518,9 +578,11 @@ ${form.tvdb_pin}`}
         >
           <Toggle
             checked={form.detect_markers}
+            disabled={noChromaprint}
             onChange={(v) => set("detect_markers", v)}
             label="Detect intros and credits"
           />
+          {noChromaprint ? <Note>This FFmpeg has no Chromaprint to compare audio with: only chapters find intros and credits.</Note> : null}
         </Row>
         <Row
           label="Seek previews"
@@ -528,18 +590,18 @@ ${form.tvdb_pin}`}
         >
           <Toggle checked={form.seek_previews} onChange={(v) => set("seek_previews", v)} label="Seek previews" />
         </Row>
-        {form.seek_previews ? (
-          <Row
+        <Row
+          label="Previews for whole libraries"
+          hint="After each scan, make seek previews and chapter pictures for everything that lacks them, one file at a time, pausing while videos are being transcoded."
+        >
+          <Toggle
+            checked={form.previews_in_background}
+            disabled={!form.seek_previews}
+            onChange={(v) => set("previews_in_background", v)}
             label="Previews for whole libraries"
-            hint="After each scan, make seek previews and chapter pictures for everything that lacks them, one file at a time, pausing while videos are being transcoded."
-          >
-            <Toggle
-              checked={form.previews_in_background}
-              onChange={(v) => set("previews_in_background", v)}
-              label="Previews for whole libraries"
-            />
-          </Row>
-        ) : null}
+          />
+          {form.seek_previews ? null : <Note>Needs Seek previews.</Note>}
+        </Row>
         <Row label="Periodic scan interval" htmlFor="scan-interval" hint="Minutes between full scans. 0 disables periodic scans.">
           <div className="flex items-center gap-2">
             <TextInput

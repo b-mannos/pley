@@ -588,7 +588,8 @@ export type ServerEvent =
   /** A playback session was ended on the server (`DELETE /api/sessions/{id}`): the device playing it stops. */
   | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean };
 
-export type HwAccel = "auto" | "none" | "nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox";
+/** `vulkan` (h264_vulkan) isn't offered: it can only be set through the API. */
+export type HwAccel = "auto" | "none" | "nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox" | "vulkan";
 /** `auto`: the transcoder picks one from its load and how far ahead of the player it is, and changes it as they change. */
 export type TranscodePreset = "auto" | "ultrafast" | "superfast" | "veryfast" | "faster" | "fast" | "medium";
 export type ToneMapping = "auto" | "libplacebo" | "opencl" | "zscale" | "none";
@@ -654,8 +655,16 @@ export interface TranscoderInfo {
   encoders: string[];
   active_encoder: string | null;
   hwaccels: string[];
+  /** Hardware accelerations with a working H.264 encoder, best first: the first is the one Automatic uses. */
+  accels: HwAccel[];
+  /** Some video is decoded on a GPU here: the hardware decoding setting changes something. */
+  hardware_decoding: boolean;
   tonemapping: string[];
   dolby_vision: boolean;
+  /** Audio fingerprints, which find intros and credits that chapters don't name. */
+  chromaprint: boolean;
+  /** FFmpeg can hold transcodes back (6.1 and newer). */
+  throttling: boolean;
   max_jobs: number;
   active_jobs: number;
   error: string | null;
