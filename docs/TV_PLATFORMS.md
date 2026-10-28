@@ -450,6 +450,62 @@ a direct play, the buffer's fill rate. Its slow network is kept in the
 browser for the server it was loaded from (`pley.autoQuality`), and its
 notice shows over the picture for 4 s.
 
+What the server remembers of a network (docs/QUALITY.md, `GET
+/api/playback/network`) comes first in Automatic. On the TVs the
+question goes out with the item's details and the capabilities probe, so
+the press of Play waits for all three at once; nothing is asked for a
+quality picked. Its speed test reads the 32 MiB as it arrives through
+XMLHttpRequest's progress (what every TV's engine has; fetch's streamed
+bodies can't be stopped cleanly before Chromium 66), stops 2 s after the
+first byte or 1 s without one, and its report is waited for 0.5 s at
+most, so a test never holds the start more than about 3.5 s; one isn't
+run again within 10 minutes. On the web the question goes out as the
+player's route loads, alongside the item, and the test reads a fetch's
+body stream (a browser without one reads 8 MiB whole); the player's
+spinner shows meanwhile. The browser asks as one client for good
+(`pley.networkClient` in its storage), not as the tab's playback id,
+which would ask for a speed test in every new tab. Each change of
+Automatic's ceiling is told to the server as it happens: a step down, a
+step back up to a quality or to the original, and
+Automatic picked again. No answer, or an older server's 404, leaves the
+device's own 30-minute memory to decide, as before, and an older server
+isn't asked or told again until the app starts over.
+
+The player's Speed plays at 0.5×, 0.75×, 1.25×, 1.5× or 2×, for the
+title playing (the next one plays at normal speed), on the web (`<`
+and `>` step it) and on LG, both through the `<video>` element's
+`playbackRate`, which keeps the voices' pitch. Samsung offers no Speed:
+AVPlay's `setSpeed` is its trick play, documented for whole speeds of 2
+and up and for nothing under 1, and its sound at those speeds isn't
+promised.
+
+Subtitles' font (Default, Serif, Monospace, Casual) and position
+(Bottom, A little higher, Higher, Highest: raised 5, 10 or 16 % of the
+height) join their size and background: on the web in the player's
+Subtitle style, kept in the browser, and also for the iPhone's own
+fullscreen player (a font for `::cue`, raised cues placed by their
+`line`); on the TVs in Settings → Subtitles and display, kept on the TV.
+The TVs have only the fonts they ship, so a font is offered only where
+the TV draws it differently from the app's own (measured on a canvas
+once): a TV without a serif face offers no Serif.
+Picture subtitles keep the place their file gives them.
+
+The Subtitles menu finds subtitles (`GET
+/api/items/{id}/subtitles/search`): what OpenSubtitles has for the file,
+those made for this very file first, in the profile's subtitle language
+or another picked there. One picked is added on the server for everyone
+and shows at once in the session playing, as a text track picked in the
+menu does (on the TVs the panel opens for a video without subtitles too).
+The web also adds a subtitle file from the computer (.srt, .vtt, .ass,
+.ssa, up to 2 MB) in the language picked, and an added track has a
+delete button for an administrator, for the profile the server says
+added it (`added_by`), and otherwise for whoever added it in that
+player. A server without OpenSubtitles set up answers 503 with `setup:
+false`: the search says so, an administrator is pointed to Settings →
+Server, and other profiles no longer see the entry; a server too old to
+search (404) loses it for everyone until the page or app starts over.
+The TVs have no file picker, and no delete.
+
 Signing in, finding the server on the network (a sweep of the TV's own
 subnet), the player's keys and panels, and the offline behaviour follow
 the Android TV app; `docs/API.md` has the server's side (built-in OAuth
@@ -538,6 +594,10 @@ Samsung, on a 2018–2019 set and a 2021 or later one:
 8. No screen saver during playback; Home and back (the session reopens
    at the same place); the network dropping.
 9. D-pad smoothness and memory on a 2018 set.
+10. Automatic's speed test on a remote network: its time and figure
+    against the network's, and the start it gives.
+11. Which subtitle fonts the set has (Settings → Subtitles and display),
+    and whether AVPlay plays 2× with its sound.
 
 LG, on a webOS 4–6 set and a webOS 23 or later one:
 
@@ -561,4 +621,9 @@ LG, on a webOS 4–6 set and a webOS 23 or later one:
    moves a row a notch, and the pointer hides when webOS says it does.
 10. Audio Guidance speaking on each move; on Samsung,
     Voice Guide the same.
+11. Speed through the media pipeline: the sound at 0.5× and 2× (pitch
+    kept or not), a stream and a file played as it is, and the speed
+    kept after a seek.
+12. Automatic's speed test on a remote network, and which subtitle fonts
+    the set has.
 
