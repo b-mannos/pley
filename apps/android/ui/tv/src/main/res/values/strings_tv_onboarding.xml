@@ -47,7 +47,7 @@
     <string name="tv_onboarding_link_go_to">or go to</string>
     <string name="tv_onboarding_link_enter_step">and enter this code</string>
     <string name="tv_onboarding_link_same_wifi">Your phone must be on the same Wi-Fi as this TV.</string>
-    <string name="tv_onboarding_link_other_device">Or open pley on a signed-in device → Link a device</string>
+    <string name="tv_onboarding_link_other_device">Or open pley on a signed-in device → Link a TV</string>
     <string name="tv_onboarding_link_scan">Scan with your phone camera</string>
     <string name="tv_onboarding_change_server">Change server</string>
     <string name="tv_onboarding_waiting">Waiting for approval…</string>

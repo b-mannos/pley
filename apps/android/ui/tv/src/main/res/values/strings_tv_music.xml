@@ -17,7 +17,7 @@
     <string name="tv_music_not_found_body">It may have been removed, or this profile can\'t see it.</string>
     <string name="tv_music_artist_failed">Couldn\'t load this artist</string>
     <string name="tv_music_album_failed">Couldn\'t load this album</string>
-    <string name="tv_music_retry">Try again</string>
+    <string name="tv_music_retry">Retry</string>
     <string name="tv_music_back">Back</string>
 
     <!-- Now Playing (design spec §4.10). -->
