@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Home: the menu on the left (Home, the libraries, Search, Settings) and
+<!-- Home: the menu on the left (Home, the libraries, Playlists, Search,
+     Settings) and
      the server's home rows (GET /api/hubs/home). -->
 <component name="HomeScreen" extends="Group">
     <interface>

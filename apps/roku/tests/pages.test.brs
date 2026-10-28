@@ -76,11 +76,40 @@ sub test_pages_tile_options_by_kind()
         end for
         return out
     end function
-    tkEqual(labels(pageTileOptions({ kind: "movie", itemId: 12, watched: false }, false, false)), ["Mark as watched", "Add to My List"])
-    tkEqual(labels(pageTileOptions({ kind: "movie", itemId: 12, watched: true }, true, true)), ["Mark as unwatched", "Remove from My List", "Remove from Continue Watching"])
-    tkEqual(labels(pageTileOptions({ kind: "show", itemId: 99 }, false, invalid)), ["Mark as watched"], "My List not known")
-    tkEqual(labels(pageTileOptions({ kind: "episode", itemId: 101, grandparentId: 99 }, true, false)), ["Mark as watched", "Remove from Continue Watching", "Go to show"])
+    tkEqual(labels(pageTileOptions({ kind: "movie", itemId: 12, watched: false }, false, false)), ["Mark as watched", "Add to My List", "Add to playlist"])
+    tkEqual(labels(pageTileOptions({ kind: "movie", itemId: 12, watched: true }, true, true)), ["Mark as unwatched", "Remove from My List", "Add to playlist", "Remove from Continue Watching"])
+    tkEqual(labels(pageTileOptions({ kind: "show", itemId: 99 }, false, invalid)), ["Mark as watched", "Add to playlist"], "My List not known")
+    tkEqual(labels(pageTileOptions({ kind: "episode", itemId: 101, grandparentId: 99 }, true, false)), ["Mark as watched", "Add to playlist", "Remove from Continue Watching", "Go to show"])
     tkEqual(pageTileOptions({ kind: "person", itemId: 7 }, false, false).Count(), 0)
+end sub
+
+sub test_pages_playlists()
+    road = { id: 1, title: "Road trip", kind: "video", item_count: 12, duration_ms: 12000000, artwork: ["/api/items/12/images/poster?v=1"], smart_filter: invalid }
+    songs = { id: 2, title: "Songs", kind: "audio", item_count: 1, duration_ms: 200000, artwork: [], smart_filter: invalid }
+    smart = { id: 3, title: "Unwatched dramas", kind: "video", item_count: 40, duration_ms: 0, artwork: [], smart_filter: "genre=Drama&unwatched=1" }
+    tile = pagePlaylistTile(road, "http://nas:7539")
+    tkEqual(tile.subtitle, "12 titles · 3 h 20 min")
+    tkEqual(tile.image, "http://nas:7539/api/items/12/images/poster?v=1&w=220")
+    tkEqual(tile.kind, "playlist")
+    tkEqual(pagePlaylistLine(songs), "1 track · 3 min")
+    tkEqual(pagePlaylistLine(smart), "Smart · 40 titles")
+    tkEqual(pagePlaylistChoices([road, songs, smart], "video"), [{ id: 1, title: "Road trip" }], "the kind's own, not smart ones")
+    tkEqual(pagePlaylistKind("album"), "audio")
+    tkEqual(pagePlaylistKind("show"), "video")
+    entries = [{ entry_id: 5, item: contentTestMovie() }, { entry_id: 6, item: contentTestEpisode() }]
+    rows = pagePlaylistEntries(entries, "http://nas:7539")
+    tkEqual(rows[0].entryId, 5)
+    tkEqual(rows[0].subtitle, "2016 · 1 h 46 min left")
+    tkEqual(rows[1].subtitle, "S1 E1 · Good News About Hell · 55 min · Watched")
+    queue = pagePlaylistQueue(entries, "http://nas:7539")
+    tkEqual(queue[0].title, "Arrival")
+    tkEqual(queue[0].line, "2016", "a movie's year")
+    tkEqual(queue[0].startMs, 600000)
+    tkEqual(queue[1].line, "S1 E1 · Good News About Hell")
+    tkEqual(pageQueueFrom(queue, 1, false).Count(), 1, "from the entry chosen")
+    shuffled = pageQueueFrom(queue, 1, true)
+    tkEqual(shuffled.Count(), 2, "shuffled: every entry")
+    tkEqual(pagePlaylistRefusal({ status: 403, message: "not allowed" }), "This sign-in can't change playlists: sign out in Settings and sign in again to allow it.")
 end sub
 
 sub test_pages_actions_ask_the_server()

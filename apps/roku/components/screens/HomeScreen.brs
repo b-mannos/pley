@@ -112,6 +112,7 @@ sub buildMenu()
     for each library in m.libraries
         items.Push({ title: library.name })
     end for
+    items.Push({ title: "Playlists" })
     items.Push({ title: "Search" })
     items.Push({ title: "Settings" })
     focused = m.menu.itemFocused
@@ -248,6 +249,8 @@ sub onMenu(event as object)
     else if index <= m.libraries.Count()
         uiNavigate({ to: "library", params: { library: m.libraries[index - 1] } })
     else if index = m.libraries.Count() + 1
+        uiNavigate({ to: "grid", params: { kind: "playlists", id: 0, title: "Playlists" } })
+    else if index = m.libraries.Count() + 2
         uiNavigate({ to: "search" })
     else
         uiNavigate({ to: "settings" })

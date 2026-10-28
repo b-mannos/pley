@@ -464,11 +464,15 @@ end function
 ' startMs }.
 function contentUpNext(item as object, server as string) as object
     tile = contentTile(item, server, true)
-    line = fmtEpisode(item.parent_index, item.index)
-    title = httpSentence(item.title)
-    if title <> ""
-        if line <> "" then line = line + " · "
-        line = line + title
+    ' A movie (a playlist's next): its year.
+    line = tile.subtitle
+    if tile.kind = "episode"
+        line = fmtEpisode(item.parent_index, item.index)
+        title = httpSentence(item.title)
+        if title <> ""
+            if line <> "" then line = line + " · "
+            line = line + title
+        end if
     end if
     return { itemId: tile.itemId, title: tile.title, line: line, image: tile.image, startMs: playerStartOf(tile.positionMs, tile.durationMs) }
 end function

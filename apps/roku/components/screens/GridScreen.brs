@@ -1,7 +1,7 @@
 ' A grid of titles under a heading: a person's movies and shows (GET
-' /api/people/{id}), or a collection's titles (GET /api/collections/{id}).
-' params: { kind ("person", "collection"), id, title (shown until the
-' server answers) }.
+' /api/people/{id}), a collection's titles (GET /api/collections/{id}), or
+' the profile's playlists (GET /api/playlists). params: { kind ("person",
+' "collection", "playlists"), id, title (shown until the server answers) }.
 
 sub init()
     m.photoFrame = m.top.findNode("photoFrame")
@@ -23,14 +23,23 @@ sub onActive()
         for each change in uiChangesSince()
             onTitleChanged(change)
         end for
+        ' A playlist renamed, emptied or deleted meanwhile.
+        if m.top.params.kind = "playlists" then load()
         return
     end if
     m.started = true
     uiChangesSince()
     params = m.top.params
     m.title.text = httpSentence(params.title)
+    load()
+end sub
+
+sub load()
+    params = m.top.params
     if params.kind = "person"
         uiRequest({ method: "GET", path: "/api/people/" + urlValue(params.id), build: "person" }, "onGrid")
+    else if params.kind = "playlists"
+        uiRequest({ method: "GET", path: "/api/playlists", build: "playlists" }, "onGrid")
     else
         uiRequest({ method: "GET", path: "/api/collections/" + urlValue(params.id), build: "collection" }, "onGrid")
     end if
@@ -55,9 +64,13 @@ sub onGrid(event as object)
         m.photo.setHttpAgent(m.top.getScene().getHttpAgent())
         m.photo.uri = page.image
     end if
+    focused = m.grid.itemFocused
     m.grid.content = event.getRoSGNode().content
+    if focused > 0 and focused < page.shown then m.grid.jumpToItem = focused
     if page.shown = 0
         m.message.text = "Nothing to show here."
+        if m.top.params.kind = "playlists" then m.message.text = "No playlists yet. Make one with Add to playlist, the Options key on a title."
+        m.message.visible = true
     else
         m.message.visible = false
     end if

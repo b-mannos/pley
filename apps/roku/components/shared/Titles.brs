@@ -40,6 +40,10 @@ end sub
 ' ({ itemId, kind, parentId, grandparentId }): goes to the show, or asks
 ' the server.
 sub uiTitleAction(tile as object, action as string)
+    if action = "playlist"
+        uiAddToPlaylist(tile)
+        return
+    end if
     if action = "show"
         showId = httpNumber(tile.grandparentId, 0)
         if showId > 0 then uiNavigate({ to: "show", params: { showId: showId, seasonId: httpNumber(tile.parentId, 0) } })
@@ -64,6 +68,69 @@ sub uiTitleActionDone(event as object)
     change = uiNoteChange({ itemId: spec.itemId, action: spec.action })
     m.changesSeen = change.count
     onTitleChanged(change)
+end sub
+
+' --- Add to playlist ---
+
+' The profile's playlists of the title's kind, to add it to one, or to a
+' new one named on the keyboard.
+sub uiAddToPlaylist(tile as object)
+    m.playlistTile = tile
+    uiRequest({ method: "GET", path: "/api/playlists" }, "uiPlaylistsListed")
+end sub
+
+sub uiPlaylistsListed(event as object)
+    answer = event.getData()
+    if not answer.ok or answer.data = invalid
+        if not uiFailed(answer) then uiMessage("That didn't work", [answer.message])
+        return
+    end if
+    m.playlistChoices = pagePlaylistChoices(answer.data.playlists, pagePlaylistKind(httpString(m.playlistTile.kind)))
+    labels = []
+    for each playlist in m.playlistChoices
+        labels.Push(playlist.title)
+    end for
+    labels.Push("New playlist…")
+    labels.Push("Cancel")
+    dialog = CreateObject("roSGNode", "StandardMessageDialog")
+    dialog.title = "Add to playlist"
+    dialog.buttons = labels
+    dialog.observeField("buttonSelected", "uiPlaylistChosen")
+    m.top.getScene().dialog = dialog
+end sub
+
+sub uiPlaylistChosen(event as object)
+    chosen = event.getData()
+    uiCloseDialog()
+    count = m.playlistChoices.Count()
+    if chosen < count
+        playlist = m.playlistChoices[chosen]
+        uiRequest({ method: "POST", path: "/api/playlists/" + urlValue(playlist.id) + "/items", json: { item_ids: [m.playlistTile.itemId] }, playlist: playlist.title }, "uiPlaylistAdded")
+    else if chosen = count
+        dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
+        dialog.title = "New playlist"
+        dialog.buttons = ["Make it", "Cancel"]
+        dialog.observeField("buttonSelected", "uiPlaylistNamed")
+        m.top.getScene().dialog = dialog
+    end if
+end sub
+
+sub uiPlaylistNamed(event as object)
+    dialog = m.top.getScene().dialog
+    name = ""
+    if dialog <> invalid then name = dialog.text.Trim()
+    uiCloseDialog()
+    if event.getData() <> 0 or name = "" then return
+    uiRequest({ method: "POST", path: "/api/playlists", json: { title: name, item_ids: [m.playlistTile.itemId] }, playlist: name }, "uiPlaylistAdded")
+end sub
+
+sub uiPlaylistAdded(event as object)
+    answer = event.getData()
+    if answer.ok
+        uiMessage("Added", ["Added to " + event.getRoSGNode().spec.playlist + "."])
+    else if not uiFailed(answer)
+        uiMessage("That didn't work", [pagePlaylistRefusal(answer)])
+    end if
 end sub
 
 ' A title marked watched or unwatched, or played to some place, on this

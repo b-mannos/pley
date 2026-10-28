@@ -273,5 +273,10 @@ function onKeyEvent(key as string, press as boolean) as boolean
         if row <> invalid then uiTileOptions(row.getChild(position[1]), false)
         return true
     end if
+    ' The title's own: Add to playlist besides what its buttons do.
+    if key = "options" and m.detail <> invalid
+        uiTileOptions({ itemId: m.detail.itemId, kind: m.detail.kind, title: m.detail.heading, watched: m.detail.watched, parentId: m.detail.seasonId, grandparentId: m.detail.showId }, false)
+        return true
+    end if
     return false
 end function

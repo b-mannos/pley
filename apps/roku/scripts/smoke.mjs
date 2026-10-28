@@ -361,7 +361,7 @@ async function walk() {
     await press("back");
     await settle();
   }
-  await openFromMenu(3, /^GET \/api\/search\?.*q=mo/, "Search", async () => {
+  await openFromMenu(4, /^GET \/api\/search\?.*q=mo/, "Search", async () => {
     await sleep(800);
     await press("lit_m");
     await press("lit_o");
@@ -377,7 +377,32 @@ async function walk() {
   await settle();
   const asked = seen(/^GET \/api\/hubs\/home$/, since);
   home.kept = age < 55000 ? !asked : age > 65000 ? asked : true;
-  await openFromMenu(4, /^GET \/api\/auth\/me$/, "Settings");
+  // Playlists: one opened, its first entry taken out with the Options key,
+  // then played from the top; Back to Home.
+  await openFromMenu(3, /^GET \/api\/playlists$/, "Playlists");
+  shoot("playlists");
+  since = mark();
+  await press("select"); // the first playlist
+  await waitFor(/^GET \/api\/playlists\/1$/, since, "a playlist");
+  shoot("playlist");
+  since = mark();
+  await press("right"); // the entries
+  await press("options");
+  await sleep(500);
+  await press("select"); // Remove from playlist
+  await waitFor(/^DELETE \/api\/playlists\/1\/items\/\d+$/, since, "an entry removed");
+  since = mark();
+  await press("left"); // the buttons, Play first
+  await press("select");
+  await waitFor(/^POST \/api\/playback$/, since, "the playlist played");
+  since = mark();
+  await press("back"); // the playlist
+  await waitFor(/^DELETE \/api\/playback\//, since, "the playlist's session closed");
+  for (let i = 0; i < 2; i++) {
+    await press("back"); // the playlists, Home
+    await settle();
+  }
+  await openFromMenu(5, /^GET \/api\/auth\/me$/, "Settings");
   shoot("settings");
   // Quality, after Audio language and Subtitles: Automatic checked, then
   // 8 Mbps 1080p chosen, kept on the Roku.
@@ -407,7 +432,7 @@ async function walk() {
   await press("back"); // Home, which asks for its libraries again
   await waitFor(/^GET \/api\/libraries$/, since, "Home's libraries after sorting");
   await press("right"); // the rows, where the next steps start
-  await openFromMenu(4, /^GET \/api\/auth\/me$/, "Settings");
+  await openFromMenu(5, /^GET \/api\/auth\/me$/, "Settings");
   // Subtitles: from "Only for foreign dialogue" to "Always", saved at once
   // with the languages left as they were; Subtitle language shows then.
   await settle();
@@ -439,7 +464,7 @@ async function walk() {
   // Signed out, and in again with a server that has no QR codes yet: the
   // code shows on its own.
   await press("back");
-  await openFromMenu(4, /^GET \/api\/auth\/me$/, "Settings");
+  await openFromMenu(5, /^GET \/api\/auth\/me$/, "Settings");
   fixture.qr = false;
   since = mark();
   await signOut();
@@ -538,6 +563,8 @@ const checks = [
   ["marked a title watched with the Options key", fixture.marks.some((m) => m.item === 103 && m.action === "watched")],
   ["asked for a show's More Like This and collections", asked(/^GET \/api\/items\/99\/related\?limit=20$/) && asked(/^GET \/api\/items\/99\/collections$/)],
   ["opened a person's page", asked(/^GET \/api\/people\/7$/)],
+  ["took an entry out of a playlist", fixture.playlistRemoved.length > 0],
+  ["played a playlist from its top, the next entry to come", fixture.playbacks.some((p) => p.item === 101)],
   ["searched", asked(/^GET \/api\/search\?/)],
   ["asked again with a new token after a 401", new Set(fixture.requests.filter((r) => r.path === "/api/items/103").map((r) => r.auth)).size > 1],
   ["sent the token in the header only", fixture.requests.every((r) => !/[?&]token=/.test(r.path))],

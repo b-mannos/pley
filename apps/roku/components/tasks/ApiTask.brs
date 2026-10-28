@@ -374,6 +374,14 @@ sub apiBuild(job as object, answer as object)
         tiles = pagePersonCredits(data, server)
         job.request.content = nodesContent(tiles)
         answer.data = { title: httpSentence(data.name), image: urlImage(server, data.photo_url, contentDetailPosterWidth()), line: fmtTitles(tiles.Count()), summary: "", shown: tiles.Count() }
+    else if job.build = "playlists"
+        tiles = pagePlaylistTiles(data.playlists, server)
+        job.request.content = nodesContent(tiles)
+        answer.data = { title: "Playlists", image: "", line: "", summary: "", shown: tiles.Count() }
+    else if job.build = "playlist"
+        rows = pagePlaylistEntries(data.entries, server)
+        job.request.content = nodesContent(rows)
+        answer.data = { title: httpSentence(data.title), line: pagePlaylistLine(data), kind: httpString(data.kind), smart: httpString(data.smart_filter) <> "", queue: pagePlaylistQueue(data.entries, server), shown: rows.Count() }
     else if job.build = "collection"
         tiles = contentTiles(data.items, server)
         job.request.content = nodesContent(tiles)

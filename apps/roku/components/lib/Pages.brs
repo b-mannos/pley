@@ -1,6 +1,7 @@
 ' What a title's page, a person's and a collection's show besides the
 ' title itself (docs/API.md): cast and crew, extras, More Like This, the
-' collections it is part of, and what the Options key offers on a tile.
+' collections it is part of, playlists, and what the Options key offers
+' on a tile.
 ' Plain fields, which the API task makes into ContentNodes (lib/Nodes.brs).
 
 ' A person as a tile: their photo, their name, and the part they played
@@ -187,9 +188,128 @@ function pageTileOptions(tile as object, continueWatching as boolean, inList as 
             options.Push({ label: "Add to My List", action: "listAdd" })
         end if
     end if
+    options.Push({ label: "Add to playlist", action: "playlist" })
     if continueWatching then options.Push({ label: "Remove from Continue Watching", action: "hide" })
     if kind = "episode" and httpNumber(tile.grandparentId, 0) > 0 then options.Push({ label: "Go to show", action: "show" })
     return options
+end function
+
+' --- Playlists ---
+
+' "12 titles · 3 h 20 min", "Smart · 40 titles": what a playlist holds.
+function pagePlaylistLine(playlist as object) as string
+    parts = []
+    if httpString(playlist.smart_filter) <> "" then parts.Push("Smart")
+    count = httpNumber(playlist.item_count, 0)
+    noun = " titles"
+    if httpString(playlist.kind) = "audio" then noun = " tracks"
+    if count = 1 then noun = Left(noun, Len(noun) - 1)
+    parts.Push(urlValue(count) + noun)
+    duration = fmtDuration(playlist.duration_ms)
+    if duration <> "" then parts.Push(duration)
+    return parts.Join(" · ")
+end function
+
+' A playlist as a tile: its first entry's picture, its name and what it
+' holds.
+function pagePlaylistTile(playlist as object, server as string) as object
+    image = ""
+    artwork = httpArray(playlist.artwork)
+    if artwork.Count() > 0 then image = urlImage(server, artwork[0], contentPosterWidth())
+    return { title: httpSentence(playlist.title), subtitle: pagePlaylistLine(playlist), image: image, wide: false, progress: 0.0, watched: false, itemId: httpNumber(playlist.id, 0), kind: "playlist" }
+end function
+
+function pagePlaylistTiles(playlists as dynamic, server as string) as object
+    tiles = []
+    for each playlist in httpArray(playlists)
+        if GetInterface(playlist, "ifAssociativeArray") <> invalid and httpNumber(playlist.id, 0) > 0 then tiles.Push(pagePlaylistTile(playlist, server))
+    end for
+    return tiles
+end function
+
+' The playlists a title can be added to: the profile's own of its kind
+' ("video" or "audio"), smart ones left out: [{ id, title }].
+function pagePlaylistChoices(playlists as dynamic, kind as string) as object
+    out = []
+    for each playlist in httpArray(playlists)
+        if GetInterface(playlist, "ifAssociativeArray") <> invalid and httpString(playlist.kind) = kind and httpString(playlist.smart_filter) = ""
+            out.Push({ id: httpNumber(playlist.id, 0), title: httpSentence(playlist.title) })
+        end if
+    end for
+    return out
+end function
+
+' The kind of playlist a title goes in: "audio" for music, else "video".
+function pagePlaylistKind(kind as string) as string
+    if kind = "artist" or kind = "album" or kind = "track" then return "audio"
+    return "video"
+end function
+
+' A playlist's entries as rows (EpisodeRow): a movie's title and year, an
+' episode's show and number, with entryId, the entry's own id.
+function pagePlaylistEntries(entries as dynamic, server as string) as object
+    rows = []
+    for each entry in httpArray(entries)
+        item = invalid
+        if GetInterface(entry, "ifAssociativeArray") <> invalid then item = httpObject(entry.item)
+        if item <> invalid
+            tile = contentTile(item, server, true)
+            parts = []
+            if tile.subtitle <> "" then parts.Push(tile.subtitle)
+            duration = fmtDuration(tile.durationMs)
+            if tile.progress > 0
+                parts.Push(fmtLeft(tile.positionMs, tile.durationMs))
+            else if duration <> ""
+                parts.Push(duration)
+            end if
+            if tile.watched then parts.Push("Watched")
+            tile.subtitle = parts.Join(" · ")
+            tile.summary = ""
+            tile.entryId = httpNumber(entry.entry_id, 0)
+            rows.Push(tile)
+        end if
+    end for
+    return rows
+end function
+
+' What the player plays one after the other from a playlist: [{ itemId,
+' title, line, image, startMs }], the Up Next cards of its entries.
+function pagePlaylistQueue(entries as dynamic, server as string) as object
+    queue = []
+    for each entry in httpArray(entries)
+        item = invalid
+        if GetInterface(entry, "ifAssociativeArray") <> invalid then item = httpObject(entry.item)
+        if item <> invalid and contentPlayable(httpString(item.kind)) then queue.Push(contentUpNext(item, server))
+    end for
+    return queue
+end function
+
+' Why a playlist didn't change, in a sentence: a sign-in from before
+' pley for Roku asked to change playlists can't (403), until signed in
+' again.
+function pagePlaylistRefusal(answer as object) as string
+    if answer.status = 403 then return "This sign-in can't change playlists: sign out in Settings and sign in again to allow it."
+    return answer.message
+end function
+
+' queue from its entry at, in order or shuffled (the entry at first).
+function pageQueueFrom(queue as object, at as integer, shuffled as boolean) as object
+    out = []
+    for i = at to queue.Count() - 1
+        out.Push(queue[i])
+    end for
+    if shuffled
+        for i = 0 to at - 1
+            out.Push(queue[i])
+        end for
+        for i = out.Count() - 1 to 1 step -1
+            j = Rnd(i + 1) - 1
+            other = out[i]
+            out[i] = out[j]
+            out[j] = other
+        end for
+    end if
+    return out
 end function
 
 ' The request an action of the Options key or a title's page makes:

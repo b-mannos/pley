@@ -10,6 +10,7 @@ import { deflateSync } from "node:zlib";
 const USER_AGENT = /^pleyRoku\/\d+\.\d+\.\d+ \(Roku OS [^;()]+; [^;()]+\)$/;
 const CLIENT_ID = "https://hhaidar.github.io/pley/oauth/roku.json";
 const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
+const SCOPE = "library play playlists profiles";
 // A new code for each sign-in.
 const USER_CODES = ["BCDF-GHJK", "LMNP-QRST"];
 
@@ -168,7 +169,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
 
   const issue = (seconds) => {
     tokens += 1;
-    const pair = { access_token: `pley_at_${tokens}`, token_type: "Bearer", expires_in: seconds, scope: "library play", refresh_token: `pley_rt_${tokens}` };
+    const pair = { access_token: `pley_at_${tokens}`, token_type: "Bearer", expires_in: seconds, scope: SCOPE, refresh_token: `pley_rt_${tokens}` };
     access.add(pair.access_token);
     refresh.set(pair.refresh_token, "fresh");
     return pair;
@@ -209,7 +210,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     }
     if (url.pathname === "/api/oauth/device" && req.method === "POST") {
       if (form.get("client_id") !== CLIENT_ID) problems.push(`device code for ${form.get("client_id")}`);
-      if (form.get("scope") !== "library play") problems.push(`device code scope ${form.get("scope")}`);
+      if (form.get("scope") !== SCOPE) problems.push(`device code scope ${form.get("scope")}`);
       devices += 1;
       const userCode = USER_CODES[(devices - 1) % USER_CODES.length];
       polled.set(`dc-${devices}`, 0);
@@ -271,7 +272,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
 
     const path = url.pathname;
     let match;
-    const me = () => ({ id: 1, username: "anna", name: "Anna", scope: "library play", ...fixture.trackDefaults });
+    const me = () => ({ id: 1, username: "anna", name: "Anna", ...fixture.trackDefaults });
     if (path === "/api/auth/me") return json(200, me());
     // The profile's track defaults (docs/API.md): all three at once.
     if (path === "/api/me/track-defaults" && req.method === "PUT") {
@@ -318,6 +319,21 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
           { key: "recently_added:3", title: "Recently Added in Music", library_id: 3, items: [{ id: 5000, kind: "album", title: "Blue", sort_title: "Blue", added_at: 0, user_state: state() }] },
         ],
       });
+    }
+    // Playlists: the profile's one, its entries, taking one out.
+    const playlist = () => ({
+      id: 1, title: "Road trip", kind: "video", item_count: fixture.playlistEntries.length, duration_ms: 9300000,
+      artwork: ["/api/items/1000/images/poster?v=1"], smart_filter: null, library_id: null, created_at: 0, updated_at: 0,
+    });
+    if (path === "/api/playlists" && req.method === "GET") return json(200, { playlists: [playlist()] });
+    if (path === "/api/playlists/1" && req.method === "GET") {
+      return json(200, { ...playlist(), entries: fixture.playlistEntries.map(([entry_id, id]) => ({ entry_id, item: items.get(id) })) });
+    }
+    if ((match = path.match(/^\/api\/playlists\/1\/items\/(\d+)$/)) && req.method === "DELETE") {
+      fixture.playlistRemoved.push(Number(match[1]));
+      fixture.playlistEntries = fixture.playlistEntries.filter(([entry]) => entry !== Number(match[1]));
+      res.writeHead(204);
+      return res.end();
     }
     // A library's tabs: its rows, its collections, and what it filters by.
     if ((match = path.match(/^\/api\/libraries\/(\d+)\/hubs$/))) {
@@ -434,7 +450,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     return json(404, { code: "not_found", message: `nothing at ${path}` });
   });
 
-  const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], myList: [1003], marks: [], problems, requests, progress, closed, close: () => server.close() };
+  const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], myList: [1003], marks: [], playlistEntries: [[1, 1000], [2, 101], [3, 102]], playlistRemoved: [], problems, requests, progress, closed, close: () => server.close() };
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       issuer = `http://127.0.0.1:${server.address().port}`;

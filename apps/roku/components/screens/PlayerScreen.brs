@@ -134,6 +134,10 @@ sub onActive()
     ' Video node's agent at once.
     m.global.session.observeFieldScoped("accessToken", "onToken")
     params = m.top.params
+    ' A playlist's entries, this one first: Up Next brings on each next.
+    m.queue = invalid
+    m.queueAt = 0
+    if GetInterface(params.queue, "ifArray") <> invalid then m.queue = params.queue
     newTitle()
     open(params.itemId, Int(httpNumber(params.startMs, 0)), params.item, "auto")
 end sub
@@ -249,8 +253,13 @@ sub onItem(event as object)
     askPlayback()
 end sub
 
-' An episode has a next one to offer before its end.
+' An episode has a next one to offer before its end; a playlist's entry,
+' the entry after it.
 sub itemKnown()
+    if m.queue <> invalid
+        if m.queueAt + 1 < m.queue.Count() then m.next = m.queue[m.queueAt + 1]
+        return
+    end if
     if httpString(m.item.kind) <> "episode" then return
     uiRequest({ method: "GET", path: "/api/items/" + urlValue(m.itemId) + "/next", attempt: m.attempt }, "onNext")
 end sub
@@ -875,6 +884,7 @@ sub playNext()
     m.video.control = "stop"
     m.restarts = []
     newTitle()
+    if m.queue <> invalid then m.queueAt = m.queueAt + 1
     open(nextEpisode.itemId, nextEpisode.startMs, invalid, "auto")
 end sub
 

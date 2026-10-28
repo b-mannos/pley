@@ -8,12 +8,13 @@ web app's tabs (Recommended, Library sorted and filtered, Collections), a
 show's seasons and episodes, a title's page (Resume and Play
 from start, a show's next episode, Mark as watched, My List, Go to show,
 and rows of its seasons, cast and crew, extras, More Like This and the
-collections it is part of), people's and collections' pages, Search with
-the on-screen keyboard (titles and people), and Settings with the
+collections it is part of), people's and collections' pages, playlists
+(Play, Shuffle, Rename, Delete, an entry taken out), Search with the
+on-screen keyboard (titles and people), and Settings with the
 profile's audio and subtitle defaults, Sort libraries, Switch server and
 Sign out. The Options key (*) on a title offers Mark as watched or
-unwatched, Add to or Remove from My List, Remove from Continue Watching
-and Go to show. The player plays files as they are whenever the
+unwatched, Add to or Remove from My List, Add to playlist (a new one
+named on the keyboard too), Remove from Continue Watching and Go to show. The player plays files as they are whenever the
 Roku can (it reports what it decodes, from `roDeviceInfo`), HLS otherwise,
 reports progress, offers Skip Intro and Skip Credits as the web player does,
 the next episode at the credits of one, and pley's menu (Down): Quality,
@@ -33,7 +34,7 @@ The app is in `apps/roku`; paths below are relative to it.
 |---|---|
 | `source/main.brs` | Starts the one scene |
 | `components/MainScene` | The stack of screens, the HTTP agent of pictures, sign-in when the server ends it |
-| `components/screens/` | Servers, sign-in with a code, Home, Library, Show, Details (a title's page), Grid (a person's or a collection's titles), Player, Search, Settings, "Can't reach your server" |
+| `components/screens/` | Servers, sign-in with a code, Home, Library, Show, Details (a title's page), Grid (a person's or a collection's titles, the playlists), Playlist, Player, Search, Settings, "Can't reach your server" |
 | `components/shared/` | The screens' helpers (`Ui.brs`), and what can be done with a title (`Titles.brs`) |
 | `components/items/` | The tiles and rows of lists and grids, the player's skip button |
 | `components/tasks/ApiTask` | The one place that talks to the server |
@@ -219,6 +220,15 @@ Rules the code keeps:
   are asked for beside it, and each row shows as it comes, in that order.
   Down past the buttons slides the page up to the rows, Up from the first
   row (or Back) slides it down again.
+- Playlists (Home's menu) are the profile's own, as tiles of their first
+  entry's picture. A playlist's page plays its entries one after the
+  other from the top, shuffled, or from the entry OK is pressed on: the
+  player gets them as its queue, and Up Next brings on the next entry, a
+  movie as well as an episode. Rename (the keyboard) and Delete (asked
+  first) change it; the Options key on an entry takes it out (not of a
+  smart playlist, which its filter fills). The app asks to be allowed
+  `library play playlists profiles`, as Kodi; a sign-in from before that
+  answers 403 to a change, and the app says to sign in again.
 - A library opens on the tab it was left on: Recommended (its rows, `GET
   /api/libraries/{id}/hubs`), Library (a grid a page at a time) or
   Collections (not for music), chips at the top that left, right and OK

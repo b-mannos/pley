@@ -6,9 +6,10 @@ function httpClientId() as string
     return "https://hhaidar.github.io/pley/oauth/roku.json"
 end function
 
-' What the app asks to be allowed: browsing and playing, nothing else.
+' What the app asks to be allowed: browsing, playing, the profile's
+' playlists and switching to the household's other profiles, as Kodi.
 function httpScope() as string
-    return "library play"
+    return "library play playlists profiles"
 end function
 
 ' "pleyRoku/0.1.0 (Roku OS 15.0.4; Roku Ultra)". os is roDeviceInfo's
