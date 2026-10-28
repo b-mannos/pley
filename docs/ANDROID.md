@@ -40,7 +40,8 @@ permission before searching the network.
 
 The remote works as on Android TV: Select opens, holding Select or
 pressing Menu (☰) opens a title's actions, Back goes back, and play/pause,
-rewind and fast forward work in the player. Fire OS 7 (Android 9) is the
+rewind and fast forward work in the player. Fire OS's home screen has no
+Watch Next row (below), so nothing is published to its TV provider. Fire OS 7 (Android 9) is the
 oldest supported; an `android-28` Android TV emulator with 1 GB of memory
 stands in for a Fire TV stick (see Emulators), apart from video decoding:
 its decoders are software only, which the app doesn't use on TVs, so it
@@ -61,16 +62,47 @@ The profile's defaults (Audio language, Subtitles, Subtitle language)
 are under Me on phones and in Settings on TVs
 (`PUT /api/me/track-defaults`). The subtitle menu's Sync moves subtitles
 in 0.1 s steps, up to 10 s either way, remembered for each file on the
-device. Their size and background are Settings' own, also set in the
-player: the phone's menu has Subtitle style, the TV's Subtitles panel
-lists them under the tracks.
+device. Their size, background, font (sans serif, serif, monospace, and
+the system's casual hand where it has one: not every Fire OS) and
+position (at the bottom, or raised by 5, 10 or 15 % of the picture) are
+Settings' own, also set in the player: the phone's menu has Subtitle
+style, the TV's Subtitles panel lists them under the tracks. A font counts
+as pley's own style, over the system's captions; the position applies
+either way, to text only (pictures keep their cue's place).
+
+Find subtitles…, at the end of the subtitle menu while the file streams
+from the server (not a download), lists what the server finds online for
+the file in the profile's subtitle language (`GET
+/api/items/{id}/subtitles/search`), the subtitles made for this very file
+first; the one picked is added on the server (`POST
+/api/items/{id}/subtitles`), joins the file's tracks as a subtitle file
+beside the media, and shows. A server without search set up says
+"Subtitle search isn't set up on this server"; an older one, that it can't
+search.
+
+The player plays at 0.5×, 0.75×, 1×, 1.25×, 1.5× or 2× (Speed: in the
+phone's settings, a button at the TV's left), the sound's pitch kept, and
+moves the sound up to 5 s earlier or later than the picture in 50 ms steps
+(Audio delay, above the audio tracks; Left and Right on the TV). Both are
+the title's only: the next one plays at 1× with no delay. The delay moves
+the audio output's clock rather than the sound (`DelayedAudioSink`), so it
+holds with passthrough too; the speed can't change for sound passed
+through to a receiver, nor either of them with tunneled playback, where
+the TV keeps the picture with the sound itself: the menus say so.
 
 ## Quality
 
 The menu and Automatic are docs/QUALITY.md's. The quality is kept per
 device and network kind (Settings → Quality on Wi-Fi and on mobile data on
 phones, Quality on TVs), Automatic until one is chosen, in the player or
-in Settings. The decisions are `AutoQuality`'s (core/player), fed every
+in Settings. Automatic starts at most at the ceiling the server keeps for
+this player on this network (`GET /api/playback/network`, asked alongside
+the item's details, 1.5 s at most), after a speed test when the server
+asks for one (a network it knows nothing of, away from home: 2 s of `GET
+/api/playback/speedtest` from its first byte, the result `PUT` back, all of
+it 3.5 s at most, during Preparing); every ceiling Automatic finds or
+forgets goes to the server too (`NetworkStart`). A server that can't
+answer, or is too old to, leaves it to the device's own memory below. The decisions are `AutoQuality`'s (core/player), fed every
 half second: rebuffering from the player's state, delivery from the
 buffered position and the playhead, the network from Media3's bandwidth
 estimate, and dropped frames as the recovery ladder counts them. At the
@@ -89,6 +121,24 @@ comes in several sizes (`hls.variants`, docs/QUALITY.md) that Media3
 moves between by itself, no bigger than the screen: in such a session
 (`PlaybackInfo.adaptive`) the half-second feed leaves `AutoQuality` be,
 and only stalls and dropped frames can still start it again lower.
+
+## Watch Next
+
+On Android TV and Google TV, the home screen's Watch Next row shows the
+profile's Continue Watching (home's row, in its order, ten at most):
+titles watched part way as Continue, with their place, and episodes not
+started as Next (`watchnext/`). It follows what the app already keeps
+current while the TV app is in the foreground (progress, a title finished
+or taken off Continue Watching, the server's events) and asks the server
+for nothing of its own; another profile or server replaces its programs,
+and signing out empties it. A program the person takes off the row is
+left off. Selecting one opens the app on the title's page and plays it
+from where it was, once its profile is the one signed in ("Who's
+watching?" first, if the TV asks); otherwise the app just opens. The
+home screen can't send the profile's token, so the app fetches the
+pictures itself and hands them over from a read-only provider
+(`WatchNextImageProvider`), by names no other app can guess. Not on
+phones, and not on Fire TV, whose home screen has no such row.
 
 ## Screens
 
@@ -209,7 +259,7 @@ startup read). Each module sees only what it builds on.
 
 | Module | What it holds | Builds on |
 |---|---|---|
-| `:app` | `PleyApplication`, the app's parts made by hand (`AppGraph`), `MainActivity` (phones), `TvActivity` (TVs), the clean-up after the web view app (`migration/`) | everything |
+| `:app` | `PleyApplication`, the app's parts made by hand (`AppGraph`), `MainActivity` (phones), `TvActivity` (TVs), the TV's Watch Next row (`watchnext/`), the clean-up after the web view app (`migration/`) | everything |
 | `:core:common` | server address rules, discovery, local network access, the device's profile and tier, picture sizes, trace names, test tags | nothing |
 | `:core:model` | the server's answers and request bodies (kotlinx.serialization), server events, the capability report; plain Kotlin, no Android | nothing |
 | `:core:auth` | signing in (`app.pley.android.auth`): the server's page in the browser, the TV's code, tokens and where they may go | common |
@@ -304,9 +354,10 @@ The store's icon, feature graphic, TV banner and words are in
 Launchers, the same in every build: "Pley" on phones and tablets
 (`MainActivity`, `LAUNCHER`) and on TV home screens (`TvActivity`,
 `LEANBACK_LAUNCHER`, with the 320×180 banner). Exported, beside these two,
-are only the sign-in's return address (`SignInRedirectActivity`) and the
-music service (`MusicService`); `CutoverTest` holds the project's manifests
-to that.
+are only the sign-in's return address (`SignInRedirectActivity`), the
+music service (`MusicService`) and the Watch Next row's pictures
+(`WatchNextImageProvider`); `CutoverTest` holds the project's manifests to
+that.
 
 ## Commands
 
