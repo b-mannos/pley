@@ -378,6 +378,32 @@ own views instead (below), which skins' widgets and favourites always get.
   needs no internet: sign-in, artwork and playback all come from the
   server, and nothing else is ever asked.
 
+## Kodi's player: speed, audio offset and the subtitles' look
+
+pley plays with Kodi's own player, whose controls have what the other
+apps' players offer pley's way, so the add-on adds none of them (it has
+no menu in Kodi's player, and changes none of Kodi's settings):
+
+- **Playback speed**: the player's settings (Estuary's gear) have Play speed,
+  and the keyboard's Alt + Left and Right (`PlayerControl(TempoDown)`,
+  `TempoUp`) step it: 0.8 to 1.5 times, the sound's pitch kept, for a file
+  played as it is and a converted stream alike. Kodi's 2× and up are fast
+  forward, without sound. So 0.5, 0.75 and 2 aren't there with sound, and
+  nothing is offered while Kodi syncs to the audio (its default).
+- **Audio offset**: the player's audio settings (Audio offset), which
+  Kodi keeps for each file played as it is, like the subtitle offset
+  above; a converted stream's address is its session's, so there it
+  lasts the playback.
+- **The subtitles' look**: Settings → Player → Language: font, size,
+  style, colour, opacity, border, background (its kind, colour and
+  opacity), shadow, blur, where they go (the bottom or top of the video
+  or the screen) and the vertical margin, as Kodi 21.3's settings list
+  them. They apply to the text subtitles pley hands Kodi (WebVTT, the
+  added ones too) and to the file's own (Override ASS/SSA subtitles
+  styles for styled ones). The other apps keep their subtitle look on
+  the device too (the web's in the browser, Android's in its settings),
+  so there is nothing of the profile's to follow here.
+
 ## How fast
 
 Measured on Kodi 21.3 for Windows, against a server on the same computer:
@@ -438,6 +464,10 @@ out); it needs a built server and FFmpeg:
 PLEY_BIN=target/debug/pley PLEY_FFMPEG_DIR=/usr/bin python -m unittest test_e2e
 ```
 
+`test_subtitles.py` walks Kodi's subtitle dialog through the plugin against
+a stand-in server: the results, search not set up, nothing for what pley
+doesn't play, and the one picked added, saved and written for Kodi.
+
 CI runs both. By hand, a portable Kodi (`kodi.exe -p` on Windows) with the
 add-on copied into `portable_data/addons` and Kodi's JSON-RPC on
 (Settings → Services → Control → Allow remote control from applications
@@ -453,6 +483,11 @@ earlier frame, so a portable Kodi taking them wants
 in `portable_data/userdata/advancedsettings.xml`.
 
 ## Not yet
+
+- Find subtitles before playing (a title's page): Kodi's subtitle dialog
+  is only in its player, and Kodi lists subtitles added on any device.
+  Subtitle search in another language than the profile's: Kodi's dialog
+  passes its own languages, which aren't used.
 
 - What the Android app's pages have below their rows: a title's Details
   (plays, versions, media info) and the library's letter bar; a person's

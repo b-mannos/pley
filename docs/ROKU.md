@@ -236,6 +236,14 @@ Rules the code keeps:
   well (`tellNetwork`, nothing waits for it): a step down's, a step up's,
   none back at Original or with Automatic chosen again in Settings or the
   player's menu. Original and the chosen qualities ask nothing.
+- Playback speed, audio delay and the subtitles' look, which other apps'
+  players offer: the Video node has no field for a playback speed on current
+  Roku OS (its reference lists `control` and `seek`, nothing of a rate) nor
+  for an audio delay, so neither is offered. Subtitles look as the Roku's
+  own caption settings say (Settings → Accessibility → Captions style: size,
+  font, colours, edges, background, opacity): the app never sets the Video
+  node's `captionStyle`, which would put its own over the person's choices
+  for the whole Roku.
 - Sort libraries (Settings), as on Android TV: OK lifts a library, up and
   down move it, OK puts it there, Back puts it back; "Use the server's
   order" goes back to the order everyone sees. Each drop saves the order
@@ -440,6 +448,8 @@ OS 15; the app uses nothing of 1.3, so the switch is one line when it goes
 to the store.
 
 ## Not yet
+
+- Playback speed and an audio delay, which the Video node doesn't offer; a choice of language in Find subtitles….
 
 - Hearing what other devices change at once from an https server: Home
   asks again once its rows are a minute old.
