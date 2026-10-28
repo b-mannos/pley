@@ -48,6 +48,9 @@ SORT_NAMES = {
     "last_played": "sort_last_played",
 }
 LIBRARY_ICONS = {"movies": "icon-clapperboard.png", "shows": "icon-tv.png", "music": "icon-music.png"}
+# A library's tabs it opens on again (Collections is a visit: it leaves
+# the one before as it was).
+REMEMBERED_TABS = ("recommended", "all")
 PAGE = 120
 # What a playlist takes (shows, seasons, artists and albums add their
 # episodes or tracks), and of which kind.
@@ -1695,7 +1698,11 @@ class Library(Screen):
         super().__init__(win)
         self.library = library
         self.rail = rail_key or library_rail(win.libraries, library["id"])
-        self.tab = "all"
+        # It opens on Recommended or Library as it was last left, on this
+        # Kodi, for this server and profile; on Library the first time.
+        self.tab = kodi.remembered(self.remembered_as(), "all")
+        if self.tab not in REMEMBERED_TABS:
+            self.tab = "all"
         self.sort = "title"
         self.descending = False
         self.watched = None  # all, False: unwatched, True: watched
@@ -1708,6 +1715,12 @@ class Library(Screen):
         self.rows = Rows(win, L.LIBRARY_ROWS, L.LIBRARY_SLOTS, ("poster", "landscape", "square"))
         self.filters = None
         self.loading = False
+
+    def remembered_as(self) -> str:
+        """Where this library's tab is remembered: the server, the profile
+        and the library."""
+        server = kodi.setting("server_id") or kodi.setting("server_url")
+        return "library_tab/%s/%s/%s" % (server, self.win.me.get("id", ""), self.library["id"])
 
     @property
     def shape(self) -> str:
@@ -1845,6 +1858,8 @@ class Library(Screen):
         if tab == self.tab:
             return
         self.tab = tab
+        if tab in REMEMBERED_TABS:
+            kodi.remember(self.remembered_as(), tab)
         try:
             self.load()
         except api.ApiError as e:

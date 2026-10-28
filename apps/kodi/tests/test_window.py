@@ -1,3 +1,7 @@
+import json
+import os
+import shutil
+import tempfile
 import unittest
 
 import support  # noqa: F401
@@ -251,6 +255,48 @@ class WindowTest(unittest.TestCase):
             library.filter_menu()
         self.assertEqual(win.session.client.posts, [("/api/playlists", {"title": "Seen", "smart_filter": "unwatched=0&sort=year%3Adesc", "library_id": 4})])
         self.assertEqual(len(win.opened), 1)
+
+    def test_a_library_opens_on_the_tab_it_was_left_on(self):
+        settings = window.kodi.xbmcaddon.settings
+        profile = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, profile, True)
+        before = dict(settings)
+        self.addCleanup(lambda: (settings.clear(), settings.update(before)))
+        settings.update({"_profile": profile, "server_id": "srv-1"})
+        movies, shows = {"id": 4, "kind": "movies", "name": "Movies"}, {"id": 5, "kind": "shows", "name": "TV Shows"}
+
+        def opened(library, me=7):
+            win = FakeWindow()
+            win.libraries, win.me = [movies, shows], {"id": me}
+            page = window.Library(win, library, None)
+            page.load = lambda: None
+            page.show = lambda filled: None
+            return page
+
+        # Library the first time.
+        self.assertEqual(opened(movies).tab, "all")
+        opened(movies).switch("recommended")
+        self.assertEqual(opened(movies).tab, "recommended")
+        # Each library keeps its own, and each profile and server theirs.
+        self.assertEqual(opened(shows).tab, "all")
+        self.assertEqual(opened(movies, me=8).tab, "all")
+        settings["server_id"] = "srv-2"
+        self.assertEqual(opened(movies).tab, "all")
+        settings["server_id"] = "srv-1"
+        # Collections is a visit: the tab before stays.
+        opened(movies).switch("collections")
+        self.assertEqual(opened(movies).tab, "recommended")
+        opened(movies).switch("all")
+        self.assertEqual(opened(movies).tab, "all")
+        # Kept in the add-on's data folder, so a restarted Kodi has it.
+        with open(os.path.join(profile, window.kodi.REMEMBERED), encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"library_tab/srv-1/7/4": "all"})
+        # A file that isn't one opens on Library.
+        with open(os.path.join(profile, window.kodi.REMEMBERED), "w", encoding="utf-8") as f:
+            f.write("{")
+        self.assertEqual(opened(movies).tab, "all")
+        opened(movies).switch("recommended")
+        self.assertEqual(opened(movies).tab, "recommended")
 
     def test_sorting_the_libraries(self):
         movies, shows, music = ({"id": 1, "name": "Movies", "kind": "movies"}, {"id": 2, "name": "TV Shows", "kind": "shows"}, {"id": 3, "name": "Music", "kind": "music"})

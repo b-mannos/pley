@@ -213,6 +213,44 @@ def profile_dir() -> str:
     return path
 
 
+# What this Kodi remembers between its runs, as the person left it (the tab
+# each library was last on): a small file in the add-on's data folder, this
+# device's own.
+REMEMBERED = "remembered.json"
+
+
+def remembered(key: str, default: str = "") -> str:
+    try:
+        with open(os.path.join(profile_dir(), REMEMBERED), encoding="utf-8") as f:
+            found = json.load(f)
+    except (OSError, ValueError):
+        return default
+    value = found.get(key) if isinstance(found, dict) else None
+    return value if isinstance(value, str) else default
+
+
+def remember(key: str, value: str) -> None:
+    path = os.path.join(profile_dir(), REMEMBERED)
+    try:
+        with open(path, encoding="utf-8") as f:
+            found = json.load(f)
+    except (OSError, ValueError):
+        found = {}
+    if not isinstance(found, dict):
+        found = {}
+    if found.get(key) == value:
+        return
+    found[key] = value
+    # Written whole, then put in place: a power cut leaves the old file.
+    temporary = path + ".new"
+    try:
+        with open(temporary, "w", encoding="utf-8") as f:
+            json.dump(found, f)
+        os.replace(temporary, path)
+    except OSError as e:
+        log("couldn't remember %s: %s" % (key, e), xbmc.LOGWARNING)
+
+
 def temp_dir() -> str:
     return xbmcvfs.translatePath("special://temp/")
 
