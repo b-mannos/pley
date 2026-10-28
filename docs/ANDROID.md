@@ -59,7 +59,9 @@ The profile's defaults (Audio language, Subtitles, Subtitle language)
 are under Me on phones and in Settings on TVs
 (`PUT /api/me/track-defaults`). The subtitle menu's Sync moves subtitles
 in 0.1 s steps, up to 10 s either way, remembered for each file on the
-device.
+device. Their size and background are Settings' own, also set in the
+player: the phone's menu has Subtitle style, the TV's Subtitles panel
+lists them under the tracks.
 
 ## Quality
 
@@ -89,7 +91,10 @@ tab's top bar (a handle to drag, Move up and Move down for TalkBack); on
 TVs, Sort by the Libraries page's title, Move in a library's actions, and
 Settings → Sort libraries, since with three libraries or fewer the rail
 lists them and there is no Libraries page. Each move is saved at once,
-and a server too old to sort says so. On the TV, a title's Media info
+and a server too old to sort says so. A row's See all (Recently Added,
+Recently Released, Top Rated), on Home and in a library's Recommended
+tab, shows the Library tab in the row's order, as the web's link does,
+without changing the view the library was left in. On the TV, a title's Media info
 stays closed until Select opens it, OK while a seek is coming or within
 two seconds of one goes there and plays on (later, OK pauses), and the
 rail keeps its panel until it has closed. Dolby Vision profile 7 is
