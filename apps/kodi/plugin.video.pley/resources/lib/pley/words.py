@@ -209,6 +209,14 @@ def quality_badges(file) -> list:
     return [b for b in badges if b]
 
 
+def stars(value) -> str:
+    """Your rating, 0 to 10 on the server, in stars: 7 → "3½ stars"."""
+    whole, half = divmod(int(value), 2)
+    if not whole:
+        return "½ star"
+    return "%d%s star%s" % (whole, "½" if half else "", "" if whole == 1 and not half else "s")
+
+
 def rating(value) -> str:
     """The critics' rating, "7.4"; "" without one."""
     return "%.1f" % value if value else ""

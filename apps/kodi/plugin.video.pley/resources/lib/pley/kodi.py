@@ -198,6 +198,8 @@ TEXT = {
     "playlist_deleted": 30239,
     "playlist_empty": 30240,
     "smart_playlist_empty": 30241,
+    "your_rating": 30242,
+    "not_rated": 30243,
 }
 
 

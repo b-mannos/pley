@@ -802,3 +802,11 @@ msgstr ""
 msgctxt "#30241"
 msgid "Nothing matches this playlist's filter yet."
 msgstr ""
+
+msgctxt "#30242"
+msgid "Your rating"
+msgstr ""
+
+msgctxt "#30243"
+msgid "Not rated"
+msgstr ""

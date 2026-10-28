@@ -270,6 +270,29 @@ class WindowTest(unittest.TestCase):
         self.assertTrue(window.xbmc.PlayList.shuffled[window.xbmc.PLAYLIST_MUSIC])
         self.assertEqual(window.xbmc.played[-1][2], 0)
 
+    def test_your_rating(self):
+        self.assertEqual([window.words.stars(v) for v in (1, 2, 3, 7, 10)], ["½ star", "1 star", "1½ stars", "3½ stars", "5 stars"])
+
+        class Server:
+            def __init__(self):
+                self.puts = []
+
+            def put(self, path, body=None):
+                self.puts.append((path, body))
+
+        win = FakeWindow()
+        win.session.client = Server()
+        page = window.Item(win, 5)
+        page.detail = {"id": 5, "kind": "movie", "user_state": {"rating": 6.0}}
+        with Dialogs(picks=[8]) as asked:
+            page.rate()
+        # Not rated, then half stars; the saved one chosen first.
+        self.assertEqual((len(asked.shown[0][0]), asked.shown[0][1]), (11, 6))
+        self.assertEqual(win.session.client.puts, [("/api/items/5/rating", {"rating": 8})])
+        with Dialogs(picks=[0]):
+            page.rate()
+        self.assertEqual(win.session.client.puts[-1], ("/api/items/5/rating", {"rating": None}))
+
     def test_an_artist_plays_album_by_album(self):
         albums = [{"id": 50, "kind": "album", "title": "Early", "year": 2001}, {"id": 51, "kind": "album", "title": "Late", "year": 2020}]
         answers = {

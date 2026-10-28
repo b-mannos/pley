@@ -21,7 +21,7 @@ import time
 import unittest
 
 import support  # noqa: F401
-from pley import api, auth, caps, service
+from pley import api, auth, caps, profiles, service
 from pley.api import path_in
 from pley.events import Events
 from pley.proxy import Proxy
@@ -127,7 +127,7 @@ class EndToEndTest(unittest.TestCase):
         started = flow.start()
         shown = self.browser("POST", "/api/oauth/device/verify", {"user_code": started["user_code"]})
         self.assertEqual(shown["client"]["name"], "pley for Kodi")
-        self.assertEqual(shown["scopes"], ["library", "play", "playlists"])
+        self.assertEqual(shown["scopes"], ["library", "play", "playlists", "profiles"])
         self.assertEqual(self.browser("POST", "/api/oauth/requests/%s" % shown["id"], {"allow": True}), {"done": True})
         time.sleep(flow.interval)
         state, tokens = flow.poll(started["device_code"])
@@ -138,7 +138,7 @@ class EndToEndTest(unittest.TestCase):
     def test_the_add_on_against_a_real_server(self):
         store = auth.Store(os.path.join(self.dir, "tokens.json"))
         tokens = self.sign_in(store)
-        self.assertEqual(tokens["scope"], "library play playlists")
+        self.assertEqual(tokens["scope"], "library play playlists profiles")
         holder = auth.Tokens(store, AGENT)
         proxy = Proxy(holder, AGENT, "e2e-secret")
         proxy.start()
@@ -208,6 +208,21 @@ class EndToEndTest(unittest.TestCase):
         renewed = store.load()
         self.assertNotIn(renewed["access_token"], (saved["access_token"], "pley_at_" + "x" * 43))
         self.assertNotEqual(renewed["refresh_token"], saved["refresh_token"])
+
+        # Who's watching?: the household, a wrong PIN said as such and
+        # spending nothing, then the kid's profile with its own.
+        kid = self.admin.post("/api/users", {"username": "kid", "display_name": "Kid", "managed": True, "home": True, "pin": "2468"})
+        household = {p["id"]: p for p in profiles.household(client)}
+        self.assertEqual(len(household), 2)
+        self.assertTrue(household[client.get("/api/auth/me")["id"]]["current"])
+        self.assertEqual((household[kid["id"]]["current"], household[kid["id"]]["needs"]), (False, "pin"))
+        with self.assertRaises(api.ApiError) as refused:
+            profiles.switch(client, kid["id"], "1111")
+        self.assertEqual(refused.exception.code, "wrong_pin")
+        profiles.switch(client, kid["id"], "2468")
+        self.assertEqual(client.get("/api/auth/me")["id"], kid["id"])
+        self.assertEqual(holder.identity(), (self.server, kid["id"]))
+        self.assertEqual(client.get("/api/libraries/%d/items" % self.library)["total"], 1)
 
         # Listed with the account's apps, then signed out.
         apps = self.admin.get("/api/me/apps")

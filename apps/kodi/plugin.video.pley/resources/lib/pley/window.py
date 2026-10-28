@@ -1636,7 +1636,23 @@ class Item(Screen):
             actions.append((T("go_to_show"), lambda: self.win.open(Item(self.win, d["parent_id"]))))
         if d["kind"] == "album" and d.get("parent_id"):
             actions.append((T("go_to_artist"), lambda: self.win.open(Item(self.win, d["parent_id"]))))
+        actions.append((T("your_rating"), self.rate))
         return actions
+
+    def rate(self) -> None:
+        """Your rating (the web's StarRating): five stars, halves allowed,
+        0 to 10 on the server; Not rated clears it."""
+        d = self.detail
+        saved = words.state(d).get("rating")
+        values = [None] + list(range(1, 11))
+        labels = [T("not_rated")] + [words.stars(v) for v in values[1:]]
+        at = values.index(round(saved)) if saved and round(saved) in values else 0
+        chosen = xbmcgui.Dialog().select(T("your_rating"), labels, preselect=at)
+        if chosen < 0 or values[chosen] == (round(saved) if saved else None):
+            return
+        self.session.client.put("/api/items/%d/rating" % d["id"], {"rating": values[chosen]})
+        d.setdefault("user_state", {})["rating"] = values[chosen]
+        self.win.toast(T("saved"))
 
     def full_summary(self) -> None:
         d = self.detail

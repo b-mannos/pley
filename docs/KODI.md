@@ -113,7 +113,8 @@ side by side with Kodi's were the reference):
   badges), what is left, genres, summary and credits, then Resume (a
   show's "Resume S1 · E3"), From start, Watched, My List, Trailer, Add to
   playlist and More
-  (the full summary, the show or season of an episode). Then a show's
+  (the full summary, the show or season of an episode, and Your rating:
+  five stars, halves allowed, or Not rated). Then a show's
   seasons as tabs and their episodes, Extras, Cast & Crew and More Like
   This; the info block says which episode focus is on.
 - **Music** (the web's artist and album pages): an artist's page has its
@@ -404,6 +405,8 @@ in `portable_data/userdata/advancedsettings.xml`.
   page with their photo (theirs is a grid of titles).
 - In Kodi's lists, a title's information page shows its synopsis, not its
   cast, genres or crew: lists don't carry them.
+- Downloads to watch without the server (the Android app's): Kodi plays
+  from the server only.
 - Playing a video playlist through, as the web's queue does: a title in
   one opens its page (a music playlist's tracks play on from the one
   chosen).
