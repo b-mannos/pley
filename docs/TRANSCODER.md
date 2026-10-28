@@ -627,6 +627,15 @@ processor per core); on Windows `--mem-mb` sets a memory limit. Several
 builds (`--bin name=path`, repeated) run in turns that change order each
 round, so a machine busy with other work weighs on each alike.
 
+What it showed (a 12-core Ryzen with an RTX 5070, `sw4` for a small
+computer): 4K HDR10 to 1080p tone mapped with zimg went from 0.3× to 1×
+real time on four processors (5.9 to 3.7 processor seconds per second of
+video) once zimg tone mapped at the output's size; picture subtitles on
+4K, from 0.23× to 0.72× (and half the processor time with the GPU's
+pipeline) once laid on the scaled frame; and three minutes watched in real
+time cost 26 to 49% less processor time with the pause 90 s ahead, the
+player never waiting.
+
 ```
 python scripts/bench-transcoder.py --make-clips D:/bench --source 4k-hdr10.mkv
 python scripts/bench-transcoder.py --media D:/bench --hdr 4k-hdr10.mkv \
