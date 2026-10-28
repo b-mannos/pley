@@ -1,6 +1,10 @@
 package app.pley.android.network
 
+import app.pley.android.model.AddSubtitle
 import app.pley.android.model.ConversionState
+import app.pley.android.model.NetworkReport
+import app.pley.android.model.PlaybackNetwork
+import app.pley.android.model.SubtitleResult
 import app.pley.android.model.EntryIds
 import app.pley.android.model.ImageKind
 import app.pley.android.model.ItemIds
@@ -24,7 +28,9 @@ import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -37,6 +43,11 @@ import org.junit.rules.TemporaryFolder
 class HttpPleyApiTest {
     private companion object {
         const val CONVERSION = "0123456789abcdef0123456789abcdef"
+
+        /** docs/API.md's examples. */
+        const val NETWORK = """{"local":false,"ceiling_kbps":8000,"source":"playback","since":1761600000000,"probe":false}"""
+        const val SEARCH = """{"results":[{"id":"opensubtitles:1234567","provider":"opensubtitles","language":"en","name":"Movie.2019.1080p.BluRay.x264-GRP","format":"srt","hearing_impaired":false,"forced":false,"downloads":1234,"matched":"hash"}]}"""
+        const val ADDED = """{"index":5000,"codec":"subrip","language":"eng","title":"English","external":true,"text_based":true,"url":"/api/files/601/subtitles/5000.vtt","added":true}"""
     }
 
     @get:Rule val folder = TemporaryFolder()
@@ -68,6 +79,9 @@ class HttpPleyApiTest {
     )
 
     private fun json(path: String) = MockPley.fixture(path)
+
+    private fun jsonAnswer(text: String, code: Int = 200): MockResponse =
+        MockResponse.Builder().code(code).setHeader("Content-Type", "application/json").body(text).build()
 
     private inline fun <reified T> request(path: String): T = Fixtures.decode(path)
 
@@ -135,6 +149,42 @@ class HttpPleyApiTest {
             ) { startPlayback(playback) },
             Golden("playbackStatus", json("playback/status_transcode.json"), "GET /api/playback/6f1c2a9e") { playbackStatus("6f1c2a9e") },
             Golden("stopPlayback", MockPley.noContent(), "DELETE /api/playback/6f1c2a9e") { stopPlayback("6f1c2a9e") },
+            Golden("playbackNetwork", jsonAnswer(NETWORK), "GET /api/playback/network?client_id=android-1") { playbackNetwork("android-1") },
+            Golden(
+                "reportNetwork (a speed test)",
+                jsonAnswer(NETWORK),
+                "PUT /api/playback/network",
+                body = """{"client_id":"android-1","probe_kbps":52000,"probe_complete":false}""",
+            ) { reportNetwork(NetworkReport.Probe("android-1", 52_000, complete = false)) },
+            Golden(
+                "reportNetwork (a ceiling)",
+                jsonAnswer(NETWORK),
+                "PUT /api/playback/network",
+                body = """{"client_id":"android-1","ceiling_kbps":8000}""",
+            ) { reportNetwork(NetworkReport.Ceiling("android-1", 8_000)) },
+            Golden(
+                "reportNetwork (forgotten)",
+                jsonAnswer(NETWORK),
+                "PUT /api/playback/network",
+                body = """{"client_id":"android-1","ceiling_kbps":null}""",
+            ) { reportNetwork(NetworkReport.Ceiling("android-1", null)) },
+            Golden(
+                "speedTest",
+                MockResponse.Builder().setHeader("Content-Type", "application/octet-stream").body(okio.Buffer().write(ByteArray(70_000))).build(),
+                "GET /api/playback/speedtest?bytes=70000",
+            ) { speedTest(70_000, 2_000, 3_500) },
+            Golden(
+                "searchSubtitles",
+                jsonAnswer(SEARCH),
+                "GET /api/items/101/subtitles/search?file_id=601&language=en%2Cfr",
+            ) { searchSubtitles(101, 601, listOf("en", "fr")) },
+            Golden("searchSubtitles (defaults)", jsonAnswer(SEARCH), "GET /api/items/101/subtitles/search") { searchSubtitles(101, null, null) },
+            Golden(
+                "addSubtitle",
+                jsonAnswer(ADDED, 201),
+                "POST /api/items/101/subtitles",
+                body = """{"result":"opensubtitles:1234567","file_id":601}""",
+            ) { addSubtitle(101, AddSubtitle("opensubtitles:1234567", 601)) },
             Golden(
                 "convert",
                 json("conversions/direct.json"),
@@ -271,6 +321,26 @@ class HttpPleyApiTest {
         // A sidecar or a cached track: no header, and complete.
         server.enqueue(MockResponse.Builder().setHeader("Content-Type", "text/vtt").body("WEBVTT\n").build())
         assertEquals(true, api.subtitles(601, 3).complete)
+    }
+
+    @Test
+    fun theNetworkAndSubtitleSearchAreDecoded() = runTest {
+        server.enqueue(jsonAnswer(NETWORK))
+        assertEquals(PlaybackNetwork(ceilingKbps = 8_000, source = "playback", since = 1_761_600_000_000, probe = false), api.playbackNetwork("a"))
+        server.enqueue(jsonAnswer(SEARCH))
+        val found = api.searchSubtitles(101, null, null)
+        assertTrue(found.setup)
+        assertEquals(SubtitleResult("opensubtitles:1234567", "opensubtitles", "en", "Movie.2019.1080p.BluRay.x264-GRP", "srt", downloads = 1234, matched = "hash"), found.results.single())
+        server.enqueue(jsonAnswer(ADDED, 201))
+        val added = api.addSubtitle(101, AddSubtitle("opensubtitles:1234567"))
+        assertTrue(added.added && added.external && added.textBased)
+        assertEquals(5000, added.index)
+        // Search not set up: said so, not thrown.
+        server.enqueue(jsonAnswer("""{"code":"unavailable","message":"Subtitle search isn't set up","setup":false}""", 503))
+        assertFalse(api.searchSubtitles(101, null, null).setup)
+        // Any other 503 is a refusal.
+        server.enqueue(MockPley.error(503, "unavailable", "busy"))
+        assertEquals(503, runCatching { api.searchSubtitles(101, null, null) }.exceptionOrNull().let { (it as ApiException).status })
     }
 
     @Test

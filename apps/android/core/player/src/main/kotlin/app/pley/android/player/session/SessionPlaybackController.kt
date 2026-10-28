@@ -51,6 +51,7 @@ import java.io.IOException
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
@@ -83,7 +84,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   (docs/QUALITY.md) plays the original and lets [AutoQuality] step down
  *   when it doesn't play well and back up when the network allows, each
  *   change a new session where it was. Dropped frames at the original stay
- *   the recovery ladder's, and count as Automatic's step down.
+ *   the recovery ladder's, and count as Automatic's step down. It starts
+ *   at most at what the server knows this network carries ([NetworkStart],
+ *   asked alongside the item's details, with a speed test on a network it
+ *   doesn't know), else at what this device remembers.
  * - **Tracks.** The audio is the server's choice for this device unless the
  *   person picks a track. Switched by the engine in direct play; a new
  *   session when a stream needs other audio or subtitles burned in; choices
@@ -178,7 +182,8 @@ class SessionPlaybackController(
     private var tracksChecked = false
 
     private val recovery = Recovery()
-    private val autoQuality = AutoQuality(env.ceiling)
+    private val network = NetworkStart(env.api, env.clientId, env.reporter, env.now)
+    private val autoQuality = AutoQuality(env.ceiling, network::report)
 
     /** Automatic went down: the next session to start says at what, once. */
     private var autoNoticePending = false
@@ -235,6 +240,7 @@ class SessionPlaybackController(
     private suspend fun prepareFirst() {
         try {
             val detail = scope.async { detailOf(current.itemId) }
+            val lookup = networkLookup()
             val snapshot = scope.async {
                 try {
                     env.capabilities.snapshot.value ?: env.capabilities.warmUp()
@@ -247,7 +253,7 @@ class SessionPlaybackController(
             if (link == null) link = env.engines().also { it.setListener(this) }
             val found = detail.await()
             caps = snapshot.await()
-            load(found, current)
+            load(found, current, lookup)
             begin(PlaybackPlan.startMs(found, current))
         } catch (e: CancellationException) {
             throw e
@@ -256,8 +262,35 @@ class SessionPlaybackController(
         }
     }
 
-    /** Takes [detail] as the item playing, with [req]'s choices. */
-    private suspend fun load(detail: ItemDetail, req: PlayRequest) {
+    /**
+     * What the server knows of the network, asked at once when the quality
+     * remembered is Automatic (only Automatic uses it), alongside the item's details.
+     */
+    private fun networkLookup(): Deferred<NetworkStart.Lookup?> = scope.async {
+        val remembered = try {
+            env.quality.remembered()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+        if (Qualities.choose(null, remembered).automatic) network.lookUp() else null
+    }
+
+    /** Where Automatic starts for this file: the server's ceiling ([lookup], with a speed test if it asks), else the device's memory. */
+    private suspend fun startCeiling(lookup: Deferred<NetworkStart.Lookup?>?): StartCeiling {
+        val found = try {
+            lookup?.await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        } ?: return StartCeiling.Device
+        return network.resolve(found)
+    }
+
+    /** Takes [detail] as the item playing, with [req]'s choices; [lookup] is the network's, for Automatic. */
+    private suspend fun load(detail: ItemDetail, req: PlayRequest, lookup: Deferred<NetworkStart.Lookup?>? = null) {
         item = detail
         current = req
         downloads = downloadedFiles(detail)
@@ -275,7 +308,9 @@ class SessionPlaybackController(
             null
         }
         picked = Qualities.choose(chosen, remembered)
-        quality = playedFor(picked)
+        val streams = chosen != null && localFile(chosen.id) == null
+        quality = playedFor(picked, if (picked.automatic && streams) startCeiling(lookup) else StartCeiling.Device)
+        lookup?.cancel()
         offset.value = chosen?.let { f ->
             try {
                 env.offsets.offset(offsetKey(f.id))
@@ -866,10 +901,10 @@ class SessionPlaybackController(
 
     /**
      * What [choice] plays: Automatic starts afresh for the file (at the
-     * original, or the network's remembered ceiling), a download plays as
-     * it is, and every other quality plays as itself.
+     * original, or at most at [start]'s ceiling), a download plays as it
+     * is, and every other quality plays as itself.
      */
-    private fun playedFor(choice: QualityPreset): QualityPreset {
+    private fun playedFor(choice: QualityPreset, start: StartCeiling = StartCeiling.Device): QualityPreset {
         val f = file
         if (!choice.automatic || f == null || localFile(f.id) != null) {
             autoQuality.stop()
@@ -881,7 +916,7 @@ class SessionPlaybackController(
             lines = Qualities.linesClassOf(f),
             cap = Qualities.closest(f),
         )
-        return autoQuality.begin(file, env.now())
+        return autoQuality.begin(file, env.now(), start)
     }
 
     /** Tells Automatic what the original plays at in [info]: the file, or the server's conversion of it. */
@@ -1120,6 +1155,8 @@ class SessionPlaybackController(
         val before = quality
         picked = choice
         streamingPicked = !choice.original && !choice.automatic
+        // Automatic picked again starts afresh: what was known of the network is forgotten.
+        if (choice.automatic) autoQuality.forgetCeiling()
         quality = playedFor(choice)
         autoNoticePending = false
         scope.launch { env.quality.remember(choice.id) }
@@ -1376,10 +1413,11 @@ class SessionPlaybackController(
         startJob?.cancel()
         sessionJob = scope.launch {
             try {
+                val lookup = networkLookup()
                 if (endedBefore) withTimeoutOrNull(END_WAIT_MS) { env.reporter.flush() }
                 val prefetched = nextDetail?.takeIf { it.first == target.id }?.second
                 val detail = prefetched ?: detailOf(target.id)
-                load(detail, req)
+                load(detail, req, lookup)
                 begin(req.startMs ?: 0)
             } catch (e: CancellationException) {
                 throw e

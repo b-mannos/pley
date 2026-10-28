@@ -19,7 +19,13 @@ import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
 import app.pley.android.model.ConversionInfo
 import app.pley.android.model.ConversionState
+import app.pley.android.model.AddSubtitle
 import app.pley.android.model.MaybeItem
+import app.pley.android.model.NetworkReport
+import app.pley.android.model.PlaybackNetwork
+import app.pley.android.model.SpeedSample
+import app.pley.android.model.SubtitleResults
+import app.pley.android.model.SubtitleTrack
 import app.pley.android.model.Me
 import app.pley.android.model.NewPlaylist
 import app.pley.android.model.PersonDetail
@@ -245,6 +251,21 @@ class FakePleyApi(val issuer: String = "http://127.0.0.1:7539") : PleyApi {
     }
 
     override suspend fun stopPlayback(sessionId: String) = respond("stopPlayback", sessionId) { }
+
+    /** The server's own network: nothing known, no speed test. */
+    override suspend fun playbackNetwork(clientId: String): PlaybackNetwork = respond("playbackNetwork", clientId) { PlaybackNetwork(local = true) }
+
+    override suspend fun reportNetwork(report: NetworkReport): PlaybackNetwork = respond("reportNetwork", report) { PlaybackNetwork() }
+
+    override suspend fun speedTest(bytes: Long, readMs: Long, timeoutMs: Long): SpeedSample =
+        respond("speedTest", bytes, readMs, timeoutMs) { SpeedSample(bytes, readMs / 2, complete = true) }
+
+    override suspend fun searchSubtitles(itemId: Long, fileId: Long?, languages: List<String>?): SubtitleResults =
+        respond("searchSubtitles", itemId, fileId, languages) { SubtitleResults() }
+
+    override suspend fun addSubtitle(itemId: Long, add: AddSubtitle): SubtitleTrack = respond("addSubtitle", itemId, add) {
+        SubtitleTrack(index = 3000, codec = "subrip", language = "eng", external = true, textBased = true, added = true)
+    }
 
     override fun playbackFileUrl(sessionId: String, file: String): String = urls.playbackFileUrl(sessionId, file)
 

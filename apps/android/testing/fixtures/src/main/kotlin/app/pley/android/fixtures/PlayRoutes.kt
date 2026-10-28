@@ -327,6 +327,9 @@ internal class PlayRoutes(private val s: State) {
         val (entry, file) = id.toLongOrNull()?.let(catalog::file) ?: return Reply.notFound("no such file")
         if (name.endsWith(".mks")) return pictures(file, name)
         val index = name.removeSuffix(".vtt").toIntOrNull() ?: return Reply.notFound("no such track")
+        s.addedSubtitles[file.id]?.firstOrNull { it.index == index }?.let { added ->
+            return Reply.bytes(ExtraRoutes.cues(added).toByteArray(), "text/vtt; charset=utf-8")
+        }
         val stream = file.streams.firstOrNull { it.index == index && it.kind == StreamKind.Subtitle }
             ?: return Reply.notFound("no such track")
         if (stream.textBased != true) return Reply.badRequest("subtitles shown as pictures are burned in")

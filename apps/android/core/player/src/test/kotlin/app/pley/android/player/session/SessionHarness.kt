@@ -8,7 +8,9 @@ import app.pley.android.data.LocalMedia
 import app.pley.android.fixtures.FixtureIds
 import app.pley.android.fixtures.FixtureServer
 import app.pley.android.fixtures.Journal
+import app.pley.android.model.AddSubtitle
 import app.pley.android.model.ItemDetail
+import app.pley.android.model.NetworkReport
 import app.pley.android.model.MaybeItem
 import app.pley.android.model.PlaybackInfo
 import app.pley.android.model.PlaybackRequest
@@ -101,6 +103,17 @@ class CountingApi(private val delegate: PleyApi) : PleyApi by delegate {
     override suspend fun reportProgress(itemId: Long, report: ProgressReport) = counted("reportProgress") { delegate.reportProgress(itemId, report) }
 
     override suspend fun setStreams(itemId: Long, choice: StreamChoice) = counted("setStreams") { delegate.setStreams(itemId, choice) }
+
+    override suspend fun playbackNetwork(clientId: String) = counted("playbackNetwork") { delegate.playbackNetwork(clientId) }
+
+    override suspend fun reportNetwork(report: NetworkReport) = counted("reportNetwork") { delegate.reportNetwork(report) }
+
+    override suspend fun speedTest(bytes: Long, readMs: Long, timeoutMs: Long) = counted("speedTest") { delegate.speedTest(bytes, readMs, timeoutMs) }
+
+    override suspend fun searchSubtitles(itemId: Long, fileId: Long?, languages: List<String>?) =
+        counted("searchSubtitles") { delegate.searchSubtitles(itemId, fileId, languages) }
+
+    override suspend fun addSubtitle(itemId: Long, add: AddSubtitle) = counted("addSubtitle") { delegate.addSubtitle(itemId, add) }
 }
 
 /**

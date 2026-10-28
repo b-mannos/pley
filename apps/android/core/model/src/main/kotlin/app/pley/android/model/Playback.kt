@@ -127,6 +127,8 @@ data class SubtitleTrack(
     val textBased: Boolean = false,
     /** WebVTT: "/api/files/7/subtitles/3.vtt"; `null` for subtitles shown as pictures. */
     val url: String? = null,
+    /** Added on the server (found online, or a file uploaded), not beside the media. */
+    val added: Boolean = false,
 )
 
 /**
@@ -358,3 +360,66 @@ data class StreamChoice(
 data class RatingRequest(
     val rating: Double? = null,
 )
+
+/**
+ * What the server remembers of this client's network, for Automatic's start
+ * (GET and PUT /api/playback/network, docs/QUALITY.md "Automatic").
+ */
+@Serializable
+data class PlaybackNetwork(
+    /** The server's own network: never a speed test. */
+    val local: Boolean = false,
+    /** The most Automatic starts at here, kbps; `null`: no limit known. */
+    val ceilingKbps: Int? = null,
+    /** "playback" (a step down) or "probe" (a speed test); `null` with no ceiling. */
+    val source: String? = null,
+    /** Unix ms of what set it. */
+    val since: Long? = null,
+    /** Run a speed test before Automatic starts. */
+    val probe: Boolean = false,
+)
+
+/** A body of PUT /api/playback/network: a speed test's result, or Automatic's ceiling (`null` forgets it). */
+sealed interface NetworkReport {
+    val clientId: String
+
+    /** [kbps] measured; [complete]: the whole test arrived within the time it had. */
+    data class Probe(override val clientId: String, val kbps: Int, val complete: Boolean) : NetworkReport
+
+    /** Automatic's ceiling changed: a step down or up to a quality; `null` for the original, or Automatic picked again. */
+    data class Ceiling(override val clientId: String, val kbps: Int?) : NetworkReport
+}
+
+/** What a speed test (GET /api/playback/speedtest) got: [bytes] in [ms] from the first byte; [complete] when all came. */
+data class SpeedSample(val bytes: Long, val ms: Long, val complete: Boolean) {
+    /** kbps: bytes × 8 / seconds / 1000. */
+    val kbps: Int get() = if (ms <= 0) 0 else (bytes * 8.0 / ms).toInt()
+}
+
+/** One subtitle found online for a file (GET /api/items/{id}/subtitles/search). */
+@Serializable
+data class SubtitleResult(
+    /** Opaque: what POST /api/items/{id}/subtitles takes back. */
+    val id: String,
+    val provider: String = "",
+    val language: String? = null,
+    /** The release it was made for: "Movie.2019.1080p.BluRay.x264-GRP". */
+    val name: String = "",
+    val format: String? = null,
+    val hearingImpaired: Boolean = false,
+    val forced: Boolean = false,
+    val downloads: Long = 0,
+    /** "hash": made for this very file; "title": for the title. */
+    val matched: String? = null,
+)
+
+/**
+ * The answer of GET /api/items/{id}/subtitles/search. [setup] is false when
+ * the server has no subtitle search set up (its 503 with `"setup": false`).
+ */
+@Serializable
+data class SubtitleResults(val results: List<SubtitleResult> = emptyList(), val setup: Boolean = true)
+
+/** The body of POST /api/items/{id}/subtitles that adds a subtitle found by search. */
+@Serializable
+data class AddSubtitle(val result: String, val fileId: Long? = null)

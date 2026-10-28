@@ -18,7 +18,13 @@ import app.pley.android.model.LibraryFilters
 import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
 import app.pley.android.model.ConversionInfo
+import app.pley.android.model.AddSubtitle
 import app.pley.android.model.MaybeItem
+import app.pley.android.model.NetworkReport
+import app.pley.android.model.PlaybackNetwork
+import app.pley.android.model.SpeedSample
+import app.pley.android.model.SubtitleResults
+import app.pley.android.model.SubtitleTrack
 import app.pley.android.model.Me
 import app.pley.android.model.NewPlaylist
 import app.pley.android.model.PersonDetail
@@ -240,6 +246,32 @@ interface PleyApi {
 
     /** DELETE /api/playback/{session}: ends the session and any transcode. */
     suspend fun stopPlayback(sessionId: String)
+
+    /** GET /api/playback/network: what the server remembers of this client's network, for Automatic's start. */
+    suspend fun playbackNetwork(clientId: String): PlaybackNetwork
+
+    /** PUT /api/playback/network: a speed test's result, or Automatic's new ceiling; the answer is GET's. */
+    suspend fun reportNetwork(report: NetworkReport): PlaybackNetwork
+
+    /**
+     * GET /api/playback/speedtest?bytes=[bytes], read as it comes: timed from
+     * the first byte, and stopped [readMs] after it (the request aborted) or
+     * when all arrived. [timeoutMs] bounds the whole request, the wait for
+     * the first byte included; a test cut short after its first byte still
+     * says what it measured.
+     */
+    suspend fun speedTest(bytes: Long, readMs: Long, timeoutMs: Long): SpeedSample
+
+    /**
+     * GET /api/items/{id}/subtitles/search: subtitles found online for the
+     * item's file [fileId] (`null`: its first) in [languages] (`null`: the
+     * profile's subtitle language). A server without search set up answers
+     * `setup` false.
+     */
+    suspend fun searchSubtitles(itemId: Long, fileId: Long?, languages: List<String>?): SubtitleResults
+
+    /** POST /api/items/{id}/subtitles: adds a subtitle found by [searchSubtitles]; the new track. */
+    suspend fun addSubtitle(itemId: Long, add: AddSubtitle): SubtitleTrack
 
     /**
      * GET /api/playback/{session}/{file}: a file of the session's HLS

@@ -11,7 +11,10 @@ import org.junit.Test
 /** Automatic's decisions (docs/QUALITY.md), on a playback simulated half a second at a time. */
 class AutoQualityTest {
     private val memory = CeilingMemory.memory()
-    private val auto = AutoQuality(memory)
+
+    /** The ceilings told to the server (NetworkStart.report). */
+    private val reported = mutableListOf<Int?>()
+    private val auto = AutoQuality(memory) { reported += it }
 
     /** The clock; far from 0, so a memory from "before" is in the past. */
     private var now = 10_000_000L
@@ -353,6 +356,39 @@ class AutoQualityTest {
         // 30 minutes on, forgotten.
         now += AutoQuality.MEMORY_MS
         assertSame(Qualities.ORIGINAL, begin(uhd))
+        assertNull(memory.read())
+    }
+
+    @Test
+    fun `the server's ceiling for the network takes the place of the remembered one`() {
+        memory.write(2_000, now)
+        // The server knows no limit here: the original, whatever this device remembers.
+        assertSame(Qualities.ORIGINAL, auto.begin(autoFile(hd), now, StartCeiling.Server(null)))
+        assertNull(auto.loweredFor)
+        // The server's ceiling, as the remembered one works.
+        assertEquals("4m", auto.begin(autoFile(uhd), now, StartCeiling.Server(5_000)).id)
+        assertEquals(LoweredFor.Network, auto.loweredFor)
+        assertSame(Qualities.ORIGINAL, auto.begin(autoFile(file(3_000_000, 1280, 720)), now, StartCeiling.Server(5_000)))
+        // The server couldn't say: this device's memory.
+        assertEquals("2m", auto.begin(autoFile(hd), now, StartCeiling.Device).id)
+        assertTrue(reported.isEmpty())
+    }
+
+    @Test
+    fun `every change of the remembered ceiling is told to the server`() {
+        downTo4m()
+        assertEquals(listOf<Int?>(memory.read()!!.first), reported)
+        // A step up to a quality is its bitrate; to the original, forgotten.
+        val up = present(play(6 * 60_000L, bandwidth = 20_000))
+        assertEquals("8m", up.to.id)
+        assertEquals(8_000, reported.last())
+        val original = present(play(4 * 60_000L, bandwidth = 20_000))
+        assertTrue(original.to.original)
+        assertNull(reported.last())
+        // Automatic picked again.
+        reported.clear()
+        auto.forgetCeiling()
+        assertEquals(listOf<Int?>(null), reported)
         assertNull(memory.read())
     }
 

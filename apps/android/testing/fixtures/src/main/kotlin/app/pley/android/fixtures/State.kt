@@ -109,6 +109,16 @@ internal class State(val options: FixtureServer.Options) {
     /** How often each subtitle track was asked for, by "file:index". */
     val subtitleAsks = HashMap<String, Int>()
 
+    /** Automatic's network memory (ExtraRoutes). */
+    val network = NetworkMemory()
+
+    /** Subtitle search is set up. */
+    @Volatile
+    var subtitleSearch = true
+
+    /** Subtitles added to files (POST /api/items/{id}/subtitles), by file. */
+    val addedSubtitles = HashMap<Long, MutableList<app.pley.android.model.SubtitleTrack>>()
+
     fun nowMs(): Long = options.clock()
 
     /** Unix seconds. */

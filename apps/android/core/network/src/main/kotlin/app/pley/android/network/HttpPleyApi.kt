@@ -20,7 +20,13 @@ import app.pley.android.model.LibraryFilters
 import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
 import app.pley.android.model.ConversionInfo
+import app.pley.android.model.AddSubtitle
 import app.pley.android.model.MaybeItem
+import app.pley.android.model.NetworkReport
+import app.pley.android.model.PlaybackNetwork
+import app.pley.android.model.SpeedSample
+import app.pley.android.model.SubtitleResults
+import app.pley.android.model.SubtitleTrack
 import app.pley.android.model.Me
 import app.pley.android.model.NewPlaylist
 import app.pley.android.model.PersonDetail
@@ -38,9 +44,16 @@ import app.pley.android.model.SessionStatus
 import app.pley.android.model.SortOrder
 import app.pley.android.model.StreamChoice
 import app.pley.android.model.TrickplayInfo
+import java.io.IOException
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.builtins.ListSerializer
@@ -217,6 +230,59 @@ class HttpPleyApi(
 
     override suspend fun stopPlayback(sessionId: String) = call("DELETE", null, "api", "playback", sessionId)
 
+    override suspend fun playbackNetwork(clientId: String): PlaybackNetwork =
+        get(PlaybackNetwork.serializer(), "api", "playback", "network", query = listOf("client_id" to clientId))
+
+    override suspend fun reportNetwork(report: NetworkReport): PlaybackNetwork {
+        // Exactly one of the two, and a ceiling of null is sent as null (it forgets).
+        val fields = buildMap {
+            put("client_id", JsonPrimitive(report.clientId))
+            when (report) {
+                is NetworkReport.Probe -> {
+                    put("probe_kbps", JsonPrimitive(report.kbps))
+                    put("probe_complete", JsonPrimitive(report.complete))
+                }
+                is NetworkReport.Ceiling -> put("ceiling_kbps", report.kbps?.let(::JsonPrimitive) ?: JsonNull)
+            }
+        }
+        return send("PUT", PlaybackNetwork.serializer(), JsonObject(fields).toString().toRequestBody(JSON), "api", "playback", "network")
+    }
+
+    override suspend fun speedTest(bytes: Long, readMs: Long, timeoutMs: Long): SpeedSample {
+        val client = http().newBuilder().callTimeout(timeoutMs, TimeUnit.MILLISECONDS).build()
+        val request = Request.Builder()
+            .url(address(listOf("api", "playback", "speedtest"), listOf("bytes" to bytes.toString())))
+            // The bytes as they travel: nothing to unpack, nothing counted twice.
+            .header("Accept-Encoding", "identity")
+            .header("Cache-Control", "no-store")
+            .build()
+        return withContext(io) {
+            val call = client.newCall(request)
+            val cancel = coroutineContext.job.invokeOnCompletion { call.cancel() }
+            try {
+                call.execute().use { response ->
+                    response.expectSuccess()
+                    SpeedReader(bytes, readMs).read(response.body.source())
+                }
+            } catch (e: IOException) {
+                throw failure(e)
+            } finally {
+                cancel.dispose()
+            }
+        }
+    }
+
+    override suspend fun searchSubtitles(itemId: Long, fileId: Long?, languages: List<String>?): SubtitleResults {
+        val query = listOf("file_id" to fileId?.toString(), "language" to languages?.takeIf { it.isNotEmpty() }?.joinToString(","))
+        val request = jsonRequest(address(listOf("api", "items", itemId, "subtitles", "search"), query)).get().build()
+        return http().fetch(request) { response ->
+            if (response.code == 503 && notSetUp(response)) SubtitleResults(setup = false) else response.decode(SubtitleResults.serializer())
+        }
+    }
+
+    override suspend fun addSubtitle(itemId: Long, add: AddSubtitle): SubtitleTrack =
+        send("POST", SubtitleTrack.serializer(), json(AddSubtitle.serializer(), add), "api", "items", itemId, "subtitles")
+
     override fun playbackFileUrl(sessionId: String, file: String): String =
         address(listOf("api", "playback", sessionId, file)).toString()
 
@@ -320,12 +386,24 @@ class HttpPleyApi(
         http().fetch(request) { it.expectSuccess() }
     }
 
+    /** A 503 that says subtitle search isn't set up (`"setup": false`). */
+    private fun notSetUp(response: okhttp3.Response): Boolean {
+        val text = try {
+            response.peekBody(MAX_ERROR_BODY).string()
+        } catch (_: IOException) {
+            return false
+        }
+        val fields = runCatching { PleyJson.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return false
+        return (fields["setup"] as? JsonPrimitive)?.booleanOrNull == false
+    }
+
     private fun <T> json(serializer: SerializationStrategy<T>, value: T): RequestBody =
         PleyJson.encodeToString(serializer, value).toRequestBody(JSON)
 
     companion object {
         private val JSON = "application/json".toMediaType()
         private val EMPTY = ByteArray(0).toRequestBody(null)
+        private const val MAX_ERROR_BODY = 16L * 1024
 
         /**
          * The header of a subtitle track still being read out of its file:

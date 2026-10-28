@@ -140,8 +140,10 @@ class PreferencesCeilings(context: Context) {
  * so they can be tested on their own: the original unless it doesn't play
  * well, then the quality that does.
  *
- * - [begin] says where a file starts: the original, or the quality the
- *   network carried when it was found too slow in the last 30 minutes.
+ * - [begin] says where a file starts: the original, or at most the
+ *   server's ceiling for this network ([StartCeiling.Server]); when the
+ *   server couldn't say, the quality the network carried when it was found
+ *   too slow on this device in the last 30 minutes.
  * - [sample] watches rebuffering and delivery while the video plays, and
  *   asks to step down on a play issue, or back up after calm minutes.
  * - [deviceFellBehind] is dropped frames at a transcode; at the original,
@@ -152,7 +154,11 @@ class PreferencesCeilings(context: Context) {
  * Seeks, pauses, the buffering after a start or a seek, and a new session
  * ([jumped]) are never play issues. Not thread-safe: the main thread only.
  */
-class AutoQuality(private val memory: CeilingMemory) {
+class AutoQuality(
+    private val memory: CeilingMemory,
+    /** The remembered ceiling changed (kbps, `null`: forgotten): the server is told ([NetworkStart.report]). */
+    private val onCeiling: (Int?) -> Unit = {},
+) {
     private var file: AutoFile? = null
 
     /** What plays: [Qualities.ORIGINAL] or one of the ladder's. */
@@ -190,9 +196,10 @@ class AutoQuality(private val memory: CeilingMemory) {
     /**
      * A new file in Automatic (a new title, Up Next's, or Automatic picked
      * in the menu): it starts afresh, at the original, or at most at the
-     * remembered ceiling when that is below the file's bitrate.
+     * ceiling when that is below the file's bitrate: the server's for this
+     * network when it said ([start]), else the one remembered here.
      */
-    fun begin(file: AutoFile, nowMs: Long): QualityPreset {
+    fun begin(file: AutoFile, nowMs: Long, start: StartCeiling = StartCeiling.Device): QualityPreset {
         this.file = file
         deviceTop = null
         originalBlocked = false
@@ -201,16 +208,22 @@ class AutoQuality(private val memory: CeilingMemory) {
         lastChangeAt = null
         resetWatch()
         resetCalm()
-        val ceiling = remembered(nowMs)
-        val start = if (ceiling != null && (file.originalKbps == null || ceiling < file.originalKbps)) {
+        val ceiling = if (start is StartCeiling.Server) start.kbps else remembered(nowMs)
+        val begins = if (ceiling != null && (file.originalKbps == null || ceiling < file.originalKbps)) {
             ladder().firstOrNull { kbps(it) <= ceiling } ?: ladder().lastOrNull()
         } else {
             null
         }
-        playing = start ?: Qualities.ORIGINAL
-        loweredFor = if (start != null) LoweredFor.Network else null
-        if (start != null) lastChangeAt = nowMs
+        playing = begins ?: Qualities.ORIGINAL
+        loweredFor = if (begins != null) LoweredFor.Network else null
+        if (begins != null) lastChangeAt = nowMs
         return playing
+    }
+
+    /** Automatic picked again in the menu: what was remembered of the network goes, here and on the server. */
+    fun forgetCeiling() {
+        memory.forget()
+        onCeiling(null)
     }
 
     /** A file is in Automatic's hands ([begin]), until [stop]. */
@@ -359,8 +372,10 @@ class AutoQuality(private val memory: CeilingMemory) {
             if (step.to.original) {
                 loweredFor = null
                 memory.forget()
+                onCeiling(null)
             } else {
                 memory.write(kbps(step.to), nowMs)
+                onCeiling(kbps(step.to))
             }
         } else {
             lastDownAt = nowMs
@@ -389,7 +404,11 @@ class AutoQuality(private val memory: CeilingMemory) {
             val ceiling = current?.let { it * rate * SAFETY }
             val lower = ladder.filter { current == null || kbps(it) < current }
             val pick = lower.firstOrNull { ceiling == null || kbps(it) <= ceiling } ?: lower.lastOrNull()
-            pick?.also { memory.write(min(ceiling?.toInt() ?: kbps(it), kbps(it)).coerceAtLeast(kbps(Qualities.LOWEST)), nowMs) }
+            pick?.also {
+                val kept = min(ceiling?.toInt() ?: kbps(it), kbps(it)).coerceAtLeast(kbps(Qualities.LOWEST))
+                memory.write(kept, nowMs)
+                onCeiling(kept)
+            }
         }
         return target?.let { AutoStep(it, reason) }
     }

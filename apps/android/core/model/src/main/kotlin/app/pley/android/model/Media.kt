@@ -110,8 +110,10 @@ data class MediaStream(
     // Subtitles.
     /** srt, ass, WebVTT, mov_text (true); PGS, VobSub (false: they're burned in). */
     val textBased: Boolean? = null,
-    /** A subtitle file beside the media. */
+    /** A subtitle file beside the media, or one added on the server ([added]). */
     val external: Boolean = false,
+    /** A subtitle added on the server (found online, or a file uploaded). */
+    val added: Boolean = false,
 )
 
 /** A chapter of a file, from its container. */

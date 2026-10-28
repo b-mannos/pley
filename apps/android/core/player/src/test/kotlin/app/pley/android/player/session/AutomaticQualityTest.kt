@@ -1,7 +1,9 @@
 package app.pley.android.player.session
 
 import app.pley.android.fixtures.FixtureIds
+import app.pley.android.model.NetworkReport
 import app.pley.android.model.PlaybackMode
+import kotlinx.coroutines.runBlocking
 import app.pley.android.player.PlayRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -196,6 +198,66 @@ class AutomaticQualityTest {
         assertEquals("Lowered for this device", state.note)
         // Automatic has Original in its menu: no second offer to play it.
         assertFalse(state.canPlayOriginal)
+    }
+
+    // ---------------------------------------------------------------- what the server knows of the network
+
+    /** The bodies of PUT /api/playback/network, in order. */
+    private fun networkReports(): List<String> = h.journal.writes("PUT", "/api/playback/network").map { it.body }
+
+    @Test
+    fun `on a network the server knows, Automatic starts at most at its ceiling`() {
+        h.server.networkRemote = true
+        runBlocking { h.api.reportNetwork(NetworkReport.Ceiling(SessionHarness.CLIENT_ID, 4_000)) }
+        val c = playing()
+        val asked = h.playbackRequests().single()
+        assertEquals(PlaybackMode.Transcode, asked.mode)
+        assertEquals(4_000, asked.maxBitrate)
+        assertEquals("Automatic · 4 Mbps 720p", c.state.value.quality)
+        assertEquals("Lowered for your connection", c.state.value.note)
+        assertEquals(1, h.api.count("playbackNetwork"))
+        assertEquals(0, h.api.count("speedTest"))
+    }
+
+    @Test
+    fun `a network the server doesn't know gets a speed test first, reported`() {
+        h.server.networkRemote = true
+        val c = playing()
+        assertEquals(1, h.api.count("speedTest"))
+        val report = networkReports().single()
+        assertTrue(report, report.contains("\"probe_kbps\""))
+        // Loopback brings it all at once: no limit, the original.
+        assertEquals("Automatic · Original", c.state.value.quality)
+        assertEquals(PlaybackMode.Auto, h.playbackRequests().single().mode)
+    }
+
+    @Test
+    fun `a step down is told to the server, and Automatic picked again forgets it`() {
+        val c = playing()
+        starveUntilLowered()
+        assertEquals("""{"client_id":"android-test","ceiling_kbps":2000}""", networkReports().single())
+        c.selectQuality("original")
+        h.settle()
+        c.selectQuality("auto")
+        h.settle()
+        assertEquals("""{"client_id":"android-test","ceiling_kbps":null}""", networkReports().last())
+        assertEquals("Automatic · Original", c.state.value.quality)
+    }
+
+    @Test
+    fun `an older server leaves the ceiling to this device, as before`() {
+        h.server.networkRoutes = false
+        val c = playing()
+        starveUntilLowered()
+        h.engine.ready()
+        c.playNext()
+        h.settle()
+        val asked = h.playbackRequests().last()
+        assertEquals(NEXT_EPISODE, asked.itemId)
+        assertEquals(2_000, asked.maxBitrate)
+        // Asked once: the routes aren't there, so nothing more goes to them.
+        assertEquals(1, h.api.count("playbackNetwork"))
+        assertTrue(networkReports().isEmpty())
     }
 
     private companion object {

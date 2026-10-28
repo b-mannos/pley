@@ -77,7 +77,7 @@ class FixtureServer(private val options: Options = Options()) : Closeable {
 
     private val state = State(options)
     private val routes: List<Route> =
-        state.oauth.routes() + BrowseRoutes(state).routes() + PlayRoutes(state).routes() + PlaylistRoutes(state).routes() +
+        state.oauth.routes() + ExtraRoutes(state).routes() + BrowseRoutes(state).routes() + PlayRoutes(state).routes() + PlaylistRoutes(state).routes() +
             ListRoutes(state).routes()
     private val listening = Any()
     private var server = MockWebServer()
@@ -127,6 +127,23 @@ class FixtureServer(private val options: Options = Options()) : Closeable {
     var refuseAccessTokens: Boolean
         get() = synchronized(state.lock) { state.oauth.refuseAccessTokens }
         set(value) = synchronized(state.lock) { state.oauth.refuseAccessTokens = value }
+
+    /** The apps play from another network than the server's: Automatic's speed test is due when nothing is known of it. */
+    var networkRemote: Boolean
+        get() = synchronized(state.lock) { state.network.remote }
+        set(value) = synchronized(state.lock) { state.network.remote = value }
+
+    /** Off, GET and PUT /api/playback/network answer as an older server's do (404, 405). */
+    var networkRoutes: Boolean
+        get() = synchronized(state.lock) { state.network.available }
+        set(value) = synchronized(state.lock) { state.network.available = value }
+
+    /** Off, subtitle search answers 503 "not set up". */
+    var subtitleSearch: Boolean
+        get() = state.subtitleSearch
+        set(value) {
+            state.subtitleSearch = value
+        }
 
     /** Event streams open now. */
     val eventListeners: Int get() = state.events.listeners
