@@ -120,6 +120,14 @@ sub init()
     m.noticeButtons.observeField("buttonSelected", "onNoticeButton")
     m.countdownTimer.observeField("fire", "onCountdown")
     m.top.observeField("active", "onActive")
+    m.top.observeField("serverStopped", "onServerStopped")
+end sub
+
+' This playback's session stopped from elsewhere: it ends now, not at its
+' next report.
+sub onServerStopped(event as object)
+    data = event.getData()
+    if m.sessionId <> "" and httpString(data.session_id) = m.sessionId then stopped(data)
 end sub
 
 sub onActive()

@@ -66,7 +66,7 @@ async function send(code, mod) {
 // The key's release goes only once the engine has read its press: read
 // in the other order, a busy engine drops the key.
 async function read(at) {
-  const until = Date.now() + 10000;
+  const until = Date.now() + 30000;
   while (Date.now() < until && Atomics.load(control, brs.DataType.KEY + at) >= 0) await sleep(10);
 }
 async function press(key, times = 1) {

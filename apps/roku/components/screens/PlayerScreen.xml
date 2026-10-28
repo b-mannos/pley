@@ -9,6 +9,9 @@
         <field id="params" type="assocarray" />
         <field id="navigate" type="assocarray" alwaysNotify="true" />
         <field id="active" type="boolean" alwaysNotify="true" />
+        <!-- A session stopped from elsewhere, as the event stream tells
+             ({ session_id, message, by_admin }). -->
+        <field id="serverStopped" type="assocarray" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/PlayerScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />

@@ -9,6 +9,9 @@
         <field id="played" type="integer" />
         <!-- The libraries' order saved so far: Home asks again after one. -->
         <field id="librariesMoved" type="integer" />
+        <!-- Changes the server's event stream told of (other devices'): Home
+             asks again after one. -->
+        <field id="remoteChanges" type="integer" />
         <!-- The latest titles marked watched or unwatched, played, put in
              My List or taken out, or out of Continue Watching
              ([{ count, itemId, action }], Ui.brs's uiNoteChange): the
@@ -27,7 +30,9 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Events.brs" />
     <children>
         <Group id="screens" />
+        <Timer id="gather" duration="0.3" />
     </children>
 </component>

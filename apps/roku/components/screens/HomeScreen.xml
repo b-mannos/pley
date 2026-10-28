@@ -8,6 +8,8 @@
         <field id="params" type="assocarray" />
         <field id="navigate" type="assocarray" alwaysNotify="true" />
         <field id="active" type="boolean" alwaysNotify="true" />
+        <!-- Set by the scene when other devices changed what Home shows. -->
+        <field id="refresh" type="boolean" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/HomeScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />

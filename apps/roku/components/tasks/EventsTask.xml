@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Follows the server's event stream (EventsTask.brs, lib/Events.brs)
+     while signed in to an http:// server. -->
+<component name="EventsTask" extends="Task">
+    <interface>
+        <!-- The server and the access token: a change connects again. "" for
+             either stops following. -->
+        <field id="server" type="string" />
+        <field id="token" type="string" />
+        <field id="userAgent" type="string" />
+        <!-- Each ServerEvent as it comes. -->
+        <field id="event" type="assocarray" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/tasks/EventsTask.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Events.brs" />
+</component>

@@ -21,6 +21,16 @@ sub init()
     m.music = CreateObject("roSGNode", "MusicPlayer")
     m.top.appendChild(m.music)
     m.global.addFields({ music: m.music })
+
+    ' What the person's other devices change, as it happens (an http://
+    ' server's event stream): gathered for 0.3 s, then the screens follow.
+    m.events = CreateObject("roSGNode", "EventsTask")
+    m.events.observeField("event", "onServerEvent")
+    m.gather = m.top.findNode("gather")
+    m.gather.observeField("fire", "onGathered")
+    session.observeField("accessToken", "onStream")
+    session.observeField("server", "onStream")
+    m.events.control = "run"
     m.api.observeField("ready", "onApiReady")
     m.api.control = "run"
 end sub
@@ -50,6 +60,33 @@ sub launchDialogDone()
     if m.stack.Count() > 0 and m.stack.Peek().isSameNode(m.launchDialog) then return
     m.launchDialog = invalid
     m.top.signalBeacon("AppDialogComplete")
+end sub
+
+' The event stream follows the server and the token signed in with.
+sub onStream()
+    session = m.global.session
+    m.events.userAgent = session.userAgent
+    m.events.server = session.server
+    m.events.token = session.accessToken
+end sub
+
+' Watch state, My List or libraries changed elsewhere: Home asks again
+' (now if it shows, else as it shows); a stream of this Roku's stopped from
+' elsewhere ends at once.
+sub onServerEvent(event as object)
+    data = event.getData()
+    if httpString(data.type) = "session_stopped"
+        if m.stack.Count() > 0 and m.stack.Peek().hasField("serverStopped") then m.stack.Peek().serverStopped = data
+        return
+    end if
+    if not evChangesHome(data) then return
+    m.gather.control = "stop"
+    m.gather.control = "start"
+end sub
+
+sub onGathered()
+    m.top.remoteChanges = m.top.remoteChanges + 1
+    if m.stack.Count() > 0 and m.stack.Peek().hasField("refresh") then m.stack.Peek().refresh = true
 end sub
 
 ' Pictures load through the scene's HTTP agent (nodes without their own

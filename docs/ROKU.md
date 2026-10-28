@@ -47,6 +47,7 @@ The app is in `apps/roku`; paths below are relative to it.
 | `components/items/` | The tiles and rows of lists and grids, the player's skip button |
 | `components/tasks/ApiTask` | The one place that talks to the server |
 | `components/tasks/DiscoveryTask` | `pley?` to UDP port 7539 (apps/server/src/discovery.rs) |
+| `components/tasks/EventsTask` | The server's event stream, on a socket (http:// servers) |
 | `components/lib/` | Plain BrightScript, no SceneGraph: addresses, sign-in decisions, token storage, the capability report, the server's JSON as tiles, times, the player's decisions |
 | `tests/` | Unit tests of `components/lib`, run on a computer |
 | `scripts/` | Test runner, smoke run, bench, the icons' generator |
@@ -210,12 +211,24 @@ Rules the code keeps:
   goes on, fast forward and rewind move 10 s; Back leaves the player as
   ever. While Up Next counts down, Back cancels it, and play, fast forward
   and rewind cancel it and do the same.
-- Home asks for its rows again only after something played, when they are a
-  minute old (for what other devices played or marked meanwhile: a Roku's
-  HTTP can't follow the server's event stream), or when Home is picked in
-  its menu. The task makes again only the rows whose JSON changed; the
-  others stay as they are, scrolled where they were, the focus stays on the
-  same row and title, and the menu changes only with the libraries.
+- What the person's other devices change comes from the server's event
+  stream (`GET /api/events`), on an http:// server: roUrlTransfer gives
+  an answer only once it is whole, so `components/tasks/EventsTask` reads
+  it from a socket of its own, HTTP/1.1 and chunks by hand
+  (`lib/Events.brs`), connecting again with each new token and, after
+  the stream ends or fails, 2 s later and doubling to a minute. Watch
+  state, My List and library changes, gathered for 0.3 s, have Home ask
+  for its rows again (at once if it shows, else as it shows); a stream
+  of this Roku's stopped from elsewhere ends at once, saying whether an
+  administrator stopped it. Roku's sockets have no TLS, so an https
+  server's stream isn't followed.
+- Home asks for its rows again only after something played, when they are
+  a minute old (for what other devices played or marked meanwhile, when
+  the event stream can't say), after an event, or when Home is picked in
+  its menu. The task makes again only the
+  rows whose JSON changed; the others stay as they are, scrolled where
+  they were, the focus stays on the same row and title, and the menu
+  changes only with the libraries.
 - A title marked watched or unwatched, played, put in My List or taken
   out, or taken out of Continue Watching is noted on the scene (its latest
   30 changes, `uiNoteChange`): the screen where it happened follows at
@@ -367,8 +380,8 @@ to the store.
 
 ## Not yet
 
-- Hearing what other devices change at once: Home asks again once its rows
-  are a minute old.
+- Hearing what other devices change at once from an https server: Home
+  asks again once its rows are a minute old.
 - Audio other than the file's default played as it is: reporting
   `audio_track_switching` and starting the Video node on the server's
   `audio_index`, once tried on a Roku.

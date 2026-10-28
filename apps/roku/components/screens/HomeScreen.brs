@@ -24,7 +24,10 @@ sub init()
     m.householdAsked = false
     m.menu.observeField("itemSelected", "onMenu")
     m.rows.observeField("rowItemSelected", "onTile")
+    ' Changes told by the server's event stream at the last load.
+    m.remoteSeen = 0
     m.top.observeField("active", "onActive")
+    m.top.observeField("refresh", "onRefresh")
     buildMenu()
 end sub
 
@@ -55,7 +58,7 @@ sub onActive()
     ' Titles marked watched or put in My List elsewhere too.
     scene = m.top.getScene()
     changed = uiChangesSince().Count() > 0
-    if changed or contentHomeStale(scene.played, m.playedSeen, m.loadedAgo.TotalSeconds()) or scene.librariesMoved <> m.movedSeen then load()
+    if changed or contentHomeStale(scene.played, m.playedSeen, m.loadedAgo.TotalSeconds()) or scene.librariesMoved <> m.movedSeen or scene.remoteChanges <> m.remoteSeen then load()
 end sub
 
 ' A title marked watched, put in My List or taken out of Continue Watching
@@ -66,9 +69,15 @@ end sub
 
 ' The libraries (the menu) and the rows, asked for together; the task
 ' makes the ContentNodes of the rows that changed.
+' Another device changed what Home shows, while it shows.
+sub onRefresh()
+    if m.top.active and m.started then load()
+end sub
+
 sub load()
     m.playedSeen = m.top.getScene().played
     m.movedSeen = m.top.getScene().librariesMoved
+    m.remoteSeen = m.top.getScene().remoteChanges
     m.loadedAgo.Mark()
     if m.rowKeys.Count() = 0 then showMessage("Loading…")
     uiGet("/api/libraries", "onLibraries")

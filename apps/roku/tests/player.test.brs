@@ -61,6 +61,7 @@ sub test_player_says_who_stopped_the_stream()
     tkEqual(playerStoppedMessage("{""code"":""session_stopped"",""error"":""session_stopped"",""message"":null}"), "Playback was stopped by the server's administrator.")
     tkEqual(playerStoppedMessage({ message: "Disk full" }), "Playback was stopped by the server's administrator." + Chr(10) + "Disk full")
     tkEqual(playerStoppedMessage("<html>"), "Playback was stopped by the server's administrator.")
+    tkEqual(playerStoppedMessage({ session_id: "s1", message: invalid, by_admin: false }), "Playback was stopped from another device.", "the event stream says who")
 end sub
 
 sub test_player_up_next_at_the_credits()
