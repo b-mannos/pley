@@ -6,8 +6,9 @@ function contentShown(kind as string) as boolean
     return kind = "movie" or kind = "show" or kind = "season" or kind = "episode"
 end function
 
+' Movies, episodes and extras (trailers and the like) play in the player.
 function contentPlayable(kind as string) as boolean
-    return kind = "movie" or kind = "episode"
+    return kind = "movie" or kind = "episode" or kind = "extra"
 end function
 
 ' Picture widths asked of the server, those of the cells that show them
@@ -248,14 +249,33 @@ function contentEpisodes(children as dynamic, server as string) as object
     return episodes
 end function
 
-' A movie's or an episode's details screen: what it shows and which
-' buttons it has. actions match buttons: "resume", "start".
-function contentDetail(detail as object, server as string) as object
+' A title's details screen (a movie, an episode, a show or an extra): what
+' it shows and which buttons it has, four at most. actions match buttons:
+' "resume", "start", "playNext" (a show's next episode, onDeck),
+' "episodes", "watched", "unwatched", "listAdd", "listRemove" and "show"
+' (an episode's). onDeck is a show's episode to play next (ItemSummary),
+' invalid until the server said or when there is none.
+function contentDetail(detail as object, server as string, onDeck = invalid as dynamic) as object
     kind = httpString(detail.kind)
     title = httpSentence(detail.title)
     heading = title
     line = fmtMeta(detail)
-    if kind = "episode"
+    if kind = "show"
+        parts = []
+        year = httpNumber(detail.year, 0)
+        if year > 0 then parts.Push(urlValue(year))
+        seasons = httpNumber(detail.child_count, 0)
+        if seasons = 1
+            parts.Push("1 season")
+        else if seasons > 1
+            parts.Push(urlValue(seasons) + " seasons")
+        end if
+        rating = httpSentence(detail.content_rating)
+        if rating <> "" then parts.Push(rating)
+        score = httpNumber(detail.rating, 0)
+        if score > 0 then parts.Push("★ " + fmtOneDecimal(score))
+        line = parts.Join(" · ")
+    else if kind = "episode"
         show = httpSentence(detail.grandparent_title)
         code = fmtEpisode(detail.parent_index, detail.index)
         if show <> "" then heading = show
@@ -271,11 +291,25 @@ function contentDetail(detail as object, server as string) as object
     position = 0
     if state <> invalid then position = httpNumber(state.position_ms, 0)
     duration = httpNumber(detail.duration_ms, 0)
+    watched = false
+    if state <> invalid then watched = httpTrue(state.watched)
+    inList = httpTrue(detail.in_watchlist)
     files = httpArray(detail.files)
     buttons = []
     actions = []
     note = ""
-    if not contentPlayable(kind)
+    if kind = "show"
+        upcoming = httpObject(onDeck)
+        if upcoming <> invalid
+            verb = "Play "
+            upcomingState = httpObject(upcoming.user_state)
+            if upcomingState <> invalid and fmtResumable(upcomingState.position_ms, upcoming.duration_ms) then verb = "Resume "
+            buttons.Push(verb + fmtEpisode(upcoming.parent_index, upcoming.index))
+            actions.Push("playNext")
+        end if
+        buttons.Push("Episodes")
+        actions.Push("episodes")
+    else if not contentPlayable(kind)
         note = "pley for Roku doesn't play this kind of title yet."
     else if files.Count() = 0
         note = "This item has no file to play."
@@ -285,6 +319,28 @@ function contentDetail(detail as object, server as string) as object
     else
         buttons = ["Play"]
         actions = ["start"]
+    end if
+    if kind = "movie" or kind = "episode" or kind = "show"
+        if watched
+            buttons.Push("Mark as unwatched")
+            actions.Push("unwatched")
+        else
+            buttons.Push("Mark as watched")
+            actions.Push("watched")
+        end if
+    end if
+    if kind = "movie" or kind = "show"
+        if inList
+            buttons.Push("Remove from My List")
+            actions.Push("listRemove")
+        else
+            buttons.Push("Add to My List")
+            actions.Push("listAdd")
+        end if
+    end if
+    if kind = "episode" and httpNumber(detail.grandparent_id, 0) > 0
+        buttons.Push("Go to show")
+        actions.Push("show")
     end if
     backdrop = urlImage(server, detail.backdrop_url, contentBackdropWidth())
     if backdrop = "" then backdrop = urlImage(server, detail.thumb_url, contentBackdropWidth())
@@ -305,6 +361,10 @@ function contentDetail(detail as object, server as string) as object
         poster: contentTileImage(detail, server, false, contentDetailPosterWidth()),
         positionMs: position,
         durationMs: duration,
+        watched: watched,
+        inList: inList,
+        showId: httpNumber(detail.grandparent_id, 0),
+        seasonId: httpNumber(detail.parent_id, 0),
         buttons: buttons,
         actions: actions,
         note: note

@@ -9,6 +9,7 @@ function navScreen(name as string) as string
         library: "LibraryScreen",
         show: "ShowScreen",
         details: "DetailsScreen",
+        grid: "GridScreen",
         player: "PlayerScreen",
         search: "SearchScreen",
         settings: "SettingsScreen",
@@ -20,17 +21,19 @@ function navScreen(name as string) as string
 end function
 
 ' The screen a tile opens: { to, params }, or invalid for kinds this
-' version doesn't open. A season opens its show on that season.
+' version doesn't open. A season opens its show on that season; a person
+' and a collection, a grid of their titles; an extra plays at once.
 function navForTile(tile as object) as dynamic
     kind = httpString(tile.kind)
     id = httpNumber(tile.itemId, 0)
     if id = 0 then return invalid
-    if kind = "movie" or kind = "episode" then return { to: "details", params: { itemId: id } }
-    if kind = "show" then return { to: "show", params: { showId: id, seasonId: 0 } }
+    if kind = "movie" or kind = "episode" or kind = "show" then return { to: "details", params: { itemId: id } }
     if kind = "season"
         showId = httpNumber(tile.parentId, 0)
         if showId = 0 then return invalid
         return { to: "show", params: { showId: showId, seasonId: id } }
     end if
+    if kind = "person" or kind = "collection" then return { to: "grid", params: { kind: kind, id: id, title: httpString(tile.title) } }
+    if kind = "extra" then return { to: "player", params: { itemId: id, startMs: 0 } }
     return invalid
 end function

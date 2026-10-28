@@ -121,3 +121,32 @@ sub uiCloseDialog()
     dialog = m.top.getScene().dialog
     if dialog <> invalid then dialog.close = true
 end sub
+
+' Notes a change to a title ({ itemId, action, … }: watched, unwatched,
+' listAdd, listRemove, hide, played) for the screens that show it, the
+' latest 30 kept on the scene; the change comes back with its count.
+function uiNoteChange(change as object) as object
+    scene = m.top.getScene()
+    change.count = scene.changeCount + 1
+    kept = []
+    for each earlier in scene.changes
+        if earlier.count > change.count - 30 then kept.Push(earlier)
+    end for
+    kept.Push(change)
+    scene.changes = kept
+    scene.changeCount = change.count
+    return change
+end function
+
+' The changes noted since this screen last asked (none the first time).
+function uiChangesSince() as object
+    scene = m.top.getScene()
+    if m.changesSeen = invalid then m.changesSeen = scene.changeCount
+    out = []
+    for each change in scene.changes
+        if change.count > m.changesSeen then out.Push(change)
+    end for
+    m.changesSeen = scene.changeCount
+    return out
+end function
+

@@ -28,8 +28,16 @@ sub onActive()
         m.title.text = m.library.name
         m.countLabel.text = fmtCount(m.library.itemCount, m.library.kind)
     end if
+    ' What was played or marked meanwhile.
+    for each change in uiChangesSince()
+        onTitleChanged(change)
+    end for
     if m.content.getChildCount() = 0 then loadMore()
     m.grid.setFocus(true)
+end sub
+
+sub onTitleChanged(change as object)
+    uiPatchTiles(m.content, change)
 end sub
 
 ' A page of posters; the task makes their ContentNodes.
@@ -74,3 +82,11 @@ end sub
 sub onSelected(event as object)
     uiOpenTile(m.content.getChild(event.getData()))
 end sub
+
+function onKeyEvent(key as string, press as boolean) as boolean
+    if press and key = "options" and m.content.getChildCount() > 0
+        uiTileOptions(m.content.getChild(m.grid.itemFocused), false)
+        return true
+    end if
+    return false
+end function

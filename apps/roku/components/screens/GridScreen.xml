@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A person's movies and shows, or a collection's titles, as a grid of
+     posters under their name (and photo), what the server says of them. -->
+<component name="GridScreen" extends="Group">
+    <interface>
+        <field id="route" type="string" />
+        <field id="params" type="assocarray" />
+        <field id="navigate" type="assocarray" alwaysNotify="true" />
+        <field id="active" type="boolean" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/screens/GridScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Titles.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Nodes.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Format.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Player.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Content.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Pages.brs" />
+    <children>
+        <Rectangle id="photoFrame" translation="[96, 48]" width="112" height="168" color="0x262B35FF" visible="false" />
+        <Poster id="photo" translation="[96, 48]" width="112" height="168" loadWidth="112" loadHeight="168" loadDisplayMode="scaleToZoom" />
+        <Label id="title" translation="[96, 56]" width="1600" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="line" translation="[96, 128]" width="1600" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
+        <Label id="summary" translation="[96, 168]" width="1600" maxLines="1" color="0x8B95A5FF" font="font:SmallestSystemFont" />
+        <MarkupGrid id="grid" translation="[96, 232]" itemComponentName="Tile" numColumns="7" numRows="2" itemSize="[220, 410]" itemSpacing="[28, 24]" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
+        <Label id="message" translation="[96, 480]" width="1728" wrap="true" horizAlign="center" color="0xA1A9B6FF" text="Loading…" font="font:MediumSystemFont" />
+    </children>
+</component>

@@ -1,5 +1,7 @@
 sub init()
     m.backdrop = m.top.findNode("backdrop")
+    m.shade = m.top.findNode("shade")
+    m.page = m.top.findNode("page")
     m.poster = m.top.findNode("poster")
     m.column = m.top.findNode("column")
     m.text = m.top.findNode("text")
@@ -8,29 +10,53 @@ sub init()
     m.genres = m.top.findNode("genres")
     m.tagline = m.top.findNode("tagline")
     m.summary = m.top.findNode("summary")
-    m.buttons = m.top.findNode("buttons")
     m.note = m.top.findNode("note")
+    m.buttons = m.top.findNode("buttons")
+    m.rows = m.top.findNode("rows")
     m.message = m.top.findNode("message")
     m.column.visible = false
-    ' The item's JSON, which the player starts with, and what it shows.
+    m.started = false
+    ' The item's JSON, which the player starts with, and what it shows; a
+    ' show's episode to play next, once the server said (invalid for none).
     m.item = invalid
     m.detail = invalid
+    m.onDeck = invalid
+    m.onDeckKnown = false
+    ' The rows under the details by key, as they come, and their keys as
+    ' shown, in order.
+    m.rowNodes = {}
+    m.rowKeys = []
     m.buttons.observeField("buttonSelected", "onButton")
+    m.rows.observeField("rowItemSelected", "onTile")
     m.top.observeField("active", "onActive")
 end sub
 
 ' Loaded each time it shows: back from the player, the place has changed.
 ' Asking for it also has the server read the start of the file ahead. The
 ' focus comes here at once, as the screen before had it: the remote works
-' whatever the answer, and a second Back goes back.
+' whatever the answer, and a second Back goes back. The rows come with the
+' first answer.
 sub onActive()
     if not m.top.active then return
-    if m.buttons.visible
+    uiChangesSince()
+    if m.rows.visible and m.page.translation[1] < 0
+        m.rows.setFocus(true)
+    else if m.buttons.visible
         m.buttons.setFocus(true)
     else
         m.top.setFocus(true)
     end if
-    uiGet("/api/items/" + urlValue(m.top.params.itemId), "onDetail")
+    path = "/api/items/" + urlValue(m.top.params.itemId)
+    if m.started
+        uiGet(path, "onDetail")
+    else
+        m.started = true
+        uiRequest({ method: "GET", path: path, build: "detail" }, "onDetail")
+    end if
+end sub
+
+sub onTitleChanged(change as object)
+    if m.detail <> invalid and change.itemId = m.detail.itemId then uiGet("/api/items/" + urlValue(m.detail.itemId), "onDetail")
 end sub
 
 ' A reload that fails leaves the details as they were.
@@ -40,28 +66,57 @@ sub onDetail(event as object)
         if m.detail = invalid and not uiFailed(answer) then m.message.text = answer.message
         return
     end if
+    first = m.item = invalid
     m.item = answer.data
-    m.detail = contentDetail(answer.data, m.global.session.server)
+    kind = httpString(m.item.kind)
+    if kind = "show"
+        m.onDeckKnown = false
+        uiGet("/api/items/" + urlValue(m.item.id) + "/on-deck", "onOnDeck")
+    end if
+    if first then askRows(event.getRoSGNode(), answer, kind)
+    showDetail()
+end sub
+
+' A show's next episode: its button comes first.
+sub onOnDeck(event as object)
+    answer = event.getData()
+    m.onDeck = invalid
+    if answer.ok and answer.data <> invalid then m.onDeck = httpObject(answer.data.item)
+    m.onDeckKnown = true
+    showDetail()
+end sub
+
+sub showDetail()
+    if m.item = invalid then return
+    m.detail = contentDetail(m.item, m.global.session.server, m.onDeck)
     m.message.visible = false
     m.heading.text = m.detail.heading
     m.line.text = m.detail.line
     m.genres.text = m.detail.genres
     m.tagline.text = m.detail.tagline
     m.summary.text = m.detail.summary
+    m.note.text = m.detail.note
     layoutText()
     agent = m.top.getScene().getHttpAgent()
-    m.backdrop.setHttpAgent(agent)
-    m.backdrop.uri = m.detail.backdrop
-    m.poster.setHttpAgent(agent)
-    m.poster.uri = m.detail.poster
-    hasButtons = m.detail.buttons.Count() > 0
-    m.note.text = m.detail.note
-    m.note.visible = not hasButtons
-    if hasButtons then m.buttons.buttons = m.detail.buttons
+    if m.backdrop.uri <> m.detail.backdrop
+        m.backdrop.setHttpAgent(agent)
+        m.backdrop.uri = m.detail.backdrop
+    end if
+    if m.poster.uri <> m.detail.poster
+        m.poster.setHttpAgent(agent)
+        m.poster.uri = m.detail.poster
+    end if
+    ' A show's buttons wait for its next episode, which comes first.
+    hasButtons = m.detail.buttons.Count() > 0 and (m.detail.kind <> "show" or m.onDeckKnown)
+    if hasButtons
+        focused = m.buttons.buttonFocused
+        if FormatJson(m.buttons.buttons) <> FormatJson(m.detail.buttons) then m.buttons.buttons = m.detail.buttons
+        if focused > 0 and focused < m.detail.buttons.Count() then m.buttons.focusButton = focused
+    end if
     m.buttons.visible = hasButtons
     m.column.visible = true
     ' Only while this screen has the focus: a dialog over it keeps it.
-    if m.top.isInFocusChain()
+    if m.top.isInFocusChain() and not m.rows.isInFocusChain()
         if hasButtons
             m.buttons.setFocus(true)
         else
@@ -74,7 +129,7 @@ end sub
 sub layoutText()
     shown = [m.heading]
     spacings = []
-    for each part in [{ label: m.line, gap: 20 }, { label: m.genres, gap: 8 }, { label: m.tagline, gap: 28 }, { label: m.summary, gap: 20 }]
+    for each part in [{ label: m.line, gap: 20 }, { label: m.genres, gap: 8 }, { label: m.tagline, gap: 28 }, { label: m.summary, gap: 20 }, { label: m.note, gap: 28 }]
         if part.label.text <> ""
             spacings.Push(part.gap)
             shown.Push(part.label)
@@ -85,10 +140,138 @@ sub layoutText()
     m.text.itemSpacings = spacings
 end sub
 
+' --- The rows ---
+
+' The rows that came with the details (cast and crew, extras), and those
+' asked for now: a show's seasons, More Like This and the collections a
+' movie or show is part of.
+sub askRows(request as object, answer as object, kind as string)
+    built = request.content
+    if built <> invalid and answer.rows <> invalid
+        children = built.getChildren(-1, 0)
+        for i = 0 to answer.rows.Count() - 1
+            if i < children.Count() then keepRow(answer.rows[i].key, children[i], answer.rows[i].wide)
+        end for
+    end if
+    path = "/api/items/" + urlValue(m.item.id)
+    if kind = "show" then uiRequest({ method: "GET", path: path + "/children", build: "seasonTiles", row: "seasons", title: "Seasons" }, "onRow")
+    if kind = "movie" or kind = "show"
+        uiRequest({ method: "GET", path: path + "/related", query: { limit: 20 }, build: "tiles", row: "related", title: "More like this" }, "onRow")
+        uiRequest({ method: "GET", path: path + "/collections", build: "collections", row: "collections", title: "Collections" }, "onRow")
+    end if
+    showRows()
+end sub
+
+sub onRow(event as object)
+    request = event.getRoSGNode()
+    answer = event.getData()
+    if not answer.ok or request.content = invalid or request.content.getChildCount() = 0 then return
+    row = CreateObject("roSGNode", "ContentNode")
+    row.title = request.spec.title
+    row.appendChildren(request.content.getChildren(-1, 0))
+    keepRow(request.spec.row, row, false)
+    showRows()
+end sub
+
+sub keepRow(key as string, row as object, wide as boolean)
+    m.rowNodes[key] = { node: row, wide: wide }
+end sub
+
+' The rows there are, in their order; the focus stays on its row.
+sub showRows()
+    keys = []
+    for each key in ["seasons", "credits", "extras", "related", "collections"]
+        if m.rowNodes.DoesExist(key) then keys.Push(key)
+    end for
+    if keys.Count() = 0 or FormatJson(keys) = FormatJson(m.rowKeys) then return
+    focusedKey = ""
+    position = m.rows.rowItemFocused
+    if position <> invalid and position.Count() = 2 and position[0] >= 0 and position[0] < m.rowKeys.Count() then focusedKey = m.rowKeys[position[0]]
+    content = CreateObject("roSGNode", "ContentNode")
+    sizes = []
+    heights = []
+    for each key in keys
+        row = m.rowNodes[key]
+        content.appendChild(row.node)
+        if row.wide
+            sizes.Push([400, 300])
+        else
+            sizes.Push([220, 410])
+        end if
+        heights.Push(sizes.Peek()[1] + 60)
+    end for
+    m.rowKeys = keys
+    m.rows.rowItemSize = sizes
+    m.rows.rowHeights = heights
+    m.rows.content = content
+    for i = 0 to keys.Count() - 1
+        if keys[i] = focusedKey then m.rows.jumpToRowItem = [i, position[1]]
+    end for
+    m.rows.visible = true
+end sub
+
+' The page slides up to the rows as they take the focus, the backdrop
+' shaded under them all, and back down.
+sub focusRows(onRows as boolean)
+    if onRows
+        m.page.translation = [0, -820]
+        m.shade.width = 1920
+        m.rows.setFocus(true)
+    else
+        m.page.translation = [0, 0]
+        m.shade.width = 1260
+        if m.buttons.visible
+            m.buttons.setFocus(true)
+        else
+            m.top.setFocus(true)
+        end if
+    end if
+end sub
+
+sub onTile(event as object)
+    position = event.getData()
+    row = m.rows.content.getChild(position[0])
+    if row <> invalid then uiOpenTile(row.getChild(position[1]))
+end sub
+
+' --- The buttons ---
+
 sub onButton(event as object)
     if m.detail = invalid then return
-    startMs = 0
-    if m.detail.actions[event.getData()] = "resume" then startMs = m.detail.positionMs
-    ' The player has the item already: one request less before it plays.
-    uiNavigate({ to: "player", params: { itemId: m.detail.itemId, startMs: startMs, item: m.item } })
+    action = m.detail.actions[event.getData()]
+    if action = "resume" or action = "start"
+        startMs = 0
+        if action = "resume" then startMs = m.detail.positionMs
+        ' The player has the item already: one request less before it plays.
+        uiNavigate({ to: "player", params: { itemId: m.detail.itemId, startMs: startMs, item: m.item } })
+    else if action = "playNext"
+        if m.onDeck = invalid then return
+        tile = contentTile(m.onDeck, m.global.session.server, true)
+        uiNavigate({ to: "player", params: { itemId: tile.itemId, startMs: playerStartOf(tile.positionMs, tile.durationMs) } })
+    else if action = "episodes"
+        uiNavigate({ to: "show", params: { showId: m.detail.itemId, seasonId: 0 } })
+    else
+        uiTitleAction({ itemId: m.detail.itemId, kind: m.detail.kind, parentId: m.detail.seasonId, grandparentId: m.detail.showId }, action)
+    end if
 end sub
+
+' Down from the buttons goes to the rows, up from the first row back; the
+' Options key on a title of the rows offers what can be done with it.
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+    if key = "down" and not m.rows.isInFocusChain() and m.rows.visible
+        focusRows(true)
+        return true
+    end if
+    if (key = "up" or key = "back") and m.rows.isInFocusChain()
+        focusRows(false)
+        return true
+    end if
+    if key = "options" and m.rows.isInFocusChain()
+        position = m.rows.rowItemFocused
+        row = m.rows.content.getChild(position[0])
+        if row <> invalid then uiTileOptions(row.getChild(position[1]), false)
+        return true
+    end if
+    return false
+end function

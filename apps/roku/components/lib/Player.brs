@@ -181,6 +181,13 @@ function playerMayRestart(restarts as object, nowMs as integer) as boolean
     return recent < 3
 end function
 
+' Whether the server counts a title played to positionMs as watched: 90 %
+' of it (docs/API.md, POST /api/items/{id}/progress).
+function playerWatched(positionMs as dynamic, durationMs as dynamic) as boolean
+    duration = httpNumber(durationMs, 0)
+    return duration > 0 and httpNumber(positionMs, 0) >= duration * 0.9
+end function
+
 ' Where a title starts: its place when there is one to resume from.
 function playerStartOf(positionMs as dynamic, durationMs as dynamic) as integer
     if fmtResumable(positionMs, durationMs) then return Int(httpNumber(positionMs, 0))

@@ -4,10 +4,15 @@ A native SceneGraph app for Roku players and Roku TVs. It finds pley
 servers on the local network (or takes an address), signs in with a code
 shown on the TV and approved on the server's `/link` page (or a QR code of
 it, which the server draws), and shows Home's rows, each library as a grid
-of posters, a show's seasons and episodes, a title's details with Resume and
-Play from start, Search with the on-screen keyboard, and Settings with the
+of posters, a show's seasons and episodes, a title's page (Resume and Play
+from start, a show's next episode, Mark as watched, My List, Go to show,
+and rows of its seasons, cast and crew, extras, More Like This and the
+collections it is part of), people's and collections' pages, Search with
+the on-screen keyboard (titles and people), and Settings with the
 profile's audio and subtitle defaults, Sort libraries, Switch server and
-Sign out. The player plays files as they are whenever the
+Sign out. The Options key (*) on a title offers Mark as watched or
+unwatched, Add to or Remove from My List, Remove from Continue Watching
+and Go to show. The player plays files as they are whenever the
 Roku can (it reports what it decodes, from `roDeviceInfo`), HLS otherwise,
 reports progress, offers Skip Intro and Skip Credits as the web player does,
 the next episode at the credits of one, and subtitle sync (Down). Music isn't played yet: music
@@ -26,7 +31,8 @@ The app is in `apps/roku`; paths below are relative to it.
 |---|---|
 | `source/main.brs` | Starts the one scene |
 | `components/MainScene` | The stack of screens, the HTTP agent of pictures, sign-in when the server ends it |
-| `components/screens/` | Servers, sign-in with a code, Home, Library, Show, Details, Player, Search, Settings, "Can't reach your server" |
+| `components/screens/` | Servers, sign-in with a code, Home, Library, Show, Details (a title's page), Grid (a person's or a collection's titles), Player, Search, Settings, "Can't reach your server" |
+| `components/shared/` | The screens' helpers (`Ui.brs`), and what can be done with a title (`Titles.brs`) |
 | `components/items/` | The tiles and rows of lists and grids, the player's skip button |
 | `components/tasks/ApiTask` | The one place that talks to the server |
 | `components/tasks/DiscoveryTask` | `pley?` to UDP port 7539 (apps/server/src/discovery.rs) |
@@ -182,6 +188,18 @@ Rules the code keeps:
   its menu. The task makes again only the rows whose JSON changed; the
   others stay as they are, scrolled where they were, the focus stays on the
   same row and title, and the menu changes only with the libraries.
+- A title marked watched or unwatched, played, put in My List or taken
+  out, or taken out of Continue Watching is noted on the scene (its latest
+  30 changes, `uiNoteChange`): the screen where it happened follows at
+  once, and the screens it covers as they show again, Home asking for its
+  rows and grids drawing the title's tile again, without asking the server
+  for the whole list. My List as Home last saw it says which of Add and
+  Remove the Options key offers.
+- A title's page comes with its cast, crew and extras, built in the task
+  (`build: "detail"`); a show's seasons, More Like This and its collections
+  are asked for beside it, and each row shows as it comes, in that order.
+  Down past the buttons slides the page up to the rows, Up from the first
+  row (or Back) slides it down again.
 - A screen shown again takes the focus at once, before any answer, so the
   remote works whatever comes back; an answer moves the focus only while its
   screen has it, so a dialog over it keeps it.

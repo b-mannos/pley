@@ -119,7 +119,7 @@ const items = new Map([...movies, show, ...seasons, ...episodes].map((item) => [
 // ones for episode 103 (the one the walk plays), which the app asks the
 // server to draw.
 const PICTURE_SUBTITLES = 4;
-function detail(item) {
+function detail(item, myList) {
   const file = {
     id: 7000 + item.id, path: `${item.title}.mkv`, size: 1000000, container: item.kind === "movie" ? "mkv" : "mp4",
     duration_ms: item.duration_ms ?? null, bitrate: 8000000, width: 1920, height: 1080, video_codec: "h264", audio_codec: "aac",
@@ -137,7 +137,10 @@ function detail(item) {
     genres: ["Drama", "Mystery"], studio: null, content_rating: "PG-13", tmdb_id: null, imdb_id: null,
     files: playable ? [file] : [],
     markers: item.kind === "episode" ? [{ file_id: file.id, kind: "credits", start_ms: item.duration_ms - 60000, end_ms: item.duration_ms, source: "chapter" }] : [],
-    extras: [], cast: [], crew: [], in_watchlist: false,
+    extras: item.kind === "movie" ? [{ id: 4000, library_id: 1, kind: "extra", title: "Official Trailer", sort_title: "Official Trailer", extra_type: "trailer", duration_ms: 150000, added_at: 0, thumb_url: "/api/items/4000/images/thumb?v=1", user_state: state() }] : [],
+    cast: [{ id: 7, name: "Ada Lovelace", role: "actor", character: "Herself", photo_url: "/api/people/7/photo?v=1" }, { id: 8, name: "Alan Turing", role: "actor", character: "The Machine" }],
+    crew: [{ id: 9, name: "Grace Hopper", role: "director" }, { id: 9, name: "Grace Hopper", role: "writer" }],
+    in_watchlist: myList.includes(item.id),
   };
 }
 
@@ -308,6 +311,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       return json(200, {
         hubs: [
           { key: "continue_watching", title: "Continue Watching", library_id: null, items: [items.get(103), items.get(1000), items.get(1005)] },
+          ...(fixture.myList.length ? [{ key: "my_list", title: "My List", library_id: null, items: fixture.myList.map((id) => items.get(id)).filter(Boolean) }] : []),
           { key: "recently_added:1", title: "Recently Added in Movies", library_id: 1, items: movies.slice(0, 20) },
           { key: "recently_added:2", title: "Recently Added in TV Shows", library_id: 2, items: [show] },
           { key: "recently_added:3", title: "Recently Added in Music", library_id: 3, items: [{ id: 5000, kind: "album", title: "Blue", sort_title: "Blue", added_at: 0, user_state: state() }] },
@@ -333,6 +337,38 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       const id = Number(match[1]);
       return json(200, { item: items.get(id + 1)?.kind === "episode" ? items.get(id + 1) : null });
     }
+    // A title's page: More Like This, its collections; people and collections.
+    if ((match = path.match(/^\/api\/items\/(\d+)\/related$/))) return json(200, { items: movies.slice(10, 20) });
+    if ((match = path.match(/^\/api\/items\/(\d+)\/collections$/))) return json(200, { collections: [{ id: 1, title: "Fixture Collection" }] });
+    if ((match = path.match(/^\/api\/people\/(\d+)$/))) {
+      return json(200, { id: Number(match[1]), name: "Ada Lovelace", photo_url: `/api/people/${match[1]}/photo?v=1`, credits: [{ item: show, roles: [{ role: "actor", character: "Herself", episodes: 9 }] }, ...movies.slice(0, 3).map((item) => ({ item, roles: [{ role: "director" }] }))] });
+    }
+    if ((match = path.match(/^\/api\/collections\/(\d+)$/))) {
+      return json(200, { id: Number(match[1]), library_id: 1, title: "Fixture Collection", summary: "Five films.", automatic: false, sort: "release", smart_filter: null, item_count: 5, poster_url: "", backdrop_url: "", created_at: 0, updated_at: 0, items: movies.slice(0, 5) });
+    }
+    if (/^\/api\/(people\/\d+\/photo|collections\/\d+\/images\/\w+)$/.test(path)) {
+      res.writeHead(200, { "Content-Type": "image/png" });
+      return res.end(POSTER);
+    }
+    // Marks, My List and Continue Watching (the Options key, a title's buttons).
+    if ((match = path.match(/^\/api\/items\/(\d+)\/(watched|unwatched)$/)) && req.method === "POST") {
+      fixture.marks.push({ item: Number(match[1]), action: match[2] });
+      res.writeHead(204);
+      return res.end();
+    }
+    if ((match = path.match(/^\/api\/watchlist\/(\d+)$/)) && (req.method === "PUT" || req.method === "DELETE")) {
+      const id = Number(match[1]);
+      fixture.myList = fixture.myList.filter((other) => other !== id);
+      if (req.method === "PUT") fixture.myList.unshift(id);
+      fixture.marks.push({ item: id, action: req.method === "PUT" ? "listAdd" : "listRemove" });
+      res.writeHead(204);
+      return res.end();
+    }
+    if ((match = path.match(/^\/api\/continue-watching\/(\d+)$/)) && req.method === "DELETE") {
+      fixture.marks.push({ item: Number(match[1]), action: "hide" });
+      res.writeHead(204);
+      return res.end();
+    }
     if ((match = path.match(/^\/api\/items\/(\d+)\/progress$/)) && req.method === "POST") {
       progress.push({ item: Number(match[1]), ...JSON.parse(body) });
       res.writeHead(204);
@@ -340,7 +376,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     }
     if ((match = path.match(/^\/api\/items\/(\d+)$/))) {
       const item = items.get(Number(match[1]));
-      return item ? json(200, detail(item)) : json(404, { code: "not_found", message: `item ${match[1]} not found` });
+      return item ? json(200, detail(item, fixture.myList)) : json(404, { code: "not_found", message: `item ${match[1]} not found` });
     }
     if (path === "/api/playback" && req.method === "POST") {
       const ask = JSON.parse(body);
@@ -383,7 +419,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     return json(404, { code: "not_found", message: `nothing at ${path}` });
   });
 
-  const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], problems, requests, progress, closed, close: () => server.close() };
+  const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], myList: [1003], marks: [], problems, requests, progress, closed, close: () => server.close() };
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       issuer = `http://127.0.0.1:${server.address().port}`;

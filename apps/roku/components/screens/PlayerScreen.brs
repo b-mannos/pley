@@ -646,9 +646,11 @@ sub seekTo(targetMs as integer)
     m.video.seek = target / 1000
 end sub
 
-' POST /api/items/{id}/progress for the current session.
+' POST /api/items/{id}/progress for the current session. Stopped, the
+' screens showing the title follow (Ui.brs's uiNoteChange).
 sub report(state as string)
     if m.sessionId = "" then return
+    if state = "stopped" then uiNoteChange({ itemId: m.itemId, action: "played", positionMs: m.positionMs, durationMs: m.durationMs, watched: playerWatched(m.positionMs, m.durationMs) })
     m.lastReportAt = m.clock.TotalMilliseconds()
     path = "/api/items/" + urlValue(m.itemId) + "/progress"
     uiRequest({ method: "POST", path: path, json: playerProgress(m.positionMs, m.durationMs, state, m.sessionId), session: m.sessionId }, "onReported")

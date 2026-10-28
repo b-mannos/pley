@@ -9,6 +9,14 @@
         <field id="played" type="integer" />
         <!-- The libraries' order saved so far: Home asks again after one. -->
         <field id="librariesMoved" type="integer" />
+        <!-- The latest titles marked watched or unwatched, played, put in
+             My List or taken out, or out of Continue Watching
+             ([{ count, itemId, action }], Ui.brs's uiNoteChange): the
+             screens showing them follow. -->
+        <field id="changes" type="array" />
+        <field id="changeCount" type="integer" />
+        <!-- The ids in My List as Home last saw them, for the Options key. -->
+        <field id="myList" type="array" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />

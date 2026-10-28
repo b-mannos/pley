@@ -39,13 +39,26 @@ sub onActive()
         uiGet(path, "onShow")
         uiRequest({ method: "GET", path: path + "/children", build: "seasons" }, "onSeasons")
         uiGet(path + "/on-deck", "onOnDeck")
+        uiChangesSince()
         m.seasons.setFocus(true)
         return
     end if
     ' Back from an episode: its place and watched marks changed.
+    uiChangesSince()
+    reloadEpisodes()
+    m.lastFocus.setFocus(true)
+end sub
+
+sub reloadEpisodes()
     uiGet("/api/items/" + urlValue(m.showId) + "/on-deck", "onOnDeck")
     if m.shownSeason <> 0 then requestEpisodes(m.shownSeason)
-    m.lastFocus.setFocus(true)
+end sub
+
+' An episode or a season marked watched or unwatched with the Options key:
+' shown at once, then as the server has it.
+sub onTitleChanged(change as object)
+    uiPatchTiles(m.episodes.content, change)
+    reloadEpisodes()
 end sub
 
 sub onShow(event as object)
@@ -178,6 +191,17 @@ function onKeyEvent(key as string, press as boolean) as boolean
     end if
     if key = "down" and m.play.isInFocusChain()
         m.seasons.setFocus(true)
+        return true
+    end if
+    if key = "options" and m.episodes.isInFocusChain() and hasEpisodes
+        ' Its show is this one: no Go to show.
+        episode = m.episodes.content.getChild(m.episodes.itemFocused)
+        if episode <> invalid then uiTileOptions({ itemId: episode.itemId, kind: "episode", title: episode.title, watched: episode.watched, parentId: episode.parentId, grandparentId: 0 }, false)
+        return true
+    end if
+    if key = "options" and m.seasons.isInFocusChain() and m.seasons.content <> invalid
+        season = m.seasons.content.getChild(m.seasons.itemFocused)
+        if season <> invalid then uiTileOptions({ itemId: season.itemId, kind: "season", title: season.title, watched: season.episodes > 0 and season.watchedEpisodes >= season.episodes, parentId: m.showId, grandparentId: 0 }, false)
         return true
     end if
     return false

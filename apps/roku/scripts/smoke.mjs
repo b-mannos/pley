@@ -1,8 +1,9 @@
 // Runs the whole app, SceneGraph and Tasks included, in brs-node against
 // a fake pley server on 127.0.0.1 (scripts/fixture-server.mjs), and walks
 // it with the remote: sign in with the TV code and its QR code, Home, a
-// title's details, the player, a library's grid and its next page, a show,
-// Search, Settings, the server gone and Retry, then signing out and in
+// title's details, the player, the Options key, a library's grid and its
+// next page, a show's page, its episodes and a person's page, Search,
+// Settings, the server gone and Retry, then signing out and in
 // again on a server too old for QR codes. Then it starts the app again,
 // signed in, and times how soon Home is asked for. Fails on a BrightScript
 // error or on anything the fake server found wrong; saves what the screen
@@ -55,17 +56,23 @@ async function send(code, mod) {
         Atomics.store(control, brs.DataType.RID + at, brs.RemoteType.SIM);
         Atomics.store(control, brs.DataType.MOD + at, mod);
         Atomics.store(control, brs.DataType.KEY + at, code + mod);
-        return;
+        return at;
       }
     }
     await sleep(20);
   }
   throw new Error(`the app read no key for 30 s`);
 }
+// The key's release goes only once the engine has read its press: read
+// in the other order, a busy engine drops the key.
+async function read(at) {
+  const until = Date.now() + 10000;
+  while (Date.now() < until && Atomics.load(control, brs.DataType.KEY + at) >= 0) await sleep(10);
+}
 async function press(key, times = 1) {
   for (let i = 0; i < times; i++) {
     const code = key.startsWith("lit_") ? key.codePointAt(4) : KEYS[key];
-    await send(code, 0);
+    await read(await send(code, 0));
     await sleep(80);
     await send(code, 100);
     await sleep(600);
@@ -229,7 +236,7 @@ async function signOut() {
 const qr = { shown: false, hidden: false };
 const sync = { label: false };
 // Home asks again only after playing, or when its rows are a minute old.
-const home = { kept: false, loadedAt: 0 };
+const home = { kept: false };
 
 async function walk() {
   // A cold start of brs-node can take a while.
@@ -269,7 +276,14 @@ async function walk() {
   since = mark();
   await press("back"); // Home, which asks for its rows again after playing
   await waitFor(/^GET \/api\/hubs\/home$/, since, "Home's rows after playing");
-  home.loadedAt = Date.now();
+  // The Options key on the first of Continue Watching: Mark as watched, and
+  // Home asks for its rows again.
+  since = mark();
+  await press("options");
+  await sleep(500);
+  shoot("home-options");
+  await press("select");
+  await waitFor(/^POST \/api\/items\/103\/watched$/, since, "a title marked watched");
   await openFromMenu(1, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies");
   shoot("library");
   // Down until the next page is asked for: two rows before the first one ends.
@@ -280,12 +294,32 @@ async function walk() {
   await press("back");
   await openFromMenu(2, /^GET \/api\/libraries\/2\/items/, "TV Shows");
   since = mark();
-  await press("select"); // Severance
+  await press("select"); // Severance: its page, with its next episode first
+  await waitFor(/^GET \/api\/items\/99\/on-deck$/, since, "the show's next episode");
+  shoot("show-details");
+  since = mark();
+  await press("down"); // Episodes
+  await press("select");
   await waitFor(/^GET \/api\/items\/100\/children$/, since, "a season's episodes");
   shoot("show");
   await press("right"); // the episodes
   shoot("show-episodes");
-  await press("back", 2);
+  await press("back"); // the show's page
+  // Down past its buttons to its rows, the seasons then cast and crew,
+  // whose first opens a person's page.
+  since = mark();
+  await press("down", 3);
+  await press("down");
+  shoot("show-rows");
+  await press("select");
+  await waitFor(/^GET \/api\/people\/7$/, since, "a person's page");
+  shoot("person");
+  // The show's page, its buttons, the library, Home: one at a time, each
+  // screen settled before the next key.
+  for (let i = 0; i < 4; i++) {
+    await press("back");
+    await settle();
+  }
   await openFromMenu(3, /^GET \/api\/search\?.*q=mo/, "Search", async () => {
     await sleep(800);
     await press("lit_m");
@@ -293,9 +327,11 @@ async function walk() {
   });
   shoot("search");
   // Back from Search nothing played: Home stays as it is, unless its rows
-  // are a minute old by now (a slow run), when it asks again.
+  // are a minute old by now (a slow run), when it asks again. They are as
+  // old as Home's last asking.
   since = mark();
-  const age = Date.now() - home.loadedAt;
+  const loads = fixture.requests.filter((r) => r.method === "GET" && r.path === "/api/hubs/home");
+  const age = Date.now() - loads[loads.length - 1].at;
   await press("back");
   await settle();
   const asked = seen(/^GET \/api\/hubs\/home$/, since);
@@ -454,6 +490,9 @@ const checks = [
   ["loaded a library's next page", asked(/^GET \/api\/libraries\/1\/items\?.*offset=70/)],
   ["came back to Home asking again only for rows a minute old", home.kept],
   ["loaded a season's episodes", asked(/^GET \/api\/items\/100\/children$/)],
+  ["marked a title watched with the Options key", fixture.marks.some((m) => m.item === 103 && m.action === "watched")],
+  ["asked for a show's More Like This and collections", asked(/^GET \/api\/items\/99\/related\?limit=20$/) && asked(/^GET \/api\/items\/99\/collections$/)],
+  ["opened a person's page", asked(/^GET \/api\/people\/7$/)],
   ["searched", asked(/^GET \/api\/search\?/)],
   ["asked again with a new token after a 401", new Set(fixture.requests.filter((r) => r.path === "/api/items/103").map((r) => r.auth)).size > 1],
   ["sent the token in the header only", fixture.requests.every((r) => !/[?&]token=/.test(r.path))],

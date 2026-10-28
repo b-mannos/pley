@@ -329,13 +329,53 @@ sub apiBuild(job as object, answer as object)
         ' Rows Home shows as they are aren't made again.
         changes = contentRowChanges(data.hubs, invalid, server, job.known)
         job.request.content = nodesRows(changes.changed)
-        answer.data = { rows: changes.summary }
+        ' What My List holds, for the Options key on other screens.
+        listed = invalid
+        for each hub in httpArray(data.hubs)
+            if GetInterface(hub, "ifAssociativeArray") <> invalid and httpString(hub.key) = "my_list"
+                listed = []
+                for each item in httpArray(hub.items)
+                    if GetInterface(item, "ifAssociativeArray") <> invalid then listed.Push(httpNumber(item.id, 0))
+                end for
+            end if
+        end for
+        if listed = invalid then listed = []
+        answer.data = { rows: changes.summary, myList: listed }
     else if job.build = "tiles"
         items = httpArray(data.items)
         tiles = contentTiles(items, server)
+        ' Search: the people found, after the titles.
+        for each person in httpArray(data.people)
+            if GetInterface(person, "ifAssociativeArray") <> invalid and httpNumber(person.id, 0) > 0 then tiles.Push(pagePersonTile(person, server, ""))
+        end for
         job.request.content = nodesContent(tiles)
         ' listed: the page's items (the next page's offset), shown or not.
         answer.data = { total: httpNumber(data.total, -1), listed: items.Count(), shown: tiles.Count() }
+    else if job.build = "detail"
+        ' The rows that come with a title's details; the details stay.
+        rows = pageDetailRows(data, server)
+        job.request.content = nodesRows(rows)
+        keys = []
+        for each row in rows
+            keys.Push({ key: row.key, wide: row.wide })
+        end for
+        answer.rows = keys
+    else if job.build = "seasonTiles"
+        tiles = pageSeasonTiles(data.items, server)
+        job.request.content = nodesContent(tiles)
+        answer.data = { shown: tiles.Count() }
+    else if job.build = "collections"
+        tiles = pageCollectionTiles(data.collections, server)
+        job.request.content = nodesContent(tiles)
+        answer.data = { shown: tiles.Count() }
+    else if job.build = "person"
+        tiles = pagePersonCredits(data, server)
+        job.request.content = nodesContent(tiles)
+        answer.data = { title: httpSentence(data.name), image: urlImage(server, data.photo_url, contentDetailPosterWidth()), line: fmtTitles(tiles.Count()), summary: "", shown: tiles.Count() }
+    else if job.build = "collection"
+        tiles = contentTiles(data.items, server)
+        job.request.content = nodesContent(tiles)
+        answer.data = { title: httpSentence(data.title), image: "", line: fmtTitles(data.item_count), summary: httpClean(data.summary, 600, false), shown: tiles.Count() }
     else if job.build = "seasons"
         seasons = contentSeasons(data.items)
         job.request.content = nodesContent(seasons)

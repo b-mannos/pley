@@ -34,6 +34,7 @@ sub onActive()
     end if
     if not m.started
         m.started = true
+        uiChangesSince()
         m.menu.setFocus(true)
         load()
         return
@@ -46,8 +47,16 @@ sub onActive()
     ' Back from playing, Continue Watching and the watched marks moved on;
     ' a minute on, other devices may have moved them; sorted, the libraries
     ' and their rows come in their new order.
+    ' Titles marked watched or put in My List elsewhere too.
     scene = m.top.getScene()
-    if contentHomeStale(scene.played, m.playedSeen, m.loadedAgo.TotalSeconds()) or scene.librariesMoved <> m.movedSeen then load()
+    changed = uiChangesSince().Count() > 0
+    if changed or contentHomeStale(scene.played, m.playedSeen, m.loadedAgo.TotalSeconds()) or scene.librariesMoved <> m.movedSeen then load()
+end sub
+
+' A title marked watched, put in My List or taken out of Continue Watching
+' here: the rows follow.
+sub onTitleChanged(change as object)
+    if change.count > 0 then load()
 end sub
 
 ' The libraries (the menu) and the rows, asked for together; the task
@@ -82,6 +91,7 @@ sub onRows(event as object)
         if m.rowKeys.Count() = 0 and not uiFailed(answer) then showMessage(answer.message)
         return
     end if
+    m.top.getScene().myList = answer.data.myList
     rows = answer.data.rows
     if rows.Count() = 0
         m.rowKeys = []
@@ -252,6 +262,12 @@ function onKeyEvent(key as string, press as boolean) as boolean
     end if
     if key = "right" and m.menu.isInFocusChain() and m.rows.visible
         m.rows.setFocus(true)
+        return true
+    end if
+    if key = "options" and m.rows.isInFocusChain()
+        position = m.rows.rowItemFocused
+        row = m.rows.content.getChild(position[0])
+        if row <> invalid then uiTileOptions(row.getChild(position[1]), m.rowKeys[position[0]] = "continue_watching")
         return true
     end if
     return false

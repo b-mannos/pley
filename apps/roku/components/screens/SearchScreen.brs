@@ -21,6 +21,13 @@ sub onActive()
         return
     end if
     m.lastFocus.setFocus(true)
+    for each change in uiChangesSince()
+        onTitleChanged(change)
+    end for
+end sub
+
+sub onTitleChanged(change as object)
+    if m.grid.visible then uiPatchTiles(m.grid.content, change)
 end sub
 
 ' Searches once typing rests for half a second.
@@ -84,6 +91,10 @@ function onKeyEvent(key as string, press as boolean) as boolean
     end if
     if (key = "left" or key = "back") and m.grid.isInFocusChain()
         m.keyboard.setFocus(true)
+        return true
+    end if
+    if key = "options" and m.grid.isInFocusChain()
+        uiTileOptions(m.grid.content.getChild(m.grid.itemFocused), false)
         return true
     end if
     return false
