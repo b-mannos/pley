@@ -37,6 +37,7 @@ import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.reducedMotion
+import app.pley.android.player.AudioDelays
 import app.pley.android.player.sleep.SleepTexts
 import app.pley.android.player.subtitles.SubtitleSync
 import app.pley.android.ui.phone.R
@@ -67,6 +68,35 @@ internal fun SyncControl(offsetMs: Long, onChange: (Long) -> Unit) {
         PleyTextButton(stringResource(R.string.player_sync_reset), onClick = { onChange(0) }, enabled = offsetMs != 0L)
         PleyIconButton(PleyIcons.ChevronLeft, stringResource(R.string.player_sync_earlier), onClick = { onChange(offsetMs - SubtitleSync.STEP_MS) })
         PleyIconButton(PleyIcons.ChevronRight, stringResource(R.string.player_sync_later), onClick = { onChange(offsetMs + SubtitleSync.STEP_MS) })
+    }
+}
+
+/**
+ * The audio page's delay: the sound later (→) or earlier (←) than the
+ * picture in 50 ms steps, ±5 s, with Reset; [note] says why it can't move.
+ */
+@Composable
+internal fun AudioDelayControl(delayMs: Long, note: String?, onChange: (Long) -> Unit) {
+    val enabled = note == null
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .padding(start = 24.dp, end = 12.dp)
+            .testTag(TAG_AUDIO_DELAY),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(R.string.player_audio_delay), style = MaterialTheme.typography.bodyLarge, color = if (enabled) PleyColors.Fg else PleyColors.Disabled)
+            Text(
+                note ?: AudioDelays.label(delayMs),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (delayMs != 0L && enabled) PleyColors.AccentBright else PleyColors.Muted,
+            )
+        }
+        PleyTextButton(stringResource(R.string.player_sync_reset), onClick = { onChange(0) }, enabled = enabled && delayMs != 0L)
+        PleyIconButton(PleyIcons.ChevronLeft, stringResource(R.string.player_audio_earlier), onClick = { onChange(delayMs - AudioDelays.STEP_MS) }, enabled = enabled)
+        PleyIconButton(PleyIcons.ChevronRight, stringResource(R.string.player_audio_later), onClick = { onChange(delayMs + AudioDelays.STEP_MS) }, enabled = enabled)
     }
 }
 
@@ -115,4 +145,5 @@ internal fun BoxScope.SleepNotice(secondsLeft: Int?, music: Boolean, onKeep: () 
 internal const val STOPPED_LEAVE_MS = 20_000L
 
 internal const val TAG_SYNC = "phone-player-sync"
+internal const val TAG_AUDIO_DELAY = "phone-player-audio-delay"
 internal const val TAG_SLEEP_NOTICE = "phone-player-sleep-notice"

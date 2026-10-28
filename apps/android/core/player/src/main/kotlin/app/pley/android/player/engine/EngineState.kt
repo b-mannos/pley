@@ -68,6 +68,8 @@ data class PlaybackStats(
     val audioEncoding: Int? = null,
     /** Encoded audio (AC3, E-AC3, TrueHD, DTS…) goes to the TV or receiver as it is. */
     val passthrough: Boolean = false,
+    /** Tunneled playback: the TV times the frames against the sound itself. */
+    val tunneling: Boolean = false,
     val renderedFrames: Int = 0,
     val droppedFrames: Int = 0,
     val maxConsecutiveDropped: Int = 0,

@@ -112,6 +112,18 @@
     <string name="tv_settings_subtitle_background">Subtitle background</string>
     <string name="tv_settings_background_none">None</string>
     <string name="tv_settings_background_box">Dark box</string>
+    <string name="tv_settings_subtitle_font">Subtitle font</string>
+    <!-- The system's own typefaces. -->
+    <string name="tv_settings_font_sans">Sans serif</string>
+    <string name="tv_settings_font_serif">Serif</string>
+    <string name="tv_settings_font_monospace">Monospace</string>
+    <string name="tv_settings_font_casual">Casual</string>
+    <string name="tv_settings_subtitle_position">Subtitle position</string>
+    <!-- How far subtitles are raised from the bottom of the picture. -->
+    <string name="tv_settings_position_bottom">Bottom</string>
+    <string name="tv_settings_position_raised">Raised</string>
+    <string name="tv_settings_position_higher">Higher</string>
+    <string name="tv_settings_position_highest">Highest</string>
 
     <!-- Server, Diagnostics, About. -->
     <string name="tv_settings_server_value">The server this TV uses</string>

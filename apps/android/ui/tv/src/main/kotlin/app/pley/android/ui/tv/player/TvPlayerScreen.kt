@@ -99,8 +99,9 @@ internal fun TvPlayerScreen(
             val s = state.value
             RowOptions(
                 previousNext = s.subtitle != null || s.chapters.size > 1,
-                subtitles = s.subtitles.isNotEmpty(),
-                audio = s.audio.size > 1,
+                subtitles = s.subtitles.isNotEmpty() || s.canFindSubtitles,
+                // One track still has its delay.
+                audio = s.audio.isNotEmpty(),
                 quality = s.qualities.isNotEmpty(),
                 chapters = s.chapters.size > 1,
             )
@@ -259,6 +260,10 @@ internal fun TvPlayerScreen(
 
     BackHandler {
         when {
+            ui.panel == PlayerPanel.FindSubtitles -> {
+                controller.closeSubtitleSearch()
+                ui.openPanel(PlayerPanel.Subtitles)
+            }
             ui.panel != null -> ui.closePanel()
             state.value.upNextCard != null -> controller.cancelUpNext()
             ui.controls -> ui.hideControls(if (skipShown) PlayerFocus.Skip else PlayerFocus.Video)

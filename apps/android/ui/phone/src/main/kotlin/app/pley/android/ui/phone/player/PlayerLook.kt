@@ -40,15 +40,21 @@ object PlayerLook {
         subtitleSizes.indices.minBy { abs(subtitleSizes[it] - fraction) }
 
     /** How subtitles look with these settings: pley's own style applies over the system's once chosen. */
-    fun captionLook(settings: Settings): CaptionLook {
-        val defaults = Settings()
-        val box = settings.subtitleBackground == SubtitleBackground.DarkBox
-        return CaptionLook(
-            textFraction = subtitleSizes[sizeIndex(settings.subtitleSize)],
-            box = box,
-            custom = settings.subtitleSize != defaults.subtitleSize || settings.subtitleBackground != defaults.subtitleBackground,
-        )
-    }
+    fun captionLook(settings: Settings): CaptionLook = CaptionLook.of(settings)
+
+    /** The positions offered, as shares of the height raised from the bottom. */
+    val subtitleRaises: List<Float> get() = Settings.SUBTITLE_RAISES
+
+    /** Which of [subtitleRaises] [raise] is (the nearest). */
+    fun raiseIndex(raise: Float): Int = subtitleRaises.indices.minBy { abs(subtitleRaises[it] - raise) }
+
+    /** The style the sheet shows for [settings]. */
+    fun subtitleChoice(settings: Settings): SubtitleChoice = SubtitleChoice(
+        sizeIndex = sizeIndex(settings.subtitleSize),
+        box = settings.subtitleBackground == SubtitleBackground.DarkBox,
+        font = settings.subtitleFont,
+        raiseIndex = raiseIndex(settings.subtitleRaise),
+    )
 
     /** "1:02:03" or "4:05". */
     fun clock(ms: Long): String {

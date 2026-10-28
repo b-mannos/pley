@@ -68,6 +68,18 @@ data class EngineTracks(
     val text: List<EngineTrack> = emptyList(),
 )
 
+/** How the sound leaves the device. */
+enum class AudioOut {
+    /** Decoded here: its speed can change. */
+    Decoded,
+
+    /** Encoded (AC3, E-AC3, TrueHD, DTS), to the TV or receiver as it is: it plays at its own speed. */
+    Passthrough,
+
+    /** Tunneled: the TV times the frames against the sound itself, at its own speed. */
+    Tunneled,
+}
+
 /** Video frames shown and dropped since the media was loaded (Media3's DecoderCounters). */
 data class FrameCounts(
     val rendered: Long,
@@ -100,6 +112,9 @@ interface EngineLink {
     /** The server is out of reach and the engine keeps trying from where it stood. */
     val reconnecting: Boolean get() = false
 
+    /** How the sound goes out now. */
+    val audioOut: AudioOut get() = AudioOut.Decoded
+
     /**
      * The network's speed in kbps as the engine measured it from what it
      * downloaded for this media (Media3's bandwidth estimate); `null` until
@@ -120,6 +135,12 @@ interface EngineLink {
     fun stop() = pause()
 
     fun seekTo(positionMs: Long)
+
+    /** Plays at [speed] times the normal speed, the sound's pitch kept; for every media loaded after too. */
+    fun setSpeed(speed: Float) {}
+
+    /** Plays the sound [delayMs] later than the picture (negative: earlier); for every media loaded after too. */
+    fun setAudioDelay(delayMs: Long) {}
 
     /**
      * Plays the [ordinal]th audio track of the media (its order among the

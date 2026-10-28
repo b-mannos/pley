@@ -43,6 +43,27 @@ interface PlaybackController {
      */
     fun setSubtitleOffset(offsetMs: Long) {}
 
+    /** Plays at [speed], one of [PlaybackSpeeds.ALL], the pitch kept; for this playback only (the next title plays at 1×). */
+    fun setSpeed(speed: Float) {}
+
+    /**
+     * Moves the sound [delayMs] against the picture (positive: later),
+     * within ±5 s in 50 ms steps; for this playback only. 0 resets.
+     */
+    fun setAudioDelay(delayMs: Long) {}
+
+    /**
+     * Looks online for subtitles of the file playing, in the profile's
+     * subtitle language ([PlayerUiState.subtitleSearch] shows how it goes).
+     */
+    fun searchSubtitles() {}
+
+    /** Adds the subtitle [resultId] of the search to the file, and shows it. */
+    fun addFoundSubtitle(resultId: String) {}
+
+    /** The search's list was closed. */
+    fun closeSubtitleSearch() {}
+
     /** Sets the sleep timer (not remembered after this playback). */
     fun setSleep(choice: SleepChoice) {}
 

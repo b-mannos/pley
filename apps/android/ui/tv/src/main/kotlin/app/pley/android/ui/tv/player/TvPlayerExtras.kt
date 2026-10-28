@@ -58,6 +58,7 @@ import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.player.AudioDelays
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.sleep.SleepTexts
 import app.pley.android.player.subtitles.SubtitleSync
@@ -72,12 +73,47 @@ internal val MoonIcon = PleyIcon("moon", false, "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9
  * as "+0.5 s"; the row takes focus as a whole, its texts never do.
  */
 @Composable
-internal fun SyncRow(offsetMs: Long, onChange: (Long) -> Unit, modifier: Modifier = Modifier) {
+internal fun SyncRow(offsetMs: Long, onChange: (Long) -> Unit, modifier: Modifier = Modifier) = StepRow(
+    title = stringResource(R.string.tv_player_sync),
+    hint = stringResource(R.string.tv_player_sync_hint),
+    value = SubtitleSync.label(offsetMs),
+    onStep = { onChange(offsetMs + it * SubtitleSync.STEP_MS) },
+    onReset = { onChange(0) },
+    tag = TAG_SYNC,
+    modifier = modifier,
+)
+
+/**
+ * The audio panel's delay row: Left and Right play the sound 50 ms earlier
+ * or later than the picture (held: on and on), OK puts it back; [note]
+ * says why it can't move, and then it doesn't.
+ */
+@Composable
+internal fun AudioDelayRow(delayMs: Long, note: String?, onChange: (Long) -> Unit, modifier: Modifier = Modifier) = StepRow(
+    title = stringResource(R.string.tv_player_audio_delay),
+    hint = note ?: stringResource(R.string.tv_player_sync_hint),
+    value = AudioDelays.label(delayMs),
+    onStep = { if (note == null) onChange(delayMs + it * AudioDelays.STEP_MS) },
+    onReset = { if (note == null) onChange(0) },
+    tag = TAG_AUDIO_DELAY,
+    modifier = modifier,
+)
+
+/** A row Left and Right step ([onStep] -1 or 1) and OK resets, showing [value] between chevrons. */
+@Composable
+private fun StepRow(
+    title: String,
+    hint: String,
+    value: String,
+    onStep: (Int) -> Unit,
+    onReset: () -> Unit,
+    tag: String,
+    modifier: Modifier = Modifier,
+) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
     val content = if (focused) PleyColors.OnAccent else PleyColors.Fg
     val muted = if (focused) PleyColors.OnAccent else PleyColors.Muted
-    val value = SubtitleSync.label(offsetMs)
     Row(
         modifier
             .fillMaxWidth()
@@ -88,25 +124,25 @@ internal fun SyncRow(offsetMs: Long, onChange: (Long) -> Unit, modifier: Modifie
                 if (native.action != AndroidKeyEvent.ACTION_DOWN) return@onKeyEvent false
                 when (native.keyCode) {
                     AndroidKeyEvent.KEYCODE_DPAD_LEFT -> {
-                        onChange(offsetMs - SubtitleSync.STEP_MS)
+                        onStep(-1)
                         true
                     }
                     AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
-                        onChange(offsetMs + SubtitleSync.STEP_MS)
+                        onStep(1)
                         true
                     }
                     else -> false
                 }
             }
             .semantics { stateDescription = value }
-            .clickable(interactionSource = interactions, indication = null, role = Role.Button) { onChange(0) }
-            .testTag(TAG_SYNC)
+            .clickable(interactionSource = interactions, indication = null, role = Role.Button, onClick = onReset)
+            .testTag(tag)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            BasicText(stringResource(R.string.tv_player_sync), style = PleyType.Tv.Label.copy(color = content), maxLines = 1)
-            BasicText(stringResource(R.string.tv_player_sync_hint), style = PleyType.Tv.Caption.copy(color = muted), maxLines = 1)
+            BasicText(title, style = PleyType.Tv.Label.copy(color = content), maxLines = 1)
+            BasicText(hint, style = PleyType.Tv.Caption.copy(color = muted), maxLines = 2)
         }
         Icon(PleyIcons.ChevronLeft, contentDescription = null, size = 20.dp, tint = muted)
         BasicText(value, style = PleyType.Tv.Label.copy(color = content), maxLines = 1, modifier = Modifier.padding(horizontal = 6.dp))
@@ -189,4 +225,5 @@ private const val NOTICE_FADE_MS = 150
 internal const val STOPPED_LEAVE_MS = 20_000L
 
 internal const val TAG_SYNC = "pley.tv.player.sync"
+internal const val TAG_AUDIO_DELAY = "pley.tv.player.audioDelay"
 internal const val TAG_SLEEP_NOTICE = "pley.tv.player.sleepNotice"

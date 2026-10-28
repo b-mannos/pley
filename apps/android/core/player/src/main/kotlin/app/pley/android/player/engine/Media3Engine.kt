@@ -133,11 +133,20 @@ class Media3Engine(
     )
 
     private val loadControl = PleyLoadControl(BufferPlan.of(profile))
+    private val audioDelay = AudioDelay()
     private val trackSelector = DefaultTrackSelector(app)
     private val loading = MediaLoading(app, mediaClient, now)
 
     override val player: ExoPlayer = ExoPlayer.Builder(app)
-        .setRenderersFactory(PleyRenderersFactory(app, rules, asyncQueueing = details?.forceAsyncQueueing ?: profile.fireTv, music = music))
+        .setRenderersFactory(
+            PleyRenderersFactory(
+                app,
+                rules,
+                asyncQueueing = details?.forceAsyncQueueing ?: profile.fireTv,
+                music = music,
+                audioDelay = if (music) null else audioDelay,
+            ),
+        )
         .setTrackSelector(trackSelector)
         .setLoadControl(loadControl)
         .setMediaSourceFactory(loading.sources)
@@ -257,6 +266,10 @@ class Media3Engine(
         setPlayWhenReady(playWhenReady && !matchPending)
         player.prepare()
         if (matchPending && window != null) startMatch()
+    }
+
+    override fun setAudioDelay(delayMs: Long) {
+        audioDelay.us = delayMs * 1_000
     }
 
     override fun attachWindow(window: Window) {

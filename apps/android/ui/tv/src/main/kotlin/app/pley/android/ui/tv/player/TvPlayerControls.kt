@@ -398,8 +398,8 @@ internal data class RowOptions(
 /**
  * The control row, top y = 441 (design spec §2.7): Previous · −10 s ·
  * Play/Pause · +10 s · Next centred; Subtitles · Audio · Quality · Info at
- * the right safe edge; Chapters, when the file has them, and the sleep
- * timer at the left one. Up goes back to the scrubber. As in streaming
+ * the right safe edge; Chapters, when the file has them, the sleep
+ * timer and Speed at the left one. Up goes back to the scrubber. As in streaming
  * apps' players, the icons stand on the scrim alone until focused.
  */
 @Composable
@@ -437,6 +437,7 @@ internal fun BoxScope.TvControlRow(
                 PlayerRoundButton(stringResource(R.string.tv_player_chapters), PleyIcons.ListVideo, { ui.openPanel(PlayerPanel.Chapters) }, beside, ui, PlayerFocus.Chapters)
             }
             PlayerRoundButton(stringResource(R.string.tv_player_sleep), MoonIcon, { ui.openPanel(PlayerPanel.Sleep) }, beside, ui, PlayerFocus.Sleep)
+            PlayerRoundButton(stringResource(R.string.tv_player_speed), PleyIcons.FastForward, { ui.openPanel(PlayerPanel.Speed) }, beside, ui, PlayerFocus.Speed)
         }
         Row(
             Modifier.align(Alignment.TopCenter),

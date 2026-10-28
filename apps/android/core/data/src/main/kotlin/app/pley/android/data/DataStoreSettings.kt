@@ -40,6 +40,7 @@ internal class DataStoreSettings(
         frameRateMatching = settings.frameRateMatching?.takeIf { it in FrameRateMatching.choices(tv) },
         passthrough = settings.passthrough.filterKeys { it in Settings.PASSTHROUGH_FORMATS },
         subtitleSize = Settings.SUBTITLE_SIZES.minBy { abs(it - settings.subtitleSize) },
+        subtitleRaise = Settings.SUBTITLE_RAISES.minBy { abs(it - settings.subtitleRaise) },
         allowSoftwareVideo = settings.allowSoftwareVideo && debuggable,
         qualityOnHomeNetwork = settings.qualityOnHomeNetwork.ifBlank { Settings.AUTOMATIC },
         qualityOnMobile = settings.qualityOnMobile.ifBlank { Settings.AUTOMATIC },
@@ -59,6 +60,8 @@ internal class DataStoreSettings(
                 tunneling = p[TUNNELING] ?: defaults.tunneling,
                 subtitleSize = p[SUBTITLE_SIZE] ?: defaults.subtitleSize,
                 subtitleBackground = p[SUBTITLE_BACKGROUND]?.let { enumOrNull<SubtitleBackground>(it) } ?: defaults.subtitleBackground,
+                subtitleFont = p[SUBTITLE_FONT]?.let { enumOrNull<SubtitleFont>(it) } ?: defaults.subtitleFont,
+                subtitleRaise = p[SUBTITLE_RAISE] ?: defaults.subtitleRaise,
                 autoplayNext = p[AUTOPLAY_NEXT] ?: defaults.autoplayNext,
                 privateSignInTab = p[PRIVATE_TAB] ?: defaults.privateSignInTab,
                 alwaysStartAs = p[ALWAYS_START_AS],
@@ -84,6 +87,8 @@ internal class DataStoreSettings(
         p.keep(TUNNELING, s.tunneling, d.tunneling)
         p.keep(SUBTITLE_SIZE, s.subtitleSize, d.subtitleSize)
         p.keep(SUBTITLE_BACKGROUND, s.subtitleBackground.name, d.subtitleBackground.name)
+        p.keep(SUBTITLE_FONT, s.subtitleFont.name, d.subtitleFont.name)
+        p.keep(SUBTITLE_RAISE, s.subtitleRaise, d.subtitleRaise)
         p.keep(AUTOPLAY_NEXT, s.autoplayNext, d.autoplayNext)
         p.keep(PRIVATE_TAB, s.privateSignInTab, d.privateSignInTab)
         p.keep(ALWAYS_START_AS, s.alwaysStartAs, null)
@@ -109,6 +114,8 @@ internal class DataStoreSettings(
         private val TUNNELING = booleanPreferencesKey("tunneling")
         private val SUBTITLE_SIZE = floatPreferencesKey("subtitle_size")
         private val SUBTITLE_BACKGROUND = stringPreferencesKey("subtitle_background")
+        private val SUBTITLE_FONT = stringPreferencesKey("subtitle_font")
+        private val SUBTITLE_RAISE = floatPreferencesKey("subtitle_raise")
         private val AUTOPLAY_NEXT = booleanPreferencesKey("autoplay_next")
         private val PRIVATE_TAB = booleanPreferencesKey("private_sign_in_tab")
         private val ALWAYS_START_AS = longPreferencesKey("always_start_as")

@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.pley.android.data.Settings
+import app.pley.android.data.SubtitleFont
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyElevation
 import app.pley.android.designsystem.PleyMotion
@@ -55,6 +56,8 @@ import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.reducedMotion
 import app.pley.android.player.PlaybackController
+import app.pley.android.player.PlaybackSpeeds
+import app.pley.android.player.SubtitleSearchUi
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.engine.EngineState
 import app.pley.android.player.sleep.SleepChoice
@@ -66,14 +69,18 @@ import app.pley.android.ui.tv.item.FactLine
 import app.pley.android.ui.tv.item.PanelHeading
 import app.pley.android.ui.tv.item.PanelRow
 import app.pley.android.ui.tv.kit.focusRow
+import app.pley.android.ui.tv.settings.fontLabel
+import app.pley.android.ui.tv.settings.raiseLabel
 import kotlin.math.abs
 import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
  * The player's side panels (design spec §2.7): Subtitles (with Sync while
- * the subtitles chosen can move, and their size and background when
- * [onSubtitleStyle] saves them), Audio, Quality, Chapters, Sleep timer and Info. 360 dp (Info 440 dp) from the right edge, full height, surface2
+ * the subtitles chosen can move, Find subtitles… while the file streams
+ * from the server, and their size, background, font and position when
+ * [onSubtitleStyle] saves them), Find subtitles' results, Audio (with the
+ * audio delay), Quality, Chapters, Sleep timer, Speed and Info. 360 dp (Info 440 dp) from the right edge, full height, surface2
  * with 16 dp left corners. It slides in on its own layer over 200 ms (in
  * place with reduced motion) and the scrim behind it fades by its colour
  * while drawing, so no layer covers the video. Focus starts on the current
@@ -139,6 +146,8 @@ private fun ChoicePanel(
             PlayerPanel.Chapters -> R.string.tv_player_chapters
             PlayerPanel.Info -> R.string.tv_player_info_title
             PlayerPanel.Sleep -> R.string.tv_player_sleep
+            PlayerPanel.Speed -> R.string.tv_player_speed
+            PlayerPanel.FindSubtitles -> R.string.tv_player_find_subtitles
         },
     )
     val burnIn = stringResource(R.string.tv_player_burn_in)
@@ -149,12 +158,34 @@ private fun ChoicePanel(
         sizes = SubtitleSizeLabels.map { stringResource(it) },
         background = stringResource(R.string.tv_settings_subtitle_background),
         backgrounds = listOf(stringResource(R.string.tv_settings_background_none), stringResource(R.string.tv_settings_background_box)),
+        font = stringResource(R.string.tv_settings_subtitle_font),
+        fonts = CaptionLook.fonts().map { it to stringResource(fontLabel(it)) },
+        position = stringResource(R.string.tv_settings_subtitle_position),
+        positions = Settings.SUBTITLE_RAISES.map { stringResource(raiseLabel(it)) },
     )
+    val findSubtitles = stringResource(R.string.tv_player_find_subtitles)
+    val searching = stringResource(R.string.tv_player_searching)
+    val adding = stringResource(R.string.tv_player_adding)
     val resources = LocalResources.current
     // Each panel's own list: its current choice may be further down than shows.
     val list = remember(panel) { LazyListState() }
     LaunchedEffect(panel, ui.panel != null) {
         if (ui.panel != null) {
+            withFrameNanos { }
+            list.focusRow(focus)
+        }
+    }
+    if (panel == PlayerPanel.FindSubtitles) {
+        // The search moves on (results, a refusal): focus goes to what shows; added, the panel closes.
+        val stage = s.subtitleSearch?.let { it::class }
+        val began = remember { BooleanArray(1) }
+        LaunchedEffect(stage) {
+            if (ui.panel != PlayerPanel.FindSubtitles) return@LaunchedEffect
+            if (stage == null) {
+                if (began[0]) ui.closePanel()
+                return@LaunchedEffect
+            }
+            began[0] = true
             withFrameNanos { }
             list.focusRow(focus)
         }
@@ -173,7 +204,39 @@ private fun ChoicePanel(
                     controller.selectSubtitle(s.subtitles[i].index)
                     ui.closePanel()
                 }
+                if (s.canFindSubtitles) {
+                    item(key = "find") {
+                        PanelRow(
+                            findSubtitles,
+                            onClick = {
+                                controller.searchSubtitles()
+                                ui.openPanel(PlayerPanel.FindSubtitles)
+                            },
+                            icon = PleyIcons.Search,
+                            focusRequester = if (s.subtitles.isEmpty()) focus else null,
+                        )
+                    }
+                }
                 if (onSubtitleStyle != null) subtitleStyle(captionLook, style, onSubtitleStyle)
+            }
+            PlayerPanel.FindSubtitles -> when (val search = s.subtitleSearch) {
+                null, SubtitleSearchUi.Searching -> item(key = "searching") { PanelNote(searching, Modifier.focusRequester(focus).focusable()) }
+                is SubtitleSearchUi.Unavailable -> item(key = "unavailable") { PanelNote(search.message, Modifier.focusRequester(focus).focusable()) }
+                is SubtitleSearchUi.Found -> {
+                    search.message?.let { message -> item(key = "nothing") { PanelNote(message, Modifier.focusRequester(focus).focusable()) } }
+                    choices(search.results.map { Row(it.label, false, it.hint) }, focus) { i -> controller.addFoundSubtitle(search.results[i].id) }
+                }
+                is SubtitleSearchUi.Adding -> choices(
+                    search.results.map { Row(it.label, false, if (it.id == search.id) adding else it.hint) },
+                    focus,
+                ) { }
+            }
+            PlayerPanel.Speed -> {
+                s.speedNote?.let { note -> item(key = "note") { PanelNote(note) } }
+                choices(PlaybackSpeeds.ALL.map { Row(PlaybackSpeeds.label(it), it == s.speed, null) }, focus) { i ->
+                    controller.setSpeed(PlaybackSpeeds.ALL[i])
+                    ui.closePanel()
+                }
             }
             PlayerPanel.Sleep -> choices(
                 SleepChoice.ALL.map { choice ->
@@ -186,9 +249,12 @@ private fun ChoicePanel(
                 controller.setSleep(SleepChoice.ALL[i])
                 ui.closePanel()
             }
-            PlayerPanel.Audio -> choices(s.audio.map { Row(it.label, it.selected, null) }, focus) { i ->
-                s.audio[i].index?.let(controller::selectAudio)
-                ui.closePanel()
+            PlayerPanel.Audio -> {
+                item(key = "delay") { AudioDelayRow(s.audioDelayMs, s.audioDelayNote, onChange = { controller.setAudioDelay(it) }) }
+                choices(s.audio.map { Row(it.label, it.selected, null) }, focus) { i ->
+                    s.audio[i].index?.let(controller::selectAudio)
+                    ui.closePanel()
+                }
             }
             PlayerPanel.Quality -> {
                 s.note?.let { note -> item(key = "note") { PanelNote(note) } }
@@ -222,8 +288,17 @@ private fun ChoicePanel(
 
 private data class Row(val label: String, val checked: Boolean, val supporting: String?)
 
-/** The words of the subtitles' size and background rows. */
-private class SubtitleStyleTexts(val size: String, val sizes: List<String>, val background: String, val backgrounds: List<String>)
+/** The words of the subtitles' size, background, font and position rows. */
+private class SubtitleStyleTexts(
+    val size: String,
+    val sizes: List<String>,
+    val background: String,
+    val backgrounds: List<String>,
+    val font: String,
+    val fonts: List<Pair<SubtitleFont, String>>,
+    val position: String,
+    val positions: List<String>,
+)
 
 /** Small, Normal, Large and Huge: [Settings.SUBTITLE_SIZES]'s names. */
 private val SubtitleSizeLabels = listOf(
@@ -247,6 +322,15 @@ private fun LazyListScope.subtitleStyle(look: CaptionLook, texts: SubtitleStyleT
     item(key = "background") { PanelHeading(texts.background) }
     itemsIndexed(texts.backgrounds, key = { i, _ -> "background-$i" }) { i, label ->
         PanelRow(label, onClick = { onStyle(look.copy(box = i == 1)) }, checked = look.box == (i == 1))
+    }
+    item(key = "font") { PanelHeading(texts.font) }
+    itemsIndexed(texts.fonts, key = { _, (font, _) -> "font-$font" }) { _, (font, label) ->
+        PanelRow(label, onClick = { onStyle(look.copy(font = font)) }, checked = look.font == font)
+    }
+    val raise = Settings.SUBTITLE_RAISES.indices.minBy { abs(Settings.SUBTITLE_RAISES[it] - look.raise) }
+    item(key = "position") { PanelHeading(texts.position) }
+    itemsIndexed(texts.positions, key = { i, _ -> "position-$i" }) { i, label ->
+        PanelRow(label, onClick = { onStyle(look.copy(raise = Settings.SUBTITLE_RAISES[i])) }, checked = i == raise)
     }
 }
 
@@ -277,6 +361,12 @@ private data class PanelData(
     val subtitleSync: Boolean,
     val subtitleOffsetMs: Long,
     val sleep: SleepState,
+    val speed: Float,
+    val speedNote: String?,
+    val audioDelayMs: Long,
+    val audioDelayNote: String?,
+    val canFindSubtitles: Boolean,
+    val subtitleSearch: SubtitleSearchUi?,
 ) {
     companion object {
         fun of(s: PlayerUiState) = PanelData(
@@ -290,6 +380,12 @@ private data class PanelData(
             subtitleSync = s.subtitleSync,
             subtitleOffsetMs = s.subtitleOffsetMs,
             sleep = s.sleep,
+            speed = s.speed,
+            speedNote = s.speedNote,
+            audioDelayMs = s.audioDelayMs,
+            audioDelayNote = s.audioDelayNote,
+            canFindSubtitles = s.canFindSubtitles,
+            subtitleSearch = s.subtitleSearch,
         )
     }
 }
@@ -369,8 +465,8 @@ private fun PanelTitle(text: String) {
 }
 
 @Composable
-private fun PanelNote(text: String) {
-    BasicText(text, style = PleyType.Tv.Body.copy(color = PleyColors.Muted), modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+private fun PanelNote(text: String, modifier: Modifier = Modifier) {
+    BasicText(text, style = PleyType.Tv.Body.copy(color = PleyColors.Muted), modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp))
 }
 
 private val PANEL_WIDTH = 360.dp

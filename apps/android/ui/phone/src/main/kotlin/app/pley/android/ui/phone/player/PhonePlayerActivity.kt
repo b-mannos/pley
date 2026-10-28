@@ -149,7 +149,7 @@ class PhonePlayerActivity : ComponentActivity(), PlayerHost {
                             host = this@PhonePlayerActivity,
                             picture = picture,
                             captions = PlayerLook.captionLook(chosen),
-                            style = SubtitleChoice(PlayerLook.sizeIndex(chosen.subtitleSize), chosen.subtitleBackground == SubtitleBackground.DarkBox),
+                            style = PlayerLook.subtitleChoice(chosen),
                             onStyle = ::chooseStyle,
                             inPip = inPip.value,
                             showDetails = chosen.showPlaybackDetails,
@@ -395,6 +395,8 @@ class PhonePlayerActivity : ComponentActivity(), PlayerHost {
                 it.copy(
                     subtitleSize = PlayerLook.subtitleSizes[choice.sizeIndex.coerceIn(0, PlayerLook.subtitleSizes.lastIndex)],
                     subtitleBackground = if (choice.box) SubtitleBackground.DarkBox else SubtitleBackground.None,
+                    subtitleFont = choice.font,
+                    subtitleRaise = PlayerLook.subtitleRaises[choice.raiseIndex.coerceIn(0, PlayerLook.subtitleRaises.lastIndex)],
                 )
             }
         }

@@ -5,6 +5,7 @@ import androidx.media3.common.text.Cue
 import app.pley.android.caps.CapsSnapshot
 import app.pley.android.common.describe
 import app.pley.android.data.LocalFile
+import app.pley.android.model.AddSubtitle
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ItemKind
 import app.pley.android.model.ItemSummary
@@ -18,22 +19,29 @@ import app.pley.android.model.PlaybackMode
 import app.pley.android.model.ProgressState
 import app.pley.android.model.ServerEvent
 import app.pley.android.model.StreamChoice
+import app.pley.android.model.StreamKind
+import app.pley.android.model.SubtitleResult
 import app.pley.android.model.SubtitleTrack
 import app.pley.android.model.TranscodeInfo
 import app.pley.android.model.format.episodeLabel
 import app.pley.android.model.format.formatBitrate
+import app.pley.android.model.format.languageName
 import app.pley.android.model.format.resolutionLabel
 import app.pley.android.model.format.streamLabel
 import app.pley.android.network.ApiException
 import app.pley.android.network.OfflineException
+import app.pley.android.player.AudioDelays
 import app.pley.android.player.ChapterMark
 import app.pley.android.player.EngineSource
+import app.pley.android.player.FoundSubtitle
+import app.pley.android.player.PlaybackSpeeds
 import app.pley.android.player.PlayRequest
 import app.pley.android.player.PlaybackController
 import app.pley.android.player.PlayerEngine
 import app.pley.android.player.PlayerPhase
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.QualityChoice
+import app.pley.android.player.SubtitleSearchUi
 import app.pley.android.player.TrackChoice
 import app.pley.android.player.UpNextUi
 import app.pley.android.player.markers.CreditsGate
@@ -98,6 +106,11 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   media, and pictures side-loaded beside a stream (its .mks), drawn at
  *   the playhead moved by the subtitle offset; a file's own text tracks
  *   move through the server's WebVTT too while an offset is set.
+ * - **Speed and audio delay**, for this title only: the engine's
+ *   ([EngineLink.setSpeed], [EngineLink.setAudioDelay]), said unavailable
+ *   while the sound can't follow (passed through, or tunneled).
+ * - **Find subtitles…**: the server's search online for the file playing;
+ *   one picked is added on the server and shown as any subtitle file.
  * - **Sleep timer**, and a session the server stopped: it says so and
  *   plays no more.
  * - **Downloads.** A file downloaded to the device plays from there as it
@@ -210,6 +223,18 @@ class SessionPlaybackController(
     private var lastAdvanceAt = 0L
     private var lastAdvancePos = -1L
     private var lastStruggleSample = 0L
+
+    /**
+     * Until when dropped frames don't count: a sound played later than the
+     * picture sets the picture ahead after each start and seek, and it drops
+     * frames to get there.
+     */
+    private var struggleQuietUntil = 0L
+
+    /** The speed and the audio delay of this title. */
+    private var speed = 1f
+    private var audioDelayMs = 0L
+    private var searchJob: Job? = null
     private var seekReport: Job? = null
 
     // ---------------------------------------------------------------- Up Next
@@ -376,6 +401,7 @@ class SessionPlaybackController(
         tracksChecked = false
         ended = false
         struggle.reset()
+        quietAfterJump()
         recovery.onJump()
         lastAdvanceAt = env.now()
         lastAdvancePos = -1
@@ -435,6 +461,7 @@ class SessionPlaybackController(
                 note = noteNow(),
                 canPlayOriginal = canPlayOriginal(),
                 durationMs = info.durationMs.takeIf { d -> d > 0 } ?: it.durationMs,
+                canFindSubtitles = true,
             )
         }
         publishChoices()
@@ -454,6 +481,8 @@ class SessionPlaybackController(
             durationMs = info.durationMs.takeIf { it > 0 } ?: chosen.durationMs ?: detail.durationMs,
         )
         engineLink.prepare(source, atMs, wantPlay.value)
+        engineLink.setSpeed(speed)
+        engineLink.setAudioDelay(audioDelayMs)
         applyTracks()
     }
 
@@ -495,6 +524,8 @@ class SessionPlaybackController(
                 note = null,
                 canPlayOriginal = false,
                 durationMs = info.durationMs.takeIf { d -> d > 0 } ?: it.durationMs,
+                // Away from the server, nothing to search with.
+                canFindSubtitles = false,
             )
         }
         publishChoices()
@@ -508,6 +539,8 @@ class SessionPlaybackController(
             durationMs = info.durationMs.takeIf { it > 0 },
         )
         engineLink.prepare(source, atMs, wantPlay.value)
+        engineLink.setSpeed(speed)
+        engineLink.setAudioDelay(audioDelayMs)
         applyTracks()
     }
 
@@ -804,6 +837,7 @@ class SessionPlaybackController(
         val now = env.now()
         val reconnecting = engineLink.reconnecting
         if (reconnecting != ui.value.reconnecting) ui.update { it.copy(reconnecting = reconnecting) }
+        audioOutChanged(engineLink.audioOut)
         val moving = mediaShown && engineLink.status == EngineStatus.Ready && engineLink.playWhenReady && !ended
         if (mediaShown && !ended) {
             val pos = engineLink.positionMs
@@ -835,7 +869,7 @@ class SessionPlaybackController(
             return
         }
         // Dropped frames, sampled every 2 s of playback.
-        if (moving && now - lastStruggleSample >= STRUGGLE_SAMPLE_MS) {
+        if (moving && now >= struggleQuietUntil && now - lastStruggleSample >= STRUGGLE_SAMPLE_MS) {
             lastStruggleSample = now
             val counts = engineLink.frameCounts()
             if (counts != null && struggle.sample(now, counts)) {
@@ -971,7 +1005,8 @@ class SessionPlaybackController(
                     val pos = livePosition()
                     val showing = track.cuesAt(SubtitleSync.trackTime(pos, shift))
                     if (showing != cueState.value) cueState.value = showing
-                    val change = SubtitleSync.untilChange(track, pos, shift)
+                    // Media time: at 2× it comes in half the time.
+                    val change = SubtitleSync.untilChange(track, pos, shift)?.let { (it / speed).toLong() }
                     delay(change?.coerceIn(CUE_MIN_MS, CUE_MAX_MS) ?: CUE_IDLE_MS)
                 }
             }
@@ -1073,6 +1108,7 @@ class SessionPlaybackController(
         recovery.onJump()
         autoQuality.jumped()
         struggle.reset()
+        quietAfterJump()
         lastAdvanceAt = env.now()
         ui.update { it.copy(positionMs = target) }
         seekReport?.cancel()
@@ -1133,6 +1169,141 @@ class SessionPlaybackController(
         }
         // A file's own text track moves through the server's WebVTT while an offset is set.
         if (wasZero != (moved == 0L)) applyTracks()
+    }
+
+    override fun setSpeed(speed: Float) {
+        if (closed || stopped || ui.value.speedNote != null) return
+        val wanted = PlaybackSpeeds.ALL.minBy { kotlin.math.abs(it - speed) }
+        if (wanted == this.speed) return
+        this.speed = wanted
+        link?.setSpeed(wanted)
+        ui.update { it.copy(speed = wanted) }
+    }
+
+    override fun setAudioDelay(delayMs: Long) {
+        if (closed || stopped || ui.value.audioDelayNote != null) return
+        val moved = AudioDelays.clamp(delayMs)
+        if (moved == audioDelayMs) return
+        audioDelayMs = moved
+        link?.setAudioDelay(moved)
+        // The picture jumps to the sound's new place: that wait or those dropped frames are no play issue.
+        struggle.reset()
+        autoQuality.jumped()
+        quietAfterJump()
+        ui.update { it.copy(audioDelayMs = moved) }
+    }
+
+    /** After a start, a seek or a new audio delay: dropped frames don't count while the picture catches up with a later sound. */
+    private fun quietAfterJump() {
+        struggleQuietUntil = if (audioDelayMs > 0) env.now() + audioDelayMs + QUIET_AFTER_DELAY_MS else 0L
+    }
+
+    /**
+     * The sound's way out, looked at every tick: passed through, it plays
+     * at its own speed (the speed goes back to 1×); tunneled, the TV keeps
+     * the picture with it, and neither the speed nor the delay applies.
+     */
+    private fun audioOutChanged(out: AudioOut) {
+        val speedNote = when (out) {
+            AudioOut.Passthrough -> texts.speedPassthrough
+            AudioOut.Tunneled -> texts.tunneled
+            AudioOut.Decoded -> null
+        }
+        val delayNote = if (out == AudioOut.Tunneled) texts.tunneled else null
+        val s = ui.value
+        if (speedNote == s.speedNote && delayNote == s.audioDelayNote) return
+        if (speedNote != null && speed != 1f) {
+            speed = 1f
+            link?.setSpeed(1f)
+        }
+        ui.update { it.copy(speedNote = speedNote, audioDelayNote = delayNote, speed = speed) }
+    }
+
+    override fun searchSubtitles() {
+        val detail = item ?: return
+        val chosen = file ?: return
+        if (closed || stopped || !ui.value.canFindSubtitles) return
+        searchJob?.cancel()
+        ui.update { it.copy(subtitleSearch = SubtitleSearchUi.Searching) }
+        searchJob = scope.launch {
+            val next = try {
+                val found = env.api.searchSubtitles(detail.id, chosen.id, null)
+                when {
+                    !found.setup -> SubtitleSearchUi.Unavailable(texts.searchNotSetUp)
+                    else -> {
+                        val results = found.results.map(::foundSubtitle)
+                        SubtitleSearchUi.Found(results, if (results.isEmpty()) texts.searchNothing else null)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                SubtitleSearchUi.Unavailable(searchFailure(e))
+            }
+            ui.update { if (it.subtitleSearch != null) it.copy(subtitleSearch = next) else it }
+        }
+    }
+
+    override fun addFoundSubtitle(resultId: String) {
+        val detail = item ?: return
+        val chosen = file ?: return
+        val shown = ui.value.subtitleSearch as? SubtitleSearchUi.Found ?: return
+        if (closed || stopped) return
+        searchJob?.cancel()
+        ui.update { it.copy(subtitleSearch = SubtitleSearchUi.Adding(resultId, shown.results)) }
+        searchJob = scope.launch {
+            val track = try {
+                env.api.addSubtitle(detail.id, AddSubtitle(resultId, chosen.id))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                ui.update { if (it.subtitleSearch != null) it.copy(subtitleSearch = SubtitleSearchUi.Unavailable(searchFailure(e))) else it }
+                return@launch
+            }
+            // An ordinary text track beside the media from now on: the menu lists it, and it shows as one.
+            val stream = MediaStream(
+                index = track.index,
+                kind = StreamKind.Subtitle,
+                codec = track.codec,
+                language = track.language,
+                title = track.title,
+                default = track.default,
+                forced = track.forced,
+                textBased = true,
+                external = true,
+                added = true,
+            )
+            if (file?.id == chosen.id) {
+                val withTrack = chosen.copy(streams = chosen.streams.filter { it.index != stream.index || it.kind != StreamKind.Subtitle } + stream)
+                file = withTrack
+                item = detail.copy(files = detail.files.map { if (it.id == withTrack.id) withTrack else it })
+                ui.update { it.copy(subtitleSearch = null, notice = texts.subtitleAdded) }
+                publishChoices()
+                selectSubtitle(stream.index.toLong())
+            } else {
+                ui.update { it.copy(subtitleSearch = null) }
+            }
+        }
+    }
+
+    override fun closeSubtitleSearch() {
+        searchJob?.cancel()
+        searchJob = null
+        ui.update { it.copy(subtitleSearch = null) }
+    }
+
+    /** A result as the list shows it: the release, then its language, whether it fits this very file, and downloads. */
+    private fun foundSubtitle(r: SubtitleResult): FoundSubtitle = FoundSubtitle(
+        id = r.id,
+        label = r.name.ifBlank { languageName(r.language) ?: r.id },
+        hint = texts.foundHint(languageName(r.language), r.matched == "hash", r.hearingImpaired, r.downloads).ifEmpty { null },
+    )
+
+    /** Why searching or adding failed, in a sentence: an older server has no search at all. */
+    private fun searchFailure(e: Exception): String = when {
+        e is ApiException && (e.status == 404 || e.status == 405) -> texts.searchUnsupported
+        e is ApiException && e.status == 503 -> texts.searchNotSetUp
+        else -> texts.searchFailed(describe(e))
     }
 
     override fun setSleep(choice: SleepChoice) {
@@ -1385,6 +1556,12 @@ class SessionPlaybackController(
         next = null
         recovery.newItem()
         autoNoticePending = false
+        // Speed and audio delay are this title's: the next one plays as it is.
+        speed = 1f
+        audioDelayMs = 0
+        link?.setSpeed(1f)
+        link?.setAudioDelay(0)
+        searchJob?.cancel()
         credits.reset()
         guardMode = null
         hideServerSubtitles()
@@ -1407,6 +1584,8 @@ class SessionPlaybackController(
                 title = it.title,
                 positionMs = req.startMs ?: 0,
                 sleep = it.sleep,
+                speedNote = it.speedNote,
+                audioDelayNote = it.audioDelayNote,
             )
         }
         sessionJob?.cancel()
@@ -1569,5 +1748,8 @@ class SessionPlaybackController(
         private const val CUE_MIN_MS = 20L
         private const val CUE_MAX_MS = 250L
         private const val CUE_IDLE_MS = 500L
+
+        /** Beyond a later sound's own delay, how long dropped frames don't count after a jump. */
+        const val QUIET_AFTER_DELAY_MS = 3_000L
     }
 }

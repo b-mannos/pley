@@ -32,6 +32,9 @@ enum class Passthrough { Auto, On, Off }
 /** Subtitle backgrounds. */
 enum class SubtitleBackground { None, DarkBox }
 
+/** Subtitle typefaces: the system's sans serif (the default), serif and monospace, and its casual hand where it has one. */
+enum class SubtitleFont { Sans, Serif, Monospace, Casual }
+
 /** How big the cards of a grid are: more small ones, or fewer large ones. */
 enum class GridDensity { Small, Medium, Large }
 
@@ -53,6 +56,9 @@ data class Settings(
     /** A share of the video's height: one of [SUBTITLE_SIZES]. */
     val subtitleSize: Float = 0.048f,
     val subtitleBackground: SubtitleBackground = SubtitleBackground.None,
+    val subtitleFont: SubtitleFont = SubtitleFont.Sans,
+    /** How far text subtitles sit above the bottom, a share of the video's height: one of [SUBTITLE_RAISES]. */
+    val subtitleRaise: Float = 0f,
     val autoplayNext: Boolean = true,
     /** Sign in from a private browser tab, which keeps no cookie behind. */
     val privateSignInTab: Boolean = true,
@@ -87,6 +93,9 @@ data class Settings(
 
         /** Subtitle sizes offered: 3.8, 4.8, 6 and 7.6 % of the video's height. */
         val SUBTITLE_SIZES: List<Float> = listOf(0.038f, 0.048f, 0.06f, 0.076f)
+
+        /** Subtitle positions offered: at the bottom, then raised by 5, 10 and 15 % of the video's height. */
+        val SUBTITLE_RAISES: List<Float> = listOf(0f, 0.05f, 0.1f, 0.15f)
 
         /**
          * The sound formats with a passthrough choice: Dolby Digital, Dolby

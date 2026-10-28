@@ -75,6 +75,25 @@
     <!-- "2.5× real time · 40 s ready". -->
     <string name="session_speed_ready">%1$s× real time · %2$d s ready</string>
 
+    <!-- Playback speed and audio delay, when they can't change. -->
+    <string name="session_speed_passthrough">Not while the sound goes to your receiver as it is: it plays at its own speed</string>
+    <string name="session_tunneled">Not with tunneled playback, where the TV keeps the picture with the sound itself</string>
+
+    <!-- Find subtitles… (subtitles found online, docs/API.md). -->
+    <string name="session_search_not_set_up">Subtitle search isn\'t set up on this server</string>
+    <string name="session_search_unsupported">This server can\'t search for subtitles: it may need an update</string>
+    <string name="session_search_nothing">No subtitles found for this file</string>
+    <!-- "Couldn't find subtitles: no answer in time". -->
+    <string name="session_search_failed">Couldn\'t find subtitles: %1$s</string>
+    <string name="session_search_exact">Made for this file</string>
+    <!-- Subtitles for the deaf and hard of hearing. -->
+    <string name="session_search_sdh">SDH</string>
+    <plurals name="session_search_downloads">
+        <item quantity="one">%1$,d download</item>
+        <item quantity="other">%1$,d downloads</item>
+    </plurals>
+    <string name="session_search_added">Subtitles added</string>
+
     <!-- Errors (VideoPlayer.tsx). -->
     <string name="session_error_unplayable">This video can\'t be played on this device.</string>
     <string name="session_error_stuck">This video doesn\'t play on this device: it stops at the same spot each time.</string>

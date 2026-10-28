@@ -6,6 +6,16 @@
     <string name="player_sync_earlier">Show subtitles earlier</string>
     <string name="player_sync_later">Show subtitles later</string>
     <string name="player_sync_reset">Reset</string>
+    <!-- The audio page's row that moves the sound against the picture, in 50 ms steps. -->
+    <string name="player_audio_delay">Audio delay</string>
+    <string name="player_audio_earlier">Play the sound earlier</string>
+    <string name="player_audio_later">Play the sound later</string>
+    <!-- The playback speed's row and page. -->
+    <string name="player_speed">Speed</string>
+    <!-- The subtitles page's row that looks for subtitles online, and its page. -->
+    <string name="player_find_subtitles">Find subtitles…</string>
+    <string name="player_searching">Searching…</string>
+    <string name="player_adding">Adding…</string>
     <!-- The settings row and page of the sleep timer. -->
     <string name="player_sleep_timer">Sleep timer</string>
     <!-- The error's title when the server stopped the playback. -->

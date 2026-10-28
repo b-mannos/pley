@@ -116,6 +116,57 @@ data class UpNextUi(
     val secondsLeft: Int?,
 )
 
+/** The speeds offered: 0.5× to 2×, 1× normal. */
+object PlaybackSpeeds {
+    val ALL: List<Float> = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
+
+    /** "1×", "1.25×", "0.5×". */
+    fun label(speed: Float): String {
+        val text = if (speed == speed.toInt().toFloat()) speed.toInt().toString() else speed.toString().trimEnd('0')
+        return "$text×"
+    }
+}
+
+/** The audio delay's range and step. */
+object AudioDelays {
+    const val MAX_MS = 5_000L
+    const val STEP_MS = 50L
+
+    /** [ms] within ±5 s, on a 50 ms step. */
+    fun clamp(ms: Long): Long = (Math.round(ms.toDouble() / STEP_MS) * STEP_MS).coerceIn(-MAX_MS, MAX_MS)
+
+    /** "+0.25 s", "−1.5 s", "0 s": the sound later (+) or earlier (−) than the picture. */
+    fun label(ms: Long): String {
+        if (ms == 0L) return "0 s"
+        val seconds = java.math.BigDecimal(kotlin.math.abs(ms)).movePointLeft(3).stripTrailingZeros().toPlainString()
+        return (if (ms > 0) "+" else "−") + seconds + " s"
+    }
+}
+
+/** A subtitle found online, as the search's list shows it. */
+data class FoundSubtitle(
+    /** What [PlaybackController.addFoundSubtitle] takes. */
+    val id: String,
+    /** The release it was made for. */
+    val label: String,
+    /** "English · Made for this file · 1,234 downloads". */
+    val hint: String?,
+)
+
+/** "Find subtitles…": where the search stands. */
+sealed interface SubtitleSearchUi {
+    data object Searching : SubtitleSearchUi
+
+    /** The results, best first; none found when empty ([message] says so). */
+    data class Found(val results: List<FoundSubtitle>, val message: String?) : SubtitleSearchUi
+
+    /** Adding [id]: its track comes next. */
+    data class Adding(val id: String, val results: List<FoundSubtitle>) : SubtitleSearchUi
+
+    /** It can't search: not set up on the server, or it failed ([message] says which). */
+    data class Unavailable(val message: String) : SubtitleSearchUi
+}
+
 /**
  * What a player screen shows, in one immutable value. Positions change
  * often: screens read them only where they draw, so the rest of the
@@ -169,6 +220,18 @@ data class PlayerUiState(
     val subtitleSync: Boolean = false,
     /** The sleep timer. */
     val sleep: SleepState = SleepState(),
+    /** The playback speed, 1 normal ([PlaybackController.setSpeed]). */
+    val speed: Float = 1f,
+    /** Why the speed can't change now (the sound passes through, or is tunneled); `null` when it can. */
+    val speedNote: String? = null,
+    /** How much later than the picture the sound plays, ms ([PlaybackController.setAudioDelay]). */
+    val audioDelayMs: Long = 0,
+    /** Why the sound can't be moved now (a tunneled output); `null` when it can. */
+    val audioDelayNote: String? = null,
+    /** "Find subtitles…" is offered: the file streams from the server. */
+    val canFindSubtitles: Boolean = false,
+    /** The search for subtitles online, while its list is open. */
+    val subtitleSearch: SubtitleSearchUi? = null,
     /** The server stopped this playback (an administrator, or another device): the error says so, and the screen leaves. */
     val stoppedByServer: Boolean = false,
 )

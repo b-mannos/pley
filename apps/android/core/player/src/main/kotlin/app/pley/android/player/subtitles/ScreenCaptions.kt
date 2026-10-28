@@ -27,14 +27,17 @@ import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
 import app.pley.android.data.Settings
 import app.pley.android.data.SubtitleBackground
+import app.pley.android.data.SubtitleFont
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * How pley draws text subtitles (apps/web/src/player/subtitles.ts): white,
  * bold, a dark outline, no box, [textFraction] of the height they are drawn
- * in. When the system's captions are on (Settings → Accessibility →
- * Captions), their style and size win, unless [custom]: the person chose
- * pley's own size or background (design spec §7).
+ * in, in [font], [raise] of the height above the bottom. When the system's
+ * captions are on (Settings → Accessibility → Captions), their style and
+ * size win, unless [custom]: the person chose pley's own size, background
+ * or font (design spec §7). The position applies either way.
  */
 @Immutable
 data class CaptionLook(
@@ -42,8 +45,11 @@ data class CaptionLook(
     val textFraction: Float = DEFAULT_FRACTION,
     /** A box of 66 % black behind the text. */
     val box: Boolean = false,
-    /** pley's own size or background were chosen: they apply even with the system's captions on. */
+    /** pley's own size, background or font were chosen: they apply even with the system's captions on. */
     val custom: Boolean = false,
+    val font: SubtitleFont = SubtitleFont.Sans,
+    /** How far above the bottom, as a share of the height: one of [Settings.SUBTITLE_RAISES]. */
+    val raise: Float = 0f,
 ) {
     @OptIn(UnstableApi::class)
     internal fun captionStyle(): CaptionStyleCompat = CaptionStyleCompat(
@@ -52,7 +58,7 @@ data class CaptionLook(
         Color.TRANSPARENT,
         CaptionStyleCompat.EDGE_TYPE_OUTLINE,
         Color.BLACK,
-        Typeface.DEFAULT_BOLD,
+        typeface(font),
     )
 
     companion object {
@@ -62,14 +68,34 @@ data class CaptionLook(
         /** 66 % black. */
         const val BOX_COLOR = 0xA8000000.toInt()
 
-        /** How subtitles look with [settings] (Settings → Subtitles): the size nearest theirs, and pley's own style once either was chosen. */
+        /** How subtitles look with [settings] (Settings → Subtitles): the size nearest theirs, and pley's own style once any was chosen. */
         fun of(settings: Settings): CaptionLook {
             val defaults = Settings()
             return CaptionLook(
                 textFraction = Settings.SUBTITLE_SIZES.minBy { abs(it - settings.subtitleSize) },
                 box = settings.subtitleBackground == SubtitleBackground.DarkBox,
-                custom = settings.subtitleSize != defaults.subtitleSize || settings.subtitleBackground != defaults.subtitleBackground,
+                custom = settings.subtitleSize != defaults.subtitleSize ||
+                    settings.subtitleBackground != defaults.subtitleBackground ||
+                    settings.subtitleFont != defaults.subtitleFont,
+                font = settings.subtitleFont,
+                raise = Settings.SUBTITLE_RAISES.minBy { abs(it - settings.subtitleRaise) },
             )
+        }
+
+        /** The fonts this device has: the casual hand only where the system has one (Android's "casual"; not every Fire OS). */
+        fun fonts(): List<SubtitleFont> = SubtitleFont.entries.filter { it != SubtitleFont.Casual || casualFont != null }
+
+        /** [font] in bold, as subtitles are drawn; the default's where the device lacks it. */
+        fun typeface(font: SubtitleFont): Typeface = when (font) {
+            SubtitleFont.Sans -> Typeface.DEFAULT_BOLD
+            SubtitleFont.Serif -> Typeface.create(Typeface.SERIF, Typeface.BOLD)
+            SubtitleFont.Monospace -> Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            SubtitleFont.Casual -> casualFont ?: Typeface.DEFAULT_BOLD
+        }
+
+        /** The system's casual family in bold; `null` when asking for it gives the default back. */
+        private val casualFont: Typeface? by lazy {
+            Typeface.create("casual", Typeface.BOLD).takeIf { it != Typeface.DEFAULT_BOLD && it != Typeface.DEFAULT }
         }
     }
 }
@@ -83,7 +109,8 @@ data class CaptionLook(
  * pictures inside the visible part of the video and text over all of it.
  *
  * [bottomPadding] keeps them clear of the bottom edge, and lifts them above
- * the player's controls while those show; [sidePadding] and [topPadding]
+ * the player's controls while those show; text is raised further by the
+ * look's [CaptionLook.raise]; [sidePadding] and [topPadding]
  * keep long lines and cues placed at the top inside a TV's safe area. The
  * text keeps its size: a share of the whole height, padding or not. Cue
  * changes redraw the view without recomposing anything.
@@ -150,7 +177,9 @@ fun ScreenCaptions(
             changes.intValue
             // The view lays its cues out inside its padding: sizes are scaled back up to the whole height's.
             val h = height.intValue
-            val inside = h - padding - top
+            // Text only: pictures keep the place their cues give them.
+            val bottom = padding + if (pictures) 0 else (look.raise * h).roundToInt()
+            val inside = h - bottom - top
             val scale = if (inside in 1 until h) h.toFloat() / inside else 1f
             val manager = view.context.getSystemService(CaptioningManager::class.java)
             if (system.value && !look.custom && manager != null) {
@@ -162,7 +191,7 @@ fun ScreenCaptions(
             }
             view.setApplyEmbeddedFontSizes(false)
             // Media3 leaves cues on the last line at the very bottom: the view's own padding lifts all of them.
-            if (view.paddingBottom != padding || view.paddingTop != top || view.paddingLeft != side) view.setPadding(side, top, side, padding)
+            if (view.paddingBottom != bottom || view.paddingTop != top || view.paddingLeft != side) view.setPadding(side, top, side, bottom)
             val showing = serverCues.value + engineCues.value
             view.setCues(showing.filter { (it.bitmap != null) == pictures })
         },

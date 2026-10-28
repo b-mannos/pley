@@ -38,6 +38,7 @@ class Media3EngineLink(override val engine: PlayerEngine) : EngineLink {
     private var videoDecoder: String? = null
     private var audioDecoder: String? = null
     private var bandwidth: Long? = null
+    private var speed = 1f
     private var reportedPlayWhenReady = engine.player.playWhenReady
 
     private val events = object : Player.Listener {
@@ -103,6 +104,15 @@ class Media3EngineLink(override val engine: PlayerEngine) : EngineLink {
     override val playWhenReady: Boolean get() = player.playWhenReady
     override val reconnecting: Boolean get() = engine.state.value.reconnecting
     override val bandwidthKbps: Long? get() = bandwidth
+    override val audioOut: AudioOut
+        get() {
+            val stats = engine.state.value.stats
+            return when {
+                stats.tunneling -> AudioOut.Tunneled
+                stats.passthrough -> AudioOut.Passthrough
+                else -> AudioOut.Decoded
+            }
+        }
 
     override fun setListener(listener: EngineLink.Listener?) {
         this.listener = listener
@@ -120,7 +130,16 @@ class Media3EngineLink(override val engine: PlayerEngine) : EngineLink {
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
             .build()
         engine.prepare(source, startMs, playWhenReady)
+        if (player.playbackParameters.speed != speed) player.setPlaybackSpeed(speed)
     }
+
+    override fun setSpeed(speed: Float) {
+        this.speed = speed
+        // PlaybackParameters' pitch stays 1: the sound is stretched in time, not raised.
+        player.setPlaybackSpeed(speed)
+    }
+
+    override fun setAudioDelay(delayMs: Long) = engine.setAudioDelay(delayMs)
 
     override fun play() {
         if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)

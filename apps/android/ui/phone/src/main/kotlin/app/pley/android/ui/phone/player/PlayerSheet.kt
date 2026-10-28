@@ -38,6 +38,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,26 +69,39 @@ import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.image.Artwork
 import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.designsystem.reducedMotion
+import app.pley.android.data.SubtitleFont
+import app.pley.android.player.AudioDelays
 import app.pley.android.player.PlaybackDetailsUi
+import app.pley.android.player.PlaybackSpeeds
+import app.pley.android.player.SubtitleSearchUi
 import app.pley.android.player.engine.EngineState
 import app.pley.android.player.engine.PlaybackStats
 import app.pley.android.player.sleep.SleepChoice
 import app.pley.android.player.sleep.SleepTexts
+import app.pley.android.player.subtitles.CaptionLook
 import app.pley.android.player.subtitles.SubtitleSync
 import androidx.compose.ui.platform.LocalResources
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.DelayedSpinner
 import app.pley.android.ui.phone.kit.PleyIconButton
+import app.pley.android.ui.phone.settings.fontLabel
+import app.pley.android.ui.phone.settings.raiseLabel
 
-/** The subtitle style chosen on this device: one of the four sizes, and the dark box. */
-data class SubtitleChoice(val sizeIndex: Int = 1, val box: Boolean = false)
+/** The subtitle style chosen on this device: one of the four sizes, the dark box, the font and how far up. */
+data class SubtitleChoice(
+    val sizeIndex: Int = 1,
+    val box: Boolean = false,
+    val font: SubtitleFont = SubtitleFont.Sans,
+    val raiseIndex: Int = 0,
+)
 
 /**
  * The player's sheet (design spec §3.4 in the player's window, so the
  * system bars stay hidden): Settings with Quality, Audio, Subtitles,
- * Subtitle style, Sleep timer and Playback details, each also opened
+ * Subtitle style, Speed, Sleep timer and Playback details, each also opened
  * straight from the bottom row, and Chapters. Subtitles has Sync while the
- * subtitles chosen can move. [surface2][PleyColors.Surface2], 20 dp top
+ * subtitles chosen can move, and Find subtitles… while the file streams
+ * from the server; Audio has the audio delay. [surface2][PleyColors.Surface2], 20 dp top
  * corners, over a 60 % scrim that closes it.
  */
 @Composable
@@ -154,10 +168,12 @@ private fun ColumnScope.SheetContent(page: SheetPage, state: PlayerScreenState, 
             SheetPage.Details -> R.string.player_details
             SheetPage.Chapters -> R.string.player_chapters
             SheetPage.Sleep -> R.string.player_sleep_timer
+            SheetPage.Speed -> R.string.player_speed
+            SheetPage.FindSubtitles -> R.string.player_find_subtitles
         },
     )
     Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (state.sheetRoot == SheetPage.Settings && page != SheetPage.Settings) {
+        if ((state.sheetRoot == SheetPage.Settings && page != SheetPage.Settings) || page == SheetPage.FindSubtitles) {
             PleyIconButton(PleyIcons.ChevronLeft, stringResource(R.string.player_sheet_back), onClick = state::back)
         } else {
             Spacer(Modifier.width(16.dp))
@@ -178,10 +194,13 @@ private fun ColumnScope.SheetContent(page: SheetPage, state: PlayerScreenState, 
         when (page) {
             SheetPage.Settings -> SettingsPage(state, style)
             SheetPage.Quality -> QualityPage(state)
-            SheetPage.Audio -> state.audio.forEach { track ->
-                OptionRow(track.selected, track.label) {
-                    track.index?.let(state.controller::selectAudio)
-                    state.closeSheet()
+            SheetPage.Audio -> {
+                AudioDelayControl(state.audioDelayMs, state.audioDelayNote, onChange = state.controller::setAudioDelay)
+                state.audio.forEach { track ->
+                    OptionRow(track.selected, track.label) {
+                        track.index?.let(state.controller::selectAudio)
+                        state.closeSheet()
+                    }
                 }
             }
             SheetPage.Subtitles -> {
@@ -193,7 +212,12 @@ private fun ColumnScope.SheetContent(page: SheetPage, state: PlayerScreenState, 
                         state.closeSheet()
                     }
                 }
+                if (state.canFindSubtitles) {
+                    ActionRow(PleyIcons.Search, stringResource(R.string.player_find_subtitles)) { state.open(SheetPage.FindSubtitles) }
+                }
             }
+            SheetPage.Speed -> SpeedPage(state)
+            SheetPage.FindSubtitles -> FindSubtitlesPage(state)
             SheetPage.Style -> StylePage(style, onStyle)
             SheetPage.Details -> DetailsPage(state)
             SheetPage.Sleep -> SleepPage(state)
@@ -213,8 +237,11 @@ private fun SettingsPage(state: PlayerScreenState, style: SubtitleChoice) {
     if (state.qualities.isNotEmpty()) {
         NavRow(PleyIcons.Gauge, stringResource(R.string.player_quality), state.quality) { state.open(SheetPage.Quality) }
     }
-    if (state.audio.size > 1) {
-        NavRow(PleyIcons.AudioLines, stringResource(R.string.player_audio), state.audio.firstOrNull { it.selected }?.label ?: stringResource(R.string.player_default)) {
+    if (state.audio.isNotEmpty()) {
+        // One track still has its delay to set.
+        val track = state.audio.firstOrNull { it.selected }?.label ?: stringResource(R.string.player_default)
+        val delay = state.audioDelayMs.takeIf { it != 0L }?.let { "$track · ${AudioDelays.label(it)}" }
+        NavRow(PleyIcons.AudioLines, stringResource(R.string.player_audio), delay ?: track) {
             state.open(SheetPage.Audio)
         }
     }
@@ -222,12 +249,61 @@ private fun SettingsPage(state: PlayerScreenState, style: SubtitleChoice) {
     val offset = state.subtitleOffsetMs.takeIf { chosen != null && state.subtitleSync && it != 0L }
     val subtitle = chosen?.label?.let { label -> offset?.let { "$label · ${SubtitleSync.label(it)}" } ?: label }
         ?: state.subtitles.firstOrNull { it.selected }?.label ?: stringResource(R.string.player_none)
-    NavRow(PleyIcons.Captions, stringResource(R.string.player_subtitles), subtitle, enabled = state.subtitles.isNotEmpty()) {
+    NavRow(PleyIcons.Captions, stringResource(R.string.player_subtitles), subtitle, enabled = state.subtitles.isNotEmpty() || state.canFindSubtitles) {
         state.open(SheetPage.Subtitles)
     }
     NavRow(PleyIcons.SlidersHorizontal, stringResource(R.string.player_subtitle_style), sizeLabel(style.sizeIndex)) { state.open(SheetPage.Style) }
+    NavRow(PleyIcons.FastForward, stringResource(R.string.player_speed), PlaybackSpeeds.label(state.speed)) { state.open(SheetPage.Speed) }
     NavRow(MoonIcon, stringResource(R.string.player_sleep_timer), SleepTexts.summary(LocalResources.current, state.sleep)) { state.open(SheetPage.Sleep) }
     NavRow(PleyIcons.Info, stringResource(R.string.player_details), state.method.orEmpty()) { state.open(SheetPage.Details) }
+}
+
+/** The speeds, 1× normal; said unavailable while the sound can't follow. */
+@Composable
+private fun SpeedPage(state: PlayerScreenState) {
+    val note = state.speedNote
+    if (note != null) Note(note)
+    PlaybackSpeeds.ALL.forEach { speed ->
+        OptionRow(state.speed == speed, PlaybackSpeeds.label(speed), enabled = note == null) {
+            state.controller.setSpeed(speed)
+            state.closeSheet()
+        }
+    }
+}
+
+/**
+ * Find subtitles…: the server's results for the profile's language, the
+ * best first; one tapped is added and shown, and the sheet closes.
+ */
+@Composable
+private fun FindSubtitlesPage(state: PlayerScreenState) {
+    val search = state.subtitleSearch
+    when (search) {
+        null, SubtitleSearchUi.Searching -> Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+            DelayedSpinner(stringResource(R.string.player_searching))
+        }
+        is SubtitleSearchUi.Unavailable -> Note(search.message)
+        is SubtitleSearchUi.Found -> {
+            search.message?.let { Note(it) }
+            search.results.forEach { found ->
+                OptionRow(false, found.label, found.hint) { state.controller.addFoundSubtitle(found.id) }
+            }
+        }
+        is SubtitleSearchUi.Adding -> search.results.forEach { found ->
+            OptionRow(false, found.label, if (found.id == search.id) stringResource(R.string.player_adding) else found.hint, enabled = false) {}
+        }
+    }
+    // Added: the search ends, the track is chosen, and the sheet closes.
+    var began by remember { mutableStateOf(false) }
+    LaunchedEffect(search) {
+        if (search != null) began = true else if (began && state.sheet == SheetPage.FindSubtitles) state.closeSheet()
+    }
+}
+
+/** A sentence in the sheet: why something isn't offered. */
+@Composable
+private fun Note(text: String) {
+    Text(text, style = MaterialTheme.typography.bodyMedium, color = PleyColors.Muted, modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp))
 }
 
 /** The sleep timer's choices; the one running ticked, with its minutes left. */
@@ -280,6 +356,14 @@ private fun StylePage(style: SubtitleChoice, onStyle: (SubtitleChoice) -> Unit) 
     GroupLabel(stringResource(R.string.player_background))
     OptionRow(!style.box, stringResource(R.string.player_background_none)) { onStyle(style.copy(box = false)) }
     OptionRow(style.box, stringResource(R.string.player_background_box)) { onStyle(style.copy(box = true)) }
+    GroupLabel(stringResource(R.string.settings_subtitle_font))
+    CaptionLook.fonts().forEach { font ->
+        OptionRow(style.font == font, stringResource(fontLabel(font))) { onStyle(style.copy(font = font)) }
+    }
+    GroupLabel(stringResource(R.string.settings_subtitle_position))
+    PlayerLook.subtitleRaises.forEachIndexed { i, raise ->
+        OptionRow(style.raiseIndex == i, stringResource(raiseLabel(raise))) { onStyle(style.copy(raiseIndex = i)) }
+    }
 }
 
 /**
@@ -473,12 +557,12 @@ private fun ActionRow(icon: PleyIcon, label: String, onClick: () -> Unit) {
 
 /** A choice: the accent check when chosen, the label and an optional hint. 56 dp. */
 @Composable
-private fun OptionRow(selected: Boolean, label: String, hint: String? = null, onClick: () -> Unit) {
+private fun OptionRow(selected: Boolean, label: String, hint: String? = null, enabled: Boolean = true, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
             .heightIn(min = 56.dp)
-            .clickable(role = Role.RadioButton, onClick = onClick)
+            .clickable(enabled = enabled, role = Role.RadioButton, onClick = onClick)
             .semantics { this.selected = selected }
             .padding(horizontal = 24.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -488,7 +572,7 @@ private fun OptionRow(selected: Boolean, label: String, hint: String? = null, on
             if (selected) Icon(PleyIcons.Check, contentDescription = null, size = 22.dp, tint = PleyColors.Accent)
         }
         Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyLarge, color = PleyColors.Fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(label, style = MaterialTheme.typography.bodyLarge, color = if (enabled) PleyColors.Fg else PleyColors.Disabled, maxLines = 1, overflow = TextOverflow.Ellipsis)
             hint?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = PleyColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis) }
         }
     }

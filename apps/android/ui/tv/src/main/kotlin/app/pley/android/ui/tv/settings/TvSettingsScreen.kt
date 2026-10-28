@@ -50,7 +50,9 @@ import app.pley.android.common.sentenceOf
 import app.pley.android.data.FrameRateMatching
 import app.pley.android.data.Passthrough
 import app.pley.android.data.Settings
+import app.pley.android.player.subtitles.CaptionLook
 import app.pley.android.data.SubtitleBackground
+import app.pley.android.data.SubtitleFont
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
@@ -100,6 +102,8 @@ private sealed interface Picking {
     data class PassthroughOf(val format: String) : Picking
     data object SubtitleSize : Picking
     data object SubtitleBackground : Picking
+    data object SubtitleFont : Picking
+    data object SubtitleRaise : Picking
 }
 
 /**
@@ -298,6 +302,8 @@ private fun rowKeyOf(p: Picking): String = when (p) {
     is Picking.PassthroughOf -> "row-passthrough-${p.format}"
     Picking.SubtitleSize -> "row-subtitle-size"
     Picking.SubtitleBackground -> "row-subtitle-background"
+    Picking.SubtitleFont -> "row-subtitle-font"
+    Picking.SubtitleRaise -> "row-subtitle-position"
 }
 
 /** The rows of category [c]; the first one's requester is "first-<category>", for Select on the category. */
@@ -484,6 +490,24 @@ private fun LazyListScope.pane(
                     icon = PleyIcons.Square,
                     onClick = { pick(Picking.SubtitleBackground) },
                     modifier = keyed("row-subtitle-background"),
+                )
+            }
+            item(key = "row-subtitle-font") {
+                TvSettingRow(
+                    stringResource(R.string.tv_settings_subtitle_font),
+                    value = stringResource(fontLabel(s.subtitleFont)),
+                    icon = PleyIcons.Pencil,
+                    onClick = { pick(Picking.SubtitleFont) },
+                    modifier = keyed("row-subtitle-font"),
+                )
+            }
+            item(key = "row-subtitle-position") {
+                TvSettingRow(
+                    stringResource(R.string.tv_settings_subtitle_position),
+                    value = stringResource(raiseLabel(s.subtitleRaise)),
+                    icon = PleyIcons.ArrowUp,
+                    onClick = { pick(Picking.SubtitleRaise) },
+                    modifier = keyed("row-subtitle-position"),
                 )
             }
             item(key = "row-reduce-motion") {
@@ -691,6 +715,24 @@ private fun Panels(
             onClose,
             returnTo,
         )
+        Picking.SubtitleFont -> TvChoicePanel(
+            visible,
+            stringResource(R.string.tv_settings_subtitle_font),
+            CaptionLook.fonts().map { TvChoice(it, stringResource(fontLabel(it))) },
+            s.subtitleFont,
+            settings::setSubtitleFont,
+            onClose,
+            returnTo,
+        )
+        Picking.SubtitleRaise -> TvChoicePanel(
+            visible,
+            stringResource(R.string.tv_settings_subtitle_position),
+            Settings.SUBTITLE_RAISES.map { TvChoice(it, stringResource(raiseLabel(it))) },
+            s.subtitleRaise,
+            settings::setSubtitleRaise,
+            onClose,
+            returnTo,
+        )
         null -> Unit
     }
 }
@@ -806,6 +848,20 @@ private fun sizeLabel(size: Float): Int = when (Settings.SUBTITLE_SIZES.indexOf(
 private fun backgroundLabel(background: SubtitleBackground): Int = when (background) {
     SubtitleBackground.None -> R.string.tv_settings_background_none
     SubtitleBackground.DarkBox -> R.string.tv_settings_background_box
+}
+
+internal fun fontLabel(font: SubtitleFont): Int = when (font) {
+    SubtitleFont.Sans -> R.string.tv_settings_font_sans
+    SubtitleFont.Serif -> R.string.tv_settings_font_serif
+    SubtitleFont.Monospace -> R.string.tv_settings_font_monospace
+    SubtitleFont.Casual -> R.string.tv_settings_font_casual
+}
+
+internal fun raiseLabel(raise: Float): Int = when (Settings.SUBTITLE_RAISES.indexOf(raise)) {
+    1 -> R.string.tv_settings_position_raised
+    2 -> R.string.tv_settings_position_higher
+    3 -> R.string.tv_settings_position_highest
+    else -> R.string.tv_settings_position_bottom
 }
 
 /** The app's version and commit, or an empty string when the system won't say. */

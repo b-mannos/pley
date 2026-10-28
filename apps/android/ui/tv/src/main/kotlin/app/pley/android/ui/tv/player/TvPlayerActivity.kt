@@ -174,11 +174,16 @@ class TvPlayerActivity : ComponentActivity() {
         }
     }
 
-    /** A size or background chosen in the Subtitles panel: Settings' own, so every video has it from now on. */
+    /** A size, background, font or position chosen in the Subtitles panel: Settings' own, so every video has it from now on. */
     private fun chooseStyle(look: CaptionLook) {
         lifecycleScope.launch {
             graph.data.settings.update {
-                it.copy(subtitleSize = look.textFraction, subtitleBackground = if (look.box) SubtitleBackground.DarkBox else SubtitleBackground.None)
+                it.copy(
+                    subtitleSize = look.textFraction,
+                    subtitleBackground = if (look.box) SubtitleBackground.DarkBox else SubtitleBackground.None,
+                    subtitleFont = look.font,
+                    subtitleRaise = look.raise,
+                )
             }
         }
     }

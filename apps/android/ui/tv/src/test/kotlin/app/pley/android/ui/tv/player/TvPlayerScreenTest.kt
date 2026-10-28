@@ -273,6 +273,23 @@ class TvPlayerScreenTest {
     }
 
     @Test
+    fun `the Audio panel moves the sound in 50 ms steps above its tracks`() {
+        val controller = playing()
+        show(controller)
+        press(Key.DirectionDown)
+        press(Key.DirectionRight)
+        press(Key.DirectionCenter)
+        compose.onNodeWithTag(TAG_PANEL).assertExists()
+        // The track playing has focus; the delay is above it.
+        press(Key.DirectionUp)
+        compose.onNodeWithTag(TAG_AUDIO_DELAY).assertIsFocused()
+        press(Key.DirectionRight)
+        assertEquals(listOf<Any?>(50L), controller.calls("setAudioDelay").single().args)
+        press(Key.DirectionLeft)
+        assertEquals(listOf<Any?>(-50L), controller.calls("setAudioDelay").last().args)
+    }
+
+    @Test
     fun `Back closes the panel, then hides the controls, then leaves`() {
         val controller = playing()
         show(controller)

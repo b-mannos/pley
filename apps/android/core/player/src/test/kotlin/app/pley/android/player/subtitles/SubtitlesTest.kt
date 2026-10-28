@@ -50,6 +50,11 @@ class SubtitlesTest {
         assertEquals(CaptionLook(0.048f, box = false, custom = false), CaptionLook.of(app.pley.android.data.Settings()))
         val big = app.pley.android.data.Settings(subtitleSize = 0.075f, subtitleBackground = app.pley.android.data.SubtitleBackground.DarkBox)
         assertEquals(CaptionLook(0.076f, box = true, custom = true), CaptionLook.of(big))
+        // A font is pley's style too; the position applies either way, never counted as one.
+        val serif = app.pley.android.data.Settings(subtitleFont = app.pley.android.data.SubtitleFont.Serif)
+        assertEquals(CaptionLook(0.048f, box = false, custom = true, font = app.pley.android.data.SubtitleFont.Serif), CaptionLook.of(serif))
+        val raised = app.pley.android.data.Settings(subtitleRaise = 0.11f)
+        assertEquals(CaptionLook(0.048f, box = false, custom = false, raise = 0.1f), CaptionLook.of(raised))
     }
 
     @Test

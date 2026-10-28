@@ -43,6 +43,8 @@ class SettingsTest {
             tunneling = true,
             subtitleSize = 0.076f,
             subtitleBackground = SubtitleBackground.DarkBox,
+            subtitleFont = SubtitleFont.Serif,
+            subtitleRaise = 0.1f,
             autoplayNext = false,
             privateSignInTab = false,
             alwaysStartAs = 3,
@@ -86,6 +88,7 @@ class SettingsTest {
             it.copy(
                 frameRateMatching = FrameRateMatching.Always,
                 subtitleSize = 0.05f,
+                subtitleRaise = 0.07f,
                 allowSoftwareVideo = true,
                 passthrough = mapOf("mp3" to Passthrough.On, "ac3" to Passthrough.Off),
                 qualityOnMobile = " ",
@@ -97,6 +100,7 @@ class SettingsTest {
         assertEquals(FrameRateMatching.Seamless, s.frameRateMatching(tv = false))
         // The nearest size offered.
         assertEquals(0.048f, s.subtitleSize)
+        assertEquals(0.05f, s.subtitleRaise)
         // Release builds never allow software video.
         assertFalse(s.allowSoftwareVideo)
         assertEquals(mapOf("ac3" to Passthrough.Off), s.passthrough)

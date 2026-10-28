@@ -9,7 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.FocusRequester
 
 /** The side panels (design spec §2.7), and the sleep timer's. */
-internal enum class PlayerPanel { Subtitles, Audio, Quality, Chapters, Info, Sleep }
+internal enum class PlayerPanel { Subtitles, Audio, Quality, Chapters, Info, Sleep, Speed, FindSubtitles }
 
 /** What can be given focus in the player. */
 internal enum class PlayerFocus {
@@ -24,6 +24,7 @@ internal enum class PlayerFocus {
     Chapters,
     Info,
     Sleep,
+    Speed,
     UpNext,
 
     /** The sleep timer's notice (Keep watching). */
@@ -142,6 +143,8 @@ internal class TvPlayerUi {
             PlayerPanel.Chapters -> PlayerFocus.Chapters
             PlayerPanel.Info -> PlayerFocus.Info
             PlayerPanel.Sleep -> PlayerFocus.Sleep
+            PlayerPanel.Speed -> PlayerFocus.Speed
+            PlayerPanel.FindSubtitles -> PlayerFocus.Subtitles
         }
     }
 }

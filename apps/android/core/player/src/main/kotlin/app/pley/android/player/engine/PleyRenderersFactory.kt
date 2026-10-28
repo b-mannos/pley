@@ -7,6 +7,7 @@ import androidx.media3.common.Format
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.video.MediaCodecVideoRenderer
@@ -18,7 +19,8 @@ import androidx.media3.exoplayer.video.VideoRendererEventListener
  * decoder; a decoder that fails to start falls back to the next one listed
  * (a Dolby Vision decoder to the base layer's HEVC decoder); Fire TV queues
  * buffers asynchronously, as Amazon asks, unless its model's kill switch
- * says no. Music gets no video renderer.
+ * says no; the sound can be moved against the picture ([audioDelay],
+ * [DelayedAudioSink]). Music gets no video renderer.
  */
 @OptIn(markerClass = [UnstableApi::class])
 class PleyRenderersFactory(
@@ -26,6 +28,7 @@ class PleyRenderersFactory(
     private val rules: DecoderRules,
     asyncQueueing: Boolean,
     private val music: Boolean,
+    private val audioDelay: AudioDelay? = null,
 ) : DefaultRenderersFactory(context) {
     init {
         setEnableDecoderFallback(true)
@@ -54,6 +57,11 @@ class PleyRenderersFactory(
             .setEventListener(eventListener)
             .setMaxDroppedFramesToNotify(MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY)
         out.add(PolicyVideoRenderer(builder, rules))
+    }
+
+    override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink? {
+        val sink = super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams) ?: return null
+        return audioDelay?.let { DelayedAudioSink(sink, it) } ?: sink
     }
 
     override fun buildCameraMotionRenderers(context: Context, extensionRendererMode: Int, out: ArrayList<Renderer>) = Unit

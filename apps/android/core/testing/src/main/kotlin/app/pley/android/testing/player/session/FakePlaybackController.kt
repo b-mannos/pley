@@ -6,6 +6,8 @@ import app.pley.android.model.Marker
 import app.pley.android.model.MarkerKind
 import app.pley.android.model.MarkerSource
 import app.pley.android.player.ChapterMark
+import app.pley.android.player.FoundSubtitle
+import app.pley.android.player.SubtitleSearchUi
 import app.pley.android.player.DetailRow
 import app.pley.android.player.PlayRequest
 import app.pley.android.player.PlaybackController
@@ -88,6 +90,16 @@ class FakePlaybackController(initial: PlayerUiState = PlayerUiState()) : Playbac
 
     override fun setSleep(choice: SleepChoice) = record("setSleep", choice)
 
+    override fun setSpeed(speed: Float) = record("setSpeed", speed)
+
+    override fun setAudioDelay(delayMs: Long) = record("setAudioDelay", delayMs)
+
+    override fun searchSubtitles() = record("searchSubtitles")
+
+    override fun addFoundSubtitle(resultId: String) = record("addFoundSubtitle", resultId)
+
+    override fun closeSubtitleSearch() = record("closeSubtitleSearch")
+
     override fun keepWatching() = record("keepWatching")
 
     override fun skip() = record("skip")
@@ -129,8 +141,9 @@ class FakePlaybackController(initial: PlayerUiState = PlayerUiState()) : Playbac
          * stream at 8 Mbps with a fallback note, two audio tracks, subtitles
          * with one to burn in, the intro showing, chapters, previews, the
          * details open, Up Next counting down and a notice; the subtitles
-         * moved, a sleep timer running, and (only to fill them) the server
-         * out of reach and a stop by the server.
+         * moved, a sleep timer running, 1.5×, the sound 0.2 s later, subtitles
+         * found online, and (only to fill them) the server out of reach, a
+         * stop by the server and the notes of a sound that can't follow.
          */
         fun everything(): PlayerUiState = PlayerUiState(
             phase = PlayerPhase.Playing,
@@ -178,6 +191,15 @@ class FakePlaybackController(initial: PlayerUiState = PlayerUiState()) : Playbac
             subtitleSync = true,
             sleep = SleepState(SleepChoice.Minutes(30), minutesLeft = 12),
             stoppedByServer = true,
+            speed = 1.5f,
+            speedNote = "Not while the sound goes to your receiver as it is: it plays at its own speed",
+            audioDelayMs = 200,
+            audioDelayNote = "Not with tunneled playback, where the TV keeps the picture with the sound itself",
+            canFindSubtitles = true,
+            subtitleSearch = SubtitleSearchUi.Found(
+                listOf(FoundSubtitle("opensubtitles:1", "Fixture.Show.S01E01.1080p.WEB", "English · Made for this file · 1,234 downloads")),
+                message = null,
+            ),
         )
     }
 }

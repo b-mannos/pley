@@ -149,7 +149,13 @@ class PlaybackAnalytics(
     }
 
     override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, audioTrackConfig: AudioSink.AudioTrackConfig) {
-        update(stats.copy(audioEncoding = audioTrackConfig.encoding, passthrough = isPassthrough(audioTrackConfig.encoding)))
+        update(
+            stats.copy(
+                audioEncoding = audioTrackConfig.encoding,
+                passthrough = isPassthrough(audioTrackConfig.encoding),
+                tunneling = audioTrackConfig.tunneling,
+            ),
+        )
     }
 
     override fun onPositionDiscontinuity(

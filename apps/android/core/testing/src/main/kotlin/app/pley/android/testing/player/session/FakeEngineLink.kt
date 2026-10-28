@@ -2,6 +2,7 @@ package app.pley.android.testing.player.session
 
 import app.pley.android.player.EngineSource
 import app.pley.android.player.PlayerEngine
+import app.pley.android.player.session.AudioOut
 import app.pley.android.player.session.EngineError
 import app.pley.android.player.session.EngineLink
 import app.pley.android.player.session.EngineStatus
@@ -39,6 +40,15 @@ class FakeEngineLink(private val clock: () -> Long = { 0L }) : EngineLink {
 
     /** What [stats] answers. */
     var lines: List<String> = listOf("Video decoder: fake")
+
+    /** How the sound goes out: tests say when it passes through or is tunneled. */
+    override var audioOut: AudioOut = AudioOut.Decoded
+
+    /** The speed and the audio delay asked for last. */
+    var speed = 1f
+        private set
+    var audioDelayMs = 0L
+        private set
 
     private var listener: EngineLink.Listener? = null
     private var basePosition = 0L
@@ -166,6 +176,14 @@ class FakeEngineLink(private val clock: () -> Long = { 0L }) : EngineLink {
     }
 
     override fun frameCounts(): FrameCounts? = frames
+
+    override fun setSpeed(speed: Float) {
+        this.speed = speed
+    }
+
+    override fun setAudioDelay(delayMs: Long) {
+        audioDelayMs = delayMs
+    }
 
     override fun stats(): List<String> = lines
 

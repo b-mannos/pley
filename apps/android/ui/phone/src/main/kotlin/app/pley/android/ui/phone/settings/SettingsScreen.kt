@@ -28,7 +28,9 @@ import app.pley.android.data.FrameRateMatching
 import app.pley.android.data.GridDensity
 import app.pley.android.data.Settings
 import app.pley.android.data.SubtitleBackground
+import app.pley.android.data.SubtitleFont
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.player.subtitles.CaptionLook
 import app.pley.android.screens.downloads.DownloadsViewModel
 import app.pley.android.screens.settings.SettingsUiState
 import app.pley.android.screens.settings.SettingsViewModel
@@ -162,6 +164,20 @@ internal fun SettingsScreen() {
                         icon = PleyIcons.Square,
                         onClick = { sheet = Sheet.SubtitleBackground },
                     )
+                    RowDivider()
+                    SettingsRow(
+                        stringResource(R.string.settings_subtitle_font),
+                        value = stringResource(fontLabel(s.subtitleFont)),
+                        icon = PleyIcons.Pencil,
+                        onClick = { sheet = Sheet.SubtitleFont },
+                    )
+                    RowDivider()
+                    SettingsRow(
+                        stringResource(R.string.settings_subtitle_position),
+                        value = stringResource(raiseLabel(s.subtitleRaise)),
+                        icon = PleyIcons.ArrowUp,
+                        onClick = { sheet = Sheet.SubtitleRaise },
+                    )
                 }
             }
             item(key = "display") {
@@ -237,7 +253,18 @@ internal fun SettingsScreen() {
 }
 
 /** The choice being made, if any. */
-private enum class Sheet { QualityHome, QualityMobile, DownloadQuality, FrameRate, SubtitleSize, SubtitleBackground, GridDensity, Licences }
+private enum class Sheet {
+    QualityHome,
+    QualityMobile,
+    DownloadQuality,
+    FrameRate,
+    SubtitleSize,
+    SubtitleBackground,
+    SubtitleFont,
+    SubtitleRaise,
+    GridDensity,
+    Licences,
+}
 
 @Composable
 private fun SettingsSheet(sheet: Sheet?, state: SettingsUiState, model: SettingsViewModel, onDismiss: () -> Unit) {
@@ -280,6 +307,20 @@ private fun SettingsSheet(sheet: Sheet?, state: SettingsUiState, model: Settings
             choices = SubtitleBackground.entries.map { Choice(it, stringResource(backgroundLabel(it))) },
             selected = s.subtitleBackground,
             onPick = model::setSubtitleBackground,
+            onDismiss = onDismiss,
+        )
+        Sheet.SubtitleFont -> ChoiceSheet(
+            title = stringResource(R.string.settings_subtitle_font),
+            choices = CaptionLook.fonts().map { Choice(it, stringResource(fontLabel(it))) },
+            selected = s.subtitleFont,
+            onPick = model::setSubtitleFont,
+            onDismiss = onDismiss,
+        )
+        Sheet.SubtitleRaise -> ChoiceSheet(
+            title = stringResource(R.string.settings_subtitle_position),
+            choices = Settings.SUBTITLE_RAISES.map { Choice(it, stringResource(raiseLabel(it))) },
+            selected = s.subtitleRaise,
+            onPick = model::setSubtitleRaise,
             onDismiss = onDismiss,
         )
         Sheet.GridDensity -> ChoiceSheet(
@@ -352,6 +393,20 @@ private fun sizeLabel(size: Float): Int = when (Settings.SUBTITLE_SIZES.indexOf(
 private fun backgroundLabel(background: SubtitleBackground): Int = when (background) {
     SubtitleBackground.None -> R.string.settings_background_none
     SubtitleBackground.DarkBox -> R.string.settings_background_box
+}
+
+internal fun fontLabel(font: SubtitleFont): Int = when (font) {
+    SubtitleFont.Sans -> R.string.settings_font_sans
+    SubtitleFont.Serif -> R.string.settings_font_serif
+    SubtitleFont.Monospace -> R.string.settings_font_monospace
+    SubtitleFont.Casual -> R.string.settings_font_casual
+}
+
+internal fun raiseLabel(raise: Float): Int = when (Settings.SUBTITLE_RAISES.indexOf(raise)) {
+    1 -> R.string.settings_position_raised
+    2 -> R.string.settings_position_higher
+    3 -> R.string.settings_position_highest
+    else -> R.string.settings_position_bottom
 }
 
 private fun densityLabel(density: GridDensity): Int = when (density) {

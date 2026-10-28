@@ -12,6 +12,7 @@ import app.pley.android.data.GridDensity
 import app.pley.android.data.Passthrough
 import app.pley.android.data.Settings
 import app.pley.android.data.SubtitleBackground
+import app.pley.android.data.SubtitleFont
 import app.pley.android.player.session.Qualities
 import app.pley.android.player.session.QualityPreset
 import app.pley.android.screens.onboarding.FileHouseholdStore
@@ -107,6 +108,10 @@ class SettingsViewModel(
     fun setSubtitleSize(size: Float) = update { it.copy(subtitleSize = size) }
 
     fun setSubtitleBackground(background: SubtitleBackground) = update { it.copy(subtitleBackground = background) }
+
+    fun setSubtitleFont(font: SubtitleFont) = update { it.copy(subtitleFont = font) }
+
+    fun setSubtitleRaise(raise: Float) = update { it.copy(subtitleRaise = raise) }
 
     fun setAutoplayNext(on: Boolean) = update { it.copy(autoplayNext = on) }
 

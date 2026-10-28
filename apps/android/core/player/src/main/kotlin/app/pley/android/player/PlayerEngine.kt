@@ -57,6 +57,12 @@ interface PlayerEngine {
     /** Lets go of the decoders and the audio output (the TV's player does in onStop). */
     fun release()
 
+    /**
+     * Plays the sound [delayMs] later than the picture (negative: earlier),
+     * from now on, for every media this engine loads.
+     */
+    fun setAudioDelay(delayMs: Long) {}
+
     /** Makes engines for this device. */
     fun interface Factory {
         /** An engine for video, or for music when [music] (no video decoders, offload with the screen off). */

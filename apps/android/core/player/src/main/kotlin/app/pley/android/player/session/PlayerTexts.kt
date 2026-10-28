@@ -80,6 +80,36 @@ interface PlayerTexts {
     /** The server stopped the playback: who did, and their [message] when given. */
     fun stopped(message: String?, byAdmin: Boolean): String
 
+    /** The speed can't change: the sound goes to a receiver as it is. */
+    val speedPassthrough: String get() = "Not while the sound goes to your receiver as it is: it plays at its own speed"
+
+    /** The speed and the audio delay can't change: the video is tunneled. */
+    val tunneled: String get() = "Not with tunneled playback, where the TV keeps the picture with the sound itself"
+
+    /** "Find subtitles…" when the server has no subtitle search set up. */
+    val searchNotSetUp: String get() = "Subtitle search isn't set up on this server"
+
+    /** The server has no subtitle search at all (an older one). */
+    val searchUnsupported: String get() = "This server can't search for subtitles: it may need an update"
+
+    /** Nothing found in the profile's language. */
+    val searchNothing: String get() = "No subtitles found for this file"
+
+    /** The search or the adding failed, for [reason]. */
+    fun searchFailed(reason: String): String = "Couldn't find subtitles: $reason"
+
+    /** A result's line under its name: its language, whether it was made for this very file, and how often it was downloaded. */
+    fun foundHint(language: String?, exact: Boolean, hearingImpaired: Boolean, downloads: Long): String =
+        listOfNotNull(
+            language,
+            if (exact) "Made for this file" else null,
+            if (hearingImpaired) "SDH" else null,
+            if (downloads > 0) "%,d downloads".format(downloads) else null,
+        ).joinToString(" · ")
+
+    /** The track added and shown. */
+    val subtitleAdded: String get() = "Subtitles added"
+
     // The details' rows.
     val rowVideo: String
     val rowAudio: String
@@ -197,6 +227,23 @@ class ResourcePlayerTexts(context: Context) : PlayerTexts {
         val who = s(if (byAdmin) R.string.session_stopped_by_admin else R.string.session_stopped_elsewhere)
         return if (message.isNullOrBlank()) who else res.getString(R.string.session_stopped_message, who, message.trim())
     }
+    override val speedPassthrough: String get() = s(R.string.session_speed_passthrough)
+    override val tunneled: String get() = s(R.string.session_tunneled)
+    override val searchNotSetUp: String get() = s(R.string.session_search_not_set_up)
+    override val searchUnsupported: String get() = s(R.string.session_search_unsupported)
+    override val searchNothing: String get() = s(R.string.session_search_nothing)
+
+    override fun searchFailed(reason: String): String = res.getString(R.string.session_search_failed, reason)
+
+    override fun foundHint(language: String?, exact: Boolean, hearingImpaired: Boolean, downloads: Long): String =
+        listOfNotNull(
+            language,
+            if (exact) s(R.string.session_search_exact) else null,
+            if (hearingImpaired) s(R.string.session_search_sdh) else null,
+            if (downloads > 0) res.getQuantityString(R.plurals.session_search_downloads, downloads.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), downloads) else null,
+        ).joinToString(" · ")
+
+    override val subtitleAdded: String get() = s(R.string.session_search_added)
     override val rowVideo: String get() = s(R.string.session_row_video)
     override val rowAudio: String get() = s(R.string.session_row_audio)
     override val rowBitrate: String get() = s(R.string.session_row_bitrate)

@@ -9,14 +9,17 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import app.pley.android.model.Marker
 import app.pley.android.model.MarkerKind
 import app.pley.android.model.MarkerSource
 import app.pley.android.player.ChapterMark
+import app.pley.android.player.FoundSubtitle
 import app.pley.android.player.PlayerPhase
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.QualityChoice
+import app.pley.android.player.SubtitleSearchUi
 import app.pley.android.player.TrackChoice
 import app.pley.android.player.UpNextUi
 import app.pley.android.player.subtitles.CaptionLook
@@ -212,6 +215,46 @@ class PhonePlayerScreenTest {
     }
 
     @Test
+    fun findSubtitlesListsWhatTheServerFoundAndAddsThePickedOne() {
+        val fake = FakePlaybackController(playing { it.copy(canFindSubtitles = true) })
+        show(fake)
+        compose.onNodeWithText("Subtitles").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Find subtitles…").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertEquals(1, fake.calls("searchSubtitles").size)
+        fake.update {
+            it.copy(subtitleSearch = SubtitleSearchUi.Found(listOf(FoundSubtitle("opensubtitles:7", "Pilot.1080p.WEB", "English · Made for this file")), null))
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("English · Made for this file").assertIsDisplayed()
+        compose.onNodeWithText("Pilot.1080p.WEB").performClick()
+        assertEquals(listOf<Any?>("opensubtitles:7"), fake.calls("addFoundSubtitle").single().args)
+        // Not set up on the server: it says so.
+        fake.update { it.copy(subtitleSearch = SubtitleSearchUi.Unavailable("Subtitle search isn't set up on this server")) }
+        compose.waitForIdle()
+        compose.onNodeWithText("Subtitle search isn't set up on this server").assertIsDisplayed()
+    }
+
+    @Test
+    fun speedAndAudioDelayAreInTheSettings() {
+        val fake = FakePlaybackController(playing())
+        show(fake)
+        compose.onNodeWithContentDescription("Playback settings").performClick()
+        compose.waitForIdle()
+        compose.onNode(hasText("Speed") and hasText("1×")).performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("1.5×").performClick()
+        assertEquals(listOf<Any?>(1.5f), fake.calls("setSpeed").single().args)
+        compose.onNodeWithContentDescription("Playback settings").performClick()
+        compose.waitForIdle()
+        compose.onNode(hasText("Audio") and hasText("English (AAC Stereo)")).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Play the sound later").performClick()
+        assertEquals(listOf<Any?>(50L), fake.calls("setAudioDelay").single().args)
+    }
+
+    @Test
     fun subtitlesMarkPictureTracksThatAreBurnedIn() {
         val fake = FakePlaybackController(playing())
         show(fake)
@@ -233,7 +276,8 @@ class PhonePlayerScreenTest {
         compose.onNodeWithText("French (EAC3 5.1)").assertIsDisplayed()
         compose.onNodeWithContentDescription("Back to settings").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("Playback details").performClick()
+        // Below Speed and the sleep timer: scrolled to on a short sheet.
+        compose.onNodeWithText("Playback details").performScrollTo().performClick()
         compose.waitForIdle()
         assertEquals(listOf<Any?>(true), fake.calls("setDetailsOpen").first().args)
         compose.onNodeWithContentDescription("Close").performClick()

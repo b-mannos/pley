@@ -13,12 +13,13 @@ import app.pley.android.player.PlaybackController
 import app.pley.android.player.PlayerPhase
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.QualityChoice
+import app.pley.android.player.SubtitleSearchUi
 import app.pley.android.player.TrackChoice
 import app.pley.android.player.UpNextUi
 import app.pley.android.player.sleep.SleepState
 
 /** A page of the player's sheet. */
-enum class SheetPage { Settings, Quality, Audio, Subtitles, Style, Details, Chapters, Sleep }
+enum class SheetPage { Settings, Quality, Audio, Subtitles, Style, Details, Chapters, Sleep, Speed, FindSubtitles }
 
 /** A run of double-taps on one side: where it lands and how far it went. */
 data class SeekRun(val side: Int, val totalMs: Long, val at: Long)
@@ -60,6 +61,12 @@ class PlayerScreenState(
     val subtitleOffsetMs: Long by derivedStateOf { ui.value.subtitleOffsetMs }
     val sleep: SleepState by derivedStateOf { ui.value.sleep }
     val stoppedByServer: Boolean by derivedStateOf { ui.value.stoppedByServer }
+    val speed: Float by derivedStateOf { ui.value.speed }
+    val speedNote: String? by derivedStateOf { ui.value.speedNote }
+    val audioDelayMs: Long by derivedStateOf { ui.value.audioDelayMs }
+    val audioDelayNote: String? by derivedStateOf { ui.value.audioDelayNote }
+    val canFindSubtitles: Boolean by derivedStateOf { ui.value.canFindSubtitles }
+    val subtitleSearch: SubtitleSearchUi? by derivedStateOf { ui.value.subtitleSearch }
 
     /** An episode: Next episode is offered. */
     val episode: Boolean by derivedStateOf { ui.value.subtitle != null }
@@ -157,6 +164,7 @@ class PlayerScreenState(
         if (sheet == null) sheetRoot = page
         sheet = page
         if (page == SheetPage.Details) controller.setDetailsOpen(true)
+        if (page == SheetPage.FindSubtitles) controller.searchSubtitles()
     }
 
     /** The details readout over the video is showing (Settings → Playback details): its numbers stay live. */
@@ -172,11 +180,18 @@ class PlayerScreenState(
     fun back() {
         val now = sheet ?: return
         if (now == SheetPage.Details) controller.setDetailsOpen(readout)
+        if (now == SheetPage.FindSubtitles) {
+            // Back from the search: to the subtitles it was opened from.
+            controller.closeSubtitleSearch()
+            sheet = SheetPage.Subtitles
+            return
+        }
         if (sheetRoot == SheetPage.Settings && now != SheetPage.Settings) sheet = SheetPage.Settings else closeSheet()
     }
 
     fun closeSheet() {
         if (sheet == SheetPage.Details) controller.setDetailsOpen(readout)
+        if (sheet == SheetPage.FindSubtitles) controller.closeSubtitleSearch()
         sheet = null
         sheetRoot = null
         touched()
