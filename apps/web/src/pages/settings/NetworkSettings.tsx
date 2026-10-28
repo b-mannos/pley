@@ -405,7 +405,7 @@ export function NetworkSettings() {
       <Card className="space-y-3">
         <div>
           <h3 className="text-base font-semibold">Listening now</h3>
-          <p className="mt-0.5 text-sm text-muted">An address pley can't listen on yet (an adapter that comes later) is tried again every 30 seconds.</p>
+          <p className="mt-0.5 text-sm text-muted">pley retries addresses it can't listen on yet every 30 seconds.</p>
         </div>
         <ul className="space-y-1.5 text-sm">
           {data.plex_on_web ? (

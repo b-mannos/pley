@@ -11,7 +11,7 @@ In this order, the same on every app:
 | id | Label | Video at most |
 |---|---|---|
 | `original` | Original | the file as it is |
-| `auto` | Automatic | Original, lower only when it doesn't play well; a transcode in several sizes the player moves between |
+| `auto` | Automatic | Lowers quality only when needed; a transcode in several sizes the player moves between |
 | `30m` | 30 Mbps 4K | 30 Mbps, 2160 lines |
 | `15m` | 15 Mbps 4K | 15 Mbps, 2160 lines |
 | `20m` | 20 Mbps 1080p | 20 Mbps, 1080 lines |
@@ -36,7 +36,7 @@ chosen; a quality chosen before, Original included, is kept.
 
 While Automatic plays, the menu says what it plays: "Automatic · Original"
 or "Automatic · 8 Mbps 1080p". The player's details say why when it went
-down: "Lowered for the network" or "Lowered: the device fell behind".
+down: "Lowered for your connection" or "Lowered for this device".
 
 ## Original
 
@@ -73,8 +73,8 @@ the highest quality of the menu at or below that ceiling, and never below
 2 Mbps 480p. A decoding issue at Original goes to the server's own quality
 for the file, as today. The session starts again where it was
 (`mode: "transcode"` with that quality's `max_bitrate` and `max_height`),
-and the player says so once, briefly: "Playing at 8 Mbps 1080p for a
-smoother picture."
+and the player says so once, briefly: "Quality lowered to 8 Mbps
+1080p".
 
 **More issues step down again**, one quality at least, but not within 20 s
 of the last change.

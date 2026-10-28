@@ -51,7 +51,7 @@ describe("SettingsPopover", () => {
     expect(screen.getByRole("button", { name: /Quality\s*30 Mbps 4K \(auto\)/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Quality/ }));
     const original = screen.getAllByRole("menuitemradio")[0];
-    expect(original).toHaveTextContent("Plays as 30 Mbps 4K here (the file: 4K · 60 Mbps)");
+    expect(original).toHaveTextContent("Plays as 30 Mbps 4K here (file: 4K · 60 Mbps)");
     expect(original).toHaveAttribute("aria-checked", "true");
   });
 
@@ -62,7 +62,7 @@ describe("SettingsPopover", () => {
     const options = screen.getAllByRole("menuitemradio");
     expect(options.map((o) => o.textContent)).toEqual([
       "Original1080p · 9.0 Mbps",
-      "AutomaticOriginal, lower only when it doesn't play well",
+      "AutomaticLowers quality only when needed",
       // 8 Mbps is too close to the file's 9 to play any better.
       "4 Mbps 720pConverted",
       "2 Mbps 480pConverted",
@@ -88,11 +88,11 @@ describe("SettingsPopover", () => {
 
   it("says when Automatic went lower, and lets it be picked again to start afresh", async () => {
     const user = userEvent.setup();
-    const props = renderPopover({ quality: "auto", autoNow: "4 Mbps 720p", autoWhy: "Lowered for the network" });
+    const props = renderPopover({ quality: "auto", autoNow: "4 Mbps 720p", autoWhy: "Lowered for your connection" });
     expect(screen.getByRole("button", { name: /Quality\s*Automatic · 4 Mbps 720p/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Quality/ }));
     const automatic = screen.getByRole("menuitemradio", { name: /Automatic/ });
-    expect(automatic).toHaveTextContent("Now 4 Mbps 720p · Lowered for the network");
+    expect(automatic).toHaveTextContent("Now 4 Mbps 720p · Lowered for your connection");
     await user.click(automatic);
     expect(props.onQuality).toHaveBeenCalledWith("auto");
   });

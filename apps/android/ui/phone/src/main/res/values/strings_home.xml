@@ -19,7 +19,7 @@
     <string name="home_libraries_loading">Loading your libraries</string>
     <string name="home_libraries_sort">Sort libraries</string>
     <string name="home_libraries_sort_done">Done</string>
-    <string name="home_libraries_sort_hint">Drag a library by its handle to move it. The order is yours alone, on all your devices.</string>
+    <string name="home_libraries_sort_hint">Drag a library by its handle to move it. Your order applies on all your devices.</string>
     <string name="home_libraries_server_order">Use the server\'s order</string>
     <string name="home_libraries_move_up">Move up</string>
     <string name="home_libraries_move_down">Move down</string>

@@ -10,7 +10,7 @@
     <!-- "1.2 GB of 4.6 GB · 2 more". -->
     <string name="downloads_notification_progress_more">%1$s of %2$s · %3$d more</string>
     <string name="downloads_notification_waiting">Downloads are waiting for Wi-Fi</string>
-    <string name="downloads_notification_waiting_text">They go on once the phone is on Wi-Fi, or on mobile data if Settings allow it.</string>
+    <string name="downloads_notification_waiting_text">They\'ll resume on Wi-Fi, or on mobile data if allowed in Settings.</string>
     <!-- The server didn't answer: away from home, or it is off. -->
     <string name="downloads_notification_waiting_server">Downloads are waiting for your server</string>
     <string name="downloads_notification_waiting_server_text">They go on once it answers again, as when the app opens at home.</string>

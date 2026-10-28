@@ -482,7 +482,7 @@ class TvPlayerScreenTest {
         val controller = playing {
             it.copy(
                 quality = "Automatic · 8 Mbps 1080p",
-                note = "Lowered for the network",
+                note = "Lowered for your connection",
                 qualities = listOf(
                     QualityChoice("original", "Original", "4K · 62 Mbps", false),
                     QualityChoice("auto", "Automatic", "Now 8 Mbps 1080p", true),
@@ -498,7 +498,7 @@ class TvPlayerScreenTest {
         press(Key.DirectionRight, times = 2)
         press(Key.DirectionCenter)
         compose.onNodeWithTag(TAG_PANEL).assertExists()
-        compose.onNodeWithText("Lowered for the network").assertExists()
+        compose.onNodeWithText("Lowered for your connection").assertExists()
         // Focus starts on the choice, Automatic, saying what it plays.
         compose.onNode(isFocused()).assert(hasText("Automatic")).assert(hasText("Now 8 Mbps 1080p"))
         press(Key.DirectionUp)

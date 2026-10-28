@@ -3,7 +3,7 @@
     <!-- The Downloads page. -->
     <string name="downloads_title">Downloads</string>
     <string name="downloads_empty">Nothing downloaded yet</string>
-    <string name="downloads_empty_body">Download a movie or an episode from its page to watch it without your server: on a plane, on a train, anywhere.</string>
+    <string name="downloads_empty_body">Download a movie or episode from its page to watch it offline.</string>
     <!-- "4.2 GB on this phone · 51 GB free". -->
     <string name="downloads_storage">%1$s on this device · %2$s free</string>
     <!-- A show's group: "3 episodes · 4.2 GB". -->
@@ -61,12 +61,12 @@
     </plurals>
     <string name="downloads_settings">Downloads</string>
     <string name="downloads_quality">Quality</string>
-    <string name="downloads_quality_hint">Original keeps the file as it is when this phone plays it; the server prepares one it doesn\'t play. A smaller quality has the server make every download first: they take less space.</string>
+    <string name="downloads_quality_hint">Original downloads the file unchanged when this phone can play it. Lower qualities take less space; the server converts them first.</string>
     <string name="downloads_mobile_data">Download on mobile data</string>
     <string name="downloads_mobile_data_value">Otherwise downloads wait for Wi-Fi</string>
     <string name="downloads_delete_all">Delete all downloads</string>
     <string name="downloads_delete_all_title">Delete all downloads?</string>
-    <string name="downloads_delete_all_body">Every download on this device goes, for every server and profile. You can download them again from your server.</string>
+    <string name="downloads_delete_all_body">This deletes every download on this device, for all servers and profiles.</string>
     <string name="downloads_delete_all_confirm">Delete all</string>
     <string name="downloads_keep">Keep them</string>
 </resources>

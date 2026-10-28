@@ -44,7 +44,7 @@ export const LANGUAGES: [string, string][] = [
 
 const SUBTITLE_MODES: { id: SubtitleMode; label: string; hint: string }[] = [
   { id: "off", label: "Off", hint: "Subtitles stay off until you turn them on." },
-  { id: "forced", label: "Only for foreign dialogue", hint: "Forced subtitles come on: they translate the lines you're meant to read." },
+  { id: "forced", label: "Only for foreign dialogue", hint: "Only forced subtitles, for signs and foreign dialogue." },
   { id: "foreign", label: "When the audio is in another language", hint: "Full subtitles come on when the audio isn't in your subtitle language." },
   { id: "always", label: "Always", hint: "Subtitles in your language come on whenever there are some." },
 ];
@@ -292,7 +292,7 @@ export function SettingsScreen(p: { entry: Entry }) {
     case "audio":
       rows.push(
         <div key="intro" class="settings-intro t-body c-muted">
-          Dolby Digital, Dolby Digital Plus and Atmos go to your TV or receiver as they are. These two can too, when your receiver takes them; otherwise pley converts them.
+          Dolby Digital, Dolby Digital Plus and Atmos are always passed through. Turn these on if your receiver supports them; otherwise pley converts them.
         </div>,
       );
       rows.push(
@@ -300,7 +300,7 @@ export function SettingsScreen(p: { entry: Entry }) {
           key="truehd"
           fid="row-truehd"
           icon="audio-lines"
-          label="Send Dolby TrueHD as it is"
+          label="Pass through Dolby TrueHD"
           value="Only with a receiver that takes TrueHD from the TV"
           toggle={settings.passthroughTrueHd}
           onSelect={() => setting({ passthroughTrueHd: !settings.passthroughTrueHd })}
@@ -311,7 +311,7 @@ export function SettingsScreen(p: { entry: Entry }) {
           key="dts"
           fid="row-dts"
           icon="audio-lines"
-          label="Send DTS as it is"
+          label="Pass through DTS"
           value="Only with a receiver that takes DTS from the TV"
           toggle={settings.passthroughDts}
           onSelect={() => setting({ passthroughDts: !settings.passthroughDts })}
@@ -493,8 +493,8 @@ function qualityName(id: string): string {
 
 /** What the original and Automatic do, under their names in the list. */
 function qualityHint(id: string): string | undefined {
-  if (id === AUTO.id) return "Original, lower only when it doesn't play well";
-  if (id === ORIGINAL.id) return "The file as it is; a slow network waits";
+  if (id === AUTO.id) return "Lowers quality only when needed";
+  if (id === ORIGINAL.id) return "Full quality. May buffer on a slow connection";
   return undefined;
 }
 

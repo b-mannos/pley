@@ -68,7 +68,7 @@
     <string name="tv_library_missing_title">This library isn\'t here</string>
     <string name="tv_library_missing_body">It may have been removed, or this profile may not see it.</string>
     <string name="tv_library_empty_title">This library is empty</string>
-    <string name="tv_library_empty_body">pley hasn\'t found anything in it yet. Titles show up here as soon as the server adds them.</string>
+    <string name="tv_library_empty_body">Nothing here yet. Titles appear as the server adds them.</string>
     <string name="tv_library_no_matches_title">No matches</string>
     <string name="tv_library_no_matches_body">Nothing in this library matches the current filters.</string>
     <string name="tv_library_recommended_failed">Couldn\'t load recommendations</string>

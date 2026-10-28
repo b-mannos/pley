@@ -108,7 +108,7 @@ class TvSettingsFocusTest {
         compose.onNodeWithTag(TV_CHOICE_PANEL).assertExists()
         // Automatic is the default where nothing was chosen, under Original, then 4K first.
         compose.focused().assert(hasText("Automatic"))
-        compose.focused().assert(hasText("Original, lower only when it doesn't play well."))
+        compose.focused().assert(hasText("Lowers quality only when needed."))
         compose.press(Key.DirectionDown)
         compose.focused().assert(hasText("30 Mbps 4K"))
         compose.press(Key.DirectionDown)
@@ -117,7 +117,7 @@ class TvSettingsFocusTest {
         compose.focused().assert(hasText("20 Mbps 1080p"))
         compose.press(Key.DirectionUp, times = 4)
         compose.focused().assert(hasText("Original"))
-        compose.focused().assert(hasText("The file as it is. A slow network waits."))
+        compose.focused().assert(hasText("Full quality. May buffer on a slow connection."))
         compose.press(Key.DirectionCenter)
         compose.waitUntil(5_000) { graph.settingsFlow.value.qualityOnHomeNetwork == Settings.ORIGINAL }
         compose.waitForIdle()

@@ -279,7 +279,7 @@ own views instead (below), which skins' widgets and favourites always get.
   last change. The service asks for the title again where it is
   (`playback.prepare` with `mode: "transcode"` and the quality's
   `max_bitrate` and `max_height`), plays it in place from that position,
-  and says "Playing at 8 Mbps 1080p for a smoother picture" in Kodi's
+  and says "Quality lowered to 8 Mbps 1080p" in Kodi's
   notification once it plays. The old session ends with the usual last
   report. The ceiling is kept for 30 minutes for each server in the
   add-on's data (`remembered.json`); a title started in Automatic
@@ -417,7 +417,7 @@ in `portable_data/userdata/advancedsettings.xml`.
   converted stream: only text subtitles come beside it (the profile's
   choice is drawn onto the video from the start). Files played as they
   are show every kind.
-- Automatic's "Automatic · 8 Mbps 1080p" and "Lowered for the network":
+- Automatic's "Automatic · 8 Mbps 1080p" and "Lowered for your connection":
   Kodi's player has no menu or details of pley's to show them in; the
   notification says it once, and Kodi's own codec info (the `o` key)
   shows the stream it plays.

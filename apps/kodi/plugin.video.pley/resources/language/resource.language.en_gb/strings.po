@@ -688,7 +688,7 @@ msgid "Automatic"
 msgstr ""
 
 msgctxt "#30213"
-msgid "Playing at %s for a smoother picture"
+msgid "Quality lowered to %s"
 msgstr ""
 
 msgctxt "#30214"
@@ -732,7 +732,7 @@ msgid "Too many wrong PINs: try again in a few minutes."
 msgstr ""
 
 msgctxt "#30224"
-msgid "This profile's PIN is locked after too many wrong tries: its owner can set it again in their account, or an administrator can."
+msgid "This profile's PIN is locked after too many wrong tries. Its owner or an administrator can reset it."
 msgstr ""
 
 msgctxt "#30225"
@@ -748,7 +748,7 @@ msgid "This sign-in can't switch profiles: sign in again to allow it."
 msgstr ""
 
 msgctxt "#30228"
-msgid "%s needs its password, which only the phone or computer approving a sign-in asks for. Sign in again with a code, and choose %s there."
+msgid "%s needs a password. Sign in again with a code and choose %s on your phone or computer."
 msgstr ""
 
 msgctxt "#30229"

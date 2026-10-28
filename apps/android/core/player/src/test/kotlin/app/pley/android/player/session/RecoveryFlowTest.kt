@@ -84,7 +84,7 @@ class RecoveryFlowTest {
         h.engine.fail(EngineError.Unsupported(audio = false, container = false, detail = "ERROR_CODE_DECODING_FORMAT_UNSUPPORTED"))
         h.settle()
         val phase = c.state.value.phase as PlayerPhase.Error
-        assertEquals("This download doesn't play on this device as it is. It plays with the server in reach, which converts it.", phase.message)
+        assertEquals("This download can't play on this device offline. Connect to your server to play it.", phase.message)
         assertTrue(phase.canRetry)
     }
 

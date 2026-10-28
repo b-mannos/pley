@@ -24,7 +24,7 @@
 
     <!-- Track defaults (AccountPage.tsx PlaybackCard). -->
     <string name="account_audio_and_subtitles">Audio and subtitles</string>
-    <string name="account_defaults_footer">What a film or show starts with until you pick tracks for it. The tracks you pick are remembered for each title.</string>
+    <string name="account_defaults_footer">Used until you pick tracks for a title. Your picks are remembered for each title.</string>
     <string name="account_defaults_web_only">This server lets you change these on the web only.</string>
     <string name="account_defaults_read_only">This server doesn\'t let the app change these: change them on the web</string>
     <string name="account_change_on_web">Change on the web</string>
@@ -36,7 +36,7 @@
     <string name="account_subtitles_off">Off</string>
     <string name="account_subtitles_off_hint">Subtitles stay off until you turn them on.</string>
     <string name="account_subtitles_forced">Only for foreign dialogue</string>
-    <string name="account_subtitles_forced_hint">Forced subtitles come on: they translate the lines you\'re meant to read.</string>
+    <string name="account_subtitles_forced_hint">Only forced subtitles, for signs and foreign dialogue.</string>
     <string name="account_subtitles_foreign">When the audio is in another language</string>
     <string name="account_subtitles_foreign_hint">Full subtitles come on when the audio isn\'t in your subtitle language.</string>
     <string name="account_subtitles_always">Always</string>
@@ -58,9 +58,9 @@
     <string name="settings_quality_home">Quality on Wi-Fi</string>
     <string name="settings_quality_mobile">Quality on mobile data</string>
     <string name="settings_quality_original">Original</string>
-    <string name="settings_quality_original_hint">The file as it is. A slow network waits.</string>
+    <string name="settings_quality_original_hint">Full quality. May buffer on a slow connection.</string>
     <string name="settings_quality_automatic">Automatic</string>
-    <string name="settings_quality_automatic_hint">Original, lower only when it doesn\'t play well.</string>
+    <string name="settings_quality_automatic_hint">Lowers quality only when needed.</string>
     <!-- "8 Mbps 1080p", "30 Mbps 4K": the lines, then the bitrate. -->
     <string name="settings_quality_preset">%2$d Mbps %1$s</string>
     <string name="settings_refresh_rate">Match the refresh rate</string>
@@ -91,7 +91,7 @@
     <string name="settings_density_large">Fewer, larger cards</string>
     <string name="settings_privacy">Privacy</string>
     <string name="settings_private_tab">Sign in from a private tab</string>
-    <string name="settings_private_tab_hint">The browser keeps no pley sign-in behind; you type your password each time</string>
+    <string name="settings_private_tab_hint">The browser doesn\'t keep you signed in, so you enter your password each time</string>
     <string name="settings_advanced">Advanced</string>
     <string name="settings_software_video">Software video decoding</string>
     <string name="settings_software_video_hint">Debug builds: lets emulators play video without a hardware decoder</string>

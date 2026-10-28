@@ -17,20 +17,20 @@
     <string name="session_quality_auto">%1$s (auto)</string>
     <!-- The original's hint when the server converts it: "Plays as 8 Mbps 1080p here". -->
     <string name="session_quality_plays_as">Plays as %1$s here</string>
-    <!-- "Plays as 8 Mbps 1080p here (the file: 4K · 62 Mbps)". -->
-    <string name="session_quality_plays_as_file">Plays as %1$s here (the file: %2$s)</string>
+    <!-- "Plays as 8 Mbps 1080p here (file: 4K · 62 Mbps)". -->
+    <string name="session_quality_plays_as_file">Plays as %1$s here (file: %2$s)</string>
     <string name="session_quality_converted">Converted</string>
     <!-- Automatic, with what it plays now: "Automatic · Original", "Automatic · 8 Mbps 1080p". -->
     <string name="session_quality_automatic_playing">Automatic · %1$s</string>
     <!-- Automatic's hint in the quality menu. -->
-    <string name="session_quality_automatic_hint">Original, lower only when it doesn\'t play well</string>
+    <string name="session_quality_automatic_hint">Lowers quality only when needed</string>
     <!-- Automatic's hint while it plays lower: "Now 8 Mbps 1080p". -->
     <string name="session_quality_automatic_now">Now %1$s</string>
-    <!-- Automatic went down, said once, briefly: "Playing at 8 Mbps 1080p for a smoother picture". -->
-    <string name="session_quality_lowered_notice">Playing at %1$s for a smoother picture</string>
+    <!-- Automatic went down, said once, briefly: "Quality lowered to 8 Mbps 1080p". -->
+    <string name="session_quality_lowered_notice">Quality lowered to %1$s</string>
     <!-- Why Automatic plays lower, in the details. -->
-    <string name="session_quality_lowered_network">Lowered for the network</string>
-    <string name="session_quality_lowered_device">Lowered: the device fell behind</string>
+    <string name="session_quality_lowered_network">Lowered for your connection</string>
+    <string name="session_quality_lowered_device">Lowered for this device</string>
 
     <!-- Markers (SkipButton.tsx). -->
     <string name="session_skip_intro">Skip Intro</string>
@@ -50,7 +50,7 @@
     <!-- How it plays (PlaybackDetails.tsx). -->
     <string name="session_method_direct">Direct play</string>
     <string name="session_method_downloaded">Downloaded</string>
-    <string name="session_error_download_needs_server">This download doesn\'t play on this device as it is. It plays with the server in reach, which converts it.</string>
+    <string name="session_error_download_needs_server">This download can\'t play on this device offline. Connect to your server to play it.</string>
     <string name="session_method_remux">Direct stream</string>
     <string name="session_method_transcode">Transcoding</string>
     <string name="session_method_remux_audio">Direct stream · Audio transcoding</string>
@@ -58,7 +58,7 @@
     <string name="session_why_transcode">Converted for this player.</string>
     <string name="session_fallback_unplayable">This device couldn\'t play the original file.</string>
     <string name="session_fallback_not_smooth">The original didn\'t play smoothly on this device.</string>
-    <string name="session_slow_server">The server can\'t convert this video as fast as it plays. A lower quality will play smoothly.</string>
+    <string name="session_slow_server">The server can\'t keep up with this video. Try a lower quality.</string>
 
     <string name="session_row_video">Video</string>
     <string name="session_row_audio">Audio</string>

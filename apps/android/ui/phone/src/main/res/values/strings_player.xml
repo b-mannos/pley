@@ -88,7 +88,7 @@
     <!-- "3 of 4,512". -->
     <string name="player_details_dropped_of">%1$d of %2$d</string>
     <string name="player_details_audio_out">Audio output</string>
-    <string name="player_details_passthrough">%1$s, to the receiver as it is</string>
+    <string name="player_details_passthrough">%1$s, passed through to the receiver</string>
     <string name="player_details_decoded">%1$s, decoded here</string>
     <string name="player_details_first_frame">First frame</string>
     <!-- "640 ms". -->

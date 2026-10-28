@@ -112,7 +112,7 @@ class ProfilesTest {
         for ((reason, message) in listOf(
             "wrong_pin" to "wrong PIN",
             "throttled" to "too many wrong PINs: try again in a few minutes",
-            "pin_locked" to "this profile's PIN is locked after too many wrong tries: its owner can set it again in their account, or an administrator can",
+            "pin_locked" to "this profile's PIN is locked after too many wrong tries. Its owner or an administrator can reset it",
             "not_allowed" to "you can't switch to this profile",
         )) {
             switchAnswer = refusal(reason)

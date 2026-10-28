@@ -405,7 +405,7 @@ sub autoSwitch(quality as string)
     was = m.watch.quality
     down = quality <> "original" and (was = "original" or aqKbps(quality) < aqKbps(was))
     if down
-        m.autoNotice = "Playing at " + aqLabel(quality) + " for a smoother picture"
+        m.autoNotice = "Quality lowered to " + aqLabel(quality)
         ceiling = m.watch.ceiling
         if ceiling <= 0 then ceiling = aqKbps(quality)
         aqRemember(playbackSection(), m.global.session.server, ceiling, nowSeconds())
@@ -1145,6 +1145,6 @@ sub showDetails(live as dynamic)
     for each row in details.rows
         lines.Push(row.label + ": " + row.value)
     end for
-    if m.watch <> invalid and m.watch.quality <> "original" then lines.Push("Quality: " + qualityShown() + " · Lowered for the network")
+    if m.watch <> invalid and m.watch.quality <> "original" then lines.Push("Quality: " + qualityShown() + " · Lowered for your connection")
     m.menuText.text = lines.Join(Chr(10))
 end sub

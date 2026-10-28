@@ -10,7 +10,7 @@
 function tracksModes() as object
     return [
         { id: "off", label: "Off", hint: "Subtitles stay off until you turn them on." },
-        { id: "forced", label: "Only for foreign dialogue", hint: "Forced subtitles come on: they translate the lines you're meant to read." },
+        { id: "forced", label: "Only for foreign dialogue", hint: "Only forced subtitles, for signs and foreign dialogue." },
         { id: "foreign", label: "When the audio is in another language", hint: "Full subtitles come on when the audio isn't in your subtitle language." },
         { id: "always", label: "Always", hint: "Subtitles in your language come on whenever there are some." }
     ]

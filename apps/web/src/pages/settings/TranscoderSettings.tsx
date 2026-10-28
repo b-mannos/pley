@@ -74,7 +74,7 @@ function TranscodeFolder({ dir }: { dir: TranscodeDir }) {
   return (
     <Row
       label="Transcode folder"
-      hint="Stream segments, converted downloads and the transcoder's caches: a fast local disk with room to spare. If the folder can't be used when pley starts, the default one in the data folder is."
+      hint="Holds stream segments, converted downloads and caches. Use a fast local disk with free space. If it can't be used, pley falls back to the data folder."
     >
       <div className="space-y-2">
         <div className="break-all font-mono text-xs text-fg/80">{dir.in_use}</div>
@@ -134,7 +134,7 @@ export function TranscoderSettings() {
   const set = draft.set;
 
   return (
-    <SettingsForm draft={draft} title="Transcoder" description="Converts what a player can't play as it is. Changes apply to transcodes that start after saving.">
+    <SettingsForm draft={draft} title="Transcoder" description="Converts video a player can't play directly. Changes apply to new transcodes.">
       {(form) => {
         const tc = system.data?.transcoder;
         // What the transcoder's FFmpeg can do, once it says (nothing is greyed out before).
@@ -199,7 +199,7 @@ export function TranscoderSettings() {
               <Row
                 label="Software encoder preset"
                 htmlFor="preset"
-                hint="Faster presets use less CPU for larger files (libx264 and libx265). Automatic starts as slow as this computer allows for the transcodes running, speeds up when a player is about to wait, and slows back down for better pictures once it is well ahead."
+                hint="Faster presets use less CPU but make larger files (libx264 and libx265). Automatic adjusts to the computer's load."
               >
                 <Select
                   id="preset"
@@ -267,7 +267,7 @@ export function TranscoderSettings() {
               </Row>
               <Row
                 label="Throttle transcodes"
-                hint="Once a buffer is built, convert at most 2× real time and pause 90 s ahead of the player: no work lost when it stops or seeks, more left for other playbacks (saves CPU/GPU and disk)."
+                hint="Once a buffer is built, convert at up to 2× real time and pause 90 s ahead of the player. Saves CPU, GPU and disk for other playbacks."
               >
                 <Toggle
                   checked={form.throttle_transcodes}

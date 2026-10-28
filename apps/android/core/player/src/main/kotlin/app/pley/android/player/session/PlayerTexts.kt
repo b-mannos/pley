@@ -35,18 +35,18 @@ interface PlayerTexts {
     fun automatic(playing: String): String = "Automatic · $playing"
 
     /** Automatic's hint in the menu. */
-    val automaticHint: String get() = "Original, lower only when it doesn't play well"
+    val automaticHint: String get() = "Lowers quality only when needed"
 
     /** Automatic's hint while it plays [playing], below the original: "Now 8 Mbps 1080p". */
     fun automaticNow(playing: String): String = "Now $playing"
 
     /** Said once when Automatic goes down to the quality named [label]. */
-    fun loweredNotice(label: String): String = "Playing at $label for a smoother picture"
+    fun loweredNotice(label: String): String = "Quality lowered to $label"
 
     /** Why Automatic plays lower, for the details. */
     fun lowered(reason: LoweredFor): String = when (reason) {
-        LoweredFor.Network -> "Lowered for the network"
-        LoweredFor.Device -> "Lowered: the device fell behind"
+        LoweredFor.Network -> "Lowered for your connection"
+        LoweredFor.Device -> "Lowered for this device"
     }
     val skipIntro: String
     val skipCredits: String
@@ -65,7 +65,7 @@ interface PlayerTexts {
     val downloaded: String get() = "Downloaded"
 
     /** A download that doesn't play here as it is, with the server out of reach to convert it. */
-    val downloadNeedsServer: String get() = "This download doesn't play on this device as it is. It plays with the server in reach, which converts it."
+    val downloadNeedsServer: String get() = "This download can't play on this device offline. Connect to your server to play it."
 
     /** The server out of reach, for [reason] ("no answer in time"): what to check. */
     fun unreachable(reason: String): String = "${asSentence(reason)} Check that the server is on and that this device is on its network."

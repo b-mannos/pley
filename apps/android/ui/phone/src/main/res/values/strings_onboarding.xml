@@ -72,7 +72,7 @@
     <string name="onboarding_use_another">Use another profile</string>
     <string name="onboarding_another_profile">Sign in as another profile</string>
     <string name="onboarding_password_title">Sign in as %1$s?</string>
-    <string name="onboarding_password_body">%1$s\'s profile needs its password, which you type on pley\'s page in your browser.</string>
+    <string name="onboarding_password_body">%1$s\'s profile needs a password. Enter it on pley\'s page in your browser.</string>
     <string name="onboarding_another_body">Sign in on pley\'s page in your browser, as the profile you want.</string>
     <string name="onboarding_profiles_failed">Couldn\'t load the profiles</string>
 </resources>

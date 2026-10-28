@@ -8,10 +8,10 @@ export const T = {
   autoQuality: (label: string) => `${label} (auto)`,
   /** The menu's value while Automatic plays: "Automatic · 8 Mbps 1080p". */
   automatic: (now: string) => `Automatic · ${now}`,
-  autoHint: "Original, lower only when it doesn't play well",
+  autoHint: "Lowers quality only when needed",
   autoNow: (now: string, why: string | null) => (why ? `Now ${now} · ${why}` : `Now ${now}`),
-  lowered: { network: "Lowered for the network", device: "Lowered: the device fell behind" },
-  smoother: (label: string) => `Playing at ${label} for a smoother picture`,
+  lowered: { network: "Lowered for your connection", device: "Lowered for this device" },
+  smoother: (label: string) => `Quality lowered to ${label}`,
 
   playsAs: (label: string, file: string | null) => (file ? `Plays as ${label} here (the file: ${file})` : `Plays as ${label} here`),
   converted: "Converted",
@@ -20,7 +20,7 @@ export const T = {
   lastInQueue: "This is the last one",
   subtitlesOff: "Off",
   subtitlesFailed: "These subtitles couldn't be loaded.",
-  slowServer: "The server can't convert this video as fast as it plays. A lower quality will play smoothly.",
+  slowServer: "The server can't keep up with this video. Try a lower quality.",
   noFile: "This item has no file to play.",
   burnedIn: "Drawn onto the video",
   reconnecting: "Reconnecting…",

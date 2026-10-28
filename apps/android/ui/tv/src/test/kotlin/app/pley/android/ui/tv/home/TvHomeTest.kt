@@ -280,7 +280,7 @@ class TvHomeTest {
         press(Key.DirectionUp)
         compose.onNodeWithTag(TV_LIBRARIES_SORT).assertIsFocused()
         press(Key.DirectionCenter)
-        compose.onNodeWithText("Select a library to move it. The order is yours alone, on all your devices.").assertExists()
+        compose.onNodeWithText("Select a library to move it. Your order applies on all your devices.").assertExists()
         compose.onNodeWithText("Movies").assertIsFocused()
         press(Key.DirectionCenter)
         compose.onNodeWithText("Arrows to move it, OK to drop it here, Back to put it back").assertExists()

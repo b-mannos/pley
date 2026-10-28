@@ -167,7 +167,7 @@ class Profiles(private val api: OkHttpClient, private val tokens: Tokens) {
             "wrong_pin" -> "wrong PIN"
             "throttled" -> "too many wrong PINs: try again in a few minutes"
             "pin_locked" ->
-                "this profile's PIN is locked after too many wrong tries: its owner can set it again in their account, or an administrator can"
+                "this profile's PIN is locked after too many wrong tries. Its owner or an administrator can reset it"
             "browser" -> "this profile needs its password: sign in again to use it"
             "not_allowed" -> "you can't switch to this profile"
             else -> when (error?.error) {

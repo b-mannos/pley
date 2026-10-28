@@ -70,7 +70,7 @@ class QualityAndGuardsTest {
         val state = c.state.value
         assertEquals("Transcoding", state.method)
         assertEquals("8 Mbps 1080p (auto)", state.quality)
-        assertTrue(state.qualities.first().hint!!.startsWith("Plays as 8 Mbps 1080p here (the file: 4K"))
+        assertTrue(state.qualities.first().hint!!.startsWith("Plays as 8 Mbps 1080p here (file: 4K"))
     }
 
     @Test

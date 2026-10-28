@@ -183,7 +183,7 @@ function authSwitchOutcome(status as integer, text as dynamic) as object
         messages = {
             wrong_pin: "Wrong PIN.",
             throttled: "Too many wrong PINs: try again in a few minutes.",
-            pin_locked: "This profile's PIN is locked after too many wrong tries: its owner can set it again in their account, or an administrator can.",
+            pin_locked: "This profile's PIN is locked after too many wrong tries. Its owner or an administrator can reset it.",
             browser: "This profile needs its password: sign in to it with a code, choosing it in the browser.",
             not_allowed: "You can't switch to this profile."
         }

@@ -616,8 +616,8 @@ describe("VideoPlayer in Automatic", () => {
     // 20 Mbps × 0.75 = 15 → 12 Mbps 1080p, the highest below it.
     await waitFor(() => expect(starts(requests)).toHaveLength(2), { timeout: 4_000 });
     expect(starts(requests)[1]).toMatchObject({ mode: "transcode", max_bitrate: 12_000, max_height: 1080, start_ms: 60_000 });
-    expect(await screen.findByText("Playing at 12 Mbps 1080p for a smoother picture")).toBeInTheDocument();
-    expect(screen.getAllByText("Playing at 12 Mbps 1080p for a smoother picture")).toHaveLength(1);
+    expect(await screen.findByText("Quality lowered to 12 Mbps 1080p")).toBeInTheDocument();
+    expect(screen.getAllByText("Quality lowered to 12 Mbps 1080p")).toHaveLength(1);
     expect(JSON.parse(window.localStorage.getItem("pley.autoQuality")!)).toMatchObject({ kbps: 15_000 });
     // Nothing was picked: the next title starts in Automatic too.
     expect(window.localStorage.getItem("pley.quality")).toBeNull();

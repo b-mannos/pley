@@ -187,7 +187,7 @@ class PhonePlayerScreenTest {
             playing {
                 it.copy(
                     quality = "Automatic · 8 Mbps 1080p",
-                    note = "Lowered for the network",
+                    note = "Lowered for your connection",
                     qualities = listOf(
                         QualityChoice("original", "Original", "4K · 62 Mbps", false),
                         QualityChoice("auto", "Automatic", "Now 8 Mbps 1080p", true),

@@ -44,7 +44,7 @@ class AutomaticQualityTest {
         assertEquals("Automatic · Original", state.quality)
         assertEquals(listOf("original", "auto"), state.qualities.take(2).map { it.id })
         assertTrue(state.qualities.first { it.id == "auto" }.selected)
-        assertEquals("Original, lower only when it doesn't play well", state.qualities.first { it.id == "auto" }.hint)
+        assertEquals("Lowers quality only when needed", state.qualities.first { it.id == "auto" }.hint)
         val asked = h.playbackRequests().single()
         assertEquals(PlaybackMode.Auto, asked.mode)
         assertNull(asked.maxBitrate)
@@ -66,8 +66,8 @@ class AutomaticQualityTest {
         assertNull(asked.audioIndex)
         val state = c.state.value
         assertEquals("Automatic · 2 Mbps 480p", state.quality)
-        assertEquals("Playing at 2 Mbps 480p for a smoother picture", state.notice)
-        assertEquals("Lowered for the network", state.note)
+        assertEquals("Quality lowered to 2 Mbps 480p", state.notice)
+        assertEquals("Lowered for your connection", state.note)
         assertFalse(state.canPlayOriginal)
         assertTrue(state.qualities.first { it.id == "auto" }.selected)
         assertEquals("Now 2 Mbps 480p", state.qualities.first { it.id == "auto" }.hint)
@@ -81,7 +81,7 @@ class AutomaticQualityTest {
         // The details say why.
         c.setDetailsOpen(true)
         h.advance(2_500)
-        assertEquals("Lowered for the network", c.state.value.details!!.why)
+        assertEquals("Lowered for your connection", c.state.value.details!!.why)
     }
 
     /** Plays on for [ms], each new session loading at once. */
@@ -192,8 +192,8 @@ class AutomaticQualityTest {
         assertNull(asked.last().maxBitrate)
         val state = c.state.value
         assertEquals("Automatic · 8 Mbps 1080p", state.quality)
-        assertEquals("Playing at 8 Mbps 1080p for a smoother picture", state.notice)
-        assertEquals("Lowered: the device fell behind", state.note)
+        assertEquals("Quality lowered to 8 Mbps 1080p", state.notice)
+        assertEquals("Lowered for this device", state.note)
         // Automatic has Original in its menu: no second offer to play it.
         assertFalse(state.canPlayOriginal)
     }

@@ -270,7 +270,7 @@ function LibraryGridTab(p: { entry: Entry; library: Library; asked?: LibrarySort
       <ColumnMessage
         top={146}
         title="This library is empty"
-        body="pley hasn't found anything in it yet. Titles show up here as soon as the server adds them."
+        body="Nothing here yet. Titles appear as the server adds them."
         focusInstead={p.focusTab}
         takeFocus={p.initial}
       />
@@ -1010,7 +1010,7 @@ export function LibrariesScreen(p: { entry: Entry; sort?: boolean }) {
       </div>
       {inSort && (
         <div class="moving-hint t-label">
-          {liftedId !== null ? "Arrows to move it, OK to drop it here, Back to put it back" : "Press OK on a library to move it. The order is yours, on all your devices."}
+          {liftedId !== null ? "Arrows to move it, OK to drop it here, Back to put it back" : "Press OK on a library to move it. Your order applies on all your devices."}
         </div>
       )}
       {actionsFor && (

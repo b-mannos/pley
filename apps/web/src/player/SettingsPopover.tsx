@@ -135,7 +135,7 @@ export interface SettingsPopoverProps {
   autoQuality?: string | null;
   /** While Automatic plays: what it plays now ("Original", "8 Mbps 1080p"). */
   autoNow?: string | null;
-  /** Why Automatic plays lower, when it does ("Lowered for the network"). */
+  /** Why Automatic plays lower, when it does ("Lowered for your connection"). */
   autoWhy?: string | null;
   onQuality: (id: string) => void;
   audioStreams: MediaStream[];
@@ -190,13 +190,13 @@ export function SettingsPopover(props: SettingsPopoverProps) {
   const qualityHint = (id: string): string | undefined => {
     if (id === "original") {
       return auto && auto.id !== "original"
-        ? `Plays as ${auto.label} here${originalHint ? ` (the file: ${originalHint})` : ""}`
+        ? `Plays as ${auto.label} here${originalHint ? ` (file: ${originalHint})` : ""}`
         : (originalHint ?? undefined);
     }
     if (id === "auto") {
       return quality === "auto" && autoNow
         ? [`Now ${autoNow}`, autoWhy].filter(Boolean).join(" · ")
-        : "Original, lower only when it doesn't play well";
+        : "Lowers quality only when needed";
     }
     return "Converted";
   };

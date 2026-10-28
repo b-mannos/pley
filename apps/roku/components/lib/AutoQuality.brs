@@ -27,9 +27,9 @@ end function
 
 ' Each quality's hint in Settings.
 function aqHint(id as string) as string
-    if id = "original" then return "The file as it is. A slow network waits."
-    if id = "auto" then return "The original, lower only when it doesn't play well."
-    return "Converted by the server, when the file is over it."
+    if id = "original" then return "Full quality. May buffer on a slow connection."
+    if id = "auto" then return "Lowers quality only when needed."
+    return "Converted by the server."
 end function
 
 function aqFind(id as dynamic) as dynamic

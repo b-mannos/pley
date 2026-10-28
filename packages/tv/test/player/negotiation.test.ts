@@ -703,10 +703,10 @@ describe("Automatic", () => {
       ["transcode", 15_000, 2160],
     ]);
     expect(w.requests[1]!.start_ms).toBeGreaterThan(600_000);
-    expect(notices).toEqual(["Playing at 15 Mbps 4K for a smoother picture"]);
+    expect(notices).toEqual(["Quality lowered to 15 Mbps 4K"]);
     expect(c.state.value.quality).toBe("Automatic · 15 Mbps 4K");
-    expect(c.state.value.note).toBe("Lowered for the network");
-    expect(c.state.value.qualities.filter((q) => q.id === "auto")[0]!.hint).toBe("Now 15 Mbps 4K · Lowered for the network");
+    expect(c.state.value.note).toBe("Lowered for your connection");
+    expect(c.state.value.qualities.filter((q) => q.id === "auto")[0]!.hint).toBe("Now 15 Mbps 4K · Lowered for your connection");
     expect(JSON.parse(kept.get("pley.autoQuality.http://nas:7539")!)).toMatchObject({ kbps: 15_000 });
     c.close();
   });

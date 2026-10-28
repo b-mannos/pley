@@ -234,7 +234,7 @@ ${form.tvdb_pin}`}
                   onChange={(v) => set("detect_markers", v)}
                   label="Detect intros and credits"
                 />
-                {noChromaprint ? <Note>This FFmpeg has no Chromaprint to compare audio with: only chapters find intros and credits.</Note> : null}
+                {noChromaprint ? <Note>This FFmpeg lacks Chromaprint, so only chapters can mark intros and credits.</Note> : null}
               </Row>
               <Row
                 label="Seek previews"
@@ -244,7 +244,7 @@ ${form.tvdb_pin}`}
               </Row>
               <Row
                 label="Previews for whole libraries"
-                hint="After each scan, make seek previews and chapter pictures for everything that lacks them, one file at a time, pausing while videos are being transcoded."
+                hint="After each scan, make missing seek previews and chapter pictures, one file at a time, pausing during transcodes."
               >
                 <Toggle
                   checked={form.previews_in_background}
@@ -272,7 +272,7 @@ ${form.tvdb_pin}`}
             <Group title="Apps">
               <Row
                 label="Apps by other publishers"
-                hint="pley's own apps can always sign in. Apps by other publishers are known by the address of a description they publish, which pley reads from the internet when someone allows one. Turning this off signs them out. Leave it off unless you need one."
+                hint="pley's own apps can always sign in. Turn this on to let people allow other publishers' apps; turning it off signs them out."
               >
                 {/* Off until a server that knows the setting sends it. */}
                 <Toggle

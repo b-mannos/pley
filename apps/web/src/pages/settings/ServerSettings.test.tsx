@@ -49,7 +49,7 @@ describe("ServerSettings", () => {
     renderWithProviders(<ServerSettings />);
     const toggle = await screen.findByRole("switch", { name: "Apps by other publishers" });
     expect(toggle).not.toBeChecked();
-    expect(screen.getByText(/Turning this off signs them out\. Leave it off unless you need one\./)).toBeInTheDocument();
+    expect(screen.getByText(/turning it off signs them out\./)).toBeInTheDocument();
 
     await user.click(toggle);
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -109,7 +109,7 @@ describe("ServerSettings", () => {
     // The current value stays, greyed out with the reason.
     expect(detect).toBeDisabled();
     expect(detect).toBeChecked();
-    expect(screen.getByText(/no Chromaprint to compare audio with/)).toBeInTheDocument();
+    expect(screen.getByText(/lacks Chromaprint/)).toBeInTheDocument();
   });
 
   it("leaves the transcoder to its own page", async () => {

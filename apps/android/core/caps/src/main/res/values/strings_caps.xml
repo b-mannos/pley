@@ -17,7 +17,7 @@
     <string name="caps_decoder">Decoder %1$s for %2$s (%3$s)</string>
     <string name="caps_no_video">No video decoder the player may use</string>
     <string name="caps_screen_hdr">Screen HDR: %1$s</string>
-    <string name="caps_hdr_played">HDR played as it is: %1$s</string>
+    <string name="caps_hdr_played">HDR played directly: %1$s</string>
     <string name="caps_dolby_vision">Dolby Vision profiles: %1$s</string>
     <string name="caps_dolby_vision_no_screen">Dolby Vision profiles: %1$s, unused: the screen doesn\'t show Dolby Vision</string>
     <string name="caps_profile_level">%1$d (level %2$s)</string>

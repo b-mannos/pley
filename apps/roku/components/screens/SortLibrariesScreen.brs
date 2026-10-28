@@ -69,7 +69,7 @@ sub hint()
     if m.moving >= 0
         m.hint.text = "Up and down move it, OK puts it there, Back puts it back."
     else
-        m.hint.text = "Select a library to move it. The order is yours alone, on all your devices."
+        m.hint.text = "Select a library to move it. Your order applies on all your devices."
     end if
 end sub
 

@@ -201,7 +201,7 @@ const SUBTITLE_MODES: Record<SubtitleMode, { label: string; hint: string }> = {
   off: { label: "Off", hint: "Subtitles stay off until you turn them on." },
   forced: {
     label: "Only for foreign dialogue",
-    hint: "Forced subtitles come on: they translate the lines you're meant to read.",
+    hint: "Only forced subtitles, for signs and foreign dialogue.",
   },
   foreign: {
     label: "When the audio is in another language",
@@ -226,8 +226,7 @@ export function PlaybackCard() {
     <Card>
       <CardTitle icon={<Languages />}>Audio and subtitles</CardTitle>
       <p className="mb-4 text-sm text-muted">
-        What a film or show starts with until you pick tracks for it. The tracks you pick are remembered for each
-        title.
+        Used until you pick tracks for a title. Your picks are remembered for each title.
       </p>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Audio language" htmlFor="audio-language">

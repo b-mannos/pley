@@ -24,7 +24,7 @@ describe("PlaybackCard", () => {
 
     // Only forced subtitles: there is no language to read them in.
     expect(screen.queryByLabelText("Subtitle language")).not.toBeInTheDocument();
-    expect(screen.getByText(/they translate the lines you're meant to read/)).toBeInTheDocument();
+    expect(screen.getByText(/for signs and foreign dialogue/)).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Audio language"), "French");
     await waitFor(() => expect(lastSave(requests)?.body).toEqual({ audio_language: "fre" }));

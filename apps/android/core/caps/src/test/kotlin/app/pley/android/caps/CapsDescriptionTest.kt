@@ -46,7 +46,7 @@ class CapsDescriptionTest {
             "Decoder c2.mtk.av1.decoder for av1 (hardware)",
             "Decoder c2.android.av1.decoder for av1 (software)",
             "Screen HDR: HDR10",
-            "HDR played as it is: HDR10",
+            "HDR played directly: HDR10",
             "Dolby Vision profiles: 4 (level 9), 5 (level 9), 8 (level 9), 9 (level 9), 10 (level 9), unused: the screen doesn't show Dolby Vision",
             "Screen: 3840×2160 at 60 Hz, rates it switches to: 23.976, 24, 25, 29.97, 30, 50, 59.94, 60",
             "Match content frame rate: never",

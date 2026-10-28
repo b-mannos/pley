@@ -174,7 +174,7 @@ class PhoneHomeTest {
 
         compose.onNodeWithContentDescription("Sort libraries").performClick()
         compose.onNodeWithText("Sort libraries").assertExists()
-        compose.onNodeWithText("Drag a library by its handle to move it. The order is yours alone, on all your devices.").assertExists()
+        compose.onNodeWithText("Drag a library by its handle to move it. Your order applies on all your devices.").assertExists()
         compose.onNodeWithTag(LIBRARY_HANDLE + 1, useUnmergedTree = true).assertExists()
         // A row doesn't open its library while sorting; TalkBack moves it.
         compose.onNodeWithText("Movies").performClick()

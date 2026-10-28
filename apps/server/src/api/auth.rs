@@ -449,8 +449,8 @@ impl From<SwitchError> for AppError {
 
 pub(crate) const NOT_ALLOWED: &str = "you can't switch to this profile";
 pub(crate) const PIN_NEEDED: &str = "this profile is protected by a PIN";
-pub(crate) const PIN_LOCKED: &str = "this profile's PIN is locked after too many wrong tries: its owner can set it \
-                                     again in their account, or an administrator can";
+pub(crate) const PIN_LOCKED: &str =
+    "this profile's PIN is locked after too many wrong tries. Its owner or an administrator can reset it";
 pub(crate) const NO_WAY_IN: &str =
     "this profile can see more than yours: an administrator can give it a PIN to switch to it";
 

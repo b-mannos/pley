@@ -183,7 +183,7 @@ const REACH_HINT = "Check that the server is on and that this device is on its n
 /** How often Automatic looks at what has loaded (autoQuality.ts). */
 const AUTO_SAMPLE_MS = 1_000;
 /** Why Automatic plays below the original, as the details say. */
-const LOWERED: Record<Lowered, string> = { network: "Lowered for the network", device: "Lowered: the device fell behind" };
+const LOWERED: Record<Lowered, string> = { network: "Lowered for your connection", device: "Lowered for this device" };
 
 /**
  * Automatic's memory of a slow network: this browser's, for the server it
@@ -205,9 +205,9 @@ function newAuto(file: MediaFile): AutoQuality {
   return auto;
 }
 
-/** "Playing at 8 Mbps 1080p for a smoother picture." */
+/** "Quality lowered to 8 Mbps 1080p." */
 function smootherText(label: string): string {
-  return `Playing at ${label} for a smoother picture`;
+  return `Quality lowered to ${label}`;
 }
 
 export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: initialSub, queue }: VideoPlayerProps) {

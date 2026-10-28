@@ -357,7 +357,7 @@ function RecoveryCodes({ codes, turnedOn, onDone }: { codes: string[]; turnedOn:
         ))}
       </ul>
       {turnedOn ? (
-        <p className="text-xs text-subtle">Devices already signed in stay signed in: sign out the ones you don't know under Devices.</p>
+        <p className="text-xs text-subtle">Devices already signed in stay signed in. Sign out any you don't know under Devices.</p>
       ) : null}
       <div className="flex flex-wrap justify-end gap-2">
         <Button

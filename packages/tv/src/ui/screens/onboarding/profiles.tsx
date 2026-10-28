@@ -43,7 +43,7 @@ export function switchRefusal(e: unknown): { message: string; locked?: boolean; 
         return { message: sentence(e.oauth?.description || "too many wrong PINs: try again in a few minutes") };
       case "pin_locked":
         return {
-          message: "This profile's PIN is locked after too many wrong tries: its owner can set it again in their account, or an administrator can.",
+          message: "This profile's PIN is locked after too many wrong tries. Its owner or an administrator can reset it.",
           locked: true,
         };
       case "browser":

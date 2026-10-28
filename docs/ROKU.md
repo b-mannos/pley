@@ -181,8 +181,8 @@ Rules the code keeps:
   bitrate than the one above (a 4K file goes 30 Mbps 4K, 15 Mbps 4K,
   then 12 Mbps 1080p), never under 2 Mbps 480p, and not within 20 s of
   the last change. The stream opens again where it was, as a new session
-  at that quality (`mode: "transcode"`), and "Playing at 8 Mbps 1080p for
-  a smoother picture" shows at the top for 4 s once it plays. The ceiling
+  at that quality (`mode: "transcode"`), and "Quality lowered to 8 Mbps
+  1080p" shows at the top for 4 s once it plays. The ceiling
   is kept 30 minutes for each server in the registry; a title started in
   Automatic meanwhile (Up Next's too) starts at the quality under it when
   that makes the file smaller. Back up: after 3 minutes without an issue

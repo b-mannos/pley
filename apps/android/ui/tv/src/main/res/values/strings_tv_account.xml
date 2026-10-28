@@ -24,7 +24,7 @@
     <string name="tv_account_subtitles_off">Off</string>
     <string name="tv_account_subtitles_off_hint">Subtitles stay off until you turn them on.</string>
     <string name="tv_account_subtitles_forced">Only for foreign dialogue</string>
-    <string name="tv_account_subtitles_forced_hint">Forced subtitles come on: they translate the lines you\'re meant to read.</string>
+    <string name="tv_account_subtitles_forced_hint">Only forced subtitles, for signs and foreign dialogue.</string>
     <string name="tv_account_subtitles_foreign">When the audio is in another language</string>
     <string name="tv_account_subtitles_foreign_hint">Full subtitles come on when the audio isn\'t in your subtitle language.</string>
     <string name="tv_account_subtitles_always">Always</string>
@@ -64,14 +64,14 @@
     <!-- Playback. -->
     <string name="tv_settings_quality">Quality</string>
     <string name="tv_settings_quality_original">Original</string>
-    <string name="tv_settings_quality_original_hint">The file as it is. A slow network waits.</string>
+    <string name="tv_settings_quality_original_hint">Full quality. May buffer on a slow connection.</string>
     <string name="tv_settings_quality_automatic">Automatic</string>
-    <string name="tv_settings_quality_automatic_hint">Original, lower only when it doesn\'t play well.</string>
+    <string name="tv_settings_quality_automatic_hint">Lowers quality only when needed.</string>
     <!-- "8 Mbps 1080p", "30 Mbps 4K": the lines, then the bitrate. -->
     <string name="tv_settings_quality_preset">%2$d Mbps %1$s</string>
     <string name="tv_settings_refresh_rate">Match the refresh rate</string>
     <string name="tv_settings_refresh_auto">Auto</string>
-    <string name="tv_settings_refresh_auto_hint">As the TV\'s own match-content setting says, for videos of 10 minutes or more</string>
+    <string name="tv_settings_refresh_auto_hint">Follows the TV\'s match-content setting, for videos 10 minutes or longer</string>
     <string name="tv_settings_refresh_always">Always</string>
     <string name="tv_settings_refresh_always_hint">The TV switches to the video\'s frame rate, whatever its own setting</string>
     <string name="tv_settings_refresh_off">Off</string>
@@ -89,7 +89,7 @@
     <string name="tv_settings_software_video_hint">Debug builds: lets emulators play video without a hardware decoder</string>
 
     <!-- Audio: passthrough per format. -->
-    <string name="tv_settings_passthrough_intro">Send surround sound to your TV or receiver as it is, or decode it here.</string>
+    <string name="tv_settings_passthrough_intro">Send surround sound to your TV or receiver, or decode it here.</string>
     <string name="tv_settings_format_ac3">Dolby Digital</string>
     <string name="tv_settings_format_eac3">Dolby Digital Plus</string>
     <string name="tv_settings_format_atmos">Dolby Atmos</string>
@@ -99,7 +99,7 @@
     <string name="tv_settings_passthrough_auto">Auto</string>
     <string name="tv_settings_passthrough_auto_hint">As the TV or receiver says it plays</string>
     <string name="tv_settings_passthrough_on">On</string>
-    <string name="tv_settings_passthrough_on_hint">Always send it as it is</string>
+    <string name="tv_settings_passthrough_on_hint">Always pass it through</string>
     <string name="tv_settings_passthrough_off">Off</string>
     <string name="tv_settings_passthrough_off_hint">Never: pley converts it</string>
 

@@ -59,7 +59,7 @@ export function PlayerPanels(p: { panel: PlayerPanel; state: PlayerState; contro
         <SidePanel onClose={p.onClose} label="Quality">
           <PanelTitle>Quality</PanelTitle>
           {s.note && <div class="t-body c-muted panel-note">{s.note}</div>}
-          {s.canPlayOriginal && <PanelRow label="Play original" sub="Try the file as it is again" icon="rotate-ccw" onSelect={pick(() => c.playOriginal())} />}
+          {s.canPlayOriginal && <PanelRow label="Play original" sub="Try the original again" icon="rotate-ccw" onSelect={pick(() => c.playOriginal())} />}
           {s.qualities.map((q) => (
             <PanelRow key={q.id} label={q.label} sub={q.hint} checked={q.selected} initial={q.selected} onSelect={pick(() => c.selectQuality(q.id))} />
           ))}
