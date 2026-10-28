@@ -74,7 +74,10 @@ the highest quality of the menu at or below that ceiling, and never below
 for the file, as today. The session starts again where it was
 (`mode: "transcode"` with that quality's `max_bitrate` and `max_height`),
 and the player says so once, briefly: "Quality lowered to 8 Mbps
-1080p".
+1080p". The web player makes the new session ready while the last one
+plays on (`keep_previous`), asking for its first segment as it will, and
+moves to it on the last one's final picture, with no spinner; so does a
+quality, audio or picture-subtitle change picked in its menus.
 
 **More issues step down again**, one quality at least, but not within 20 s
 of the last change.

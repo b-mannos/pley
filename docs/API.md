@@ -1199,6 +1199,7 @@ queue.
   start_ms?: number;              // resume position; transcodes start producing there
   mode?: "auto" | "direct" | "remux" | "transcode"; // default "auto"
   client_id?: string;             // identifies the player (browser tab, device)
+  keep_previous?: boolean;        // started while the client's last session plays on: that one isn't ended (the player ends it as it moves over)
   keyed_urls?: boolean;           // the player can't send the Authorization header: its addresses carry a key (Keyed URLs)
   caps: {                         // what the client can decode natively
     containers: string[];         // e.g. ["mp4","m4v","mov","webm","mp3","m4a","flac","ogg","wav"]

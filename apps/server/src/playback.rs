@@ -281,6 +281,11 @@ pub struct PlaybackRequest {
     /// thing at a time, so its previous sessions end when it starts a new one.
     #[serde(default)]
     pub client_id: Option<String>,
+    /// The player starts this session while the one it plays goes on, to
+    /// move to it once its first segments are made, with no wait: the
+    /// client's other sessions are left to it to end.
+    #[serde(default)]
+    pub keep_previous: bool,
     /// The player can't send the Authorization header with its media
     /// requests (a TV's own player): the session's addresses carry a key
     /// of their own instead ([`Session::media_key`]).
@@ -2243,6 +2248,7 @@ mod tests {
             caps: browser(),
             mode: PlaybackMode::Auto,
             client_id: None,
+            keep_previous: false,
             keyed_urls: false,
             hdr_transcodes: false,
             download: false,

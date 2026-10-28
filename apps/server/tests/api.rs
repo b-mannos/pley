@@ -476,6 +476,16 @@ async fn direct_play_supports_ranges_and_transcode_needs_the_transcoder() {
     let activity = app.get("/api/activity", &token).await;
     assert_eq!(activity.body["sessions"].as_array().unwrap().len(), 2);
 
+    // One prepared while the last plays on leaves that one to the client to end.
+    let playing = play.body["session_id"].as_str().unwrap().to_owned();
+    let body = json!({"item_id": id_of("Clip"), "caps": caps, "client_id": "tab-1", "keep_previous": true});
+    let prepared = app.post("/api/playback", &token, body).await;
+    assert_eq!(prepared.status, StatusCode::OK, "{:?}", prepared.body);
+    let activity = app.get("/api/activity", &token).await;
+    let sessions = activity.body["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 3, "{sessions:?}");
+    assert!(sessions.iter().any(|s| s["session_id"] == json!(playing)), "{sessions:?}");
+
     let system = app.get("/api/system", &token).await;
     assert_eq!(system.body["transcoder"]["available"], json!(false));
     assert_eq!(system.body["counts"]["movies"], json!(2));

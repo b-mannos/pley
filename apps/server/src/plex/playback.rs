@@ -619,6 +619,7 @@ pub async fn universal_start(
         caps: hls_caps(),
         mode: if params.get("directStream") == Some("0") { PlaybackMode::Transcode } else { PlaybackMode::Remux },
         client_id,
+        keep_previous: false,
         keyed_urls: false,
         hdr_transcodes: false,
         download: false,

@@ -32,6 +32,7 @@ import { canPlayNativeHls, videoCaps } from "@/lib/caps";
 import { cn } from "@/lib/cn";
 import { episodeLabel, fileResolution, formatBitrate, formatClock, streamLabel } from "@/lib/format";
 import { loadHls } from "@/lib/hls";
+import { warmStream } from "./prepare";
 import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
 import {
   endSession,
@@ -127,6 +128,13 @@ export interface VideoPlayerProps {
  * what's loaded takes a few dozen milliseconds, and would flash it.
  */
 const SPINNER_DELAY_MS = 400;
+/** The same while the last session's picture stands in for the next one's (`freezeFrame`). */
+const FROZEN_SPINNER_DELAY_MS = 2_500;
+
+/** How long a session prepared alongside the one playing may take to get ready before the player moves to it anyway. */
+const PREPARE_MAX_MS = 20_000;
+/** How far past where it starts a prepared session's first segment is asked for: where the player will be by then. */
+const PREPARE_LEAD_S = 4;
 
 /** Seconds kept of what is buffered when the player grows (`capToPlayer`): the bigger size starts meanwhile. */
 const UPSIZE_KEEP_S = 15;
@@ -252,6 +260,30 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const announceFallback = useRef(false);
   /** The lines of the size a stream in several sizes plays at now (hls.js picks it). */
   const [levelLines, setLevelLines] = useState<number | null>(null);
+  /** The next session is a quality, audio or Automatic change: it is prepared while this one plays. */
+  const prepareNext = useRef(false);
+  /** The last picture of the session left, shown until the next one shows its own. */
+  const freezeRef = useRef<HTMLCanvasElement>(null);
+  const [frozen, setFrozen] = useState(false);
+  const frozenNow = useRef(false);
+  const unfreeze = () => {
+    frozenNow.current = false;
+    setFrozen(false);
+  };
+  const freezeFrame = () => {
+    const c = freezeRef.current;
+    const v = videoRef.current;
+    if (!c || !v || !v.videoWidth) return;
+    c.width = v.videoWidth;
+    c.height = v.videoHeight;
+    try {
+      c.getContext("2d")?.drawImage(v, 0, 0, c.width, c.height);
+      frozenNow.current = true;
+      setFrozen(true);
+    } catch {
+      // Nothing to show: the element shows black meanwhile, as before.
+    }
+  };
 
   const file = item.files.find((f) => f.id === fileId) ?? item.files[0] ?? null;
   const audioStreams = useMemo(() => file?.streams.filter((s) => s.kind === "audio") ?? [], [file]);
@@ -442,6 +474,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     bufferingTimer.current = undefined;
     setBuffering(false);
     setLoading(false);
+    unfreeze();
     setPlaying(false);
     setUpNext(null);
     sleep.clear();
@@ -540,41 +573,56 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     if (!video || !file || stoppedRef.current) return;
     let cancelled = false;
     const q = playingQuality;
-    const startSec = startMsRef.current / 1000;
+    let startSec = startMsRef.current / 1000;
     const requestMode = fallbackModeRef.current ?? mode;
-    recoveries.current.network = 0;
-    recoveries.current.media = 0;
-    playedFrom.current = null;
-    mediaShown.current = false;
-    autoSettling.current = true;
-    setLevelLines(null);
-    // A new session gets the full grace before it counts as stalled.
-    lastAdvance.current = { at: performance.now(), time: -1 };
-    lastData.current = performance.now();
-    setLoading(true);
-    setError(null);
-    setUnreachable(false);
-    setNeedsGesture(false);
-    setEnded(false);
-    window.clearTimeout(bufferingTimer.current);
-    bufferingTimer.current = undefined;
-    setBuffering(false);
-
-    // Release the previous session, reporting the last real position (not
-    // the reset element's 0). The next one doesn't wait for that: the server
-    // ends this tab's sessions itself before it starts another (and before
-    // it checks its transcode limit). It does wait for the previous run's
-    // start, which ends its own session if that run was cancelled.
-    const prev = sessionRef.current;
-    sessionRef.current = null;
-    if (prev) void endSession(item.id, prev, positionRef.current * 1000);
+    // A quality, audio or Automatic change while it plays (`prepareNext`):
+    // the new session is made ready while this one plays on, and the
+    // player moves to it on this one's last picture, without a spinner.
+    let prepared = prepareNext.current && sessionRef.current !== null && mediaShown.current && !error;
+    prepareNext.current = false;
     const previousStart = pendingStartRef.current;
-    destroyHls();
-    video.pause();
-    video.removeAttribute("src");
-    video.load();
-    positionRef.current = startSec;
-    setCurrent(startSec);
+
+    /**
+     * Lets go of the session playing, reporting the last real position (not
+     * the reset element's 0), and resets the element for one starting at
+     * `at`. The next session doesn't wait for that: the server ends this
+     * tab's sessions itself before it starts another (and before it checks
+     * its transcode limit), unless it was prepared alongside. It does wait
+     * for the previous run's start, which ends its own session if that run
+     * was cancelled.
+     */
+    const release = (at: number) => {
+      recoveries.current.network = 0;
+      recoveries.current.media = 0;
+      playedFrom.current = null;
+      mediaShown.current = false;
+      autoSettling.current = true;
+      setLevelLines(null);
+      // A new session gets the full grace before it counts as stalled.
+      lastAdvance.current = { at: performance.now(), time: -1 };
+      lastData.current = performance.now();
+      if (!prepared) {
+        setLoading(true);
+        unfreeze();
+      }
+      setError(null);
+      setUnreachable(false);
+      setNeedsGesture(false);
+      setEnded(false);
+      window.clearTimeout(bufferingTimer.current);
+      bufferingTimer.current = undefined;
+      setBuffering(false);
+      const prev = sessionRef.current;
+      sessionRef.current = null;
+      if (prev) void endSession(item.id, prev, positionRef.current * 1000);
+      destroyHls();
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+      positionRef.current = at;
+      setCurrent(at);
+    };
+    if (!prepared) release(startSec);
 
     const seekOnLoad = (seconds: number) => {
       if (seconds <= 0) return;
@@ -587,25 +635,56 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     // Most plays end up on hls.js: fetch it while the server prepares the stream.
     loadHls().catch(() => undefined);
 
-    // The new session is recorded as soon as it exists, so the next run (or
+    /** A prepared session's stream, asked for as the player will ask once it moves there. */
+    const warm = (pinfo: PlaybackInfo): Promise<void> => {
+      if (!pinfo.hls) return Promise.resolve();
+      const abort = new AbortController();
+      const timer = window.setTimeout(() => abort.abort(), PREPARE_MAX_MS);
+      const pick = (sizes: { width: number; height: number }[], listed: number) => (auto ? startSize(sizes, video, listed) : listed);
+      return warmStream(pinfo.url, startSec + PREPARE_LEAD_S, pick, abort.signal)
+        .catch(() => undefined)
+        .finally(() => window.clearTimeout(timer));
+    };
+
+    // The new session is recorded as soon as it plays, so the next run (or
     // unmount) ends it; a run cancelled before that ends it here instead.
     const acquired = (async (): Promise<PlaybackInfo | null> => {
       await previousStart;
       if (cancelled) return null;
-      const pinfo = await startPlayback({
-        item_id: item.id,
-        file_id: file.id,
-        audio_index: audioIndex,
-        subtitle_index: burnIndex,
-        max_bitrate: q.maxBitrate,
-        max_height: q.maxHeight,
-        start_ms: Math.round(startSec * 1000),
-        mode: requestMode,
-        caps: videoCaps(),
-      });
+      const start = (alongside: boolean) =>
+        startPlayback({
+          item_id: item.id,
+          file_id: file.id,
+          audio_index: audioIndex,
+          subtitle_index: burnIndex,
+          max_bitrate: q.maxBitrate,
+          max_height: q.maxHeight,
+          start_ms: Math.round(startSec * 1000),
+          mode: requestMode,
+          caps: videoCaps(),
+          ...(alongside ? { keep_previous: true } : {}),
+        });
+      let pinfo: PlaybackInfo;
+      try {
+        pinfo = await start(prepared);
+      } catch (err) {
+        // No transcode free for two at once: the last one ends first, as before.
+        if (!prepared || !isApiError(err, 503) || cancelled) throw err;
+        prepared = false;
+        startSec = livePosition();
+        release(startSec);
+        pinfo = await start(false);
+      }
+      if (prepared && !cancelled && !stoppedRef.current) await warm(pinfo);
       if (cancelled || stoppedRef.current) {
         await stopSession(pinfo.session_id);
         return null;
+      }
+      if (prepared) {
+        // Where the last one got to while this one got ready.
+        freezeFrame();
+        startSec = livePosition();
+        release(startSec);
       }
       sessionRef.current = pinfo;
       return pinfo;
@@ -929,6 +1008,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const applyAutoStep = (step: AutoStep | null) => {
     if (!step) return;
     startMsRef.current = currentMs();
+    prepareNext.current = true;
     // The stall watch starts over: the new session is on its way.
     lastAdvance.current = { at: performance.now(), time: -1 };
     setAutoStepped((n) => n + 1);
@@ -1029,7 +1109,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     // spinner only comes for a wait that lasts, so seeks don't flash it.
     const startWaiting = () => {
       if (bufferingTimer.current !== undefined) return;
-      bufferingTimer.current = window.setTimeout(() => setBuffering(true), SPINNER_DELAY_MS);
+      bufferingTimer.current = window.setTimeout(() => setBuffering(true), frozenNow.current ? FROZEN_SPINNER_DELAY_MS : SPINNER_DELAY_MS);
     };
     const stopWaiting = () => {
       window.clearTimeout(bufferingTimer.current);
@@ -1037,8 +1117,12 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       setBuffering(false);
     };
     const onWaiting = startWaiting;
-    const onPlaying = stopWaiting;
+    const onPlaying = () => {
+      stopWaiting();
+      unfreeze();
+    };
     const onCanPlay = stopWaiting;
+    const onLoadedData = () => unfreeze();
     const onSeeked = () => {
       // The frame at the new time can arrive before anything to play on
       // from it (a transcode starting there): playing again ends the wait.
@@ -1076,6 +1160,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     v.addEventListener("waiting", onWaiting);
     v.addEventListener("playing", onPlaying);
     v.addEventListener("canplay", onCanPlay);
+    v.addEventListener("loadeddata", onLoadedData);
     v.addEventListener("seeking", onSeeking);
     v.addEventListener("emptied", onEmptied);
     v.addEventListener("seeked", onSeeked);
@@ -1090,6 +1175,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       v.removeEventListener("waiting", onWaiting);
       v.removeEventListener("playing", onPlaying);
       v.removeEventListener("canplay", onCanPlay);
+      v.removeEventListener("loadeddata", onLoadedData);
       v.removeEventListener("seeking", onSeeking);
       v.removeEventListener("emptied", onEmptied);
       v.removeEventListener("seeked", onSeeked);
@@ -1326,6 +1412,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const playing = audioIndex ?? info?.audio_index ?? audioStreams.find((s) => s.default)?.index ?? audioStreams[0]?.index;
     if (index === playing) return;
     startMsRef.current = currentMs();
+    prepareNext.current = true;
     setAudioIndex(index);
     rememberTracks(index, subIndex);
   };
@@ -1337,6 +1424,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const changeQuality = (id: string) => {
     if (id === selectedQuality.id && !(auto && auto.playing !== ORIGINAL_ID)) return;
     startMsRef.current = currentMs();
+    prepareNext.current = true;
     const fellBackBefore = fallbackModeRef.current !== null;
     fallbackModeRef.current = null;
     setStalled(false);
@@ -1350,7 +1438,10 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const changeSubtitle = (index: number | null) => {
     const s = subStreams.find((x) => x.index === index);
     const nextBurn = s && s.text_based === false ? s.index : null;
-    if (nextBurn !== burnIndex) startMsRef.current = currentMs();
+    if (nextBurn !== burnIndex) {
+      startMsRef.current = currentMs();
+      prepareNext.current = true;
+    }
     setSubIndex(index);
     rememberTracks(audioIndex ?? undefined, index);
   };
@@ -1536,6 +1627,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         onDoubleClick={onSurfaceDoubleClick}
       >
       </video>
+      <canvas ref={freezeRef} aria-hidden className={cn("pointer-events-none absolute inset-0 size-full object-contain", !frozen && "hidden")} />
       <SubtitleOverlay cues={cues} lifted={showControls} style={subStyle} />
 
       <div

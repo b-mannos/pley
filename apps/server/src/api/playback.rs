@@ -124,8 +124,9 @@ pub async fn start(
 
     // A client plays one thing at a time: end what it played before (a
     // quality or audio switch, the next episode) so its transcode slot is
-    // free before the limit is checked.
-    if let Some(client) = &client_id {
+    // free before the limit is checked. Unless it prepares this one while
+    // that one plays: it ends that one itself as it moves.
+    if let Some(client) = client_id.as_ref().filter(|_| !req.keep_previous) {
         let previous = state.sessions.take_client_sessions(user.id, client);
         if !previous.is_empty() {
             end_sessions(&state, previous);

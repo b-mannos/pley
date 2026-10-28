@@ -494,6 +494,8 @@ export interface PlaybackRequest {
   mode?: PlaybackMode;
   /** Identifies the player; its previous sessions end when it starts a new one. */
   client_id?: string;
+  /** Started while the last session plays on, to move to it once it is ready: that one is left to the player to end. */
+  keep_previous?: boolean;
   caps: ClientCaps;
 }
 
