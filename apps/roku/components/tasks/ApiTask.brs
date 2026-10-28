@@ -28,6 +28,7 @@ sub apiRun()
     m.tokens = invalid
     m.signIn = invalid
     m.signIns = 0
+    m.profileAsked = 0
     apiDeviceFacts()
     m.top.ready = true
     while true
@@ -292,6 +293,7 @@ sub apiCallAnswered(job as object, status as integer, body as string, headers as
         end if
     end if
     answer = httpAnswer(status, body)
+    if httpTrue(job.me) then apiKnowProfile(job, answer)
     if answer.ok and job.play and apiAbandoned(job.request)
         ' The player left before its session came: the server would go on
         ' preparing it.
@@ -535,6 +537,31 @@ sub apiSelect(url as string, name as string)
         m.session.accessToken = ""
     end if
     m.session.signedIn = m.tokens <> invalid
+    apiAskProfile()
+end sub
+
+' Who the sign-in acts as (GET /api/auth/me), for the screens: asked as a
+' server is chosen signed in, and after each sign-in.
+sub apiAskProfile()
+    m.session.profileId = 0
+    m.session.profileName = ""
+    if m.tokens = invalid then return
+    job = apiJob("call", "GET", m.server + "/api/auth/me")
+    job.auth = true
+    job.build = ""
+    job.me = true
+    m.profileAsked = m.profileAsked + 1
+    job.asked = m.profileAsked
+    apiSend(job)
+end sub
+
+' The profile, unless another sign-in came meanwhile.
+sub apiKnowProfile(job as object, answer as object)
+    if not answer.ok or job.asked <> m.profileAsked then return
+    data = httpObject(answer.data)
+    if data = invalid then return
+    m.session.profileId = httpNumber(data.id, 0)
+    m.session.profileName = httpSentence(data.name)
 end sub
 
 sub apiUseServer(request as object, spec as object)
@@ -781,6 +808,7 @@ sub apiSignedIn(signIn as object, body as string)
         m.session.signOutReason = ""
         m.session.accessToken = fresh.access
         m.session.signedIn = true
+        apiAskProfile()
     end if
     apiSignInUpdate(signIn, { status: "signed_in" })
 end sub

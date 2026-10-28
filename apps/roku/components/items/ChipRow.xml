@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A row of chips, left and right between them, OK choosing one: a
+     library's tabs, and its sort and filters. The current one (a tab
+     shown) stands out; the focused one is in the accent while the row has
+     the focus. -->
+<component name="ChipRow" extends="Group">
+    <interface>
+        <!-- [{ label, width }]: a chip's width in pixels. -->
+        <field id="chips" type="array" onChange="onChips" />
+        <field id="current" type="integer" value="-1" onChange="onLook" />
+        <field id="focusIndex" type="integer" value="0" onChange="onLook" />
+        <!-- The chip OK was pressed on. -->
+        <field id="chosen" type="integer" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/items/ChipRow.brs" />
+</component>

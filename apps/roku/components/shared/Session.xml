@@ -13,5 +13,9 @@
         <field id="userAgent" type="string" />
         <field id="appVersion" type="string" />
         <field id="device" type="string" />
+        <!-- The profile signed in (GET /api/auth/me), once the server said:
+             0 and "" until then. -->
+        <field id="profileId" type="integer" />
+        <field id="profileName" type="string" />
     </interface>
 </component>

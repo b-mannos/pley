@@ -293,6 +293,28 @@ async function walk() {
   shoot("library-scrolled");
   await press("back");
   await openFromMenu(2, /^GET \/api\/libraries\/2\/items/, "TV Shows");
+  // Its tabs: Recommended, Collections, then Library again, sorted by year.
+  since = mark();
+  await press("up"); // the tabs, on Library
+  await press("left"); // Recommended
+  await press("select");
+  await waitFor(/^GET \/api\/libraries\/2\/hubs$/, since, "a library's recommendations");
+  shoot("library-recommended");
+  await press("right", 2); // Collections
+  await press("select");
+  await waitFor(/^GET \/api\/libraries\/2\/collections$/, since, "a library's collections");
+  shoot("library-collections");
+  await press("left"); // Library
+  await press("select");
+  await press("right", 2); // past Collections to the sort
+  await press("select");
+  await sleep(500);
+  await press("down"); // Year
+  await press("select");
+  await waitFor(/^GET \/api\/libraries\/2\/items\?.*sort=year/, since, "the library sorted by year");
+  shoot("library-sorted");
+  await press("left"); // the tabs
+  await press("down"); // the grid
   since = mark();
   await press("select"); // Severance: its page, with its next episode first
   await waitFor(/^GET \/api\/items\/99\/on-deck$/, since, "the show's next episode");
@@ -490,6 +512,9 @@ const checks = [
   ["loaded a library's next page", asked(/^GET \/api\/libraries\/1\/items\?.*offset=70/)],
   ["came back to Home asking again only for rows a minute old", home.kept],
   ["loaded a season's episodes", asked(/^GET \/api\/items\/100\/children$/)],
+  ["showed a library's Recommended and Collections tabs", asked(/^GET \/api\/libraries\/2\/hubs$/) && asked(/^GET \/api\/libraries\/2\/collections$/)],
+  ["sorted a library by year, newest first", asked(/^GET \/api\/libraries\/2\/items\?.*order=desc.*sort=year/)],
+  ["kept the library's tab and sort on the Roku", registry !== null && /libraryViews.*\\"sort\\":\\"year\\"/.test(JSON.stringify([...registry]))],
   ["marked a title watched with the Options key", fixture.marks.some((m) => m.item === 103 && m.action === "watched")],
   ["asked for a show's More Like This and collections", asked(/^GET \/api\/items\/99\/related\?limit=20$/) && asked(/^GET \/api\/items\/99\/collections$/)],
   ["opened a person's page", asked(/^GET \/api\/people\/7$/)],

@@ -3,8 +3,9 @@
 A native SceneGraph app for Roku players and Roku TVs. It finds pley
 servers on the local network (or takes an address), signs in with a code
 shown on the TV and approved on the server's `/link` page (or a QR code of
-it, which the server draws), and shows Home's rows, each library as a grid
-of posters, a show's seasons and episodes, a title's page (Resume and Play
+it, which the server draws), and shows Home's rows, each library with the
+web app's tabs (Recommended, Library sorted and filtered, Collections), a
+show's seasons and episodes, a title's page (Resume and Play
 from start, a show's next episode, Mark as watched, My List, Go to show,
 and rows of its seasons, cast and crew, extras, More Like This and the
 collections it is part of), people's and collections' pages, Search with
@@ -200,6 +201,19 @@ Rules the code keeps:
   are asked for beside it, and each row shows as it comes, in that order.
   Down past the buttons slides the page up to the rows, Up from the first
   row (or Back) slides it down again.
+- A library opens on the tab it was left on: Recommended (its rows, `GET
+  /api/libraries/{id}/hubs`), Library (a grid a page at a time) or
+  Collections (not for music), chips at the top that left, right and OK
+  move between. On the Library tab two chips at the right say its sort
+  ("Year, newest first") and filters ("Unwatched, Drama"); OK opens their
+  choices in a panel at the right: the sorts the web app offers for the
+  library's kind (OK on the one checked turns the order around), and
+  Show (All titles, Unwatched, Watched), Genre and Year from `GET
+  /api/libraries/{id}/filters`, and Clear filters. The tab, sort and
+  filters are kept for each server, profile and library (registry
+  section `libraryViews`), as the web app keeps them in the browser; the
+  profile is the one `GET /api/auth/me` names, which the task asks for
+  as a server is chosen signed in and after each sign-in.
 - A screen shown again takes the focus at once, before any answer, so the
   remote works whatever comes back; an answer moves the focus only while its
   screen has it, so a dialog over it keeps it.

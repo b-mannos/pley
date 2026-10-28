@@ -318,6 +318,15 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
         ],
       });
     }
+    // A library's tabs: its rows, its collections, and what it filters by.
+    if ((match = path.match(/^\/api\/libraries\/(\d+)\/hubs$/))) {
+      const listed = match[1] === "1" ? movies.slice(0, 20) : match[1] === "2" ? [show] : [];
+      return json(200, { hubs: listed.length ? [{ key: "recently_added", title: "Recently Added", library_id: Number(match[1]), items: listed }, { key: "top_rated", title: "Top Rated", library_id: Number(match[1]), items: listed }] : [] });
+    }
+    if ((match = path.match(/^\/api\/libraries\/(\d+)\/collections$/))) {
+      return json(200, { collections: match[1] === "3" ? [] : [{ id: 1, library_id: Number(match[1]), title: "Fixture Collection", summary: null, automatic: false, sort: "release", smart_filter: null, item_count: 5, poster_url: "", backdrop_url: "", created_at: 0, updated_at: 0 }] });
+    }
+    if ((match = path.match(/^\/api\/libraries\/(\d+)\/filters$/))) return json(200, { genres: ["Drama", "Mystery"], years: [2022, 2019] });
     if ((match = path.match(/^\/api\/libraries\/(\d+)\/items$/))) {
       const listed = match[1] === "1" ? movies : match[1] === "2" ? [show] : [];
       const offset = Number(url.searchParams.get("offset") ?? 0);
