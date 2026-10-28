@@ -13,6 +13,7 @@ const version = versionOf(join(root, "package.json"));
 const dist = join(root, "dist");
 
 const { bytes } = await buildApp({
+  app: "pley for Samsung TV",
   entry: join(root, "src/main.ts"),
   outdir: dist,
   // Tizen 4.0 (2018) runs Chromium 56.

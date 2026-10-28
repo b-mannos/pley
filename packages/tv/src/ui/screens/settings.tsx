@@ -15,6 +15,7 @@ import { PanelRow } from "../kit/buttons";
 import { PanelTitle, SidePanel, useScrollToFocus, useTrap } from "../kit/panel";
 import type { Entry } from "../shell/navigator";
 import { Dialog, failedTitle, problem, sentence, useApp } from "./common";
+import { licenseRows } from "../../licenses";
 import { pageOf } from "./item-actions";
 import { librarySorting, SORT_NEEDS_NEWER } from "./library";
 import { ProfileAvatar, QrCode } from "./onboarding/kit";
@@ -55,12 +56,6 @@ const SIZES: { id: Settings["subtitleSize"]; label: string }[] = [
   { id: "largest", label: "Largest" },
 ];
 
-const LICENCES: [string, string][] = [
-  ["Preact, Preact Signals", "MIT"],
-  ["Lucide icons", "ISC"],
-  ["QR Code generator (Kazuhiko Arase)", "MIT"],
-  ["Roboto", "Apache-2.0"],
-];
 
 interface Choice<T> {
   value: T;
@@ -404,7 +399,8 @@ export function SettingsScreen(p: { entry: Entry }) {
           Open-source licences
         </div>,
       );
-      for (const [name, licence] of LICENCES) rows.push(<SettingRow key={name} fid={`row-lic-${name}`} label={name} value={licence} onSelect={() => undefined} />);
+      // Their texts are in the app's package, in NOTICES.txt.
+      for (const [name, licence] of licenseRows()) rows.push(<SettingRow key={name} fid={`row-lic-${name}`} label={name} value={licence} onSelect={() => undefined} />);
       break;
     case "signout":
       rows.push(

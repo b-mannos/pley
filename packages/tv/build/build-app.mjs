@@ -1,13 +1,15 @@
 // Builds a TV app from its entry: one script and one stylesheet for the
 // TV's old engine, the fonts, and the page that loads them. Everything the
 // app needs ships inside the package: no CDN, no remote font, so it works
-// on a home network without the internet.
+// on a home network without the internet. NOTICES.txt beside it carries the
+// licenses of the packages in it (notices.ts).
 
 import { build } from "esbuild";
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { commit } from "../../../scripts/commit.mjs";
+import { LICENSE_FILES, noticesText, packageOf, TEXTS } from "./notices.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -24,6 +26,7 @@ const PRELUDE = [
 
 /**
  * @param {{
+ *   app: string,
  *   entry: string,
  *   outdir: string,
  *   target: string,
@@ -66,6 +69,7 @@ export async function buildApp(o) {
     mkdirSync(dirname(join(o.outdir, f.to)), { recursive: true });
     copyFileSync(f.from, join(o.outdir, f.to));
   }
+  writeFileSync(join(o.outdir, "NOTICES.txt"), noticesText(o.app, shipped(Object.keys(result.metafile.inputs), dirname(fonts))));
   writeFileSync(
     join(o.outdir, "index.html"),
     [
@@ -90,6 +94,29 @@ export async function buildApp(o) {
   );
   const bytes = Object.values(result.metafile.outputs).reduce((n, out) => n + out.bytes, 0);
   return { bytes };
+}
+
+/**
+ * The packages of others' work in the app: those the bundle's `inputs`
+ * come from, and the font, each with its license's text.
+ *
+ * @param {string[]} inputs
+ * @param {string} fontPackage
+ */
+function shipped(inputs, fontPackage) {
+  /** @type {Map<string, string>} */
+  const dirs = new Map([["@fontsource/roboto", fontPackage]]);
+  for (const input of inputs) {
+    const id = packageOf(input);
+    if (!id || dirs.has(id)) continue;
+    const path = resolve(input).replace(/\\/g, "/");
+    dirs.set(id, path.slice(0, path.lastIndexOf(`/node_modules/${id}/`) + `/node_modules/${id}`.length));
+  }
+  return [...dirs].map(([id, dir]) => {
+    const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+    const file = LICENSE_FILES.filter((f) => existsSync(join(dir, f)))[0];
+    return { id, version: pkg.version, homepage: typeof pkg.homepage === "string" ? pkg.homepage : null, text: file ? readFileSync(join(dir, file), "utf8") : (TEXTS[id] ?? "") };
+  });
 }
 
 /** The app's version, from its package.json. */
