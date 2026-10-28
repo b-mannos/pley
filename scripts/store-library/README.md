@@ -7,8 +7,8 @@ video of its picture at its running time (1080p, silent 5.1), small enough
 to make in a few minutes.
 
 ```sh
-node scripts/store-library/art.mjs <dir>          # the pictures, through a headless Chrome
-node scripts/store-library/media.mjs <dir>        # Movies/ and Shows/, and the videos to make
+bun scripts/store-library/art.mjs <dir>           # the pictures, through a headless Chrome
+bun scripts/store-library/media.mjs <dir>         # Movies/ and Shows/, and the videos to make
 tr '\n' '\0' < <dir>/jobs.txt | xargs -0 -P 6 -I{} bash scripts/store-library/encode.sh "{}"
 ```
 
@@ -19,7 +19,7 @@ ones (`HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY` at a closed port,
 
 ```sh
 pley serve --data-dir <dir>/data --bind 127.0.0.1:17560 --plex-bind off --no-discovery --no-tray
-node scripts/store-library/setup.mjs http://127.0.0.1:17560 <setup code> <dir>
+bun scripts/store-library/setup.mjs http://127.0.0.1:17560 <setup code> <dir>
 ```
 
 `setup.mjs` makes the account (Alex, its password in `<dir>/admin.json`),

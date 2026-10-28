@@ -132,7 +132,9 @@ folder. Services, containers and SSH sessions never show the icon, and
 
 ## Firewall and remote access
 
-Port 7539 (TCP) is the only one that needs to be reachable. The apps find
+Port 7539 (TCP) is the only one that needs to be reachable: the
+Plex-compatible API answers there too, unless you give it a port of its own
+(`--plex-bind 0.0.0.0:32400`, or **Settings → Network**). The apps find
 servers on the local network through UDP port 7539; allow it too, or enter
 the server's address in the app. Containers only answer them with host
 networking (`--network host`), since broadcasts don't reach a bridge

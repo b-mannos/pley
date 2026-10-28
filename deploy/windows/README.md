@@ -217,7 +217,8 @@ save-config` saves the same options for pley outside a service.
 ## Building the installer
 
 With [Inno Setup](https://jrsoftware.org/isinfo.php) 6.7 or newer
-(`winget install JRSoftware.InnoSetup`):
+(`winget install JRSoftware.InnoSetup`), and Rust and Bun to build pley and
+its web app:
 
 ```
 powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Archive -Installer

@@ -1,7 +1,7 @@
 # Store listings
 
 The pictures and words the app stores ask for besides the app itself.
-`node scripts/render-icons.mjs` renders the pictures from the logo
+`bun scripts/render-icons.mjs` renders the pictures from the logo
 (`apps/web/public/favicon.svg`), with every other icon.
 
 | File | Size | For |
@@ -31,6 +31,11 @@ them. They show a made-up library, with no real title's artwork, which
 - **Package**: `com.formandelement.pley` (Google Play and the Amazon Appstore),
   the bundle from the release, `pley-android-<version>-play.aab`
   (docs/ANDROID.md, Releases).
+- **Version code**: the version's (0.2.0 is 20000). The stores take each
+  code once, so a second upload of the same version is built with
+  `PLEY_BUILD` set, 1 to 99, which is added to it (`PLEY_BUILD=1` makes
+  20001): `./gradlew :app:bundleStoreRelease` in `apps/android`, with the
+  release key.
 - **Category**: Video Players & Editors.
 - **Name**: pley
 

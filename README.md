@@ -19,6 +19,7 @@ web app in React and TypeScript.
   `104 - Title` in a `Season 1` folder, `Season 1 Episode 4`, and a title
   alone, which TMDB numbers by its title; no two files ever merge into one
   episode for lack of a number.
+- Each profile can put its libraries in an order of its own, on every app.
 
 **Metadata**
 
@@ -32,8 +33,15 @@ web app in React and TypeScript.
   shown. One quality menu: the original, or a lower quality that transcodes.
 - Hardware encoding (NVENC, Quick Sync, AMF, VAAPI, VideoToolbox) and GPU tone
   mapping with libplacebo, including Dolby Vision profile 5.
-- Subtitles (text tracks as WebVTT, image tracks burned in), audio tracks and
-  default languages per user. A choice carries over to the next episode.
+- Dolby Vision profile 7 (with its FEL or MEL enhancement layer said) and
+  HDR10+ are told apart from plain HDR10 and shown as badges, and the
+  player's details say what the screen gets.
+- Subtitles (text tracks as WebVTT, image tracks burned in), with their
+  timing moved earlier or later in every player, the TV apps included.
+- Audio and subtitle defaults for each profile, set on every app; a choice
+  carries over to the next episode. Of the profile's language, the server
+  picks the audio track each device plays best (as it is rather than
+  converted, the 5.1 for a player that passes it to a receiver).
 - Resume, Up Next, Skip Intro and Skip Credits (from chapters, and by
   comparing the audio of episodes), seek-bar previews and chapter pictures.
 
@@ -67,7 +75,8 @@ web app in React and TypeScript.
 
 - Metadata editing with locked fields, Fix Match and a choice of artwork.
 - Settings with a Test button for each API key and service, a live dashboard
-  (playback, transcoder, scans) and daily database backups.
+  (playback, transcoder, scans, and charts of pley's and the computer's CPU
+  and memory) and daily database backups.
 
 **Compatibility API** on pley's own port (or 32400), for `python-plexapi`, Tautulli and
 Kometa: browsing with their filters, editing, collections, playlists, play
@@ -127,8 +136,11 @@ HTTP, so the two can have different licenses
 ## Requirements
 
 - Rust 1.95 or newer.
-- Node.js 22 or newer to build the web app (22.22+ or 24.15+ to run its
-  tests).
+- [Bun](https://bun.sh) 1.4 or newer (`package.json` pins 1.4.4) to build
+  the web app and the other JavaScript apps. Bun installs the packages from
+  `bun.lock` and runs their scripts and tools (each package's
+  `bunfig.toml` says so). Node.js 22 or newer only for the Roku app, whose
+  tools need it.
 - FFmpeg and ffprobe on `PATH` or configured; 6.1 or newer throttles
   transcodes. For hardware transcoding and GPU tone mapping, use a build with
   NVENC, QSV, AMF or VAAPI and libplacebo, such as gyan.dev's "full" build on
@@ -138,7 +150,7 @@ HTTP, so the two can have different licenses
 ## Quick start
 
 ```powershell
-npm install; npm run build                       # build the web app (embedded into the server)
+bun install; bun run build                       # build the web app (embedded into the server)
 cargo build                                      # build pley and pley-transcoder
 .\target\debug\pley.exe --data-dir .\data        # http://localhost:7539
 ```
@@ -160,7 +172,8 @@ starts it in Docker, locked down, for a reverse proxy in front of it
 ## Configuration
 
 Options come from command-line flags, `PLEY_*` environment variables or
-`pley.toml` in the data folder ([example](pley.example.toml)):
+`pley.toml` in the data folder ([example](pley.example.toml)): `--plex-bind`,
+for one, is also `PLEY_PLEX_BIND` or `plex_bind`.
 
 | Flag | Default | |
 |---|---|---|
@@ -211,17 +224,19 @@ Archive belong to their owners.
 
 ## Development
 
-- `npm run dev` serves the web app with hot reload on `http://localhost:5173`,
+- `bun run dev` serves the web app with hot reload on `http://localhost:5173`,
   proxying `/api` to the server on port 7539. Debug builds of the server read
-  `apps/web/dist` from disk, so `npm run build` shows up without recompiling.
+  `apps/web/dist` from disk, so `bun run build` shows up without recompiling.
+  `bun install --frozen-lockfile` installs exactly what `bun.lock` holds, as
+  CI and the Docker build do.
 - `cargo test --workspace` runs the Rust tests, including end-to-end tests of
   both APIs. `cargo test -p pley-server --test providers -- --ignored` also
   checks the real TVmaze and MusicBrainz (and TheTVDB with
   `PLEY_TEST_TVDB_KEY` and, if needed, `PLEY_TEST_TVDB_PIN`).
-- `npm run check` runs the web app's type check, ESLint and tests (Vitest),
+- `bun run check` runs the web app's type check, ESLint and tests (Vitest),
   and the desktop app's.
-- `npm run desktop` runs the desktop app (Rust, and on Linux WebKitGTK:
-  `libwebkit2gtk-4.1-dev`); `npm run build -w apps/desktop` makes its
+- `bun run desktop` runs the desktop app (Rust, and on Linux WebKitGTK:
+  `libwebkit2gtk-4.1-dev`); `bun run --cwd apps/desktop build` makes its
   installers.
 - The Android app builds with the Android SDK and JDK 17 or newer (on
   Windows, Android Studio's: `JAVA_HOME=C:\Program Files\Android\Android
@@ -232,9 +247,11 @@ Archive belong to their owners.
   `store` and `direct`: `adb install
   app/build/outputs/apk/store/debug/app-store-debug.apk` installs the debug
   app. [docs/ANDROID.md](docs/ANDROID.md) has the modules and the rest.
-- `npm run tv:check` type-checks and tests the Samsung and LG TV apps;
-  `npm run tizen` and `npm run webos` package them with Samsung's and LG's
+- `bun run tv:check` type-checks and tests the Samsung and LG TV apps;
+  `bun run tizen` and `bun run webos` package them with Samsung's and LG's
   command-line tools ([docs/TV_PLATFORMS.md](docs/TV_PLATFORMS.md)).
+- In `apps/roku`, `bun install` and `bun run check` compile, lint and test
+  the Roku app, its tools on Node ([docs/ROKU.md](docs/ROKU.md)).
 - `cargo clippy --workspace --all-targets` and `cargo fmt --all` lint and
   format the Rust code; `scripts/check-licenses.ps1` checks the license
   boundary.
@@ -249,11 +266,13 @@ Registry. `scripts/build.ps1` (or `build.sh`) builds an archive locally.
 The release also carries the server's Windows installers, the Android app (an
 APK to sideload and a bundle for Google Play, signed with the key from the
 repository's secrets), the desktop app's installers, the LG TV app, the Kodi
-add-on and the Roku app.
+add-on and the Roku app. The stores take each Android version code once:
+a rebuild of the same version is built with `PLEY_BUILD` (1 to 99) set,
+which adds to the version's code ([deploy/stores](deploy/stores/README.md)).
 
 Every app has one version, pley's, in [`VERSION`](VERSION):
-`node scripts/version.mjs set 0.3.0` writes it into every manifest, and
-`node scripts/version.mjs check` (which CI runs) finds any that disagree. A
+`bun scripts/version.mjs set 0.3.0` writes it into every manifest, and
+`bun scripts/version.mjs check` (which CI runs) finds any that disagree. A
 release's tag is that version (`v0.3.0`). Builds record the commit they
 were made from, which every app shows beside its version, as
 "0.2.0 (1a2b3c4d5)": `pley --version`, the web app's Account page and
