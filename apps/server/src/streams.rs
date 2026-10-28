@@ -214,11 +214,16 @@ fn fit(s: &MediaStream, out: &dyn AudioOut, default_audio: Option<&MediaStream>)
         let text = text.to_lowercase();
         text.contains("atmos") || text.contains("dts:x")
     });
+    // Passed through, the receiver decodes it: the player's own channels
+    // (what it outputs as PCM, 2.0 behind an optical or ARC receiver) don't
+    // limit it. A 2.0 player passing AC-3 through had its stereo mix chosen
+    // over the AC-3 5.1 the receiver would have played.
+    let passed = out.passes_through(&s.codec);
     let sound = Sound {
-        channels: out.channels().map_or(channels, |most| channels.min(most)),
-        native: out.channels().is_none_or(|most| channels <= most),
+        channels: if passed { channels } else { out.channels().map_or(channels, |most| channels.min(most)) },
+        native: passed || out.channels().is_none_or(|most| channels <= most),
         lossless,
-        objects: objects && out.passes_through(&s.codec),
+        objects: objects && passed,
         bitrate: s.bitrate.unwrap_or(0),
     };
     (true, sound)
@@ -881,6 +886,18 @@ mod tests {
         // A player that switches tracks itself takes the 5.1.
         let switching = Player { switches: true, ..SAFARI };
         assert_eq!(resolve(None, &NONE, &streams, Some(&switching)).audio, Some(2));
+    }
+
+    #[test]
+    fn a_receiver_behind_a_stereo_output_gets_what_it_decodes() {
+        // Kodi or a TV box set to 2.0 (its PCM output) with Dolby Digital
+        // passed through to a receiver on optical or ARC: the AC-3 5.1, not
+        // the stereo mix, nor the TrueHD decoded and folded down.
+        let arc =
+            Player { decodes: &["aac", "truehd"], passes: &["ac3"], switches: true, channels: Some(2), v1: false };
+        assert_eq!(resolve(None, &NONE, &film(), Some(&arc)).audio, Some(2));
+        // Without passthrough, stereo as before.
+        assert_eq!(resolve(None, &NONE, &film(), Some(&Player { passes: &[], ..arc })).audio, Some(3));
     }
 
     #[test]
