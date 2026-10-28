@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -141,10 +142,11 @@ internal fun rememberSpinning(state: PlayerScreenState): Boolean {
 }
 
 /**
- * Skip Intro or Skip Credits (design spec §3.5): a tonal pill at the bottom
- * right, shown even with the controls hidden, above the seek bar while they
- * show. It steps aside for Up Next and while the seek bar is dragged, and
- * is announced when it appears.
+ * Skip Intro or Skip Credits (design spec §3.5): a quiet pill at the bottom
+ * right, dark and see-through with a faint outline, so it asks little of
+ * the eye over the picture. Shown even with the controls hidden, above the
+ * seek bar while they show. It steps aside for Up Next and while the seek
+ * bar is dragged, and is announced when it appears.
  */
 @Composable
 internal fun BoxScope.SkipButton(state: PlayerScreenState) {
@@ -168,18 +170,19 @@ internal fun BoxScope.SkipButton(state: PlayerScreenState) {
                 // As tall as the player's other buttons (Unlock, the bar's), for a thumb.
                 .heightIn(min = 48.dp)
                 .clip(PleyShape.Pill)
-                .background(PleyColors.Surface3.copy(alpha = 0.92f))
+                .background(Color.Black.copy(alpha = 0.45f))
+                .border(1.dp, PleyColors.Fg.copy(alpha = 0.25f), PleyShape.Pill)
                 .clickable(role = Role.Button) {
                     state.touched()
                     state.controller.skip()
                 }
                 .semantics { liveRegion = LiveRegionMode.Polite }
-                .padding(horizontal = 20.dp),
+                .padding(horizontal = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(last.orEmpty(), style = MaterialTheme.typography.labelLarge, color = PleyColors.Fg)
-            Icon(PleyIcons.ChevronsRight, contentDescription = null, size = 18.dp)
+            Text(last.orEmpty(), style = MaterialTheme.typography.labelMedium, color = PleyColors.Fg.copy(alpha = 0.9f))
+            Icon(PleyIcons.ChevronsRight, contentDescription = null, size = 16.dp, tint = PleyColors.Fg.copy(alpha = 0.9f))
         }
     }
 }

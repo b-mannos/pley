@@ -43,7 +43,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -85,7 +84,6 @@ import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.designsystem.reducedMotion
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.UpNextUi
-import app.pley.android.player.markers.Markers
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.kit.TvPillButton
 import app.pley.android.ui.tv.kit.TvTextButton
@@ -100,11 +98,12 @@ import kotlinx.coroutines.delay
  */
 
 /**
- * Skip Intro / Skip Credits: a pill with its right edge at x = 912, its
- * bottom at y = 489 (or 355 with the controls shown); a 4 dp line along its
- * bottom shrinks over the marker's time left, stepped once a second. It
- * fades out over 150 ms when the marker ends. [visible] says whether it
- * shows; the screen gives it focus.
+ * Skip Intro / Skip Credits: a quiet button, its right edge at x = 912, its
+ * bottom at y = 489 (or 355 with the controls shown). Dark and see-through
+ * with a faint outline over the picture; with the focus, which the screen
+ * gives it, only its outline firms up: no fill of the accent, no growing,
+ * no countdown. It fades out over 150 ms when the marker ends. [visible]
+ * says whether it shows.
  */
 @Composable
 internal fun BoxScope.TvSkipButton(
@@ -117,16 +116,6 @@ internal fun BoxScope.TvSkipButton(
     val label by remember(state) { derivedStateOf { state.value.skipLabel } }
     var lastLabel by remember { mutableStateOf("") }
     label?.let { lastLabel = it }
-    // The share of the marker left, once a second.
-    val share by remember(state) {
-        derivedStateOf {
-            val s = state.value
-            val second = s.positionMs / 1000 * 1000
-            val m = Markers.active(s.markers, s.positionMs) ?: return@derivedStateOf 0f
-            val span = (m.endMs - m.startMs).coerceAtLeast(1)
-            ((m.endMs - second).toFloat() / span).coerceIn(0f, 1f)
-        }
-    }
     AnimatedVisibility(
         visible = visible && label != null,
         modifier = Modifier
@@ -135,13 +124,10 @@ internal fun BoxScope.TvSkipButton(
         enter = fadeIn(tween(SKIP_FADE_MS)),
         exit = fadeOut(tween(SKIP_FADE_MS)),
     ) {
-        val interactions = remember { MutableInteractionSource() }
-        val focused by interactions.collectIsFocusedAsState()
         Button(
             onClick = onSkip,
-            interactionSource = interactions,
             modifier = Modifier
-                .heightIn(min = 48.dp)
+                .heightIn(min = 40.dp)
                 .testTag(TAG_SKIP)
                 .focusRequester(ui.requester(PlayerFocus.Skip))
                 .onFocusChanged { if (it.isFocused) ui.focused = PlayerFocus.Skip else if (ui.focused == PlayerFocus.Skip) ui.focused = null }
@@ -151,35 +137,28 @@ internal fun BoxScope.TvSkipButton(
                     right = FocusRequester.Cancel
                     up = FocusRequester.Cancel
                 }
-                .semantics { liveRegion = LiveRegionMode.Polite }
-                .drawWithContent {
-                    drawContent()
-                    val h = 4.dp.toPx()
-                    val inset = size.height / 2f
-                    val w = (size.width - 2 * inset).coerceAtLeast(0f)
-                    drawRect(
-                        if (focused) PleyColors.OnAccent else PleyColors.Accent,
-                        topLeft = Offset(inset, size.height - h),
-                        size = Size(w * share, h),
-                    )
-                },
+                .semantics { liveRegion = LiveRegionMode.Polite },
             shape = ButtonDefaults.shape(PleyShape.Control),
             colors = ButtonDefaults.colors(
-                containerColor = PleyColors.OnArt,
-                contentColor = PleyColors.Fg,
-                focusedContainerColor = PleyColors.Accent,
-                focusedContentColor = PleyColors.OnAccent,
-                pressedContainerColor = PleyColors.AccentBright,
-                pressedContentColor = PleyColors.OnAccent,
+                containerColor = SkipFill,
+                contentColor = PleyColors.Fg.copy(alpha = 0.85f),
+                focusedContainerColor = SkipFillFocused,
+                focusedContentColor = PleyColors.Fg,
+                pressedContainerColor = SkipFillFocused,
+                pressedContentColor = PleyColors.Fg,
             ),
-            scale = ButtonDefaults.scale(focusedScale = PleyFocus.PILL_SCALE, pressedScale = 1f),
+            scale = ButtonDefaults.scale(focusedScale = 1f, pressedScale = 1f),
             glow = ButtonDefaults.glow(Glow.None, Glow.None, Glow.None),
-            border = ButtonDefaults.border(Border.None, Border.None, Border.None, Border.None, Border.None),
-            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
+            border = ButtonDefaults.border(
+                border = Border(BorderStroke(1.dp, PleyColors.Fg.copy(alpha = 0.25f)), shape = PleyShape.Control),
+                focusedBorder = Border(BorderStroke(2.dp, PleyColors.Fg.copy(alpha = 0.9f)), shape = PleyShape.Control),
+                pressedBorder = Border(BorderStroke(2.dp, PleyColors.Fg), shape = PleyShape.Control),
+            ),
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 2.dp),
         ) {
-            Icon(PleyIcons.ChevronsRight, contentDescription = null, size = 22.dp, tint = LocalContentColor.current)
-            Spacer(Modifier.width(10.dp))
             Text(lastLabel, style = PleyType.Tv.Label)
+            Spacer(Modifier.width(8.dp))
+            Icon(PleyIcons.ChevronsRight, contentDescription = null, size = 18.dp, tint = LocalContentColor.current)
         }
     }
 }
@@ -501,6 +480,10 @@ private const val BUFFERING_DELAY_MS = 500L
 private const val UP_NEXT_IMAGE_WIDTH = 640
 private val UP_NEXT_WIDTH = 300.dp
 private val UP_NEXT_IMAGE_HEIGHT = 169.dp
+
+/** Skip's fill: the picture shows through, as Skip asks for little of the eye. */
+private val SkipFill = Color.Black.copy(alpha = 0.45f)
+private val SkipFillFocused = Color.Black.copy(alpha = 0.6f)
 
 /** Skip's bottom edge, from the bottom of the 540 dp canvas: y = 489 hidden, 355 with the controls. */
 private val SKIP_BOTTOM_HIDDEN = (540 - 489).dp
