@@ -377,6 +377,47 @@ Forced in the track menus. The Subtitles panel's sync row moves the
 subtitles in 0.1 s steps, up to 10 s either way, kept for each file on
 the TV and never sent to the server.
 
+Quality follows [QUALITY.md](QUALITY.md): the player's Quality panel and
+Settings → Playback → Quality list Original, Automatic, 30 and 15 Mbps
+4K, then 1080p and below, and Automatic is the default until a quality
+is picked. Settings saved before Automatic held Original whether it was
+picked or not, so a saved Original counts only once a quality has been
+picked on the TV since (`pley.qualityPicked`). Automatic's decisions are
+`player/autoquality.ts`, the same as the web player's; the controller
+feeds it on its half-second tick, while it is meant to play and not
+within 2 s of a seek of its own:
+
+- Waits: the engine buffering while it played, as Info's Stalls counts
+  them; a pause, a seek or a new session isn't one.
+- Delivery: from what the engine has loaded ahead (`bufferedMs`) on LG.
+  AVPlay only knows the position (`knowsBuffer: false`), so on Samsung
+  waits alone tell a slow network.
+- The network's speed: AVPlay's `CURRENT_BANDWIDTH` for a stream on
+  Samsung; on LG, which says nothing of it, how fast the buffer fills
+  while it grows (seconds loaded a second times the bitrate), which is
+  at least what the network carries. Steps back up need one or the other.
+- Decoding: the original that drops frames or fails falls back to the
+  server's quality once, as before (the recovery ladder); dropped frames
+  in a conversion, where the engine counts them, step Automatic down.
+  Neither TV's engine counts frames yet, so on a TV that is the
+  fallbacks' alone.
+
+The slow network is kept for 30 minutes per TV and server
+(`pley.autoQuality.<server>`), so Up Next, and the playback that starts
+again when the TV shows the app again, begin where it left off. A step
+down says so in the player's toast; the Quality row's value reads
+"Automatic · 8 Mbps 1080p", Automatic's row says why under it, and so
+does Info. Picking Automatic again starts afresh at the original.
+
+The web player (`apps/web/src/player`) does the same, with what a
+browser tells: waits from the element's `waiting` and `playing` events
+(not after a seek or a new session until it plays, not while the tab is
+hidden), delivery from its buffered ranges once a second, the network's
+speed from hls.js's segment loads (bytes over the time each took) or, for
+a direct play, the buffer's fill rate. Its slow network is kept in the
+browser for the server it was loaded from (`pley.autoQuality`), and its
+notice shows over the picture for 4 s.
+
 Signing in, finding the server on the network (a sweep of the TV's own
 subnet), the player's keys and panels, and the offline behaviour follow
 the Android TV app; `docs/API.md` has the server's side (built-in OAuth
