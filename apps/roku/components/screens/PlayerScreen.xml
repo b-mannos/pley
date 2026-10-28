@@ -23,7 +23,7 @@
     <children>
         <Rectangle width="1920" height="1080" color="0x000000FF" />
         <Video id="video" width="1920" height="1080">
-            <SkipButton id="skip" translation="[1464, 900]" visible="false" />
+            <SkipButton id="skip" translation="[1544, 924]" visible="false" />
         </Video>
         <Label id="loading" translation="[0, 500]" width="1920" horizAlign="center" text="Loading…" color="0xA1A9B6FF" font="font:MediumSystemFont" />
         <Group id="upNext" translation="[0, 700]" visible="false">

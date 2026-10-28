@@ -11,7 +11,13 @@
     </interface>
     <script type="text/brightscript" uri="pkg:/components/items/SkipButton.brs" />
     <children>
-        <Rectangle width="360" height="84" color="0x38BDF8FF" />
-        <Label id="label" width="360" height="84" horizAlign="center" vertAlign="center" color="0x16191EFF" font="font:MediumBoldSystemFont" />
+        <!-- Quiet over the picture: dark and see-through inside a light
+             outline, which it always has, holding the focus while it shows. -->
+        <Rectangle width="280" height="60" color="0x000000A6" />
+        <Rectangle width="280" height="2" color="0xE9EBEFE6" />
+        <Rectangle translation="[0, 58]" width="280" height="2" color="0xE9EBEFE6" />
+        <Rectangle translation="[0, 2]" width="2" height="56" color="0xE9EBEFE6" />
+        <Rectangle translation="[278, 2]" width="2" height="56" color="0xE9EBEFE6" />
+        <Label id="label" width="280" height="60" horizAlign="center" vertAlign="center" color="0xE9EBEFFF" font="font:SmallSystemFont" />
     </children>
 </component>
