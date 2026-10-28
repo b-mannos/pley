@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -201,6 +202,11 @@ internal fun TvServersContent(
             ) {
                 items(rows, key = { it.url }, contentType = { "server" }) { row ->
                     val first = row.url == rows.first().url
+                    val requester = remember { FocusRequester() }
+                    DisposableEffect(row.url) {
+                        rowFocus[row.url] = requester
+                        onDispose { if (rowFocus[row.url] === requester) rowFocus.remove(row.url) }
+                    }
                     TvServerRow(
                         row = row,
                         connecting = state.busy == row.url,
@@ -211,7 +217,7 @@ internal fun TvServersContent(
                             null
                         },
                         modifier = (if (first) Modifier.focusRequester(firstRow) else Modifier)
-                            .focusRequester(rowFocus.getOrPut(row.url) { FocusRequester() }),
+                            .focusRequester(requester),
                     )
                 }
             }
