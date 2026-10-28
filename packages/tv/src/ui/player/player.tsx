@@ -4,7 +4,6 @@ import { initMusic } from "../../player/music";
 import { PlaybackController, type PlayerEnv, type SavedPlayback } from "../../player/controller";
 import { T } from "../../player/details";
 import type { PlayRequest } from "../../player/plan";
-import { activeMarker } from "../../player/markers";
 import type { Marker } from "../../api/types";
 import { thumbnailAt, sheetPath } from "../../player/nextup";
 import { badgeText, MEDIA_STEP_MS, Seeker, STEP_MS } from "../../player/seeker";
@@ -110,7 +109,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
   const ui = useUi();
   const c = p.controller;
   const s = c.state.value;
-  // The clock ticks twice a second: what follows it (the times, the scrubber, Skip's bar) reads it itself, so the rest isn't drawn again.
+  // The clock ticks twice a second: what follows it (the times, the scrubber) reads it itself, so the rest isn't drawn again.
   const clockNow = () => c.clock.peek();
   const shown = c.subs.value;
   const settings = app.settings.value;
@@ -511,10 +510,9 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
       {readoutShown && <CompactReadout state={s} controller={c} stats={engineStats} />}
       {skipShown && (
         <G kind="row" class={`skip-box${controls ? " lifted" : ""}`}>
-          <F class="skip-pill t-label" fid="skip" label={s.skipLabel!} onSelect={() => c.skip()}>
-            <Icon name="chevrons-right" size={22} />
-            <span style="margin-left:10px">{s.skipLabel}</span>
-            <SkipBar controller={c} markers={s.markers} />
+          <F class="skip-pill t-caption" fid="skip" label={s.skipLabel!} onSelect={() => c.skip()}>
+            <span>{s.skipLabel}</span>
+            <span style="margin-left:8px;display:flex"><Icon name="chevrons-right" size={18} /></span>
           </F>
         </G>
       )}
@@ -647,15 +645,6 @@ function EndsAt(p: { controller: PlaybackController; hours24: boolean }) {
   if (clock.durationMs <= 0) return null;
   const end = new Date(Date.now() + Math.max(0, clock.durationMs - clock.positionMs));
   return <div class="t-label c-muted">{`Ends at ${formatTimeOfDay(end, p.hours24)}`}</div>;
-}
-
-/** What's left of the intro or credits, in whole seconds: Skip's bar shrinks with it, once a second. */
-function SkipBar(p: { controller: PlaybackController; markers: Marker[] }) {
-  const pos = p.controller.clock.value.positionMs;
-  const m = activeMarker(p.markers, pos);
-  if (!m) return null;
-  const left = Math.ceil(Math.max(0, m.end_ms - pos) / 1000) / Math.max(1, Math.ceil((m.end_ms - m.start_ms) / 1000));
-  return <div class="skip-bar" style={`transform:scaleX(${left})`} />;
 }
 
 /** The scrubber: played, buffered, chapter gaps, the thumb at the seek target (else where it plays), the marker's name under it. */
