@@ -94,6 +94,8 @@ const PREFETCHES_KEPT: usize = 512;
 /// The transcoder's last lines on its error output kept, to say why it
 /// went (an error report with its causes takes a few).
 const LAST_WORDS: usize = 12;
+/// How often background work waiting for transcodes asks again.
+pub const TRANSCODING_LOOK: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 struct ManagedSpec {
@@ -438,6 +440,20 @@ impl Transcoder {
 
     pub async fn status(&self) -> TranscoderResult<TranscoderStatus> {
         self.get_json("/v1/status", Duration::from_secs(10)).await
+    }
+
+    /// Whether the transcoder is transcoding now: a playback's FFmpeg or a
+    /// download being converted. Background work waits until it isn't (the
+    /// transcoder pauses its own meanwhile). `false` when it can't say.
+    pub async fn transcoding(&self) -> bool {
+        self.is_available() && self.status().await.is_ok_and(|s| s.running_processes > 0)
+    }
+
+    /// Resolves once the transcoder isn't transcoding (see [`Transcoder::transcoding`]).
+    pub async fn not_transcoding(&self) {
+        while self.transcoding().await {
+            tokio::time::sleep(TRANSCODING_LOOK).await;
+        }
     }
 
     /// The job's media playlist (`index.m3u8`).

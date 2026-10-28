@@ -564,8 +564,9 @@ half-made ones are deleted.
 what Chromaprint analyses. Each value covers 1365 samples (0.124 s) and is
 returned as a plain number. The pley server compares the fingerprints of
 episodes to find shared intros and credits. Requests run two at a time, at
-below-normal process priority, and pause while a playback starts (see
-*Background work and playback*), so they never slow down playback. Whether the
+below-normal process priority, and pause while a playback starts or a
+transcode runs (see *Background work and playback*), so they never slow down
+playback. Whether the
 FFmpeg build includes Chromaprint is reported as `capabilities.chromaprint`.
 
 `POST /v1/frames` decodes only the key frames of part of the first video
@@ -623,6 +624,18 @@ counts the time it ran. A playback starts:
 - for `ms` after `POST /v1/hold`, which the pley server sends for a direct
   play (10 s): it serves those itself.
 
+Transcodes come first too. While a job's FFmpeg or a conversion runs (it
+holds a transcode slot, `running_processes`; a job's FFmpeg paused far
+ahead of its player still counts, one stopped for an idle player doesn't),
+the same runs wait and are paused, until 5 s after the last one ends, so a
+seek's restart doesn't let them through. Probes and reading ahead wait for
+starts only: they read little, and new files or the next playback
+shouldn't wait for a film to end. The pley server waits for transcodes as
+well before it asks for seek previews or fingerprints.
+
+Background runs and conversions start at below-normal process priority
+(`nice` 10 on Linux), a job's FFmpeg at normal priority.
+
 `/v1/status` counts the runs paused now (`background_paused`).
 
 ## Metrics
@@ -633,7 +646,7 @@ counts the time it ran. A playback starts:
   produced and served, bytes served, probes (with total probe time),
   thumbnails, subtitle extractions, keyframe scans
 - running and hardware processes against their limits
-- background FFmpeg runs paused for a starting playback
+- background FFmpeg runs paused for playback
 - work-dir disk usage
 - per job: state, video and audio plans (input → output, encoder, decoder,
   tone mapper), ffmpeg progress (fps, speed, bitrate, position, dropped and

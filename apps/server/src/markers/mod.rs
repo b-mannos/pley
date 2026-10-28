@@ -22,7 +22,9 @@
 //! the worker's next turn). A season being watched goes first, during
 //! playback (the transcoder holds it back while a playback starts), one
 //! request at a time: the episodes playing before the rest of it, and their
-//! players are told when they have markers.
+//! players are told when they have markers. Nothing is analysed while
+//! something is being transcoded (a playback's or a download's): the
+//! transcoder pauses what it was making until it is done.
 
 #[cfg(test)]
 mod eval;
@@ -44,7 +46,7 @@ use crate::events::{EventBus, ServerEvent};
 use crate::library::{LibraryKind, get_library};
 use crate::playback::{QUIET_BEFORE_BACKGROUND_SECS, Sessions};
 use crate::settings::SettingsStore;
-use crate::transcoder::{Transcoder, TranscoderError};
+use crate::transcoder::{TRANSCODING_LOOK, Transcoder, TranscoderError};
 use crate::util::now;
 use matcher::{MatchParams, consensus, shared_run};
 
@@ -706,21 +708,27 @@ impl MarkerService {
 
     /// Background work: playback has the machine to itself, except for the
     /// markers of what plays (which the transcoder holds back while a
-    /// playback starts).
+    /// playback starts). Transcodes come first, even for those.
     async fn wait_turn(&self, watched: bool) -> Result<(), FpError> {
-        while !watched && self.sessions.quiet_for() < QUIET_BEFORE_BACKGROUND_SECS {
-            if !self.watched.lock().is_empty() {
+        loop {
+            let quiet = watched || self.sessions.quiet_for() >= QUIET_BEFORE_BACKGROUND_SECS;
+            if quiet && !self.transcoder.transcoding().await {
+                return Ok(());
+            }
+            if !watched && !self.watched.lock().is_empty() {
                 return Err(FpError::Preempted);
             }
-            let _ = tokio::time::timeout(Duration::from_secs(15), self.wake.notified()).await;
+            let look = if quiet { TRANSCODING_LOOK } else { Duration::from_secs(15) };
+            let _ = tokio::time::timeout(look, self.wake.notified()).await;
         }
-        Ok(())
     }
 
     /// What `request` answers once it is this work's turn (see
     /// [`MarkerService::wait_turn`]). Library work that a playback starting
     /// interrupts (dropping the request stops the transcoder's FFmpeg) is
-    /// asked again at its next turn; the markers of what plays go on.
+    /// asked again at its next turn; the markers of what plays go on. A
+    /// transcode beginning meanwhile pauses the transcoder's FFmpeg instead:
+    /// held past the request's time, it is asked again too.
     async fn in_turn<T, F: Future<Output = Result<T, TranscoderError>>>(
         &self,
         watched: bool,
@@ -730,7 +738,13 @@ impl MarkerService {
             self.wait_turn(watched).await?;
             let starts = self.sessions.starts();
             tokio::select! {
-                result = request() => return Ok(result),
+                result = request() => {
+                    let timed_out = matches!(&result, Err(TranscoderError::Http(err)) if err.is_timeout());
+                    if !timed_out || !self.transcoder.transcoding().await {
+                        return Ok(result);
+                    }
+                    tracing::debug!("intro/credits detection put off: something is being transcoded");
+                }
                 () = self.sessions.started_since(starts), if !watched => {
                     tracing::debug!("intro/credits detection put off: a playback is starting");
                 }

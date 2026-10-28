@@ -2,11 +2,13 @@
 //! chapter images cut from them. The transcoder makes the sprite sheets; they
 //! are kept in the file's media folder ([`crate::store`]), so they follow the
 //! file when it is moved or renamed. Files are done one at a time in the
-//! background: first the titles people open (unless the server is busy
-//! transcoding, a playback is starting, or the title itself is playing),
+//! background: first the titles people open (unless something is being
+//! transcoded, a playback is starting, or the title itself is playing),
 //! then whole libraries after scans
 //! when the setting allows, only while nothing plays. A playback that starts
-//! while previews are being made stops them; they are made again later.
+//! while previews are being made stops them; they are made again later. A
+//! download being converted meanwhile pauses them (the transcoder holds its
+//! FFmpeg until the conversion is done).
 //!
 //! Chapter images and Plex's BIF index (`index-sd.bif`) are cut from the
 //! sprite sheets, so they cost no extra decoding of the video.
@@ -27,11 +29,9 @@ use crate::db::Db;
 use crate::playback::{QUIET_BEFORE_BACKGROUND_SECS, Sessions};
 use crate::settings::SettingsStore;
 use crate::store::Store;
-use crate::transcoder::Transcoder;
+use crate::transcoder::{Transcoder, TranscoderError};
 use crate::util::now;
 
-/// Previews wait while this many transcodes run.
-const BUSY_TRANSCODES: usize = 2;
 /// How often a waiting worker looks again.
 const IDLE_LOOK: Duration = Duration::from_secs(15);
 /// Quality of chapter images and BIF frames cut from the sheets.
@@ -250,9 +250,8 @@ impl TrickplayService {
                 }
                 continue;
             };
-            while self.sessions.active_transcodes() >= BUSY_TRANSCODES {
-                tokio::time::sleep(IDLE_LOOK).await;
-            }
+            // Transcodes come first, a playback's or a download's.
+            self.transcoder.not_transcoding().await;
             if self.sessions.starting_for().is_some() {
                 self.requeue(file_id, opened);
                 continue;
@@ -307,7 +306,11 @@ impl TrickplayService {
         let info = match self.transcoder.trickplay(&file.path).await {
             Ok(info) => info,
             Err(err) => {
-                self.failed.lock().insert(file.id, fingerprint);
+                // Not a request that timed out while transcodes held it:
+                // only what the transcoder couldn't make.
+                if matches!(err, TranscoderError::Api { .. }) {
+                    self.failed.lock().insert(file.id, fingerprint);
+                }
                 return Err(err.into());
             }
         };

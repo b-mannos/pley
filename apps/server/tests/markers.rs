@@ -7,7 +7,7 @@ mod common;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::Json;
@@ -16,7 +16,7 @@ use axum::extract::State;
 use axum::routing::{get, post};
 use pley_transcoder_api::{
     API_VERSION, Capabilities, Chapter, Fingerprint, FingerprintRequest, MediaInfo, MediaStream, ProbeRequest,
-    StreamKind, TranscoderInfo,
+    StreamKind, TranscoderInfo, TranscoderStatus,
 };
 use serde_json::{Value, json};
 
@@ -95,8 +95,12 @@ fn probe(path: &str) -> MediaInfo {
     }
 }
 
-async fn start_transcoder() -> (Arc<AtomicUsize>, String) {
+/// The stand-in: how many fingerprints it made, and how many transcodes it
+/// says run (`/v1/status`).
+async fn start_transcoder() -> (Arc<AtomicUsize>, Arc<AtomicU32>, String) {
     let fingerprints = Arc::new(AtomicUsize::new(0));
+    let transcoding = Arc::new(AtomicU32::new(0));
+    let running = transcoding.clone();
     let app = Router::new()
         .route(
             "/v1/info",
@@ -117,22 +121,35 @@ async fn start_transcoder() -> (Arc<AtomicUsize>, String) {
             }),
         )
         .route("/v1/keyframes", post(|| async { axum::http::StatusCode::ACCEPTED }))
+        .route(
+            "/v1/status",
+            get(move || {
+                let running_processes = running.load(Ordering::SeqCst);
+                async move { Json(TranscoderStatus { running_processes, ..Default::default() }) }
+            }),
+        )
         .with_state(fingerprints.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr: SocketAddr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    (fingerprints, format!("http://{addr}"))
+    (fingerprints, transcoding, format!("http://{addr}"))
 }
 
 async fn world() -> (TestApp, Arc<AtomicUsize>, String) {
-    let (fingerprints, base) = start_transcoder().await;
+    let (app, fingerprints, _, admin) = world_transcoding().await;
+    (app, fingerprints, admin)
+}
+
+/// [`world`], and how many transcodes the stand-in says run.
+async fn world_transcoding() -> (TestApp, Arc<AtomicUsize>, Arc<AtomicU32>, String) {
+    let (fingerprints, transcoding, base) = start_transcoder().await;
     let app = TestApp::with_config(|c| c.transcoder_url = Some(base)).await;
     app.state.transcoder.start();
     assert!(app.state.transcoder.wait_ready(Duration::from_secs(10)).await);
     let admin = app.setup_admin().await;
     app.put("/api/settings", &admin, json!({"seek_previews": false})).await;
     app.state.markers.start();
-    (app, fingerprints, admin)
+    (app, fingerprints, transcoding, admin)
 }
 
 /// The markers of an item once the background worker stored `count` of them.
@@ -292,4 +309,30 @@ async fn the_season_playing_goes_first() {
     // The season it pushed aside waits for quiet again.
     let lone = app.get(&format!("/api/items/{}", second["Episode 1"]), &admin).await;
     assert_eq!(lone.body["markers"], json!([]));
+}
+
+#[tokio::test]
+async fn nothing_is_fingerprinted_while_something_is_transcoded() {
+    let (app, fingerprints, transcoding, admin) = world_transcoding().await;
+    // A download being converted, say.
+    transcoding.store(1, Ordering::SeqCst);
+    for e in 1..=3 {
+        app.media_file(&format!("tv/Show (2020)/Season 01/Show - S01E{e:02}.mkv"), 1024);
+    }
+    let tv = app.library(&admin, "TV", "shows", "tv").await;
+    let show = app.ids(tv, &admin).await["Show"];
+    let seasons = app.children(show, &admin).await;
+    let first = app.children(seasons["Season 1"], &admin).await;
+
+    // Not even the season being watched.
+    let play = json!({"item_id": first["Episode 1"], "caps": {}, "mode": "direct", "client_id": "tv"});
+    let reply = app.post("/api/playback", &admin, play).await;
+    assert_eq!(reply.status, axum::http::StatusCode::OK, "{:?}", reply.body);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(fingerprints.load(Ordering::SeqCst), 0, "it waits");
+
+    // Once the transcode is done, it goes on.
+    transcoding.store(0, Ordering::SeqCst);
+    let e1 = markers_soon(&app, &admin, first["Episode 1"], 2).await;
+    assert_eq!(summary(&e1[0]).0, "intro");
 }

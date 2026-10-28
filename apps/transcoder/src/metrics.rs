@@ -79,7 +79,7 @@ pub fn render_prometheus(status: &TranscoderStatus) -> String {
         ("max_jobs", "Maximum concurrent transcode processes", status.max_jobs as f64),
         ("jobs", "Transcode jobs (sessions) currently known", status.jobs.len() as f64),
         ("work_dir_bytes", "Disk space used by segments and caches", status.work_dir_bytes as f64),
-        ("background_paused", "Background ffmpeg runs paused for a starting playback", status.background_paused as f64),
+        ("background_paused", "Background ffmpeg runs paused for playback", status.background_paused as f64),
     ];
     for (name, help, value) in gauges {
         let _ = writeln!(out, "# HELP pley_transcoder_{name} {help}");

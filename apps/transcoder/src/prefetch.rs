@@ -135,7 +135,7 @@ impl Prefetcher {
     }
 
     fn starting(&self) -> bool {
-        self.jobs.created_within(YIELD) || self.jobs.background.held()
+        self.jobs.created_within(YIELD) || self.jobs.background.starting()
     }
 }
 
@@ -169,7 +169,7 @@ impl Stop {
         self.dropped.load(Ordering::Relaxed)
             || Instant::now() >= self.deadline
             || self.jobs.creations() != self.creations
-            || self.jobs.background.held()
+            || self.jobs.background.starting()
     }
 }
 

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-Restricted
 //! Seek-bar preview thumbnails ("trickplay"): one small frame every few
 //! seconds, tiled into JPEG sprite sheets. Only keyframes are decoded, so even
-//! a long film takes seconds to a minute (paused while a playback starts, see
-//! [`crate::background`]); HDR and Dolby Vision are tone-mapped
-//! so previews look like the transcoded picture. Results are cached per file
+//! a long film takes seconds to a minute (paused while a playback starts or a
+//! transcode runs, see [`crate::background`]); HDR and Dolby Vision are
+//! tone-mapped so previews look like the transcoded picture. Results are cached per file
 //! version until every sheet has been fetched (the server keeps its own copy),
 //! or for a day (see `cache.rs`).
 

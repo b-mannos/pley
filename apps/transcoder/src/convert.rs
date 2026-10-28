@@ -3,7 +3,8 @@
 //! run at full speed (a converted download, for a device that doesn't play
 //! the original as it is). One runs at a time, in a transcode slot like a
 //! job's process (hardware when a session is free), so playback keeps the
-//! others. Asked again for the same input and request, the same conversion
+//! others; background work waits for it as for a job ([`crate::background`]).
+//! Asked again for the same input and request, the same conversion
 //! answers, or the file it made. The files live in `conversions/` under the
 //! work folder, which the janitor prunes ([`crate::cache`]); reading one
 //! counts as using it. One left waiting while nobody asks about it isn't
@@ -478,6 +479,7 @@ fn progress_of(out_time_us: f64, duration_ms: i64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::background::Background;
     use pley_transcoder_api::{AudioRequest, VideoRequest};
 
     fn request(max_height: u32) -> JobRequest {
@@ -581,7 +583,7 @@ mod tests {
         });
         let metrics = Arc::new(crate::metrics::Metrics::default());
         let prober = Arc::new(Prober::new(ff.clone(), metrics, 1));
-        let slots = Arc::new(Slots::new(&Limits { max_jobs: 2, max_hw_jobs: 0 }));
+        let slots = Arc::new(Slots::new(&Limits { max_jobs: 2, max_hw_jobs: 0 }, Background::new()));
         let conversions = Conversions::new(ff, prober, slots, None, dir.path().join("conversions"));
         let req = JobRequest {
             input: source.to_string_lossy().into_owned(),
@@ -679,7 +681,8 @@ mod tests {
         });
         let metrics = Arc::new(crate::metrics::Metrics::default());
         let prober = Arc::new(Prober::new(ff.clone(), metrics, 1));
-        let slots = Arc::new(Slots::new(&Limits { max_jobs: 2, max_hw_jobs: 0 }));
+        let background = Background::new();
+        let slots = Arc::new(Slots::new(&Limits { max_jobs: 2, max_hw_jobs: 0 }, background.clone()));
         let conversions = Conversions::new(ff, prober, slots.clone(), None, dir.path().join("conversions"));
         let req = JobRequest {
             input: source.to_string_lossy().into_owned(),
@@ -706,6 +709,7 @@ mod tests {
         assert_eq!(status.progress, 1.0);
         assert_eq!(status.video.as_ref().map(|v| v.mode), Some(VideoMode::Copy));
         assert_eq!(slots.counts(), (0, 0), "its slot is given back");
+        assert!(background.held(), "background work waited for it, and waits a moment longer");
 
         let file = conversions.file(&id).unwrap();
         assert_eq!(std::fs::metadata(&file).unwrap().len(), status.size.unwrap());
@@ -790,7 +794,7 @@ mod tests {
         });
         let metrics = Arc::new(crate::metrics::Metrics::default());
         let prober = Arc::new(Prober::new(ff.clone(), metrics, 1));
-        let slots = Arc::new(Slots::new(&Limits { max_jobs: 2, max_hw_jobs: 0 }));
+        let slots = Arc::new(Slots::new(&Limits { max_jobs: 2, max_hw_jobs: 0 }, Background::new()));
         let conversions = Conversions::new(ff, prober, slots, None, dir.path().join("conversions"));
         // Another conversion's turn.
         let turn = conversions.turn.clone().acquire_owned().await.unwrap();

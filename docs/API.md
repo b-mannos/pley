@@ -1182,7 +1182,7 @@ queue.
 | GET | `/api/media/{key}/{file}` | – | a keyed session's media, for a player that can't send the Authorization header: `master.m3u8`, `index.m3u8` and `{n}.ts` of a stream, `file.{ext}` of a direct play (see [Keyed URLs](#keyed-urls)). No token |
 | GET | `/api/files/{id}/subtitles/{index}.vtt` | query: `offset_ms` | WebVTT (text subtitles; extracted/converted on demand and cached). `offset_ms` moves every cue that much later (earlier when negative, never before 0; at most ±600000), for players that can't move a track themselves (Roku's subtitle sync); `400` when it isn't a whole number. Any embedded track may come partial: one still being read out of its file comes with the cues found so far and `X-Pley-Complete: 0` (not cached), so check that header and ask again for the rest. A Matroska file's track usually comes whole at once, read through its Cues when they list it. Requests for a subtitle file being converted share that conversion, which goes on (to the cache) when they stop waiting; one that failed is tried again on the next request |
 | GET | `/api/files/{id}/subtitles/{index}.mks` | – | a picture subtitle track (PGS, VobSub with its palette, DVB; in the file or a file next to it) copied as it is into a Matroska file of its own (`video/x-matroska`), for players that show it next to an HLS stream instead of having it drawn onto the video (`picture_subtitles_sideload`). Its times are the original's from the start of the file, so it lines up with the playback position (an HLS stream started at a seek point included). Made once per file version by the transcoder (which reads the whole file for it), cached, then served with `Range` support. `404` for a text track or anything but subtitles; `503` with a transcoder too old to make it |
-| GET | `/api/files/{id}/trickplay` | – | `{ id, interval_ms, width, height, columns, rows, count, sheets }` seek-bar previews; `404` while they are being made (asking, or opening the item, queues them). They are made one file at a time, never during a playback's first 30 s: a playback that starts puts off the file being done, which is made again later |
+| GET | `/api/files/{id}/trickplay` | – | `{ id, interval_ms, width, height, columns, rows, count, sheets }` seek-bar previews; `404` while they are being made (asking, or opening the item, queues them). They are made one file at a time, never during a playback's first 30 s nor while anything is transcoded: a playback that starts puts off the file being done, which is made again later |
 | GET | `/api/files/{id}/trickplay/{n}.jpg?v={id}` | – | sprite sheet `n`: thumbnail `k` is at column `k % columns`, row `k / columns` of sheet `k / (columns × rows)` and shows the video at `k × interval_ms` |
 | GET | `/api/files/{id}/chapters/{n}.jpg` | – | picture of chapter `n` (0-based), cut from the seek previews (a few seconds into the chapter); `404` until the file has previews |
 
@@ -1620,7 +1620,8 @@ A background worker analyses one season at a time after library scans (and
 version so improvements re-run automatically. A season that isn't analysed
 yet goes first as soon as one of its episodes plays, during playback: the
 episodes playing first, then the rest, each followed by a `library_changed`
-event so players pick up the markers. It is skipped when
+event so players pick up the markers. Nothing is analysed while something is
+being transcoded (a playback's or a download's), not even that season. It is skipped when
 `detect_markers` is off or the transcoder's FFmpeg lacks Chromaprint (chapters
 are still used).
 

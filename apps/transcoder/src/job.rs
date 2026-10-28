@@ -24,7 +24,7 @@ use tokio::process::ChildStdout;
 use tokio::sync::{Notify, oneshot, watch};
 
 use crate::adaptive;
-use crate::background::{self, Background, Starting};
+use crate::background::{self, Background, Starting, Transcoding};
 use crate::error::{ApiError, ApiResult};
 use crate::extract::Extractor;
 use crate::ffmpeg::Ffmpeg;
@@ -79,17 +79,20 @@ pub struct Slots {
     used: Mutex<(u32, u32)>,
     max: u32,
     max_hw: u32,
+    /// Background work, held while a slot is taken: transcodes come first.
+    background: Arc<Background>,
 }
 
 impl Slots {
-    pub fn new(limits: &Limits) -> Self {
-        Self { used: Mutex::new((0, 0)), max: limits.max_jobs.max(1), max_hw: limits.max_hw_jobs }
+    pub fn new(limits: &Limits, background: Arc<Background>) -> Self {
+        Self { used: Mutex::new((0, 0)), max: limits.max_jobs.max(1), max_hw: limits.max_hw_jobs, background }
     }
 
     /// A process slot, with a hardware session when `want_hw` and one is
     /// free; `None` when every slot is taken.
     pub(crate) fn take(self: &Arc<Self>, want_hw: bool) -> Option<Slot> {
-        self.acquire(want_hw).map(|hw| Slot { slots: self.clone(), hw })
+        let hw = self.acquire(want_hw)?;
+        Some(Slot { slots: self.clone(), hw, _transcoding: self.background.transcode() })
     }
 
     /// Reserve a process slot. Returns whether a hardware session was granted,
@@ -126,6 +129,7 @@ pub(crate) struct Slot {
     slots: Arc<Slots>,
     /// Whether it holds a hardware encoder session.
     pub hw: bool,
+    _transcoding: Transcoding,
 }
 
 impl Drop for Slot {
@@ -349,7 +353,7 @@ impl JobManager {
         background: Arc<Background>,
     ) -> Arc<Self> {
         Arc::new(Self {
-            slots: Arc::new(Slots::new(&limits)),
+            slots: Arc::new(Slots::new(&limits, background.clone())),
             background,
             ff,
             prober,
@@ -1728,8 +1732,11 @@ mod tests {
 
     #[test]
     fn slots_go_back_however_their_holder_ends() {
-        let slots = Arc::new(Slots::new(&Limits { max_jobs: 2, max_hw_jobs: 1 }));
+        let background = Background::new();
+        let slots = Arc::new(Slots::new(&Limits { max_jobs: 2, max_hw_jobs: 1 }, background.clone()));
+        assert!(!background.held());
         let (hardware, software) = (slots.take(true).unwrap(), slots.take(true).unwrap());
+        assert!(background.held(), "background work waits for transcodes");
         assert_eq!((hardware.hw, software.hw), (true, false));
         assert!(slots.take(false).is_none());
         drop(hardware);
@@ -1740,7 +1747,7 @@ mod tests {
 
     #[test]
     fn slots_fall_back_to_software() {
-        let slots = Slots::new(&Limits { max_jobs: 2, max_hw_jobs: 1 });
+        let slots = Slots::new(&Limits { max_jobs: 2, max_hw_jobs: 1 }, Background::new());
         assert_eq!(slots.acquire(true), Some(true));
         assert_eq!(slots.acquire(true), Some(false));
         assert_eq!(slots.acquire(false), None);
@@ -1748,7 +1755,7 @@ mod tests {
         assert_eq!(slots.counts(), (1, 0));
         assert_eq!(slots.acquire(true), Some(true));
         // Releasing more than was taken never underflows.
-        let slots = Slots::new(&Limits { max_jobs: 0, max_hw_jobs: 0 });
+        let slots = Slots::new(&Limits { max_jobs: 0, max_hw_jobs: 0 }, Background::new());
         slots.release(true);
         assert_eq!(slots.counts(), (0, 0));
         assert_eq!(slots.acquire(true), Some(false), "at least one job, in software");
@@ -1848,8 +1855,10 @@ mod tests {
         assert_eq!(jobs.list().len(), 1);
     }
 
-    /// Background work waits while a job is created and until its FFmpeg has
-    /// made its first segments. Needs FFmpeg on the PATH (skipped otherwise).
+    /// A job's start holds even what waits only for starts, while it is
+    /// created and until its FFmpeg has made its first segments; background
+    /// work waits on while the FFmpeg runs. Needs FFmpeg on the PATH (skipped
+    /// otherwise).
     #[tokio::test(flavor = "multi_thread")]
     async fn starting_jobs_hold_background_work() {
         use pley_transcoder_api::{VideoMode, VideoRequest};
@@ -1886,7 +1895,7 @@ mod tests {
             let (background, seen) = (background.clone(), seen.clone());
             async move {
                 loop {
-                    if background.held() {
+                    if background.starting() {
                         seen.store(true, Relaxed);
                     }
                     tokio::time::sleep(Duration::from_millis(1)).await;
@@ -1907,11 +1916,13 @@ mod tests {
         watch.abort();
         assert!(seen.load(Relaxed), "held while the job started");
         let deadline = Instant::now() + Duration::from_secs(5);
-        while background.held() && Instant::now() < deadline {
+        while background.starting() && Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert!(!background.held(), "free once its first segments are out");
+        assert!(!background.starting(), "started once its first segments are out");
         jobs.remove(&created.id).await;
+        tokio::time::sleep(background::AFTER_TRANSCODE + Duration::from_millis(100)).await;
+        assert!(!background.held(), "free once nothing transcodes");
     }
 
     /// A hardware encoder that fails before its first segment hands the job

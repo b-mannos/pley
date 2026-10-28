@@ -4,8 +4,8 @@
 //! the intro and credits they share. And how dark the key frames of part of
 //! a video are, for credits with no audio in common (text on black).
 //! Background work: few at a time, at low process priority, and paused
-//! while a playback starts (see [`crate::background`]), so playback never
-//! waits for it.
+//! while a playback starts or a transcode runs (see [`crate::background`]),
+//! so playback never waits for it.
 
 use std::path::Path;
 use std::sync::Arc;

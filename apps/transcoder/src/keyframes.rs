@@ -6,8 +6,8 @@
 //! tables and fragment headers), read in milliseconds when a job is created.
 //! Other files, or ones whose index can't be trusted, need every packet
 //! header read: that runs in the background one file at a time, out of the
-//! way of starting playbacks (see [`crate::background`]), and jobs transcode
-//! until it is done.
+//! way of playbacks and transcodes (see [`crate::background`]), and jobs
+//! transcode until it is done.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -199,7 +199,7 @@ async fn scan(ff: &Ffmpeg, background: &Background, path: &Path) -> anyhow::Resu
         }
         anyhow::Ok(times)
     };
-    // Paused while a playback starts.
+    // Paused while a playback starts or a transcode runs.
     let (status, times) = tokio::join!(background.supervise(&mut child, SCAN_TIMEOUT), read);
     let (status, mut times) = (status.map_err(|e| anyhow::anyhow!("{e:?}"))?, times?);
     if !status.success() && times.is_empty() {

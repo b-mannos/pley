@@ -9,7 +9,7 @@ mod common;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::extract::{Path, State};
@@ -79,6 +79,8 @@ struct Fake {
     conversions_deleted: Arc<Mutex<Vec<String>>>,
     /// Background holds asked for (ms), in order.
     holds: Arc<Mutex<Vec<u64>>>,
+    /// FFmpeg transcodes running, as `/v1/status` says.
+    transcoding: Arc<AtomicU32>,
 }
 
 /// The stand-in's one conversion: running when asked for, done when looked at again.
@@ -272,7 +274,13 @@ async fn start_fake() -> (Fake, String) {
             "/v1/status",
             get(|State(fake): State<Fake>| async move {
                 let jobs = fake.jobs.lock().iter().map(|(id, (req, n))| job_status(id, req, *n)).collect();
-                Json(TranscoderStatus { version: "9.9.9".into(), max_jobs: 8, jobs, ..Default::default() })
+                Json(TranscoderStatus {
+                    version: "9.9.9".into(),
+                    max_jobs: 8,
+                    running_processes: fake.transcoding.load(Ordering::SeqCst),
+                    jobs,
+                    ..Default::default()
+                })
             }),
         )
         .route(
@@ -1453,6 +1461,31 @@ async fn seek_previews_wait_while_a_playback_starts() {
     assert!(made, "the previews were made");
     assert_eq!(w.fake.previews_dropped.load(Ordering::SeqCst), 1);
     assert_eq!(app.state.trickplay.pending(), 0);
+}
+
+#[tokio::test]
+async fn seek_previews_wait_while_something_is_transcoded() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    app.put("/api/settings", admin, json!({"seek_previews": true})).await;
+    let clip = app.file_of(w.movies["Clip"]).await;
+    // A download being converted, say: no playback, but FFmpeg transcodes.
+    w.fake.transcoding.store(1, Ordering::SeqCst);
+
+    // Opening the clip queues its previews, which wait.
+    assert_eq!(app.get(&format!("/api/items/{}", w.movies["Clip"]), admin).await.status, StatusCode::OK);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(w.fake.previews.lock().is_empty(), "nothing is made while it transcodes");
+    assert_eq!(app.state.trickplay.pending(), 1);
+
+    // Once it is done, they are made.
+    w.fake.transcoding.store(0, Ordering::SeqCst);
+    let asked = std::time::Instant::now();
+    while app.get(&format!("/api/files/{clip}/trickplay"), admin).await.status != StatusCode::OK {
+        assert!(asked.elapsed() < pley::transcoder::TRANSCODING_LOOK * 3, "the previews were made");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(w.fake.previews.lock().len(), 1);
 }
 
 #[tokio::test]

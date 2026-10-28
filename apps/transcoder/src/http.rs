@@ -236,7 +236,7 @@ async fn probe(State(state): Shared, Json(req): Json<ProbeRequest>) -> ApiResult
         return Err(ApiError::NotFound(format!("file not found: {}", req.path)));
     }
     // Library scans ask; jobs probe without asking. A playback starting goes first.
-    state.jobs.background.wait().await;
+    state.jobs.background.wait_for_starts().await;
     let info = state.prober.probe(path).await.map_err(|e| {
         // Only a file ffprobe could not read is a definitive failure; timeouts
         // (sleeping NAS) and start-up problems are worth retrying later.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-Restricted
-//! Background work keeps out of a starting playback's way.
+//! Background work keeps out of the way of playbacks and transcodes.
 //!
 //! Seek previews, audio fingerprints, the key frames of credits, keyframe
 //! scans and library probes read whole files, or long stretches of them, from
@@ -11,8 +11,15 @@
 //! restart) hasn't made its first segments yet, and while the server says a
 //! direct play, which it serves itself, is starting ([`Background::hold`]).
 //!
-//! Starts last seconds ([`MAX_START`] at most), so a paused run only waits:
-//! nothing is lost, and its time limit counts the time it ran.
+//! Transcodes come first too: while a job's FFmpeg or a conversion runs (it
+//! holds a transcode slot, see [`Background::transcode`]), background FFmpeg
+//! runs wait and are paused the same way, until a few seconds after the last
+//! one ends ([`AFTER_TRANSCODE`]). Probes and reading ahead (`prefetch.rs`)
+//! wait only for starts: they read little, and a new file or the next
+//! playback shouldn't wait for a film to end.
+//!
+//! A paused run only waits: nothing is lost, and its time limit counts the
+//! time it ran.
 
 use std::collections::HashMap;
 use std::process::{ExitStatus, Stdio};
@@ -33,6 +40,9 @@ use crate::error::{ApiError, ApiResult};
 pub const MAX_START: Duration = Duration::from_secs(20);
 /// The longest a hold asked for from outside lasts.
 pub const MAX_HOLD: Duration = Duration::from_secs(60);
+/// Background work waits this long after the last transcode ends: a job's
+/// FFmpeg restarting (a seek, another preset) ends one before the next.
+pub const AFTER_TRANSCODE: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 struct State {
@@ -41,12 +51,25 @@ struct State {
     next_id: u64,
     /// Until when the server asked for background work to wait.
     held_until: Option<Instant>,
+    /// Transcodes running (see [`Background::transcode`]).
+    transcodes: usize,
+    /// Until when the last transcode to end holds background work.
+    transcoded_until: Option<Instant>,
 }
 
 impl State {
-    /// When background work may go on again, if it must wait now.
-    fn held_until(&self, now: Instant) -> Option<Instant> {
+    /// When what waits only for starts may go on again, if it must wait now.
+    fn starting_until(&self, now: Instant) -> Option<Instant> {
         self.starts.values().copied().chain(self.held_until).filter(|until| *until > now).max()
+    }
+
+    /// When background work may go on again, if it must wait now. While a
+    /// transcode runs that is unknown: a while from now, and its end says so.
+    fn held_until(&self, now: Instant) -> Option<Instant> {
+        if self.transcodes > 0 {
+            return Some(now + MAX_HOLD);
+        }
+        self.starting_until(now).into_iter().chain(self.transcoded_until.filter(|until| *until > now)).max()
     }
 }
 
@@ -87,9 +110,24 @@ impl Background {
         self.changed.send_replace(());
     }
 
+    /// A transcode runs (a job's FFmpeg, a conversion): background work
+    /// waits until the guard is dropped, and [`AFTER_TRANSCODE`] longer.
+    pub fn transcode(self: &Arc<Self>) -> Transcoding {
+        self.state.lock().transcodes += 1;
+        self.changed.send_replace(());
+        Transcoding { background: self.clone() }
+    }
+
     /// Whether background work must wait now.
+    #[cfg(test)]
     pub fn held(&self) -> bool {
         self.held_until().is_some()
+    }
+
+    /// Whether a playback is starting (or the server asked for a hold): what
+    /// reads little (probes, reading ahead) waits only for that.
+    pub fn starting(&self) -> bool {
+        self.state.lock().starting_until(Instant::now()).is_some()
     }
 
     /// Background processes paused now.
@@ -103,10 +141,20 @@ impl Background {
 
     /// Resolves once background work may go on.
     pub async fn wait(&self) {
+        self.wait_while(State::held_until).await;
+    }
+
+    /// Resolves once no playback is starting (see [`Background::starting`]).
+    pub async fn wait_for_starts(&self) {
+        self.wait_while(State::starting_until).await;
+    }
+
+    async fn wait_while(&self, held: fn(&State, Instant) -> Option<Instant>) {
         let mut changed = self.changed.subscribe();
         // Seen before the look: no change slips in between.
         changed.mark_unchanged();
-        while let Some(until) = self.held_until() {
+        loop {
+            let Some(until) = held(&self.state.lock(), Instant::now()) else { break };
             tokio::select! {
                 _ = changed.changed() => {}
                 () = tokio::time::sleep_until(until) => {}
@@ -114,9 +162,9 @@ impl Background {
         }
     }
 
-    /// Run FFmpeg (or FFprobe) as background work: once nothing starts, and
-    /// paused while something does. Its output and log; an error when it
-    /// fails or runs longer than `timeout`.
+    /// Run FFmpeg (or FFprobe) as background work: once nothing starts or
+    /// transcodes, and paused while something does. Its output and log; an
+    /// error when it fails or runs longer than `timeout`.
     pub async fn run(&self, mut cmd: Command, timeout: Duration) -> ApiResult<(Vec<u8>, String)> {
         self.wait().await;
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -135,8 +183,8 @@ impl Background {
     }
 
     /// Wait for a background process to end, pausing it while a playback
-    /// starts; it is stopped once it has run for `timeout`, paused time not
-    /// counted.
+    /// starts or a transcode runs; it is stopped once it has run for
+    /// `timeout`, paused time not counted.
     pub async fn supervise(&self, child: &mut Child, timeout: Duration) -> ApiResult<ExitStatus> {
         let mut changed = self.changed.subscribe();
         changed.mark_unchanged();
@@ -146,7 +194,7 @@ impl Background {
             let until = self.held_until();
             if until.is_some() != paused.on && pause(child, until.is_some()) {
                 paused.set(until.is_some());
-                let what = if paused.on { "paused: a playback is starting" } else { "resumed" };
+                let what = if paused.on { "paused: playback comes first" } else { "resumed" };
                 tracing::debug!("background process {} {what}", child.id().unwrap_or_default());
             }
             let since = Instant::now();
@@ -181,6 +229,21 @@ pub struct Starting {
 impl Drop for Starting {
     fn drop(&mut self) {
         self.background.state.lock().starts.remove(&self.id);
+        self.background.changed.send_replace(());
+    }
+}
+
+/// A transcode running (see [`Background::transcode`]); over when dropped.
+pub struct Transcoding {
+    background: Arc<Background>,
+}
+
+impl Drop for Transcoding {
+    fn drop(&mut self) {
+        let mut state = self.background.state.lock();
+        state.transcodes = state.transcodes.saturating_sub(1);
+        state.transcoded_until = Some(Instant::now() + AFTER_TRANSCODE);
+        drop(state);
         self.background.changed.send_replace(());
     }
 }
@@ -351,29 +414,55 @@ mod tests {
         child.kill().await.unwrap();
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn transcodes_hold_background_work_until_a_while_after_they_end() {
+        let bg = Background::new();
+        let one = bg.transcode();
+        let two = bg.transcode();
+        assert!(bg.held());
+        assert!(!bg.starting(), "probes and reading ahead go on");
+        tokio::time::timeout(Duration::from_millis(1), bg.wait_for_starts()).await.expect("nothing starts");
+        let waiting = tokio::spawn({
+            let bg = bg.clone();
+            async move { bg.wait().await }
+        });
+        tokio::time::sleep(Duration::from_secs(3 * 3600)).await;
+        assert!(!waiting.is_finished(), "for as long as they run");
+        drop(one);
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        assert!(!waiting.is_finished(), "the other one runs");
+        drop(two);
+        let ended = Instant::now();
+        waiting.await.unwrap();
+        assert_eq!(ended.elapsed().as_secs(), AFTER_TRANSCODE.as_secs(), "a restart's gap doesn't free it");
+        assert!(!bg.held());
+    }
+
     #[cfg(any(windows, target_os = "linux"))]
     #[tokio::test]
-    async fn runs_are_paused_while_a_playback_starts() {
-        let bg = Background::new();
-        let mut child = chatty().spawn().unwrap();
-        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
-        let supervised = tokio::spawn({
-            let bg = bg.clone();
-            async move { bg.supervise(&mut child, Duration::from_secs(3600)).await }
-        });
-        assert!(line_within(&mut lines, Duration::from_secs(10)).await);
-        let start = bg.start();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while bg.paused() == 0 && Instant::now() < deadline {
-            tokio::time::sleep(Duration::from_millis(10)).await;
+    async fn runs_are_paused_while_a_playback_starts_or_a_transcode_runs() {
+        for transcode in [false, true] {
+            let bg = Background::new();
+            let mut child = chatty().spawn().unwrap();
+            let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+            let supervised = tokio::spawn({
+                let bg = bg.clone();
+                async move { bg.supervise(&mut child, Duration::from_secs(3600)).await }
+            });
+            assert!(line_within(&mut lines, Duration::from_secs(10)).await);
+            let hold: Box<dyn std::any::Any> = if transcode { Box::new(bg.transcode()) } else { Box::new(bg.start()) };
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while bg.paused() == 0 && Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert_eq!(bg.paused(), 1, "transcode: {transcode}");
+            while line_within(&mut lines, Duration::from_millis(300)).await {}
+            assert!(!line_within(&mut lines, Duration::from_millis(500)).await, "paused");
+            drop(hold);
+            assert!(line_within(&mut lines, AFTER_TRANSCODE + Duration::from_secs(5)).await, "resumed");
+            assert_eq!(bg.paused(), 0);
+            supervised.abort();
         }
-        assert_eq!(bg.paused(), 1);
-        while line_within(&mut lines, Duration::from_millis(300)).await {}
-        assert!(!line_within(&mut lines, Duration::from_millis(500)).await, "paused");
-        drop(start);
-        assert!(line_within(&mut lines, Duration::from_secs(5)).await, "resumed");
-        assert_eq!(bg.paused(), 0);
-        supervised.abort();
     }
 
     #[cfg(any(windows, target_os = "linux"))]
