@@ -124,6 +124,16 @@ class ProxyTest(unittest.TestCase):
         self.assertEqual((response.status, data), (200, b""))
         self.assertEqual(response.getheader("Content-Type"), "video/x-matroska")
 
+    def test_streams_are_counted_for_automatic(self):
+        from pley.autoquality import Meter
+
+        self.proxy.meter = Meter()
+        response, data = self.ask("GET", "/%s/api/files/7/stream" % SECRET)
+        self.assertEqual(len(data), len(MOVIE))
+        self.ask("GET", "/%s/api/libraries" % SECRET)
+        self.assertEqual([(path, size) for _, path, size, _ in self.proxy.meter.answers], [("/api/files/7/stream", len(MOVIE))], "the API's answers aren't")
+        self.assertAlmostEqual(self.proxy.meter.arriving_kbps("/api/files/7/stream"), len(MOVIE) * 8 / 1000.0 / 20)
+
     def test_a_stream_stopped_on_the_server_is_told(self):
         response, data = self.ask("GET", "/%s/api/playback/s1/12.ts" % SECRET)
         self.assertEqual(response.status, 410)

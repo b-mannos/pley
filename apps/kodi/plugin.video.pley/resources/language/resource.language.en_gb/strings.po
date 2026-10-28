@@ -682,3 +682,11 @@ msgstr ""
 msgctxt "#30211"
 msgid "Kodi signs out of %s."
 msgstr ""
+
+msgctxt "#30212"
+msgid "Automatic"
+msgstr ""
+
+msgctxt "#30213"
+msgid "Playing at %s for a smoother picture"
+msgstr ""

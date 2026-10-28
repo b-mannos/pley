@@ -13,11 +13,15 @@ import time
 import xbmc
 import xbmcgui
 
-from . import api, kodi, listing, tracks
+from . import api, autoquality, kodi, listing, tracks
 from .api import path_in
 
-# The quality setting's choices, as the web player's (apps/web/src/player/quality.ts).
-QUALITIES = [(None, None), (30000, 2160), (20000, 1080), (15000, 2160), (12000, 1080), (8000, 1080), (4000, 720), (2000, 480)]
+# The quality setting (docs/QUALITY.md): a quality's id. Before Automatic
+# it was an index into another order, under another name.
+QUALITY = "video_quality"
+OLD_QUALITY = "quality"
+# Where Automatic keeps the ceiling of a network found slow, for each server.
+CEILING = "auto_ceiling:"
 
 MIME = {
     "mkv": "video/x-matroska",
@@ -53,25 +57,27 @@ def beside(base: str, info: dict) -> list:
     ]
 
 
-def prepare(client: api.Client, base: str, item_id: int, start_ms: int, detail=None) -> xbmcgui.ListItem:
+def prepare(client: api.Client, base: str, item_id: int, start_ms: int, detail=None, restart=None) -> xbmcgui.ListItem:
     """Kodi's item for playing `item_id` from `start_ms`, its address set,
     once the server said how. The item's details (for Kodi's info) are
     asked for while the server decides, unless given. Tells the service
-    what plays (kodi.PLAYING)."""
+    what plays (kodi.PLAYING). `restart` is Automatic's quality when the
+    service plays the title again at another one."""
     started = time.perf_counter()
     details = {"item": detail} if detail else {}
     loader = None
     if not detail:
         loader = threading.Thread(target=load_details, args=(client, item_id, details), daemon=True)
         loader.start()
-    max_bitrate, max_height = QUALITIES[quality_index()]
+    asked = ask(restart)
     request = {
         "item_id": item_id,
         "start_ms": start_ms,
         "client_id": install_id(),
         "caps": report(),
-        "max_bitrate": max_bitrate,
-        "max_height": max_height,
+        "max_bitrate": asked["max_bitrate"],
+        "max_height": asked["max_height"],
+        "mode": asked["mode"],
     }
     # The account's subtitles, when they are pictures: drawn onto the video
     # if the file is converted (the server draws nothing when Kodi shows
@@ -126,6 +132,9 @@ def prepare(client: api.Client, base: str, item_id: int, start_ms: int, detail=N
     if (detail or {}).get("kind") not in listing.MUSIC:
         # The account's audio and subtitles, which the service shows in Kodi.
         playing["tracks"] = tracks.layout(info, file)
+        if asked["automatic"]:
+            # What the service's Automatic watches the playback with.
+            playing["auto"] = automatic(asked, info, file)
     kodi.set_property(kodi.PLAYING, json.dumps(playing))
     reason = info.get("reason")
     elapsed = (time.perf_counter() - started) * 1000
@@ -149,8 +158,92 @@ def load_details(client: api.Client, item_id: int, into: dict) -> None:
         kodi.log("details of %d: %s" % (item_id, e.message), xbmc.LOGWARNING)
 
 
-def quality_index() -> int:
-    return min(max(kodi.setting_int("quality"), 0), len(QUALITIES) - 1)
+def chosen_quality() -> str:
+    """The quality setting's choice. One chosen before Automatic came is
+    carried over, once: Original can't be told from the setting never
+    changed, and becomes Automatic."""
+    old = kodi.setting_int(OLD_QUALITY)
+    if old:
+        carried = autoquality.from_old_index(old)
+        if carried:
+            kodi.set_setting(QUALITY, carried)
+        kodi.set_setting_int(OLD_QUALITY, 0)
+        kodi.log("quality setting carried over: %s" % carried)
+    return autoquality.from_setting(kodi.setting(QUALITY))
+
+
+def ask(restart=None) -> dict:
+    """How the playback is asked for. Original and Automatic let the server
+    choose (the file as it is where it plays); a quality from the settings
+    caps it, and the server converts a file that is over it (one under it
+    plays as it is, as the other apps play a file the quality wouldn't make
+    smaller). Automatic under a ceiling remembered for a slow network
+    starts at the quality under it, the same way; the service's restart
+    at a quality converts."""
+    if restart is not None:
+        max_bitrate, max_height = autoquality.limits(restart)
+        mode = "auto" if restart == autoquality.ORIGINAL else "transcode"
+        return dict(automatic=True, quality=restart, lowered=False, mode=mode, max_bitrate=max_bitrate, max_height=max_height)
+    chosen = chosen_quality()
+    if chosen != autoquality.AUTO:
+        max_bitrate, max_height = autoquality.limits(chosen)
+        return dict(automatic=False, quality=chosen, lowered=False, mode="auto", max_bitrate=max_bitrate, max_height=max_height)
+    start = autoquality.start_quality(ceiling())
+    max_bitrate, max_height = autoquality.limits(start) if start else (None, None)
+    return dict(
+        automatic=True,
+        quality=start or autoquality.ORIGINAL,
+        lowered=start is not None,
+        mode="auto",
+        max_bitrate=max_bitrate,
+        max_height=max_height,
+    )
+
+
+def automatic(asked: dict, info: dict, file) -> dict:
+    """What the service's Automatic needs of a playback: the quality it
+    plays at (the original when the server played the file as it is,
+    under a ceiling it fits), the bitrate that is, the file's bitrate and
+    lines, and the server's own quality for the file."""
+    file = file or {}
+    video = next((s for s in file.get("streams") or [] if s.get("kind") == "video"), None) or {}
+    file_kbps = (file.get("bitrate") or 0) / 1000.0 or None
+    file_lines = file.get("height") or video.get("height") or None
+    quality = asked["quality"]
+    converted = info.get("method") == "transcode"
+    if not converted:
+        quality = autoquality.ORIGINAL
+    cap = info.get("auto_quality")
+    if quality == autoquality.ORIGINAL:
+        playing_kbps = autoquality.kbps_of(cap) if cap and converted else file_kbps
+    else:
+        playing_kbps = autoquality.kbps_of(quality)
+        if file_kbps:
+            playing_kbps = min(playing_kbps, file_kbps)
+    return {
+        "quality": quality,
+        "playing_kbps": playing_kbps,
+        "file_kbps": file_kbps,
+        "file_lines": file_lines,
+        "cap": cap,
+        "lowered": asked["lowered"] and quality != autoquality.ORIGINAL,
+        "server": server_key(),
+        "prefix": autoquality.media_prefix(info["url"]),
+    }
+
+
+def server_key() -> str:
+    return kodi.setting("server_id") or kodi.setting("server_url")
+
+
+def ceiling():
+    """The ceiling Automatic remembers for this server, None past 30 minutes."""
+    return autoquality.remembered_ceiling(kodi.remembered(CEILING + server_key()), time.time())
+
+
+def remember_ceiling(server: str, kbps) -> None:
+    """Remembered for the next titles in Automatic (None forgets it)."""
+    kodi.remember(CEILING + server, autoquality.remember_ceiling(kbps, time.time()) if kbps else "")
 
 
 def install_id() -> str:

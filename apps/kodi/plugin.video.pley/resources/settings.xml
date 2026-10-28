@@ -76,24 +76,33 @@
     </category>
     <category id="playback" label="30043">
       <group id="1">
-        <setting id="quality" type="integer" label="30044">
+        <setting id="video_quality" type="string" label="30044">
           <level>0</level>
-          <default>0</default>
+          <default>auto</default>
           <constraints>
             <options>
-              <option label="30045">0</option>
-              <option label="30046">1</option>
-              <option label="30047">2</option>
-              <option label="30048">3</option>
-              <option label="30049">4</option>
-              <option label="30050">5</option>
-              <option label="30051">6</option>
-              <option label="30052">7</option>
+              <option label="30045">original</option>
+              <option label="30212">auto</option>
+              <option label="30046">30m</option>
+              <option label="30048">15m</option>
+              <option label="30047">20m</option>
+              <option label="30049">12m</option>
+              <option label="30050">8m</option>
+              <option label="30051">4m</option>
+              <option label="30052">2m</option>
             </options>
           </constraints>
           <control type="list" format="string">
             <heading>30044</heading>
           </control>
+        </setting>
+        <!-- The quality before Automatic, an index into the old order:
+             carried over to video_quality once (playback.chosen_quality). -->
+        <setting id="quality" type="integer">
+          <level>4</level>
+          <default>0</default>
+          <visible>false</visible>
+          <control type="edit" format="integer"/>
         </setting>
       </group>
       <group id="2">

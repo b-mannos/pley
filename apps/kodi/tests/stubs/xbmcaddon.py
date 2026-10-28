@@ -29,6 +29,9 @@ class Addon:
     def setSettingString(self, name, value):
         settings[name] = value
 
+    def setSettingInt(self, name, value):
+        settings[name] = int(value)
+
     def getLocalizedString(self, id):
         return localized(id)
 

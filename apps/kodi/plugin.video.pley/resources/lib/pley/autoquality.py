@@ -1,0 +1,438 @@
+"""The quality menu and how Automatic chooses (docs/QUALITY.md), without
+Kodi: what the service sees of the playback goes in, decisions come out.
+
+Automatic plays the original unless it doesn't play well here. Kodi tells
+the service three things about that: whether it is buffering
+(Player.Caching), where the playback is (the position not moving while
+it plays), and how much it has read ahead (JSON-RPC's cachepercentage,
+where the player has a cache). The proxy every stream goes through counts
+what arrives (Meter). Kodi doesn't say how many frames it drops, so a
+device that can't keep up isn't seen here; the server converts what this
+Kodi can't decode before it plays.
+"""
+
+from __future__ import annotations
+
+import collections
+import threading
+import time
+from typing import List, Optional
+
+# The menu, in its order: (id, label, kbps, lines).
+ORIGINAL = "original"
+AUTO = "auto"
+MENU = [
+    (ORIGINAL, "Original", None, None),
+    (AUTO, "Automatic", None, None),
+    ("30m", "30 Mbps 4K", 30000, 2160),
+    ("15m", "15 Mbps 4K", 15000, 2160),
+    ("20m", "20 Mbps 1080p", 20000, 1080),
+    ("12m", "12 Mbps 1080p", 12000, 1080),
+    ("8m", "8 Mbps 1080p", 8000, 1080),
+    ("4m", "4 Mbps 720p", 4000, 720),
+    ("2m", "2 Mbps 480p", 2000, 480),
+]
+IDS = [m[0] for m in MENU]
+DEFAULT = AUTO
+# The setting's order before Automatic (an index): what a choice made then means now.
+OLD_ORDER = [ORIGINAL, "30m", "20m", "15m", "12m", "8m", "4m", "2m"]
+# The lowest Automatic goes, and where it goes knowing nothing of the
+# file or the network.
+FLOOR = "2m"
+BLIND = "8m"
+
+# Rebuffering: one wait this long, or two shorter ones this close.
+LONG_WAIT = 2.0
+SHORT_WAITS_WITHIN = 60.0
+# Delivery: seconds of video arriving per second, over this long; under
+# SLOW for SLOW_FOR seconds with under LOW_AHEAD seconds read ahead, and
+# falling, it is a play issue before a wait.
+DELIVERY_WINDOW = 20.0
+SLOW = 1.1
+SLOW_FOR = 15.0
+LOW_AHEAD = 10.0
+# What a step down keeps of what the network carried.
+MARGIN = 0.75
+# Without a measure of delivery, a step down halves.
+UNKNOWN_DELIVERY = 0.5
+# No change this soon after the last.
+SETTLE = 20.0
+# Back up: after this long without an issue, not this soon after a step
+# down, at most one step this often, when the network carried this much
+# more than the quality up.
+QUIET = 180.0
+AFTER_DOWN = 300.0
+UP_EVERY = 180.0
+HEADROOM = 1.6
+# What Automatic remembers of a network found slow, for the next title.
+REMEMBER_FOR = 30 * 60.0
+# The position moving this much less or more than the time is a seek.
+JUMP = 3.0
+
+
+def label(quality_id: str) -> str:
+    for id_, text, _, _ in MENU:
+        if id_ == quality_id:
+            return text
+    return MENU[0][1]
+
+
+def limits(quality_id: str):
+    """(max_bitrate, max_height) for a quality; (None, None) for Original and Automatic."""
+    for id_, _, kbps, lines in MENU:
+        if id_ == quality_id:
+            return kbps, lines
+    return None, None
+
+
+def kbps_of(quality_id: Optional[str]) -> Optional[int]:
+    return limits(quality_id)[0] if quality_id else None
+
+
+def from_setting(value: str) -> str:
+    """The quality a setting's value names (Automatic for anything else)."""
+    return value if value in IDS else DEFAULT
+
+
+def from_old_index(index: int) -> Optional[str]:
+    """The quality a choice made before Automatic named, None for none.
+    Index 0 was both the default and Original, which can't be told apart: it isn't carried over, and Automatic is played."""
+    if 0 < index < len(OLD_ORDER):
+        return OLD_ORDER[index]
+    return None
+
+
+def offered(file_kbps: Optional[float], file_lines: Optional[int]) -> List[str]:
+    """The menu's converted qualities that make the file smaller (every
+    one when its bitrate and size are unknown), best first by bitrate."""
+    found = []
+    for id_, _, kbps, lines in MENU:
+        if kbps is None:
+            continue
+        if file_kbps is None and file_lines is None:
+            found.append(id_)
+        elif (file_kbps is not None and kbps < file_kbps) or (file_lines is not None and lines < file_lines):
+            found.append(id_)
+    return sorted(found, key=lambda q: -kbps_of(q))
+
+
+def under_cap(qualities: List[str], cap: Optional[str]) -> List[str]:
+    """Those no higher than what the server would convert the file to
+    (auto_quality, which is at the file's lines or fewer)."""
+    if not cap or cap not in IDS:
+        return qualities
+    most = kbps_of(cap)
+    return [q for q in qualities if kbps_of(q) <= most]
+
+
+def start_quality(ceiling_kbps: Optional[float]) -> Optional[str]:
+    """Where Automatic starts under a remembered ceiling: the best quality
+    at or under it (2 Mbps 480p at least); None without one. The server
+    plays the file as it is when it is already under it."""
+    if not ceiling_kbps:
+        return None
+    for q in offered(None, None):
+        if kbps_of(q) <= ceiling_kbps:
+            return q
+    return FLOOR
+
+
+def step_down(
+    current: str,
+    playing_kbps: Optional[float],
+    delivery: Optional[float],
+    network_kbps: Optional[float],
+    file_kbps: Optional[float],
+    file_lines: Optional[int],
+    cap: Optional[str],
+):
+    """The quality after a play issue, and the ceiling it came from:
+    (quality, ceiling kbps), or (None, None) when there is nothing lower.
+
+    The ceiling is the bitrate playing times the delivery seen times 0.75
+    (what the network carried, when the bitrate playing is unknown), never
+    above the server's own quality for the file; the quality is the best
+    under it, always lower than the one playing, 2 Mbps 480p at least."""
+    if delivery is not None and playing_kbps:
+        carried = playing_kbps * min(max(delivery, 0.05), 1.0)
+    elif network_kbps and playing_kbps:
+        carried = min(network_kbps, playing_kbps)
+    elif network_kbps:
+        carried = network_kbps
+    elif playing_kbps:
+        carried = playing_kbps * UNKNOWN_DELIVERY
+    else:
+        carried = None
+    ceiling = carried * MARGIN if carried else None
+    candidates = under_cap(offered(file_kbps, file_lines), cap)
+    below = playing_kbps if current == ORIGINAL else kbps_of(current)
+    if below is not None:
+        candidates = [q for q in candidates if kbps_of(q) < below]
+    if not candidates:
+        return None, None
+    if ceiling is None:
+        # Nothing known of the file or the network: a middling quality.
+        quality = BLIND if BLIND in candidates else candidates[0]
+        return quality, kbps_of(quality)
+    for q in candidates:
+        if kbps_of(q) <= ceiling:
+            return q, ceiling
+    return candidates[-1], ceiling
+
+
+def step_up(current: str, file_kbps: Optional[float], file_lines: Optional[int], cap: Optional[str]):
+    """The next quality up from `current` and the bitrate it needs the
+    network to carry it at (before the headroom): (quality, kbps). The
+    original needs the file's bitrate, or the server's own quality's when
+    it converts it; unknown, it can't be measured against: (None, None)."""
+    if current == ORIGINAL:
+        return None, None
+    up = [q for q in under_cap(offered(file_kbps, file_lines), cap) if kbps_of(q) > kbps_of(current)]
+    if up:
+        return up[-1], kbps_of(up[-1])
+    need = kbps_of(cap) if cap in IDS else file_kbps
+    if not need:
+        return None, None
+    return ORIGINAL, need
+
+
+class Watch:
+    """One title in Automatic, from its first playback to its last
+    restart: `tick` once a second with what Kodi says, and it answers a
+    quality to restart at, or None. `restarted` after a restart."""
+
+    def __init__(
+        self,
+        now: float,
+        quality: str,
+        playing_kbps: Optional[float],
+        file_kbps: Optional[float],
+        file_lines: Optional[int],
+        cap: Optional[str] = None,
+        lowered: bool = False,
+    ):
+        self.quality = quality
+        self.playing_kbps = playing_kbps
+        self.file_kbps = file_kbps
+        self.file_lines = file_lines
+        self.cap = cap
+        self.changed_at = now
+        # Started under a remembered ceiling counts as a step down.
+        self.down_at = now if lowered else None
+        self.issue_at = now
+        # The ceiling of the last step down, for the next titles.
+        self.ceiling = None
+        self.reset(now)
+
+    def reset(self, now: float) -> None:
+        self.last = None
+        self.flowing = 0
+        self.stall_since = None
+        self.stall_counted = False
+        self.short_waits = collections.deque()
+        self.history = collections.deque()
+        self.slow_since = None
+
+    def seeked(self) -> None:
+        """Kodi was told to seek: the wait that follows isn't the network's."""
+        self.flowing = 0
+        self.stall_since = None
+        self.history.clear()
+        self.slow_since = None
+
+    def restarted(self, now: float, quality: str, playing_kbps: Optional[float]) -> None:
+        """Playing again at `quality` (a new session, the same title)."""
+        self.quality = quality
+        self.playing_kbps = playing_kbps
+        self.changed_at = now
+        self.reset(now)
+
+    def delivery(self) -> Optional[float]:
+        """Seconds of video that arrived per second over the window, from
+        the position and what is read ahead; None without both."""
+        if len(self.history) < 2:
+            return None
+        t0, p0, a0 = self.history[0]
+        t1, p1, a1 = self.history[-1]
+        if a0 is None or a1 is None or t1 - t0 < 5:
+            return None
+        return max((p1 - p0) + (a1 - a0), 0.0) / (t1 - t0)
+
+    def tick(
+        self,
+        now: float,
+        position: float,
+        paused: bool = False,
+        seeking: bool = False,
+        caching: bool = False,
+        ahead: Optional[float] = None,
+        arriving_kbps: Optional[float] = None,
+        carried_kbps: Optional[float] = None,
+    ) -> Optional[str]:
+        """What Kodi says this second: `position` and `ahead` in seconds,
+        `arriving_kbps` what the proxy passed on over the last 20 s,
+        `carried_kbps` what it measured the network carrying since the
+        last issue (None when it can't tell)."""
+        last, self.last = self.last, (now, position)
+        if paused or seeking:
+            # Waits while paused or seeking aren't the network's.
+            self.seeked()
+            return None
+        issue = False
+        if last is not None:
+            elapsed = now - last[0]
+            moved = position - last[1]
+            if moved < -0.5 or (moved > 0.2 and abs(moved - elapsed) > JUMP):
+                # A seek Kodi didn't say it made.
+                self.seeked()
+                return None
+            stalled = caching or moved <= 0.2
+            if stalled:
+                if self.stall_since is None and self.flowing >= 2:
+                    # Stopped somewhere since the last look: counted from it.
+                    self.stall_since = last[0]
+                    self.stall_counted = False
+                if self.stall_since is not None and not self.stall_counted and now - self.stall_since >= LONG_WAIT:
+                    self.stall_counted = True
+                    issue = True
+            else:
+                if self.stall_since is not None and not self.stall_counted:
+                    self.short_waits.append(now)
+                    while self.short_waits and now - self.short_waits[0] > SHORT_WAITS_WITHIN:
+                        self.short_waits.popleft()
+                    if len(self.short_waits) >= 2:
+                        self.short_waits.clear()
+                        issue = True
+                self.stall_since = None
+                self.flowing += 1
+        if self.flowing >= 2 or self.stall_since is not None:
+            self.history.append((now, position, ahead))
+            while self.history and now - self.history[0][0] > DELIVERY_WINDOW:
+                self.history.popleft()
+        delivery = self.delivery()
+        if not issue and delivery is not None and ahead is not None:
+            falling = self.falling()
+            if delivery < SLOW and ahead < LOW_AHEAD and falling:
+                if self.slow_since is None:
+                    self.slow_since = now
+                elif now - self.slow_since >= SLOW_FOR:
+                    self.slow_since = None
+                    issue = True
+            else:
+                self.slow_since = None
+        if issue:
+            return self.on_issue(now, delivery, arriving_kbps)
+        return self.maybe_up(now, carried_kbps)
+
+    def falling(self) -> bool:
+        """Less read ahead now than at the start of the window."""
+        aheads = [a for _, _, a in self.history if a is not None]
+        return len(aheads) >= 2 and aheads[-1] < aheads[0] - 1.0
+
+    def on_issue(self, now: float, delivery: Optional[float], arriving_kbps: Optional[float]) -> Optional[str]:
+        self.issue_at = now
+        if now - self.changed_at < SETTLE:
+            return None
+        quality, ceiling = step_down(
+            self.quality, self.playing_kbps, delivery, arriving_kbps, self.file_kbps, self.file_lines, self.cap
+        )
+        if quality is None:
+            return None
+        self.changed_at = self.down_at = now
+        self.ceiling = ceiling
+        return quality
+
+    def maybe_up(self, now: float, carried_kbps: Optional[float]) -> Optional[str]:
+        if self.quality == ORIGINAL or carried_kbps is None:
+            return None
+        if now - self.issue_at < QUIET or now - self.changed_at < UP_EVERY:
+            return None
+        if self.down_at is not None and now - self.down_at < AFTER_DOWN:
+            return None
+        quality, need = step_up(self.quality, self.file_kbps, self.file_lines, self.cap)
+        if quality is None or carried_kbps < HEADROOM * need:
+            return None
+        self.changed_at = now
+        return quality
+
+
+class Meter:
+    """What the proxy passes on of each stream, for Automatic: bytes as
+    they arrive, and each answer's size over the time it took. Paths are
+    the server's; the service asks about those of the playback."""
+
+    def __init__(self, clock=time.monotonic, keep: float = 240.0):
+        self.clock = clock
+        self.keep = keep
+        self.lock = threading.Lock()
+        self.chunks = collections.deque()
+        self.answers = collections.deque()
+
+    def prune(self, now: float) -> None:
+        while self.chunks and now - self.chunks[0][0] > self.keep:
+            self.chunks.popleft()
+        while self.answers and now - self.answers[0][0] > self.keep:
+            self.answers.popleft()
+
+    def chunk(self, path: str, size: int) -> None:
+        now = self.clock()
+        with self.lock:
+            self.chunks.append((now, path, size))
+            self.prune(now)
+
+    def answered(self, path: str, size: int, seconds: float) -> None:
+        """A whole answer: `size` bytes in `seconds`, from its first byte
+        to its last, counting the time Kodi took to take them (so a
+        measure is never more than the network carried)."""
+        now = self.clock()
+        with self.lock:
+            self.answers.append((now, path, size, seconds))
+            self.prune(now)
+
+    def arriving_kbps(self, prefix: str, window: float = DELIVERY_WINDOW) -> Optional[float]:
+        """What arrived of `prefix`'s answers over the last `window` seconds, in kbps."""
+        now = self.clock()
+        with self.lock:
+            found = [(t, n) for t, path, n in self.chunks if path.startswith(prefix) and now - t <= window]
+        if not found:
+            return None
+        return sum(n for _, n in found) * 8 / 1000.0 / window
+
+    def carried_kbps(self, prefix: str, since: float, least: int = 3, smallest: int = 256 * 1024) -> Optional[float]:
+        """What the network carried since `since`, in kbps: the `least`-th
+        fastest answer of `prefix` of 256 KB or more (a 2 s segment at
+        2 Mbps is 500 KB), so one lucky answer doesn't count; None with
+        fewer such answers."""
+        with self.lock:
+            rates = sorted(
+                (n * 8 / 1000.0 / s for t, path, n, s in self.answers if t >= since and path.startswith(prefix) and n >= smallest and s > 0),
+                reverse=True,
+            )
+        if len(rates) < least:
+            return None
+        return rates[least - 1]
+
+
+def remembered_ceiling(value: str, now: float) -> Optional[float]:
+    """A remembered ceiling ("kbps@time") still in force at `now` (wall clock)."""
+    try:
+        kbps, at = value.split("@")
+        kbps, at = float(kbps), float(at)
+    except ValueError:
+        return None
+    if kbps <= 0 or now - at > REMEMBER_FOR or at - now > 60:
+        return None
+    return kbps
+
+
+def remember_ceiling(kbps: float, now: float) -> str:
+    return "%d@%d" % (kbps, now)
+
+
+def media_prefix(url: str) -> str:
+    """The paths a playback's answers come from: an HLS stream's folder,
+    or the file played as it is."""
+    path = url.split("?")[0]
+    if path.endswith(".m3u8"):
+        return path.rsplit("/", 1)[0] + "/"
+    return path

@@ -169,6 +169,7 @@ TEXT = {
     "scanning_now": 30209,
     "sign_out_ask": 30210,
     "sign_out_of": 30211,
+    "smoother": 30213,
 }
 
 
@@ -205,6 +206,10 @@ def setting_int(name: str) -> int:
 
 def set_setting(name: str, value: str) -> None:
     addon().setSettingString(name, value)
+
+
+def set_setting_int(name: str, value: int) -> None:
+    addon().setSettingInt(name, value)
 
 
 def profile_dir() -> str:

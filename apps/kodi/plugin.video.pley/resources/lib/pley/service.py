@@ -13,7 +13,7 @@ import time
 
 import xbmc
 
-from . import api, auth, kodi, overlay, prompts, tracks
+from . import api, auth, autoquality, kodi, overlay, prompts, tracks
 from .events import CHANGES, Events, Refresher
 from .proxy import Proxy, new_secret
 
@@ -30,6 +30,8 @@ ENDED_FROM = 0.9
 # Seconds a tracked playback may seem stopped before it counts as stopped,
 # when Kodi didn't say so.
 LOST_AFTER = 3
+# Waits that aren't the network's: Kodi seeking, or playing faster or backwards.
+MOVING = ("Player.Seeking", "Player.Forwarding", "Player.Rewinding")
 FULLSCREEN = "Window.IsActive(fullscreenvideo) + !Window.IsVisible(videoosd) + !Window.IsVisible(seekbar)"
 
 
@@ -145,6 +147,15 @@ class Player(xbmc.Player):
         # The playback last stopped by the server, and when.
         self.stopped_for = None
         self.stopped_at = float("-inf")
+        # Automatic (docs/QUALITY.md): the playback's watch and what it
+        # was given (playback.automatic), what the proxy counts, and the
+        # title being played again at another quality: (item id, watch,
+        # what to say once it plays).
+        self.watch = None
+        self.auto = None
+        self.clock = time.monotonic
+        self.meter = autoquality.Meter()
+        self.restarting = None
 
     # ------------------------------------------------------------ requests
 
@@ -257,19 +268,159 @@ class Player(xbmc.Player):
             follower = tracks.Follower(
                 playing["tracks"], kodi.rpc, lambda body: self.worker.put(lambda: self.save_tracks(playing, body))
             )
+        watch, notice = self.watching(playing)
         with self.lock:
             self.after_end = None
             self.lost_since = None
             self.reports = reports
             self.moments = moments
             self.tracks = follower
+            self.watch = watch
+            self.auto = playing.get("auto") if watch is not None else None
             reports.at(self.position())
+        if notice:
+            kodi.notify(notice)
         if playing.get("kind") == "episode":
             self.worker.put(lambda: self.find_next(reports, moments))
         if follower is not None:
             # The account's audio and subtitles, as soon as Kodi lists them
             # (else on the loop's next turns).
             follower.turn()
+
+    def watching(self, playing: dict):
+        """Automatic's watch over a playback that started, and what to say
+        of it: the title's own, kept, when the service played it again at
+        another quality (the notice of a step down); a new one otherwise."""
+        restarting, self.restarting = self.restarting, None
+        auto = playing.get("auto")
+        if not auto:
+            return None, None
+        now = self.clock()
+        if restarting is not None and restarting[0] == playing.get("item_id"):
+            _, watch, notice = restarting
+            watch.restarted(now, auto["quality"], auto.get("playing_kbps"))
+            if auto["quality"] == autoquality.ORIGINAL:
+                # Back to the original: the network is good again.
+                self.remember(auto, None)
+            return watch, notice
+        watch = autoquality.Watch(
+            now,
+            auto["quality"],
+            auto.get("playing_kbps"),
+            auto.get("file_kbps"),
+            auto.get("file_lines"),
+            auto.get("cap"),
+            lowered=bool(auto.get("lowered")),
+        )
+        return watch, None
+
+    def remember(self, auto: dict, kbps) -> None:
+        """The ceiling for the next titles on this server (None forgets it), on the worker."""
+        from . import playback
+
+        server = auto.get("server") or ""
+        self.worker.put(lambda: playback.remember_ceiling(server, kbps))
+
+    def read_ahead(self):
+        """Seconds Kodi has read ahead of the position, where its player
+        keeps a cache (None where it doesn't say)."""
+        found = kodi.rpc("Player.GetProperties", {"playerid": 1, "properties": ["percentage", "cachepercentage", "totaltime"]})
+        if not isinstance(found, dict):
+            return None
+        cached = found.get("cachepercentage") or 0
+        at = found.get("percentage") or 0
+        total = found.get("totaltime") or {}
+        seconds = (
+            total.get("hours", 0) * 3600 + total.get("minutes", 0) * 60 + total.get("seconds", 0) + total.get("milliseconds", 0) / 1000.0
+        )
+        if cached <= 0 or seconds <= 0 or cached >= 99.5:
+            # No cache, or all of the rest read: nothing more to arrive.
+            return None
+        return max(cached - at, 0) / 100.0 * seconds
+
+    def automatic(self, watch: autoquality.Watch, auto: dict, position: float, paused: bool) -> None:
+        """Automatic's turn, from the loop: what Kodi says of the playback,
+        and a restart at another quality when the watch says so."""
+        if self.restarting is not None:
+            return
+        seeking = any(xbmc.getCondVisibility(c) for c in MOVING)
+        caching = xbmc.getCondVisibility("Player.Caching")
+        ahead = None if paused else self.read_ahead()
+        prefix = auto.get("prefix") or ""
+        arriving = self.meter.arriving_kbps(prefix)
+        carried = None
+        if watch.quality != autoquality.ORIGINAL:
+            carried = self.meter.carried_kbps(prefix, max(watch.issue_at, watch.changed_at))
+        was = watch.quality
+        quality = watch.tick(self.clock(), position / 1000.0, paused, seeking, caching, ahead, arriving, carried)
+        if quality is None:
+            return
+        with self.lock:
+            reports = self.reports
+            if reports is None or self.watch is not watch:
+                return
+            item_id = reports.playing["item_id"]
+        down = quality != autoquality.ORIGINAL and (was == autoquality.ORIGINAL or autoquality.kbps_of(quality) < autoquality.kbps_of(was))
+        notice = None
+        if down:
+            notice = kodi.text("smoother") % autoquality.label(quality)
+            self.remember(auto, watch.ceiling or autoquality.kbps_of(quality))
+        kodi.log(
+            "automatic: %s to %s at %d s (%s)"
+            % ("down" if down else "up", quality, position / 1000, "network" if down else "%s kbps carried" % int(carried or 0))
+        )
+        self.restarting = (item_id, watch, notice)
+        self.worker.put(lambda: self.restart(item_id, position, quality))
+
+    def restart(self, item_id: int, position_ms: float, quality: str) -> None:
+        """Plays the title again where it is, at `quality` (from the
+        worker): a new session, which ends the one before."""
+        from . import playback
+
+        if not self.still_playing(item_id):
+            self.restarting = None
+            return
+        base = kodi.get_property(kodi.PROXY)
+        try:
+            # The settings as they are now (the service's are read once).
+            kodi.begin()
+            client = api.Client(base, self.user_agent, timeout=60, local=True)
+            li = playback.prepare(client, base, item_id, int(position_ms), restart=quality)
+        except (api.ApiError, OSError, ValueError, KeyError) as e:
+            kodi.log("automatic: couldn't play %d at %s: %r" % (item_id, quality, e), xbmc.LOGWARNING)
+            self.restarting = None
+            return
+        if not self.still_playing(item_id):
+            # Stopped meanwhile: the new session isn't played, and ends.
+            self.restarting = None
+            try:
+                session = json.loads(kodi.get_property(kodi.PLAYING))["session_id"]
+            except (ValueError, KeyError, TypeError):
+                return
+            kodi.clear_property(kodi.PLAYING)
+            self.end("/api/playback/%s" % session)
+            return
+        li.setProperty("StartOffset", "%.3f" % (position_ms / 1000.0))
+        self.play(li.getPath(), li)
+
+    def still_playing(self, item_id: int) -> bool:
+        with self.lock:
+            return self.reports is not None and self.reports.playing["item_id"] == item_id
+
+    def onPlayBackSeek(self, time_ms, offset_ms) -> None:
+        self.moved()
+
+    def onPlayBackSeekChapter(self, chapter) -> None:
+        self.moved()
+
+    def onPlayBackSpeedChanged(self, speed) -> None:
+        self.moved()
+
+    def moved(self) -> None:
+        """A seek, a chapter or a new speed: the wait that follows isn't the network's."""
+        watch = self.watch
+        if watch is not None:
+            watch.seeked()
 
     def save_tracks(self, playing: dict, body: dict) -> None:
         """Audio or subtitles changed in Kodi's player: remembered for the
@@ -331,6 +482,7 @@ class Player(xbmc.Player):
         reports, self.reports = self.reports, None
         moments, self.moments = self.moments, None
         follower, self.tracks = self.tracks, None
+        self.watch = self.auto = None
         self.lost_since = None
         if follower is not None:
             # Before the last report, on the worker.
@@ -357,10 +509,12 @@ class Player(xbmc.Player):
             moments = None
             position = 0.0
             follower = None
+            watch = auto = None
             if self.reports is not None:
                 if file == self.reports.playing["path"]:
                     self.lost_since = None
                     follower = self.tracks
+                    watch, auto = self.watch, self.auto
                     position = self.position()
                     if paused and not self.reports.paused:
                         self.reports.position_ms = position
@@ -389,6 +543,8 @@ class Player(xbmc.Player):
             # The account's choice shown, and changes made in Kodi's player
             # saved (Kodi asked outside the lock).
             follower.turn()
+        if watch is not None:
+            self.automatic(watch, auto, position, bool(paused))
         self.fullscreen = bool(playing) and xbmc.getCondVisibility(FULLSCREEN)
         with self.ui:
             self.offer(moments, playing, position)
@@ -487,6 +643,12 @@ def save_proxy_config(profile: str, config: dict) -> None:
     auth.write_private(os.path.join(profile, "proxy.json"), json.dumps(config))
 
 
+def carry_quality_over() -> None:
+    from . import playback
+
+    playback.chosen_quality()
+
+
 def run() -> None:
     monitor = xbmc.Monitor()
     profile = kodi.profile_dir()
@@ -496,7 +658,7 @@ def run() -> None:
     worker = Worker()
     refresher = Refresher(kodi.refresh_listing, busy=lambda: player.isPlaying())
     player = Player(tokens, user_agent, worker, refresher)
-    proxy = Proxy(tokens, user_agent, config["secret"], config["port"], on_stopped=player.stopped_by_server)
+    proxy = Proxy(tokens, user_agent, config["secret"], config["port"], on_stopped=player.stopped_by_server, meter=player.meter)
     port = proxy.start()
     if port != config["port"]:
         save_proxy_config(profile, {"port": port, "secret": config["secret"]})
@@ -504,6 +666,8 @@ def run() -> None:
     kodi.log("proxy on 127.0.0.1:%d" % port)
     events = Events(tokens, user_agent, player.heard)
     events.start()
+    # A quality chosen before Automatic, shown in the settings as it was.
+    worker.put(carry_quality_over)
     while not monitor.waitForAbort(1):
         try:
             player.tick()

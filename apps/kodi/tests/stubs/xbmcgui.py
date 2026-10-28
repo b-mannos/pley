@@ -1,5 +1,7 @@
 NOTIFICATION_INFO, NOTIFICATION_WARNING, NOTIFICATION_ERROR = "info", "warning", "error"
 current_window = 10000
+# Notifications shown: (heading, message).
+notified = []
 
 
 def getCurrentWindowId():
@@ -35,6 +37,9 @@ class ListItem:
         self.music = Tag()
         self.subtitles = []
         self.mime = None
+
+    def getPath(self):
+        return self.path
 
     def setArt(self, art):
         self.art.update(art)
@@ -104,4 +109,4 @@ class WindowXMLDialog:
 
 class Dialog:
     def notification(self, heading, message, icon="", time=0, sound=True):
-        pass
+        notified.append((heading, message))

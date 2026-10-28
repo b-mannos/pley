@@ -158,8 +158,8 @@ own views instead (below), which skins' widgets and favourites always get.
   switched by Kodi, every kind of subtitle, the receiver formats Kodi's
   audio settings pass through, HDR10 and HLG always (Kodi tone-maps them on
   SDR screens), and Dolby Vision where Kodi says the screen shows it
-  (profiles 5 and 8; 7 as well on CoreELEC). The quality setting asks the
-  server for a lower one, converted. Text subtitles come beside what
+  (profiles 5 and 8; 7 as well on CoreELEC). The quality setting (below)
+  asks the server for a lower one, converted. Text subtitles come beside what
   plays: all of them beside a converted stream, which carries none, and
   beside a file played as it is the files next to it (Kodi reads the
   file's own tracks itself, and has no folder to look in for an address
@@ -205,6 +205,61 @@ own views instead (below), which skins' widgets and favourites always get.
   episode's own `poster` in place of its still. Only in a row of films and
   episodes (Home's) is the show's poster the episode's `poster` too, so
   poster views stay posters.
+- **Quality** (docs/QUALITY.md; `autoquality.py`, `playback.ask`): the
+  add-on's settings (Playback → Quality) offer the menu in its order,
+  Original, Automatic, 30 Mbps 4K, 15 Mbps 4K, 20 Mbps 1080p and down to
+  2 Mbps 480p, Automatic unless another was chosen. The setting is one
+  for every title, so a quality is sent as a cap (`max_bitrate`,
+  `max_height`, `mode: "auto"`): the server converts a file over it and
+  plays one under it as it is, which is what the other apps do by
+  offering a file only the qualities that make it smaller. A quality
+  chosen before Automatic came is carried over the first time the
+  service or a playback reads the setting; Original can't be told from
+  the setting never changed, and becomes Automatic.
+  Kodi's player has no quality menu of pley's, so the choice is made in
+  the settings, before playing.
+- **Automatic** plays the original and watches it from the service, once
+  a second while it plays (not paused, seeking, fast-forwarding or
+  rewinding, nor in the seconds after a seek or the start):
+  - *Waits*: Kodi buffering (`Player.Caching`), or the position not
+    moving while it plays. One of 2 seconds or more, or two shorter ones
+    within a minute, is a play issue.
+  - *Delivery*: where Kodi's player keeps a cache (a file played as it
+    is), JSON-RPC's `cachepercentage` says how much is read ahead; video
+    arriving at under 1.1 times real time for 15 seconds with under 10
+    seconds ahead and falling is a play issue before it waits.
+  - *Decoding*: Kodi tells add-ons nothing of dropped frames (only its
+    debug overlay shows them), so a device that can't keep up isn't seen;
+    the server converts what this Kodi's caps say it can't decode.
+
+  On a play issue it steps down by the spec's rule: the bitrate playing
+  (the file's, the quality's for a conversion) times the delivery seen
+  (else what the proxy saw arrive over the last 20 s) times 0.75, never
+  above the server's own quality for the file (`auto_quality`), always
+  a quality lower, never under 2 Mbps 480p, and not within 20 s of the
+  last change. The service asks for the title again where it is
+  (`playback.prepare` with `mode: "transcode"` and the quality's
+  `max_bitrate` and `max_height`), plays it in place from that position,
+  and says "Playing at 8 Mbps 1080p for a smoother picture" in Kodi's
+  notification once it plays. The old session ends with the usual last
+  report. The ceiling is kept for 30 minutes for each server in the
+  add-on's data (`remembered.json`); a title started in Automatic
+  meanwhile, Up Next's included, asks for the quality under it as a cap
+  (a file under it still plays as it is).
+
+  **Back up** needs a measure of the network, which only the proxy has:
+  every segment and file passes through it, and it times each answer
+  from its first byte to its last, Kodi's taking of them included, so a
+  measure is never more than the network carried. After 3 minutes
+  without an issue, and 5 after a step down, when the third fastest
+  answer of 256 KB or more since the last change or issue carried
+  1.6 times the next quality up (the file's bitrate for Original), it
+  steps up one quality, silently, at most every 3 minutes; back at
+  Original the ceiling is forgotten. Kodi reads a stream only as fast as
+  its buffers empty once they are full, so answers carry that much only
+  while it fills them (after a start, a seek or a wait); on a Kodi whose
+  buffers stay full it stays at the quality it went down to for the rest
+  of the title, as the spec allows.
 - **Progress**: the service tells the server where playback is every 10
   seconds while it plays and every 30 while it is paused (the server lets a
   player it hasn't heard from for 90 seconds go, and its conversion with
@@ -321,3 +376,7 @@ in `portable_data/userdata/advancedsettings.xml`.
   converted stream: only text subtitles come beside it (the profile's
   choice is drawn onto the video from the start). Files played as they
   are show every kind.
+- Automatic's "Automatic · 8 Mbps 1080p" and "Lowered for the network":
+  Kodi's player has no menu or details of pley's to show them in; the
+  notification says it once, and Kodi's own codec info (the `o` key)
+  shows the stream it plays.

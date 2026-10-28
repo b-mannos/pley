@@ -19,6 +19,7 @@ import os
 import re
 import socket
 import threading
+import time
 
 # Python 3.8's http.server reads the system's MIME types as it loads (on
 # Windows from the registry, about half a second of a Kodi start); the
@@ -56,13 +57,15 @@ def new_secret() -> str:
 class Proxy:
     """Serves on 127.0.0.1:`port` (another one when it is taken) until
     `stop`. `on_stopped(message)` hears of streams an administrator
-    stopped."""
+    stopped. `meter` (autoquality.Meter) counts what streams bring, for
+    Automatic."""
 
-    def __init__(self, tokens: Tokens, user_agent: str, secret: str, port: int = 0, on_stopped=None):
+    def __init__(self, tokens: Tokens, user_agent: str, secret: str, port: int = 0, on_stopped=None, meter=None):
         self.tokens = tokens
         self.user_agent = user_agent
         self.secret = secret
         self.on_stopped = on_stopped
+        self.meter = meter
         self.server = None
         self.thread = None
         self.wanted_port = port
@@ -253,7 +256,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return self.answer(401, {"code": "signed_out", "message": "pley is signed out"})
             except (api.ApiError, OSError, http.client.HTTPException) as e:
                 return self.answer(502, {"code": "unreachable", "message": str(e)})
-            self.relay(response)
+            self.relay(response, rest)
         finally:
             if upstream:
                 upstream.close()
@@ -270,7 +273,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return None
         return "/" + self.proxy.secret + location
 
-    def relay(self, response: http.client.HTTPResponse) -> None:
+    def relay(self, response: http.client.HTTPResponse, path: str = "") -> None:
         try:
             if response.status == 410 and self.proxy.on_stopped:
                 data = response.read()
@@ -301,16 +304,32 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             if self.command == "HEAD" or response.status in (204, 304):
                 return
+            # A stream's bytes are counted as they come, and its whole
+            # answer over the time it took, Kodi's taking them included.
+            meter = self.proxy.meter if response.status in (200, 206) and is_media(response) else None
+            began = time.monotonic()
+            size = 0
             while True:
                 chunk = response.read(CHUNK)
                 if not chunk:
                     break
+                if meter is not None:
+                    meter.chunk(path, len(chunk))
+                    size += len(chunk)
                 self.wfile.write(chunk)
+            if meter is not None:
+                meter.answered(path, size, time.monotonic() - began)
         except (OSError, http.client.HTTPException):
             # Kodi let go (a seek, a stop), the server did, or the proxy is
             # stopping: the connection ends, and Kodi asks again from where
             # it got to.
             self.close_connection = True
+
+
+def is_media(response: http.client.HTTPResponse) -> bool:
+    """A stream's answer (a file, a segment), not artwork or the API's."""
+    kind = (response.getheader("Content-Type") or "").split(";")[0].strip().lower()
+    return kind.startswith(("video/", "audio/")) or kind in ("application/octet-stream", "application/mp4")
 
 
 # A subtitle named for Kodi (3.eng.forced.vtt): Kodi reads a side-loaded
