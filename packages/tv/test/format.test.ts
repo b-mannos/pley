@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MediaFile, MediaStream, PlaybackInfo, TranscodeInfo } from "../src/api/types";
-import { dynamicRangeBadges, qualityBadges, streamRange } from "../src/format/format";
+import { dynamicRangeBadges, isForcedSubtitle, qualityBadges, streamLabel, streamRange } from "../src/format/format";
 import { dolbyVisionDetails, streamBlock } from "../src/format/media-info";
 import { buildDetails, shownAs, videoLabel } from "../src/player/details";
 
@@ -42,6 +42,20 @@ describe("formats, named as the server, the web and Android name them", () => {
     );
     const facts = streamBlock({ ...p81, hdr10plus: true }, "Video").facts;
     expect(facts.filter((f) => f.label === "HDR")[0]?.value).toBe("Dolby Vision P8.1 + HDR10+");
+  });
+
+  it("tells apart subtitles whose titles name their language", () => {
+    const sub = (title: string | null, over: Partial<MediaStream> = {}) =>
+      streamLabel({ index: 6, kind: "subtitle", codec: "subrip", language: "eng", title, default: false, forced: false, ...over } as MediaStream);
+    // Forced by its title alone, as the server counts it: never two "English (SRT)".
+    expect(sub("English")).toBe("English (SRT)");
+    expect(sub("English (Forced)")).toBe("English (SRT, Forced)");
+    expect(sub("Forced")).toBe("English (SRT, Forced)");
+    expect(sub("Signs & Songs")).toBe("English – Signs & Songs (SRT, Forced)");
+    expect(sub("English SDH")).toBe("English – SDH (SRT)");
+    expect(sub("Designs")).toBe("English – Designs (SRT)");
+    expect(sub(null, { language: "fre", forced: true, external: true })).toBe("French (SRT, Forced, External)");
+    expect(isForcedSubtitle({ kind: "subtitle", title: "Signs/Songs", forced: false } as MediaStream)).toBe(true);
   });
 });
 

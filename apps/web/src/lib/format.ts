@@ -244,6 +244,34 @@ export function channelsLabel(channels: number | undefined, layout?: string): st
   }
 }
 
+/**
+ * Subtitles the server counts as forced: flagged so, or a title saying so
+ * ("English (Forced)", "Signs & Songs"), as streams::is_forced does.
+ */
+export function isForcedSubtitle(s: MediaStream): boolean {
+  if (s.forced) return true;
+  return (s.title ?? "")
+    .toLowerCase()
+    .split(/[^0-9a-zÀ-￿]+/)
+    .some((w) => w === "forced" || w === "signs");
+}
+
+/**
+ * What a subtitle title says beyond its language and "forced" (shown as a
+ * flag): "SDH" of "English SDH", nothing of "English (Forced)", the whole
+ * title when it doesn't name the language ("Signs & Songs").
+ */
+function subtitleTitleRest(title: string, lang: string): string {
+  const at = title.toLowerCase().indexOf(lang.toLowerCase());
+  // A title that doesn't name the language is shown whole, unless it only says "Forced".
+  if (at < 0) return /[0-9a-zÀ-￿]/i.test(title.replace(/\bforced\b/gi, "")) ? title : "";
+  return (title.slice(0, at) + " " + title.slice(at + lang.length))
+    .replace(/\bforced\b/gi, " ")
+    .replace(/[()[\]{}\-–—_.,:;|/]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Human readable label for an audio/subtitle/video stream. */
 export function streamLabel(s: MediaStream): string {
   const lang = languageName(s.language);
@@ -255,8 +283,9 @@ export function streamLabel(s: MediaStream): string {
   }
   if (s.kind === "subtitle") {
     const base = lang ?? s.title ?? "Unknown";
-    const extra = s.title && lang && !s.title.toLowerCase().includes(lang.toLowerCase()) ? ` – ${s.title}` : "";
-    const flags = [codecLabel(s.codec), s.forced ? "Forced" : null, s.external ? "External" : null]
+    const rest = s.title && lang ? subtitleTitleRest(s.title, lang) : "";
+    const extra = rest ? ` – ${rest}` : "";
+    const flags = [codecLabel(s.codec), isForcedSubtitle(s) ? "Forced" : null, s.external ? "External" : null]
       .filter(Boolean)
       .join(", ");
     return `${base}${extra}${flags ? ` (${flags})` : ""}`;

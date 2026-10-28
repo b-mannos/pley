@@ -140,6 +140,34 @@ export function audioFormatLabel(s: MediaStream): string {
 }
 
 /**
+ * Subtitles the server counts as forced: flagged so, or a title saying so
+ * ("English (Forced)", "Signs & Songs"), as its streams::is_forced does.
+ */
+export function isForcedSubtitle(s: MediaStream): boolean {
+  if (s.forced) return true;
+  return (s.title ?? "")
+    .toLowerCase()
+    .split(/[^0-9a-zÀ-￿]+/)
+    .some((w) => w === "forced" || w === "signs");
+}
+
+/**
+ * What a subtitle title says beyond its language and "forced" (shown as a
+ * flag): "SDH" of "English SDH", nothing of "English (Forced)", the whole
+ * title when it doesn't name the language ("Signs & Songs").
+ */
+function subtitleTitleRest(title: string, lang: string): string {
+  const at = title.toLowerCase().indexOf(lang.toLowerCase());
+  // A title that doesn't name the language is shown whole, unless it only says "Forced".
+  if (at < 0) return /[0-9a-zÀ-￿]/i.test(title.replace(/\bforced\b/gi, "")) ? title : "";
+  return (title.slice(0, at) + " " + title.slice(at + lang.length))
+    .replace(/\bforced\b/gi, " ")
+    .replace(/[()[\]{}\-–—_.,:;|/]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * A track as the pickers list it. Audio: "English (EAC3 5.1)", "English –
  * Commentary (AAC Stereo)". Subtitles: "French – SDH (SRT, Forced)".
  * Video: "4K HEVC Dolby Vision P8.1 10-bit".
@@ -147,16 +175,17 @@ export function audioFormatLabel(s: MediaStream): string {
 export function streamLabel(s: MediaStream): string {
   const lang = languageName(s.language);
   const title = s.title || null;
-  const extra = title && lang && title.toLowerCase().indexOf(lang.toLowerCase()) < 0 ? ` – ${title}` : "";
   if (s.kind === "audio") {
+    const extra = title && lang && title.toLowerCase().indexOf(lang.toLowerCase()) < 0 ? ` – ${title}` : "";
     const details = audioFormatLabel(s);
     const base = title && !lang ? title : lang ?? title ?? "Unknown";
     return base + extra + (details ? ` (${details})` : "");
   }
   if (s.kind === "subtitle") {
     const base = lang ?? title ?? "Unknown";
-    const flags = [codecLabel(s.codec), s.forced ? "Forced" : "", s.external ? "External" : ""].filter(Boolean).join(", ");
-    return base + extra + (flags ? ` (${flags})` : "");
+    const rest = title && lang ? subtitleTitleRest(title, lang) : "";
+    const flags = [codecLabel(s.codec), isForcedSubtitle(s) ? "Forced" : "", s.external ? "External" : ""].filter(Boolean).join(", ");
+    return base + (rest ? ` – ${rest}` : "") + (flags ? ` (${flags})` : "");
   }
   return [resolutionLabel(s.width, s.height), codecLabel(s.codec), streamRange(s), s.bit_depth && s.bit_depth > 8 ? `${s.bit_depth}-bit` : null]
     .filter(Boolean)

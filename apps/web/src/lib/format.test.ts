@@ -262,6 +262,19 @@ describe("streamLabel", () => {
     );
   });
 
+  it("tells apart subtitles whose titles name their language", () => {
+    const sub = (title: string) => streamLabel(makeStream({ kind: "subtitle", codec: "subrip", language: "eng", title }));
+    // Forced by its title alone, as the server counts it: never two "English (SRT)".
+    expect(sub("English")).toBe("English (SRT)");
+    expect(sub("English (Forced)")).toBe("English (SRT, Forced)");
+    expect(sub("Forced")).toBe("English (SRT, Forced)");
+    expect(sub("Signs & Songs")).toBe("English – Signs & Songs (SRT, Forced)");
+    expect(sub("English SDH")).toBe("English – SDH (SRT)");
+    expect(sub("English [CC]")).toBe("English – CC (SRT)");
+    // A word that only contains "forced" or "signs" doesn't count.
+    expect(sub("Designs")).toBe("English – Designs (SRT)");
+  });
+
   it("describes video by resolution, codec and dynamic range", () => {
     const dv = makeStream({
       codec: "hevc",
