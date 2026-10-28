@@ -103,10 +103,10 @@ export function PlayerScreen(p: { request: PlayRequest; pressedAt: number }) {
     return off;
   }, [controller]);
 
-  return <PlayerView key={run} controller={controller} host={host} />;
+  return <PlayerView key={run} controller={controller} host={host} queued={!!(saved ? saved.request : p.request).queue} />;
 }
 
-function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDivElement | null } }) {
+function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDivElement | null }; queued: boolean }) {
   const app = useApp();
   const ui = useUi();
   const c = p.controller;
@@ -246,8 +246,9 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
   }, [!!error]);
 
   const chapters = s.chapters;
-  const episode = s.subtitle !== null;
-  const hasPrevNext = episode || chapters.length > 1;
+  // Next plays the next episode, or a playlist's or a collection's next title, as on the web; else the next chapter.
+  const nextTitle = s.subtitle !== null || p.queued;
+  const hasPrevNext = nextTitle || chapters.length > 1;
 
   const media = (key: Key) => {
     const { positionMs: position, durationMs: duration } = clockNow();
@@ -272,7 +273,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
         seeker.press(-1, MEDIA_STEP_MS, position, duration);
         return;
       case "next": {
-        if (episode) {
+        if (nextTitle) {
           c.playNext();
           return;
         }
