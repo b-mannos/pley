@@ -11,7 +11,7 @@ In this order, the same on every app:
 | id | Label | Video at most |
 |---|---|---|
 | `original` | Original | the file as it is |
-| `auto` | Automatic | Lowers quality only when needed; a transcode in several sizes the player moves between |
+| `auto` | Automatic | Dynamically adjust to conditions; a transcode in several sizes the player moves between |
 | `30m` | 30 Mbps 4K | 30 Mbps, 2160 lines |
 | `15m` | 15 Mbps 4K | 15 Mbps, 2160 lines |
 | `20m` | 20 Mbps 1080p | 20 Mbps, 1080 lines |

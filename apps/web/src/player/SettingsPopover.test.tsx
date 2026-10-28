@@ -62,7 +62,7 @@ describe("SettingsPopover", () => {
     const options = screen.getAllByRole("menuitemradio");
     expect(options.map((o) => o.textContent)).toEqual([
       "Original1080p · 9.0 Mbps",
-      "AutomaticLowers quality only when needed",
+      "AutomaticDynamically adjust to conditions",
       // 8 Mbps is too close to the file's 9 to play any better.
       "4 Mbps 720pConverted",
       "2 Mbps 480pConverted",

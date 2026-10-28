@@ -23,7 +23,7 @@
     <!-- Automatic, with what it plays now: "Automatic · Original", "Automatic · 8 Mbps 1080p". -->
     <string name="session_quality_automatic_playing">Automatic · %1$s</string>
     <!-- Automatic's hint in the quality menu. -->
-    <string name="session_quality_automatic_hint">Lowers quality only when needed</string>
+    <string name="session_quality_automatic_hint">Dynamically adjust to conditions</string>
     <!-- Automatic's hint while it plays lower: "Now 8 Mbps 1080p". -->
     <string name="session_quality_automatic_now">Now %1$s</string>
     <!-- Automatic went down, said once, briefly: "Quality lowered to 8 Mbps 1080p". -->

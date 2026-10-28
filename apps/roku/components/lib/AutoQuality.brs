@@ -28,7 +28,7 @@ end function
 ' Each quality's hint in Settings.
 function aqHint(id as string) as string
     if id = "original" then return "Full quality. May buffer on a slow connection."
-    if id = "auto" then return "Lowers quality only when needed."
+    if id = "auto" then return "Dynamically adjust to conditions."
     return "Converted by the server."
 end function
 

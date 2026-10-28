@@ -8,7 +8,7 @@ export const T = {
   autoQuality: (label: string) => `${label} (auto)`,
   /** The menu's value while Automatic plays: "Automatic · 8 Mbps 1080p". */
   automatic: (now: string) => `Automatic · ${now}`,
-  autoHint: "Lowers quality only when needed",
+  autoHint: "Dynamically adjust to conditions",
   autoNow: (now: string, why: string | null) => (why ? `Now ${now} · ${why}` : `Now ${now}`),
   lowered: { network: "Lowered for your connection", device: "Lowered for this device" },
   smoother: (label: string) => `Quality lowered to ${label}`,

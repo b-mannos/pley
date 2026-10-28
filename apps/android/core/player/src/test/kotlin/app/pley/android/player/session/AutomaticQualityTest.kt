@@ -44,7 +44,7 @@ class AutomaticQualityTest {
         assertEquals("Automatic · Original", state.quality)
         assertEquals(listOf("original", "auto"), state.qualities.take(2).map { it.id })
         assertTrue(state.qualities.first { it.id == "auto" }.selected)
-        assertEquals("Lowers quality only when needed", state.qualities.first { it.id == "auto" }.hint)
+        assertEquals("Dynamically adjust to conditions", state.qualities.first { it.id == "auto" }.hint)
         val asked = h.playbackRequests().single()
         assertEquals(PlaybackMode.Auto, asked.mode)
         assertNull(asked.maxBitrate)

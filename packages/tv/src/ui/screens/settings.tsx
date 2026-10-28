@@ -493,7 +493,7 @@ function qualityName(id: string): string {
 
 /** What the original and Automatic do, under their names in the list. */
 function qualityHint(id: string): string | undefined {
-  if (id === AUTO.id) return "Lowers quality only when needed";
+  if (id === AUTO.id) return "Dynamically adjust to conditions";
   if (id === ORIGINAL.id) return "Full quality. May buffer on a slow connection";
   return undefined;
 }

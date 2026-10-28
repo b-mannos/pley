@@ -66,7 +66,7 @@
     <string name="tv_settings_quality_original">Original</string>
     <string name="tv_settings_quality_original_hint">Full quality. May buffer on a slow connection.</string>
     <string name="tv_settings_quality_automatic">Automatic</string>
-    <string name="tv_settings_quality_automatic_hint">Lowers quality only when needed.</string>
+    <string name="tv_settings_quality_automatic_hint">Dynamically adjust to conditions.</string>
     <!-- "8 Mbps 1080p", "30 Mbps 4K": the lines, then the bitrate. -->
     <string name="tv_settings_quality_preset">%2$d Mbps %1$s</string>
     <string name="tv_settings_refresh_rate">Match the refresh rate</string>

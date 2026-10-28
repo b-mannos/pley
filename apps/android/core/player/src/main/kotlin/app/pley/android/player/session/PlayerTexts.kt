@@ -35,7 +35,7 @@ interface PlayerTexts {
     fun automatic(playing: String): String = "Automatic · $playing"
 
     /** Automatic's hint in the menu. */
-    val automaticHint: String get() = "Lowers quality only when needed"
+    val automaticHint: String get() = "Dynamically adjust to conditions"
 
     /** Automatic's hint while it plays [playing], below the original: "Now 8 Mbps 1080p". */
     fun automaticNow(playing: String): String = "Now $playing"

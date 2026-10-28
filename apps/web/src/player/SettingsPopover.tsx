@@ -196,7 +196,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
     if (id === "auto") {
       return quality === "auto" && autoNow
         ? [`Now ${autoNow}`, autoWhy].filter(Boolean).join(" · ")
-        : "Lowers quality only when needed";
+        : "Dynamically adjust to conditions";
     }
     return "Converted";
   };

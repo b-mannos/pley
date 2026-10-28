@@ -108,7 +108,7 @@ class TvSettingsFocusTest {
         compose.onNodeWithTag(TV_CHOICE_PANEL).assertExists()
         // Automatic is the default where nothing was chosen, under Original, then 4K first.
         compose.focused().assert(hasText("Automatic"))
-        compose.focused().assert(hasText("Lowers quality only when needed."))
+        compose.focused().assert(hasText("Dynamically adjust to conditions."))
         compose.press(Key.DirectionDown)
         compose.focused().assert(hasText("30 Mbps 4K"))
         compose.press(Key.DirectionDown)
