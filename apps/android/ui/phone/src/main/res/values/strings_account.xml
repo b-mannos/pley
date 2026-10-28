@@ -58,7 +58,11 @@
     <string name="settings_quality_home">Quality on Wi-Fi</string>
     <string name="settings_quality_mobile">Quality on mobile data</string>
     <string name="settings_quality_original">Original</string>
-    <string name="settings_quality_preset">%1$s · %2$d Mbps</string>
+    <string name="settings_quality_original_hint">The file as it is. A slow network waits.</string>
+    <string name="settings_quality_automatic">Automatic</string>
+    <string name="settings_quality_automatic_hint">Original, lower only when it doesn\'t play well.</string>
+    <!-- "8 Mbps 1080p", "30 Mbps 4K": the lines, then the bitrate. -->
+    <string name="settings_quality_preset">%2$d Mbps %1$s</string>
     <string name="settings_refresh_rate">Match the refresh rate</string>
     <string name="settings_refresh_seamless">When seamless</string>
     <string name="settings_refresh_seamless_hint">The screen follows the video\'s frame rate when it can do so without a pause.</string>

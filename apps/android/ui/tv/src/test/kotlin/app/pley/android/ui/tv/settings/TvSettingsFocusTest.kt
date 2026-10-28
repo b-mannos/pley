@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.navigation3.runtime.NavKey
 import app.pley.android.common.Tier
 import app.pley.android.data.FrameRateMatching
+import app.pley.android.data.Settings
 import app.pley.android.data.TrackDefaultsUnsupported
 import app.pley.android.network.ApiException
 import app.pley.android.screens.PleyKey
@@ -94,6 +95,34 @@ class TvSettingsFocusTest {
         compose.waitUntil(5_000) { graph.settingsFlow.value.frameRateMatching == FrameRateMatching.Always }
         compose.waitForIdle()
         compose.focused().assert(hasText("Match the refresh rate"))
+    }
+
+    @Test
+    fun qualityStartsOnAutomaticUnderOriginalAndKeepsAnOriginalChosen() {
+        show()
+        compose.press(Key.DirectionDown)
+        compose.press(Key.DirectionRight)
+        compose.focused().assert(hasText("Quality"))
+        compose.focused().assert(hasText("Automatic"))
+        compose.press(Key.DirectionCenter)
+        compose.onNodeWithTag(TV_CHOICE_PANEL).assertExists()
+        // Automatic is the default where nothing was chosen, under Original, then 4K first.
+        compose.focused().assert(hasText("Automatic"))
+        compose.focused().assert(hasText("Original, lower only when it doesn't play well."))
+        compose.press(Key.DirectionDown)
+        compose.focused().assert(hasText("30 Mbps 4K"))
+        compose.press(Key.DirectionDown)
+        compose.focused().assert(hasText("15 Mbps 4K"))
+        compose.press(Key.DirectionDown)
+        compose.focused().assert(hasText("20 Mbps 1080p"))
+        compose.press(Key.DirectionUp, times = 4)
+        compose.focused().assert(hasText("Original"))
+        compose.focused().assert(hasText("The file as it is. A slow network waits."))
+        compose.press(Key.DirectionCenter)
+        compose.waitUntil(5_000) { graph.settingsFlow.value.qualityOnHomeNetwork == Settings.ORIGINAL }
+        compose.waitForIdle()
+        compose.focused().assert(hasText("Quality"))
+        compose.focused().assert(hasText("Original"))
     }
 
     @Test

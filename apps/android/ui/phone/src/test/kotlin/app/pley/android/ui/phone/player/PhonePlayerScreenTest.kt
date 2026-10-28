@@ -2,6 +2,7 @@ package app.pley.android.ui.phone.player
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -178,6 +179,36 @@ class PhonePlayerScreenTest {
         assertEquals(listOf<Any?>("4m"), fake.calls("selectQuality").single().args)
         compose.waitForIdle()
         assertEquals(0, compose.onAllNodesWithTextCount("Converted"))
+    }
+
+    @Test
+    fun qualityPutsAutomaticUnderOriginalAndSaysWhatItPlays() {
+        val fake = FakePlaybackController(
+            playing {
+                it.copy(
+                    quality = "Automatic · 8 Mbps 1080p",
+                    note = "Lowered for the network",
+                    qualities = listOf(
+                        QualityChoice("original", "Original", "4K · 62 Mbps", false),
+                        QualityChoice("auto", "Automatic", "Now 8 Mbps 1080p", true),
+                        QualityChoice("30m", "30 Mbps 4K", "Converted", false),
+                        QualityChoice("15m", "15 Mbps 4K", "Converted", false),
+                        QualityChoice("20m", "20 Mbps 1080p", "Converted", false),
+                    ),
+                )
+            },
+        )
+        show(fake)
+        compose.onNodeWithContentDescription("Playback settings").performClick()
+        compose.waitForIdle()
+        // The settings' row says what Automatic plays.
+        compose.onNodeWithText("Automatic · 8 Mbps 1080p").assertIsDisplayed().performClick()
+        compose.waitForIdle()
+        val tops = listOf("Original", "Automatic", "30 Mbps 4K", "15 Mbps 4K").map { compose.onNodeWithText(it).getBoundsInRoot().top }
+        assertEquals(tops.sorted(), tops)
+        compose.onNodeWithText("Now 8 Mbps 1080p").assertIsDisplayed()
+        compose.onNodeWithText("15 Mbps 4K").performClick()
+        assertEquals(listOf<Any?>("15m"), fake.calls("selectQuality").single().args)
     }
 
     @Test

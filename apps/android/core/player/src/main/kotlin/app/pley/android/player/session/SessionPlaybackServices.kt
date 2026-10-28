@@ -102,6 +102,7 @@ class SessionPlaybackServices(
                     reporter = reporter,
                     subtitles = OkHttpSubtitleFetcher({ network.subtitles(session.issuer) }),
                     quality = QualityMemory.of(data.settings, networkKind),
+                    ceiling = CeilingMemory.preferences(app, session.issuer),
                     sheets = OkHttpSheetSource({ network.images }),
                     autoplayNext = {
                         try {

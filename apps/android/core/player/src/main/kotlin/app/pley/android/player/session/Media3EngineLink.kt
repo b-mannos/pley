@@ -37,6 +37,7 @@ class Media3EngineLink(override val engine: PlayerEngine) : EngineLink {
     private var wantedText: Wanted? = Wanted(null, null)
     private var videoDecoder: String? = null
     private var audioDecoder: String? = null
+    private var bandwidth: Long? = null
     private var reportedPlayWhenReady = engine.player.playWhenReady
 
     private val events = object : Player.Listener {
@@ -84,6 +85,10 @@ class Media3EngineLink(override val engine: PlayerEngine) : EngineLink {
         ) {
             audioDecoder = decoderName
         }
+
+        override fun onBandwidthEstimate(eventTime: AnalyticsListener.EventTime, totalLoadTimeMs: Int, totalBytesLoaded: Long, bitrateEstimate: Long) {
+            if (bitrateEstimate > 0) bandwidth = bitrateEstimate / 1000
+        }
     }
 
     init {
@@ -97,6 +102,7 @@ class Media3EngineLink(override val engine: PlayerEngine) : EngineLink {
     override val status: EngineStatus get() = statusOf(player.playbackState)
     override val playWhenReady: Boolean get() = player.playWhenReady
     override val reconnecting: Boolean get() = engine.state.value.reconnecting
+    override val bandwidthKbps: Long? get() = bandwidth
 
     override fun setListener(listener: EngineLink.Listener?) {
         this.listener = listener

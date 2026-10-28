@@ -34,6 +34,9 @@ class FakeEngineLink(private val clock: () -> Long = { 0L }) : EngineLink {
     /** What [frameCounts] answers. */
     var frames: FrameCounts? = null
 
+    /** What [bandwidthKbps] answers: the network's speed as measured, `null` while unknown. */
+    override var bandwidthKbps: Long? = null
+
     /** What [stats] answers. */
     var lines: List<String> = listOf("Video decoder: fake")
 

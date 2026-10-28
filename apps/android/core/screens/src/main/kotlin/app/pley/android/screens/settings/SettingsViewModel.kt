@@ -128,10 +128,13 @@ class SettingsViewModel(
     fun setDownloadQuality(preset: QualityPreset) = update { it.copy(downloadQuality = idOf(preset)) }
 
     companion object {
-        /** The qualities offered, best first: the original, then the transcodes. */
+        /** The qualities offered for playing, in the player's order: Original, Automatic, then the transcodes. */
         val QUALITIES: List<QualityPreset> get() = Qualities.ALL
 
-        /** What the settings keep for [preset]: "Original", or its id ("8m"). */
+        /** The qualities downloads are made at: the original, then the transcodes of 1080p and below. */
+        val DOWNLOAD_QUALITIES: List<QualityPreset> get() = listOf(Qualities.ORIGINAL) + Qualities.TRANSCODES.filter { (it.maxHeight ?: 0) <= 1080 }
+
+        /** What the settings keep for [preset]: "Original", or its id ("auto", "8m"). */
         fun idOf(preset: QualityPreset): String = if (preset.original) Settings.ORIGINAL else preset.id
 
         /** The preset a setting's value names. */

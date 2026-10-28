@@ -40,10 +40,10 @@ enum class GridDensity { Small, Medium, Large }
  * Defaults are what the app does without being asked.
  */
 data class Settings(
-    /** "Original" or a preset's name, on Wi-Fi or Ethernet. */
-    val qualityOnHomeNetwork: String = ORIGINAL,
-    /** "Original" or a preset's name, on mobile data. */
-    val qualityOnMobile: String = ORIGINAL,
+    /** "auto" (Automatic, the default), "Original" or a preset's id, on Wi-Fi or Ethernet. */
+    val qualityOnHomeNetwork: String = AUTOMATIC,
+    /** "auto" (Automatic, the default), "Original" or a preset's id, on mobile data. */
+    val qualityOnMobile: String = AUTOMATIC,
     /** `null`: the device's default, Seamless on phones and Auto on TVs ([frameRateMatching] of a device). */
     val frameRateMatching: FrameRateMatching? = null,
     /** Per format of [PASSTHROUGH_FORMATS]; a format left out is Auto. */
@@ -81,6 +81,9 @@ data class Settings(
 
     companion object {
         const val ORIGINAL = "Original"
+
+        /** Automatic: the original, lower only when it doesn't play well (docs/QUALITY.md). */
+        const val AUTOMATIC = "auto"
 
         /** Subtitle sizes offered: 3.8, 4.8, 6 and 7.6 % of the video's height. */
         val SUBTITLE_SIZES: List<Float> = listOf(0.038f, 0.048f, 0.06f, 0.076f)

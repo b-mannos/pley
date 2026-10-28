@@ -106,7 +106,7 @@ interface QualityMemory {
     suspend fun remember(id: String)
 
     companion object {
-        /** Remembers nothing: always the original. */
+        /** Remembers nothing: Automatic, as where no quality was ever chosen. */
         val NONE = object : QualityMemory {
             override suspend fun remembered(): String? = null
 
@@ -177,6 +177,8 @@ class PlaybackEnvironment(
     val reporter: SessionReporter,
     val subtitles: SubtitleFetcher,
     val quality: QualityMemory = QualityMemory.NONE,
+    /** What Automatic found the network carries, on this device for this server, for the next titles. */
+    val ceiling: CeilingMemory = CeilingMemory.memory(),
     /** Seek previews' sheets; `null` for none. */
     val sheets: SheetSource? = null,
     val sheetDecoder: SheetDecoder = RegionSheetDecoder,

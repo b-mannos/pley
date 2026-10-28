@@ -247,7 +247,7 @@ private fun SettingsSheet(sheet: Sheet?, state: SettingsUiState, model: Settings
             val mobile = sheet == Sheet.QualityMobile
             ChoiceSheet(
                 title = stringResource(if (mobile) R.string.settings_quality_mobile else R.string.settings_quality_home),
-                choices = SettingsViewModel.QUALITIES.map { Choice(it.id, qualityLabel(it.id)) },
+                choices = SettingsViewModel.QUALITIES.map { Choice(it.id, qualityLabel(it.id), qualityHint(it.id)) },
                 selected = SettingsViewModel.presetOf(if (mobile) s.qualityOnMobile else s.qualityOnHomeNetwork).id,
                 onPick = { id -> model.setQuality(mobile, SettingsViewModel.presetOf(id)) },
                 onDismiss = onDismiss,
@@ -256,7 +256,7 @@ private fun SettingsSheet(sheet: Sheet?, state: SettingsUiState, model: Settings
         Sheet.DownloadQuality -> ChoiceSheet(
             title = stringResource(R.string.downloads_quality),
             // Up to 1080p: what a phone shows.
-            choices = SettingsViewModel.QUALITIES.filter { it.original || (it.maxHeight ?: 0) <= 1080 }.map { Choice(it.id, qualityLabel(it.id)) },
+            choices = SettingsViewModel.DOWNLOAD_QUALITIES.map { Choice(it.id, qualityLabel(it.id)) },
             selected = SettingsViewModel.presetOf(s.downloadQuality).id,
             onPick = { id -> model.setDownloadQuality(SettingsViewModel.presetOf(id)) },
             onDismiss = onDismiss,
@@ -298,11 +298,12 @@ private fun SettingsSheet(sheet: Sheet?, state: SettingsUiState, model: Settings
     }
 }
 
-/** "Original", "1080p · 8 Mbps". */
+/** "Original", "Automatic", "8 Mbps 1080p", as the player's menu says them. */
 @Composable
 internal fun qualityLabel(value: String): String {
     val preset = SettingsViewModel.presetOf(value)
     if (preset.original) return stringResource(R.string.settings_quality_original)
+    if (preset.automatic) return stringResource(R.string.settings_quality_automatic)
     val lines = when (preset.maxHeight) {
         2160 -> "4K"
         null -> ""
@@ -310,6 +311,17 @@ internal fun qualityLabel(value: String): String {
     }
     val mbps = (preset.maxBitrateKbps ?: 0) / 1000
     return stringResource(R.string.settings_quality_preset, lines, mbps)
+}
+
+/** What Original and Automatic do, under their names; `null` for the transcodes, whose names say it. */
+@Composable
+private fun qualityHint(value: String): String? {
+    val preset = SettingsViewModel.presetOf(value)
+    return when {
+        preset.original -> stringResource(R.string.settings_quality_original_hint)
+        preset.automatic -> stringResource(R.string.settings_quality_automatic_hint)
+        else -> null
+    }
 }
 
 @Composable

@@ -79,6 +79,11 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   on closing and before any new session, through the app-scoped
  *   [SessionReporter]. One server session at a time.
  * - **Recovery.** [Recovery]'s ladder for errors, 12 s stalls and dropped frames.
+ * - **Quality.** The quality chosen plays as it is; Automatic
+ *   (docs/QUALITY.md) plays the original and lets [AutoQuality] step down
+ *   when it doesn't play well and back up when the network allows, each
+ *   change a new session where it was. Dropped frames at the original stay
+ *   the recovery ladder's, and count as Automatic's step down.
  * - **Tracks.** The audio is the server's choice for this device unless the
  *   person picks a track. Switched by the engine in direct play; a new
  *   session when a stream needs other audio or subtitles burned in; choices
@@ -135,6 +140,11 @@ class SessionPlaybackController(
      */
     private var audioPicked = false
     private var subtitle: MediaStream? = null
+
+    /** The quality chosen: the menu's or the remembered one, Automatic included. */
+    private var picked: QualityPreset = Qualities.AUTOMATIC
+
+    /** What plays: the original or a transcode, Automatic's choice while [picked] is Automatic. */
     private var quality: QualityPreset = Qualities.ORIGINAL
     private var markers: List<Marker> = emptyList()
 
@@ -168,6 +178,10 @@ class SessionPlaybackController(
     private var tracksChecked = false
 
     private val recovery = Recovery()
+    private val autoQuality = AutoQuality(env.ceiling)
+
+    /** Automatic went down: the next session to start says at what, once. */
+    private var autoNoticePending = false
     private val struggle = StruggleMeter()
     private val credits = CreditsGate()
     private val nextUp = NextUp(env.api, env.local)
@@ -260,7 +274,8 @@ class SessionPlaybackController(
         } catch (_: Exception) {
             null
         }
-        quality = Qualities.choose(chosen, remembered)
+        picked = Qualities.choose(chosen, remembered)
+        quality = playedFor(picked)
         offset.value = chosen?.let { f ->
             try {
                 env.offsets.offset(offsetKey(f.id))
@@ -335,7 +350,8 @@ class SessionPlaybackController(
         playingConverted = local?.converted == true
         if (local != null) return beginLocal(detail, chosen, local, atMs)
 
-        val mode = recovery.fallbackMode ?: guardMode?.takeIf { quality.original } ?: quality.mode
+        // A lower quality is always a transcode; the original keeps a fallback's mode, or a guard's.
+        val mode = if (!quality.original) PlaybackMode.Transcode else recovery.fallbackMode ?: guardMode ?: quality.mode
         val decision = caps?.let { c -> runCatching { env.policy.decide(detail, chosen.id, c) }.getOrNull() }
         var choices = PlaybackPlan.Choices(
             file = chosen,
@@ -368,11 +384,17 @@ class SessionPlaybackController(
         val info = started.info
         // Automatic: the track the server chose plays, switched to by the engine in direct play.
         if (audio == null) audio = PlaybackPlan.playedAudio(chosen, info.audioIndex)
+        autoQuality.jumped()
+        syncAutoOriginal(info)
+        if (autoNoticePending) {
+            autoNoticePending = false
+            playingPreset(info).takeIf { !it.original }?.let { notice(texts.loweredNotice(it)) }
+        }
         ui.update {
             it.copy(
                 method = texts.method(info),
-                note = recovery.fallbackReason?.let(texts::fallback),
-                canPlayOriginal = recovery.struggleSwitched && recovery.fallbackMode != null,
+                note = noteNow(),
+                canPlayOriginal = canPlayOriginal(),
                 durationMs = info.durationMs.takeIf { d -> d > 0 } ?: it.durationMs,
             )
         }
@@ -649,7 +671,7 @@ class SessionPlaybackController(
     private fun act(action: Recovery.Action, starving: Boolean) {
         when (action) {
             is Recovery.Action.NewSession -> {
-                if (action.reason == FallbackReason.NotSmooth && recovery.struggleSwitched) {
+                if (action.reason == FallbackReason.NotSmooth && recovery.struggleSwitched && !automatic) {
                     ui.update { it.copy(canPlayOriginal = true) }
                 }
                 restart(livePosition())
@@ -667,7 +689,11 @@ class SessionPlaybackController(
                     if (session === s) act(recovery.afterServerCheck(speed, starving), starving)
                 }
             }
-            Recovery.Action.SuggestLowerQuality -> ui.update { it.copy(suggestLowerQuality = true, note = texts.slowServer) }
+            Recovery.Action.SuggestLowerQuality -> {
+                // Automatic goes lower by itself; otherwise the person is offered a lower quality.
+                val step = if (automatic) autoQuality.serverTooSlow(env.now()) else null
+                if (step != null) applyAuto(step) else ui.update { it.copy(suggestLowerQuality = true, note = texts.slowServer) }
+            }
             is Recovery.Action.Fail -> fail(
                 texts.failure(action.failure, action.detail),
                 canRetry = action.failure != Failure.Unplayable,
@@ -775,10 +801,103 @@ class SessionPlaybackController(
             val counts = engineLink.frameCounts()
             if (counts != null && struggle.sample(now, counts)) {
                 struggle.reset()
-                recovery.onStruggling(s.info.method)?.let { act(it, starving = false) }
+                onStruggling(s.info.method, now)
+                return
             }
         }
+        if (automatic && !stopped && ui.value.phase !is PlayerPhase.Error) {
+            val step = autoQuality.sample(
+                AutoSample(
+                    atMs = now,
+                    watching = mediaShown && wantPlay.value && !ended && !reconnecting && engineLink.status != EngineStatus.Idle,
+                    buffering = engineLink.status == EngineStatus.Buffering,
+                    positionMs = engineLink.positionMs,
+                    bufferedMs = engineLink.bufferedMs,
+                    durationMs = ui.value.durationMs,
+                    bandwidthKbps = engineLink.bandwidthKbps,
+                ),
+            )
+            if (step != null) applyAuto(step)
+        }
     }
+
+    /**
+     * The decoder drops frames. The original switches to the server's
+     * quality, once, by the recovery ladder (in Automatic, that is its step
+     * down); a transcode in Automatic steps down to fewer lines.
+     */
+    private fun onStruggling(method: PlaybackMethod, now: Long) {
+        val action = recovery.onStruggling(method)
+        if (action != null) {
+            if (automatic) {
+                autoQuality.deviceFellBehindAtOriginal(now, convertedKbps = null)
+                autoNoticePending = true
+            }
+            act(action, starving = false)
+        } else if (automatic) {
+            autoQuality.deviceFellBehind(now)?.let(::applyAuto)
+        }
+    }
+
+    /**
+     * Plays what Automatic asked for, from where it is: a new session at
+     * that quality. Going down says so once, as the new session starts;
+     * going back up is silent.
+     */
+    private fun applyAuto(step: AutoStep) {
+        if (closed || stopped || item == null) return
+        autoQuality.applied(step, env.now())
+        quality = step.to
+        autoNoticePending = !step.up
+        ui.update { it.copy(suggestLowerQuality = false) }
+        publishChoices()
+        restart(livePosition())
+    }
+
+    /** Automatic plays, streamed from the server: it watches and adapts (a download plays as it is). */
+    private val automatic: Boolean get() = picked.automatic && autoQuality.active
+
+    /**
+     * What [choice] plays: Automatic starts afresh for the file (at the
+     * original, or the network's remembered ceiling), a download plays as
+     * it is, and every other quality plays as itself.
+     */
+    private fun playedFor(choice: QualityPreset): QualityPreset {
+        val f = file
+        if (!choice.automatic || f == null || localFile(f.id) != null) {
+            autoQuality.stop()
+            return if (choice.automatic) Qualities.ORIGINAL else choice
+        }
+        val file = AutoFile(
+            offered = Qualities.forFile(f),
+            originalKbps = Qualities.fileKbps(f),
+            lines = Qualities.linesOf(f),
+            cap = Qualities.closest(f),
+        )
+        return autoQuality.begin(file, env.now())
+    }
+
+    /** Tells Automatic what the original plays at in [info]: the file, or the server's conversion of it. */
+    private fun syncAutoOriginal(info: PlaybackInfo) {
+        if (!automatic || !quality.original) return
+        val converted = info.method == PlaybackMethod.Transcode
+        val kbps = if (converted) serverQuality(info)?.maxBitrateKbps else Qualities.fileKbps(file)
+        autoQuality.originalPlaysAt(kbps, converted)
+    }
+
+    /** The quality the server converts the original at in [info]; `null` when it doesn't, or plays a quality asked for. */
+    private fun serverQuality(info: PlaybackInfo?): QualityPreset? =
+        info?.autoQuality?.takeIf { quality.original }?.let { Qualities.byId(it) }?.takeIf { !it.original && !it.automatic }
+
+    /** What plays in [info]: the quality, or the original's conversion at the server's quality. */
+    private fun playingPreset(info: PlaybackInfo?): QualityPreset = serverQuality(info) ?: quality
+
+    /** Why it plays this way when the player chose it: Automatic's lowering, else a fallback's reason. */
+    private fun noteNow(): String? =
+        autoQuality.loweredFor?.takeIf { automatic }?.let(texts::lowered) ?: recovery.fallbackReason?.let(texts::fallback)
+
+    /** "Play original" after the switch for dropped frames; Automatic has Original in its menu instead. */
+    private fun canPlayOriginal(): Boolean = recovery.struggleSwitched && recovery.fallbackMode != null && !automatic
 
     /** Progress every 10 s while playing and every 30 s paused, so the server keeps the session and its transcode. */
     private suspend fun progressReports() {
@@ -907,6 +1026,7 @@ class SessionPlaybackController(
         lastPositionMs = target
         startedAtMs = target
         recovery.onJump()
+        autoQuality.jumped()
         struggle.reset()
         lastAdvanceAt = env.now()
         ui.update { it.copy(positionMs = target) }
@@ -927,6 +1047,8 @@ class SessionPlaybackController(
         val s = session ?: return
         val engineLink = link
         if (!s.info.hls && engineLink != null && PlaybackPlan.audioPlaysHere(chosen, caps)) {
+            // The engine loads the other track: its wait is no play issue.
+            autoQuality.jumped()
             engineLink.selectAudio(PlaybackPlan.audioStreams(file).indexOf(chosen), chosen.language)
         } else {
             restart(livePosition())
@@ -983,15 +1105,34 @@ class SessionPlaybackController(
 
     override fun selectQuality(name: String) {
         val wanted = Qualities.byIdOrLabel(name)
-        val chosen = Qualities.forFile(file).firstOrNull { it.id == wanted.id } ?: return
-        if (chosen.id == quality.id) return
-        quality = chosen
-        streamingPicked = !chosen.original
-        recovery.qualityChanged()
-        ui.update { it.copy(suggestLowerQuality = false, note = null, canPlayOriginal = false) }
-        scope.launch { env.quality.remember(chosen.id) }
+        val choice = Qualities.forFile(file).firstOrNull { it.id == wanted.id } ?: return
+        if (choice.id == picked.id) return
+        val before = quality
+        picked = choice
+        streamingPicked = !choice.original && !choice.automatic
+        quality = playedFor(choice)
+        autoNoticePending = false
+        scope.launch { env.quality.remember(choice.id) }
+        // Original and Automatic at the original play the same: it plays on, as it is.
+        val same = quality.id == before.id
+        if (same) {
+            if (automatic && recovery.fallbackReason == FallbackReason.NotSmooth) {
+                autoQuality.deviceFellBehindAtOriginal(env.now(), serverQuality(session?.info)?.maxBitrateKbps)
+            }
+            session?.info?.let(::syncAutoOriginal)
+        } else {
+            recovery.qualityChanged()
+        }
+        ui.update {
+            it.copy(
+                suggestLowerQuality = false,
+                note = if (same) noteNow() else null,
+                canPlayOriginal = same && canPlayOriginal(),
+            )
+        }
         publishChoices()
-        if (item != null) restart(livePosition())
+        refreshDetails()
+        if (item != null && !same) restart(livePosition())
     }
 
     override fun skip() {
@@ -1061,7 +1202,7 @@ class SessionPlaybackController(
             info = info,
             file = file,
             audioIndex = audio?.index,
-            note = recovery.fallbackReason?.let(texts::fallback),
+            note = noteNow(),
             positionMs = livePosition(),
             live = live,
             engine = link?.stats().orEmpty(),
@@ -1081,7 +1222,7 @@ class SessionPlaybackController(
         // Only a picked track: the server chooses again otherwise.
         audioIndex = audio?.takeIf { audioPicked }?.index?.toLong(),
         subtitleIndex = subtitle?.index?.toLong(),
-        quality = quality.id,
+        quality = picked.id,
         queue = current.queue,
     )
 
@@ -1196,6 +1337,7 @@ class SessionPlaybackController(
         val endedBefore = endSession(position)
         next = null
         recovery.newItem()
+        autoNoticePending = false
         credits.reset()
         guardMode = null
         hideServerSubtitles()
@@ -1255,7 +1397,8 @@ class SessionPlaybackController(
         val sub = subtitle
         // Text moves always; pictures only when drawn here from the server's .mks.
         val syncable = sub != null && (!PlaybackPlan.isImage(sub) || (streaming && sideload && info?.burnSubtitles != true))
-        val auto = info?.autoQuality?.takeIf { quality.original }?.let { Qualities.byId(it) }?.takeIf { !it.original }
+        val auto = serverQuality(info)
+        val playing = texts.quality(auto ?: quality)
         val fileHint = chosenFile?.let { f ->
             listOfNotNull(resolutionLabel(f.width, f.height), formatBitrate(f.bitrate).ifEmpty { null }).joinToString(" · ").ifEmpty { null }
         }
@@ -1266,11 +1409,12 @@ class SessionPlaybackController(
                 id = preset.id,
                 label = texts.quality(preset),
                 hint = when {
+                    preset.automatic -> if (automatic && (auto != null || !quality.original)) texts.automaticNow(playing) else texts.automaticHint
                     !preset.original -> texts.converted
                     auto != null -> texts.playsAs(auto, fileHint)
                     else -> fileHint
                 },
-                selected = preset.id == quality.id,
+                selected = preset.id == picked.id,
             )
         }
         ui.update {
@@ -1278,7 +1422,11 @@ class SessionPlaybackController(
                 audio = audioChoices,
                 subtitles = subtitleChoices,
                 qualities = qualities,
-                quality = if (auto != null) texts.autoQuality(auto) else texts.quality(quality),
+                quality = when {
+                    automatic -> texts.automatic(playing)
+                    auto != null -> texts.autoQuality(auto)
+                    else -> texts.quality(quality)
+                },
                 subtitleSync = syncable,
                 subtitleOffsetMs = offset.value,
             )

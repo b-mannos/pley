@@ -100,6 +100,13 @@ interface EngineLink {
     /** The server is out of reach and the engine keeps trying from where it stood. */
     val reconnecting: Boolean get() = false
 
+    /**
+     * The network's speed in kbps as the engine measured it from what it
+     * downloaded for this media (Media3's bandwidth estimate); `null` until
+     * it measured something.
+     */
+    val bandwidthKbps: Long? get() = null
+
     fun setListener(listener: Listener?)
 
     /** Loads [source] at [startMs]; the track choices of the media before are forgotten. */

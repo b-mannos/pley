@@ -41,8 +41,8 @@ internal class DataStoreSettings(
         passthrough = settings.passthrough.filterKeys { it in Settings.PASSTHROUGH_FORMATS },
         subtitleSize = Settings.SUBTITLE_SIZES.minBy { abs(it - settings.subtitleSize) },
         allowSoftwareVideo = settings.allowSoftwareVideo && debuggable,
-        qualityOnHomeNetwork = settings.qualityOnHomeNetwork.ifBlank { Settings.ORIGINAL },
-        qualityOnMobile = settings.qualityOnMobile.ifBlank { Settings.ORIGINAL },
+        qualityOnHomeNetwork = settings.qualityOnHomeNetwork.ifBlank { Settings.AUTOMATIC },
+        qualityOnMobile = settings.qualityOnMobile.ifBlank { Settings.AUTOMATIC },
         downloadQuality = settings.downloadQuality.ifBlank { Settings.ORIGINAL },
     )
 

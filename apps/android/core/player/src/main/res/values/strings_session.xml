@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- What the playback session says, in the web player's words (apps/web/src/player). -->
 <resources>
-    <!-- Qualities (apps/web/src/player/quality.ts). -->
+    <!-- Qualities, in the menu's order (docs/QUALITY.md). -->
     <string name="session_quality_original">Original</string>
+    <string name="session_quality_automatic">Automatic</string>
     <string name="session_quality_30m">30 Mbps 4K</string>
-    <string name="session_quality_20m">20 Mbps 1080p</string>
     <string name="session_quality_15m">15 Mbps 4K</string>
+    <string name="session_quality_20m">20 Mbps 1080p</string>
     <string name="session_quality_12m">12 Mbps 1080p</string>
     <string name="session_quality_8m">8 Mbps 1080p</string>
     <string name="session_quality_4m">4 Mbps 720p</string>
@@ -17,6 +18,17 @@
     <!-- "Plays as 8 Mbps 1080p here (the file: 4K · 62 Mbps)". -->
     <string name="session_quality_plays_as_file">Plays as %1$s here (the file: %2$s)</string>
     <string name="session_quality_converted">Converted</string>
+    <!-- Automatic, with what it plays now: "Automatic · Original", "Automatic · 8 Mbps 1080p". -->
+    <string name="session_quality_automatic_playing">Automatic · %1$s</string>
+    <!-- Automatic's hint in the quality menu. -->
+    <string name="session_quality_automatic_hint">Original, lower only when it doesn\'t play well</string>
+    <!-- Automatic's hint while it plays lower: "Now 8 Mbps 1080p". -->
+    <string name="session_quality_automatic_now">Now %1$s</string>
+    <!-- Automatic went down, said once, briefly: "Playing at 8 Mbps 1080p for a smoother picture". -->
+    <string name="session_quality_lowered_notice">Playing at %1$s for a smoother picture</string>
+    <!-- Why Automatic plays lower, in the details. -->
+    <string name="session_quality_lowered_network">Lowered for the network</string>
+    <string name="session_quality_lowered_device">Lowered: the device fell behind</string>
 
     <!-- Markers (SkipButton.tsx). -->
     <string name="session_skip_intro">Skip Intro</string>

@@ -112,7 +112,8 @@ class CountingApi(private val delegate: PleyApi) : PleyApi by delegate {
 class SessionHarness(
     val caps: CapsSnapshot = capsOf(TestDevices.sdrPhone),
     val autoplay: Boolean = true,
-    val quality: String? = null,
+    /** The quality remembered on the device: the original unless a test says otherwise ("auto" for Automatic). */
+    val quality: String? = QualityPreset.ORIGINAL_ID,
     /** Picture subtitles beside a stream; `null` burns them in. */
     val pictures: PictureSource? = null,
     /** The server's events, as the app's stream would bring them. */

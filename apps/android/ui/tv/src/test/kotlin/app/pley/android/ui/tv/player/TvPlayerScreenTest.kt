@@ -9,7 +9,10 @@ import kotlin.math.roundToInt
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -23,6 +26,7 @@ import app.pley.android.model.MarkerSource
 import app.pley.android.player.ChapterMark
 import app.pley.android.player.PlayerPhase
 import app.pley.android.player.PlayerUiState
+import app.pley.android.player.QualityChoice
 import app.pley.android.player.TrackChoice
 import app.pley.android.player.UpNextUi
 import app.pley.android.testing.player.engine.FakePlayerEngine
@@ -437,6 +441,38 @@ class TvPlayerScreenTest {
         assertEquals("retry", controller.calls.last().name)
         back()
         assertEquals(1, exits)
+    }
+
+    @Test
+    fun `the quality panel puts Automatic under Original, says why it is lower, and chooses with the D-pad`() {
+        val controller = playing {
+            it.copy(
+                quality = "Automatic · 8 Mbps 1080p",
+                note = "Lowered for the network",
+                qualities = listOf(
+                    QualityChoice("original", "Original", "4K · 62 Mbps", false),
+                    QualityChoice("auto", "Automatic", "Now 8 Mbps 1080p", true),
+                    QualityChoice("30m", "30 Mbps 4K", "Converted", false),
+                    QualityChoice("15m", "15 Mbps 4K", "Converted", false),
+                    QualityChoice("20m", "20 Mbps 1080p", "Converted", false),
+                    QualityChoice("8m", "8 Mbps 1080p", "Converted", false),
+                ),
+            )
+        }
+        show(controller)
+        press(Key.DirectionDown)
+        press(Key.DirectionRight, times = 2)
+        press(Key.DirectionCenter)
+        compose.onNodeWithTag(TAG_PANEL).assertExists()
+        compose.onNodeWithText("Lowered for the network").assertExists()
+        // Focus starts on the choice, Automatic, saying what it plays.
+        compose.onNode(isFocused()).assert(hasText("Automatic")).assert(hasText("Now 8 Mbps 1080p"))
+        press(Key.DirectionUp)
+        compose.onNode(isFocused()).assert(hasText("Original"))
+        press(Key.DirectionDown, times = 3)
+        compose.onNode(isFocused()).assert(hasText("15 Mbps 4K"))
+        press(Key.DirectionCenter)
+        assertEquals(listOf<Any?>("15m"), controller.calls("selectQuality").single().args)
     }
 
     @Test

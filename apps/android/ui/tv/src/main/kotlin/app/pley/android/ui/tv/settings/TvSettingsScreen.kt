@@ -649,7 +649,7 @@ private fun Panels(
         Picking.Quality -> TvChoicePanel(
             visible,
             stringResource(R.string.tv_settings_quality),
-            SettingsViewModel.QUALITIES.map { TvChoice(it.id, qualityLabel(it.id)) },
+            SettingsViewModel.QUALITIES.map { TvChoice(it.id, qualityLabel(it.id), qualityHint(it.id)) },
             SettingsViewModel.presetOf(s.qualityOnHomeNetwork).id,
             { id -> settings.setQuality(mobile = false, SettingsViewModel.presetOf(id)) },
             onClose,
@@ -723,11 +723,23 @@ internal fun modeHint(mode: SubtitleMode): Int = when (mode) {
     else -> R.string.tv_account_subtitles_forced_hint
 }
 
-/** "Original", "1080p · 8 Mbps". */
+/** What Original and Automatic do, under their names; `null` for the transcodes, whose names say it. */
+@Composable
+private fun qualityHint(value: String): String? {
+    val preset = SettingsViewModel.presetOf(value)
+    return when {
+        preset.original -> stringResource(R.string.tv_settings_quality_original_hint)
+        preset.automatic -> stringResource(R.string.tv_settings_quality_automatic_hint)
+        else -> null
+    }
+}
+
+/** "Original", "Automatic", "8 Mbps 1080p", as the player's menu says them. */
 @Composable
 private fun qualityLabel(value: String): String {
     val preset = SettingsViewModel.presetOf(value)
     if (preset.original) return stringResource(R.string.tv_settings_quality_original)
+    if (preset.automatic) return stringResource(R.string.tv_settings_quality_automatic)
     val lines = when (preset.maxHeight) {
         2160 -> "4K"
         null -> ""

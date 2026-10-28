@@ -18,6 +18,24 @@ interface PlayerTexts {
 
     /** Every quality but the original. */
     val converted: String
+
+    /** The menu's row while Automatic plays [playing]: "Automatic · Original", "Automatic · 8 Mbps 1080p". */
+    fun automatic(playing: String): String = "Automatic · $playing"
+
+    /** Automatic's hint in the menu. */
+    val automaticHint: String get() = "Original, lower only when it doesn't play well"
+
+    /** Automatic's hint while it plays [playing], below the original: "Now 8 Mbps 1080p". */
+    fun automaticNow(playing: String): String = "Now $playing"
+
+    /** Said once when Automatic goes down to [preset]. */
+    fun loweredNotice(preset: QualityPreset): String = "Playing at ${quality(preset)} for a smoother picture"
+
+    /** Why Automatic plays lower, for the details. */
+    fun lowered(reason: LoweredFor): String = when (reason) {
+        LoweredFor.Network -> "Lowered for the network"
+        LoweredFor.Device -> "Lowered: the device fell behind"
+    }
     val skipIntro: String
     val skipCredits: String
 
@@ -71,9 +89,10 @@ class ResourcePlayerTexts(context: Context) : PlayerTexts {
 
     override fun quality(preset: QualityPreset): String = s(
         when (preset.id) {
+            QualityPreset.AUTOMATIC_ID -> R.string.session_quality_automatic
             "30m" -> R.string.session_quality_30m
-            "20m" -> R.string.session_quality_20m
             "15m" -> R.string.session_quality_15m
+            "20m" -> R.string.session_quality_20m
             "12m" -> R.string.session_quality_12m
             "8m" -> R.string.session_quality_8m
             "4m" -> R.string.session_quality_4m
@@ -92,6 +111,21 @@ class ResourcePlayerTexts(context: Context) : PlayerTexts {
         }
 
     override val converted: String get() = s(R.string.session_quality_converted)
+
+    override fun automatic(playing: String): String = res.getString(R.string.session_quality_automatic_playing, playing)
+
+    override val automaticHint: String get() = s(R.string.session_quality_automatic_hint)
+
+    override fun automaticNow(playing: String): String = res.getString(R.string.session_quality_automatic_now, playing)
+
+    override fun loweredNotice(preset: QualityPreset): String = res.getString(R.string.session_quality_lowered_notice, quality(preset))
+
+    override fun lowered(reason: LoweredFor): String = s(
+        when (reason) {
+            LoweredFor.Network -> R.string.session_quality_lowered_network
+            LoweredFor.Device -> R.string.session_quality_lowered_device
+        },
+    )
     override val skipIntro: String get() = s(R.string.session_skip_intro)
     override val skipCredits: String get() = s(R.string.session_skip_credits)
 

@@ -61,6 +61,27 @@ are under Me on phones and in Settings on TVs
 in 0.1 s steps, up to 10 s either way, remembered for each file on the
 device.
 
+## Quality
+
+The menu and Automatic are docs/QUALITY.md's. The quality is kept per
+device and network kind (Settings → Quality on Wi-Fi and on mobile data on
+phones, Quality on TVs), Automatic until one is chosen, in the player or
+in Settings. The decisions are `AutoQuality`'s (core/player), fed every
+half second: rebuffering from the player's state, delivery from the
+buffered position and the playhead, the network from Media3's bandwidth
+estimate, and dropped frames as the recovery ladder counts them. At the
+original, dropped frames are the ladder's switch to the server's quality,
+as with Original (then Automatic offers Original in its menu rather than
+Play original), and it never steps back up to the original; at a lower
+quality they go to fewer lines. Automatic works out the server's quality
+for a file itself (the server's rule) until the server names it, which it
+does only when it converts. A server that converts too slowly makes
+Automatic step down rather than offer a lower quality. The network's
+ceiling is kept in the app's preferences for each server, on the
+device's clock since it started: a ceiling from before a restart is
+forgotten. Downloads play as they are, in Automatic too. Waits while the
+server is out of reach (Reconnecting) aren't play issues.
+
 ## Screens
 
 Libraries are sorted for the profile: on phones, Sort in the Libraries

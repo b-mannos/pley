@@ -20,8 +20,9 @@ class SettingsTest {
     fun `defaults are what the app does without being asked`() = runTest {
         val settings = TestData(this, folder.newFolder()).graph.settings.settings.first()
         assertEquals(Settings(), settings)
-        assertEquals("Original", settings.qualityOnHomeNetwork)
-        assertEquals("Original", settings.qualityOnMobile)
+        // Automatic where no quality was ever chosen (docs/QUALITY.md).
+        assertEquals("auto", settings.qualityOnHomeNetwork)
+        assertEquals("auto", settings.qualityOnMobile)
         assertTrue(settings.privateSignInTab)
         assertTrue(settings.autoplayNext)
         assertFalse(settings.tunneling)
@@ -65,6 +66,20 @@ class SettingsTest {
     }
 
     @Test
+    fun `the original chosen is kept, as Automatic left untouched is`() = runTest {
+        val dir = folder.newFolder()
+        val first = appRun()
+        val before = TestData(this, dir, scope = first)
+        before.graph.settings.update { it.copy(qualityOnHomeNetwork = Settings.ORIGINAL) }
+        first.cancel()
+        testScheduler.runCurrent()
+
+        val after = TestData(this, dir).graph.settings.settings.first()
+        assertEquals(Settings.ORIGINAL, after.qualityOnHomeNetwork)
+        assertEquals(Settings.AUTOMATIC, after.qualityOnMobile)
+    }
+
+    @Test
     fun `what a device can't have is put back`() = runTest {
         val phone = TestData(this, folder.newFolder(), debuggable = false).graph.settings
         phone.update {
@@ -85,7 +100,7 @@ class SettingsTest {
         // Release builds never allow software video.
         assertFalse(s.allowSoftwareVideo)
         assertEquals(mapOf("ac3" to Passthrough.Off), s.passthrough)
-        assertEquals("Original", s.qualityOnMobile)
+        assertEquals("auto", s.qualityOnMobile)
     }
 
     @Test
