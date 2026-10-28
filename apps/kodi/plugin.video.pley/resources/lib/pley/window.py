@@ -428,6 +428,8 @@ class Window(xbmcgui.WindowXML):
         for entry in (L.RAIL_PLAYLISTS, L.RAIL_COLLECTIONS):
             self.place_rail_entry(entry, y, pitch)
             y += pitch
+        # Settings stays at the foot, its pill as tall as the others'.
+        self.place_rail_entry(L.RAIL_SETTINGS, L.RAIL_SETTINGS_Y, pitch)
 
     def place_rail_entry(self, entry: int, y: int, pitch: int) -> None:
         """An entry's group centred on `y`, its pills as tall as `pitch`

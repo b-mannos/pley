@@ -147,12 +147,11 @@ def rail_pitch(libraries: int) -> int:
     """How far apart the entries from Search to Collections are: closer
     than RAIL_PITCH when there are too many for Collections to end a step
     above Settings (with four libraries it was on Settings, with six off
-    the screen)."""
+    the screen). Settings' pill is as tall as the others', so a full rail
+    goes down to it evenly."""
     entries = 2 + min(libraries, len(RAIL_LIBRARIES)) + 2
-    # The last entry's middle, half its pill and a gap above Settings' pill:
-    # TOP + (entries - 1) * pitch + (pitch - GAP) / 2 + GAP <= Settings' top.
-    room = RAIL_SETTINGS_Y - RAIL_ROW // 2 - RAIL_TOP - RAIL_GAP // 2
-    return min(RAIL_PITCH, 2 * room // (2 * entries - 1))
+    # From Search's middle, a step per entry down to Settings' middle.
+    return min(RAIL_PITCH, (RAIL_SETTINGS_Y - RAIL_TOP) // entries)
 
 
 def rail_row(pitch: int) -> int:

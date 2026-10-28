@@ -65,8 +65,9 @@ side by side with Kodi's were the reference):
   Playlists, Collections and Settings (the add-on's). Collapsed it shows
   icons, the current page's marked; Left opens it over the page with each
   entry's name. However many libraries there are, the entries come closer
-  when they must, so Collections always ends a step above Settings. The
-  profile's menu has Audio and subtitles (below). The
+  when they must, their pills shorter (Settings' too), so Collections
+  always ends a step above Settings. The profile's menu has Audio and
+  subtitles (below). The
   libraries come in the profile's order: the profile's menu has Sort
   libraries (a library, then where it goes), a library's
   menu key Move up, Move down and Use the server's order, each saved at
