@@ -41,6 +41,14 @@ pub const READRATE_BURST_MS: i64 = 60_000;
 
 /// CPU tone mapping chain (zimg). Expects HDR input, outputs 8-bit BT.709.
 pub const ZSCALE_TONEMAP: &str = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
+
+/// [`ZSCALE_TONEMAP`] at `w×h`: the first zscale scales as it makes the
+/// picture linear, so the tone mapping, in 32-bit floats for each of three
+/// colours, works on the output's pixels rather than the source's (4K to
+/// 1080p: a quarter of them).
+pub fn zscale_tonemap(w: i64, h: i64) -> String {
+    ZSCALE_TONEMAP.replacen("zscale=t=linear", &format!("zscale=w={w}:h={h}:t=linear"), 1)
+}
 const OPENCL_TONEMAP: &str = "format=p010,hwupload,tonemap_opencl=tonemap=hable:desat=0:t=bt709:m=bt709:p=bt709:format=nv12,hwdownload,format=nv12";
 
 /// A `setparams` filter giving HDR frames the colour properties they lack
@@ -864,17 +872,18 @@ impl Plan {
         }
 
         let scale_needed = v.width != v.src_width || v.height != v.src_height;
-        let mut pre = Vec::<String>::new(); // at source resolution
-        let mut post = Vec::<String>::new(); // after (optional) overlay
+        // Everything is done at the output's size as early as it can be:
+        // deinterlacing at the source's, then tone mapping and scaling in one
+        // step where the tone mapper scales (libplacebo, zimg), picture
+        // subtitles laid on the scaled frame.
+        let mut pre = Vec::<String>::new(); // before the (optional) overlay
+        let mut post = Vec::<String>::new(); // after it
 
         if v.deinterlace {
             pre.push("yadif=mode=send_frame:deint=interlaced".into());
         }
-        let overlay_needed = matches!(self.burn, Some(Burn::Image { .. } | Burn::ImageFile { .. }));
         match v.tonemap {
             Some(Tonemapper::Libplacebo) => {
-                // libplacebo scales too, unless a bitmap overlay needs source size first.
-                let (w, h) = if overlay_needed { (v.src_width, v.src_height) } else { (v.width, v.height) };
                 let vulkan = matches!(pipeline, Pipeline::Vulkan { .. });
                 let format = match (vulkan, v.hdr.is_some()) {
                     (true, false) => "nv12",
@@ -898,27 +907,21 @@ impl Plan {
                     Pipeline::Vulkan { encode_on_gpu: false } => pre.push(format!("hwdownload,format={format}")),
                     _ => {}
                 }
-                if overlay_needed && scale_needed {
-                    post.push(format!("scale={}:{}:flags=bicubic", v.width, v.height));
-                }
             }
             Some(Tonemapper::Opencl) => {
                 pre.extend(v.tonemap_input.clone());
                 pre.push(OPENCL_TONEMAP.into());
                 if scale_needed {
-                    post.push(format!("scale={}:{}:flags=bicubic", v.width, v.height));
+                    pre.push(format!("scale={}:{}:flags=bicubic", v.width, v.height));
                 }
             }
             Some(Tonemapper::Zscale) => {
                 pre.extend(v.tonemap_input.clone());
-                pre.push(ZSCALE_TONEMAP.into());
-                if scale_needed {
-                    post.push(format!("scale={}:{}:flags=bicubic", v.width, v.height));
-                }
+                pre.push(if scale_needed { zscale_tonemap(v.width, v.height) } else { ZSCALE_TONEMAP.into() });
             }
             None => {
                 if scale_needed {
-                    post.push(format!("scale={}:{}:flags=bicubic", v.width, v.height));
+                    pre.push(format!("scale={}:{}:flags=bicubic", v.width, v.height));
                 }
             }
         }
@@ -946,13 +949,13 @@ impl Plan {
 
         let join = |parts: &[String]| if parts.is_empty() { "null".to_owned() } else { parts.join(",") };
         // Picture subtitles come on a canvas of their own (1080p on 4K discs):
-        // it is fitted to the frame's width, keeping its shape, and laid on
-        // the bottom of the frame.
+        // it is fitted to the (scaled) frame's width, keeping its shape, and
+        // laid on the bottom of the frame.
         let overlay = |subs: &str| {
             format!(
                 "{input}{}[base];{subs}scale={}:-1[subs];[base][subs]overlay=x=(W-w)/2:y=H-h:eof_action=pass:repeatlast=0[ov];[ov]{}[vout]",
                 join(&pre),
-                v.src_width,
+                v.width,
                 join(&post)
             )
         };
@@ -1787,6 +1790,79 @@ mod tests {
         assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::Software);
     }
 
+    /// What an Intel N100 (or any recent Intel graphics) passes at start-up:
+    /// Quick Sync's encoders on Windows (`Qsv`) or VAAPI's on Linux, their
+    /// zero-copy pipeline for the codecs they decode, and Vulkan's decoder
+    /// with libplacebo on the GPU (unless `vulkan` is false: an older
+    /// driver), OpenCL and zimg.
+    fn intel(accel: HwAccel, vulkan: bool) -> Ffmpeg {
+        let prefix = if accel == HwAccel::Qsv { "qsv" } else { "vaapi" };
+        let hw = |codec: VideoCodec, main10: bool| EncoderInfo {
+            name: format!("{}_{prefix}", if codec == VideoCodec::H264 { "h264" } else { "hevc" }),
+            codec,
+            hardware: true,
+            accel,
+            main10,
+        };
+        let mappers = [Tonemapper::Libplacebo, Tonemapper::Opencl, Tonemapper::Zscale];
+        let mappers = mappers.into_iter().filter(|m| vulkan || *m != Tonemapper::Libplacebo).collect();
+        let mut ff = ffmpeg_with(vec![hw(VideoCodec::H264, false), hw(VideoCodec::Hevc, true), x264(), x265()], mappers);
+        ff.caps.hwaccels = ["d3d11va", "qsv", "vaapi", "vulkan"].map(String::from).to_vec();
+        let codecs: Vec<String> = ["h264", "hevc", "hevc10"].map(String::from).to_vec();
+        ff.caps.gpu_pipelines = vec![pley_transcoder_api::GpuPipeline { accel, codecs: codecs.clone() }];
+        if vulkan {
+            ff.caps.vulkan_decode = codecs;
+        }
+        ff
+    }
+
+    #[test]
+    fn intel_graphics_keep_sdr_on_the_gpu_and_tone_map_on_vulkan() {
+        for accel in [HwAccel::Qsv, HwAccel::Vaapi] {
+            let ff = intel(accel, true);
+            let encoder = if accel == HwAccel::Qsv { "h264_qsv" } else { "h264_vaapi" };
+
+            // SDR: decoded, scaled and encoded without leaving the GPU.
+            let plan = Plan::build(&request(), &ten_bit(media(DynamicRange::Sdr, None)), &ff, None).unwrap();
+            let v = plan.video.as_ref().unwrap();
+            assert_eq!(v.pipeline, Pipeline::Gpu(accel));
+            let args = args_string(&plan, 0, 2);
+            let scaler =
+                if accel == HwAccel::Qsv { "vpp_qsv=w=1920:h=1080:format=nv12" } else { "scale_vaapi=w=1920:h=1080:format=nv12" };
+            assert!(args.contains(&format!("[0:0]{scaler}[vout]")), "{args}");
+            assert!(args.contains(&format!("-c:v {encoder}")), "{args}");
+
+            // HDR10 to SDR: decoded and tone mapped (and scaled) on Vulkan,
+            // one download of the 1080p frame to the encoder.
+            let plan = Plan::build(&request(), &ten_bit(media(DynamicRange::Hdr10, None)), &ff, None).unwrap();
+            let v = plan.video.as_ref().unwrap();
+            assert_eq!((v.pipeline, v.tonemap), (Pipeline::Vulkan { encode_on_gpu: false }, Some(Tonemapper::Libplacebo)));
+            let args = args_string(&plan, 0, 2);
+            assert!(args.contains("libplacebo=w=1920:h=1080:format=nv12"), "{args}");
+            assert!(args.contains("hwdownload,format=nv12"), "{args}");
+            assert!(args.contains(&format!("-c:v {encoder}")), "{args}");
+            if accel == HwAccel::Vaapi {
+                // VAAPI's encoders take frames on the GPU only.
+                assert!(args.contains("hwdownload,format=nv12,format=nv12,hwupload[vout]"), "{args}");
+            }
+
+            // An older driver without Vulkan: hardware decoding, OpenCL's tone
+            // mapping, then the encoder.
+            let ff = intel(accel, false);
+            let plan = Plan::build(&request(), &ten_bit(media(DynamicRange::Hdr10, None)), &ff, None).unwrap();
+            let v = plan.video.as_ref().unwrap();
+            assert_eq!((v.pipeline, v.tonemap), (Pipeline::Software, Some(Tonemapper::Opencl)));
+            let decoder = match accel {
+                HwAccel::Qsv if cfg!(windows) => "d3d11va",
+                _ => "vaapi",
+            };
+            assert_eq!(v.hw_decode.as_deref(), Some(decoder));
+            let args = args_string(&plan, 0, 2);
+            assert!(args.contains(&format!("-hwaccel {decoder}")), "{args}");
+            assert!(args.contains(&format!("-c:v {encoder}")), "{args}");
+        }
+    }
+
     #[test]
     fn dolby_vision_profile5_requires_libplacebo() {
         let ff = ffmpeg_with(vec![x264()], vec![Tonemapper::Zscale]);
@@ -1797,7 +1873,9 @@ mod tests {
         // BT.2020 so the transcode works (with off colours, as warned).
         let args = args_string(&plan, 0, 2);
         assert!(
-            args.contains("setparams=color_trc=smpte2084:color_primaries=bt2020:colorspace=bt2020nc,zscale=t=linear"),
+            args.contains(
+                "setparams=color_trc=smpte2084:color_primaries=bt2020:colorspace=bt2020nc,zscale=w=1920:h=1080:t=linear"
+            ),
             "{args}"
         );
 
@@ -2158,9 +2236,11 @@ mod tests {
         req.subtitle = Some(SubtitleBurnRequest { stream_index: Some(2), external_path: None });
         let plan = Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, None).unwrap();
         let args = args_string(&plan, 0, 2);
-        // The subtitles' canvas fills the 4K frame's width, then both go to 1080p.
-        assert!(args.contains("[0:2]scale=3840:-1[subs];[base][subs]overlay=x=(W-w)/2:y=H-h"), "{args}");
-        assert!(args.contains("scale=1920:1080"));
+        // The 4K frame goes to 1080p first, then the subtitles' canvas,
+        // fitted to its width, is laid on it.
+        assert!(args.contains("scale=1920:1080:flags=bicubic[base];"), "{args}");
+        assert!(args.contains("[0:2]scale=1920:-1[subs];[base][subs]overlay=x=(W-w)/2:y=H-h"), "{args}");
+        assert!(args.contains("[ov]format=yuv420p[vout]"), "{args}");
         assert!(!args.contains("-ss"));
     }
 
