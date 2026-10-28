@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The player: the Video node with its own controls, Skip Intro and Skip
-     Credits, Up Next before the end of an episode, subtitle sync (Down), and
-     what went wrong when it did. -->
+     Credits, Up Next before the end of an episode, subtitle sync (Down),
+     Automatic's notice of a lower quality, and what went wrong when it did. -->
 <component name="PlayerScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -20,6 +20,7 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Content.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/SubtitleSync.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Tracks.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/AutoQuality.brs" />
     <children>
         <Rectangle width="1920" height="1080" color="0x000000FF" />
         <Video id="video" width="1920" height="1080">
@@ -49,6 +50,14 @@
             <Label id="noticeText" translation="[96, 430]" width="1500" wrap="true" maxLines="6" color="0xA1A9B6FF" font="font:SmallSystemFont" />
             <ButtonGroup id="noticeButtons" iconUri="" focusedIconUri="" translation="[96, 700]" minWidth="400" />
         </Group>
+        <!-- Automatic saying it went down, briefly, at the top. -->
+        <Group id="toast" visible="false">
+            <Rectangle translation="[460, 72]" width="1000" height="96" color="0x16191EE6" />
+            <Label id="toastText" translation="[460, 72]" width="1000" height="96" horizAlign="center" vertAlign="center" color="0xEBEBEBFF" font="font:SmallSystemFont" />
+        </Group>
         <Timer id="countdownTimer" duration="1" repeat="true" />
+        <Timer id="toastTimer" duration="4" />
+        <!-- Automatic's look at the playback, once a second while it plays. -->
+        <Timer id="autoTimer" duration="1" repeat="true" />
     </children>
 </component>

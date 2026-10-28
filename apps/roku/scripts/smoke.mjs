@@ -209,12 +209,12 @@ async function openFromMenu(index, pattern, what, then = async () => {}) {
 }
 
 // From Settings: Sign out, and Sign out again in the dialog. Sign out is
-// the last of six buttons, Subtitle language showing once subtitles come on
-// always.
+// the last of seven buttons, Subtitle language showing once subtitles come
+// on always.
 async function signOut() {
   for (let attempt = 0; attempt < 3; attempt++) {
     const since = mark();
-    await press("down", 5);
+    await press("down", 6);
     await press("select");
     await sleep(800);
     await press("select");
@@ -302,11 +302,20 @@ async function walk() {
   home.kept = age < 55000 ? !asked : age > 65000 ? asked : true;
   await openFromMenu(4, /^GET \/api\/auth\/me$/, "Settings");
   shoot("settings");
-  // Sort libraries: Movies lifted and put after TV Shows, saved at once;
-  // then the server's order again, which the rest of the walk expects.
-  since = mark();
+  // Quality, after Audio language and Subtitles: Automatic checked, then
+  // 8 Mbps 1080p chosen, kept on the Roku.
   await press("down", 2);
-  await press("select"); // Sort libraries, after Audio language and Subtitles
+  await press("select");
+  await sleep(500);
+  shoot("settings-quality");
+  await press("down", 5);
+  await press("select");
+  await settle();
+  // Sort libraries, next: Movies lifted and put after TV Shows, saved at
+  // once; then the server's order again, which the rest of the walk expects.
+  since = mark();
+  await press("down");
+  await press("select"); // Sort libraries
   await waitFor(/^GET \/api\/libraries$/, since, "the libraries to sort");
   await press("select"); // lifts Movies
   await press("down");
@@ -429,6 +438,8 @@ const checks = [
   ["loaded Home", asked(/^GET \/api\/hubs\/home$/)],
   ["asked to play with its capabilities", asked(/^POST \/api\/playback$/)],
   ["asked for the picture subtitles to be drawn", fixture.playbacks.some((p) => p.item === 103 && p.subtitle_index === 4)],
+  ["played the original in Automatic, the default", fixture.playbacks.length > 0 && fixture.playbacks.every((p) => p.mode === "auto" && p.max_bitrate === null)],
+  ["kept 8 Mbps 1080p chosen in Settings", registry !== null && /playback.quality","8m"/.test(JSON.stringify([...registry]))],
   ["showed subtitle sync", sync.label],
   ["saved Movies after TV Shows, every library in the order", fixture.orders.some((ids) => JSON.stringify(ids) === "[2,1,3]")],
   ["went back to the server's order", fixture.orders.includes(null) && fixture.libraryOrder.join() === "1,2,3"],

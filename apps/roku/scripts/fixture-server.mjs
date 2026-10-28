@@ -351,7 +351,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       if (ask.file_id != null && ask.file_id !== fileId) problems.push(`playback of file ${ask.file_id} for item ${ask.item_id}`);
       const burn = ask.subtitle_index ?? null;
       if (burn !== null && burn !== PICTURE_SUBTITLES) problems.push(`subtitles ${burn} to draw, which aren't pictures`);
-      fixture.playbacks.push({ item: ask.item_id, subtitle_index: burn });
+      fixture.playbacks.push({ item: ask.item_id, subtitle_index: burn, mode: ask.mode, max_bitrate: ask.max_bitrate ?? null });
       sessions += 1;
       const session = `s${sessions}`;
       if (fixture.playbackDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, fixture.playbackDelayMs));

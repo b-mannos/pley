@@ -4,7 +4,8 @@
 ' one opens its choices in a panel at the right; a choice is saved at once
 ' (PUT /api/me/track-defaults, all three) and shows before the server
 ' answers, put back if it refuses. A server or sign-in that doesn't let apps
-' change them says to change them on the web.
+' change them says to change them on the web. Quality is this Roku's own
+' (AutoQuality.brs), kept in its registry.
 
 sub init()
     m.server = m.top.findNode("server")
@@ -79,6 +80,9 @@ sub showRows()
         labels.Push(row.text)
         actions.Push(row.kind)
     end for
+    ' This Roku's, kept on it: no server needed.
+    labels.Push("Quality: " + aqLabel(aqChoice(playbackSection())))
+    actions.Push("quality")
     for each action in ["Sort libraries", "Switch server", "Sign out"]
         labels.Push(action)
         actions.Push(action)
@@ -100,6 +104,10 @@ end sub
 
 sub onButton(event as object)
     chosen = m.actions[event.getData()]
+    if chosen = "quality"
+        openQuality()
+        return
+    end if
     if chosen = "audio" or chosen = "mode" or chosen = "subtitle"
         openChoices(chosen)
         return
@@ -143,8 +151,32 @@ sub openChoices(kind as string)
         return
     end if
     m.message.text = ""
+    showChoices(kind, tracksChoices(kind, m.defaults))
+end sub
+
+' The Quality menu (docs/QUALITY.md), kept on this Roku: Automatic unless
+' another was chosen.
+sub openQuality()
+    m.message.text = ""
+    current = aqChoice(playbackSection())
+    choice = { title: "Quality", labels: [], values: [], hints: [], current: 0 }
+    for each quality in aqMenu()
+        if quality.id = current then choice.current = choice.values.Count()
+        choice.labels.Push(quality.label)
+        choice.values.Push(quality.id)
+        choice.hints.Push(aqHint(quality.id))
+    end for
+    showChoices("quality", choice)
+end sub
+
+' Where the quality setting is kept on this Roku (the player reads it).
+function playbackSection() as object
+    return CreateObject("roRegistrySection", "playback")
+end function
+
+sub showChoices(kind as string, choice as object)
     m.choiceKind = kind
-    m.choice = tracksChoices(kind, m.defaults)
+    m.choice = choice
     items = []
     for each label in m.choice.labels
         items.Push({ title: label })
@@ -181,6 +213,11 @@ sub onChoice(event as object)
     at = event.getData()
     if at < 0 or at >= m.choice.values.Count() then return
     closeChoices()
+    if m.choiceKind = "quality"
+        aqChoose(playbackSection(), m.choice.values[at])
+        showRows()
+        return
+    end if
     saveDefaults(tracksWith(m.defaults, m.choiceKind, m.choice.values[at]))
 end sub
 

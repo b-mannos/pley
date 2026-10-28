@@ -114,6 +114,44 @@ Rules the code keeps:
   server or sign-in that doesn't let apps change them (403, 404, 405) puts
   the choice back and says to change them on the web, at the server's
   `/account`.
+- Quality (Settings, docs/QUALITY.md; `components/lib/AutoQuality.brs`):
+  the menu in its order, Original, Automatic, 30 Mbps 4K, 15 Mbps 4K,
+  20 Mbps 1080p and down to 2 Mbps 480p, each with its hint, kept on the
+  Roku (registry section `playback`), Automatic unless another was
+  chosen. A quality is asked for as on Android: converted (`mode:
+  "transcode"`, `max_bitrate`, `max_height`) when it makes the file
+  smaller, by the file's bitrate and lines in its details; else the file
+  plays as it is. Roku's player has no quality menu of pley's, so the
+  choice is made in Settings, before playing.
+- Automatic plays the original and watches it. Roku's own HLS would adapt
+  between a stream's variants, but pley's streams have one, so stepping
+  down is the app's:
+  - *Waits*: the Video node's state `buffering` after at least 2 s of
+    playing (not a start, nor after a seek pley made or a pause), and not
+    when `bufferingStatus.isUnderrun` says it isn't for want of data. One
+    of 2 s or more, or two shorter ones within a minute, is a play issue.
+  - *Delivery* before a wait: Roku tells an app nothing of how much it has
+    read ahead, so this one isn't seen; nor are dropped frames. What the
+    Roku can't decode is converted, as before (a media error plays the
+    file again converted at the server's own quality).
+
+  On a play issue it steps down by the spec's rule: what the network
+  carried (the HLS segments' sizes over their download times in the last
+  20 s, from `downloadedSegment`, no more than the bitrate playing; half
+  of it for a file played as it is, which has no segments) times 0.75,
+  never above the server's own quality for the file (`auto_quality`),
+  always a quality lower, never under 2 Mbps 480p, and not within 20 s of
+  the last change. The stream opens again where it was, as a new session
+  at that quality (`mode: "transcode"`), and "Playing at 8 Mbps 1080p for
+  a smoother picture" shows at the top for 4 s once it plays. The ceiling
+  is kept 30 minutes for each server in the registry; a title started in
+  Automatic meanwhile (Up Next's too) starts at the quality under it when
+  that makes the file smaller. Back up: after 3 minutes without an issue
+  and 5 after a step down, when the segments since then (20 s of video at
+  least) carried 1.6 times the next quality up (the file's bitrate, for
+  Original), one step at a time, every 3 minutes at most, silently; back
+  at Original the ceiling is forgotten. Without segments to measure, it
+  stays where it went down to, as the spec allows.
 - Sort libraries (Settings), as on Android TV: OK lifts a library, up and
   down move it, OK puts it there, Back puts it back; "Use the server's
   order" goes back to the order everyone sees. Each drop saves the order

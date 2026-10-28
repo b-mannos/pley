@@ -748,8 +748,9 @@ end sub
 ' --- Playback ---
 
 ' POST /api/playback with what this Roku plays, asked of it now. mode is
-' "auto", or "transcode" once the original didn't play here;
-' subtitleIndex, picture subtitles for the server to draw.
+' "auto", or "transcode" for a quality (maxBitrate, maxHeight: the Quality
+' setting's or Automatic's, AutoQuality.brs) or once the original didn't
+' play here; subtitleIndex, picture subtitles for the server to draw.
 sub apiPlay(request as object, spec as object)
     mode = httpString(spec.mode)
     if mode = "" then mode = "auto"
@@ -762,6 +763,8 @@ sub apiPlay(request as object, spec as object)
     }
     if httpNumber(spec.fileId, 0) > 0 then body.file_id = spec.fileId
     if httpNumber(spec.subtitleIndex, -1) >= 0 then body.subtitle_index = Int(spec.subtitleIndex)
+    if httpNumber(spec.maxBitrate, 0) > 0 then body.max_bitrate = Int(spec.maxBitrate)
+    if httpNumber(spec.maxHeight, 0) > 0 then body.max_height = Int(spec.maxHeight)
     ' Starting a transcode takes the server a few seconds.
     apiCall(request, { method: "POST", path: "/api/playback", json: body, timeoutMs: 60000, play: true })
 end sub

@@ -8,7 +8,9 @@
 ' bring up Up Next instead. Down brings up subtitle sync for a file with
 ' text subtitles (SubtitleSync.brs). Subtitles (or audio) the person picks
 ' in Roku's options are remembered on the server for the show or the movie
-' (Tracks.brs), so the next episode starts with matching ones.
+' (Tracks.brs), so the next episode starts with matching ones. The quality
+' is the one chosen in Settings; Automatic opens the stream again lower
+' where it was when it doesn't play well (AutoQuality.brs).
 
 sub init()
     m.video = m.top.findNode("video")
@@ -73,6 +75,21 @@ sub init()
     m.audioShown = -2
     m.audioPlaying = -1
     m.tracksFrom = -1
+    ' Automatic (docs/QUALITY.md): how this opening was asked for
+    ' (aqAsk), the title's watch, the quality Automatic opens the title
+    ' at again ("" for the setting's choice), and what to say once it plays.
+    m.asked = invalid
+    m.watch = invalid
+    m.watchItem = invalid
+    m.autoQuality = ""
+    m.autoNotice = ""
+    m.toast = m.top.findNode("toast")
+    m.toastText = m.top.findNode("toastText")
+    m.toastTimer = m.top.findNode("toastTimer")
+    m.toastTimer.observeField("fire", "onToastTimer")
+    m.autoTimer = m.top.findNode("autoTimer")
+    m.autoTimer.observeField("fire", "onAutoTick")
+    m.video.observeField("downloadedSegment", "onSegment")
     m.syncButtons.buttons = ["Done", "Reset"]
     m.syncButtons.observeField("buttonSelected", "onSyncButton")
     m.video.notificationInterval = 1
@@ -102,7 +119,17 @@ sub onActive()
     ' Video node's agent at once.
     m.global.session.observeFieldScoped("accessToken", "onToken")
     params = m.top.params
+    newTitle()
     open(params.itemId, Int(httpNumber(params.startMs, 0)), params.item, "auto")
+end sub
+
+' Another title: Automatic starts from the setting again.
+sub newTitle()
+    m.watch = invalid
+    m.watchItem = invalid
+    m.autoQuality = ""
+    m.autoNotice = ""
+    m.autoTimer.control = "stop"
 end sub
 
 sub onToken()
@@ -148,7 +175,8 @@ sub open(itemId as dynamic, startMs as integer, item as dynamic, mode as string)
 end sub
 
 ' POST /api/playback for the first file (the server's default too), with
-' its picture subtitles to draw when the person's choices pick some.
+' its picture subtitles to draw when the person's choices pick some, at the
+' quality chosen in Settings (or Automatic's).
 sub askPlayback()
     spec = { op: "play", itemId: m.itemId, startMs: m.startMs, mode: m.mode, attempt: m.attempt }
     file = contentFile(m.item, invalid)
@@ -157,8 +185,29 @@ sub askPlayback()
         burn = playerBurnIndex(file)
         if burn >= 0 then spec.subtitleIndex = burn
     end if
+    choice = aqChoice(playbackSection())
+    again = ""
+    ceiling = 0
+    if choice = "auto"
+        again = m.autoQuality
+        if again = "" then ceiling = aqRemembered(playbackSection(), m.global.session.server, nowSeconds())
+    end if
+    m.asked = aqAsk(choice, again, ceiling, file)
+    ' A file that failed to play as it is stays converted (broken()).
+    if m.mode <> "transcode" then spec.mode = m.asked.mode
+    spec.maxBitrate = m.asked.maxBitrate
+    spec.maxHeight = m.asked.maxHeight
     m.playRequest = uiRequest(spec, "onPlayback")
 end sub
+
+' Where the quality setting and Automatic's ceilings are kept on this Roku.
+function playbackSection() as object
+    return CreateObject("roRegistrySection", "playback")
+end function
+
+function nowSeconds() as integer
+    return CreateObject("roDateTime").AsSeconds()
+end function
 
 ' The session asked for isn't wanted any more: the task closes it if it
 ' comes (and onPlayback does, if it came already).
@@ -233,6 +282,109 @@ sub begin()
     m.video.control = "play"
     m.video.setFocus(true)
     m.lastReportAt = m.clock.TotalMilliseconds()
+    watchPlayback()
+end sub
+
+' Automatic's watch over what now plays: the title's own after a restart,
+' told the quality it plays at now (the original when the server played
+' the file as it is), the bitrate that is, and the server's own quality
+' for the file.
+sub watchPlayback()
+    if m.asked = invalid or not m.asked.automatic or httpString(m.item.kind) = "track"
+        newTitle()
+        return
+    end if
+    file = contentFile(m.item, m.info.file_id)
+    fileKbps = aqFileKbps(file)
+    fileLines = aqFileLines(file)
+    converted = httpString(m.info.method) = "transcode"
+    cap = httpString(m.info.auto_quality)
+    quality = m.asked.quality
+    if not converted then quality = "original"
+    if quality = "original"
+        playing = fileKbps
+        if converted and aqKbps(cap) > 0 then playing = aqKbps(cap)
+    else
+        playing = aqKbps(quality)
+        if fileKbps > 0 and fileKbps < playing then playing = fileKbps
+    end if
+    now = m.clock.TotalMilliseconds()
+    if m.watch <> invalid and m.watchItem = m.itemId
+        aqRestarted(m.watch, now, quality, playing)
+    else
+        m.watch = aqWatch(now, quality, playing, fileKbps, fileLines, cap, m.asked.lowered and quality <> "original")
+        m.watchItem = m.itemId
+    end if
+    m.autoTimer.control = "start"
+end sub
+
+' The Video node's state, for Automatic: a wait while it plays (one the
+' Roku says is for want of data, where it says), and the notice of a step
+' down once the stream plays.
+sub watchState(state as string)
+    if m.watch = invalid then return
+    underrun = invalid
+    if state = "buffering"
+        status = m.video.bufferingStatus
+        if GetInterface(status, "ifAssociativeArray") <> invalid and GetInterface(status.isUnderrun, "ifBoolean") <> invalid then underrun = status.isUnderrun
+    end if
+    quality = aqState(m.watch, m.clock.TotalMilliseconds(), state, underrun)
+    if state = "playing" and m.autoNotice <> ""
+        showToast(m.autoNotice)
+        m.autoNotice = ""
+    end if
+    if quality <> "" then autoSwitch(quality)
+end sub
+
+sub onAutoTick()
+    if m.watch = invalid or m.info = invalid then return
+    quality = aqTick(m.watch, m.clock.TotalMilliseconds())
+    if quality <> "" then autoSwitch(quality)
+end sub
+
+' Each HLS segment the Video node downloaded: its size over the time it
+' took is what the network carried.
+sub onSegment(event as object)
+    if m.watch = invalid then return
+    segment = event.getData()
+    if GetInterface(segment, "ifAssociativeArray") = invalid then return
+    ' 1 is audio alone and 3 captions: the video's are muxed (0) or video (2).
+    kind = Int(httpNumber(segment.SegType, 0))
+    if kind = 1 or kind = 3 then return
+    aqSegment(m.watch, m.clock.TotalMilliseconds(), httpNumber(segment.SegSize, 0), httpNumber(segment.DownloadDuration, 0))
+end sub
+
+' The title again where it is, at quality: a step down says so once it
+' plays, and is remembered for 30 minutes for the next titles; back at the
+' original, that is forgotten.
+sub autoSwitch(quality as string)
+    was = m.watch.quality
+    down = quality <> "original" and (was = "original" or aqKbps(quality) < aqKbps(was))
+    if down
+        m.autoNotice = "Playing at " + aqLabel(quality) + " for a smoother picture"
+        ceiling = m.watch.ceiling
+        if ceiling <= 0 then ceiling = aqKbps(quality)
+        aqRemember(playbackSection(), m.global.session.server, ceiling, nowSeconds())
+    else if quality = "original"
+        aqRemember(playbackSection(), m.global.session.server, 0, nowSeconds())
+    end if
+    m.autoQuality = quality
+    position = m.positionMs
+    seconds = m.video.position
+    if seconds <> invalid and seconds > 0 then position = Int(seconds * 1000)
+    m.autoTimer.control = "stop"
+    open(m.itemId, position, m.item, m.mode)
+end sub
+
+sub showToast(text as string)
+    m.toastText.text = text
+    m.toast.visible = true
+    m.toastTimer.control = "stop"
+    m.toastTimer.control = "start"
+end sub
+
+sub onToastTimer()
+    m.toast.visible = false
 end sub
 
 ' Gives the Video node stream, its text tracks moved as the sync says,
@@ -386,6 +538,7 @@ end sub
 
 sub onState(event as object)
     state = event.getData()
+    watchState(state)
     if state = "playing"
         m.played = true
         m.loading.visible = false
@@ -413,6 +566,7 @@ sub onPosition(event as object)
     seconds = event.getData()
     if seconds = invalid then return
     m.positionMs = Int(seconds * 1000)
+    if m.watch <> invalid then aqPosition(m.watch, m.clock.TotalMilliseconds(), m.positionMs)
     if playerShouldReport(m.video.state, m.clock.TotalMilliseconds() - m.lastReportAt) then report("playing")
     if m.next <> invalid and not m.upNextShown and m.upNextAt > 0 and m.positionMs >= m.upNextAt then showUpNext()
     updateSkip()
@@ -483,6 +637,7 @@ sub playerKey(key as string)
 end sub
 
 sub seekTo(targetMs as integer)
+    if m.watch <> invalid then aqSeeked(m.watch)
     target = targetMs
     last = Int(m.durationMs) - 1000
     if last > 0 and target > last then target = last
@@ -534,6 +689,9 @@ sub finish()
     m.attempt = m.attempt + 1
     m.tracksFrom = -1
     m.countdownTimer.control = "stop"
+    newTitle()
+    m.toastTimer.control = "stop"
+    m.toast.visible = false
     if m.sessionId <> ""
         report("stopped")
         endSession()
@@ -695,6 +853,7 @@ sub playNext()
     end if
     m.video.control = "stop"
     m.restarts = []
+    newTitle()
     open(nextEpisode.itemId, nextEpisode.startMs, invalid, "auto")
 end sub
 
