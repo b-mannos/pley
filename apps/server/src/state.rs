@@ -43,6 +43,8 @@ pub struct Inner {
     pub markers: Arc<MarkerService>,
     pub trickplay: Arc<TrickplayService>,
     pub two_step: crate::two_step::TwoStep,
+    /// What Automatic quality knows of each client's networks.
+    pub bandwidth: crate::bandwidth::Bandwidth,
     /// Sign-ins of apps in progress (see [`crate::oauth`]).
     pub oauth: crate::oauth::AuthorizationServer,
     /// Where the server listens, and wants to (see [`crate::network`]).
@@ -132,6 +134,8 @@ impl AppState {
         let oauth = crate::oauth::AuthorizationServer::new(&config);
         let two_step = crate::two_step::TwoStep::new(db.clone(), &config.data_dir);
         two_step.check_key().await;
+        // After two-step sign-in, which makes the key it derives its own from.
+        let bandwidth = crate::bandwidth::Bandwidth::new(db.clone(), &config.data_dir);
         let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&db.read).await?;
         if users == 0 {
             auth.setup.issue();
@@ -145,6 +149,7 @@ impl AppState {
                 markers,
                 trickplay,
                 two_step,
+                bandwidth,
                 oauth,
                 started_at: Instant::now(),
                 stopping,

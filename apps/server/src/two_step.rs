@@ -377,8 +377,9 @@ fn aad(user_id: i64) -> [u8; 16] {
 }
 
 /// The key in `path`, made on first use. A file that isn't a key is left
-/// alone: replacing it would lose every secret sealed with it.
-fn load_key(path: &Path) -> Result<[u8; 32], String> {
+/// alone: replacing it would lose every secret sealed with it. Other keys
+/// the server holds are derived from it ([`crate::bandwidth`]'s).
+pub(crate) fn load_key(path: &Path) -> Result<[u8; 32], String> {
     match std::fs::read_to_string(path) {
         Ok(text) => hex::decode(text.trim())
             .ok()

@@ -8,6 +8,7 @@ pub mod accounts;
 pub mod api;
 pub mod auth;
 pub mod backup;
+pub mod bandwidth;
 pub mod catalog;
 pub mod collections;
 pub mod config;

@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use axum::Json;
 use axum::body::{Body, Bytes};
+use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -20,7 +21,8 @@ use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
 use super::items::item_or_404;
-use crate::auth::AuthUser;
+use crate::auth::{AuthUser, SourceIp};
+use crate::bandwidth::{self, Answer, Report, valid_kbps};
 use crate::catalog::{self, ItemRow};
 use crate::error::{ApiResult, AppError};
 use crate::events::ServerEvent;
@@ -300,6 +302,103 @@ pub async fn status(
         info
     });
     Ok(Json(SessionStatus { session_id: session.id.clone(), method: session.method, transcode }))
+}
+
+#[derive(Deserialize)]
+pub struct NetworkQuery {
+    client_id: Option<String>,
+}
+
+/// `GET /api/playback/network?client_id=`: what Automatic knows of the
+/// network this request came from, for this client (see [`bandwidth`]).
+pub async fn network(
+    State(state): State<AppState>,
+    user: AuthUser,
+    SourceIp(ip): SourceIp,
+    query: Result<Query<NetworkQuery>, QueryRejection>,
+) -> ApiResult<Json<Answer>> {
+    let Query(query) = query.map_err(|_| AppError::bad_request("give a client_id"))?;
+    let client_id = client_id_of(query.client_id.as_deref())?;
+    let network = state.bandwidth.network(ip);
+    Ok(Json(state.bandwidth.get(user.id, client_id, &network).await?))
+}
+
+/// `PUT /api/playback/network`'s body: a speed test's result, or
+/// Automatic's new ceiling (`null`: none).
+#[derive(Deserialize)]
+pub struct NetworkReport {
+    client_id: Option<String>,
+    probe_kbps: Option<f64>,
+    probe_complete: Option<bool>,
+    #[serde(default, deserialize_with = "super::nullable")]
+    ceiling_kbps: Option<Option<f64>>,
+}
+
+impl NetworkReport {
+    fn checked(&self) -> ApiResult<(&str, Report)> {
+        let client_id = client_id_of(self.client_id.as_deref())?;
+        let kbps = |kbps: f64| {
+            valid_kbps(kbps).ok_or_else(|| {
+                AppError::bad_request(format!("speeds are whole kbps from 1 to {}", bandwidth::MAX_KBPS))
+            })
+        };
+        let report = match (self.probe_kbps, self.ceiling_kbps) {
+            (Some(probe), None) => Report::Probe { kbps: kbps(probe)?, complete: self.probe_complete.unwrap_or(false) },
+            (None, Some(Some(ceiling))) => Report::Ceiling(kbps(ceiling)?),
+            (None, Some(None)) => Report::Forget,
+            _ => return Err(AppError::bad_request("give either probe_kbps or ceiling_kbps")),
+        };
+        Ok((client_id, report))
+    }
+}
+
+/// `PUT /api/playback/network`: keeps what the client reports of the
+/// network this request came from, and answers as `GET`.
+pub async fn report_network(
+    State(state): State<AppState>,
+    user: AuthUser,
+    SourceIp(ip): SourceIp,
+    body: Result<Json<NetworkReport>, JsonRejection>,
+) -> ApiResult<Json<Answer>> {
+    let Json(body) = body.map_err(|err| AppError::bad_request(err.body_text()))?;
+    let (client_id, report) = body.checked()?;
+    let network = state.bandwidth.network(ip);
+    Ok(Json(state.bandwidth.report(user.id, client_id, &network, report).await?))
+}
+
+fn client_id_of(client_id: Option<&str>) -> ApiResult<&str> {
+    bandwidth::valid_client_id(client_id)
+        .ok_or_else(|| AppError::bad_request("client_id must be the player's id, 1 to 128 characters"))
+}
+
+#[derive(Deserialize)]
+pub struct SpeedTestQuery {
+    bytes: Option<u64>,
+}
+
+/// `GET /api/playback/speedtest?bytes=`: that many bytes of data nothing
+/// compresses, to time (see [`bandwidth::speed_test`]); two at a time per
+/// user.
+pub async fn speed_test(
+    State(state): State<AppState>,
+    user: AuthUser,
+    query: Result<Query<SpeedTestQuery>, QueryRejection>,
+) -> ApiResult<Response> {
+    let Query(query) = query.map_err(|_| AppError::bad_request("bytes must be a whole number"))?;
+    let size = bandwidth::speed_test_size(query.bytes);
+    let turn = state.bandwidth.speed_test_turn(user.id).ok_or_else(|| {
+        AppError::TooManyRequests(format!(
+            "{} speed tests are running for this account: try again when one ends",
+            bandwidth::SPEED_TESTS_AT_ONCE
+        ))
+    })?;
+    // `no-transform`: no proxy compresses it either.
+    let headers = [
+        (header::CONTENT_TYPE, HeaderValue::from_static("application/octet-stream")),
+        (header::CONTENT_LENGTH, HeaderValue::from(size)),
+        (header::CACHE_CONTROL, HeaderValue::from_static("no-store, no-transform")),
+    ];
+    Ok((headers, bandwidth::speed_test(size, turn)).into_response())
 }
 
 /// What a viewer is told when the transcoder refused: its own sentence,

@@ -162,6 +162,10 @@ pub const APP_ROUTES: &[(&str, &str, Need)] = &[
     ("GET", "/api/events", Need::Scope(Library)),
     // play
     ("POST", "/api/playback", Need::Scope(Play)),
+    // what Automatic knows of the network, and a speed test of it
+    ("GET", "/api/playback/network", Need::Scope(Play)),
+    ("PUT", "/api/playback/network", Need::Scope(Play)),
+    ("GET", "/api/playback/speedtest", Need::Scope(Play)),
     ("GET", "/api/playback/{session}", Need::Scope(Play)),
     ("DELETE", "/api/playback/{session}", Need::Scope(Play)),
     ("GET", "/api/playback/{session}/{file}", Need::Scope(Play)),
@@ -245,7 +249,7 @@ mod tests {
     fn every_app_route_is_on_a_real_path() {
         // Whether each names a route of api/mod.rs is checked by
         // tests/app_tokens.rs, which reads it.
-        assert_eq!(APP_ROUTES.len(), 60);
+        assert_eq!(APP_ROUTES.len(), 63);
         for (i, (method, path, _)) in APP_ROUTES.iter().enumerate() {
             assert!(["GET", "POST", "PUT", "PATCH", "DELETE"].contains(method), "{method} {path}");
             assert!(path.starts_with("/api/") && !path.ends_with('/'), "{path}");
