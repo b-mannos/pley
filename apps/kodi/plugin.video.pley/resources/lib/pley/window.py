@@ -295,7 +295,11 @@ class Window(xbmcgui.WindowXML):
             if self.ready:
                 # Back from playing, or a dialog: what changed shows.
                 if self.screen is not None:
-                    self.screen.resume()
+                    try:
+                        self.screen.resume()
+                    except api.ApiError as e:
+                        # The page stays as it was; the next change shows.
+                        kodi.log("back on %s: %s" % (self.screen.name, e.message), xbmc.LOGWARNING)
                 return
             self.ready = True
             kodi.set_property(UI, "1")
@@ -739,15 +743,18 @@ class Window(xbmcgui.WindowXML):
         self.rest_timer.daemon = True
         self.rest_timer.start()
 
-    def later(self, work, then) -> None:
+    def later(self, work, then, failed=None) -> None:
         """Runs `work` away from the window's thread, then `then(answer)`
-        on it (not once it closed)."""
+        on it (not once it closed); `failed()` there when the server
+        refused or didn't answer."""
 
         def run():
             try:
                 answer = work()
             except api.ApiError as e:
                 kodi.log("in the background: %s" % e.message, xbmc.LOGWARNING)
+                if failed is not None:
+                    self.post(failed)
                 return
             self.post(lambda: then(answer))
 
@@ -2178,7 +2185,11 @@ class Library(Screen):
             self.items += found
             self.win.c(L.grid_list(L.LIBRARY_GRID, self.shape)).addItems([tiles.tile(self.session.base, item, self.shape) for item in found])
 
-        self.win.later(lambda: self.session.get("/api/libraries/%d/items" % lib, **self.query(offset)), done)
+        def failed():
+            # Asked again as focus moves on.
+            self.loading = False
+
+        self.win.later(lambda: self.session.get("/api/libraries/%d/items" % lib, **self.query(offset)), done, failed)
 
     def menu(self, control_id: int) -> None:
         if self.tab == "all" and control_id == L.grid_list(L.LIBRARY_GRID, self.shape):
@@ -2767,14 +2778,11 @@ class Notice(Screen):
             return win.leave_for("sign_in")
         if control_id == L.NOTICE_FIRST and self.retry is not None:
             screen = type(self.retry)(win) if isinstance(self.retry, (Home, Search)) else self.retry
-            if not win.libraries:
-                try:
-                    win.me, win.libraries = api.together(lambda: win.session.get("/api/auth/me"), lambda: win.session.get("/api/libraries"))
-                except api.ApiError as e:
-                    return win.toast(T("server_error") % e.message, 6)
-                win.setup_rail()
             win.stack = []
             win.screen = None
+            if not win.libraries:
+                # Nothing came at the start: started again, "Who's watching?" too.
+                return win.start()
             return win.open(screen)
         if control_id == L.NOTICE_SECOND:
             win.leave_for("choose_server")
