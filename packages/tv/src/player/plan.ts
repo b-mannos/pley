@@ -71,9 +71,15 @@ export function initialSubtitle(file: MediaFile | null, requested: number | null
   return (requested != null ? subs.filter((s) => s.index === requested)[0] : undefined) ?? subs.filter((s) => s.index === file?.selected_subtitle)[0] ?? null;
 }
 
-/** `item` as the server answers once `audio` and `subtitle` (`null`: off) were picked for its file `fileId`. */
-export function withTracks(item: ItemDetail, fileId: number, audio: number | null, subtitle: number | null): ItemDetail {
-  return { ...item, files: item.files.map((f) => (f.id === fileId ? { ...f, selected_audio: audio, selected_subtitle: subtitle } : f)) };
+/**
+ * `item` as the server answers once `audio` and `subtitle` (`null`: off)
+ * were picked for its file `fileId`. An audio of `null` is Automatic (no
+ * track picked); left out (`undefined`), the audio stays as it was.
+ */
+export function withTracks(item: ItemDetail, fileId: number, audio: number | null | undefined, subtitle: number | null): ItemDetail {
+  const tracks = (f: MediaFile): MediaFile =>
+    audio === undefined ? { ...f, selected_subtitle: subtitle } : { ...f, selected_audio: audio, audio_picked: audio !== null, selected_subtitle: subtitle };
+  return { ...item, files: item.files.map((f) => (f.id === fileId ? tracks(f) : f)) };
 }
 
 /** Subtitles shown as pictures (PGS, VobSub, DVB): a stream burns them in unless the TV draws them. */

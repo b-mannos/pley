@@ -335,6 +335,12 @@ export interface MediaFile {
   /** Tracks to start with: the user's remembered choice for this show or movie. */
   selected_audio: number | null;
   selected_subtitle: number | null;
+  /**
+   * `selected_audio` is a track the user picked. `false`: nothing is picked, and each
+   * player gets its best track of that language at play time, so a title's page names
+   * the language, not a track. Absent from older servers.
+   */
+  audio_picked?: boolean;
   chapters: Chapter[];
 }
 

@@ -154,6 +154,12 @@ export interface MediaFile {
   edition: string | null;
   selected_audio: number | null;
   selected_subtitle: number | null;
+  /**
+   * `selected_audio` is a track the profile picked. `false`: nothing is
+   * picked, and each player gets its best track of that language at play
+   * time, so a title's page names the language. Absent from older servers.
+   */
+  audio_picked?: boolean;
   chapters: Chapter[];
 }
 

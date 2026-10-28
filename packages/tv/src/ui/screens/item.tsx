@@ -18,6 +18,8 @@ import {
   streamRange,
   formatBytes,
   startingAudio,
+  audioPicked,
+  automaticAudioLabel,
   audioFormatLabel,
 } from "../../format/format";
 import { mediaFacts } from "../../format/media-info";
@@ -945,14 +947,15 @@ function TracksPanel(p: { item: ItemDetail; file: MediaFile; files: MediaFile[];
   const ui = useUi();
   const audio = audioStreams(p.file);
   const subs = subtitleStreams(p.file);
-  const [chosenAudio, setChosenAudio] = useState<number | null>(p.file.selected_audio ?? audio.filter((a) => a.default)[0]?.index ?? audio[0]?.index ?? null);
+  // `null` is Automatic: no track picked, and each player plays its best of the language.
+  const [chosenAudio, setChosenAudio] = useState<number | null>(audioPicked(p.file) ? p.file.selected_audio : null);
   const [chosenSub, setChosenSub] = useState<number | null>(p.file.selected_subtitle ?? null);
   // Subtitles picked alone leave the audio as it was picked before, or to the player.
-  const [audioPicked, setAudioPicked] = useState(false);
+  const [audioChosenHere, setAudioChosenHere] = useState(false);
   const save = (a: number | null | undefined, s: number | null) => {
     // Play, pressed at once, starts with these (the player starts from the
     // details kept); the show's other episodes are asked for again.
-    app.tracksChanged(withTracks(p.item, p.file.id, a === undefined ? (p.file.selected_audio ?? null) : a, s));
+    app.tracksChanged(withTracks(p.item, p.file.id, a, s));
     ui.api.setStreams(p.item.id, p.file.id, a, s).then(p.onSaved, (e) => ui.toast(sentence(errorMessage(e)), true));
   };
   const firstChecked = p.files.length > 1 ? "version" : audio.length >= 2 ? "audio" : "subs";
@@ -970,6 +973,16 @@ function TracksPanel(p: { item: ItemDetail; file: MediaFile; files: MediaFile[];
       {audio.length >= 2 && (
         <>
           <PanelHeading>Audio</PanelHeading>
+          <PanelRow
+            label={automaticAudioLabel(p.file)}
+            checked={chosenAudio === null}
+            initial={firstChecked === "audio" && chosenAudio === null}
+            onSelect={() => {
+              setChosenAudio(null);
+              setAudioChosenHere(true);
+              save(null, chosenSub);
+            }}
+          />
           {audio.map((s: MediaStream) => (
             <PanelRow
               key={s.index}
@@ -978,7 +991,7 @@ function TracksPanel(p: { item: ItemDetail; file: MediaFile; files: MediaFile[];
               initial={firstChecked === "audio" && s.index === chosenAudio}
               onSelect={() => {
                 setChosenAudio(s.index);
-                setAudioPicked(true);
+                setAudioChosenHere(true);
                 save(s.index, chosenSub);
               }}
             />
@@ -994,7 +1007,7 @@ function TracksPanel(p: { item: ItemDetail; file: MediaFile; files: MediaFile[];
             initial={firstChecked === "subs" && chosenSub === null}
             onSelect={() => {
               setChosenSub(null);
-              save(audioPicked ? chosenAudio : undefined, null);
+              save(audioChosenHere ? chosenAudio : undefined, null);
             }}
           />
           {subs.map((s) => (
@@ -1005,7 +1018,7 @@ function TracksPanel(p: { item: ItemDetail; file: MediaFile; files: MediaFile[];
               initial={firstChecked === "subs" && s.index === chosenSub}
               onSelect={() => {
                 setChosenSub(s.index);
-                save(audioPicked ? chosenAudio : undefined, s.index);
+                save(audioChosenHere ? chosenAudio : undefined, s.index);
               }}
             />
           ))}

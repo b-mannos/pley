@@ -296,7 +296,24 @@ export function streamLabel(s: MediaStream): string {
     .join(" ");
 }
 
-type RangeFields = Pick<MediaStream, "dynamic_range" | "dv_profile" | "dv_bl_compat" | "dv_el" | "hdr10plus" | "hdr">;
+/**
+ * The audio a title's page offers while no track is picked: "Automatic (English)",
+ * the language of the details' choice (else of the file's default track). Each
+ * player then plays its best track of that language, so the page names no track.
+ */
+export function automaticAudioLabel(file: MediaFile): string {
+  const audio = file.streams.filter((s) => s.kind === "audio");
+  const track = audio.find((s) => s.index === file.selected_audio) ?? audio.find((s) => s.default) ?? audio[0];
+  const lang = track?.language && !["und", "zxx", "mul"].includes(track.language) ? languageName(track.language) : null;
+  return lang ? `Automatic (${lang})` : "Automatic";
+}
+
+/** Whether the person picked the file's audio track; older servers don't say, and their choice reads as picked. */
+export function audioPicked(file: MediaFile): boolean {
+  return file.audio_picked !== false;
+}
+
+type RangeFields =Pick<MediaStream, "dynamic_range" | "dv_profile" | "dv_bl_compat" | "dv_el" | "hdr10plus" | "hdr">;
 
 /**
  * A Dolby Vision profile as the server names it: "P8.1", "P8.4", "P5",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MediaFile, MediaStream, PlaybackInfo, TranscodeInfo } from "../src/api/types";
-import { dynamicRangeBadges, isForcedSubtitle, qualityBadges, streamLabel, streamRange } from "../src/format/format";
+import { automaticAudioLabel, dynamicRangeBadges, isForcedSubtitle, qualityBadges, startingAudio, streamLabel, streamRange } from "../src/format/format";
 import { dolbyVisionDetails, streamBlock } from "../src/format/media-info";
 import { buildDetails, shownAs, videoLabel } from "../src/player/details";
 
@@ -56,6 +56,25 @@ describe("formats, named as the server, the web and Android name them", () => {
     expect(sub("Designs")).toBe("English – Designs (SRT)");
     expect(sub(null, { language: "fre", forced: true, external: true })).toBe("French (SRT, Forced, External)");
     expect(isForcedSubtitle({ kind: "subtitle", title: "Signs/Songs", forced: false } as MediaStream)).toBe(true);
+  });
+});
+
+describe("a title page's audio", () => {
+  const audio = (index: number, codec: string, channels: number, isDefault: boolean, language = "eng") =>
+    ({ index, kind: "audio", codec, channels, language, title: null, default: isDefault, forced: false }) as MediaStream;
+  const file = (over: Partial<MediaFile>) =>
+    ({ id: 1, path: "a.mkv", size: 1, streams: [audio(1, "truehd", 6, true), audio(2, "aac", 2, false), audio(3, "ac3", 6, false, "fre")], selected_audio: 1, selected_subtitle: null, ...over }) as unknown as MediaFile;
+
+  it("without a pick, is Automatic with the language, and the version names the file's default", () => {
+    expect(automaticAudioLabel(file({ audio_picked: false, selected_audio: 2 }))).toBe("Automatic (English)");
+    expect(automaticAudioLabel(file({ audio_picked: false, selected_audio: 3 }))).toBe("Automatic (French)");
+    expect(automaticAudioLabel(file({ audio_picked: false, streams: [audio(1, "aac", 2, true, "und")] }))).toBe("Automatic");
+    expect(startingAudio(file({ audio_picked: false, selected_audio: 2 }))?.index).toBe(1);
+  });
+
+  it("with a pick, or from a server that doesn't say, is the track", () => {
+    expect(startingAudio(file({ audio_picked: true, selected_audio: 2 }))?.index).toBe(2);
+    expect(startingAudio(file({ selected_audio: 3 }))?.index).toBe(3);
   });
 });
 

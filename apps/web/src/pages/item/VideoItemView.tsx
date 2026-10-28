@@ -8,7 +8,7 @@ import { PartOfCollections } from "@/components/lists/PartOfCollections";
 import { MissingKeyNotice } from "@/components/MetadataNotice";
 import { StarRating } from "@/components/StarRating";
 import { Button, Select } from "@/components/ui";
-import { codecLabel, formatBytes, formatDate, formatDuration, resolutionLabel, seasonTitle, streamLabel } from "@/lib/format";
+import { audioPicked, automaticAudioLabel, codecLabel, formatBytes, formatDate, formatDuration, resolutionLabel, seasonTitle, streamLabel } from "@/lib/format";
 import { saveStreamChoice } from "@/lib/progress";
 import { usePlayItem } from "@/lib/usePlayItem";
 import { playIntent } from "@/player/preload";
@@ -59,15 +59,15 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
   const file = item.files.find((f) => f.id === fileId) ?? item.files[0];
   const audioStreams = useMemo(() => file?.streams.filter((s) => s.kind === "audio") ?? [], [file]);
   const subStreams = useMemo(() => file?.streams.filter((s) => s.kind === "subtitle") ?? [], [file]);
-  const defaultAudio = audioStreams.find((s) => s.default) ?? audioStreams[0];
 
   // "auto" → the server's pick for this user (remembered choice for the show or movie);
-  // per-file selections reset when the version changes.
+  // per-file selections reset when the version changes. An audio of `null` is Automatic:
+  // no track picked, so each player plays its best track of the language.
   const qc = useQueryClient();
   const [audio, setAudio] = useState<{ file: number | null; index: number | null | "auto" }>({ file: null, index: "auto" });
   const [sub, setSub] = useState<{ file: number | null; index: number | null | "auto" }>({ file: null, index: "auto" });
   const audioChoice = audio.file === (file?.id ?? null) ? audio.index : "auto";
-  const audioIndex = audioChoice === "auto" ? (file?.selected_audio ?? null) : audioChoice;
+  const audioIndex = audioChoice === "auto" ? (file && audioPicked(file) ? file.selected_audio : null) : audioChoice;
   const subChoice = sub.file === (file?.id ?? null) ? sub.index : "auto";
   const subIndex = subChoice === "auto" ? (file?.selected_subtitle ?? null) : subChoice;
 
@@ -85,14 +85,19 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
             ...old,
             files: old.files.map((f) =>
               f.id === file.id
-                ? { ...f, selected_audio: nextAudio === undefined ? f.selected_audio : nextAudio, selected_subtitle: nextSub }
+                ? {
+                    ...f,
+                    ...(nextAudio === undefined ? {} : { selected_audio: nextAudio, audio_picked: nextAudio !== null }),
+                    selected_subtitle: nextSub,
+                  }
                 : f,
             ),
           }
         : old,
     );
+    // Automatic is asked for again here too, for the language the server now starts with.
     void saveStreamChoice(item.id, { file_id: file.id, audio_index: nextAudio, subtitle_index: nextSub }).then(() =>
-      qc.invalidateQueries({ queryKey: ["item"], predicate: (q) => q.queryKey[1] !== item.id }),
+      qc.invalidateQueries({ queryKey: ["item"], predicate: (q) => q.queryKey[1] !== item.id || nextAudio === null }),
     );
   };
 
@@ -220,12 +225,14 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
               {audioStreams.length > 1 ? (
                 <LabeledSelect
                   label="Audio"
-                  value={String(audioIndex ?? defaultAudio?.index ?? "")}
+                  value={audioIndex == null ? "auto" : String(audioIndex)}
                   onChange={(v) => {
-                    setAudio({ file: file.id, index: Number(v) });
-                    remember(Number(v), subIndex);
+                    const index = v === "auto" ? null : Number(v);
+                    setAudio({ file: file.id, index });
+                    remember(index, subIndex);
                   }}
                 >
+                  <option value="auto">{automaticAudioLabel(file)}</option>
                   {audioStreams.map((s) => (
                     <option key={s.index} value={s.index}>
                       {streamLabel(s)}

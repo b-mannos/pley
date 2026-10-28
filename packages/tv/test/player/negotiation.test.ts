@@ -156,6 +156,15 @@ describe("tracks picked on the title's page", () => {
     expect(initialSubtitle(withTracks(picked, 7, 2, null).files[0]!, null)).toBeNull();
     expect(withTracks(item(file()), 8, 2, 4).files[0]).toEqual(file());
   });
+
+  it("say whether the audio is a pick: Automatic picks none, subtitles alone leave it as it was", () => {
+    const picked = withTracks(item(file()), 7, 2, 4).files[0]!;
+    expect([picked.selected_audio, picked.audio_picked]).toEqual([2, true]);
+    const automatic = withTracks(item(file()), 7, null, 4).files[0]!;
+    expect([automatic.selected_audio, automatic.audio_picked]).toEqual([null, false]);
+    const subsAlone = withTracks(item(file({ selected_audio: 2, audio_picked: true })), 7, undefined, null).files[0]!;
+    expect([subsAlone.selected_audio, subsAlone.audio_picked, subsAlone.selected_subtitle]).toEqual([2, true, null]);
+  });
 });
 
 describe("the play request", () => {

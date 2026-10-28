@@ -211,10 +211,33 @@ export function summaryBadges(media: MediaSummary | null | undefined): string[] 
   return [resolutionBadge(media.width, media.height), dynamicRangeShort(media.dynamic_range)].filter((b): b is string => !!b);
 }
 
-/** The audio track a file starts with: the profile's choice, else the default, else the first. */
+/** Whether the profile picked the file's audio track; older servers don't say, and their choice reads as picked. */
+export function audioPicked(file: MediaFile): boolean {
+  return file.audio_picked !== false;
+}
+
+/**
+ * The audio track a file is described by: the profile's pick, else the
+ * default, else the first. Without a pick each player plays its best track
+ * of the language, so the details' choice isn't named as if it would play.
+ */
 export function startingAudio(file: MediaFile): MediaStream | null {
   const audio = file.streams.filter((s) => s.kind === "audio");
-  return audio.filter((s) => s.index === file.selected_audio)[0] ?? audio.filter((s) => s.default)[0] ?? audio[0] ?? null;
+  const picked = audioPicked(file) ? audio.filter((s) => s.index === file.selected_audio)[0] : undefined;
+  return picked ?? audio.filter((s) => s.default)[0] ?? audio[0] ?? null;
+}
+
+/**
+ * The audio a title's page offers while no track is picked, as on the web:
+ * "Automatic (English)", the language of the details' choice (else of the
+ * file's default track).
+ */
+export function automaticAudioLabel(file: MediaFile): string {
+  const audio = file.streams.filter((s) => s.kind === "audio");
+  const track = audio.filter((s) => s.index === file.selected_audio)[0] ?? audio.filter((s) => s.default)[0] ?? audio[0];
+  const code = track?.language ?? "";
+  const lang = code && code !== "und" && code !== "zxx" && code !== "mul" ? languageName(code) : null;
+  return lang ? `Automatic (${lang})` : "Automatic";
 }
 
 /** "Final Cut · 4K · HEVC · MKV · 58.2 GB", else "Version 2". */
