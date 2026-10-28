@@ -106,10 +106,11 @@ class Client:
 
 class Dialogs:
     """xbmcgui.Dialog, answering as the test says: `picks` for select,
-    `typed` for input; what select offered is kept in `shown`."""
+    `typed` for input, `yes` for yesno; what select offered is kept in
+    `shown`, what yesno asked in `asked`."""
 
-    def __init__(self, picks=(), typed=()):
-        self.picks, self.typed, self.shown = list(picks), list(typed), []
+    def __init__(self, picks=(), typed=(), yes=()):
+        self.picks, self.typed, self.yes, self.shown, self.asked = list(picks), list(typed), list(yes), [], []
 
     def __enter__(self):
         self.real = window.xbmcgui.Dialog
@@ -126,6 +127,10 @@ class Dialogs:
             def contextmenu(self, entries):
                 outer.shown.append((list(entries), -1))
                 return outer.picks.pop(0)
+
+            def yesno(self, heading, message, nolabel="", yeslabel="", autoclose=0):
+                outer.asked.append((heading, message, nolabel, yeslabel))
+                return outer.yes.pop(0)
 
         window.xbmcgui.Dialog = Dialog
         return self
@@ -312,6 +317,23 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(win.made[L.rail_labels(L.RAIL_LIBRARIES[0])[0]].label, "Music")
         self.assertEqual(shows_page.rail, "lib2")
         self.assertEqual(win.focused, L.RAIL_SEARCH)
+
+    def test_signing_out_asks_first(self):
+        win = FakeWindow()
+        win.libraries = []
+        left = []
+        win.leave_for = left.append
+        window.kodi.xbmcaddon.settings["server_name"] = "Tokyo"
+        self.addCleanup(window.kodi.xbmcaddon.settings.pop, "server_name", None)
+        # The profile's menu: Choose a server, Audio and subtitles, Sign out.
+        with Dialogs(picks=[2], yes=[False]) as asked:
+            win.account()
+        # Short: the question, the server, and Sign out to say yes.
+        self.assertEqual(asked.asked, [("Sign out?", "Kodi signs out of Tokyo.", window.T("cancel"), window.T("sign_out"))])
+        self.assertEqual(left, [])
+        with Dialogs(picks=[2], yes=[True]):
+            win.account()
+        self.assertEqual(left, ["sign_out"])
 
     def test_the_rail_fits_every_library_above_settings(self):
         for count in range(8):

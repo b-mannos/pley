@@ -674,3 +674,11 @@ msgstr ""
 msgctxt "#30209"
 msgid "Scanning…"
 msgstr ""
+
+msgctxt "#30210"
+msgid "Sign out?"
+msgstr ""
+
+msgctxt "#30211"
+msgid "Kodi signs out of %s."
+msgstr ""

@@ -167,6 +167,8 @@ TEXT = {
     "libraries": 30207,
     "open": 30208,
     "scanning_now": 30209,
+    "sign_out_ask": 30210,
+    "sign_out_of": 30211,
 }
 
 
@@ -235,6 +237,14 @@ def refresh_listing() -> None:
 def notify(message: str, error: bool = False) -> None:
     icon = xbmcgui.NOTIFICATION_ERROR if error else xbmcgui.NOTIFICATION_INFO
     xbmcgui.Dialog().notification("pley", message, icon, 5000)
+
+
+def ask_sign_out() -> bool:
+    """Sign out?, with the server it signs out of: whether the person chose
+    Sign out."""
+    server = setting("server_name") or setting("server_url")
+    line = text("sign_out_of") % server if server else ""
+    return bool(xbmcgui.Dialog().yesno(text("sign_out_ask"), line, nolabel=text("cancel"), yeslabel=text("sign_out")))
 
 
 def get_property(name: str) -> str:

@@ -49,8 +49,9 @@ it signs in only with a code and gets a viewer's rights, whoever allows it:
 `library play playlists` (browse, play, and make and change the profile's
 playlists). A Kodi signed in before it asked for `playlists` is told by the
 server to sign in again when it adds to a playlist.
-Settings has Sign out and Choose a server. Choosing another server keeps
-the sign-in there until the new one is made, then ends it on its server.
+Settings has Sign out, which asks "Sign out?" first, and Choose a server.
+Choosing another server keeps the sign-in there until the new one is made,
+then ends it on its server.
 The same server at another address is signed in to again: anything on the
 network can answer the broadcast with a server's id, and the tokens would
 go to it.

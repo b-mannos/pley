@@ -418,6 +418,11 @@ class Plugin:
         self.sign_in(server, kodi.setting("server_name") or server, kodi.setting("server_id"))
 
     def route_sign_out(self) -> None:
+        if kodi.ask_sign_out():
+            self.sign_out()
+
+    def sign_out(self) -> None:
+        """Signs out, asked already, and says so."""
         if self.sign_out_quietly():
             kodi.notify(kodi.text("signed_out"))
         else:

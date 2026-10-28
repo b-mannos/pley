@@ -480,10 +480,15 @@ class Window(xbmcgui.WindowXML):
         actions.append((T("tracks"), self.track_defaults))
         if len(self.libraries) > 1:
             actions.append((T("sort_libraries"), self.sort_libraries))
-        actions.append((T("sign_out"), lambda: self.leave_for("sign_out")))
+        actions.append((T("sign_out"), self.sign_out))
         chosen = xbmcgui.Dialog().contextmenu([name for name, _ in actions])
         if chosen >= 0:
             actions[chosen][1]()
+
+    def sign_out(self) -> None:
+        """Sign out, once the person says so: the window closes first."""
+        if kodi.ask_sign_out():
+            self.leave_for("sign_out")
 
     def track_defaults(self) -> None:
         """Audio and subtitles: the profile's defaults for titles it hasn't
@@ -2393,7 +2398,7 @@ def run(plugin, base: str) -> None:
         elif after == "sign_in":
             plugin.route_sign_in()
         elif after == "sign_out":
-            plugin.route_sign_out()
+            plugin.sign_out()
             return
         else:
             return
