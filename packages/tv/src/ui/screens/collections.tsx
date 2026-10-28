@@ -38,6 +38,9 @@ export function CollectionsScreen(p: { entry: Entry; libraryId?: number }) {
   if (loaded.data && !groups.length) {
     return <ColumnMessage top={ROWS_TOP} title="No collections yet" body="Movies of the same TMDB collection are grouped here once two of them are in a library." />;
   }
+  // Each row's tile focused last, so Back from a collection comes to it, the rows drawn again.
+  const rowIndex = (p.entry.state.rowIndex as Record<string, number> | undefined) ?? {};
+  p.entry.state.rowIndex = rowIndex;
   const sections: Section[] = groups.map((g: { library: Library; collections: Collection[] }, gi) => ({
     key: `lib-${g.library.id}`,
     height: rowHeight("poster"),
@@ -48,8 +51,12 @@ export function CollectionsScreen(p: { entry: Entry; libraryId?: number }) {
         kind="poster"
         items={g.collections}
         keyOf={(c) => c.id}
+        enterAt={rowIndex[`lib-${g.library.id}`]}
         onLeftEdge={ui.toRail}
-        onFocusIndex={onFocus}
+        onFocusIndex={(i) => {
+          rowIndex[`lib-${g.library.id}`] = i;
+          onFocus();
+        }}
         tile={(c, i, place) => (
           <ArtTile
             kind="poster"
@@ -68,7 +75,13 @@ export function CollectionsScreen(p: { entry: Entry; libraryId?: number }) {
   }));
   return (
     <div class="collections-page">
-      <SectionPage sections={sections} top={ROWS_TOP} clipAbove={ROWS_TOP - 12} />
+      <SectionPage
+        sections={sections}
+        top={ROWS_TOP}
+        clipAbove={ROWS_TOP - 12}
+        focusedKey={p.entry.state.section as string | undefined}
+        onFocusSection={(k) => (p.entry.state.section = k)}
+      />
       <div class="t-page c-fg" style="position:absolute;left:96px;top:27px">
         Collections
       </div>
