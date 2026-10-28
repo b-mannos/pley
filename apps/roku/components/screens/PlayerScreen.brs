@@ -42,7 +42,10 @@ sub init()
     m.menuKind = ""
     m.menuActions = []
     m.menuValues = []
+    ' Find subtitles…: the results listed ([{ id, label, hint }]).
+    m.found = []
     m.menuList.observeField("itemSelected", "onMenuEntry")
+    m.menuList.observeField("itemFocused", "onMenuEntryFocused")
     m.menuChoices.observeField("itemSelected", "onMenuChoice")
     m.menuChoices.observeField("itemFocused", "onMenuChoiceFocused")
     m.clock = CreateObject("roTimespan")
@@ -558,13 +561,14 @@ sub closeSync()
 end sub
 
 ' The stream again from where it is: the same session and address, the
-' subtitles that showed shown again, moved.
-sub reopen()
+' subtitles that showed shown again, moved (or the track at subtitle).
+sub reopen(subtitle = "" as string)
     if m.item = invalid or m.info = invalid then return
     position = m.positionMs
     seconds = m.video.position
     if seconds <> invalid and seconds > 0 then position = Int(seconds * 1000)
-    showing = syncBaseUrl(httpString(m.video.currentSubtitleTrack))
+    showing = subtitle
+    if showing = "" then showing = syncBaseUrl(httpString(m.video.currentSubtitleTrack))
     if showing = "" then showing = syncBaseUrl(httpString(m.video.subtitleTrack))
     m.positionMs = position
     m.loading.visible = true
@@ -1038,7 +1042,7 @@ end function
 ' --- pley's menu ---
 
 ' Its entries: Quality, Subtitle sync for a file with text subtitles,
-' Chapters for a file that has them, Playback details.
+' Chapters for a file that has them, Find subtitles…, Playback details.
 sub openMenu()
     hideSkip()
     m.menuKind = "menu"
@@ -1053,6 +1057,8 @@ sub openMenu()
         items.Push({ title: "Chapters" })
         m.menuActions.Push("chapters")
     end if
+    items.Push({ title: "Find subtitles…" })
+    m.menuActions.Push("find")
     items.Push({ title: "Playback details" })
     m.menuActions.Push("details")
     at = m.menuList.itemFocused
@@ -1100,8 +1106,14 @@ function qualityShown() as string
 end function
 
 sub onMenuEntry(event as object)
+    if m.menuKind = "found"
+        addSubtitles(event.getData())
+        return
+    end if
     action = m.menuActions[event.getData()]
-    if action = "quality"
+    if action = "find"
+        findSubtitles()
+    else if action = "quality"
         openQualities()
     else if action = "sync"
         closeMenu()
@@ -1214,4 +1226,111 @@ sub showDetails(live as dynamic)
     end for
     if m.watch <> invalid and m.watch.quality <> "original" then lines.Push("Quality: " + qualityShown() + " · Lowered for your connection")
     m.menuText.text = lines.Join(Chr(10))
+end sub
+
+' --- Find subtitles… (SubtitleSearch.brs) ---
+
+' The server's results for the file playing, in the person's subtitle
+' language, listed in the menu.
+sub findSubtitles()
+    m.menuKind = "finding"
+    m.menuTitle.text = "Find subtitles"
+    m.found = []
+    showMenuText("Looking for subtitles…")
+    m.top.setFocus(true)
+    fileId = 0
+    if m.info <> invalid then fileId = m.info.file_id
+    uiRequest({ method: "GET", path: ssSearchPath(m.itemId, fileId), timeoutMs: 30000, session: m.sessionId }, "onSubtitlesFound")
+end sub
+
+sub showMenuText(text as string)
+    m.menuText.text = text
+    m.menuList.visible = false
+    m.menuChoices.visible = false
+    m.menuText.visible = true
+    m.menuHint.text = "Back goes back."
+end sub
+
+sub onSubtitlesFound(event as object)
+    if event.getRoSGNode().spec.session <> m.sessionId or m.menuKind <> "finding" then return
+    answer = event.getData()
+    if not answer.ok
+        showMenuText(ssProblem(answer, true))
+        return
+    end if
+    m.found = ssResults(answer.data)
+    if m.found.Count() = 0
+        showMenuText("No subtitles were found for this file in your subtitle language.")
+        return
+    end if
+    m.menuKind = "found"
+    items = []
+    for each result in m.found
+        items.Push({ title: result.label })
+    end for
+    m.menuList.content = nodesContent(items)
+    m.menuList.jumpToItem = 0
+    m.menuText.visible = false
+    m.menuChoices.visible = false
+    m.menuList.visible = true
+    onMenuEntryFocused()
+    m.menuList.setFocus(true)
+end sub
+
+sub onMenuEntryFocused()
+    if m.menuKind <> "found" then return
+    at = m.menuList.itemFocused
+    if at >= 0 and at < m.found.Count() then m.menuHint.text = m.found[at].hint
+end sub
+
+' The result picked is added on the server, then shown.
+sub addSubtitles(at as integer)
+    if at < 0 or at >= m.found.Count() or m.info = invalid then return
+    m.menuKind = "adding"
+    showMenuText("Adding " + m.found[at].label + "…")
+    m.top.setFocus(true)
+    body = { result: m.found[at].id }
+    fileId = httpNumber(m.info.file_id, 0)
+    if fileId > 0 then body.file_id = fileId
+    uiRequest({ method: "POST", path: "/api/items/" + urlValue(m.itemId) + "/subtitles", json: body, timeoutMs: 60000, session: m.sessionId }, "onSubtitlesAdded")
+end sub
+
+' The new track joins the stream's text tracks and shows: the stream opens
+' again where it was with it (a new session where the server drew picture
+' subtitles onto the video), and it is saved as the person's pick for the
+' show or the movie, as a track picked in Roku's options is.
+sub onSubtitlesAdded(event as object)
+    if event.getRoSGNode().spec.session <> m.sessionId or m.menuKind <> "adding" then return
+    answer = event.getData()
+    track = invalid
+    if answer.ok then track = ssAddedTrack(answer.data)
+    if track = invalid
+        if answer.ok then answer.message = "The server didn't send the subtitles back."
+        showMenuText(ssProblem(answer, false))
+        return
+    end if
+    closeMenu()
+    m.info.subtitles = ssWithTrack(m.info.subtitles, track)
+    index = Int(httpNumber(track.index, -1))
+    file = contentFile(m.item, m.info.file_id)
+    burned = -1
+    if httpTrue(m.info.burn_subtitles) then burned = Int(httpNumber(m.info.subtitle_index, -1))
+    m.subtitleShown = index
+    body = tracksStreamsBody(m.info.file_id, -2, index)
+    uiRequest({ method: "PUT", path: "/api/items/" + urlValue(m.itemId) + "/streams", jsonText: FormatJson(body) }, "")
+    if file <> invalid then file.selected_subtitle = index
+    stream = contentStream(m.info, m.item, m.global.session.server, m.positionMs)
+    m.textTracks = stream.subtitleTracks.Count()
+    showToast("Subtitles added: " + contentSubtitleName(track, httpString(track.language)))
+    if tracksNeedNewSession(burned, index)
+        position = m.positionMs
+        seconds = m.video.position
+        if seconds <> invalid and seconds > 0 then position = Int(seconds * 1000)
+        open(m.itemId, position, m.item, m.mode)
+        return
+    end if
+    url = httpString(track.url)
+    if Left(url, 1) = "/" then url = m.global.session.server + url
+    captionsOn()
+    reopen(syncTrackUrl(url, m.syncMs))
 end sub

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The player: the Video node with its own controls, Skip Intro and Skip
      Credits, Up Next before the end of an episode, pley's menu (Down:
-     Quality, Subtitle sync, Chapters, Playback details), Automatic's
+     Quality, Subtitle sync, Chapters, Find subtitles…, Playback details), Automatic's
      notice of a lower quality, and what went wrong when it did. -->
 <component name="PlayerScreen" extends="Group">
     <interface>
@@ -26,6 +26,7 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Tracks.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/AutoQuality.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Details.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/SubtitleSearch.brs" />
     <children>
         <Rectangle width="1920" height="1080" color="0x000000FF" />
         <Video id="video" width="1920" height="1080">

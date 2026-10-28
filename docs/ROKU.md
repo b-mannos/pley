@@ -28,7 +28,8 @@ plays files as they are whenever the Roku can (it reports what it
 decodes, from `roDeviceInfo`), HLS otherwise, reports progress, offers
 Skip Intro and Skip Credits as the web player does, the next episode at
 the credits of one (a playlist's next entry), and Pley's menu (Down):
-Quality, subtitle sync, the file's chapters and the playback's details.
+Quality, subtitle sync, the file's chapters, Find subtitles… and the
+playback's details.
 
 It talks to the Pley server and nothing else, so it works on a home network
 without internet: pictures come from the server, the fonts are the Roku's
@@ -90,7 +91,8 @@ Rules the code keeps:
   video, which plays on (play, fast forward and rewind still work): Quality
   ("Automatic · Original"), Subtitle sync for a file with text subtitles,
   Chapters for a file that has them (OK goes to one; the one playing is
-  checked), and Playback details, as the other apps say them: how it
+  checked), Find subtitles… (below), and Playback details, as the other
+  apps say them: how it
   plays ("Direct play", "Direct stream", "Transcoding") and why, its video
   and audio as they are and as the server converts them (`GET
   /api/playback/{session}`), its bitrate, what the screen gets of HDR,
@@ -109,6 +111,27 @@ Rules the code keeps:
   remembered for each file of each server in the registry (section
   `subtitleSync`, the latest 50 files) and moves the file's subtitles from
   the start the next time.
+- Find subtitles… (pley's menu; `components/lib/SubtitleSearch.brs`):
+  the server looks for the file playing on OpenSubtitles in the person's
+  subtitle language (`GET /api/items/{id}/subtitles/search?file_id=`, no
+  `language`, so the server takes the profile's, English without one),
+  and the results are listed in the menu in its order, those made for
+  this very file first: "English · Movie.2019.1080p.BluRay", the whole
+  name, "Made for this file", "Hearing impaired", "Forced" and the
+  downloads under the list for the one in focus. OK adds it on the server
+  (`POST /api/items/{id}/subtitles` with the result and the file), whose
+  answer is an ordinary text track: it joins the session's tracks, is
+  saved as the person's pick for the show or the movie (`PUT
+  /api/items/{id}/streams`, as a pick in Roku's options is), and shows,
+  captions turned on for it, the stream opening again where it was as
+  subtitle sync opens it (a new session where the server drew picture
+  subtitles onto the video). "Subtitles added: English" shows at the top.
+  A server without OpenSubtitles set up (503, `setup: false`) has the
+  menu say that subtitle search isn't set up, and that an administrator
+  sets it up on the web, in Settings → Server; a server from before it
+  (404) that it needs a newer pley. There is no switch to another
+  language: the profile's subtitle language is changed in Settings.
+  Subtitles added on any device are ordinary tracks on every one.
 - Subtitles or audio picked in Roku's options while a title plays (captions
   turned on or off, another subtitle track, another audio track of a file
   played as it is) are saved as on Samsung and LG (`PUT
@@ -360,7 +383,10 @@ the app with the remote: sign-in with a code and its QR code, Home, a
 title's details after a refused token, Back while the player starts (the
 session that comes after is closed), the player with picture subtitles to
 draw, its menu, subtitle sync (shown, moved 0.3 s and remembered), a
-chapter and the playback's details, Home asking again after it, the
+chapter and the playback's details, Find subtitles… (the results, the
+first added and saved as the pick, the stream opened again without the
+pictures drawn), Automatic's speed test before the first play (8 MiB
+fetched, measured and told, the answer kept for the next plays), Home asking again after it, the
 Options key's Mark as watched, a library's second page, a library's
 Recommended and Collections tabs and its sort, a show's page, its
 episodes and a person's page, music (an artist, an album, its tracks

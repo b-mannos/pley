@@ -321,6 +321,22 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       fixture.trackDefaults = { audio_language: asked.audio_language ?? null, subtitle_language: asked.subtitle_language ?? null, subtitle_mode: asked.subtitle_mode };
       return json(200, me());
     }
+    // Find subtitles…: OpenSubtitles' results for the file, and the one
+    // picked added as an ordinary text track.
+    if ((match = path.match(/^\/api\/items\/(\d+)\/subtitles\/search$/)) && req.method === "GET") {
+      if (!url.searchParams.get("file_id")) problems.push("a subtitle search without the file playing");
+      return json(200, { results: [
+        { id: "opensubtitles:1", provider: "opensubtitles", language: "en", name: "Heat.1995.1080p.BluRay.x264", format: "srt", hearing_impaired: false, forced: false, downloads: 1234, matched: "hash" },
+        { id: "opensubtitles:2", provider: "opensubtitles", language: "en", name: "Heat.1995.WEB", format: "srt", hearing_impaired: true, forced: false, downloads: 12, matched: "title" },
+      ] });
+    }
+    if ((match = path.match(/^\/api\/items\/(\d+)\/subtitles$/)) && req.method === "POST") {
+      const asked = JSON.parse(body);
+      fixture.subtitlesAdded.push({ item: Number(match[1]), ...asked });
+      const fileId = asked.file_id ?? 7000 + Number(match[1]);
+      res.writeHead(201, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ index: 10001, codec: "subrip", language: "eng", title: null, default: false, forced: false, external: true, text_based: true, added: true, url: `/api/files/${fileId}/subtitles/10001.vtt` }));
+    }
     if ((match = path.match(/^\/api\/items\/(\d+)\/streams$/)) && req.method === "PUT") {
       fixture.streams.push({ item: Number(match[1]), ...JSON.parse(body) });
       res.writeHead(204);
@@ -514,7 +530,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
 
   const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], myList: [1003], marks: [], playlistEntries: [[1, 1000], [2, 101], [3, 102]], playlistRemoved: [],
     household: [{ id: 1, name: "Anna", avatar_url: null, avatar_color: "#38bdf8", current: true, needs: "none" }, { id: 2, name: "Ben", avatar_url: null, avatar_color: "#f472b6", current: false, needs: "none" }],
-    switched: [], probed: false, networkTold: [], speedTests: [], problems, requests, progress, closed, close: () => server.close() };
+    switched: [], subtitlesAdded: [], probed: false, networkTold: [], speedTests: [], problems, requests, progress, closed, close: () => server.close() };
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       issuer = `http://127.0.0.1:${server.address().port}`;
