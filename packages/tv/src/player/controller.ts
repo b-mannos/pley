@@ -201,6 +201,12 @@ export const SHORT_END_MS = 60_000;
 export const SHORT_PLAY_MS = 5_000;
 export const STARVING_MS = 1_000;
 export const STRUGGLE_SAMPLE_MS = 2_000;
+/**
+ * Frames dropped while the TV's player switches a file's audio track (a
+ * desktop Chrome drops about 130) aren't the video struggling: for this
+ * long after a switch they aren't counted, then counting starts afresh.
+ */
+export const TRACK_SWITCH_QUIET_MS = 5_000;
 export const DETAILS_MS = 2_000;
 export const COUNTDOWN_SECONDS = 10;
 /** The longest a new session waits for the one before to be ended. */
@@ -297,6 +303,8 @@ export class PlaybackController {
   private lastAdvanceAt = 0;
   private lastAdvancePos = -1;
   private lastStruggleSample = 0;
+  /** Dropped frames aren't counted before this (an audio track switched in place). */
+  private framesQuietUntil = 0;
   private sessionStartedAt = 0;
   private live: TranscodeInfo | null = null;
 
@@ -569,7 +577,8 @@ export class PlaybackController {
     const engine = this.engineRef;
     if (!info || !engine) return;
     if (!info.hls && this.audio) {
-      engine.selectAudio(audioStreams(this.file).indexOf(this.audio), this.audio.language);
+      // Another track than the one the file starts with: the switch may drop frames.
+      if (engine.selectAudio(audioStreams(this.file).indexOf(this.audio), this.audio.language) && !this.audio.default) this.quietFrames();
     }
     const sub = this.subtitle;
     if (!sub) {
@@ -584,6 +593,12 @@ export class PlaybackController {
     } else {
       this.presenter.hide();
     }
+  }
+
+  /** An audio track switched in place: the frames it drops aren't counted, and counting starts afresh after. */
+  private quietFrames(): void {
+    this.framesQuietUntil = this.now() + TRACK_SWITCH_QUIET_MS;
+    this.struggle.reset();
   }
 
   /** Picture subtitles are drawn here unless the server can't make them. */
@@ -796,7 +811,7 @@ export class PlaybackController {
       return;
     }
     // Dropped frames, sampled every 2 s of playback.
-    if (moving && now - this.lastStruggleSample >= STRUGGLE_SAMPLE_MS) {
+    if (moving && now >= this.framesQuietUntil && now - this.lastStruggleSample >= STRUGGLE_SAMPLE_MS) {
       this.lastStruggleSample = now;
       const counts = engine.frameCounts();
       if (counts && this.struggle.sample(now, counts.dropped, counts.total)) {
@@ -981,7 +996,10 @@ export class PlaybackController {
     const info = this.info;
     if (!info) return;
     const engine = this.engineRef;
-    if (!info.hls && engine && audioPlaysHere(chosen, this.caps) && engine.selectAudio(audioStreams(this.file).indexOf(chosen), chosen.language)) return;
+    if (!info.hls && engine && audioPlaysHere(chosen, this.caps) && engine.selectAudio(audioStreams(this.file).indexOf(chosen), chosen.language)) {
+      this.quietFrames();
+      return;
+    }
     this.restart(this.livePosition());
   }
 

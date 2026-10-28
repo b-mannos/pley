@@ -225,8 +225,10 @@ class FakeEngine implements PlayerEngine {
   release() {
     this.released = true;
   }
+  /** Where it plays; tests that let time pass move it on. */
+  pos = 600_000;
   positionMs() {
-    return 600_000;
+    return this.pos;
   }
   durationMs() {
     return 7_200_000;
@@ -249,8 +251,10 @@ class FakeEngine implements PlayerEngine {
     this.switched.push(position);
     return true;
   }
+  /** Dropped and total frames, when a test counts them. */
+  frames: { dropped: number; total: number } | null = null;
   frameCounts() {
-    return null;
+    return this.frames;
   }
   stats() {
     return null;
@@ -498,6 +502,63 @@ describe("the server out of reach", () => {
     w.net.down = false;
     await vi.advanceTimersByTimeAsync(2_100);
     expect(w.requests.map((r) => r.mode)).toEqual(["auto", "auto"]);
+    c.close();
+  });
+});
+
+describe("dropped frames", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * A file played as it is, its picture shown and its frames counted, on a
+   * clock the test moves: E-AC-3, and an AC-3 track the TV plays too.
+   */
+  async function counting() {
+    vi.useFakeTimers();
+    const f = file();
+    f.streams[2] = stream({ index: 2, kind: "audio", codec: "ac3", language: "eng", channels: 6, default: false });
+    const w = world(item(f), () => info());
+    w.env.now = () => Date.now();
+    const c = new PlaybackController({ itemId: 70 }, w.env, 0);
+    c.start();
+    await vi.advanceTimersByTimeAsync(50);
+    const frames = { dropped: 0, total: 0 };
+    w.engine.frames = frames;
+    w.engine.state = "ready";
+    w.engine.listener?.firstFrame();
+    w.engine.listener?.status("ready");
+    /** `seconds` of playback at 24 frames a second, `dropped` of them dropped as it starts. */
+    const play = async (seconds: number, dropped = 0) => {
+      frames.dropped += dropped;
+      for (let i = 0; i < seconds * 2; i++) {
+        frames.total += 12;
+        w.engine.pos += 500;
+        await vi.advanceTimersByTimeAsync(500);
+      }
+    };
+    return { w, c, play };
+  }
+
+  it("convert a video that drops many", async () => {
+    const { w, c, play } = await counting();
+    await play(4);
+    await play(14, 130);
+    expect(w.requests.map((r) => r.mode).slice(0, 2)).toEqual(["auto", "transcode"]);
+    c.close();
+  });
+
+  it("aren't counted as a track switch drops them (a desktop Chrome's 130)", async () => {
+    const { w, c, play } = await counting();
+    await play(4);
+    c.selectAudio(2);
+    expect(w.engine.switched.slice(-1)).toEqual([1]);
+    await play(14, 130);
+    expect(w.requests.map((r) => r.mode)).toEqual(["auto"]);
+    // Counted again after: a video that drops them later still converts.
+    await play(14, 130);
+    expect(w.requests.map((r) => r.mode).slice(0, 2)).toEqual(["auto", "transcode"]);
     c.close();
   });
 });
