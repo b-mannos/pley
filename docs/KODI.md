@@ -225,7 +225,8 @@ own views instead (below), which skins' widgets and favourites always get.
     moving while it plays. One of 2 seconds or more, or two shorter ones
     within a minute, is a play issue.
   - *Delivery*: where Kodi's player keeps a cache (a file played as it
-    is), JSON-RPC's `cachepercentage` says how much is read ahead; video
+    is, and in Kodi 21 a converted stream too), JSON-RPC's
+    `cachepercentage` says how much is read ahead; video
     arriving at under 1.1 times real time for 15 seconds with under 10
     seconds ahead and falling is a play issue before it waits.
   - *Decoding*: Kodi tells add-ons nothing of dropped frames (only its
@@ -380,3 +381,10 @@ in `portable_data/userdata/advancedsettings.xml`.
   Kodi's player has no menu or details of pley's to show them in; the
   notification says it once, and Kodi's own codec info (the `o` key)
   shows the stream it plays.
+- `cachepercentage` and `Player.CacheLevel` read for the converted
+  stream as for the file (Kodi caches HLS too). A restart holds the last
+  picture under Kodi's busy circle for 3 to 6 seconds and plays on from
+  the stream's keyframe, up to a second back; the notification's
+  sentence is longer than Kodi's box and scrolls across once in its 5
+  seconds. A step back up is unseen so far: how often a Kodi's segment
+  reads prove the network carries more.
