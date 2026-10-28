@@ -129,7 +129,8 @@ function detail(item, myList) {
       { index: 3, kind: "subtitle", codec: "subrip", language: "eng", text_based: true },
       { index: PICTURE_SUBTITLES, kind: "subtitle", codec: "hdmv_pgs_subtitle", language: "eng", forced: false, text_based: false },
     ],
-    edition: null, selected_audio: 1, selected_subtitle: item.id === 103 ? PICTURE_SUBTITLES : 3, chapters: [],
+    edition: null, selected_audio: 1, selected_subtitle: item.id === 103 ? PICTURE_SUBTITLES : 3,
+    chapters: [{ start_ms: 0, end_ms: 600000, title: "Opening" }, { start_ms: 600000, end_ms: item.duration_ms ?? 1200000, title: null }],
   };
   const playable = item.kind === "movie" || item.kind === "episode";
   return {
@@ -415,7 +416,12 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
         res.writeHead(204);
         return res.end();
       }
-      return json(200, { session_id: match[1], method: "direct", transcode: null });
+      const playback = fixture.playbacks[Number(match[1].slice(1)) - 1];
+      const converted = playback?.subtitle_index != null;
+      return json(200, {
+        session_id: match[1], method: converted ? "transcode" : "direct",
+        transcode: converted ? { job_id: "j1", state: "running", video: "transcode", audio: "copy", video_in: "H.264 1920×1080", video_out: "H.264 1920×1080", audio_in: "AAC 2.0", audio_out: null, encoder: "libx264", preset: "veryfast", decoder: "cpu", pipeline: "cpu", tonemap: null, dolby_vision: null, hdr10plus_stripped: false, subtitle_burn: true, speed: 2.5, fps: 60, transcoded_ms: 960000, segments_ready: 10, segments_total: 500, bitrate_out: 8000000, last_error: null } : null,
+      });
     }
     if (path === "/api/search") {
       const q = (url.searchParams.get("q") ?? "").toLowerCase();

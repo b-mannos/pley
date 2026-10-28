@@ -263,13 +263,32 @@ async function walk() {
   await press("select"); // Resume
   await waitFor(/^POST \/api\/playback$/, since, "a playback session");
   shoot("player");
-  // Subtitle sync: Down brings it up, right moves the subtitles later, and
-  // Back closes it, the stream opening again with its text track moved.
+  // pley's menu (Down), and its subtitle sync: right moves the subtitles
+  // later, and Back closes it, the stream opening again with its text
+  // track moved.
   await press("down");
+  await sleep(300);
+  shoot("player-menu");
+  await press("down"); // Subtitle sync
+  await press("select");
   await press("right", 3);
   sync.label = await drawnWithin(2500, syncDrawn);
   shoot("player-sync");
   await press("back");
+  // The menu again: the first chapter gone to, then the playback's details,
+  // what the server makes of the conversion asked for.
+  await press("down");
+  await press("down"); // Chapters
+  await press("select");
+  await press("up");
+  await press("select");
+  since = mark();
+  await press("down");
+  await press("down"); // Playback details
+  await press("select");
+  await waitFor(/^GET \/api\/playback\/s\d+$/, since, "the conversion's details");
+  shoot("player-details");
+  await press("back", 2);
   since = mark();
   await press("back"); // stopped, then the session closed
   await waitFor(/^DELETE \/api\/playback\//, since, "closing the session");
@@ -499,6 +518,7 @@ const checks = [
   ["played the original in Automatic, the default", fixture.playbacks.length > 0 && fixture.playbacks.every((p) => p.mode === "auto" && p.max_bitrate === null)],
   ["kept 8 Mbps 1080p chosen in Settings", registry !== null && /playback.quality","8m"/.test(JSON.stringify([...registry]))],
   ["showed subtitle sync", sync.label],
+  ["showed the playback's details", asked(/^GET \/api\/playback\/s\d+$/)],
   ["saved Movies after TV Shows, every library in the order", fixture.orders.some((ids) => JSON.stringify(ids) === "[2,1,3]")],
   ["went back to the server's order", fixture.orders.includes(null) && fixture.libraryOrder.join() === "1,2,3"],
   [

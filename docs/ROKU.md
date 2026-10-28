@@ -16,7 +16,8 @@ unwatched, Add to or Remove from My List, Remove from Continue Watching
 and Go to show. The player plays files as they are whenever the
 Roku can (it reports what it decodes, from `roDeviceInfo`), HLS otherwise,
 reports progress, offers Skip Intro and Skip Credits as the web player does,
-the next episode at the credits of one, and subtitle sync (Down). Music isn't played yet: music
+the next episode at the credits of one, and pley's menu (Down): Quality,
+subtitle sync, the file's chapters and the playback's details. Music isn't played yet: music
 libraries and their titles are left out.
 
 It talks to the pley server and nothing else, so it works on a home network
@@ -73,8 +74,20 @@ Rules the code keeps:
   subtitle track only with captions on, a setting of the whole Roku: when
   pley picks one, it turns captions on for that playback and back as they
   were after, unless the person changed them meanwhile.
-- Subtitle sync, as the Android TV player's Sync: Down while a file with
-  text subtitles plays brings it up at the top of the screen; left and
+- pley's menu: Down while a title plays opens it at the right, over the
+  video, which plays on (play, fast forward and rewind still work): Quality
+  ("Automatic · Original"), Subtitle sync for a file with text subtitles,
+  Chapters for a file that has them (OK goes to one; the one playing is
+  checked), and Playback details, as the other apps say them: how it
+  plays ("Direct play", "Direct stream", "Transcoding") and why, its video
+  and audio as they are and as the server converts them (`GET
+  /api/playback/{session}`), its bitrate, what the screen gets of HDR,
+  subtitles drawn onto the video, and how far ahead the conversion is.
+  Back goes back in it, then closes it. Subtitles and audio stay in
+  Roku's own options (the Options key), which know the Video node's
+  tracks.
+- Subtitle sync, as the Android TV player's Sync: chosen in pley's menu
+  for a file with text subtitles, it shows at the top of the screen; left and
   right (rewind and fast forward too) move the subtitles 0.1 s, from 10 s
   earlier to 10 s later, shown as "+0.3 s"; Reset puts them back, Done or
   Back closes it. The Video node draws a sideloaded track as it comes and
@@ -126,10 +139,13 @@ Rules the code keeps:
   20 Mbps 1080p and down to 2 Mbps 480p, each with its hint, kept on the
   Roku (registry section `playback`), Automatic unless another was
   chosen. A quality is asked for as on Android: converted (`mode:
-  "transcode"`, `max_bitrate`, `max_height`) when it makes the file
-  smaller, by the file's bitrate and lines in its details; else the file
-  plays as it is. Roku's player has no quality menu of pley's, so the
-  choice is made in Settings, before playing.
+  "transcode"`, `max_bitrate`, `max_height`) when the file is offered it,
+  having more lines or more than 1.25 times its bitrate (its details
+  say); else the file plays as it is. The player's menu has Quality too:
+  the qualities the file is offered, named by its own lines when taller
+  ("8 Mbps 720p"), the tallest first, then by bitrate; one chosen there
+  becomes the Roku's setting, and the title opens again at it where it
+  was.
 - Automatic plays the original and watches it. Roku's own HLS would adapt
   between a stream's variants, but pley's streams have one, so stepping
   down is the app's:
@@ -147,7 +163,9 @@ Rules the code keeps:
   20 s, from `downloadedSegment`, no more than the bitrate playing; half
   of it for a file played as it is, which has no segments) times 0.75,
   never above the server's own quality for the file (`auto_quality`),
-  always a quality lower, never under 2 Mbps 480p, and not within 20 s of
+  always a quality lower among those the file is offered, each of less
+  bitrate than the one above (a 4K file goes 30 Mbps 4K, 15 Mbps 4K,
+  then 12 Mbps 1080p), never under 2 Mbps 480p, and not within 20 s of
   the last change. The stream opens again where it was, as a new session
   at that quality (`mode: "transcode"`), and "Playing at 8 Mbps 1080p for
   a smoother picture" shows at the top for 4 s once it plays. The ceiling

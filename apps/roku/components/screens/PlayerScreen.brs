@@ -5,12 +5,13 @@
 ' otherwise it starts again where it was, with a new session and the
 ' current token (a token that ran out answers 401 to the Video node).
 ' Skip Intro and Skip Credits follow the web player: an episode's credits
-' bring up Up Next instead. Down brings up subtitle sync for a file with
-' text subtitles (SubtitleSync.brs). Subtitles (or audio) the person picks
+' bring up Up Next instead. Down brings up pley's menu: Quality, subtitle
+' sync for a file with text subtitles (SubtitleSync.brs), the file's
+' chapters, and the playback's details (Details.brs). Subtitles (or audio) the person picks
 ' in Roku's options are remembered on the server for the show or the movie
 ' (Tracks.brs), so the next episode starts with matching ones. The quality
-' is the one chosen in Settings; Automatic opens the stream again lower
-' where it was when it doesn't play well (AutoQuality.brs).
+' is the one chosen in Settings or the menu; Automatic opens the stream
+' again lower where it was when it doesn't play well (AutoQuality.brs).
 
 sub init()
     m.video = m.top.findNode("video")
@@ -30,6 +31,20 @@ sub init()
     m.sync = m.top.findNode("sync")
     m.syncValue = m.top.findNode("syncValue")
     m.syncButtons = m.top.findNode("syncButtons")
+    m.menu = m.top.findNode("menu")
+    m.menuTitle = m.top.findNode("menuTitle")
+    m.menuList = m.top.findNode("menuList")
+    m.menuChoices = m.top.findNode("menuChoices")
+    m.menuText = m.top.findNode("menuText")
+    m.menuHint = m.top.findNode("menuHint")
+    ' What the menu shows ("menu", "quality", "chapters", "details"), the
+    ' actions of its entries, and the values of a list of choices.
+    m.menuKind = ""
+    m.menuActions = []
+    m.menuValues = []
+    m.menuList.observeField("itemSelected", "onMenuEntry")
+    m.menuChoices.observeField("itemSelected", "onMenuChoice")
+    m.menuChoices.observeField("itemFocused", "onMenuChoiceFocused")
     m.clock = CreateObject("roTimespan")
     m.started = false
     ' Which opening the answers belong to: answers for an earlier one are dropped.
@@ -161,6 +176,7 @@ sub open(itemId as dynamic, startMs as integer, item as dynamic, mode as string)
     m.textTracks = 0
     m.tracksFrom = -1
     m.sync.visible = false
+    closeMenu()
     hideSkip()
     hideUpNext()
     m.notice.visible = false
@@ -407,9 +423,10 @@ function syncSection() as object
     return CreateObject("roRegistrySection", "subtitleSync")
 end function
 
-' Subtitle sync is offered while a file with text subtitles plays.
-function syncOffered() as boolean
-    return m.info <> invalid and m.textTracks > 0 and not m.notice.visible and not m.upNext.visible
+' pley's menu is offered while a stream plays; subtitle sync in it for a
+' file with text subtitles.
+function menuOffered() as boolean
+    return m.info <> invalid and not m.notice.visible and not m.upNext.visible and not m.sync.visible
 end function
 
 sub openSync()
@@ -584,7 +601,7 @@ sub updateSkip()
         if marker <> invalid then m.skip.text = playerSkipLabel(marker)
     end if
     m.skipMarker = marker
-    shown = marker <> invalid and not m.skipDismissed and m.video.state = "playing" and not m.upNext.visible and not m.notice.visible and not m.sync.visible
+    shown = marker <> invalid and not m.skipDismissed and m.video.state = "playing" and not m.upNext.visible and not m.notice.visible and not m.sync.visible and not m.menu.visible
     if shown = m.skip.visible then return
     if shown
         m.skip.visible = true
@@ -771,6 +788,7 @@ end sub
 
 sub notice(title as string, text as string, buttons as object)
     m.loading.visible = false
+    closeMenu()
     hideSkip()
     hideUpNext()
     m.noticeTitle.text = title
@@ -799,6 +817,7 @@ end sub
 
 sub showUpNext()
     closeSync()
+    closeMenu()
     hideSkip()
     m.upNextShown = true
     m.nextTitle.text = m.next.title
@@ -860,12 +879,29 @@ sub playNext()
 end sub
 
 ' While subtitle sync shows: left and right (rewind and fast forward too)
-' move the subtitles, Back closes it. While Up Next counts down: Back
-' cancels it, and play, fast forward and rewind cancel it and act on the
-' video. Otherwise Down brings up subtitle sync, and Back leaves the player
-' (the scene), which closes the session.
+' move the subtitles, Back closes it. While pley's menu shows: Back goes
+' back in it, then closes it. While Up Next counts down: Back cancels it,
+' and play, fast forward and rewind cancel it and act on the video.
+' Otherwise Down brings up the menu, and Back leaves the player (the
+' scene), which closes the session.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
+    if m.menu.visible
+        if key = "back" or key = "left"
+            if m.menuKind = "menu"
+                closeMenu()
+            else
+                openMenu()
+            end if
+            return true
+        end if
+        ' The video's own keys go on as ever.
+        if key = "play" or key = "fastforward" or key = "rewind"
+            playerKey(key)
+            return true
+        end if
+        return false
+    end if
     if m.sync.visible
         if key = "left" or key = "rewind"
             stepSync(-syncStepMs())
@@ -893,9 +929,190 @@ function onKeyEvent(key as string, press as boolean) as boolean
         end if
         return false
     end if
-    if key = "down" and syncOffered()
-        openSync()
+    if key = "down" and menuOffered()
+        openMenu()
         return true
     end if
     return false
 end function
+
+' --- pley's menu ---
+
+' Its entries: Quality, Subtitle sync for a file with text subtitles,
+' Chapters for a file that has them, Playback details.
+sub openMenu()
+    hideSkip()
+    m.menuKind = "menu"
+    m.menuTitle.text = "Playback"
+    items = [{ title: "Quality: " + qualityShown() }]
+    m.menuActions = ["quality"]
+    if m.textTracks > 0
+        items.Push({ title: "Subtitle sync: " + syncLabel(m.syncMs) })
+        m.menuActions.Push("sync")
+    end if
+    if detChapters(playingFile()).Count() > 0
+        items.Push({ title: "Chapters" })
+        m.menuActions.Push("chapters")
+    end if
+    items.Push({ title: "Playback details" })
+    m.menuActions.Push("details")
+    at = m.menuList.itemFocused
+    m.menuList.content = nodesContent(items)
+    if at > 0 and at < items.Count() then m.menuList.jumpToItem = at
+    m.menuChoices.visible = false
+    m.menuText.visible = false
+    m.menuList.visible = true
+    m.menuHint.text = "Back closes this. Subtitles and audio: the Options key."
+    m.menu.visible = true
+    m.menuList.setFocus(true)
+end sub
+
+sub closeMenu()
+    if not m.menu.visible then return
+    m.menu.visible = false
+    m.menuKind = ""
+    m.video.setFocus(true)
+    updateSkip()
+end sub
+
+' The file playing: the session's, else the item's first.
+function playingFile() as dynamic
+    if m.item = invalid then return invalid
+    fileId = invalid
+    if m.info <> invalid then fileId = m.info.file_id
+    return contentFile(m.item, fileId)
+end function
+
+' The quality as the menu says it: "Automatic · 8 Mbps 1080p" while
+' Automatic plays, else the one chosen, named for the file.
+function qualityShown() as string
+    choice = aqChoice(playbackSection())
+    labels = {}
+    for each quality in aqMenuFor(playingFile())
+        labels[quality.id] = quality.label
+    end for
+    if choice = "auto"
+        now = "Original"
+        if m.watch <> invalid and labels.DoesExist(m.watch.quality) then now = labels[m.watch.quality]
+        return "Automatic · " + now
+    end if
+    if labels.DoesExist(choice) then return labels[choice]
+    return aqLabel(choice)
+end function
+
+sub onMenuEntry(event as object)
+    action = m.menuActions[event.getData()]
+    if action = "quality"
+        openQualities()
+    else if action = "sync"
+        closeMenu()
+        openSync()
+    else if action = "chapters"
+        openChapters()
+    else
+        openDetails()
+    end if
+end sub
+
+' The qualities this file is offered, the one chosen checked.
+sub openQualities()
+    m.menuKind = "quality"
+    m.menuTitle.text = "Quality"
+    choice = aqChoice(playbackSection())
+    items = []
+    m.menuValues = []
+    current = 0
+    for each quality in aqMenuFor(playingFile())
+        if quality.id = choice then current = items.Count()
+        items.Push({ title: quality.label })
+        m.menuValues.Push(quality.id)
+    end for
+    showMenuChoices(items, current)
+end sub
+
+sub openChapters()
+    m.menuKind = "chapters"
+    m.menuTitle.text = "Chapters"
+    chapters = detChapters(playingFile())
+    items = []
+    m.menuValues = []
+    for each chapter in chapters
+        items.Push({ title: chapter.label })
+        m.menuValues.Push(chapter.startMs)
+    end for
+    showMenuChoices(items, detChapterAt(chapters, m.positionMs))
+end sub
+
+sub showMenuChoices(items as object, current as integer)
+    m.menuChoices.content = nodesContent(items)
+    m.menuChoices.checkedItem = current
+    m.menuChoices.jumpToItem = current
+    m.menuList.visible = false
+    m.menuText.visible = false
+    m.menuChoices.visible = true
+    m.menuHint.text = ""
+    onMenuChoiceFocused()
+    m.menuChoices.setFocus(true)
+end sub
+
+sub onMenuChoiceFocused()
+    if m.menuKind <> "quality" then return
+    at = m.menuChoices.itemFocused
+    if at >= 0 and at < m.menuValues.Count() then m.menuHint.text = aqHint(m.menuValues[at])
+end sub
+
+' A quality is kept as the Roku's (Settings shows it) and the title opens
+' again at it where it was; a chapter is gone to.
+sub onMenuChoice(event as object)
+    at = event.getData()
+    if at < 0 or at >= m.menuValues.Count() then return
+    value = m.menuValues[at]
+    kind = m.menuKind
+    closeMenu()
+    if kind = "chapters"
+        seekTo(value)
+        return
+    end if
+    if value = aqChoice(playbackSection()) then return
+    aqChoose(playbackSection(), value)
+    ' Picked again, Automatic starts afresh at the original.
+    if value = "auto" then aqRemember(playbackSection(), m.global.session.server, 0, nowSeconds())
+    position = m.positionMs
+    seconds = m.video.position
+    if seconds <> invalid and seconds > 0 then position = Int(seconds * 1000)
+    newTitle()
+    open(m.itemId, position, m.item, m.mode)
+end sub
+
+' How the stream plays, and for a conversion what the server makes of it
+' (GET /api/playback/{session}).
+sub openDetails()
+    m.menuKind = "details"
+    m.menuTitle.text = "Playback details"
+    showDetails(invalid)
+    m.menuList.visible = false
+    m.menuChoices.visible = false
+    m.menuText.visible = true
+    m.menuHint.text = ""
+    m.top.setFocus(true)
+    if m.sessionId <> "" and httpString(m.info.method) <> "direct" then uiRequest({ method: "GET", path: "/api/playback/" + urlEncode(m.sessionId), session: m.sessionId }, "onDetails")
+end sub
+
+sub onDetails(event as object)
+    if event.getRoSGNode().spec.session <> m.sessionId or m.menuKind <> "details" then return
+    answer = event.getData()
+    if answer.ok and answer.data <> invalid then showDetails(httpObject(answer.data.transcode))
+end sub
+
+sub showDetails(live as dynamic)
+    if m.info = invalid then return
+    details = detPlayback(m.info, playingFile(), m.audioPlaying, live, m.positionMs)
+    lines = [details.method]
+    if details.why <> "" then lines.Push(details.why)
+    lines.Push("")
+    for each row in details.rows
+        lines.Push(row.label + ": " + row.value)
+    end for
+    if m.watch <> invalid and m.watch.quality <> "original" then lines.Push("Quality: " + qualityShown() + " · Lowered for the network")
+    m.menuText.text = lines.Join(Chr(10))
+end sub

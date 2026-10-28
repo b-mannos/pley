@@ -26,11 +26,27 @@ sub test_aq_automatic_unless_a_quality_was_chosen()
 end sub
 
 sub test_aq_a_file_is_offered_the_qualities_that_make_it_smaller()
-    tkEqual(aqOffered(10000, 1080), ["8m", "4m", "2m"])
-    tkEqual(aqOffered(18000, 2160), ["20m", "15m", "12m", "8m", "4m", "2m"])
-    tkEqual(aqOffered(20000, 1080), ["15m", "12m", "8m", "4m", "2m"])
-    tkEqual(aqOffered(0, 0), ["30m", "20m", "15m", "12m", "8m", "4m", "2m"], "unknown: every one")
+    tkEqual(aqOffered(10000, 1080), ["8m", "4m", "2m"], "at most 80 % of its bitrate")
+    tkEqual(aqOffered(18000, 2160), ["20m", "12m", "8m", "4m", "2m"], "15 Mbps 4K is no lighter than 18")
+    tkEqual(aqOffered(20000, 1080), ["15m", "12m", "8m", "4m", "2m"], "15 Mbps 4K as 15 Mbps 1080p, above 12")
+    tkEqual(aqOffered(40000, 2160), ["30m", "15m", "20m", "12m", "8m", "4m", "2m"], "a 4K file: the menu's order")
+    tkEqual(aqOffered(0, 0), ["30m", "15m", "20m", "12m", "8m", "4m", "2m"], "unknown: every one")
     tkEqual(aqOffered(1500, 480), [])
+end sub
+
+sub test_aq_the_players_menu_names_qualities_by_the_files_lines()
+    labels = function(menu as object) as object
+        out = []
+        for each quality in menu
+            out.Push(quality.label)
+        end for
+        return out
+    end function
+    tkEqual(labels(aqMenuFor({ bitrate: 12000000, width: 1280, height: 720 })), ["Original", "Automatic", "8 Mbps 720p", "4 Mbps 720p", "2 Mbps 480p"])
+    tkEqual(labels(aqMenuFor({ bitrate: 10000000, width: 1920, height: 800 })), ["Original", "Automatic", "8 Mbps 1080p", "4 Mbps 720p", "2 Mbps 480p"], "a wide film is 1080p")
+    tkEqual(labels(aqMenuFor(invalid)).Count(), 9, "an unknown file: the whole menu")
+    tkEqual(aqLadder(40000, 2160, ""), ["30m", "15m", "12m", "8m", "4m", "2m"], "each lower in bitrate than the one above")
+    tkEqual(aqLadder(40000, 2160, "15m"), ["15m", "12m", "8m", "4m", "2m"], "never above the server's quality")
 end sub
 
 sub test_aq_how_each_choice_is_asked_for()

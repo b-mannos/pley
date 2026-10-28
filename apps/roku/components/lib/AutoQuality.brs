@@ -64,26 +64,98 @@ function aqFromSetting(value as dynamic) as string
     return "auto"
 end function
 
-' The converted qualities that make a file smaller (every one when its
-' bitrate and lines are unknown, 0), the highest bitrate first.
+' The converted qualities worth offering for a file (docs/QUALITY.md):
+' those with fewer lines than its fileLines, or at most 80 % of its
+' bitrate, as a copy a little lighter plays no better than the file;
+' every one, in the menu's order, when neither is known. Named by the
+' file's lines when taller (aqMenuFor), they go by those lines, tallest
+' first, then by bitrate: a 4K file keeps the menu's order.
 function aqOffered(fileKbps as float, fileLines as integer) as object
+    menu = ["30m", "15m", "20m", "12m", "8m", "4m", "2m"]
+    if fileKbps <= 0 and fileLines <= 0 then return menu
+    named = aqNamedLines(0, fileLines)
+    copies = []
+    for each id in menu
+        fewer = fileLines > 0 and aqLines(id) < fileLines
+        lighter = fileKbps > 0 and aqKbps(id) <= fileKbps * 0.8
+        if fewer or lighter
+            shown = aqLines(id)
+            if named > 0 and named < shown then shown = named
+            ' In order: after every copy taller, or as tall and of more bitrate.
+            at = copies.Count()
+            for i = copies.Count() - 1 to 0 step -1
+                if copies[i].lines < shown or (copies[i].lines = shown and copies[i].kbps < aqKbps(id)) then at = i
+            end for
+            copies.Push(invalid)
+            for i = copies.Count() - 1 to at + 1 step -1
+                copies[i] = copies[i - 1]
+            end for
+            copies[at] = { id: id, lines: shown, kbps: aqKbps(id) }
+        end if
+    end for
     ids = []
-    for each id in ["30m", "20m", "15m", "12m", "8m", "4m", "2m"]
-        kbps = aqKbps(id)
-        if (fileKbps <= 0 and fileLines <= 0) or (fileKbps > 0 and kbps < fileKbps) or (fileLines > 0 and aqLines(id) < fileLines) then ids.Push(id)
+    for each copy in copies
+        ids.Push(copy.id)
     end for
     return ids
 end function
 
-' Those no higher than the server's own quality for the file (auto_quality, "" for none).
-function aqUnderCap(ids as object, cap as string) as object
-    most = aqKbps(cap)
-    if most <= 0 then return ids
-    kept = []
-    for each id in ids
-        if aqKbps(id) <= most then kept.Push(id)
+' The lines qualities are named by for a file width × height: 2160, 1080,
+' 720 or 480, by its width too (a 1920 × 800 film is 1080p); 0 when
+' neither is known.
+function aqNamedLines(width as integer, height as integer) as integer
+    if width <= 0 and height <= 0 then return 0
+    if width >= 3800 or height >= 2100 then return 2160
+    if width >= 1800 or height >= 1000 then return 1080
+    if width >= 1200 or height >= 700 then return 720
+    return 480
+end function
+
+' The player's Quality menu for a file: Original, Automatic and the
+' qualities offered for it ([{ id, label }]), a quality taller than the
+' file named by the file's own lines ("8 Mbps 720p" for a 720p file).
+function aqMenuFor(file as dynamic) as object
+    width = 0
+    if file <> invalid
+        width = Int(httpNumber(file.width, 0))
+        if width <= 0
+            for each stream in httpArray(file.streams)
+                if width <= 0 and GetInterface(stream, "ifAssociativeArray") <> invalid and httpString(stream.kind) = "video" then width = Int(httpNumber(stream.width, 0))
+            end for
+        end if
+    end if
+    named = aqNamedLines(width, aqFileLines(file))
+    menu = [{ id: "original", label: "Original" }, { id: "auto", label: "Automatic" }]
+    for each id in aqOffered(aqFileKbps(file), aqFileLines(file))
+        label = aqLabel(id)
+        if named > 0 and aqLines(id) > named
+            lines = urlValue(named) + "p"
+            if named >= 2160 then lines = "4K"
+            label = urlValue(aqKbps(id) \ 1000) + " Mbps " + lines
+        end if
+        menu.Push({ id: id, label: label })
     end for
-    return kept
+    return menu
+end function
+
+' The qualities Automatic steps through below the original, highest
+' first: those offered for the file, no higher than the server's own
+' quality for it (auto_quality, "" for none) in bitrate and lines, each
+' of less bitrate than the one above (a 4K file goes 30 Mbps 4K, 15 Mbps
+' 4K, then 12 Mbps 1080p).
+function aqLadder(fileKbps as float, fileLines as integer, cap as string) as object
+    most = aqKbps(cap)
+    tallest = aqLines(cap)
+    ladder = []
+    below = 0
+    for each id in aqOffered(fileKbps, fileLines)
+        kbps = aqKbps(id)
+        if (most <= 0 or (kbps <= most and aqLines(id) <= tallest)) and (below = 0 or kbps < below)
+            ladder.Push(id)
+            below = kbps
+        end if
+    end for
+    return ladder
 end function
 
 function aqHas(ids as object, id as string) as boolean
@@ -97,7 +169,7 @@ end function
 ' the best quality at or under it, 2 Mbps 480p at least; "" for none.
 function aqStartQuality(ceilingKbps as float) as string
     if ceilingKbps <= 0 then return ""
-    for each id in aqOffered(0, 0)
+    for each id in ["30m", "20m", "15m", "12m", "8m", "4m", "2m"]
         if aqKbps(id) <= ceilingKbps then return id
     end for
     return "2m"
@@ -171,7 +243,7 @@ function aqStepDown(current as string, playingKbps as float, networkKbps as floa
     below = playingKbps
     if current <> "original" then below = aqKbps(current)
     candidates = []
-    for each id in aqUnderCap(aqOffered(fileKbps, fileLines), cap)
+    for each id in aqLadder(fileKbps, fileLines, cap)
         if below <= 0 or aqKbps(id) < below then candidates.Push(id)
     end for
     if candidates.Count() = 0 then return invalid
@@ -194,7 +266,7 @@ end function
 function aqStepUp(current as string, fileKbps as float, fileLines as integer, cap as string) as dynamic
     if current = "original" then return invalid
     up = []
-    for each id in aqUnderCap(aqOffered(fileKbps, fileLines), cap)
+    for each id in aqLadder(fileKbps, fileLines, cap)
         if aqKbps(id) > aqKbps(current) then up.Push(id)
     end for
     if up.Count() > 0 then return { quality: up[up.Count() - 1], kbps: aqKbps(up[up.Count() - 1]) }
