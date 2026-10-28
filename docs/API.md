@@ -1218,7 +1218,12 @@ language, else the language of the file's default track. Of that
 language's tracks, the main sound (never a commentary or an audio
 description, unless picked), then the one this player plays best:
 
-1. as it is (decoded, or passed through), rather than converted;
+1. as it is (decoded, or passed through), rather than converted; a track
+   that needs a stream counts as it is only when the stream copies it
+   (AAC and MP3 for version 1 players, browsers; AC-3 and E-AC-3 too for
+   version 2), so an old Fire TV app that can't play a file's TrueHD
+   default gets its stereo AAC copied, not its AC-3 5.1 converted to
+   stereo;
 2. a picked track's title (a stereo mix picked on purpose stays);
 3. with the file as it is: the file's default, or any track for a
    player that switches tracks itself (`audio_track_switching`); other

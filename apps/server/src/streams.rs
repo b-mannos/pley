@@ -171,6 +171,11 @@ pub trait AudioOut {
     fn switches_tracks(&self) -> bool;
     /// The most channels its output takes, when it says.
     fn channels(&self) -> Option<i64>;
+    /// Copies this codec as it is into a stream (HLS), for a track it can't
+    /// have with the file as it is; the others are converted.
+    fn stream_copies(&self, codec: &str) -> bool {
+        self.plays(codec)
+    }
 }
 
 /// How a track sounds on a player, better greater: as many channels as its
@@ -186,12 +191,16 @@ struct Sound {
     bitrate: i64,
 }
 
-/// Whether `out` plays `s` as it is, and how it sounds there. A track it
-/// can't play is converted: E-AC-3, AC-3 or AAC, 5.1 at most (stereo for
-/// version 1 players, which name no channels), so only its channels count.
-fn fit(s: &MediaStream, out: &dyn AudioOut) -> (bool, Sound) {
+/// Whether `out` gets `s` as it is, and how it sounds there. A track it
+/// can't play, or one that a stream it needs (another track than the
+/// default, for a player that doesn't switch them) would convert, is
+/// converted: E-AC-3, AC-3 or AAC, 5.1 at most (stereo for version 1
+/// players, which name no channels), so only its channels count. A version
+/// 1 player's stream copies only AAC and MP3: its AC-3 5.1 came out as
+/// stereo AAC where the file's own stereo AAC would have been copied.
+fn fit(s: &MediaStream, out: &dyn AudioOut, default_audio: Option<&MediaStream>) -> (bool, Sound) {
     let channels = s.channels.unwrap_or(2);
-    if !out.plays(&s.codec) {
+    if !out.plays(&s.codec) || !(as_is(s, out, default_audio) || out.stream_copies(&s.codec)) {
         let channels = channels.min(out.channels().unwrap_or(2)).min(6);
         return (false, Sound { channels, native: false, lossless: false, objects: false, bitrate: 0 });
     }
@@ -241,7 +250,7 @@ pub fn resolve(
                 audio_streams.iter().copied().filter(|s| same_language(s.language.as_deref(), Some(language)));
             in_language
                 .max_by_key(|s| {
-                    let fits = out.map(|out| fit(s, out));
+                    let fits = out.map(|out| fit(s, out, default_audio));
                     (
                         audio_kind(s.title.as_deref()) == wanted,
                         fits.is_some_and(|(plays, _)| plays),
@@ -318,7 +327,7 @@ fn automatic_audio<'a>(
         .filter(|l| present(l))
         .or_else(|| out.and(default_audio).and_then(|d| d.language.as_deref()).filter(|l| known_language(l)))?;
     audio_streams.iter().copied().filter(|s| same_language(s.language.as_deref(), Some(language))).max_by_key(|s| {
-        let fits = out.map(|out| fit(s, out));
+        let fits = out.map(|out| fit(s, out, default_audio));
         (
             audio_kind(s.title.as_deref()) == AudioKind::Main,
             fits.is_some_and(|(plays, _)| plays),
@@ -775,6 +784,8 @@ mod tests {
         passes: &'static [&'static str],
         switches: bool,
         channels: Option<i64>,
+        /// A version 1 player: its streams copy only AAC and MP3.
+        v1: bool,
     }
 
     impl AudioOut for Player {
@@ -790,20 +801,32 @@ mod tests {
         fn channels(&self) -> Option<i64> {
             self.channels
         }
+        fn stream_copies(&self, codec: &str) -> bool {
+            let copied: &[&str] = if self.v1 { &["aac", "mp3"] } else { &["aac", "mp3", "ac3", "eac3"] };
+            copied.contains(&codec) && self.plays(codec)
+        }
     }
 
     /// A TV with a 7.1 receiver taking everything.
-    const THEATER: Player =
-        Player { decodes: &["aac"], passes: &["ac3", "eac3", "truehd", "dts"], switches: true, channels: Some(8) };
+    const THEATER: Player = Player {
+        decodes: &["aac"],
+        passes: &["ac3", "eac3", "truehd", "dts"],
+        switches: true,
+        channels: Some(8),
+        v1: false,
+    };
     /// A TV with a 5.1 soundbar: Dolby Digital (Plus) passed through.
-    const SOUNDBAR: Player = Player { decodes: &["aac"], passes: &["ac3", "eac3"], switches: true, channels: Some(6) };
+    const SOUNDBAR: Player =
+        Player { decodes: &["aac"], passes: &["ac3", "eac3"], switches: true, channels: Some(6), v1: false };
     /// A phone: AAC and Dolby Digital (Plus) decoded, stereo.
-    const PHONE: Player = Player { decodes: &["aac", "ac3", "eac3"], passes: &[], switches: true, channels: Some(2) };
+    const PHONE: Player =
+        Player { decodes: &["aac", "ac3", "eac3"], passes: &[], switches: true, channels: Some(2), v1: false };
     /// Chrome, a version 1 player: AAC, a file's default track only, no channels said.
     const CHROME: Player =
-        Player { decodes: &["aac", "mp3", "opus", "flac"], passes: &[], switches: false, channels: None };
+        Player { decodes: &["aac", "mp3", "opus", "flac"], passes: &[], switches: false, channels: None, v1: true };
     /// Safari, also version 1: Dolby Digital too.
-    const SAFARI: Player = Player { decodes: &["aac", "ac3", "eac3"], passes: &[], switches: false, channels: None };
+    const SAFARI: Player =
+        Player { decodes: &["aac", "ac3", "eac3"], passes: &[], switches: false, channels: None, v1: true };
 
     fn track(index: i64, codec: &str, channels: i64, title: Option<&str>, default: bool) -> MediaStream {
         MediaStream { codec: codec.into(), channels: Some(channels), ..audio(index, "eng", title, default) }
@@ -837,8 +860,12 @@ mod tests {
         // Chrome plays AAC only: the stereo track, copied into a stream, never the
         // commentary or the description, though they play as they are too.
         assert_eq!(play(&CHROME), Some(3));
-        // Safari plays Dolby Digital: 5.1 rather than stereo.
-        assert_eq!(play(&SAFARI), Some(2));
+        // Safari plays Dolby Digital, but not in a stream of a version 1
+        // player, which converts it: the stereo track, copied as it is.
+        assert_eq!(play(&SAFARI), Some(3));
+        // A version 2 player that doesn't switch tracks (a TV app's old
+        // engine) has the Dolby Digital copied into its stream: 5.1.
+        assert_eq!(play(&Player { v1: false, ..SAFARI }), Some(2));
         // An item's details don't know the player: the default, as ever.
         assert_eq!(resolve(None, &NONE, &film(), None).audio, None);
         // The profile's language first: French, as it is.
@@ -854,6 +881,22 @@ mod tests {
         // A player that switches tracks itself takes the 5.1.
         let switching = Player { switches: true, ..SAFARI };
         assert_eq!(resolve(None, &NONE, &streams, Some(&switching)).audio, Some(2));
+    }
+
+    #[test]
+    fn a_track_its_stream_would_convert_gives_way_to_one_it_copies() {
+        // A Fire TV Stick Lite's old app: plays AC-3 with the file as it is,
+        // but a file whose TrueHD default it can't play streams, and its
+        // stream copies only AAC: the English stereo, not the 5.1 converted.
+        let lite =
+            Player { decodes: &["aac", "ac3", "eac3", "dts"], passes: &[], switches: false, channels: None, v1: true };
+        assert_eq!(resolve(None, &NONE, &film(), Some(&lite)).audio, Some(3));
+        // With a Dolby Digital default, that one plays with the file as it is.
+        let streams = vec![track(1, "ac3", 6, None, true), track(2, "aac", 2, None, false)];
+        assert_eq!(resolve(None, &NONE, &streams, Some(&lite)).audio, None);
+        // Only a converted track in the language: that one, as before.
+        let only = vec![track(1, "truehd", 8, None, true), track(2, "dts", 6, None, false)];
+        assert_eq!(resolve(None, &NONE, &only, Some(&lite)).audio, None);
     }
 
     #[test]
@@ -901,13 +944,13 @@ mod tests {
     #[test]
     fn lossless_and_object_audio_are_told_apart() {
         let dts = |profile: &str| MediaStream { profile: Some(profile.into()), ..track(1, "dts", 6, None, true) };
-        assert!(fit(&dts("DTS-HD MA"), &THEATER).1.lossless);
-        assert!(fit(&dts("DTS-HD MA + DTS:X"), &THEATER).1.objects);
-        assert!(!fit(&dts("DTS"), &THEATER).1.lossless && !fit(&dts("DTS-HD HRA"), &THEATER).1.lossless);
+        assert!(fit(&dts("DTS-HD MA"), &THEATER, None).1.lossless);
+        assert!(fit(&dts("DTS-HD MA + DTS:X"), &THEATER, None).1.objects);
+        assert!(!fit(&dts("DTS"), &THEATER, None).1.lossless && !fit(&dts("DTS-HD HRA"), &THEATER, None).1.lossless);
         // Atmos decoded on the device is lost: it counts only passed through.
         let joc =
             MediaStream { profile: Some("Dolby Digital Plus + Dolby Atmos".into()), ..track(1, "eac3", 6, None, true) };
-        assert!(fit(&joc, &SOUNDBAR).1.objects && !fit(&joc, &PHONE).1.objects);
+        assert!(fit(&joc, &SOUNDBAR, None).1.objects && !fit(&joc, &PHONE, None).1.objects);
         for (title, kind) in [
             ("Audio Description", AudioKind::Description),
             ("English AD", AudioKind::Description),

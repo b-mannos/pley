@@ -222,6 +222,15 @@ impl crate::streams::AudioOut for Caps {
     fn channels(&self) -> Option<i64> {
         self.audio_channels.filter(|_| self.is_v2()).map(i64::from)
     }
+    /// Version 1 players copy what browsers play from MPEG-TS; version 2
+    /// players everything MPEG-TS carries that they play.
+    fn stream_copies(&self, codec: &str) -> bool {
+        if self.is_v2() {
+            matches!(codec, "aac" | "mp3" | "ac3" | "eac3") && self.plays_audio(codec)
+        } else {
+            matches!(codec, "aac" | "mp3") && self.audio(codec)
+        }
+    }
 }
 
 /// How the client wants the media delivered.
@@ -1146,13 +1155,8 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         }
     });
     let audio_req = audio.map(|a| {
-        // Version 1 players copy what browsers play from MPEG-TS; version 2
-        // players everything MPEG-TS carries that they play.
-        let copy = if v2 {
-            matches!(a.codec.as_str(), "aac" | "mp3" | "ac3" | "eac3") && caps.plays_audio(&a.codec)
-        } else {
-            matches!(a.codec.as_str(), "aac" | "mp3") && caps.audio(&a.codec)
-        };
+        // As the choice of the track counted on (streams::fit).
+        let copy = crate::streams::AudioOut::stream_copies(caps, &a.codec);
         let (codec, channels) = converted_audio(caps, a);
         AudioRequest {
             stream_index: Some(a.index),
