@@ -4,8 +4,11 @@ import type { Params } from "react-router";
 import { queries } from "@/api/hooks";
 import type { ItemKind } from "@/api/types";
 import { loadHls } from "@/lib/hls";
+import { getStored } from "@/lib/hooks";
 import { decodeId } from "@/lib/ids";
 import { androidPlayer } from "@/lib/shell";
+import { networkStart } from "./network";
+import { automaticChosen } from "./quality";
 
 /** The player page's code (the /play route loads it on demand). */
 export const loadPlayerPage = () => import("./PlayerPage");
@@ -16,10 +19,13 @@ export const loadPlayerPage = () => import("./PlayerPage");
  * that would have fetched it, and the player waits for it. An item already
  * there, even an older copy, opens the player right away (the player
  * updates it as any page does). A failure isn't retried here, holding the
- * click up: the player page shows it and retries itself.
+ * click up: the player page shows it and retries itself. For Automatic,
+ * what the server knows of this network is asked meanwhile (the player
+ * takes the answer; the page doesn't wait for it).
  */
 export function playerData(prefetch: QueryClient["prefetchQuery"], params: Params): Promise<void>[] {
   const id = decodeId(params.id);
+  if (id && !androidPlayer() && automaticChosen(getStored<string | null>("pley.quality", null))) void networkStart();
   return id ? [prefetch({ ...queries.item(id), staleTime: Infinity, retry: false })] : [];
 }
 

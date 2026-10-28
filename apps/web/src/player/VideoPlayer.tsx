@@ -47,6 +47,7 @@ import { playUrl } from "@/lib/usePlayItem";
 import { nextInQueue, queuePlayUrl, type QueuePosition } from "@/lib/videoQueue";
 import { AutoQuality, ORIGINAL_ID, storedMemory, type AutoMemory, type AutoStep, type Lowered } from "./autoQuality";
 import { autoLadder, chooseQuality, modeFor, namedFor, qualitiesFor, qualityById } from "./quality";
+import { networkStart, reportCeiling } from "./network";
 import { ChaptersMenu } from "./ChaptersMenu";
 import { SeekBar } from "./SeekBar";
 import { methodLabel, PlaybackDetails } from "./PlaybackDetails";
@@ -209,10 +210,21 @@ const autoMemory: AutoMemory = storedMemory(
   "pley.autoQuality",
 );
 
-/** Automatic for `file`, starting at the original or at the network remembered. */
-function newAuto(file: MediaFile): AutoQuality {
-  const auto = new AutoQuality({ ladder: autoLadder(file), originalKbps: file.bitrate ? file.bitrate / 1000 : null, memory: autoMemory });
-  auto.start(performance.now());
+/**
+ * Automatic for `file`, not started: it starts at the original or at the
+ * network remembered, once the server has said what it knows of this
+ * network (`networkStart`). Its ceilings are told to the server too.
+ * `afresh`: picked again in the menu, it starts at the original at once,
+ * nothing asked.
+ */
+function newAuto(file: MediaFile, afresh: boolean): AutoQuality {
+  const auto = new AutoQuality({
+    ladder: autoLadder(file),
+    originalKbps: file.bitrate ? file.bitrate / 1000 : null,
+    memory: autoMemory,
+    onCeiling: reportCeiling,
+  });
+  if (afresh) auto.start(performance.now(), null);
   return auto;
 }
 
@@ -308,10 +320,27 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const [autoRun, setAutoRun] = useState(0);
   const [, setAutoStepped] = useState(0);
   const auto = useMemo(
-    () => (selectedQuality.id === "auto" && file ? newAuto(file) : null),
+    () => (selectedQuality.id === "auto" && file ? newAuto(file, autoRun > 0) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [file?.id, selectedQuality.id, autoRun],
   );
+  // Automatic starts once the server has said what it knows of this network
+  // (asked as the player's page loaded, alongside the item), after a speed
+  // test when it asks for one; hls.js loads meanwhile.
+  const autoReady = !auto || auto.started;
+  useEffect(() => {
+    if (!auto || auto.started) return;
+    let gone = false;
+    loadHls().catch(() => undefined);
+    void networkStart().then((known) => {
+      if (gone || auto.started) return;
+      auto.start(performance.now(), known);
+      setAutoStepped((n) => n + 1);
+    });
+    return () => {
+      gone = true;
+    };
+  }, [auto]);
   const playingQuality = auto ? namedFor(file, qualityById(auto.playing)) : selectedQuality;
   const mode = modeFor(playingQuality);
   const [loadToken, setLoadToken] = useState(0);
@@ -569,8 +598,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   // ---------------------------------------------------------------------
   useEffect(() => {
     const video = videoRef.current;
-    // Stopped on the server: nothing starts again here.
-    if (!video || !file || stoppedRef.current) return;
+    // Stopped on the server: nothing starts again here. Automatic waits to know where it starts.
+    if (!video || !file || stoppedRef.current || !autoReady) return;
     let cancelled = false;
     const q = playingQuality;
     let startSec = startMsRef.current / 1000;
@@ -824,7 +853,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item.id, file?.id, audioIndex, burnIndex, playingQuality.id, loadToken]);
+  }, [item.id, file?.id, audioIndex, burnIndex, playingQuality.id, loadToken, autoReady]);
 
   // Final teardown on unmount: report "stopped" and release the transcode.
   useEffect(() => {
@@ -1430,6 +1459,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     setStalled(false);
     if (id === "auto") {
       autoMemory.set(null);
+      reportCeiling(null);
       setAutoRun((n) => n + 1);
     }
     setQuality(id);

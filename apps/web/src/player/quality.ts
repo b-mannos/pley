@@ -107,6 +107,11 @@ export function chooseQuality(picked: string | null | undefined, offered: Qualit
   return offered.find((q) => q.id === picked) ?? ORIGINAL;
 }
 
+/** Whether the quality kept (`pley.quality`) plays Automatic: none was ever picked, or Automatic was. */
+export function automaticChosen(picked: string | null | undefined): boolean {
+  return chooseQuality(picked, QUALITIES).id === AUTO.id;
+}
+
 /**
  * How a quality is asked for: the original lets the server choose (direct
  * play when the browser can); any other quality is a transcode.

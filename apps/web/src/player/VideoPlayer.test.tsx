@@ -5,6 +5,7 @@ import { useServerEvents } from "@/api/events";
 import type { ItemDetail, PlaybackInfo, ServerEvent } from "@/api/types";
 import { makeItem, makeStream } from "@/test/fixtures";
 import { mockApi, renderWithProviders, type FakeRequest } from "@/test/render";
+import { forgetNetwork } from "./network";
 import { VideoPlayer, startSize } from "./VideoPlayer";
 
 /** A stand-in for hls.js: records its config and calls, and fires events on demand. */
@@ -566,12 +567,15 @@ describe("VideoPlayer in Automatic", () => {
   const starts = (requests: FakeRequest[]) =>
     requests.filter((r) => r.method === "POST" && r.path === "/api/playback").map((r) => r.body as Record<string, unknown>);
 
-  /** A 20 Mbps 1080p file, played as it is. */
-  function render20() {
+  beforeEach(() => forgetNetwork());
+
+  /** A 20 Mbps 1080p file, played as it is; `more`: other answers of the server's. */
+  function render20(more: Parameters<typeof mockApi>[0] = {}) {
     const item = detail();
     item.files[0]!.bitrate = 20_000_000;
     const requests = serve([session("d1", { method: "direct", hls: false, url: "/api/files/3/stream" }), session("t2")], {
       "DELETE /api/playback/d1": () => undefined,
+      ...more,
     });
     const view = renderWithProviders(<VideoPlayer item={item} startMs={60_000} fileId={null} audio={null} sub={null} />);
     return { requests, ...view };
@@ -655,6 +659,52 @@ describe("VideoPlayer in Automatic", () => {
     });
     await sleep(3_100);
     expect(starts(requests)).toHaveLength(1);
+  }, 15_000);
+
+  it("starts at the ceiling the server knows for this network, which it asks first, over the browser's own", async () => {
+    window.localStorage.setItem("pley.autoQuality", JSON.stringify({ kbps: 3_000, at: Date.now() - 60_000 }));
+    const { requests } = render20({
+      "GET /api/playback/network": () => ({ local: false, ceiling_kbps: 9_000, source: "playback", since: Date.now() - 3_600_000, probe: false }),
+    });
+    await waitFor(() => expect(starts(requests)).toHaveLength(1));
+    const asked = requests.findIndex((r) => r.path.startsWith("/api/playback/network?client_id=web-"));
+    expect(asked).toBeGreaterThanOrEqual(0);
+    expect(asked).toBeLessThan(requests.findIndex((r) => r.method === "POST" && r.path === "/api/playback"));
+    expect(starts(requests)[0]).toMatchObject({ mode: "transcode", max_bitrate: 8_000, max_height: 1080 });
+    await userEvent.click(screen.getByRole("button", { name: "Playback settings" }));
+    await userEvent.click(screen.getByRole("button", { name: /Quality/ }));
+    expect(screen.getByRole("menuitemradio", { name: /Automatic\s*Now 8 Mbps 1080p · Lowered for your connection/ })).toBeInTheDocument();
+  });
+
+  it("starts at the original when the server knows of no limit, whatever the browser remembers", async () => {
+    window.localStorage.setItem("pley.autoQuality", JSON.stringify({ kbps: 3_000, at: Date.now() - 60_000 }));
+    const { requests } = render20({
+      "GET /api/playback/network": () => ({ local: true, ceiling_kbps: null, source: null, since: null, probe: false }),
+    });
+    await waitFor(() => expect(starts(requests)).toHaveLength(1));
+    expect(starts(requests)[0]).toMatchObject({ mode: "auto", max_bitrate: null });
+  });
+
+  it("tells the server the ceiling of a step down, and to forget it when Automatic is picked again", async () => {
+    const nothing = { local: false, ceiling_kbps: null, source: null, since: null, probe: false };
+    const { requests, container } = render20({ "GET /api/playback/network": () => nothing, "PUT /api/playback/network": () => nothing });
+    const video = container.querySelector("video")!;
+    await waitFor(() => expect(video.getAttribute("src")).toBe("/api/files/3/stream"));
+    playing(video);
+    act(() => {
+      video.dispatchEvent(new Event("waiting"));
+    });
+    await waitFor(() => expect(starts(requests)).toHaveLength(2), { timeout: 4_000 });
+    const puts = () => requests.filter((r) => r.method === "PUT" && r.path === "/api/playback/network").map((r) => r.body);
+    await waitFor(() => expect(puts()).toEqual([{ client_id: expect.stringMatching(/^web-/) as unknown, ceiling_kbps: 15_000 }]));
+
+    await userEvent.click(screen.getByRole("button", { name: "Playback settings" }));
+    await userEvent.click(screen.getByRole("button", { name: /Quality/ }));
+    await userEvent.click(screen.getByRole("menuitemradio", { name: /Automatic/ }));
+    await waitFor(() => expect(puts()).toHaveLength(2));
+    expect(puts()[1]).toMatchObject({ ceiling_kbps: null });
+    await waitFor(() => expect(starts(requests)).toHaveLength(3));
+    expect(starts(requests)[2]).toMatchObject({ mode: "auto", max_bitrate: null });
   }, 15_000);
 
   it("starts the next title at the network it remembers", async () => {

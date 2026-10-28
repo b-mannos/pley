@@ -7,6 +7,7 @@ import { MediaCard } from "@/components/cards";
 import { encodeId } from "@/lib/ids";
 import { makeItem } from "@/test/fixtures";
 import { apiError, mockApi, renderWithProviders, testQueryClient } from "@/test/render";
+import { forgetNetwork } from "./network";
 import { playerData, playIntent, usePreloadPlayerWhenIdle } from "./preload";
 
 const { loadHls, page } = vi.hoisted(() => ({
@@ -118,6 +119,13 @@ describe("preloading the player", () => {
 });
 
 describe("the player's route data", () => {
+  beforeEach(() => {
+    forgetNetwork();
+    // A quality picked: nothing is asked of the network.
+    window.localStorage.setItem("pley.quality", JSON.stringify("original"));
+  });
+  afterEach(() => window.localStorage.removeItem("pley.quality"));
+
   it("is the item, fetched with the player's code", async () => {
     const requests = mockApi({ "GET /api/items/7": () => makeItem({ id: 7, title: "Heat" }) });
     const client = testQueryClient();
@@ -142,5 +150,19 @@ describe("the player's route data", () => {
     expect(requests).toHaveLength(1);
     expect(playerData(client.prefetchQuery.bind(client), { id: "nope!" })).toEqual([]);
     expect(playerData(client.prefetchQuery.bind(client), {})).toEqual([]);
+  });
+
+  it("asks what the server knows of this network alongside the item for Automatic, without waiting for it", async () => {
+    window.localStorage.removeItem("pley.quality");
+    let answer: (v: unknown) => void = () => undefined;
+    const requests = mockApi({
+      "GET /api/items/7": () => makeItem({ id: 7, title: "Heat" }),
+      "GET /api/playback/network": () => new Promise((resolve) => (answer = resolve)),
+    });
+    const client = testQueryClient();
+    await Promise.all(playerData(client.prefetchQuery.bind(client), { id: encodeId(7) }));
+    expect(requests.map((r) => r.path.split("?")[0])).toEqual(["/api/playback/network", "/api/items/7"]);
+    expect(requests[0]!.path).toMatch(/client_id=web-[0-9a-f]{32}$/);
+    answer({ local: true, ceiling_kbps: null, source: null, since: null, probe: false });
   });
 });
