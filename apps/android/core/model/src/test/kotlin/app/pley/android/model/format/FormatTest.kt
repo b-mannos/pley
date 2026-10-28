@@ -244,6 +244,11 @@ class FormatTest {
         )
         assertEquals("French – SDH (SRT, Forced)", streamLabel(stream(StreamKind.Subtitle, "subrip", "fre", "SDH", forced = true)))
         assertEquals("Portuguese (BR) – SDH (PGS)", streamLabel(stream(StreamKind.Subtitle, "hdmv_pgs_subtitle", "pt-BR", "SDH")))
+        // Only named forced, as the server counts them: told apart from the file's full English.
+        assertEquals("English (SRT)", streamLabel(stream(StreamKind.Subtitle, "subrip", "eng", "English")))
+        assertEquals("English (SRT, Forced)", streamLabel(stream(StreamKind.Subtitle, "subrip", "eng", "English (Forced)")))
+        assertEquals("English – Signs & Songs (SRT, Forced)", streamLabel(stream(StreamKind.Subtitle, "subrip", "eng", "Signs & Songs")))
+        assertEquals("English – Unforced Errors (SRT)", streamLabel(stream(StreamKind.Subtitle, "subrip", "eng", "Unforced Errors")))
         val dv = stream(codec = "hevc", width = 3840, height = 2160, range = DynamicRange.DolbyVision, dvProfile = 8, dvBlCompat = 1, bitDepth = 10)
         assertEquals("4K HEVC Dolby Vision P8.1 10-bit", streamLabel(dv))
         assertEquals("1080p H.264", streamLabel(stream(width = 1920, height = 1080, bitDepth = 8, range = DynamicRange.Sdr)))

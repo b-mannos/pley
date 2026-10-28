@@ -172,7 +172,7 @@ fun streamLabel(s: MediaStream): String {
             val base = lang ?: title ?: "Unknown"
             val flags = listOfNotNull(
                 codecLabel(s.codec).takeIf { it.isNotEmpty() },
-                "Forced".takeIf { s.forced },
+                "Forced".takeIf { isForced(s) },
                 "External".takeIf { s.external },
             ).joinToString(", ")
             base + extra + (if (flags.isNotEmpty()) " ($flags)" else "")
@@ -185,6 +185,14 @@ fun streamLabel(s: MediaStream): String {
         ).joinToString(" ")
     }
 }
+
+/**
+ * Forced subtitles: flagged so, or only named so ("English (Forced)",
+ * "Signs & Songs"), as the server counts them when it chooses. Without it
+ * a file's "English" and "English (Forced)" both read "English (SRT)".
+ */
+fun isForced(s: MediaStream): Boolean =
+    s.forced || s.title.orEmpty().lowercase().split(Regex("[^\\p{L}\\p{N}]+")).any { it == "forced" || it == "signs" }
 
 /** The web's poster badges for a listing's [MediaSummary]: ["4K", "DV", "HEVC"]. */
 fun mediaBadges(media: MediaSummary?): List<String> {
