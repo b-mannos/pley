@@ -245,11 +245,9 @@ class PhonePlayerActivity : ComponentActivity(), PlayerHost {
         super.onStop()
         detachEngine()
         if (isFinishing || isChangingConfigurations) return
-        if (isInPictureInPictureMode) {
-            // Picture in picture was closed: the playback ends.
-            finish()
-            return
-        }
+        // Stopped in picture in picture too: the screen turned off, and it is
+        // there again, paused, once unlocked. Closed, it ends as it leaves
+        // picture in picture (onPictureInPictureModeChanged).
         val c = controller.value ?: return
         c.pause()
         // Lets go of the decoders and the buffers; the session stays for 90 s.
@@ -313,6 +311,7 @@ class PhonePlayerActivity : ComponentActivity(), PlayerHost {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         inPip.value = isInPictureInPictureMode
         picture.inPip = isInPictureInPictureMode
+        // Left picture in picture while stopped: its window was closed, and the playback ends.
         if (!isInPictureInPictureMode && lifecycle.currentState == Lifecycle.State.CREATED) finish()
     }
 

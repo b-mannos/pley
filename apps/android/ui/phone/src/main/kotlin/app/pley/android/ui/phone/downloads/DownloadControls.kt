@@ -15,8 +15,12 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -122,23 +126,24 @@ internal fun DownloadIconButton(
 /**
  * Runs [download] once the app may show the downloads' notification
  * (asked once, on Android 13 and later): downloading goes on either way,
- * only quieter when it may not.
+ * only quieter when it may not. What waits for the answer is kept with
+ * the screen, which the phone turning makes anew meanwhile.
  */
 @Composable
 internal fun rememberDownloadStarter(download: (List<Long>) -> Unit): (List<Long>) -> Unit {
     val context = LocalContext.current
     val current = rememberUpdatedState(download)
-    val pending = remember { arrayOfNulls<List<Long>>(1) }
+    var pending by rememberSaveable { mutableStateOf<LongArray?>(null) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        pending[0]?.let { ids -> current.value(ids) }
-        pending[0] = null
+        pending?.let { ids -> current.value(ids.toList()) }
+        pending = null
     }
     return remember(context, launcher) {
         { ids ->
             val asked = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
             if (asked) {
-                pending[0] = ids
+                pending = ids.toLongArray()
                 launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
             } else {
                 current.value(ids)
