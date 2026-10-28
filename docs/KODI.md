@@ -25,7 +25,7 @@ python apps/kodi/package.py        # dist/plugin.video.pley-<version>.zip
 
 Its icon (512 square, solid to the corners, as Kodi's add-on checker
 wants) and fanart (1920 × 1080) are rendered from pley's logo with the
-other apps' icons: `node scripts/render-icons.mjs` at the repository's
+other apps' icons: `bun scripts/render-icons.mjs` at the repository's
 root.
 
 In Kodi: Settings → System → Add-ons → Unknown sources on, then
@@ -64,7 +64,9 @@ side by side with Kodi's were the reference):
 - **The rail** on the left: the profile, Search, Home, each library,
   Playlists, Collections and Settings (the add-on's). Collapsed it shows
   icons, the current page's marked; Left opens it over the page with each
-  entry's name. The profile's menu has Audio and subtitles (below). The
+  entry's name. However many libraries there are, the entries come closer
+  when they must, so Collections always ends a step above Settings. The
+  profile's menu has Audio and subtitles (below). The
   libraries come in the profile's order: the profile's menu has Sort
   libraries (a library, then where it goes), a library's
   menu key Move up, Move down and Use the server's order, each saved at
@@ -109,10 +111,12 @@ they were. `apps/kodi/skin.py` writes the window's XML from
 the Android app's dp doubled: it lays out 960 by 540, Kodi's skins 1920 by
 1080): `python apps/kodi/skin.py` after changing them, and the tests fail
 when the XML is behind. The pictures (`resources/skins/default/media`)
-are rendered by `node scripts/render-kodi-skin.mjs`: the Android app's own
+are rendered by `bun scripts/render-kodi-skin.mjs`: the Android app's own
 Lucide icons (read from its `PleyIcons.kt`), its buttons, tile masks and
 focus ring, the backdrop's gradients and the artwork placeholders, which
-pick their colour from the title as the web's do. Text is in Estuary's
+pick their colour from the title as the web's do. A mask keeps to the
+picture's place (`scalediffuse` off), so round photos stay round and
+cropped posters keep their corners. Text is in Estuary's
 fonts (Kodi lends an add-on's windows the skin's fonts, by name): with
 another skin, pley's screens use its default font.
 
@@ -149,7 +153,9 @@ own views instead (below), which skins' widgets and favourites always get.
   beside a file played as it is the files next to it (Kodi reads the
   file's own tracks itself, and has no folder to look in for an address
   over HTTP). They are named as Kodi names its own (`3.eng.forced.vtt`),
-  so Kodi lists them by language and says which are forced.
+  so Kodi lists them by language and says which are forced: flagged so,
+  or only named so ("English (Forced)", "Signs & Songs"), as the server
+  counts them.
   Kodi's own Subtitle offset (Subtitles in the player's controls) moves
   them, and Kodi remembers it for each file played as it is; it counts the
   other way from pley's other apps, +0.3 s showing them earlier.
