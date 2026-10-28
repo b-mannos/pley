@@ -41,13 +41,14 @@ MIME = {
 
 def beside(base: str, info: dict) -> list:
     """The text subtitles Kodi is given beside what it plays, named so it
-    reads their language and whether they are forced: all of them beside a
+    reads their language and whether they are forced (flagged, or only
+    named so: "English (Forced)", "Signs & Songs"): all of them beside a
     converted stream, which carries none; beside a file played as it is,
     the files next to it (Kodi reads the file's own tracks itself, and an
     address over HTTP has no folder for it to look in). Kodi lists them
     first, in this order (tracks.py)."""
     return [
-        path_in(base, api.subtitle_name(s["url"], s.get("language"), s.get("forced")))
+        path_in(base, api.subtitle_name(s["url"], s.get("language"), tracks.is_forced(s)))
         for s in tracks.beside_tracks(info)
     ]
 

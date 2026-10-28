@@ -15,6 +15,7 @@ after them all.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 
@@ -110,6 +111,15 @@ def needs_burn(info: dict, file) -> bool:
     return bool(info.get("hls") or chosen.get("external"))
 
 
+def is_forced(stream) -> bool:
+    """Forced subtitles, as the server counts them: flagged so, or named so
+    ("English (Forced)", "Signs & Songs"), as many files only name them."""
+    if stream.get("forced"):
+        return True
+    words = re.split(r"[^0-9a-z]+", (stream.get("title") or "").lower())
+    return "forced" in words or "signs" in words
+
+
 def beside_tracks(info: dict) -> list:
     """The subtitle tracks Kodi is given as files beside what plays: every
     text track beside a converted stream, which carries none; the text
@@ -128,7 +138,9 @@ def layout(info: dict, file) -> dict:
     profile's language, the track it plays best), the details' only from
     a server too old to say."""
     hls = bool(info.get("hls"))
-    subtitles = beside_tracks(info)
+    # Forced as Kodi sees them: the files given by their names (playback.beside),
+    # the file's own by their flag.
+    subtitles = [dict(s, forced=is_forced(s)) for s in beside_tracks(info)]
     if not hls:
         subtitles += sorted((s for s in info.get("subtitles") or [] if not s.get("external")), key=lambda s: s["index"])
     audio = []

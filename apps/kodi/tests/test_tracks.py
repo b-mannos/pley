@@ -148,6 +148,25 @@ class LayoutTest(unittest.TestCase):
         # Kodi's French is fre, a file's may be fra.
         self.assertEqual(tracks.language("FRA"), "fre")
 
+    def test_files_given_count_forced_as_they_are_named(self):
+        # A stream's English and its "Signs & Songs", neither flagged: Kodi
+        # reads the second's name (4.eng.forced.vtt) as forced, so does the
+        # layout, and Kodi listing only the forced one still finds it.
+        subtitles = [
+            {"index": 3, "language": "eng", "title": "English", "forced": False, "external": False, "text_based": True, "url": "/api/files/7/subtitles/3.vtt"},
+            {"index": 4, "language": "eng", "title": "Signs & Songs", "forced": False, "external": False, "text_based": True, "url": "/api/files/7/subtitles/4.vtt"},
+        ]
+        info = {"hls": True, "file_id": 7, "audio_index": 1, "subtitle_index": None, "burn_subtitles": False, "subtitles": subtitles}
+        entries = tracks.layout(info, a_file())["subtitles"]
+        self.assertEqual([(s["index"], s["forced"]) for s in entries], [(3, False), (4, True)])
+        found = [{"index": 0, "language": "eng", "isforced": True}]
+        self.assertEqual(tracks.to_kodi(entries, 4, found), 0)
+        self.assertEqual(tracks.from_kodi(entries, 0, found), 4)
+        # The file's own tracks, played as it is, keep their flag: Kodi reads
+        # that from the file.
+        info = dict(info, hls=False)
+        self.assertEqual([(s["index"], s["forced"]) for s in tracks.layout(info, a_file())["subtitles"]], [(3, False), (4, False)])
+
     def test_picture_subtitles_drawn_on(self):
         english_pictures = a_file(subtitle=4)
         self.assertEqual(tracks.burn_index(english_pictures), 4)
