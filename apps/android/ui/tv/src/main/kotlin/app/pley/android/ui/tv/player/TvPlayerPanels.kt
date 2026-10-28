@@ -16,17 +16,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,6 +63,7 @@ import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.item.FactLine
 import app.pley.android.ui.tv.item.PanelHeading
 import app.pley.android.ui.tv.item.PanelRow
+import app.pley.android.ui.tv.kit.focusRow
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -128,7 +132,15 @@ private fun ChoicePanel(panel: PlayerPanel, state: State<PlayerUiState>, ui: TvP
     val original = stringResource(R.string.tv_player_play_original)
     val originalHint = stringResource(R.string.tv_player_play_original_hint)
     val resources = LocalResources.current
-    LazyColumn(Modifier.fillMaxSize()) {
+    // Each panel's own list: its current choice may be further down than shows.
+    val list = remember(panel) { LazyListState() }
+    LaunchedEffect(panel, ui.panel != null) {
+        if (ui.panel != null) {
+            withFrameNanos { }
+            list.focusRow(focus)
+        }
+    }
+    LazyColumn(Modifier.fillMaxSize(), state = list) {
         item(key = "title") { PanelTitle(title) }
         when (panel) {
             PlayerPanel.Subtitles -> {

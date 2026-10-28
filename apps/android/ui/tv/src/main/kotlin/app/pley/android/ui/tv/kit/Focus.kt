@@ -1,6 +1,7 @@
 package app.pley.android.ui.tv.kit
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.saveable.listSaver
@@ -10,6 +11,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusEventModifierNode
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.FocusRequesterModifierNode
 import androidx.compose.ui.focus.FocusState
 import androidx.compose.ui.focus.focusProperties
@@ -213,3 +215,25 @@ private class InitialFocusNode(
 
 /** D-pad rule 9: keeps text and focusable things inside the TV's safe area, 48 dp at the sides and 27 above and below. */
 fun Modifier.tvSafeArea(): Modifier = padding(horizontal = TvSafeArea.Horizontal, vertical = TvSafeArea.Vertical)
+
+/**
+ * Gives [requester] focus once its row is laid out, scrolling down to it
+ * when it is further down the list than shows: a lazy list composes only
+ * the rows in view, so a requester on a row below them (the current
+ * language far down a list of them, the 12th subtitle track) isn't
+ * attached yet, and asking it alone leaves focus behind the panel.
+ * Whether focus got there.
+ */
+suspend fun LazyListState.focusRow(requester: FocusRequester): Boolean {
+    repeat(FOCUS_ROW_TRIES) {
+        withFrameNanos { }
+        if (runCatching { requester.requestFocus() }.getOrDefault(false)) return true
+        val info = layoutInfo
+        val last = info.visibleItemsInfo.lastOrNull()?.index
+        if (last != null && last < info.totalItemsCount - 1) scrollToItem(last)
+    }
+    return false
+}
+
+/** Frames [focusRow] tries for: a page of rows a frame, so lists of hundreds. */
+private const val FOCUS_ROW_TRIES = 40

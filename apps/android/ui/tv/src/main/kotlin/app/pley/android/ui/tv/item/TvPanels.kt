@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,6 +34,7 @@ import app.pley.android.screens.item.destination
 import app.pley.android.screens.item.itemActions
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.kit.TvSidePanel
+import app.pley.android.ui.tv.kit.focusRow
 
 /**
  * The page's side panels (design spec §2.7): Audio and subtitles, More,
@@ -60,15 +62,17 @@ internal fun TvPanels(
     }
     TvSidePanel(visible = panel != null, onDismiss = { onClose(returnTo) }, modifier = Modifier.testTag(TV_PANEL)) {
         val first = remember(shown) { FocusRequester() }
+        val list = rememberLazyListState()
         LaunchedEffect(shown, panel != null) {
             if (panel != null) {
                 withFrameNanos { }
                 withFrameNanos { }
-                runCatching { first.requestFocus() }
+                list.focusRow(first)
             }
         }
         LazyColumn(
-            Modifier
+            state = list,
+            modifier = Modifier
                 .fillMaxSize()
                 // Focus stays in the panel until Back closes it; closing, it may leave
                 // (back to the button that opened it) while the panel slides away.

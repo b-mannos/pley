@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,6 +57,7 @@ import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.ui.tv.kit.TvSidePanel
+import app.pley.android.ui.tv.kit.focusRow
 
 /**
  * The TV's settings pieces (design spec §4.8): rows that fill with
@@ -214,11 +216,12 @@ internal fun <T> TvChoicePanel(
         }
     }
     TvSidePanel(visible = open, onDismiss = close, modifier = Modifier.testTag(TV_CHOICE_PANEL)) {
+        val list = rememberLazyListState()
         LaunchedEffect(open, choices) {
             if (open) {
                 withFrameNanos { }
                 withFrameNanos { }
-                runCatching { first.requestFocus() }
+                list.focusRow(first)
             }
         }
         BasicText(
@@ -230,7 +233,8 @@ internal fun <T> TvChoicePanel(
         )
         val start = choices.indexOfFirst { it.value == selected }.coerceAtLeast(0)
         LazyColumn(
-            Modifier
+            state = list,
+            modifier = Modifier
                 .fillMaxSize()
                 .focusProperties { onExit = { if (open) cancelFocusChange() } }
                 .focusGroup(),
