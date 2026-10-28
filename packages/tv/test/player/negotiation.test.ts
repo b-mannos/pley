@@ -1017,3 +1017,38 @@ describe("a change while it plays", () => {
     c.close();
   });
 });
+
+describe("speed", () => {
+  it("isn't offered where the TV's player can't keep the sound at other speeds (Samsung's AVPlay)", async () => {
+    const w = world(item(file()), () => info());
+    const c = new PlaybackController({ itemId: 70 }, w.env, 0);
+    c.start();
+    await settle();
+    expect(c.state.value.speeds).toEqual([]);
+    c.setSpeed(2);
+    expect(c.state.value.speed).toBe(1);
+    c.close();
+  });
+
+  it("plays at the speed picked, only those offered, and keeps it for the title's next session", async () => {
+    const w = world(item(file()), (req) => info({ session_id: `s-${req.mode}` }));
+    const rates: number[] = [];
+    (w.engine as FakeEngine & { setSpeed(rate: number): boolean }).setSpeed = (rate: number) => {
+      rates.push(rate);
+      return true;
+    };
+    const c = new PlaybackController({ itemId: 70 }, w.env, 0);
+    c.start();
+    await settle();
+    expect(c.state.value.speeds).toEqual([0.5, 0.75, 1, 1.25, 1.5, 2]);
+    c.setSpeed(1.5);
+    c.setSpeed(3);
+    expect([c.state.value.speed, rates]).toEqual([1.5, [1.5]]);
+    // Another session of the same title (subtitles burned in, say) plays at it too.
+    c.selectQuality("8m");
+    await settle();
+    expect(w.engine.prepared).toHaveLength(2);
+    expect(rates).toEqual([1.5, 1.5]);
+    c.close();
+  });
+});

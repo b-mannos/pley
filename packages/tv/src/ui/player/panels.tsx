@@ -5,13 +5,14 @@ import { mediaFacts, streamBlock, type FactBlock } from "../../format/media-info
 import type { PlaybackController, PlayerState } from "../../player/controller";
 import type { EngineStats } from "../../player/engine";
 import { SLEEP_CHOICES, sameChoice, sleepLabel } from "../../player/sleep";
+import { speedLabel } from "../../player/speed";
 import { formatOffset, SYNC_STEP_MS } from "../../subs/sync";
 import { PanelRow } from "../kit/buttons";
 import { F } from "../kit/focusable";
 import { Icon } from "../kit/icons";
 import { PanelTitle, SidePanel } from "../kit/panel";
 
-export type PlayerPanel = "subtitles" | "audio" | "quality" | "chapters" | "sleep" | "info";
+export type PlayerPanel = "subtitles" | "audio" | "quality" | "chapters" | "speed" | "sleep" | "info";
 
 /** A chapter's name: its title, or "Chapter N" (its title after it, unless it is one already). */
 export function chapterName(title: string | null, n: number): string {
@@ -83,6 +84,15 @@ export function PlayerPanels(p: { panel: PlayerPanel; state: PlayerState; contro
         </SidePanel>
       );
     }
+    case "speed":
+      return (
+        <SidePanel onClose={p.onClose} label="Speed">
+          <PanelTitle>Speed</PanelTitle>
+          {s.speeds.map((rate) => (
+            <PanelRow key={String(rate)} label={speedLabel(rate)} checked={rate === s.speed} initial={rate === s.speed} onSelect={pick(() => c.setSpeed(rate))} />
+          ))}
+        </SidePanel>
+      );
     case "sleep":
       return (
         <SidePanel onClose={p.onClose} label="Sleep timer">

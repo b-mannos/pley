@@ -7,12 +7,15 @@ import { SignedOutError, Tokens, type KeyValue } from "./auth/tokens";
 import { xhrTransport, type Transport } from "./net/transport";
 import type { Platform, Probe } from "./platform";
 import { Reporter } from "./player/reporter";
+import type { SubtitleFont, SubtitlePosition } from "./subs/style";
 import { OffsetStore } from "./subs/sync";
 
 /** What a person sets on this TV (Settings). */
 export interface Settings {
   subtitleSize: "small" | "normal" | "large" | "largest";
   subtitleBox: boolean;
+  subtitleFont: SubtitleFont;
+  subtitlePosition: SubtitlePosition;
   /** Up Next plays after its 10 s countdown. */
   autoplayNext: boolean;
   reduceMotion: boolean;
@@ -29,6 +32,8 @@ export interface Settings {
 const DEFAULT_SETTINGS: Settings = {
   subtitleSize: "normal",
   subtitleBox: false,
+  subtitleFont: "default",
+  subtitlePosition: "bottom",
   autoplayNext: true,
   reduceMotion: false,
   playbackDetails: false,

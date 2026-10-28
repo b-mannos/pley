@@ -52,6 +52,7 @@ import { AUTO, autoLadder, chooseQuality, fileHint, modeOf, namedFor, ORIGINAL, 
 import { failureText, Recovery, StruggleMeter, type EngineError, type RecoveryAction } from "./recovery";
 import type { Reporter } from "./reporter";
 import { SLEEP_OFF, SleepTimer, type SleepChoice, type SleepState } from "./sleep";
+import { SPEEDS } from "./speed";
 
 export type Phase =
   | { kind: "preparing" }
@@ -123,6 +124,9 @@ export interface PlayerState {
   notice: string | null;
   subtitleOffsetMs: number;
   subtitleSync: boolean;
+  /** How fast it plays (1: normal), for this title; `speeds`: what the TV's player plays at, empty when only normal. */
+  speed: number;
+  speeds: readonly number[];
   sleep: SleepState;
   stoppedByServer: boolean;
   /** The server stopped answering mid-playback: the player keeps its place and asks again ("Reconnecting…"). */
@@ -168,6 +172,8 @@ const INITIAL: PlayerState = {
   notice: null,
   subtitleOffsetMs: 0,
   subtitleSync: false,
+  speed: 1,
+  speeds: [],
   sleep: SLEEP_OFF,
   stoppedByServer: false,
   reconnecting: false,
@@ -415,6 +421,7 @@ export class PlaybackController {
           tracks: () => undefined,
         });
       }
+      this.update({ speeds: this.engineRef.setSpeed ? SPEEDS : [] });
       this.caps = caps;
       this.load(detail, this.current, known);
       await this.begin(startOfPlay(detail, this.current), generation);
@@ -670,6 +677,8 @@ export class PlaybackController {
       audioCodec: info.audio_converted ? null : this.audio?.codec ?? null,
     };
     engine.prepare(source, this.wantPlay);
+    const speed = this.state.value.speed;
+    if (speed !== 1) engine.setSpeed?.(speed);
     this.applyTracks();
   }
 
@@ -1197,6 +1206,13 @@ export class PlaybackController {
     this.presenter.refresh();
   }
 
+  /** Plays at `rate` times normal speed, until the next title; only at the speeds the TV's player plays. */
+  setSpeed(rate: number): void {
+    const engine = this.engineRef;
+    if (this.closed || !engine?.setSpeed || this.state.value.speeds.indexOf(rate) < 0) return;
+    if (engine.setSpeed(rate)) this.update({ speed: rate });
+  }
+
   setSleep(choice: SleepChoice): void {
     if (this.closed || this.stopped) return;
     this.sleep.set(choice);
@@ -1466,7 +1482,9 @@ export class PlaybackController {
     this.current = req;
     const sleep = this.state.value.sleep;
     const title = this.state.value.title;
-    this.state.value = { ...INITIAL, itemId: target.id, title, sleep };
+    // The next title plays at normal speed.
+    if (this.state.value.speed !== 1) this.engineRef?.setSpeed?.(1);
+    this.state.value = { ...INITIAL, itemId: target.id, title, sleep, speeds: this.state.value.speeds };
     this.setClock({ positionMs: req.startMs ?? 0, bufferedMs: 0 });
     const generation = this.nextGeneration();
     const prefetched = this.nextDetail?.id === target.id ? this.nextDetail : null;

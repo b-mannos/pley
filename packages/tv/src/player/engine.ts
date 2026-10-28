@@ -101,6 +101,12 @@ export interface PlayerEngine {
   readonly knowsBuffer?: boolean;
   /** How fast the network brings the stream, kbps, when the engine measures it; `null` when it can't say. */
   bandwidthKbps?(): number | null;
+  /**
+   * Plays at `rate` times normal speed, with its sound, from now and for
+   * the sources it opens after; false when it can't. An engine without it
+   * plays at normal speed only.
+   */
+  setSpeed?(rate: number): boolean;
 
   status(): EngineStatus;
   playing(): boolean;

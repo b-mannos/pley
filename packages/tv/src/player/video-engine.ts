@@ -217,6 +217,13 @@ export class VideoEngine implements PlayerEngine {
     this.listener = null;
   }
 
+  /** The element's own rate: its default one too, which each new source starts at; browsers keep the voices' pitch. */
+  setSpeed(rate: number): boolean {
+    this.video.defaultPlaybackRate = rate;
+    this.video.playbackRate = rate;
+    return true;
+  }
+
   positionMs(): number {
     return Math.max(0, (this.video.currentTime || 0) * 1000);
   }

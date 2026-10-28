@@ -6,6 +6,7 @@ import { displayAddress } from "../../auth/addresses";
 import { episodeLabel } from "../../format/format";
 import { AUTO, ORIGINAL, PRESETS, presetById } from "../../player/quality";
 import type { AppState, Settings } from "../../state";
+import { fontsHere, SUBTITLE_FONTS, SUBTITLE_POSITIONS } from "../../subs/style";
 import { useUi } from "../context";
 import { Art, artCandidates } from "../kit/art";
 import { Pill, TextButton } from "../kit/buttons";
@@ -348,6 +349,42 @@ export function SettingsScreen(p: { entry: Entry }) {
               ],
               settings.subtitleBox,
               (v) => setting({ subtitleBox: v as boolean }),
+            )
+          }
+        />,
+      );
+      rows.push(
+        <SettingRow
+          key="font"
+          fid="row-font"
+          icon="captions"
+          label="Subtitle font"
+          value={SUBTITLE_FONTS.filter((f) => f.id === settings.subtitleFont)[0]?.label ?? "Default"}
+          onSelect={() =>
+            choose(
+              "row-font",
+              "Subtitle font",
+              SUBTITLE_FONTS.filter((f) => f.id === settings.subtitleFont || fontsHere().indexOf(f.id) >= 0).map((f) => ({ value: f.id, label: f.label })),
+              settings.subtitleFont,
+              (v) => setting({ subtitleFont: v as Settings["subtitleFont"] }),
+            )
+          }
+        />,
+      );
+      rows.push(
+        <SettingRow
+          key="position"
+          fid="row-position"
+          icon="captions"
+          label="Subtitle position"
+          value={SUBTITLE_POSITIONS.filter((p) => p.id === settings.subtitlePosition)[0]?.label ?? "Bottom"}
+          onSelect={() =>
+            choose(
+              "row-position",
+              "Subtitle position",
+              SUBTITLE_POSITIONS.map((p) => ({ value: p.id, label: p.label })),
+              settings.subtitlePosition,
+              (v) => setting({ subtitlePosition: v as Settings["subtitlePosition"] }),
             )
           }
         />,

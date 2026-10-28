@@ -10,6 +10,7 @@ import type { Marker } from "../../api/types";
 import { thumbnailAt, sheetPath } from "../../player/nextup";
 import { badgeText, MEDIA_STEP_MS, Seeker, STEP_MS } from "../../player/seeker";
 import { LEAVE_AFTER_MS } from "../../player/sleep";
+import { speedLabel } from "../../player/speed";
 import type { Key } from "../keys";
 import { useUi } from "../context";
 import { Pill, TextButton } from "../kit/buttons";
@@ -475,7 +476,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
       {/* Under the subtitles, so they stay clear over it. */}
       <div class={`player-scrim${controls ? " in" : ""}`} />
       {shown.picture && <PictureSubtitles frame={shown.picture} />}
-      {shown.cues.length > 0 && <TextSubtitles cues={shown.cues} size={settings.subtitleSize} box={settings.subtitleBox} lifted={controls} />}
+      {shown.cues.length > 0 && <TextSubtitles cues={shown.cues} size={settings.subtitleSize} box={settings.subtitleBox} font={settings.subtitleFont} position={settings.subtitlePosition} lifted={controls} />}
       <F class="video-holder" fid="video" disabled={controls} label="Video" />
       <div class={`player-controls${controls ? " in" : ""}`} aria-hidden={!controls}>
         <div class="player-top">
@@ -497,6 +498,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
         <G kind="row" class="player-row">
           <div class="row-left">
             {chapters.length > 1 && <PlayerButton fid="chapters" icon="list-video" label="Chapters" onSelect={() => openPanel("chapters")} />}
+            {s.speeds.length > 0 && <PlayerButton fid="speed" icon="fast-forward" label={s.speed === 1 ? "Speed" : `Speed ${speedLabel(s.speed)}`} onSelect={() => openPanel("speed")} />}
             <PlayerButton fid="sleep" icon="moon" label="Sleep timer" onSelect={() => openPanel("sleep")} />
           </div>
           <div class="row-centre">

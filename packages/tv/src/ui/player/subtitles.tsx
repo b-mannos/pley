@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from "preact/hooks";
 import type { Settings } from "../../state";
+import { fontFamily, liftPx } from "../../subs/style";
 import type { PictureFrame } from "../../subs/pictures";
 import type { Cue } from "../../subs/vtt";
 import { useUi } from "../context";
@@ -15,12 +16,21 @@ function onTop(c: Cue): boolean {
 
 /**
  * Text subtitles over the whole screen: white bold text with a black
- * outline (or a dark box), at the bottom, lifted above the controls while
- * they show; cues placed at the top stay there.
+ * outline (or a dark box), in the font chosen, at the bottom or as far
+ * above it as chosen, lifted above the controls while they show; cues
+ * placed at the top stay there.
  */
-export function TextSubtitles(p: { cues: Cue[]; size: Settings["subtitleSize"]; box: boolean; lifted: boolean }) {
+export function TextSubtitles(p: {
+  cues: Cue[];
+  size: Settings["subtitleSize"];
+  box: boolean;
+  lifted: boolean;
+  font?: Settings["subtitleFont"];
+  position?: Settings["subtitlePosition"];
+}) {
   if (!p.cues.length) return null;
   const px = Math.round(540 * SIZES[p.size] * 10) / 10;
+  const under = 40 + liftPx(p.position ?? "bottom");
   const bottom = p.cues.filter((c) => !onTop(c));
   const top = p.cues.filter(onTop);
   const cue = (c: Cue, i: number) => {
@@ -32,7 +42,7 @@ export function TextSubtitles(p: { cues: Cue[]; size: Settings["subtitleSize"]; 
     );
   };
   return (
-    <div class="subtitles" style={`font-size:${px}px;padding:27px 48px ${p.lifted ? 153 : 40}px 48px`} aria-live="off">
+    <div class="subtitles" style={`font-size:${px}px;font-family:${fontFamily(p.font ?? "default")};padding:27px 48px ${p.lifted ? Math.max(153, under) : under}px 48px`} aria-live="off">
       <div class="cues-top">{top.map(cue)}</div>
       <div class="cues-bottom">{bottom.map(cue)}</div>
     </div>
