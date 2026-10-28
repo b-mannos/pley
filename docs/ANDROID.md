@@ -8,8 +8,9 @@ a Media3 player), which an update clears up after (below).
 
 ## Installing
 
-Release builds aren't signed yet, and no store carries the
-app. Until then it is sideloaded, a debug or self-signed build:
+No store carries the app yet; release builds are signed when the release
+key is given (Releases, below). Until then it is sideloaded, a debug build
+or a signed release:
 
 - From a computer: `adb install -r app-store-debug.apk` (`adb connect
   <ip>:5555` first for a TV or Fire TV, see Emulators).
@@ -19,7 +20,9 @@ app. Until then it is sideloaded, a debug or self-signed build:
   apps" for the Downloader app, then open the APK's address in Downloader.
 
 The phone or tablet's launcher opens `MainActivity`; the TV home screen
-shows the 320×180 banner and opens `TvActivity`. A TV that opens
+shows the 320×180 banner and opens `TvActivity`. Fire TV shows a
+sideloaded app by its TV icon in a 16:9 tile, so `TvActivity`'s icon is
+the banner too, drawn sharp enough for a 4K TV. A TV that opens
 `MainActivity` (some launchers do) is sent on to `TvActivity`.
 
 ## Fire TV
@@ -40,6 +43,38 @@ oldest supported; an `android-28` Android TV emulator with 1 GB of memory
 stands in for a Fire TV stick (see Emulators), apart from video decoding:
 its decoders are software only, which the app doesn't use on TVs, so it
 can't play video.
+
+## Audio and subtitles
+
+The player names an audio track to the server (`audio_index`) only when
+the person picked one, on the title's page or in the player's menu;
+otherwise the server picks, of the profile's language, the track this
+device plays best, and the player switches to the one its answer names,
+which the menu marks. Tracks picked in the player, on another episode or
+as new defaults are the ones the next episode and the title's page start
+with (`PUT /api/items/{id}/streams`); subtitles changed alone are saved
+without the audio, so the track one device played isn't pinned for every
+other. Downloads, with no server to ask, still choose the audio here.
+The profile's defaults (Audio language, Subtitles, Subtitle language)
+are under Me on phones and in Settings on TVs
+(`PUT /api/me/track-defaults`). The subtitle menu's Sync moves subtitles
+in 0.1 s steps, up to 10 s either way, remembered for each file on the
+device.
+
+## Screens
+
+Libraries are sorted for the profile: on phones, Sort in the Libraries
+tab's top bar (a handle to drag, Move up and Move down for TalkBack); on
+TVs, Sort by the Libraries page's title, Move in a library's actions, and
+Settings → Sort libraries, since with three libraries or fewer the rail
+lists them and there is no Libraries page. Each move is saved at once,
+and a server too old to sort says so. On the TV, a title's Media info
+stays closed until Select opens it, OK while a seek is coming or within
+two seconds of one goes there and plays on (later, OK pauses), and the
+rail keeps its panel until it has closed. Dolby Vision profile 7 is
+labelled FEL or MEL, and a hybrid file shows both DV and HDR10+. With a
+large system font, labels and poster titles shrink to fit rather than
+break inside a word.
 
 ## Offline
 
@@ -185,7 +220,10 @@ Release builds are minified, and signed when the release key is given
 
 The version is pley's, from `VERSION` at the repository's root, and the
 version code follows from it (1.2.3 is 1020300), so every release installs
-over the one before. Builds record the commit they were made from
+over the one before. Google Play and the Amazon Appstore take each code
+once, so a rebuild of the same version for them sets `PLEY_BUILD` (1 to
+99), which is added to the code (0.2.0 with `PLEY_BUILD=1` is 20001).
+Builds record the commit they were made from
 (`PLEY_COMMIT`, else git's); Settings and Diagnostics show both, as
 "0.2.0 (1a2b3c4d5)".
 
@@ -207,8 +245,9 @@ $env:PLEY_KEYSTORE = "$HOME\keys\pley-release.keystore"   # and the others
 ```
 
 The APK to sideload (phones, Android TV, Fire TV) is
-`app/build/outputs/apk/direct/release/app-direct-release.apk`; the bundle
-for Google Play is `app/build/outputs/bundle/storeRelease/app-store-release.aab`.
+`app/build/outputs/apk/direct/release/app-direct-release.apk`; the signed
+bundle for the stores (`:app:bundleStoreRelease`) is
+`app/build/outputs/bundle/storeRelease/app-store-release.aab`.
 
 A tag's release workflow builds both, with the key from the repository's
 secrets: `ANDROID_KEYSTORE_BASE64` (the keystore, base64-encoded),
