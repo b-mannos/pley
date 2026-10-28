@@ -49,7 +49,9 @@ import kotlinx.coroutines.flow.map
  * A library's page on the phone (design spec §4.2, mockup phone-library):
  * the library's name and Search in the top bar, the Recommended, Library
  * and Collections tabs, then the tab's content. The tab, sort and
- * filters are kept with the page, so they come back after process death.
+ * filters are kept with the page, so they come back after process death,
+ * and on the device for each library and profile, so the library opens
+ * again on the tab it was left on.
  */
 @Composable
 internal fun LibraryScreen(key: PleyKey.Library) {
@@ -84,6 +86,8 @@ private fun LibraryPage(state: LibraryUiState<ArtworkTileModel>, vm: LibraryView
                 icon = PleyIcons.FolderSearch,
             )
             state.libraryError != null -> ErrorState(stringResource(R.string.library_failed), state.libraryError!!, onRetry = vm::retry)
+            // The tab the library was left on is read first: no other flashes before it.
+            state.openedOn == null -> Unit
             else -> {
                 LibraryTabs(state.tabs, state.params.tab, onSelect = vm::select)
                 Box(Modifier.weight(1f).fillMaxWidth()) {

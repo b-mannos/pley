@@ -121,6 +121,11 @@ data class LibraryUiState<T : Any>(
     /** Why the library couldn't be read, while nothing saved shows. */
     val libraryError: Throwable? = null,
     val params: LibraryParams = LibraryParams(),
+    /**
+     * The tab the page opened on: `null` while the one the library was left
+     * on is read, when the page shows no tab yet.
+     */
+    val openedOn: LibraryTab? = null,
     val tabs: List<LibraryTab> = LibraryTab.entries,
     val sorts: List<LibrarySort> = LibraryParams.sortsFor(LibraryKind.Movies),
     /** Genres and years the listing can be filtered by (none for music). */
@@ -152,22 +157,28 @@ data class LibraryUiState<T : Any>(
  *
  * [params] are the tab, sort and filters, which the screen keeps across
  * process death ([LibraryParams.toQueryString] of [LibraryUiState.params]),
- * handing them back as [saved]; a page opened anew starts on [tab], with
- * the sort and filters the library was left in ([LibraryViews]), read
- * before the page shows anything. Each tab reads only once it has been
- * shown. Tiles and the A to Z are worked out off the main thread.
+ * handing them back as [saved]; a page opened anew starts with the sort
+ * and filters the library was left in on this device ([LibraryViews]),
+ * read before the page shows anything, on [tab], or without one on the
+ * tab it was left on (Library the first time). Each tab reads only once
+ * it has been shown. Tiles and the A to Z are worked out off the main
+ * thread.
  */
 class LibraryViewModel<T : Any>(
     val libraryId: Long,
-    tab: LibraryTab,
+    tab: LibraryTab?,
     saved: String?,
     private val deps: LibraryDeps,
     private val tiles: TileFactory<T>,
 ) : ViewModel() {
-    private val params = MutableStateFlow(saved?.let { LibraryParams.parse(it, tab) } ?: LibraryParams(tab = tab))
+    private val opening = tab ?: LibraryTab.Library
+    private val params = MutableStateFlow(saved?.let { LibraryParams.parse(it, opening) } ?: LibraryParams(tab = opening))
 
     /** The view the library was left in is read (a page that came back has its own). */
     private val viewRead = MutableStateFlow(saved != null)
+
+    /** The tab the page opened on, once the view it was left in is read. */
+    private val openedOn = MutableStateFlow(if (saved != null) params.value.tab else null)
     private val retry = MutableStateFlow(0)
     private val builder = GridBuilder(tiles)
 
@@ -264,6 +275,7 @@ class LibraryViewModel<T : Any>(
             missing = load is Loadable.Ready && lib == null,
             libraryError = (load as? Loadable.Failed)?.takeIf { lib == null }?.error,
             params = p,
+            openedOn = openedOn.value ?: p.tab,
             tabs = LibraryParams.tabsFor(lib?.kind),
             sorts = LibraryParams.sortsFor(lib?.kind ?: LibraryKind.Movies),
             filters = filters,
@@ -272,15 +284,19 @@ class LibraryViewModel<T : Any>(
             recommended = recommended,
             collections = collections,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_AFTER_MS), LibraryUiState(libraryId, params = params.value))
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_AFTER_MS), LibraryUiState(libraryId, params = params.value, openedOn = openedOn.value))
 
     init {
         viewModelScope.launch {
             if (!viewRead.value) {
                 // A slow disk doesn't hold the page up for long: it opens as it is.
                 val left = withTimeoutOrNull(VIEW_READ_MS) { deps.views.of(libraryId) }
-                // Unless something was chosen meanwhile.
-                if (!left.isNullOrEmpty()) params.compareAndSet(LibraryParams(tab = tab), LibraryParams.parse(left, tab).copy(tab = tab))
+                // Unless something was chosen meanwhile. A page opened on a tab stays on it.
+                if (!left.isNullOrEmpty()) {
+                    val view = LibraryParams.parse(left, opening)
+                    params.compareAndSet(LibraryParams(tab = opening), if (tab != null) view.copy(tab = tab) else view)
+                }
+                openedOn.value = params.value.tab
                 viewRead.value = true
             }
             // What is chosen from now on is how the library opens next time.

@@ -43,8 +43,8 @@ data class LibraryParams(
         year = year,
     )
 
-    /** The sort, order and filters without the tab: how a library is left, to open so again. */
-    fun view(): String = copy(tab = LibraryTab.Library).toQueryString()
+    /** The tab, sort, order and filters: how a library is left, to open so again. */
+    fun view(): String = toQueryString()
 
     /** Without any filter: "Clear filters". */
     fun cleared(): LibraryParams = copy(watched = null, genre = null, year = null)

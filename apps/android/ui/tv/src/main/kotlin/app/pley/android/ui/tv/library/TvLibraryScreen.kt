@@ -90,11 +90,11 @@ internal fun TvLibraryScreen(key: PleyKey.Library) {
         vm.state.map { it.params.toQueryString() }.distinctUntilChanged().collect { saved = it }
     }
     val state by vm.state.collectAsStateWithLifecycle()
-    TvLibraryPage(state, vm, openedOn = key.tab)
+    TvLibraryPage(state, vm)
 }
 
 @Composable
-private fun TvLibraryPage(state: LibraryUiState<ArtworkTileModel>, vm: LibraryViewModel<ArtworkTileModel>, openedOn: LibraryTab) {
+private fun TvLibraryPage(state: LibraryUiState<ArtworkTileModel>, vm: LibraryViewModel<ArtworkTileModel>) {
     val memory = rememberFocusMemory()
     val skeleton = rememberSkeleton(animated = false)
     val tabs = rememberSaveableStateHolder()
@@ -118,8 +118,9 @@ private fun TvLibraryPage(state: LibraryUiState<ArtworkTileModel>, vm: LibraryVi
         if (panel == null && next != null) returnTo = next
         panel = next
     }
-    // Content takes focus on its own only on the tab the page opened on, before another was chosen.
+    // Content takes focus on its own only on the tab the page opened on (where it was left), before another was chosen.
     var switched by rememberSaveable { mutableStateOf(false) }
+    val openedOn = state.openedOn
     val tab = state.params.tab
     Box(Modifier.fillMaxSize()) {
         when {
@@ -133,6 +134,8 @@ private fun TvLibraryPage(state: LibraryUiState<ArtworkTileModel>, vm: LibraryVi
                 action = stringResource(R.string.tv_library_retry),
                 onAction = vm::retry,
             )
+            // The tab the library was left on is read first: no other flashes before it.
+            openedOn == null -> Unit
             else -> tabs.SaveableStateProvider(tab) {
                 val initial = !switched && tab == openedOn
                 when (tab) {

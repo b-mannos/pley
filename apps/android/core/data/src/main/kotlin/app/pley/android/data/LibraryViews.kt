@@ -10,8 +10,9 @@ import kotlinx.coroutines.flow.first
 
 /**
  * How each library was last left on this device, by the profile shown:
- * its sort, order and filters, as a library page's query without its tab
- * ("sort=added&watched=false"). A library opened again shows them.
+ * its tab (Recommended, Library or Collections), sort, order and filters,
+ * as a library page's query ("tab=recommended&sort=added&watched=false").
+ * A library opened again shows them, on that tab.
  */
 interface LibraryViews {
     /** The view [libraryId] was left in: `null` when it never left the default. */

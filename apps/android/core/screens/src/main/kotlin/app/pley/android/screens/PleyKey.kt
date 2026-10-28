@@ -37,9 +37,12 @@ sealed interface PleyKey : NavKey {
     @Serializable
     data object Libraries : PleyKey
 
-    /** One library, on [tab] (recommended, library or collections). */
+    /**
+     * One library, on [tab] (recommended, library or collections); `null`:
+     * on the tab it was left on this device, else Library.
+     */
     @Serializable
-    data class Library(val libraryId: Long, val tab: LibraryTab = LibraryTab.Library) : PleyKey
+    data class Library(val libraryId: Long, val tab: LibraryTab? = null) : PleyKey
 
     /** A library's collections. */
     @Serializable

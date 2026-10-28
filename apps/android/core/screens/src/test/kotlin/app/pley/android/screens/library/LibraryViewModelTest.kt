@@ -51,7 +51,7 @@ class LibraryViewModelTest {
     @After
     fun reset() = Dispatchers.resetMain()
 
-    private fun viewModel(libraryId: Long = 1, tab: LibraryTab = LibraryTab.Library, saved: String? = null) = LibraryViewModel(
+    private fun viewModel(libraryId: Long = 1, tab: LibraryTab? = null, saved: String? = null) = LibraryViewModel(
         libraryId = libraryId,
         tab = tab,
         saved = saved,
@@ -175,11 +175,47 @@ class LibraryViewModelTest {
         vm.genre("Comedy")
         vm.select(LibraryTab.Recommended)
         advanceUntilIdle()
-        assertEquals("sort=year&genre=Comedy", views.kept[1])
+        assertEquals("tab=recommended&sort=year&genre=Comedy", views.kept[1])
         vm.clearFilters()
         vm.sortBy(LibrarySort.Title)
+        vm.select(LibraryTab.Library)
         advanceUntilIdle()
         assertNull("the default view is forgotten", views.kept[1])
+        job.cancel()
+    }
+
+    @Test
+    fun aLibraryOpensOnTheTabItWasLeftOnUnlessOpenedOnOne() = runTest(dispatcher) {
+        views.kept[1] = "tab=recommended"
+        views.kept[3] = "tab=collections&sort=added"
+        val left = viewModel()
+        val job = launch { left.state.collect {} }
+        advanceUntilIdle()
+        assertEquals(LibraryTab.Recommended, left.state.value.params.tab)
+        assertEquals(LibraryTab.Recommended, left.state.value.openedOn)
+        // Another library keeps its own.
+        val other = viewModel(libraryId = 3)
+        val otherJob = launch { other.state.collect {} }
+        advanceUntilIdle()
+        assertEquals(LibraryParams(LibraryTab.Collections, LibrarySort.Added), other.state.value.params)
+        // "See all" opens the Library tab, with the sort it was left in.
+        val seeAll = viewModel(libraryId = 3, tab = LibraryTab.Library)
+        val seeAllJob = launch { seeAll.state.collect {} }
+        advanceUntilIdle()
+        assertEquals(LibraryParams(LibraryTab.Library, LibrarySort.Added), seeAll.state.value.params)
+        job.cancel()
+        otherJob.cancel()
+        seeAllJob.cancel()
+    }
+
+    @Test
+    fun nothingKeptOpensOnLibrary() = runTest(dispatcher) {
+        val vm = viewModel()
+        assertNull("no tab shows before the one it was left on is read", vm.state.value.openedOn)
+        val job = launch { vm.state.collect {} }
+        advanceUntilIdle()
+        assertEquals(LibraryTab.Library, vm.state.value.params.tab)
+        assertEquals(LibraryTab.Library, vm.state.value.openedOn)
         job.cancel()
     }
 
