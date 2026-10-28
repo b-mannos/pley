@@ -723,7 +723,6 @@ function HistoryMessage(p: { title: string; body: string; action: string; onActi
   );
 }
 
-/** "0.2.0 (1a2b3c4d5)": the app's version and the commit it was built from, when known. */
 /** What the TV says about itself, label and value (Settings' Diagnostics and the Diagnostics page). */
 function deviceFacts(app: AppState): [string, string][] {
   const d = app.platform.device();
@@ -806,6 +805,7 @@ export function DiagnosticsScreen() {
   );
 }
 
+/** "0.2.0 (1a2b3c4d5)": the app's version and the commit it was built from, when known. */
 export function buildLabel(version: string): string {
   const commit = typeof __PLEY_COMMIT__ === "string" ? __PLEY_COMMIT__ : "";
   return commit && commit !== "unknown" ? `${version} (${commit})` : version;
