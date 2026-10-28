@@ -124,6 +124,8 @@ export class AutoQuality {
   private lowAhead = 0;
   private loads: { at: number; bytes: number; ms: number }[] = [];
   private rates: { at: number; kbps: number }[] = [];
+  /** What the network carried at least, from the buffer filling faster than it plays. */
+  private floors: { at: number; kbps: number }[] = [];
 
   constructor(o: AutoOptions) {
     this.ladder = o.ladder;
@@ -219,7 +221,7 @@ export class AutoQuality {
     const ahead = Math.max(0, bufferedEnd - position);
     const kbps = this.playingKbps();
     // Filling faster than it plays: the network carries at least that much.
-    if (delivery > 1 && kbps !== null) this.bandwidth(now, delivery * kbps);
+    if (delivery > 1 && kbps !== null) this.floor(now, delivery * kbps);
     if (delivery < DELIVERY_LOW && ahead < DELIVERY_AHEAD_S) {
       if (this.lowFrom === null) {
         this.lowFrom = now;
@@ -246,6 +248,18 @@ export class AutoQuality {
     this.trim(now);
   }
 
+  /**
+   * The network carried at least `kbps` (the buffer filled that much faster
+   * than the video plays). A full buffer fills only as fast as it plays, so
+   * most of these are far below what the network carries: their highest
+   * says the most, where a measurement's median would say the least (LG's
+   * TVs, whose players tell nothing else of their network).
+   */
+  private floor(now: number, kbps: number): void {
+    this.floors.push({ at: now, kbps });
+    this.trim(now);
+  }
+
   /** The decoder fell behind (frames dropped, a decoder failing) while it converts. */
   decoding(): void {
     this.pending = "device";
@@ -258,7 +272,11 @@ export class AutoQuality {
     this.pending = null;
   }
 
-  /** How fast the network carried data since `since`, kbps; `null` when nothing says. */
+  /**
+   * How fast the network carried data since `since`, kbps: its downloads,
+   * the player's own figures (their median), or at least the most a refill
+   * of the buffer showed; `null` when nothing says.
+   */
   network(since: number): number | null {
     let bytes = 0;
     let ms = 0;
@@ -276,6 +294,7 @@ export class AutoQuality {
       const median = said[Math.floor(said.length / 2)]!;
       if (best === null || median > best) best = median;
     }
+    for (const f of this.floors) if (f.at >= since && (best === null || f.kbps > best)) best = f.kbps;
     return best;
   }
 
@@ -369,5 +388,6 @@ export class AutoQuality {
   private trim(now: number): void {
     while (this.loads.length && now - this.loads[0]!.at > KEEP_MS) this.loads.shift();
     while (this.rates.length && now - this.rates[0]!.at > KEEP_MS) this.rates.shift();
+    while (this.floors.length && now - this.floors[0]!.at > KEEP_MS) this.floors.shift();
   }
 }

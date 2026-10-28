@@ -361,6 +361,25 @@ describe("Automatic", () => {
       expect(mem.value).toBeNull();
     });
 
+    it("on LG, whose player says nothing of its network, goes up on the fastest refill the buffer showed", () => {
+      const t = auto(20, memory(), file(1920, 1080, 20));
+      t.play(20, 0.5, 9);
+      expect(t.wait(2_000)?.to).toBe("4m");
+      // Back at 4 Mbps, the buffer refills at 4 times the video's pace: the network carries 16 Mbps at least.
+      t.play(8, 4);
+      // Full, it fills only as fast as it plays: every figure since says hardly more than 4 Mbps.
+      expect(t.play(300, 1.02)).toEqual({ to: "8m", why: null });
+    });
+
+    it("on LG stays down when no refill carried 1.6 times the next quality", () => {
+      const t = auto(20, memory(), file(1920, 1080, 20));
+      t.play(20, 0.5, 9);
+      expect(t.wait(2_000)?.to).toBe("4m");
+      t.play(8, 1.3);
+      expect(t.play(330, 1.02)).toBeNull();
+      expect(t.a.playing).toBe("4m");
+    });
+
     it("measures the network from engine figures too, by their median", () => {
       const { a, clock } = lowered();
       clock.t += 301_000;
